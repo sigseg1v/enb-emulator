@@ -126,7 +126,7 @@ namespace ToolsLauncher
         internal static void LogException(Exception e)
         {
 #if DEBUG
-            Debug.WriteLine(e.ToString());
+            System.Diagnostics.Debug.WriteLine(e.ToString());
 #else
             try
             {

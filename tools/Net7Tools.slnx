@@ -1,0 +1,46 @@
+<Solution>
+  <Folder Name="/commontools/">
+    <Project Path="commontools/CommonTools.csproj" />
+  </Folder>
+  <Folder Name="/dataimport/">
+    <Project Path="dataimport/DataImport.csproj" />
+  </Folder>
+  <Folder Name="/effect-editor/">
+    <Project Path="effect-editor/SQLBind/SQLBind.csproj" />
+  </Folder>
+  <Folder Name="/enb-ini-parser/">
+    <Project Path="enb-ini-parser/EnB Ini Parser.csproj" />
+  </Folder>
+  <Folder Name="/faction-editor/">
+    <Project Path="faction-editor/Net7 Faction Editor.csproj" />
+  </Folder>
+  <Folder Name="/launchnet7/">
+    <Project Path="launchnet7/ExeUpdater/ExeUpdater.csproj" />
+    <Project Path="launchnet7/FileListCreator/FileListCreator.csproj" />
+    <Project Path="launchnet7/LaunchNet7/LaunchNet7.csproj" />
+  </Folder>
+  <Folder Name="/missioneditor/">
+    <Project Path="missioneditor/MissionEditor.csproj" />
+  </Folder>
+  <Folder Name="/mob-editor/">
+    <Project Path="mob-editor/N7 Mob Editor.csproj" />
+  </Folder>
+  <Folder Name="/sector-editor/">
+    <Project Path="sector-editor/Net7 Sector Editor.csproj" />
+  </Folder>
+  <Folder Name="/station-tools/">
+    <Project Path="station-tools/Station Tools.csproj" />
+  </Folder>
+  <Folder Name="/talktreeeditor/">
+    <Project Path="talktreeeditor/TalkTreeEditor/TalkTreeEditor.csproj" />
+  </Folder>
+  <Folder Name="/toolslauncher/">
+    <Project Path="toolslauncher/ToolsLauncher/ToolsLauncher.csproj" />
+  </Folder>
+  <Folder Name="/toolspatcher/">
+    <Project Path="toolspatcher/ToolsPatcher.csproj" />
+  </Folder>
+  <Folder Name="/w3d-parser/">
+    <Project Path="w3d-parser/W3d Parser.csproj" />
+  </Folder>
+</Solution>

@@ -42,6 +42,8 @@ namespace LaunchNet7
             AreDetailsVisible = !AreDetailsVisible;
         }
 
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+
         public bool AreDetailsVisible
         {
             get { return m_AreDetailsVisible; }

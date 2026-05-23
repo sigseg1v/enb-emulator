@@ -1,0 +1,30 @@
+<Project>
+  <PropertyGroup>
+    <!--
+      Allows cross-platform `dotnet build` for projects targeting net10.0-windows.
+      The resulting binaries are still Windows-only at runtime (WinForms / GDI+).
+    -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+
+    <!--
+      Net-7 tools were 2008-era C#. Modern Roslyn warns prolifically on legacy
+      patterns; suppress the categories that would otherwise drown the log.
+      Real errors still surface as errors.
+    -->
+    <NoWarn>$(NoWarn);CS0108;CS0114;CS0414;CS0219;CS0162;CS0168;CS0169;CS0252;CS0612;CS0618;CS0628;CS1591;CS8981;CS0436;NU1701;MSB3277;MSB3270;SYSLIB0011;SYSLIB0014;SYSLIB0021;SYSLIB0050;SYSLIB0051;CA1416;WFO1000;WFO2001</NoWarn>
+    <!-- The WinForms designer-serialization analyzer is treated as an error by default in .NET 8+.
+         Demote it to a warning here; the codebase still produces working WinForms designers. -->
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);WFO1000;WFO2001</WarningsNotAsErrors>
+
+    <!-- Tools target a Windows runtime; we don't ship them as portable libs. -->
+    <RuntimeIdentifiers>win-x64;win-x86</RuntimeIdentifiers>
+
+    <!--
+      SDK glob picks up everything under the csproj dir; original csprojs
+      were explicit. Exclude vendored library sources (each has its own
+      csproj or just isn't supposed to be in the parent project) and the
+      old-style backup files we kept beside the converted csprojs.
+    -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);Libs/**;**/*.old;**/Backup*/**</DefaultItemExcludes>
+  </PropertyGroup>
+</Project>

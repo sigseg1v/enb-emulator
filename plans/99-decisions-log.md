@@ -47,3 +47,32 @@ Phase C replaces the include with libpqxx, removes mysqlplus.cpp from the build,
 Several kyp-era call sites reference methods/fields tada-o removed during its refactor: `Player::SetTCPTerminate`, `ChangeProspectSkill`, `AddScanSkill`, `ChangeTractorBeamSpeed`, `Connection::SendObjectEffect`, `Object::DamageMOB`, `ServerManager::GetTCPCBuffer`, `ServerManager::GetConnection`. Rather than reverse-engineering tada-o's replacement logic for each (which would require a Phase B blowup), we added empty/no-op stubs so the build links. Runtime behavior in code paths exercising these will be wrong (e.g. skill changes will silently drop, the TCP listener won't actually populate connections), but the binary exists and the rest of the codebase can be exercised.
 
 Phase B continuation (or whoever owns the listener/skill subsystems) needs to either remove the dead kyp call sites or wire them to tada-o's actual replacements. Tracked as Phase B follow-ups in `server/BUILD_ERRORS.md`.
+
+## 2026-05-22 — Phase D: rely on SDK globbing + targeted Compile Remove, not explicit Compile Include
+
+The 2008-era csprojs were exhaustive `<Compile Include="…">` lists. The straightforward Phase D conversion would preserve those (which would build identically). We picked the SDK glob (`<Project Sdk="Microsoft.NET.Sdk">` default `**/*.cs`) instead, with per-project `<Compile Remove>` only where the glob picks up a file the original didn't:
+
+- `Enumerations.cs` (plural) duplicated `Enumeration.cs` (singular) in commontools.
+- `Design/**` in sector-editor was legacy GUI scaffolding never compiled.
+- `Sql/Helpers.cs` duplicated `Utilities/Helpers.cs` (`SQLData` class).
+- `Sprites/{Bare-models, BaseSprite, SystemSprite}.cs` were SdlDotNet drafts.
+- `Chunks/TexturesChunke.cs` was a typo'd duplicate of `TexturesChunk.cs`.
+- Vendored `Libs/SmartIrc4Net/src/**` would otherwise duplicate the IRC client's `AssemblyInfo.cs`.
+
+Pro: csproj files stay short and survive new source files being added without bookkeeping. Con: future contributors must remember the SDK globs everything by default and check for accidental inclusion. Documented in `tools/README.md`.
+
+## 2026-05-22 — Phase D: use Oracle MySql.Data 9.x NuGet, not MySqlConnector
+
+The 2008-era csprojs reference `MySql.Data, Version=5.2.5.0`. Two NuGet options today: Oracle's official `MySql.Data` (current 9.4.0) or the community `MySqlConnector` (faster, fewer deps, async-first). MySqlConnector exposes types under `MySqlConnector.*` namespace; tools' source uses `MySql.Data.MySqlClient.*`. Patching the source would mean touching every editor.
+
+Decision: use Oracle's `MySql.Data` NuGet — drop-in API, no source changes. Trade-off: Oracle's package is heavier and has Connector/NET licensing implications (GPLv2 with FOSS exception), but for tools that are already Windows-only WinForms editors used internally, that's fine. MySqlConnector swap can happen later if/when an editor is ported headless or cross-platform.
+
+## 2026-05-22 — Phase D: case-corrected ProjectReference paths and lowercase image symlinks for Linux build
+
+Phase A renamed tool directories to kebab-case (e.g. `Net7Tools/CommonTools` → `tools/commontools`). The original csproj files reference `..\CommonTools\CommonTools.csproj`, which worked on Windows' case-insensitive FS but breaks on Linux. The converter rewrites the outer segment after `..` to the lowercase form (`../commontools/CommonTools.csproj`), but preserves the inner csproj subdir's casing (which may differ — e.g. `talktreeeditor/TalkTreeEditor/`).
+
+The sector-editor also embeds image references with lowercase paths (`images\classspecificgate.gif`) in its Resources.resx, while files on disk are CamelCased (`Images/classSpecificGate.gif`). Rather than rewrite the resx (which would touch generated artefacts), we created `tools/sector-editor/images/` as a directory of lowercase symlinks into `Images/`. The build resolves; the original assets stay untouched.
+
+## 2026-05-22 — Phase D: WFO1000 patched in source, not just suppressed
+
+WFO1000 (WinForms designer code-serialization analyzer) is emitted as an error in .NET 8+ even with `NoWarn` and `WarningsNotAsErrors` set. Two `FormUpdate.cs` files (launchnet7, toolslauncher) trigger it on a `bool AreDetailsVisible` property the original code uses for state, not designer markup. We added `[DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]` directly on the property. The runtime behavior is identical (the designer wouldn't have serialized this anyway); the attribute is what the analyzer wants to see.
