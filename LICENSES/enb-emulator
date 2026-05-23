@@ -1,0 +1,44 @@
+Net-7 Earth & Beyond emulator preservation project — default license
+
+This project's default license is the same as the upstream Net-7 server code:
+
+  Creative Commons Attribution-NonCommercial-ShareAlike 3.0 United States
+  https://creativecommons.org/licenses/by-nc-sa/3.0/us/
+  https://creativecommons.org/licenses/by-nc-sa/3.0/us/legalcode
+
+In short:
+- Attribution — credit must be given to Net-7 Entertainment (2005–2009) and to this preservation project.
+- NonCommercial — you may not use this material, in whole or in derivative form, for commercial purposes. Paid hosting, paid access, paid mods, monetised servers — all prohibited under this license.
+- ShareAlike — derivative works must be released under the same (or a compatible) license.
+
+This file is the project's *default* license. Precedence rules are:
+
+  1. A license header at the top of an individual source file takes precedence over this default.
+     (E.g. every Net-7 .cpp / .h carries its own CC BY-NC-SA 3.0 header.)
+  2. A LICENSE / LICENSE.txt file inside a subdirectory takes precedence over this default for files in that subdirectory.
+     (E.g. client/linux-installer/LICENSE is GPLv3 and governs files in that directory.)
+  3. Otherwise, this default license (CC BY-NC-SA 3.0) applies.
+
+See LICENSES/README.md for a directory-by-directory license map.
+
+Full text of CC BY-NC-SA 3.0 US is at the URLs above. The header block from any Net-7 source file (verbatim) is reproduced below for convenience:
+
+------------------------------------------------------------------------
+/* Net-7 Entertainment: Net-7 Earth and Beyond emulator project
+**
+** This code/content is licensed under the Creative Commons license, it is interactive content. You can view the terms of our:
+** Creative Commons Attribution-Noncommercial-Share Alike 3.0 United States License
+** http://creativecommons.org/licenses/by-nc-sa/3.0/us/
+**
+** Net-7 Emulator Project, an Earth & Beyond emulator by Net7 Entertainment is licensed under a Creative Commons Attribution-Noncommercial-Share Alike 3.0 United States License
+**
+** Based on a work at http://www.earthandbeyond.com
+**
+** Permissions beyond the scope of this license may be available at http://www.dreamersofdawn.org/docs/More_Information.htm
+**
+** The license can be modified at our discretion within the bounds of Creative Commons at any time.
+**
+** Copyright of our assets/code/software began in 2005-2009, Net-7 Entertainment.
+**
+*/
+------------------------------------------------------------------------

@@ -1,0 +1,7 @@
+Tada-O fork of the Net-7 server
+
+The tada-o fork (origin of the code now in server/, login-server/Net7SSL/, and parts of other server-side directories) did not provide a separate license file. The source files retain the upstream Net-7 CC BY-NC-SA 3.0 headers, and under the ShareAlike clause the tada-o modifications inherit that same license.
+
+In other words: everything inherited from tada-o is governed by LICENSES/Net7 (CC BY-NC-SA 3.0 US).
+
+If the original tada-o authors object to this interpretation and supply a different license, this file will be updated and any necessary changes made.

@@ -1,0 +1,105 @@
+# C/C++ build artefacts
+*.o
+*.obj
+*.d
+*.a
+*.so
+*.so.*
+*.dylib
+*.lo
+*.la
+*.lai
+*.slo
+*.gch
+*.pch
+
+# C/C++ executables (we keep none directly; vendor exceptions are below)
+*.exe
+*.out
+*.app
+*.dll
+*.lib
+*.pdb
+*.ilk
+*.exp
+*.idb
+*.map
+
+# CMake / Ninja / Make
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+cmake_install.cmake
+install_manifest.txt
+build/
+out/
+cmake-build-*/
+.ninja_*
+compile_commands.json
+
+# .NET / C#
+bin/
+obj/
+*.user
+*.suo
+*.userprefs
+*.usertasks
+.vs/
+*.cache
+*.psess
+*.vspx
+*.pidb
+*.svclog
+packages/
+TestResults/
+*.nuget.props
+*.nuget.targets
+
+# IDEs / editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# SVN remnants
+.svn/
+
+# Local dev env
+.env
+.env.local
+*.local
+.direnv/
+
+# Postgres dev data dir from docker-compose
+pgdata/
+
+# Logs
+*.log
+
+# ----- Re-includes (`!` rules) for kept files that the patterns above would otherwise eat -----
+
+# Vendor binaries we don't have source for — see THIRD_PARTY_BINARIES.md notes
+!vendor/**
+
+# Third-party libs vendored with the server build (we may keep some prebuilt artefacts)
+!server/third_party/**
+
+# C# tool resources (icons, images, sprites) often live under bin/ or with .dll extension
+!tools/**/Resources/**
+!tools/**/Images/**
+!tools/**/Sprites/**
+
+# Game-asset binaries from kyp's tooling
+!archive/kyp-snapshot/**
+
+# Original packet captures
+!**/capturedPackets/**
+
+# Reference docs (rtf, pdf)
+!**/*.rtf
+!**/*.pdf
