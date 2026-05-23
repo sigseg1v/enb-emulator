@@ -185,3 +185,50 @@ jobs:
           sudo apt-get install -y --no-install-recommends shellcheck
       - name: Lint installer
         run: shellcheck client/linux-installer/install-enb-linux.sh
+
+  integration-test:
+    name: integration-test (live proxy handshake)
+    runs-on: ubuntu-24.04
+    needs: ctest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            g++ cmake ninja-build pkg-config libssl-dev
+      - name: Build Net7Proxy docker image
+        run: docker build -t enb-proxy:ci proxy/
+      - name: Run proxy detached
+        run: |
+          docker run -d --name net7proxy-ci \
+            -p 3801:3801 -p 3805:3805 -p 3500:3500 \
+            enb-proxy:ci
+      - name: Wait for proxy on tcp/3801
+        run: |
+          set -e
+          for i in $(seq 1 30); do
+            if timeout 1 bash -c '</dev/tcp/127.0.0.1/3801' 2>/dev/null; then
+              echo "proxy ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "proxy never came up; logs:"
+          docker logs net7proxy-ci
+          exit 1
+      - name: Build tests
+        run: |
+          cmake -S tests -B build/tests -G Ninja
+          cmake --build build/tests --target handshake_live_test replay_test -j"$(nproc)"
+      - name: Run live ctest
+        env:
+          NET7_TEST_PROXY_HOST: 127.0.0.1
+          NET7_TEST_PROXY_PORT: "3801"
+        run: ctest --test-dir build/tests --output-on-failure -R 'HandshakeDriver|Replay'
+      - name: Proxy logs (always)
+        if: always()
+        run: docker logs net7proxy-ci || true
+      - name: Stop proxy
+        if: always()
+        run: docker rm -f net7proxy-ci || true
