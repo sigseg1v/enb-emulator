@@ -1,6 +1,8 @@
 // WestwoodRSA.cpp
 
-#include "Net7.h"
+// Phase J Linux port: login-server's umbrella header is Net7SSL.h, not
+// Net7.h (which lives in proxy/ and server/).
+#include "Net7SSL.h"
 #include "WestwoodRSA.h"
 
 #include <openssl/ssl.h>

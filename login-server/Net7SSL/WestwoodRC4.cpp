@@ -1,6 +1,8 @@
 // WestwoodRC4.cpp
 
-#include "Net7.h"
+// Phase J Linux port: login-server's umbrella header is Net7SSL.h, not
+// Net7.h (which lives in proxy/ and server/).
+#include "Net7SSL.h"
 #include "WestwoodRC4.h"
 
 WestwoodRC4::WestwoodRC4()

@@ -66,68 +66,82 @@
     typedef signed char     s8;
 
 #else // LINUX
-	#define ATTRIB_PACKED __attribute__((packed))
-	#define TRUE            1
-	#define FALSE           0
-	#define MAX_PATH        260
-	#define WORD            unsigned short
-	#define DWORD           unsigned long
-	#define SOCKET          int
-	#define INVALID_SOCKET	-1
-	#define closesocket	close
-	#define stricmp strcasecmp
-	#define WSAGetLastError() (errno)
-	#define WSAECONNRESET	ECONNRESET
-
-	#define ULONG 			unsigned long
-	#define UINT 			unsigned int
-	#define UCHAR			unsigned char
-    	#define BOOL			bool
-	#define u64				u_int64_t
-	#define s64				int64_t
-    	#define u32				u_int32_t
-	#define s32				int32_t
-	#define u16				u_int16_t
-	#define s16				int16_t
-	#define u8				u_int8_t
-	#define s8				int8_t
-
-
-	//#include <syslog.h>
-	//#include <fcntl.h>
-	//#include <netinet/in.h>
-	//#include <sys/stat.h>
-	//#include <sys/select.h>
-	#include <arpa/inet.h>
-	#include <sys/socket.h>
+	// Phase J Linux port — the original ad-hoc #defines below predate the
+	// shared compat shim that proxy/ and server/ use. Pull in those shims
+	// first; the remaining typedefs are kept because much of the
+	// login-server tree references them with subtly-different signatures
+	// (e.g. `unsigned long` DWORD vs. shim's `uint32_t`). The compat shim
+	// is `#ifndef`-guarded throughout so duplicate definitions are not
+	// emitted.
+	#include "compat/win32_shim.h"
+	#include "compat/threading_shim.h"
 	#include <sys/types.h>
+	#include <sys/socket.h>
 	#include <sys/times.h>
 	#include <sys/time.h>
+	#include <netinet/in.h>
+	#include <netinet/tcp.h>
+	#include <arpa/inet.h>
 	#include <errno.h>
 	#include <netdb.h>
 	#include <pthread.h>
 	#include <unistd.h>
+	#include <fcntl.h>
 
-	#define SERVER_LOGS_PATH        "../logs/"
-	#define SERVER_HTML_PATH        "../html/"
-	#define SERVER_DATABASE_PATH    "../database/"
-	#define SERVER_USER_PATH        "../database/Users/"
+	#define ATTRIB_PACKED __attribute__((packed))
+	#ifndef MAX_PATH
+	#define MAX_PATH        260
+	#endif
+	// Win32 socket name closesocket -> POSIX close.
+	#define closesocket(s) ::close(s)
+	#define stricmp strcasecmp
+	#ifndef WSAECONNRESET
+	#define WSAECONNRESET	ECONNRESET
+	#endif
+	#ifndef UCHAR
+	typedef unsigned char UCHAR;
+	#endif
+	#ifndef UINT
+	typedef unsigned int UINT;
+	#endif
+
+	#include <stdint.h>
+	typedef uint64_t u64;
+	typedef int64_t  s64;
+	typedef uint32_t u32;
+	typedef int32_t  s32;
+	typedef uint16_t u16;
+	typedef int16_t  s16;
+	typedef uint8_t  u8;
+	typedef int8_t   s8;
+
+	#define SERVER_LOGS_PATH        "./logs/"
+	#define SERVER_HTML_PATH        "./html/"
+	#define SERVER_DATABASE_PATH    "./database/"
+	#define SERVER_USER_PATH        "./database/Users/"
 	#define CONFIG_FILE				"Net7Config.cfg"
 
 	// Some MSVC <-> GCC redefines
 	#define _snprintf snprintf
+	#define _vsnprintf vsnprintf
 	#define _strcmpi strcasecmp
 	#define _isnan isnan
 	#define _alloca alloca
 	#define _sleep Sleep
 	#define _stricmp strcasecmp
-	// This might not be right... _atoi64 is specific to Windows
+	// _atoi64 is specific to MSVC; atoll is the POSIX equivalent.
 	#define _atoi64 atoll
+	// MSVC-only safe-string wrappers; map to their POSIX counterparts.
+	#define strcpy_s(dst, sz, src)  strncpy((dst), (src), (sz)-1)
+	#define sprintf_s(dst, sz, ...) snprintf((dst), (sz), __VA_ARGS__)
+	// MSVC-only directives gcc doesn't understand.
+	#define WINAPI
+	#define __cdecl
+	#define SOCKADDR_IN struct sockaddr_in
+	// SOMAXCONN normally provided by <sys/socket.h> on Linux too — no-op.
 
-	long GetTickCount();
 	unsigned long GetCurrentDirectory(unsigned long size, char *path);
 	int SetCurrentDirectory(const char *path);
-	void Sleep(unsigned long dwMilliseconds);
 	bool DeleteFile(const char *filename);
 
 #endif
