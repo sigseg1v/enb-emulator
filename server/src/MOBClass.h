@@ -20,7 +20,7 @@
 #ifndef _MOB_CLASS_H_INCLUDED_
 #define _MOB_CLASS_H_INCLUDED_
 
-#include "AuxClasses\AuxMobIndex.h"
+#include "AuxClasses/AuxMobIndex.h"
 #include "CMobClass.h"
 #include "HuskClass.h"
 #include "MOBDatabase.h"

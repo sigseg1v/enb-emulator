@@ -21,7 +21,7 @@
 
 #include <map>
 #include <vector>
-#include "net7.h"
+#include "Net7.h"
 
 #ifndef _TALK_TREE_H_INCLUDED_
 #define _TALK_TREE_H_INCLUDED_

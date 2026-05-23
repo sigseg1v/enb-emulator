@@ -24,7 +24,7 @@
 #define NODE_EXTEND_SIZE 200
 
 #include "Mutex.h"
-#include "Timenode.h"
+#include "TimeNode.h"
 #include <vector>
 
 class Player;

@@ -23,7 +23,7 @@
 #include "Opcodes.h"
 #include "PacketStructures.h"
 #include <float.h>
-#include "UDPconnection.h"
+#include "UDPConnection.h"
 #include "MemoryHandler.h"
 #include "ObjectClass.h"
 #include "PlayerClass.h"

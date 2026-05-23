@@ -2,7 +2,7 @@
 #define _PLAYER_BUFFS_H_INCLUDED_
 
 #include "AuxClasses/AuxShipIndex.h"
-#include "mutex.h"
+#include "Mutex.h"
 
 #include <map>
 

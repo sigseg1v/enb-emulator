@@ -16,7 +16,7 @@
 **
 */
 
-#include "net7.h"
+#include "Net7.h"
 #include "ItemBaseManager.h"
 #include "PlayerSkills.h"
 #include "PlayerClass.h"

@@ -17,7 +17,7 @@
 **
 */
 
-#include "net7.h"
+#include "Net7.h"
 
 #ifndef _ITEM_BASE_H_INCLUDED_
 #define _ITEM_BASE_H_INCLUDED_

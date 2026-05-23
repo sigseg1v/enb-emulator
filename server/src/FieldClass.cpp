@@ -21,7 +21,7 @@
 #include "ObjectClass.h"
 #include "FieldClass.h"
 #include "ObjectManager.h"
-#include "MOBclass.h"
+#include "MOBClass.h"
 #include "PacketMethods.h"
 #include "SaveManager.h"
 #include <float.h>

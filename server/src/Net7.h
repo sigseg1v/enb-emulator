@@ -13,7 +13,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 �, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 �, Net-7 Entertainment.
 **
 */
 
@@ -58,10 +58,9 @@
 #include <time.h>
 #include <math.h>
 #include <ctype.h>
-#include <io.h>
-#include <direct.h>
-
 #ifdef WIN32
+    #include <io.h>
+    #include <direct.h>
     #ifndef WIN32_LEAN_AND_MEAN
 	#define WIN32_LEAN_AND_MEAN		// Exclude rarely-used stuff from Windows headers
     #endif
@@ -70,7 +69,7 @@
 	#include <winsock2.h>
 	#include <objbase.h>
 	#include <process.h>
-    #include <malloc.h> 
+    #include <malloc.h>
 	#define SERVER_LOGS_PATH        "..\\logs\\"
 	#define SERVER_HTML_PATH        "..\\html\\"
 	#define SERVER_DATABASE_PATH	"..\\database\\"
@@ -148,6 +147,67 @@
 	#define _stricmp strcasecmp
 	// This might not be right... _atoi64 is specific to Windows
 	#define _atoi64 atoll
+
+	// Win32 calling-convention macros — no-ops on GCC
+	#define __stdcall
+	#define __cdecl
+	#define __fastcall
+	#define WINAPI
+	#define CALLBACK
+
+	// Win32 opaque handle and OLE/COM string types (struct layouts only — these are
+	// not actually used through their Win32 semantics in the cross-platform server)
+	typedef void* HANDLE;
+	#define INVALID_HANDLE_VALUE ((HANDLE)-1)
+	typedef wchar_t* BSTR;
+	typedef char* LPSTR;
+	typedef const char* LPCSTR;
+	typedef char* LPTSTR;
+	typedef const char* LPCTSTR;
+	typedef void* LPVOID;
+	typedef const void* LPCVOID;
+
+	// MSVC safe-string functions — map to their POSIX counterparts. Buffer size is
+	// honored where possible; for *_s variants that take a size before the format
+	// string we route to snprintf/strncpy/strncat which take size analogously.
+	#include <stdio.h>
+	#include <string.h>
+	static inline int sprintf_s(char *dst, size_t size, const char *fmt, ...) {
+		va_list ap; va_start(ap, fmt);
+		int r = vsnprintf(dst, size, fmt, ap);
+		va_end(ap);
+		return r;
+	}
+	static inline int _snprintf_s(char *dst, size_t size, size_t /*count*/, const char *fmt, ...) {
+		va_list ap; va_start(ap, fmt);
+		int r = vsnprintf(dst, size, fmt, ap);
+		va_end(ap);
+		return r;
+	}
+	static inline int vsprintf_s(char *dst, size_t size, const char *fmt, va_list ap) {
+		return vsnprintf(dst, size, fmt, ap);
+	}
+	static inline int strcpy_s(char *dst, size_t size, const char *src) {
+		if (!dst || !src || size == 0) return 22; // EINVAL
+		strncpy(dst, src, size - 1);
+		dst[size - 1] = '\0';
+		return 0;
+	}
+	static inline int strncpy_s(char *dst, size_t size, const char *src, size_t count) {
+		if (!dst || !src || size == 0) return 22;
+		size_t n = (count < size - 1) ? count : (size - 1);
+		strncpy(dst, src, n);
+		dst[n] = '\0';
+		return 0;
+	}
+	static inline int strcat_s(char *dst, size_t size, const char *src) {
+		if (!dst || !src || size == 0) return 22;
+		size_t cur = strnlen(dst, size);
+		if (cur >= size) return 34; // ERANGE
+		strncpy(dst + cur, src, size - cur - 1);
+		dst[size - 1] = '\0';
+		return 0;
+	}
 
 	long GetTickCount();
 	unsigned long GetCurrentDirectory(unsigned long size, char *path);

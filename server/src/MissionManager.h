@@ -19,7 +19,7 @@
 #define _MISSIONMANAGER_H
 
 #include "TalkTree.h"
-#include "staticdata.h"
+#include "StaticData.h"
 #include <vector>
 class Player;
 class Mission;

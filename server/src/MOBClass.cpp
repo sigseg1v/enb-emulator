@@ -22,7 +22,7 @@
 #include "MOBClass.h"
 #include "PlayerClass.h"
 #include "ObjectManager.h"
-#include "opcodes.h"
+#include "Opcodes.h"
 #include "ServerManager.h"
 #include "MOBDatabase.h"
 #include "PlayerManager.h"

@@ -19,7 +19,7 @@
 #define _EQUIPABLE_H_INCLUDED_
 
 #include "ItemBase.h"
-#include "AuxClasses\AuxEquipItem.h"
+#include "AuxClasses/AuxEquipItem.h"
 #include "TimeNode.h"
 #include "Mutex.h"
 

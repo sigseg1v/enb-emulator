@@ -57,16 +57,16 @@
 //#define TEST_CREATE 1
 
 #include "Net7.h"
-#include "AuxClasses\AuxPlayerIndex.h"
-#include "AuxClasses\AuxShipIndex.h"
-#include "AuxClasses\AuxManufacturingIndex.h"
+#include "AuxClasses/AuxPlayerIndex.h"
+#include "AuxClasses/AuxShipIndex.h"
+#include "AuxClasses/AuxManufacturingIndex.h"
 #include "CMobClass.h"
 #include "CMobEquippable.h"
 #include "MissionManager.h"
 #include "ItemList.h"
 #include "MessageQueue.h"
 #include "CMobBuffs.h"
-#include "Abilities\AbilityBase.h"
+#include "Abilities/AbilityBase.h"
 
 class Player;
 class Stats;

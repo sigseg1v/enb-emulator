@@ -20,7 +20,7 @@
 #ifndef _PACKET_STRUCTURES_H_INCLUDED_
 #define _PACKET_STRUCTURES_H_INCLUDED_
 
-#include "net7.h" // ATTRIB_PACKED
+#include "Net7.h" // ATTRIB_PACKED
 
 struct EnbTcpHeader
 {

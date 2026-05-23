@@ -21,7 +21,7 @@
 #define _RESOURCE_CLASS_H_INCLUDED_
 
 #include "ObjectClass.h"
-#include "Timenode.h"
+#include "TimeNode.h"
 
 class ItemBase;
 

@@ -21,7 +21,7 @@
 #define _ITEM_BASE_MANAGER_H_INCLUDED_
 
 #include "ItemBase.h"
-#include "AuxClasses\AuxItem.h"
+#include "AuxClasses/AuxItem.h"
 
 #define MAX_ITEMBASE_ITEMS  10000
 

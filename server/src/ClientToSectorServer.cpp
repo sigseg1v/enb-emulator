@@ -622,7 +622,7 @@ void Connection::SendMessageString(char *msg, char color, bool log)
 #include "ObjectClass.h"
 #include "ObjectManager.h"
 #include <string>
-#include "MOBclass.h"
+#include "MOBClass.h"
 #include "PacketMethods.h"
 
 static int _httoi(const char *value); //convert hex string to int

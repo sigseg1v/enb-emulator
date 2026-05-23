@@ -28,7 +28,7 @@
 #include "PacketStructures.h"
 #include "SectorData.h"
 #include "VectorMath.h"
-#include "AuxClasses\AuxGroupInfo.h"
+#include "AuxClasses/AuxGroupInfo.h"
 #include "Guilds.h"
 
 class UDP_Connection;

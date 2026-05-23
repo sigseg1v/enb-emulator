@@ -1,9 +1,9 @@
 #ifndef _COMMON_PLAYER_AND_MOB_H_INCLUDED_
 #define _COMMON_PLAYER_AND_MOB_H_INCLUDED_
 
-#include "objectclass.h"
+#include "ObjectClass.h"
 #include "Stats.h"
-#include "AuxClasses\AuxPercent.h"
+#include "AuxClasses/AuxPercent.h"
 
 #define SHIELD_RECHARGE_RESUME_DELAY	10000
 

@@ -14,6 +14,9 @@ const float TWOPI=PI*2.0f;			//360 degrees
 const float HALFPI=PI*.5f;			//90  degrees
 const float QUARTERPI=PI*.25f;		//45  degrees
 const float EPSILON=.000001f;		//small value
+#ifdef INFINITY
+#undef INFINITY  // <math.h> defines INFINITY as a macro expanding to __builtin_inff()
+#endif
 const float INFINITY=10000000.0f;	//big value
 
 class Vector{
