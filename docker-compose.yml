@@ -104,17 +104,34 @@ services:
       - "3805:3805/tcp"
     restart: unless-stopped
 
+  # --------------------------------------------------------------
+  # Net7SSL server-side TLS authentication listener (Phase J).
+  # Binds 443 (SSL_PORT) — the Westwood SSL auth handshake the
+  # client speaks first. The WIN32-only Connection/MailManager/MySQL
+  # tree under login-server/Net7SSL/ is walled at source level; the
+  # Linux path drives SSL_accept() inline and closes. Opcode
+  # dispatch / account lookup are the next pass.
+  # --------------------------------------------------------------
   login:
     build:
       context: ./login-server
     depends_on:
       mysql:
         condition: service_healthy
+    extra_hosts:
+      - "local.net-7.org:127.0.0.1"
     volumes:
-      - ./deploy/login-config:/app/config:ro
+      # SSL_Listener.cpp reads "<g_DomainName>.cer" and "<g_DomainName>.pem"
+      # from CWD; the same certs the server container uses also work here.
+      - ./deploy/certs/local.net-7.org.cer:/app/local.net-7.org.cer:ro
+      - ./deploy/certs/local.net-7.org.pem:/app/local.net-7.org.pem:ro
     ports:
-      # Net7SSL TCP login listens on 7800-7810.
-      - "7800-7810:7800-7810/tcp"
+      # Container binds 443 internally (the protocol-correct port). The
+      # host side is remapped to 4443 so the stack works under rootless
+      # docker, which forbids publishing host ports < 1024. For prod, set
+      # `sysctl net.ipv4.ip_unprivileged_port_start=443` on the host and
+      # change the left side to 443.
+      - "4443:443/tcp"
     restart: unless-stopped
 
   # --------------------------------------------------------------

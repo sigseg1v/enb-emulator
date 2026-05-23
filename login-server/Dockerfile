@@ -1,24 +1,23 @@
 # login-server/Dockerfile
 #
-# Scaffolding only. The login-server tree (Net7Mysql + Net7SSL) currently
-# ships .vcproj / .sln Visual Studio 2008 project files and a `.mak` file
-# — no CMake yet. Phase B continuation will write a CMakeLists.txt at
-# login-server/CMakeLists.txt that builds both subprojects.
+# Multi-stage build of the Net7SSL authentication listener.
 #
-# Once that exists, this Dockerfile will use it. Until then, the build
-# stage below is intentionally a placeholder that exits successfully on
-# a "no CMakeLists yet" sentinel so the rest of the docker-compose stack
-# can come up without this image being a hard dependency.
+# Phase J: this image's job is to bind TCP 443 (SSL_PORT) and accept SSL
+# handshakes. The 6.7K LOC under login-server/Net7SSL/ that depends on
+# Connection_B, AccountManager (mysqlplus), MailslotManager, UDPClient,
+# and the rest of the WIN32-only Connection-management tree is walled
+# behind `#ifdef WIN32` at source level and compiles to nothing on Linux.
+# The Linux build path stands up the SSL_Listener, drives SSL_accept()
+# inline for each connection, and closes. Opcode dispatch and MySQL
+# account lookup remain WIN32-only for Phase J.
+#
+# Modelled on proxy/Dockerfile.
 
 # ---------- build stage ----------
 FROM ubuntu:24.04 AS build
 
 ENV DEBIAN_FRONTEND=noninteractive
-# proxy/login-server still call SSLv2_client_method (removed in 1.1) and
-# WestwoodRSA was migrated to BN_new in Phase E. Until those land in a
-# real CMake build we keep the 1.0.x compat shim available — and bump
-# to 3.0 as soon as the targets enter the build (Phase E continuation).
-ENV OPENSSL_API_COMPAT=0x10100000L
+ENV OPENSSL_API_COMPAT=0x30000000L
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -27,32 +26,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ninja-build \
         pkg-config \
         libssl-dev \
-        liblua5.4-dev \
-        liblua5.4-0 \
-        libtinyxml-dev \
-        libcrypto++-dev \
-        libpq-dev \
-        libpqxx-dev \
-        libmariadb-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
 COPY . /src/login-server/
 
-# If a CMakeLists.txt exists, build it. Otherwise leave a stub binary
-# and a marker file so the runtime image still assembles. Phase B
-# continuation removes the conditional.
-RUN if [ -f /src/login-server/CMakeLists.txt ]; then \
-        cmake -S /src/login-server -B /build -G Ninja \
-        && cmake --build /build -j"$(nproc)"; \
-    else \
-        mkdir -p /build \
-        && printf '#!/bin/sh\necho "login-server: not yet built (Phase B continuation pending)" >&2\nexec sleep infinity\n' \
-            > /build/login-server \
-        && chmod +x /build/login-server \
-        && echo "Phase B continuation: write login-server/CMakeLists.txt to enable a real build." \
-            > /build/STUB.txt; \
-    fi
+RUN cmake -S /src/login-server/Net7SSL -B /build -G Ninja \
+    && cmake --build /build -j"$(nproc)" -- -k 0
 
 # ---------- runtime stage ----------
 FROM ubuntu:24.04 AS runtime
@@ -62,22 +42,23 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         libssl3 \
-        liblua5.4-0 \
-        libtinyxml2.6.2v5 \
-        libcrypto++8 \
-        libpqxx-7.7 \
-        libmariadb3 \
+        iproute2 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system net7 \
     && useradd  --system --gid net7 --home /app net7
 
 WORKDIR /app
-COPY --from=build /build/login-server /app/login-server
-# Best-effort: copy the stub marker if it exists.
-COPY --from=build /build/STUB.txt /app/STUB.txt
+COPY --from=build /build/net7ssl /app/net7ssl
+RUN mkdir -p /app/logs && chown -R net7:net7 /app
 
-# Placeholder port range until Phase B confirms login/SSL ports.
-EXPOSE 7800-7810/tcp
+# Net7SSL listener footprint (login-server/Net7SSL/Net7SSL.h):
+#   443   TCP  SSL_PORT (Westwood SSL auth — primary)
+# Other listed ports (3805 GLOBAL, 3807 LOCALCERT_LOGIN, 3808 UDP_MASTER,
+# 3809 PROXY) are owned by other services; this container only binds 443.
+EXPOSE 443/tcp
 
-USER net7
-CMD ["/app/login-server"]
+# Port 443 is privileged. The container's net7 user can't bind it by
+# default; running as root is the simplest path inside the dev-stack
+# container. Production would set CAP_NET_BIND_SERVICE on the binary.
+# USER net7
+CMD ["/app/net7ssl"]
