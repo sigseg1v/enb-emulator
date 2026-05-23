@@ -117,6 +117,29 @@ if(OpenSSL_FOUND)
         Threads::Threads
     )
     gtest_discover_tests(handshake_live_test)
+
+    # Replay engine: offline parse tests + env-gated live replay.
+    add_executable(replay_test
+        client/replay_test.cpp
+        client/replay.cpp
+        client/handshake_driver.cpp
+        client/tcp_client.cpp
+        client/capture_parser.cpp
+        client/westwood/westwood_rsa.cpp
+        client/westwood/westwood_rc4.cpp
+    )
+    target_include_directories(replay_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/client
+    )
+    target_compile_definitions(replay_test PRIVATE
+        NET7_TEST_CAPTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/client/captures\"
+    )
+    target_link_libraries(replay_test PRIVATE
+        GTest::gtest_main
+        OpenSSL::Crypto
+        Threads::Threads
+    )
+    gtest_discover_tests(replay_test)
 else()
     message(STATUS "net7-tests: OpenSSL not found — skipping handshake_test")
 endif()
