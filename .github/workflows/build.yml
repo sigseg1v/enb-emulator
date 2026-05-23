@@ -119,7 +119,40 @@ jobs:
         with:
           dotnet-version: '10.0.x'
       - name: Build tool suite
-        run: dotnet build tools/Net7Tools.sln
+        run: dotnet build tools/Net7Tools.slnx
+
+  ctest:
+    name: ctest (gtest harness)
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: net7
+          POSTGRES_PASSWORD: net7
+          POSTGRES_DB: net7
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U net7 -d net7"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            g++ cmake ninja-build pkg-config libpq-dev
+      - name: Configure
+        run: cmake -S tests -B build/tests -G Ninja
+      - name: Build
+        run: cmake --build build/tests -j"$(nproc)"
+      - name: Test
+        env:
+          NET7_TEST_DB_DSN: "host=127.0.0.1 user=net7 password=net7 dbname=net7"
+        run: ctest --test-dir build/tests --output-on-failure
 
   installer-shellcheck:
     name: installer-shellcheck
