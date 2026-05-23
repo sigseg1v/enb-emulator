@@ -138,21 +138,33 @@ test:
     ctest --test-dir build/tests --output-on-failure
     -dotnet test tools/Net7Tools.slnx --nologo
 
-# Live handshake + replay over TCP against just the Net7Proxy container
-# (skips mysql + server boot — the proxy handshake path doesn't touch
-# the DB so this stays fast).
+# Live handshake + replay over TCP against the Net7Proxy. Reuses a
+# proxy already listening on 127.0.0.1:3801 if one exists (e.g. you ran
+# `just dev`); otherwise spins up a standalone one. Skips mysql + server
+# boot — the proxy handshake path doesn't touch the DB so this stays fast.
 integration-test:
-    docker build -t enb-proxy:local proxy/
-    -docker rm -f net7proxy-local 2>/dev/null
-    docker run -d --name net7proxy-local -p 3801:3801 -p 3805:3805 -p 3500:3500 enb-proxy:local
-    @echo "waiting for proxy on tcp/3801..."
-    @until timeout 1 bash -c '</dev/tcp/127.0.0.1/3801' 2>/dev/null; do sleep 1; done
+    #!/usr/bin/env bash
+    set -euo pipefail
+    spawned=0
+    if ! timeout 1 bash -c '</dev/tcp/127.0.0.1/3801' 2>/dev/null; then
+        echo ">>> no proxy on tcp/3801; building + starting net7proxy-local"
+        docker build -t enb-proxy:local proxy/
+        docker rm -f net7proxy-local 2>/dev/null || true
+        docker run -d --name net7proxy-local -p 3801:3801 -p 3805:3805 -p 3500:3500 enb-proxy:local
+        spawned=1
+        echo ">>> waiting for proxy on tcp/3801..."
+        until timeout 1 bash -c '</dev/tcp/127.0.0.1/3801' 2>/dev/null; do sleep 1; done
+    else
+        echo ">>> reusing existing proxy on tcp/3801"
+    fi
     cmake -S tests -B build/tests -G Ninja
     cmake --build build/tests --target handshake_live_test replay_test -j"$(nproc)"
     NET7_TEST_PROXY_HOST=127.0.0.1 NET7_TEST_PROXY_PORT=3801 \
         ctest --test-dir build/tests --output-on-failure \
               -R 'HandshakeDriver|Replay'
-    docker rm -f net7proxy-local
+    if [ "$spawned" = "1" ]; then
+        docker rm -f net7proxy-local
+    fi
 
 # ---- package / release ----
 
