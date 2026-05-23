@@ -73,6 +73,14 @@ Phase A renamed tool directories to kebab-case (e.g. `Net7Tools/CommonTools` →
 
 The sector-editor also embeds image references with lowercase paths (`images\classspecificgate.gif`) in its Resources.resx, while files on disk are CamelCased (`Images/classSpecificGate.gif`). Rather than rewrite the resx (which would touch generated artefacts), we created `tools/sector-editor/images/` as a directory of lowercase symlinks into `Images/`. The build resolves; the original assets stay untouched.
 
+## 2026-05-22 — Phase E: bump `OPENSSL_API_COMPAT` to 0x30000000L; finish BIGNUM migration in proxy + login-server
+
+Phase B already migrated `server/src/WestwoodRSA.cpp` off `BN_init` (made opaque + removed in 3.0). Inventory of the rest of the tree found only two remaining deprecation hits: `BN_init` in `proxy/WestwoodRSA.cpp` and `login-server/Net7SSL/WestwoodRSA.cpp` (the latter two not currently in the CMake build, but the source matters for when they re-enter it). Migrated both to the heap-allocated-BIGNUM pattern from server/src — identical fix, mechanical.
+
+`SSL_load_error_strings` is a macro to `OPENSSL_init_ssl(...)` in 1.1+, not deprecation-tagged in 3.x. Left as-is. `SSLv23_*_method` is an alias of `TLS_*_method` in 3.x, not deprecation-tagged. Left as-is. **Removed:** `SSLv2_client_method` (gone since 1.1) is called by `proxy/ServerManager.cpp` and `login-server/Net7SSL/Net7SSL.cpp` — documented in `server/crypto/MIGRATION_TABLE.md` but not fixed now because those targets are not in the build.
+
+Trial-compiled seven openssl-touching TUs in server/src against `-DOPENSSL_API_COMPAT=0x30000000L -Werror=deprecated-declarations`: zero hits. Bumped CMake from `0x10100000L` to `0x30000000L` to lock it in.
+
 ## 2026-05-22 — Phase D: WFO1000 patched in source, not just suppressed
 
 WFO1000 (WinForms designer code-serialization analyzer) is emitted as an error in .NET 8+ even with `NoWarn` and `WarningsNotAsErrors` set. Two `FormUpdate.cs` files (launchnet7, toolslauncher) trigger it on a `bool AreDetailsVisible` property the original code uses for state, not designer markup. We added `[DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]` directly on the property. The runtime behavior is identical (the designer wouldn't have serialized this anyway); the attribute is what the analyzer wants to see.

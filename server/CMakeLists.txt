@@ -155,8 +155,9 @@ target_compile_definitions(net7 PRIVATE
     USE_OPENSSL
     LINUX
     __linux__
-    # Initial compat target. Phase E migrates to 0x30000000L cleanly.
-    OPENSSL_API_COMPAT=0x10100000L
+    # Phase E: server/src is clean against OpenSSL 3.0 (no deprecated APIs).
+    # If you re-introduce 1.x APIs, lower this temporarily, then migrate them.
+    OPENSSL_API_COMPAT=0x30000000L
 )
 
 target_compile_options(net7 PRIVATE

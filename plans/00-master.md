@@ -10,8 +10,8 @@ This is the source of truth for what's done and what's next across invocations. 
 | B | Best-effort Linux server build | [02-phase-b-linux-server.md](02-phase-b-linux-server.md) | complete | 2026-05-22 | 2026-05-22 |
 | C | Postgres migration | [03-phase-c-postgres.md](03-phase-c-postgres.md) | complete (scaffold; mysqlplus.cpp rewrite is continuation) | 2026-05-22 | 2026-05-22 |
 | D | C# tools → .NET 10 | [04-phase-d-csharp-tools.md](04-phase-d-csharp-tools.md) | complete (16 csproj build clean; itemeditor/enbpatcher deferred — need new csproj) | 2026-05-22 | 2026-05-22 |
-| E | OpenSSL 1.0 → 3.x | [05-phase-e-openssl.md](05-phase-e-openssl.md) | in progress | 2026-05-22 | 2026-05-22 |
-| F | Warning cleanup | [06-phase-f-warnings.md](06-phase-f-warnings.md) | not started | — | — |
+| E | OpenSSL 1.0 → 3.x | [05-phase-e-openssl.md](05-phase-e-openssl.md) | complete (server clean under API_COMPAT 3.0; proxy/login-server prepped for later) | 2026-05-22 | 2026-05-22 |
+| F | Warning cleanup | [06-phase-f-warnings.md](06-phase-f-warnings.md) | in progress | 2026-05-22 | 2026-05-22 |
 | G | Tests | [07-phase-g-tests.md](07-phase-g-tests.md) | not started | — | — |
 | H | Deepen docs | [08-phase-h-docs.md](08-phase-h-docs.md) | not started | — | — |
 | I | Dev env polish | [09-phase-i-dev-env.md](09-phase-i-dev-env.md) | not started | — | — |

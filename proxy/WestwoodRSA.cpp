@@ -70,17 +70,16 @@ bool WestwoodRSA::Encrypt(unsigned char *in_buffer, unsigned int length, unsigne
     bool success = false;
     if (length > 0)
     {
-        BIGNUM M;
-        BIGNUM C;
-        BN_init(&M);
-        BN_init(&C);
+        // OpenSSL 3.x: BIGNUM is opaque; BN_init() is gone. Heap-allocate.
+        BIGNUM *M = BN_new();
+        BIGNUM *C = BN_new();
         unsigned int offset = 0;
         unsigned int remaining = length;
         while (remaining >= WWRSA_BLOCK_SIZE)
         {
-            BN_bin2bn(in_buffer + offset, WWRSA_BLOCK_SIZE, &M);
-            BN_mod_exp(&C, &M, e, N, temp);
-            BN_bn2bin(&C, out_buffer + offset);
+            BN_bin2bn(in_buffer + offset, WWRSA_BLOCK_SIZE, M);
+            BN_mod_exp(C, M, e, N, temp);
+            BN_bn2bin(C, out_buffer + offset);
             offset += WWRSA_BLOCK_SIZE;
             remaining -= WWRSA_BLOCK_SIZE;
         }
@@ -89,10 +88,12 @@ bool WestwoodRSA::Encrypt(unsigned char *in_buffer, unsigned int length, unsigne
             unsigned char buffer[WWRSA_BLOCK_SIZE];
             memcpy(buffer, in_buffer + offset, remaining);
             memset(buffer + remaining, 0, WWRSA_BLOCK_SIZE - remaining);
-            BN_bin2bn(buffer, WWRSA_BLOCK_SIZE, &M);
-            BN_mod_exp(&C, &M, e, N, temp);
-            BN_bn2bin(&C, out_buffer + offset);
+            BN_bin2bn(buffer, WWRSA_BLOCK_SIZE, M);
+            BN_mod_exp(C, M, e, N, temp);
+            BN_bn2bin(C, out_buffer + offset);
         }
+        BN_free(M);
+        BN_free(C);
         success = true;
     }
 
@@ -105,21 +106,22 @@ bool WestwoodRSA::Decrypt(unsigned char *in_buffer, unsigned int length, unsigne
     unsigned int blocks = length / WWRSA_BLOCK_SIZE;
     if (blocks * WWRSA_BLOCK_SIZE == length)
     {
-        BIGNUM C;
-        BIGNUM M;
-        BN_init(&C);
-        BN_init(&M);
+        // OpenSSL 3.x: BIGNUM is opaque; BN_init() is gone. Heap-allocate.
+        BIGNUM *C = BN_new();
+        BIGNUM *M = BN_new();
         unsigned int offset = 0;
         for (unsigned int i = 0; i < blocks; i++)
         {
-            BN_bin2bn(in_buffer + offset, WWRSA_BLOCK_SIZE, &C);
-            BN_mod_exp(&M, &C, d, N, temp);
-            
-            int size = BN_bn2bin(&M, out_buffer + offset);
+            BN_bin2bn(in_buffer + offset, WWRSA_BLOCK_SIZE, C);
+            BN_mod_exp(M, C, d, N, temp);
+
+            int size = BN_bn2bin(M, out_buffer + offset);
 
             if ((size < 0) || (size > WWRSA_BLOCK_SIZE))
             {
                 printf("Unexpected error in WestwoodRSA::Decrypt\n");
+                BN_free(C);
+                BN_free(M);
                 return false;
             }
             else if (size == 0)
@@ -130,17 +132,19 @@ bool WestwoodRSA::Decrypt(unsigned char *in_buffer, unsigned int length, unsigne
             {
 			    // Need this cause BN_bn2bin will yield at the beginning
 			    // of the buffer, unlike Integer::Encode which, because
-			    // it is passed size as a parameter (WWRSA_BLOCK_SIZE), 
-			    // will place the data at the end of the buffer.   
+			    // it is passed size as a parameter (WWRSA_BLOCK_SIZE),
+			    // will place the data at the end of the buffer.
             	unsigned char temp[WWRSA_BLOCK_SIZE];
             	int diff = WWRSA_BLOCK_SIZE - size;
             	memcpy(temp, (out_buffer + offset), size);
             	memset((out_buffer + offset), 0, WWRSA_BLOCK_SIZE - size);
             	memcpy((out_buffer + offset + diff), temp, size);
             }
-            
+
             offset += WWRSA_BLOCK_SIZE;
         }
+        BN_free(C);
+        BN_free(M);
         success = true;
     }
 
