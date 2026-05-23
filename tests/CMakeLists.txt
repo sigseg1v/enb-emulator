@@ -72,6 +72,33 @@ else()
     message(STATUS "net7-tests: libpq not found — skipping postgres_smoke_test")
 endif()
 
+# --- Client: Westwood RSA/RC4 + capture parser ---------------------------
+# The standalone test client lives at tests/client/. Built only if OpenSSL
+# is available (Westwood RSA leans on libcrypto BIGNUM ops).
+find_package(OpenSSL QUIET)
+if(OpenSSL_FOUND)
+    add_executable(handshake_test
+        client/handshake_test.cpp
+        client/capture_parser.cpp
+        client/westwood/westwood_rsa.cpp
+        client/westwood/westwood_rc4.cpp
+    )
+    target_include_directories(handshake_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/client
+    )
+    target_compile_definitions(handshake_test PRIVATE
+        NET7_TEST_CAPTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/client/captures\"
+    )
+    target_link_libraries(handshake_test PRIVATE
+        GTest::gtest_main
+        OpenSSL::Crypto
+    )
+    include(GoogleTest)
+    gtest_discover_tests(handshake_test)
+else()
+    message(STATUS "net7-tests: OpenSSL not found — skipping handshake_test")
+endif()
+
 include(GoogleTest)
 gtest_discover_tests(smoke_test)
 gtest_discover_tests(header_layout_test)
