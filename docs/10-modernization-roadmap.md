@@ -339,6 +339,76 @@ incremental-build daemon vs. just bind-mounting source).
 **Deliverables.** Polished `justfile`, multi-stage Dockerfiles,
 GHCR-pushing release workflow, CI build matrix.
 
+## Phase J -- runnable end-to-end
+
+Plan: `plans/10-phase-j-runnable.md`.
+
+**Goal.** `docker compose up` produces a stack a real client can talk
+to. Server binds its UDP sector ports, the proxy completes a real Net-7
+RSA+RC4 handshake on tcp/3801 + tcp/3805, the DB initialises itself
+from the 2010 MySQL dumps, and an integration-test harness drives the
+proxy with captured-packet replay.
+
+**Approach.**
+
+1. Stand up MySQL 8.0 in compose with auto-load init scripts for the
+   55K-line `net7.sql` and 3K-line `net7_user.sql` dumps. One-shot
+   bootstrap on first volume creation; subsequent boots reuse the
+   `mysqldata` named volume.
+2. Author `Net7Config.cfg` matching the compose mysql endpoint.
+3. Generate self-signed dev SSL cert chain for `local.net-7.org` and
+   bind-mount it into the server container (the server reads
+   `<g_DomainName>.{cer,pem}` from CWD per `SSL_Listener.cpp:56-57`).
+4. Port enough of `proxy/` (Net7Proxy) to Linux to bind the master /
+   global / sector listeners and run the full Westwood RSA+RC4
+   handshake (`Connection::DoKeyExchange` -- 74-byte pubkey send +
+   4+64-byte encrypted-key recv + RC4 install). File-level WIN32
+   walls keep the heavy opcode-dispatch TUs out of the Linux build.
+5. Build a self-contained test client in `tests/client/`: Westwood RSA
+   + RC4 reimplemented (no Net7.h dep), capture-file parser, TCP
+   driver, handshake driver, generic replay engine. Loopback +
+   env-gated live tests against the container.
+6. Wire live tests into CI via a dedicated `integration-test` job
+   that builds the proxy image, runs it detached, then runs ctest
+   with `NET7_TEST_PROXY_HOST=127.0.0.1`.
+7. Port `login-server/` (Net7SSL) using the same file-level WIN32
+   wall pattern proven on the proxy.
+
+**Effort.** 2-4 weeks of focused work for the proxy handshake +
+integration harness; the login-server port adds another 1-2 weeks.
+Full opcode dispatch on the Linux proxy (so server responses round-
+trip end-to-end in the replay test) is a separate multi-week
+follow-up, gated by Phase C's mysqlplus.cpp rewrite.
+
+**Key risks.**
+
+- The captures (`capture_1.txt`) and the live Net-7 server speak
+  **different handshake envelopes**. The historical captures show
+  86-byte Westwood Online ACK1 with session ID + cookies; live
+  Net-7 sends 74 bytes (raw modulus + exponent, no envelope). The
+  test client needs two handshake variants. Discovered the hard
+  way; documented in `99-decisions-log.md` 2026-05-23.
+- The vendored `server/src/mysql/mysql.h` predates
+  `MYSQL_OPT_SSL_MODE`; libmysqlclient 8.0+ defaults to
+  `SSL_MODE_PREFERRED` and dies against a latin1 mysql container.
+  Workaround: cast literal enum `35` to `mysql_option` and call
+  `mysql_options(..., SSL_MODE_DISABLED)`. Replace when migrating
+  to libpqxx.
+- `_beginthreadex` -> `pthread_create` shim loses the thread-handle
+  return value. Affects only call sites that use the handle for
+  join/wait; recv-thread paths are unaffected.
+- `SSLv2_client_method` / `SSLv23_*` were removed in OpenSSL 3.
+  Sidestepped for now by making `RegisterSectorServer` early-return
+  on Linux; needs proper `TLS_*` migration before multi-host
+  deployment is meaningful.
+
+**Deliverables.** `db/mysql/init/` boot scripts,
+`deploy/Net7Config.cfg`, `just init` / `just run-stack` /
+`just seed-account` / `just integration-test`, `proxy/Dockerfile` +
+`proxy/CMakeLists.txt` + Linux portability shims across `proxy/`,
+`tests/client/` (handshake + replay harness, 17 gtest cases),
+CI `integration-test` job, `login-server/` Linux build (in progress).
+
 ## What we deliberately skipped
 
 Things we are **not** doing. Each has a reason; in some cases the
