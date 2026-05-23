@@ -4,6 +4,11 @@
 // to listen on the specified port.
 //
 
+// Phase J (Linux port): blocking-TCP accept loop that feeds Connection_B
+// nodes. Connection_B isn't ported yet (see Connection.cpp). Also the
+// `Connection_B.h` include is case-mismatched (real file is
+// `connection_B.h`) — irrelevant once walled.
+#ifdef WIN32
 #include "Net7SSL.h"
 #include "Connection_B.h"
 #include "TcpListener_B.h"
@@ -173,4 +178,5 @@ void TcpListener::Shutdown()
 
 	m_Mutex.Unlock();
 }
+#endif // WIN32 — Phase J file-level guard
 

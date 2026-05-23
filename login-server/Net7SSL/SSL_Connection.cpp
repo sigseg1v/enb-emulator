@@ -8,7 +8,13 @@
 // TODO: Add code for subsxml to return XML data from resource files
 // TODO: Fix all the HTTP(s) responses.
 
+// Phase J (Linux port): SSL session state, HTTP request parsing, MySQL
+// account lookup, sector-server registration response. Reaches into
+// OpenSSL 3 opaque types (ssl->version) and pulls in AccountManager,
+// MailManager, mysqlplus. Wall the whole TU; the listener thread in
+// SSL_Listener.cpp drives a Phase-J-stub accept-handshake-close path.
 
+#ifdef WIN32
 #include "Net7SSL.h"
 #include "SSL_Connection.h"
 #include "ServerManager.h"
@@ -659,7 +665,7 @@ SSL_DenyList::~SSL_DenyList()
 bool SSL_DenyList::CheckSSLAddress(unsigned long address)
 {
 	bool result = false;
-	for (SSL_AddressList::iterator it = m_AddrList.begin(); it != m_AddrList.end(); ++it) 
+	for (SSL_AddressList::iterator it = m_AddrList.begin(); it != m_AddrList.end(); ++it)
 	{
 		if (address == (*it))
 		{
@@ -670,3 +676,4 @@ bool SSL_DenyList::CheckSSLAddress(unsigned long address)
 
 	return result;
 }
+#endif // WIN32 — Phase J file-level guard

@@ -15,9 +15,14 @@
 
 #include "Net7SSL.h"
 #include "SSL_Listener.h"
+#ifdef WIN32
+// Phase J: SSL_Connection / ServerManager / ConnectionManager are all
+// WIN32-walled for now. The Linux accept loop in RunThread() drives the
+// handshake inline against m_ssl_context and doesn't need them.
 #include "SSL_Connection.h"
 #include "ServerManager.h"
 #include "ConnectionManager.h"
+#endif
 
 // This helper function is referenced by _beginthread to launch the TCP Listener thread.
 #ifdef WIN32
@@ -48,7 +53,14 @@ SSL_Listener::SSL_Listener(unsigned long ip_address, unsigned short port)
 	// Initialize SSL Context
 	SSL_load_error_strings();
 	SSLeay_add_ssl_algorithms();
-	ssl_server_method = SSLv23_server_method();
+	// Phase E/J: OpenSSL 3.x removed SSLv23_server_method (and the SSLv2/3
+	// methods). TLS_server_method is the modern replacement that still
+	// negotiates the highest mutually-supported TLS version.
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
+	ssl_server_method = (SSL_METHOD *)TLS_server_method();
+#else
+	ssl_server_method = (SSL_METHOD *)SSLv23_server_method();
+#endif
 
 	sprintf(certf,	"%s.cer", g_DomainName);
 	sprintf(keyf,	"%s.pem", g_DomainName);
@@ -60,22 +72,22 @@ SSL_Listener::SSL_Listener(unsigned long ip_address, unsigned short port)
 		return;
 	}
 
-	if ( SSL_CTX_use_certificate_file(m_ssl_context, certf, SSL_FILETYPE_PEM) <= 0 ) 
+	if ( SSL_CTX_use_certificate_file(m_ssl_context, certf, SSL_FILETYPE_PEM) <= 0 )
 	{
-		LogMessage("SSL Init: SSL_CTX_use_certificate_file failed\n");
-		return;
+		LogMessage("SSL Init: SSL_CTX_use_certificate_file failed (looked for '%s'); SSL listener will refuse connections.\n", certf);
+		// Phase J: don't bail — let the accept loop run so port 443 binds
+		// even without a cert. Operators will see the warning in the log
+		// and provision a cert before going live.
 	}
 
 	if ( SSL_CTX_use_PrivateKey_file(m_ssl_context, keyf, SSL_FILETYPE_PEM) <= 0 )
 	{
-		LogMessage("SSL Init: SSL_CTX_use_PrivateKey_file failed\n");
-		return;
+		LogMessage("SSL Init: SSL_CTX_use_PrivateKey_file failed (looked for '%s')\n", keyf);
 	}
 
 	if ( !SSL_CTX_check_private_key(m_ssl_context) )
 	{
-		LogMessage("SSL Init: Private key does not match the certificate public key\n");
-		return;
+		LogMessage("SSL Init: Private key does not match the certificate public key (warning only)\n");
 	}
 
 	SSL_CTX_set_mode(m_ssl_context, SSL_MODE_AUTO_RETRY); 	// Avoids the SSL_ERROR_WANT_READ / WRITE
@@ -158,7 +170,9 @@ void SSL_Listener::RunThread()
 		{
 			ip = (unsigned char *) &from.sin_addr;
 			addr = from.sin_addr.s_addr;
+			(void)addr;
 
+#ifdef WIN32
 			if (!g_SSL_Deny_List->CheckSSLAddress(addr))
 			{
 				LogMessage("Accepted SSL connection from %d.%d.%d.%d\n", ip[0], ip[1], ip[2], ip[3]);
@@ -179,6 +193,34 @@ void SSL_Listener::RunThread()
 			{
 				LogMessage("Refused connection to %d.%d.%d.%d : On the SSL shitlist.\n", ip[0], ip[1], ip[2], ip[3]);
 			}
+#else
+			// Phase J Linux: SSL_Connection / SSL_DenyList / ConnectionManager
+			// are still WIN32-walled. Drive the SSL handshake inline, then
+			// close. This proves the listener works end-to-end (cert is
+			// presented, handshake completes if the cert files are present)
+			// without dragging in the rest of the connection-management
+			// machinery for Phase J.
+			LogMessage("Accepted SSL connection from %d.%d.%d.%d (Phase J Linux stub: handshake-and-close)\n",
+				ip[0], ip[1], ip[2], ip[3]);
+			SSL *ssl = SSL_new(m_ssl_context);
+			if (ssl)
+			{
+				SSL_set_fd(ssl, (int)s);
+				int hs = SSL_accept(ssl);
+				if (hs <= 0)
+				{
+					int err = SSL_get_error(ssl, hs);
+					LogMessage("  SSL_accept failed (err=%d). Likely missing/invalid cert.\n", err);
+				}
+				else
+				{
+					LogMessage("  SSL handshake OK (%s)\n", SSL_get_version(ssl));
+					SSL_shutdown(ssl);
+				}
+				SSL_free(ssl);
+			}
+			::close((int)s);
+#endif
 		}
 		else
 		{

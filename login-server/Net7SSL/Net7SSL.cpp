@@ -1,4 +1,16 @@
 // Net7.cpp
+//
+// Phase J (Linux port): this TU contains the original Win32 process entry
+// point, the (Win32-only) Net-7 instance mutex, the MySQL-driven sector
+// table loader, and the legacy "register-with-auth-server" helper. The
+// dependency cone (MailslotManager, MemoryHandler, ConnectionManager,
+// AccountManager, mysqlplus, UDPClient, ServerManager) is heavyweight
+// Windows code. For Phase J we wall the entire original file behind
+// `#ifdef WIN32` and provide a minimal Linux `main()` plus the few
+// globals the rest of the Linux build actually links against.
+//
+// This mirrors proxy/Net7.cpp.
+#ifdef WIN32
 #define _WIN32_WINNT _WIN32_WINNT_WINXP
 #include <process.h>
 #include "Net7SSL.h"
@@ -593,3 +605,168 @@ char *GetSectorName(long sector_id)
 {
 	return SectorNames[sector_id];
 }
+
+#else // !WIN32 — Phase J Linux entry point + minimal globals
+
+#include "Net7SSL.h"
+#include "SSL_Listener.h"
+
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <cstdarg>
+#include <ctime>
+#include <unistd.h>
+#include <signal.h>
+#include <arpa/inet.h>
+
+// Globals declared extern in Net7SSL.h. We define just enough here to make
+// the Linux build link. WIN32-walled translation units in this directory
+// would otherwise own these symbols.
+char g_LogFilename[MAX_PATH]   = {0};
+char g_InternalIP[MAX_PATH]    = {0};
+char g_DomainName[MAX_PATH]    = "local.net-7.org";
+char g_MySQL_User[MAX_PATH]    = {0};
+char g_MySQL_Pass[MAX_PATH]    = {0};
+char g_MySQL_Host[MAX_PATH]    = {0};
+char g_Galaxy_Name[MAX_PATH]   = {0};
+int  g_DASE                    = 0;
+unsigned long g_receive_time   = 0;
+long g_PlayerCount             = 0;
+unsigned long g_cumulative_mem = 0;
+long g_MaxPlayerCount          = 0;
+
+bool g_Debug                   = false;
+bool g_ServerShutdown          = false;
+bool g_LoggedIn                = false;
+bool g_ShuttingDown            = false;
+
+// Manager singletons — Linux build does not instantiate the heavy ones.
+class GMemoryHandler;
+class ServerManager;
+class PlayerManager;
+class StringManager;
+class ItemBaseManager;
+class AccountManager;
+class SaveManager;
+class SSL_DenyList;
+class ConnectionManager;
+
+GMemoryHandler   * g_GlobMemMgr   = nullptr;
+ServerManager    * g_ServerMgr    = nullptr;
+PlayerManager    * g_PlayerMgr    = nullptr;
+StringManager    * g_StringMgr    = nullptr;
+ItemBaseManager  * g_ItemBaseMgr  = nullptr;
+AccountManager   * g_AccountMgr   = nullptr;
+SaveManager      * g_SaveMgr      = nullptr;
+SSL_DenyList     * g_SSL_Deny_List = nullptr;
+ConnectionManager* g_ConnectionMgr = nullptr;
+
+static unsigned long s_StartTick = 0;
+
+// LogMessage is referenced from WestwoodRSA.cpp and other minimally-ported
+// TUs. Match the variadic signature declared in Net7SSL.h.
+void LogMessage(const char *format, ...)
+{
+    char buffer[8192];
+    char timestr[20];
+    time_t rawtime;
+    struct tm * timeinfo;
+
+    va_list args;
+    va_start(args, format);
+    vsnprintf(buffer, sizeof(buffer), format, args);
+    va_end(args);
+
+    time(&rawtime);
+    timeinfo = localtime(&rawtime);
+    strftime(timestr, sizeof(timestr), "%d/%m/%y %H:%M:%S", timeinfo);
+
+    fprintf(stdout, "%s SSL:%s", timestr, buffer);
+    fflush(stdout);
+}
+
+// Linux stubs for the Win32 directory helpers prototyped in Net7SSL.h.
+unsigned long GetCurrentDirectory(unsigned long size, char *path)
+{
+    if (!path || size == 0) return 0;
+    if (getcwd(path, size) == nullptr) return 0;
+    return strlen(path);
+}
+
+int SetCurrentDirectory(const char *path)
+{
+    if (!path) return 0;
+    return chdir(path) == 0 ? 1 : 0;
+}
+
+bool DeleteFile(const char *filename)
+{
+    if (!filename) return false;
+    return unlink(filename) == 0;
+}
+
+unsigned long GetNet7TickCount()
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    unsigned long now = (unsigned long)(ts.tv_sec * 1000UL + ts.tv_nsec / 1000000UL);
+    return now - s_StartTick;
+}
+
+void LockMessageQueue()   {}
+void UnlockMessageQueue() {}
+void LogDebug(char * /*format*/, ...)    {}
+void LogChatMsg(char * /*format*/, ...)  {}
+void LogMySQLMsg(char * /*format*/, ...) {}
+void DumpBuffer(unsigned char * /*b*/, int /*l*/) {}
+void DumpBufferToFile(unsigned char * /*b*/, int /*l*/, char * /*f*/, bool /*r*/) {}
+char* GetSectorName(long /*sector_id*/) { return nullptr; }
+void LoadSectorData() {}
+
+static volatile sig_atomic_t s_shutdown_requested = 0;
+static void handle_signal(int /*sig*/) { s_shutdown_requested = 1; g_ServerShutdown = true; }
+
+int main(int argc, char **argv)
+{
+    // Line-buffer stdout so docker logs show output promptly.
+    setvbuf(stdout, nullptr, _IOLBF, 0);
+    setvbuf(stderr, nullptr, _IOLBF, 0);
+
+    struct timespec ts0;
+    clock_gettime(CLOCK_MONOTONIC, &ts0);
+    s_StartTick = (unsigned long)(ts0.tv_sec * 1000UL + ts0.tv_nsec / 1000000UL);
+
+    signal(SIGINT,  handle_signal);
+    signal(SIGTERM, handle_signal);
+    signal(SIGPIPE, SIG_IGN);
+
+    // Default bind address: 0.0.0.0 (any). Allow override via env / argv[1].
+    const char *bind_addr = "0.0.0.0";
+    if (argc > 1) bind_addr = argv[1];
+    if (const char *env = getenv("NET7SSL_BIND_ADDR")) bind_addr = env;
+
+    unsigned long ip_address_internal = inet_addr(bind_addr);
+    if (ip_address_internal == INADDR_NONE) {
+        ip_address_internal = htonl(INADDR_ANY);
+    }
+
+    LogMessage("Net7SSL (Linux Phase J) starting — bind %s:%d\n", bind_addr, SSL_PORT);
+
+    // Stand up the SSL listener. Mirrors the SSL_Listener constructor used
+    // by Win32 main_prog() above. The listener spawns its own accept loop
+    // thread on Linux (see SSL_Listener.cpp).
+    SSL_Listener *listener = new SSL_Listener(ip_address_internal, SSL_PORT);
+    (void)listener;
+
+    LogMessage("Net7SSL listener up; entering main loop\n");
+
+    while (!g_ServerShutdown) {
+        sleep(1);
+    }
+
+    LogMessage("Net7SSL shutting down\n");
+    return 0;
+}
+
+#endif // WIN32 / Linux Phase J split

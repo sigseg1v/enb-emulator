@@ -11,6 +11,11 @@
 //#include <time.h>
 //#include "mysql/mysqlplus.h"
 
+// Phase J (Linux port): MySQL-driven account / character / station table
+// loader and HTTP-form-data parser for the SSL auth flow. Depends on the
+// vendored mysqlplus.cpp header which is WIN32-only in this tree, plus
+// StaticData.h which doesn't exist in login-server/. Wall the whole TU.
+#ifdef WIN32
 #include "Net7SSL.h"
 #include "AccountManager.h"
 //#include "ServerManager.h"
@@ -1021,3 +1026,4 @@ long AccountManager::GetPlayerSector(long avatar_id)
 
 	return sector_id;
 }
+#endif // WIN32 — Phase J file-level guard

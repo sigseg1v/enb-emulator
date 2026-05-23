@@ -1,3 +1,7 @@
+// Phase J (Linux port): UDP message-bus client used to receive MVAS keep-
+// alives and dispatch opcodes back into the connection-manager tree. Uses
+// _beginthread + PacketMethods (WIN32-only headers). Wall the whole TU.
+#ifdef WIN32
 #include "Net7SSL.h"
 #include "UDPClient.h"
 #include "Net7SSL_opcodes.h"
@@ -337,3 +341,4 @@ void UDPClient::WaitForResponse(short port, short opcode, unsigned char *data, s
 		count--;
 	}
 }
+#endif // WIN32 — Phase J file-level guard

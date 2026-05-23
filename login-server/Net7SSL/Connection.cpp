@@ -1,5 +1,14 @@
 // Connection.cpp for BLOCKING TCP connection (hence Connection_B)
 //
+// Phase J (Linux port): this translation unit is the heavyweight blocking-
+// TCP login/global-server session handler — RC4 recv loop, opcode dispatch,
+// Westwood RSA exchange, MessageQueue/CircularBuffer back-pressure, the
+// works. Porting it to Linux is a Phase J continuation; for now it is
+// WIN32-only. The Linux net7ssl binary stands up the SSL listener only
+// (port 443) and any inbound TCP-side connection from the Net-7 server
+// will currently bounce until this TU is ported. Same pattern as
+// proxy/Connection.cpp.
+#ifdef WIN32
 
 #include "Net7SSL.h"
 #include "Connection_B.h"
@@ -517,3 +526,8 @@ long Connection_B::GameID()
 { 
 	return m_AvatarID; 
 }
+#else // !WIN32 — Phase J Linux stub (file-level WIN32 wall, see top of file)
+// Intentionally empty on Linux. The Connection_B class is forward-declared
+// in connection_B.h but its methods compile to nothing here. Any code path
+// that needs Connection_B at runtime is WIN32-walled at its call sites.
+#endif // WIN32 — Phase J file-level guard

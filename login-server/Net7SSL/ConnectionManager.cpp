@@ -1,4 +1,9 @@
 // ConnectionManager.cpp
+//
+// Phase J (Linux port): connection lifecycle / cleanup loop for the
+// blocking-TCP and SSL connection lists. Depends on Connection_B,
+// SSL_Connection, MailslotManager — all WIN32-only for Phase J.
+#ifdef WIN32
 
 
 #include "Net7SSL.h"
@@ -209,3 +214,4 @@ void MailManager::HandleMessage()
 	//LogMessage("Received keepalive pong from Net7 Server\n");
 	g_receive_time = current_tick;
 }
+#endif // WIN32 — Phase J file-level guard

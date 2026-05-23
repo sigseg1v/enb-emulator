@@ -6,6 +6,10 @@
  *   ///////////////////////////////////////   *
  ***********************************************/
 
+// Phase J (Linux port): client->global-server opcode dispatch. Depends on
+// Connection_B (blocking-TCP session machinery), AccountManager (MySQL),
+// PacketMethods. None of those compile on Linux yet. Wall the whole TU.
+#ifdef WIN32
 #include "Net7SSL.h"
 #include "Connection_B.h"
 #include "Opcodes.h"
@@ -496,3 +500,4 @@ void Connection_B::HandleMasterHandoff()
 {
 	LogMessage("!!! Unimplemented opcode used - Implement me if TCP master login is what you want.\n");
 }
+#endif // WIN32 — Phase J file-level guard

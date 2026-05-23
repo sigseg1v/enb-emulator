@@ -1,5 +1,8 @@
 // ServerManager.cpp
-
+//
+// Phase J (Linux port): the manager that owns the Connection_B pool plus
+// the auxiliary TCP listeners. Connection_B is WIN32-only for Phase J.
+#ifdef WIN32
 #include "Connection_B.h"
 #include "Net7SSL.h"
 #include "ServerManager.h"
@@ -49,3 +52,4 @@ void ServerManager::SetUDPConnections(UDPClient *connection, UDPClient *send)
 	m_UDPMVAS		= connection;
     m_UDPGlobal     = send;
 }
+#endif // WIN32 — Phase J file-level guard
