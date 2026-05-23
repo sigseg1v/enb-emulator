@@ -22,6 +22,9 @@ FetchContent_Declare(
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+
 enable_testing()
 
 # --- Smoke: GTest/CTest wiring -------------------------------------------
@@ -95,6 +98,25 @@ if(OpenSSL_FOUND)
     )
     include(GoogleTest)
     gtest_discover_tests(handshake_test)
+
+    # Live + loopback handshake driver. Live half is env-gated via
+    # NET7_TEST_PROXY_HOST and self-skips when unset.
+    add_executable(handshake_live_test
+        client/handshake_live_test.cpp
+        client/handshake_driver.cpp
+        client/tcp_client.cpp
+        client/westwood/westwood_rsa.cpp
+        client/westwood/westwood_rc4.cpp
+    )
+    target_include_directories(handshake_live_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/client
+    )
+    target_link_libraries(handshake_live_test PRIVATE
+        GTest::gtest_main
+        OpenSSL::Crypto
+        Threads::Threads
+    )
+    gtest_discover_tests(handshake_live_test)
 else()
     message(STATUS "net7-tests: OpenSSL not found — skipping handshake_test")
 endif()
