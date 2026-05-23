@@ -1,14 +1,23 @@
 // Net7.cpp
+#ifdef WIN32
 #define _WIN32_WINNT _WIN32_WINNT_WINXP
 #include <process.h>
+#endif
 #include "Net7.h"
 #include "ServerManager.h"
+// UDPConnection.h is the server-side header (server/src/); proxy/ has
+// only UDPClient.h. The client-launcher-era code referenced UDPConnection
+// directly but the symbol is unused in the proxy translation unit.
+#ifdef WIN32
 #include "UDPConnection.h"
+#endif
 #include "UDPClient.h"
 
+#ifdef WIN32
 #pragma comment(lib, "wsock32.lib")
 #pragma comment(lib, "ssleay32.lib")
 #pragma comment(lib, "libeay32.lib")
+#endif
 
 char g_LogFilename[MAX_PATH];
 char g_InternalIP[MAX_PATH];
@@ -43,6 +52,7 @@ void Usage()
 	printf("   Net7Proxy /ADDRESS:(ip address)\n");
 }
 
+#ifdef WIN32
 bool StartENBClient()
 {
 	STARTUPINFO si = {NULL};
@@ -58,14 +68,14 @@ bool StartENBClient()
         GetCurrentDirectory(MAX_PATH+2, start_dir);
 
 		SetCurrentDirectory(cur_dir);
-		
-		success = CreateProcess(g_exe, g_cmd, NULL, NULL, TRUE, 
+
+		success = CreateProcess(g_exe, g_cmd, NULL, NULL, TRUE,
 			CREATE_DEFAULT_ERROR_MODE, NULL, NULL, &si, &pi);
-		   
+
 		LogMessage("Starting E&B...\n");
         SetCurrentDirectory(start_dir);
 	}
-   
+
 	if (GetProcessHandle())
 	{
 		LogMessage("Launch E&B successful\n");
@@ -78,7 +88,19 @@ bool StartENBClient()
 
 	return (true);
 }
+#else
+// Linux: Net7Proxy here is a SERVER-SIDE TCP listener. The original
+// Net7Proxy was a client launcher: it spawned ENB.exe, attached Detours,
+// and patched the client in memory. None of that applies server-side.
+// Stub it as a no-op success so any legacy call site that still calls
+// StartENBClient() doesn't error out.
+bool StartENBClient()
+{
+    return true;
+}
+#endif
 
+#ifdef WIN32
 int main(int argc, char* argv[])
 {
     long port = SECTOR_SERVER_PORT;
@@ -283,14 +305,104 @@ int main(int argc, char* argv[])
 	}
     return 0;
 }
+#else
+// Linux: SERVER-SIDE main. Net7Proxy here is the TCP entry point for the
+// Westwood RSA+RC4 handshake on port 3801 (MASTER_SERVER_PORT). The
+// original client-launcher main() (CreateProcess, Detours, MessageBox)
+// is irrelevant server-side and lives in #ifdef WIN32 above.
+//
+// What this main does:
+//   - parse minimal command-line (currently none required)
+//   - set up g_DomainName (default: local.net-7.org)
+//   - construct a ServerManager and call RunMasterServer()
+// What it intentionally does NOT do (vs. Win32 main):
+//   - launch the ENB.exe client (irrelevant server-side)
+//   - patch the client in memory (Detours)
+//   - open a UDP receive connection to verify a server is reachable;
+//     server-side Net7Proxy IS the server.
+int main(int argc, char* argv[])
+{
+    g_StartTick = GetTickCount();
+    g_internal_addr = default_addr;
+    g_server_addr  = default_addr;
 
+    // Make stdout line-buffered so `docker logs -f` shows messages as
+    // they happen (default for a non-tty is fully-buffered).
+    setvbuf(stdout, NULL, _IOLBF, 0);
+
+    printf("Net7Proxy (server-side, Linux) version %s\n", VERSION);
+    fflush(stdout);
+
+    for (int i = 1; i < argc; i++)
+    {
+        if (strncmp(argv[i], "/ADDRESS:", 9) == 0)
+        {
+            g_internal_addr = argv[i] + 9;
+        }
+        else if (strncmp(argv[i], "/LC", 3) == 0)
+        {
+            g_LocalCert = true;
+        }
+        else if (strncmp(argv[i], "/OPCODES", 8) == 0)
+        {
+            g_OpcodeDebugging = true;
+        }
+        else if (strncmp(argv[i], "/SSL:", 5) == 0)
+        {
+            long ssl_p = atoi(argv[i] + 5);
+            if (ssl_p > 0)
+            {
+                ssl_port = (unsigned short)ssl_p;
+            }
+        }
+        else
+        {
+            printf("Unrecognized switch: '%s'\n", argv[i]);
+            Usage();
+            return 1;
+        }
+    }
+
+    // g_DomainName defaults to local.net-7.org; docker-compose extra_hosts
+    // remaps it to the container loopback so gethostbyname() succeeds.
+    snprintf(g_DomainName, MAX_PATH, "local.net-7.org");
+
+    // Bind on 0.0.0.0 by default so the container is reachable from the
+    // host. The TcpListener actually uses INADDR_ANY (TcpListener.cpp:80)
+    // regardless of m_IpAddress.
+    unsigned long ip_address_internal = inet_addr(g_internal_addr);
+
+    LogMessage("Net7Proxy: binding TCP %d (MASTER_SERVER_PORT) on %s\n",
+               MASTER_SERVER_PORT, g_internal_addr);
+    LogMessage("Net7Proxy: binding TCP %d (GLOBAL_SERVER_PORT) on %s\n",
+               GLOBAL_SERVER_PORT, g_internal_addr);
+
+    // The "is_master_server", "max_sectors", "standalone" constructor args
+    // are ServerManager's; for the proxy-as-listener role we want the
+    // master-server path (RunMasterServer creates the TCP listeners).
+    ServerManager server_mgr(true /*master*/,
+                             ip_address_internal,
+                             (short) SECTOR_SERVER_PORT,
+                             (short) 1,
+                             true /*standalone*/,
+                             ip_address_internal);
+
+    server_mgr.RunServer();
+
+    return 0;
+}
+#endif
+
+#ifdef WIN32
 static volatile HANDLE 	g_ProcessHandle 	= (HANDLE) INVALID_HANDLE_VALUE;
 static volatile bool	g_EngineInUse		= FALSE;
+#endif
 long g_AddrStore = 0x00b6e5a8; //this virtual offset places us within the known .data area offset.
 
 //=========================
 
-bool engine_close_process() 
+#ifdef WIN32
+bool engine_close_process()
 {
 	if (g_EngineInUse) 
 	{
@@ -565,12 +677,14 @@ void PatchClient()
     addr_off = 0x00733620; //store client GameID to read buffer
     engine_write_process((void*)addr_off, (void*)inject_buffer5, sizeof(inject_buffer5));
 }
+#endif // WIN32 — end engine_* / PatchClient block
 
 unsigned long GetNet7TickCount()
 {
     return ((GetTickCount() - g_StartTick) & 0x7FFFFFFF);
 }
 
+#ifdef WIN32
 bool GetProcessHandle()
 {
 	long count = 0;
@@ -595,15 +709,26 @@ bool GetProcessHandle()
 		return true;
 	}
 }
+#else
+// Linux: client-process functions are no-ops server-side.
+bool GetProcessHandle() { return true; }
+bool engine_open_process(char * /*processwindowtitle*/) { return false; }
+bool engine_read_process(LPVOID, LPVOID, DWORD) { return false; }
+void PatchClient() { /* no client to patch server-side */ }
+bool ClientStillRunning() { return true; }
+bool ShutdownClient() { return true; }
+#endif
 
 void WaitForEngineReady()
 {
+#ifdef WIN32
 	long counter = 0;
 	while (!g_EngineInUse && counter < 300 && !g_ServerShutdown)
 	{
 		Sleep(250);
 		counter++;
 	}
+#endif
 }
 
 void WaitForLogin()
@@ -616,7 +741,9 @@ void WaitForLogin()
 	}
 }
 
+#ifdef WIN32
 bool ClientStillRunning()
 {
 	return (engine_check_process("Earth & Beyond"));
 }
+#endif

@@ -16,8 +16,9 @@
 #include <time.h>
 #include <math.h>
 #include <ctype.h>
-#include <crtdbg.h>
 
+#ifdef WIN32
+#include <crtdbg.h>
 #pragma warning(disable:4996)
 
 
@@ -29,19 +30,81 @@
 #include <winsock2.h>
 #include <objbase.h>
 #include <process.h>
-#include <malloc.h> 
+#include <malloc.h>
 #define SERVER_LOGS_PATH        "..\\logs\\"
 #define SERVER_HTML_PATH        "..\\html\\"
 #define SERVER_DATABASE_PATH	"..\\database\\"
 #define SERVER_USER_PATH		"..\\database\\Users\\"
+#else // Linux
+// Phase J Linux port: pull in POSIX + the compat shims so legacy Win32
+// typedefs (DWORD, HANDLE, BOOL, LPTSTR, SOCKET, INVALID_SOCKET, ...) are
+// available throughout the proxy tree without editing every translation
+// unit.
+#include "compat/win32_shim.h"
+#include "compat/threading_shim.h"
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <pthread.h>
+// _vsnprintf is the msvcrt name; POSIX has vsnprintf.
+#define _vsnprintf  vsnprintf
+// Win32 sockets API names that legacy code uses:
+#define closesocket(s) ::close(s)
+#define WSAGetLastError() errno
+// MSVC-only directives the compiler doesn't understand on gcc:
+#define __cdecl
+#ifndef WINAPI
+#define WINAPI
+#endif
+#ifndef UINT
+typedef unsigned int UINT;
+#endif
+#ifndef SOCKADDR_IN
+#define SOCKADDR_IN struct sockaddr_in
+#endif
+typedef int LPDWORD_int_alias;  // unused; reserved
+// MAX_PATH is a Win32 idiom; default to PATH_MAX semantics.
+#include <limits.h>
+#ifndef MAX_PATH
+#define MAX_PATH 260
+#endif
+// The Net7Proxy logs/database paths are unused on the server-side Linux
+// build (Net7Proxy was originally a client-side launcher). Keep the names
+// defined so any legacy reference compiles.
+#define SERVER_LOGS_PATH        "./logs/"
+#define SERVER_HTML_PATH        "./html/"
+#define SERVER_DATABASE_PATH	"./database/"
+#define SERVER_USER_PATH		"./database/Users/"
+#endif
+
 #define CONFIG_FILE				"Net7Config.cfg"
+#ifdef WIN32
 #pragma pack(1)
 #define ATTRIB_PACKED
+#else
+// gcc equivalent of MSVC's #pragma pack(1) / __declspec(packed).
+// Applied per-struct via the ATTRIB_PACKED suffix (see PacketStructures.h).
+#define ATTRIB_PACKED __attribute__((packed))
+#endif
 
+#ifdef WIN32
 typedef unsigned __int64 u64;
 typedef signed __int64  s64;
 typedef unsigned __int32 u32;
 typedef signed __int32  s32;
+#else
+#include <stdint.h>
+typedef uint64_t u64;
+typedef int64_t  s64;
+typedef uint32_t u32;
+typedef int32_t  s32;
+#endif
 typedef unsigned short  u16;
 typedef signed short    s16;
 typedef unsigned char   u8;
