@@ -7,6 +7,11 @@
 //
 // TODO: Add code for subsxml to return XML data from resource files
 //
+// Phase J: this is the in-proxy HTTPS server (port 443) that the original
+// Net7Proxy used to authenticate sector-server registrations. Server-side
+// on Linux the auth flow belongs to login-server/Net7SSL/; the proxy
+// doesn't need to host an HTTPS responder. WIN32-only on Linux.
+#ifdef WIN32
 
 #include "Net7.h"
 #include "SSL_Connection.h"
@@ -671,3 +676,29 @@ char *SSL_Connection::SectorServer(size_t *response_length, char *recv_buffer)
 
 	return HttpResult(response_length, info, "text/plain");
 }
+
+// SSL_Connection has a stub for Linux below so SSL_Listener.cpp can link.
+#else // !WIN32 — Linux stub
+#include "Net7.h"
+#include "SSL_Connection.h"
+#include "ServerManager.h"
+
+SSL_Connection::SSL_Connection(SOCKET s, ServerManager& server_mgr, long ip_address)
+    : m_Socket(s), m_IpAddress(ip_address), m_ServerMgr(server_mgr),
+      m_SslConnectionThreadRunning(false),
+      m_ConnectionActive(false),
+      m_ServerShutdown(false)
+{
+    // Phase J Linux stub: close immediately. Real SSL flow lives in
+    // login-server/Net7SSL/ (still to be Linux-ported).
+    if (m_Socket != INVALID_SOCKET) {
+        closesocket(m_Socket);
+        m_Socket = INVALID_SOCKET;
+    }
+}
+SSL_Connection::~SSL_Connection() {
+    if (m_Socket != INVALID_SOCKET) closesocket(m_Socket);
+}
+void SSL_Connection::RunThread() {}
+bool SSL_Connection::IsActive() { return m_ConnectionActive; }
+#endif // WIN32 — Phase J file-level guard

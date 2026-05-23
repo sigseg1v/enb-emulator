@@ -1,5 +1,13 @@
 // Connection.cpp
-		
+//
+// Phase J (Linux port): this translation unit is the heavyweight client
+// proxy session handler — TCP recv/send threads, Westwood RSA+RC4 key
+// exchange, ~150 opcode handlers. Porting it to Linux is a Phase J
+// continuation; for now it is WIN32-only and the Linux net7proxy binary
+// links a TcpListener that accept()s connections and immediately closes
+// them. Wrap-out per CLAUDE.md "wrap in #ifdef WIN32 if you can't port".
+#ifdef WIN32
+
 #include "Net7.h"
 #include "Connection.h"
 #include "ServerManager.h"
@@ -739,6 +747,64 @@ bool Connection::CheckTCPShutdownCycle()
 			return true;
 		}
 	}
-	
+
 	return false;
 }
+
+#else // !WIN32 — Linux stub
+// Connection class has lots of out-of-line definitions referenced by
+// TcpListener (which constructs Connection on accept()). For the Phase J
+// Linux build we provide a minimal stub Connection so the linker is
+// satisfied; on accept(), TcpListener will instantiate this stub which
+// just records the socket and logs.
+#include "Net7.h"
+#include "Connection.h"
+#include "ServerManager.h"
+
+Connection::Connection(SOCKET s, ServerManager &server_mgr, short port,
+                       int server_type, unsigned long* ip_addr)
+    : m_Socket(s),
+      m_ConnectionActive(true),
+      m_TcpThreadRunning(false),
+      m_SectorTCPRequest(false),
+      m_TcpShutdownCycle(0),
+      m_ServerType(server_type),
+      m_TcpPort(port),
+      m_UDPClient(nullptr),
+      m_AccountUsername(nullptr),
+      m_ServerMgr(server_mgr),
+      m_AvatarID(-1),
+      m_SectorID(0),
+      m_PacketLoggingEnabled(false),
+      m_IPaddr(0),
+      m_SendThreadHandle(nullptr),
+      m_Tilt_Sent(0),
+      m_Turn_Sent(0)
+{
+    if (ip_addr) m_IPaddr = *ip_addr;
+    unsigned char *ip = (unsigned char *) &m_IPaddr;
+    LogMessage("Net7Proxy (stub): accept on port %d from %u.%u.%u.%u — closing\n",
+               m_TcpPort, ip[0], ip[1], ip[2], ip[3]);
+    // Immediately mark inactive so ConnectionManager::CheckConnections
+    // reaps us next tick.
+    m_ConnectionActive = false;
+    if (m_Socket != INVALID_SOCKET) {
+        closesocket(m_Socket);
+        m_Socket = INVALID_SOCKET;
+    }
+}
+
+Connection::~Connection() {
+    if (m_Socket != INVALID_SOCKET) {
+        closesocket(m_Socket);
+        m_Socket = INVALID_SOCKET;
+    }
+}
+
+bool Connection::IsActive()                    { return m_ConnectionActive; }
+bool Connection::CheckTCPShutdownCycle()       { return true; }
+void Connection::TerminateConnection()         { m_ConnectionActive = false; }
+void Connection::SendResponse(short /*opcode*/, unsigned char* /*data*/,
+                              size_t /*length*/, long /*sequence_num*/) {}
+
+#endif // WIN32 — Phase J file-level guard
