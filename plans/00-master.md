@@ -15,7 +15,7 @@ This is the source of truth for what's done and what's next across invocations. 
 | G | Tests | [07-phase-g-tests.md](07-phase-g-tests.md) | complete (3 binaries, CI ctest job, fixed Phase D sln→slnx CI regression; subsystem tests need source isolation first) | 2026-05-22 | 2026-05-22 |
 | H | Deepen docs | [08-phase-h-docs.md](08-phase-h-docs.md) | complete (4 new docs + §8 flow walkthroughs + capture analysis in docs/03 §8 with 120k-packet histogram) | 2026-05-22 | 2026-05-23 |
 | I | Dev env polish | [09-phase-i-dev-env.md](09-phase-i-dev-env.md) | complete (justfile/Dockerfiles/CI matrix/release.yml/pre-commit; wine-tools profile deferred) | 2026-05-22 | 2026-05-22 |
-| J | Runnable end-to-end | [10-phase-j-runnable.md](10-phase-j-runnable.md) | in progress (mysql/init/certs/data done; server boots, loads 130 sectors, **does not bind sector UDP** — `_beginthreadex` stub returns 0, sector threads never spawn; mailslot poll loop spins) | 2026-05-23 | 2026-05-23 |
+| J | Runnable end-to-end | [10-phase-j-runnable.md](10-phase-j-runnable.md) | in progress (server UDP binds verified; test client scaffold complete — Westwood RSA/RC4 + capture parser + handshake driver + replay engine, 14 ctest cases incl. loopback handshake; Net7Proxy port in flight — listens on 3801/3500 in container, host port-publish + live tests pending) | 2026-05-23 | 2026-05-23 |
 
 Decisions log: [99-decisions-log.md](99-decisions-log.md).
 

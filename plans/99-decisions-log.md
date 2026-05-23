@@ -164,3 +164,19 @@ After actually inspecting `/proc/net/udp` inside the live `server` container, **
 Tactical fix this turn: quieted the GetMailslotInfo log spam by changing the Net7.h:301 inline stub to return TRUE with 0 messages (MAILSLOT_NO_MESSAGE) so MailManager's poll falls through silently. The misdiagnosed `_beginthreadex` task is dropped; the real `_beginthreadex` replacement is wanted but only matters once Net7Proxy is up and a real session needs the per-connection comms thread (ConnectionManager.cpp:24, CREATE_SUSPENDED + ResumeThread).
 
 Next: port Net7Proxy to Linux and stand up TCP 3801 in the dev stack. Net7SSL after that. Test client can be developed in parallel against capture-only unit tests until the live listener is up.
+
+## 2026-05-23 — Phase J: test client built bottom-up against captures, not against live server
+
+The test client at `tests/client/` is intentionally structured in three independent layers, each tested without a live server, then the live server wired in via env-gated tests:
+
+1. **Crypto + parser layer** (`westwood/`, `capture_parser.{h,cpp}`): self-contained reimplementations of Westwood RSA, Westwood RC4, and the human-readable capture text format under `archive/kyp-snapshot/capturedPackets/`. No Net7.h or server dependency. Six unit tests pin correctness against captured ACK1 modulus bytes, RFC 6229 RC4 vectors, and a captured SYN2 ciphertext (decrypt yields the annotated session key at plaintext[63..56] reversed — per `proxy/Connection.cpp:230-268`).
+2. **Transport + handshake driver** (`tcp_client.{h,cpp}`, `handshake_driver.{h,cpp}`): blocking POSIX TCP socket + a `RunClientHandshake()` that walks the full 4-step SYN1/ACK1/SYN2/ACK2 exchange. Verified by a loopback test that spawns a server-half thread on an ephemeral localhost port and confirms the client-chosen RC4 key matches what the server-half decoded.
+3. **Replay engine** (`replay.{h,cpp}`): walks a filtered packet list, sends client→server packets (RC4-encrypted post-handshake), reads + decrypts server→client responses. Opcode-only equality check on responses (full byte-compare would always fail — server state diverges run-to-run between capture and replay).
+
+**Why this shape**: The Net7Proxy port lands asynchronously; structuring the test client this way meant we never blocked on it. Layers 1-2 ship 14 ctest cases that all run in CI today. Layer 3's live test self-skips via `NET7_TEST_PROXY_HOST` and activates the moment the proxy listener is reachable from the runner.
+
+**Captures shipped**: We slice `archive/kyp-snapshot/capturedPackets/capture_1.txt` into two small fixtures (`tests/client/captures/capture_1_handshake.txt`, `_post_handshake.txt`) so tests stay fast and the fixture intent is obvious. The full RAR archives stay under `archive/` for analysis work.
+
+**Subtle correctness item caught**: the capture text format embeds annotation hex (e.g. the decrypted "RC4 session key:" line under SYN2) that is *not* part of the on-wire packet. Our `ParseCapture` caps each packet's byte count at the header's declared length so annotation bytes never leak into wire data. This was caught by `WestwoodRsa.DecryptCapturedSyn2YieldsSessionKey` failing on first run with 92 bytes instead of 84.
+
+**Login opcode (0x02) task**: dropped as a separate item — the replay engine sends any captured client→server packet identically, so "login" is just one entry in the capture stream rather than special-case code.
