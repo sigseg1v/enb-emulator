@@ -138,9 +138,13 @@ test:
     ctest --test-dir build/tests --output-on-failure
     -dotnet test tools/Net7Tools.slnx --nologo
 
-# Integration tests against the live stack (handshake + replay over TCP).
+# Live handshake + replay over TCP against just the Net7Proxy container
+# (skips mysql + server boot — the proxy handshake path doesn't touch
+# the DB so this stays fast).
 integration-test:
-    just run-stack-bg
+    docker build -t enb-proxy:local proxy/
+    -docker rm -f net7proxy-local 2>/dev/null
+    docker run -d --name net7proxy-local -p 3801:3801 -p 3805:3805 -p 3500:3500 enb-proxy:local
     @echo "waiting for proxy on tcp/3801..."
     @until timeout 1 bash -c '</dev/tcp/127.0.0.1/3801' 2>/dev/null; do sleep 1; done
     cmake -S tests -B build/tests -G Ninja
@@ -148,7 +152,7 @@ integration-test:
     NET7_TEST_PROXY_HOST=127.0.0.1 NET7_TEST_PROXY_PORT=3801 \
         ctest --test-dir build/tests --output-on-failure \
               -R 'HandshakeDriver|Replay'
-    just down
+    docker rm -f net7proxy-local
 
 # ---- package / release ----
 
