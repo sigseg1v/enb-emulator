@@ -13,7 +13,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -257,13 +257,13 @@ void ItemBaseManager::SetRefineInfo()
 
     for (int i=0; i<MAX_ITEMBASE_ITEMS; i++)
     {
-        if (refines_into = GetItem(i))
+        if ((refines_into = GetItem(i)))
         {
 			if (refines_into->Category() == IB_CATEGORY_REFINED_RESOURCE)
 			{
 				for (int j=0;j < 6;j++)
 				{
-					if (item = GetItem(refines_into->Component(j)))
+					if ((item = GetItem(refines_into->Component(j))))
 					{
                     	item->SetRefinesInto(refines_into->ItemTemplateID());
 					}
@@ -382,7 +382,7 @@ unsigned long ItemBaseManager::HashItemBaseVal(char * Name)
     // This is the djb2 hash function
     unsigned long Char, Hash = 5381;
 
-    while (Char = *Name++)
+    while ((Char = *Name++))
         Hash = ((Hash << 5) + Hash) + Char;
 
     return Hash % m_HashTable.Size;

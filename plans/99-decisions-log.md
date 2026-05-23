@@ -73,6 +73,14 @@ Phase A renamed tool directories to kebab-case (e.g. `Net7Tools/CommonTools` →
 
 The sector-editor also embeds image references with lowercase paths (`images\classspecificgate.gif`) in its Resources.resx, while files on disk are CamelCased (`Images/classSpecificGate.gif`). Rather than rewrite the resx (which would touch generated artefacts), we created `tools/sector-editor/images/` as a directory of lowercase symlinks into `Images/`. The build resolves; the original assets stay untouched.
 
+## 2026-05-22 — Phase F: target -Wmisleading-indentation and -Wparentheses, not the suppressed top three
+
+The plan said "fix the top three categories with safe global transforms." After histogramming the warnings, the top three (-Wunused-parameter 1379, -Wwrite-strings 1140, -Wunused-variable 296) are all already globally suppressed in CMake — and "fixing" them honestly means a const-correctness cascade through every C-string-taking function and adding `[[maybe_unused]]` to every unused parameter in every virtual override. That's a multi-week refactor, not a "safe global transform."
+
+Substituted the highest-value tractable targets instead: -Wmisleading-indentation (53 → 0; 4 source-level fixes) and -Wparentheses (5 → 0; 5 source-level fixes). These are real bug-bait, not cosmetic — misleading-indentation is exactly the class of warning that catches semicolons-on-the-wrong-line and missing-brace mistakes; parentheses-around-assignment makes assignment-vs-comparison-typo intent explicit. Documented the rest of the long-tail in `server/WARNINGS_BASELINE.md` with per-category suggested fixes.
+
+Did NOT remove any of the global -Wno-* suppressions. Each is load-bearing for a real cascade. Removing them now would drown the build log without producing actionable diffs.
+
 ## 2026-05-22 — Phase E: bump `OPENSSL_API_COMPAT` to 0x30000000L; finish BIGNUM migration in proxy + login-server
 
 Phase B already migrated `server/src/WestwoodRSA.cpp` off `BN_init` (made opaque + removed in 3.0). Inventory of the rest of the tree found only two remaining deprecation hits: `BN_init` in `proxy/WestwoodRSA.cpp` and `login-server/Net7SSL/WestwoodRSA.cpp` (the latter two not currently in the CMake build, but the source matters for when they re-enter it). Migrated both to the heap-allocated-BIGNUM pattern from server/src — identical fix, mechanical.

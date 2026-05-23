@@ -406,12 +406,20 @@ public:
 		return Vector( ((n&1)?b:a).x,((n&2)?b:a).y,((n&4)?b:a).z );
 	}
 	void update( const Vector &q ){
-		if( q.x<a.x ) a.x=q.x;if( q.y<a.y ) a.y=q.y;if( q.z<a.z ) a.z=q.z;
-		if( q.x>b.x ) b.x=q.x;if( q.y>b.y ) b.y=q.y;if( q.z>b.z ) b.z=q.z;
+		if( q.x<a.x ) a.x=q.x;
+		if( q.y<a.y ) a.y=q.y;
+		if( q.z<a.z ) a.z=q.z;
+		if( q.x>b.x ) b.x=q.x;
+		if( q.y>b.y ) b.y=q.y;
+		if( q.z>b.z ) b.z=q.z;
 	}
 	void update( const Box &q ){
-		if( q.a.x<a.x ) a.x=q.a.x;if( q.a.y<a.y ) a.y=q.a.y;if( q.a.z<a.z ) a.z=q.a.z;
-		if( q.b.x>b.x ) b.x=q.b.x;if( q.b.y>b.y ) b.y=q.b.y;if( q.b.z>b.z ) b.z=q.b.z;
+		if( q.a.x<a.x ) a.x=q.a.x;
+		if( q.a.y<a.y ) a.y=q.a.y;
+		if( q.a.z<a.z ) a.z=q.a.z;
+		if( q.b.x>b.x ) b.x=q.b.x;
+		if( q.b.y>b.y ) b.y=q.b.y;
+		if( q.b.z>b.z ) b.z=q.b.z;
 	}
 	bool overlaps( const Box &q )const{
 		return

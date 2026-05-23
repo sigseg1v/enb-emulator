@@ -87,7 +87,7 @@ void Equipable::PullAuxData()
 
 	if (m_UsesAmmo && VALID_AMMO(m_AuxAmmoItem) && m_AuxAmmoItem->GetItemTemplateID() > 0)
 	{
-		if (m_AmmoBase = g_ItemBaseMgr->GetItem(m_AuxAmmoItem->GetItemTemplateID()))
+		if ((m_AmmoBase = g_ItemBaseMgr->GetItem(m_AuxAmmoItem->GetItemTemplateID())))
 		{
 			m_AmmoInstance = m_AmmoBase->GetAmmoInstance(m_AuxAmmoItem->GetInstanceInfo());
 		}
@@ -437,7 +437,7 @@ _Item Equipable::EquipAmmo(_Item * NewAmmo)
 
 	Player *p = g_PlayerMgr->GetPlayerFromIndex(m_PlayerID);
 
-    if (m_AmmoBase = g_ItemBaseMgr->GetItem(NewAmmo->ItemTemplateID))
+    if ((m_AmmoBase = g_ItemBaseMgr->GetItem(NewAmmo->ItemTemplateID)))
     {
         m_AmmoInstance = m_AmmoBase->GetAmmoInstance(NewAmmo->InstanceInfo);
 		UpdateRange();

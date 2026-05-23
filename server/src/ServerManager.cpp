@@ -13,7 +13,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -473,12 +473,14 @@ void ServerManager::ReloadAllObjects()
 	m_MOBList.LoadMOBContent();
 	m_SectorContent.LoadSectorContent();
     for (int i = 0; i < m_MaxSectors; i++)
+    {
         if (m_SectorMgrList[i])
 		{
 			ObjectManager * om = m_SectorMgrList[i]->GetObjectManager();
 			if (om)
 				om->InitialiseResourceContent();
 		}
+    }
 
 	g_ResetContent = false;
 }
