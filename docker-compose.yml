@@ -52,6 +52,12 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      # Phase J: the login container's entrypoint chmod's the shared
+      # /run/net7-ipc volume to 0777 (server runs as net7:net7 uid 999
+      # and otherwise can't bind a datagram socket in the root-owned
+      # volume dir). Start order matters; wait for login to be up.
+      login:
+        condition: service_started
     environment:
       # Net7Config.cfg is the file the server actually reads on boot
       # (server/src/Net7.cpp:124). We mount one in via volumes:.
@@ -70,6 +76,10 @@ services:
       # SERVER_DATABASE_PATH (Net7.h:143) = "../database/" relative to CWD.
       # With WORKDIR=/app, that resolves to /database/.
       - ./server/data:/database:ro
+      # Phase J IPC: AF_UNIX SOCK_DGRAM peer sockets live here. The login
+      # service mounts the same named volume so the two processes can see
+      # each other's sockets without going through the network.
+      - net7-ipc:/run/net7-ipc
     ports:
       # Net-7 listens on:
       # - 3501-3800 TCP (sector servers; allocated dynamically)
@@ -125,6 +135,21 @@ services:
       # from CWD; the same certs the server container uses also work here.
       - ./deploy/certs/local.net-7.org.cer:/app/local.net-7.org.cer:ro
       - ./deploy/certs/local.net-7.org.pem:/app/local.net-7.org.pem:ro
+      # Phase J IPC: shares the AF_UNIX SOCK_DGRAM sockets with the server
+      # container (Net7SSL writes /run/net7-ipc/net7.sock,
+      # reads /run/net7-ipc/net7SSL.sock; server is the mirror).
+      - net7-ipc:/run/net7-ipc
+    # The login container runs as root; we use that to chmod the shared
+    # /run/net7-ipc volume to 0777 before exec'ing net7ssl, so the
+    # server container (running as net7:net7, uid 999) can also bind a
+    # datagram socket there. Same-host trust model — see posix_ipc.h.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        mkdir -p /run/net7-ipc
+        chmod 0777 /run/net7-ipc
+        exec /app/net7ssl
     ports:
       # Container binds 443 internally (the protocol-correct port). The
       # host side is remapped to 4443 so the stack works under rootless
@@ -213,3 +238,6 @@ services:
 volumes:
   mysqldata:
   pgdata:
+  # Phase J IPC: shared AF_UNIX SOCK_DGRAM socket directory between the
+  # server and login containers. Replaces the Win32 mailslot pair.
+  net7-ipc:

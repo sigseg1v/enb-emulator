@@ -208,10 +208,8 @@ void ConnectionManager::CheckSslConnections()
 
 }
 
-void MailManager::HandleMessage()
-{
-	unsigned long current_tick = GetNet7TickCount();
-	//LogMessage("Received keepalive pong from Net7 Server\n");
-	g_receive_time = current_tick;
-}
+// MailManager::HandleMessage() lives in MailslotManager.cpp (portable on
+// both Win32 and Linux). It used to be defined here on Win32-only because
+// the tada-o snapshot's login-server tree was missing MailslotManager.cpp
+// entirely; Phase J restored that .cpp and moved the body there.
 #endif // WIN32 — Phase J file-level guard

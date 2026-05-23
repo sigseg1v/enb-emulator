@@ -12,11 +12,17 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 #include "MailslotManager.h"
 #include "Net7.h"
+
+#ifdef WIN32
+// ---------------------------------------------------------------------------
+// Original Win32 mailslot implementation. Linux build uses the POSIX path
+// below (see #else // !WIN32).
+// ---------------------------------------------------------------------------
 
 bool MailManager::WriteMessage(char *message)
 {
@@ -194,18 +200,104 @@ MailManager::~MailManager()
 
 void MailManager::SetUpSendSlot()
 {
-	m_hFile = CreateFile(g_OutputSlot, 
-		GENERIC_WRITE, 
+	m_hFile = CreateFile(g_OutputSlot,
+		GENERIC_WRITE,
 		FILE_SHARE_READ,
-		(LPSECURITY_ATTRIBUTES) NULL, 
-		OPEN_EXISTING, 
-		FILE_ATTRIBUTE_NORMAL, 
-		(HANDLE) NULL); 
+		(LPSECURITY_ATTRIBUTES) NULL,
+		OPEN_EXISTING,
+		FILE_ATTRIBUTE_NORMAL,
+		(HANDLE) NULL);
 
-	if (m_hFile == INVALID_HANDLE_VALUE) 
-	{ 
-		LogMessage("CreateFile failed with %d.\n", GetLastError()); 
-	} 
+	if (m_hFile == INVALID_HANDLE_VALUE)
+	{
+		LogMessage("CreateFile failed with %d.\n", GetLastError());
+	}
 
 	m_SendSlotInit = true;
 }
+
+#else // !WIN32 â€” Phase J POSIX (AF_UNIX SOCK_DGRAM) implementation
+// ---------------------------------------------------------------------------
+// On Linux the mailslot transport is replaced with AF_UNIX SOCK_DGRAM
+// (see server/compat/posix_ipc.h). m_hSlot / m_hFile / m_hEvent member
+// HANDLEs are unused; we keep a heap-allocated PosixIpc behind m_hSlot
+// (cast through void*) so the class shape stays binary-compatible with
+// the Win32 build's header.
+// ---------------------------------------------------------------------------
+#include "../compat/posix_ipc.h"
+
+#include <cstring>
+#include <new>
+
+namespace {
+inline net7ipc::PosixIpc * AsIpc(HANDLE h) {
+    return reinterpret_cast<net7ipc::PosixIpc *>(h);
+}
+}
+
+bool MailManager::WriteMessage(char *message)
+{
+    auto *ipc = AsIpc(m_hSlot);
+    if (!ipc) return false;
+    return ipc->WriteMessage(message);
+}
+
+void MailManager::CheckMessages()
+{
+    auto *ipc = AsIpc(m_hSlot);
+    if (!ipc) return;
+
+    int got;
+    while ((got = ipc->ReadMessage(reinterpret_cast<char *>(m_Buffer),
+                                   sizeof(m_Buffer))) > 0)
+    {
+        // Mailslot wire format (Win32): opcode byte at [0], slot at [2],
+        // length at [4], payload at [6]. The only message actually sent
+        // by the existing codebase is the literal "Ping" keepalive
+        // (login -> server) and "Pong" / silence in return. Both sides'
+        // HandleMessage() reduces to "update g_receive_time"; we honour
+        // that by delegating to the same hook.
+        HandleMessage();
+    }
+}
+
+MailManager::MailManager()
+    : m_hSlot(0), m_hFile(0), m_hEvent(0), m_SendSlotInit(false)
+{
+    std::memset(m_Buffer, 0, sizeof(m_Buffer));
+
+    auto *ipc = new (std::nothrow)
+        net7ipc::PosixIpc(g_InputSlot, g_OutputSlot);
+    if (!ipc || !ipc->valid())
+    {
+        LogMessage("MailManager: PosixIpc bind('%s') failed; IPC disabled\n",
+                   g_InputSlot ? g_InputSlot : "<null>");
+        delete ipc;
+        return;
+    }
+
+    LogMessage("MailManager: AF_UNIX recv=%s send=%s\n",
+               ipc->recv_path().c_str(), ipc->send_path().c_str());
+    m_hSlot = reinterpret_cast<HANDLE>(ipc);
+    m_SendSlotInit = true; // PosixIpc opens the send fd lazily
+}
+
+void MailManager::ResetMailSystem()
+{
+    auto *ipc = AsIpc(m_hSlot);
+    if (ipc) ipc->Reset();
+}
+
+MailManager::~MailManager()
+{
+    delete AsIpc(m_hSlot);
+    m_hSlot = 0;
+}
+
+void MailManager::SetUpSendSlot()
+{
+    // No-op on Linux: PosixIpc::WriteMessage opens the send socket on
+    // demand and reuses it. Kept for header symmetry with Win32.
+}
+
+#endif // WIN32

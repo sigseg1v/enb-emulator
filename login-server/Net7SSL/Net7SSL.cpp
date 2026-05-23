@@ -610,6 +610,7 @@ char *GetSectorName(long sector_id)
 
 #include "Net7SSL.h"
 #include "SSL_Listener.h"
+#include "MailslotManager.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -619,6 +620,14 @@ char *GetSectorName(long sector_id)
 #include <unistd.h>
 #include <signal.h>
 #include <arpa/inet.h>
+
+// Phase J IPC: AF_UNIX SOCK_DGRAM replaces the Win32 mailslot pair. The
+// server side (server/src/Net7.cpp) binds the inverse mapping. Both sides
+// need a writable directory at /run/net7-ipc/ — docker-compose mounts a
+// shared named volume there.
+LPTSTR g_OutputSlot = const_cast<LPTSTR>("/run/net7-ipc/net7.sock");
+LPTSTR g_InputSlot  = const_cast<LPTSTR>("/run/net7-ipc/net7SSL.sock");
+LPTSTR g_EventName  = const_cast<LPTSTR>("Net7SSLSlot");
 
 // Globals declared extern in Net7SSL.h. We define just enough here to make
 // the Linux build link. WIN32-walled translation units in this directory
@@ -759,11 +768,35 @@ int main(int argc, char **argv)
     SSL_Listener *listener = new SSL_Listener(ip_address_internal, SSL_PORT);
     (void)listener;
 
+    // Mailslot IPC peer (server <-> login keepalive). Same wiring as Win32
+    // main_prog(): every ~10s send "Ping" to the server's recv socket; if
+    // we don't hear from the peer for ~60s, declare it dead and exit.
+    MailManager *MailMgr = new MailManager();
+
     LogMessage("Net7SSL listener up; entering main loop\n");
 
+    unsigned long send_check  = GetNet7TickCount() + 60 * 1000;
+    g_receive_time            = GetNet7TickCount() + 60 * 1000;
+
     while (!g_ServerShutdown) {
-        sleep(1);
+        usleep(500 * 1000); // 500ms — matches Win32 Sleep(500)
+        unsigned long current_tick = GetNet7TickCount();
+
+        MailMgr->CheckMessages();
+
+        if (current_tick > (send_check + 10000)) {
+            MailMgr->WriteMessage(const_cast<char *>("Ping"));
+            send_check = current_tick;
+        }
+
+        if (current_tick > (g_receive_time + 60000)) {
+            LogMessage("Net7 Server seems to have stopped\n");
+            LogMessage("Net7SSL Terminating\n");
+            break;
+        }
     }
+
+    delete MailMgr;
 
     LogMessage("Net7SSL shutting down\n");
     return 0;
