@@ -113,6 +113,7 @@ This phase exists because Phases A–I delivered a server that compiles and an i
         - **HTML/CSS/GIF file serving is unimplemented** — the Win32 fallback path serves files from `SERVER_HTML_PATH` if the extension matches an allowlist. Not used by the actual auth flow; left as a TODO if we ever want the in-browser cert-install page to render.
         - **No connection pooling** — one TLS session = one HTTP request = one SQL query. Plenty for the dev stack; if real load lands on this thing, port the per-connection `SSL_Connection` class fully.
 
-- [ ] Update `plans/00-master.md` status table + `plans/99-decisions-log.md` entry for Phase J scope.
-      Status: in progress (this file)
+- [x] Update `plans/00-master.md` status table + `plans/99-decisions-log.md` entry for Phase J scope.
+      Status: done
       Touches: `plans/00-master.md`, `plans/99-decisions-log.md`
+      Notes: Phase J now closed — five sub-ports (server build, proxy bind, login bind, IPC bus, login HTTP/MySQL auth, proxy opcode dispatch) all verified. Carry-over to Phase K: in-game opcode handlers (ProcessGlobalServerOpcode / ProcessSectorServerOpcode, ~1043 LOC walled), UDP proxy plane (UDPProxyMVAS/ToClient/ToGlobal, UDPClient), ticket validation handoff (login → game server via RegisterSectorServer on SSL_LOCALCERT_LOGIN_PORT 3807), per-connection threading in net7ssl, /who.cgi.
