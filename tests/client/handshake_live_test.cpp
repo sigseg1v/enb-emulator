@@ -2,12 +2,16 @@
 //
 // Live + loopback integration tests for the handshake driver.
 //
-// Loopback tests run unconditionally: we spin up a thread that plays the
-// server side of the handshake against the client driver on a localhost
-// socket pair. This proves the wire format is internally consistent.
+// Two distinct wire protocols are exercised here:
+//   - RunClientHandshake() — Westwood-envelope (4-step SYN1/ACK1/SYN2/ACK2)
+//     as captured from the original Westwood Online servers. The loopback
+//     test uses this because it owns both sides.
+//   - RunNet7Handshake()   — raw RSA exchange Net-7 actually speaks on
+//     TCP 3801 (server initiates with 74-byte pubkey, client sends 4+64
+//     byte encrypted block). The live test uses this against the running
+//     Net7Proxy container.
 //
-// Live test runs only when NET7_TEST_PROXY_HOST is set in the env. It
-// connects to a real Net7Proxy instance and walks the handshake.
+// Live test only runs when NET7_TEST_PROXY_HOST is set in the env.
 
 #include <gtest/gtest.h>
 
@@ -216,11 +220,13 @@ TEST(HandshakeDriver, LiveServerHandshake) {
     westwood::Rsa rsa;
     enbtest::HandshakeResult result;
     std::string err;
-    ASSERT_TRUE(enbtest::RunClientHandshake(client, rsa, /*session_id=*/0x1234,
-                                            /*rng_seed=*/0xA5A5A5A5A5A5A5A5ull,
-                                            result, &err))
+    ASSERT_TRUE(enbtest::RunNet7Handshake(client, rsa,
+                                          /*rng_seed=*/0xA5A5A5A5A5A5A5A5ull,
+                                          result, &err))
         << err;
 
-    EXPECT_NE(result.cord_port, 0)
-        << "server returned CORD port 0; expected a real sector port";
+    // Net-7 protocol has no ACK packet — success just means the server
+    // sent us a valid 74-byte pubkey and accepted our encrypted key block.
+    // We can't probe much more without sending opcode traffic.
+    SUCCEED();
 }

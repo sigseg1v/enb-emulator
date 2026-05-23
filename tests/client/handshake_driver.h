@@ -63,13 +63,39 @@ struct HandshakeResult {
     westwood::Rc4 tx_cipher;  // encrypts subsequent client -> server traffic
 };
 
-// Performs the full 4-step handshake. Caller owns `client` and `rsa`.
-// `rng_seed` controls the chosen RC4 session key (deterministic for tests);
-// pass 0 to derive from time.
-// On success, fills `out`. On failure, returns false and out is unchanged;
-// errors are accumulated into `client`.last_error().
+// Performs the full 4-step Westwood-envelope handshake (matches the
+// historical Westwood Online wire protocol seen in
+// capturedPackets/capture_1.txt). Used for capture-validation and for the
+// loopback self-test where both client and server speak this protocol.
+//
+// Note: the Net-7 emulator does **not** speak this envelope on TCP 3801 —
+// see RunNet7Handshake() below for the live-server variant.
 bool RunClientHandshake(TcpClient& client, const westwood::Rsa& rsa,
                         uint16_t session_id, uint64_t rng_seed,
                         HandshakeResult& out, std::string* err = nullptr);
+
+// Performs the Net-7 raw RSA exchange as implemented in
+// server/src/Connection.cpp:150 (DoKeyExchange) and the corresponding
+// proxy/Connection.cpp Linux port. Wire format:
+//
+//   server -> client (74 bytes, server initiates immediately on connect):
+//     [0-3]    = 0x00 0x00 0x00 0x41    modulus length = 65
+//     [4]      = 0x00                   modulus MSB
+//     [5-68]   = 64-byte modulus N
+//     [69-72]  = 0x00 0x00 0x00 0x01    exponent length = 1
+//     [73]     = 0x23                   exponent (35)
+//
+//   client -> server (4 + 64 = 68 bytes):
+//     [0-3]    = 0x00 0x00 0x00 0x40    block length = 64 (network byte order)
+//     [4-67]   = 64-byte RSA-encrypted block:
+//                  plaintext[0..55]  = arbitrary padding
+//                  plaintext[56..63] = REVERSED 8-byte RC4 session key
+//                  (server reads it back via rc4_key_buffer[0] = rc4key[0x3f])
+//
+// After this, both sides have an RC4 session keyed identically and are
+// ready for the EnB TCP framed opcode stream.
+bool RunNet7Handshake(TcpClient& client, const westwood::Rsa& rsa,
+                      uint64_t rng_seed, HandshakeResult& out,
+                      std::string* err = nullptr);
 
 }  // namespace enbtest
