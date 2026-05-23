@@ -1,0 +1,15 @@
+name: Run ShellCheck Workflow
+
+on:
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  shellcheck:
+    name: Run ShellCheck Job
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Run ShellCheck Action
+        uses: ludeeus/action-shellcheck@master

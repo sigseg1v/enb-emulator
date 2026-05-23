@@ -6,81 +6,37 @@ Goal: consolidate the three upstream repos into a clean layout, write docs, writ
 
 ### A1 — Source merge
 
-- [ ] Copy `tada-o/Source Code/Net7/*.{cpp,h}` and subdirs → `server/src/`. Strip `.svn/`. Preserve license headers verbatim.
-      Touches: server/src/
-      Notes:
-- [ ] Copy `tada-o/Source Code/Net7/Makefile` → `server/Makefile.legacy`.
-      Touches: server/Makefile.legacy
-      Notes:
-- [ ] Copy `tada-o/Source Code/libs/*` → `server/third_party/`. Strip `.svn/`.
-      Touches: server/third_party/
-      Notes:
-- [ ] Copy `tada-o/Source Code/Net7Mysql/` → `login-server/Net7Mysql/`. Verify what it actually is.
-      Touches: login-server/
-      Notes:
-- [ ] Copy `tada-o/Source Code/Net7SSL/` → `login-server/Net7SSL/`.
-      Touches: login-server/Net7SSL/
-      Notes:
-- [ ] Copy `tada-o/Source Code/Net7Proxy/` → `proxy/`.
-      Touches: proxy/
-      Notes:
-- [ ] Copy `tada-o/Source Code/MVASlaunch/` → `launcher/`.
-      Touches: launcher/
-      Notes:
-- [ ] Copy `tada-o/Source Code/ClientDetours/` → `client/detours/`.
-      Touches: client/detours/
-      Notes:
-- [ ] Copy `tada-o/Source Code/Client Mods/` → `client/mods/`.
-      Touches: client/mods/
-      Notes:
-- [ ] Copy `tada-o/net7.sql` + `net7_user.sql` → `db/mysql/`.
-      Touches: db/mysql/
-      Notes:
-- [ ] Copy `tada-o/account for game.txt` → `archive/tada-o-account-note.txt`.
-      Touches: archive/
-      Notes:
-- [ ] Copy `kyp/trunk/Net7Tools/*` → `tools/` (kebab-case rename per tool).
-      Touches: tools/
-      Notes:
-- [ ] Copy `kyp/trunk/Documents/` → `archive/kyp-snapshot/Documents/`.
-      Touches: archive/kyp-snapshot/Documents/
-      Notes:
-- [ ] Copy `kyp/trunk/capturedPackets/` → `archive/kyp-snapshot/capturedPackets/`.
-      Touches: archive/kyp-snapshot/capturedPackets/
-      Notes:
-- [ ] Copy `kyp/trunk/html/` → `archive/kyp-snapshot/html/`.
-      Touches: archive/kyp-snapshot/html/
-      Notes:
-- [ ] Copy `kyp/branches/linux-port/` → `archive/kyp-snapshot/linux-port-legacy/`.
-      Touches: archive/kyp-snapshot/linux-port-legacy/
-      Notes:
-- [ ] Copy `kyp/branches/Net7_TD/` → `archive/kyp-snapshot/Net7_TD/`.
-      Touches: archive/kyp-snapshot/Net7_TD/
-      Notes:
-- [ ] Copy `kyp/trunk/_workspace/` → `archive/kyp-snapshot/_workspace/`.
-      Touches: archive/kyp-snapshot/_workspace/
-      Notes:
-- [ ] Copy `enb-linux-installer/*` (script, README, LICENSE, .github/) → `client/linux-installer/`. PRESERVE GPLv3 LICENSE verbatim.
-      Touches: client/linux-installer/
-      Notes:
-- [ ] Verify no `.svn/` directories anywhere in the merged tree.
-      Touches: (audit)
-      Notes:
-- [ ] Verify Net-7 CC BY-NC-SA 3.0 header still present in every Net-7 source file (count "Net-7 Entertainment" matches).
-      Touches: (audit)
-      Notes:
+- [x] Copy `tada-o/Source Code/Net7/*.{cpp,h}` and subdirs → `server/src/`. Strip `.svn/`. Preserve license headers verbatim.
+      Notes: 300 files contain "Net-7 Entertainment" header (verified). Files are ISO-8859 with CRLF; need `--binary-files=text` for grep.
+- [x] Copy `tada-o/Source Code/Net7/Makefile` → `server/Makefile.legacy`.
+- [x] Copy `tada-o/Source Code/libs/*` → `server/third_party/`. Strip `.svn/`.
+- [x] Copy `tada-o/Source Code/Net7Mysql/` → `login-server/Net7Mysql/`.
+- [x] Copy `tada-o/Source Code/Net7SSL/` → `login-server/Net7SSL/`.
+- [x] Copy `tada-o/Source Code/Net7Proxy/` → `proxy/`.
+- [x] Copy `tada-o/Source Code/MVASlaunch/` → `launcher/`.
+- [x] Copy `tada-o/Source Code/ClientDetours/` → `client/detours/`.
+- [x] Copy `tada-o/Source Code/Client Mods/` → `client/mods/`.
+- [x] Copy `tada-o/net7.sql` + `net7_user.sql` → `db/mysql/`.
+- [x] Copy `tada-o/account for game.txt` → `archive/tada-o-account-note.txt`.
+- [x] Copy `kyp/trunk/Net7Tools/*` → `tools/` (kebab-case rename per tool).
+- [x] Copy `kyp/trunk/Documents/` → `archive/kyp-snapshot/Documents/`.
+- [x] Copy `kyp/trunk/capturedPackets/` → `archive/kyp-snapshot/capturedPackets/`.
+- [x] Copy `kyp/trunk/html/` → `archive/kyp-snapshot/html/`.
+- [x] Copy `kyp/branches/linux-port/` → `archive/kyp-snapshot/linux-port-legacy/`.
+- [x] Copy `kyp/branches/Net7_TD/` → `archive/kyp-snapshot/Net7_TD/`.
+- [x] Copy `kyp/trunk/_workspace/` → `archive/kyp-snapshot/_workspace/`.
+- [x] Copy `enb-linux-installer/*` (script, README, LICENSE, .github/) → `client/linux-installer/`. PRESERVE GPLv3 LICENSE verbatim. (Verified diff == 0.)
+- [x] Verify no `.svn/` directories anywhere in the merged tree. (Found 166, removed all.)
+- [x] Verify Net-7 CC BY-NC-SA 3.0 header still present in every Net-7 source file. (300 hits across server/src.)
 
 ### A2 — Binary audit + .gitignore re-includes
 
-- [ ] Enumerate all binary-ish files in merged tree. Classify: build-output (drop), vendor-without-source (keep + note), resource (keep).
-      Touches: (audit)
-      Notes:
-- [ ] Move kept third-party binaries (DLLs, libs we don't have source for) under `vendor/` or alongside their project, with a `THIRD_PARTY_BINARIES.md` listing what+where-from+why.
-      Touches: vendor/, server/third_party/, etc.
-      Notes:
-- [ ] Add `!` re-include rules to `.gitignore` for every kept-binary path so they're not silently ignored.
-      Touches: .gitignore
-      Notes:
+- [x] Enumerate all binary-ish files in merged tree. Classify: build-output (drop), vendor-without-source (keep + note), resource (keep).
+      Notes: dropped Debug/, Release/, obj/, .ncb, .suo, .user, .pdb, .obj, .sbr, .pfx (code-signing keys), .ipdb, .iobj, .ipch, .tlog, .aps, .opensdf, .sdf, .VC.db.
+- [x] Move kept third-party binaries (DLLs, libs we don't have source for) under `vendor/` or alongside their project, with a `THIRD_PARTY_BINARIES.md` listing.
+      Notes: kept in-place (server/third_party/, server/src/LUA/, client/mods/release/, tools/<each>/Libs/). Wrote 3 THIRD_PARTY_BINARIES.md files (server/third_party/, client/mods/, tools/).
+- [x] Add `!` re-include rules to `.gitignore` for every kept-binary path so they're not silently ignored.
+      Notes: only `login-server/Net7Mysql/res/Thumbs.db` remains ignored (OS junk, correct).
 
 ### A3 — Docs
 
@@ -97,7 +53,7 @@ Goal: consolidate the three upstream repos into a clean layout, write docs, writ
 - [ ] `docs/10-modernization-roadmap.md` — Phase B/C/D/E/F/G/H/I summary with effort estimates
 - [ ] `docs/11-gm-commands.md` — reformatted from GMCommands.txt
 - [ ] `docs/reference/` — preserved original architecture RTF + FAQ
-- [ ] Top-level `README.md`
+- [x] Top-level `README.md` (done during bootstrap)
 
 ### A4 — Phase B scaffolding
 

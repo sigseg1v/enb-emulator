@@ -86,13 +86,34 @@ pgdata/
 # Vendor binaries we don't have source for — see THIRD_PARTY_BINARIES.md notes
 !vendor/**
 
-# Third-party libs vendored with the server build (we may keep some prebuilt artefacts)
+# Third-party libs vendored with the server build (we keep prebuilt artefacts for Windows builds)
 !server/third_party/**
+!server/src/LUA/**/*.lib
+
+# Detours has a prebuilt detours.lib for the samples
+!client/detours/Detours/lib/**
+
+# login-server vendored mysql lib
+!login-server/Net7Mysql/libmySQL.lib
+
+# Modded client + auth dll (game binary, no source)
+!client/mods/release/**
+
+# Game data files (mixfiles, .bik video, etc.) shipped with the mods
+!client/mods/Data/**
 
 # C# tool resources (icons, images, sprites) often live under bin/ or with .dll extension
 !tools/**/Resources/**
 !tools/**/Images/**
 !tools/**/Sprites/**
+!tools/**/Props/**
+!tools/**/Design/**
+
+# C# tool vendored dependencies (DLLs they ship with — old MySql.Data, log4net, SandDock, etc.)
+!tools/**/Libs/**
+!tools/**/lib/**
+!tools/**/*.dll
+!tools/**/SQLBind/**
 
 # Game-asset binaries from kyp's tooling
 !archive/kyp-snapshot/**
@@ -100,6 +121,19 @@ pgdata/
 # Original packet captures
 !**/capturedPackets/**
 
-# Reference docs (rtf, pdf)
+# Reference docs (rtf, pdf, doc, ico, icns)
 !**/*.rtf
 !**/*.pdf
+!**/*.doc
+!**/*.ico
+!**/*.ICO
+!**/*.icns
+!**/*.bik
+
+# Per-rule: still EXCLUDE genuine build outputs inside the re-included paths
+client/mods/release/*.tmp
+tools/**/obj/
+tools/**/bin/
+server/**/build/
+server/src/Debug/
+server/src/Release/

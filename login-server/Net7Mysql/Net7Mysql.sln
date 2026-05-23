@@ -1,0 +1,20 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 10.00
+# Visual Studio 2008
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Net7Mysql", "Net7Mysql.vcproj", "{02D66F0E-E631-4CEF-A6F1-6D03497123DD}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Win32 = Debug|Win32
+		Release|Win32 = Release|Win32
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{02D66F0E-E631-4CEF-A6F1-6D03497123DD}.Debug|Win32.ActiveCfg = Debug|Win32
+		{02D66F0E-E631-4CEF-A6F1-6D03497123DD}.Debug|Win32.Build.0 = Debug|Win32
+		{02D66F0E-E631-4CEF-A6F1-6D03497123DD}.Release|Win32.ActiveCfg = Release|Win32
+		{02D66F0E-E631-4CEF-A6F1-6D03497123DD}.Release|Win32.Build.0 = Release|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

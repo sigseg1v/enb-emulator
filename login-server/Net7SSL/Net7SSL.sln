@@ -1,0 +1,20 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 10.00
+# Visual C++ Express 2008
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Net7SSL", "Net7SSL.vcproj", "{0E3B0ECC-3BB9-474C-8536-4AAF05FD2235}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Win32 = Debug|Win32
+		Release|Win32 = Release|Win32
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{0E3B0ECC-3BB9-474C-8536-4AAF05FD2235}.Debug|Win32.ActiveCfg = Debug|Win32
+		{0E3B0ECC-3BB9-474C-8536-4AAF05FD2235}.Debug|Win32.Build.0 = Debug|Win32
+		{0E3B0ECC-3BB9-474C-8536-4AAF05FD2235}.Release|Win32.ActiveCfg = Release|Win32
+		{0E3B0ECC-3BB9-474C-8536-4AAF05FD2235}.Release|Win32.Build.0 = Release|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
