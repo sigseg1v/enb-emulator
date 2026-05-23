@@ -207,96 +207,96 @@ s32 AuxStats::GetResistPsionic()	{return Data->ResistPsionic;}
 
 void AuxStats::SetData(_Stats *NewData)
 {
-	ReplaceData(Data->Defence, NewData->Defence, 0);
-	ReplaceData(Data->MissleDefence, NewData->MissleDefence, 1);
-	ReplaceData(Data->Speed, NewData->Speed, 2);
-	ReplaceData(Data->WarpSpeed, NewData->WarpSpeed, 3);
-	ReplaceData(Data->WarpPowerLevel, NewData->WarpPowerLevel, 4);
-	ReplaceData(Data->TurnRate, NewData->TurnRate, 5);
-	ReplaceData(Data->ScanRange, NewData->ScanRange, 6);
-	ReplaceData(Data->Visibility, NewData->Visibility, 7);
-	ReplaceData(Data->ResistImpact, NewData->ResistImpact, 8);
-	ReplaceData(Data->ResistExplosion, NewData->ResistExplosion, 9);
-	ReplaceData(Data->ResistPlasma, NewData->ResistPlasma, 10);
-	ReplaceData(Data->ResistEnergy, NewData->ResistEnergy, 11);
-	ReplaceData(Data->ResistEMP, NewData->ResistEMP, 12);
-	ReplaceData(Data->ResistChemical, NewData->ResistChemical, 13);
-	ReplaceData(Data->ResistPsionic, NewData->ResistPsionic, 14);
+	ReplaceData(&Data->Defence, NewData->Defence, 0);
+	ReplaceData(&Data->MissleDefence, NewData->MissleDefence, 1);
+	ReplaceData(&Data->Speed, NewData->Speed, 2);
+	ReplaceData(&Data->WarpSpeed, NewData->WarpSpeed, 3);
+	ReplaceData(&Data->WarpPowerLevel, NewData->WarpPowerLevel, 4);
+	ReplaceData(&Data->TurnRate, NewData->TurnRate, 5);
+	ReplaceData(&Data->ScanRange, NewData->ScanRange, 6);
+	ReplaceData(&Data->Visibility, NewData->Visibility, 7);
+	ReplaceData(&Data->ResistImpact, NewData->ResistImpact, 8);
+	ReplaceData(&Data->ResistExplosion, NewData->ResistExplosion, 9);
+	ReplaceData(&Data->ResistPlasma, NewData->ResistPlasma, 10);
+	ReplaceData(&Data->ResistEnergy, NewData->ResistEnergy, 11);
+	ReplaceData(&Data->ResistEMP, NewData->ResistEMP, 12);
+	ReplaceData(&Data->ResistChemical, NewData->ResistChemical, 13);
+	ReplaceData(&Data->ResistPsionic, NewData->ResistPsionic, 14);
 }
 
 void AuxStats::SetDefence(s32 NewDefence)
 {
-	ReplaceData(Data->Defence, NewDefence, 0);
+	ReplaceData(&Data->Defence, NewDefence, 0);
 }
 
 void AuxStats::SetMissleDefence(s32 NewMissleDefence)
 {
-	ReplaceData(Data->MissleDefence, NewMissleDefence, 1);
+	ReplaceData(&Data->MissleDefence, NewMissleDefence, 1);
 }
 
 void AuxStats::SetSpeed(s32 NewSpeed)
 {
-	ReplaceData(Data->Speed, NewSpeed, 2);
+	ReplaceData(&Data->Speed, NewSpeed, 2);
 }
 
 void AuxStats::SetWarpSpeed(s32 NewWarpSpeed)
 {
-	ReplaceData(Data->WarpSpeed, NewWarpSpeed, 3);
+	ReplaceData(&Data->WarpSpeed, NewWarpSpeed, 3);
 }
 
 void AuxStats::SetWarpPowerLevel(s32 NewWarpPowerLevel)
 {
-	ReplaceData(Data->WarpPowerLevel , NewWarpPowerLevel, 4);
+	ReplaceData(&Data->WarpPowerLevel , NewWarpPowerLevel, 4);
 }
 
 void AuxStats::SetTurnRate(s32 NewTurnRate)
 {
-	ReplaceData(Data->TurnRate, NewTurnRate, 5);
+	ReplaceData(&Data->TurnRate, NewTurnRate, 5);
 }
 
 void AuxStats::SetScanRange(s32 NewScanRange)
 {
-	ReplaceData(Data->ScanRange, NewScanRange, 6);
+	ReplaceData(&Data->ScanRange, NewScanRange, 6);
 }
 
 void AuxStats::SetVisibility(s32 NewVisibility)
 {
-	ReplaceData(Data->Visibility, NewVisibility, 7);
+	ReplaceData(&Data->Visibility, NewVisibility, 7);
 }
 
 void AuxStats::SetResistImpact(s32 NewResistImpact)
 {
-	ReplaceData(Data->ResistImpact, NewResistImpact, 8);
+	ReplaceData(&Data->ResistImpact, NewResistImpact, 8);
 }
 
 void AuxStats::SetResistExplosion(s32 NewResistExplosion)
 {
-	ReplaceData(Data->ResistExplosion, NewResistExplosion, 9);
+	ReplaceData(&Data->ResistExplosion, NewResistExplosion, 9);
 }
 
 void AuxStats::SetResistPlasma(s32 NewResistPlasma)
 {
-	ReplaceData(Data->ResistPlasma, NewResistPlasma, 10);
+	ReplaceData(&Data->ResistPlasma, NewResistPlasma, 10);
 }
 
 void AuxStats::SetResistEnergy(s32 NewResistEnergy)
 {
-	ReplaceData(Data->ResistEnergy, NewResistEnergy, 11);
+	ReplaceData(&Data->ResistEnergy, NewResistEnergy, 11);
 }
 
 void AuxStats::SetResistEMP(s32 NewResistEMP)
 {
-	ReplaceData(Data->ResistEMP, NewResistEMP, 12);
+	ReplaceData(&Data->ResistEMP, NewResistEMP, 12);
 }
 
 void AuxStats::SetResistChemical(s32 NewResistChemical)
 {
-	ReplaceData(Data->ResistChemical, NewResistChemical, 13);
+	ReplaceData(&Data->ResistChemical, NewResistChemical, 13);
 }
 
 void AuxStats::SetResistPsionic(s32 NewResistPsionic)
 {
-	ReplaceData(Data->ResistPsionic, NewResistPsionic, 14);
+	ReplaceData(&Data->ResistPsionic, NewResistPsionic, 14);
 }
 
 /******************************

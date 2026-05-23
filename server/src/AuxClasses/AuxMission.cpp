@@ -277,25 +277,25 @@ void AuxMission::SetAllFlags()
 
 void AuxMission::SetData(_Mission *NewData)
 {
-	ReplaceData(Data->ID, NewData->ID, 0);
+	ReplaceData(&Data->ID, NewData->ID, 0);
 	ReplaceString(Data->Name, NewData->Name, 1, 64);
 	ReplaceString(Data->Summary, NewData->Summary, 2, 128);
 	ReplaceString(Data->Reward, NewData->Reward, 3, 128);
 	ReplaceString(Data->FailureConsequence, NewData->FailureConsequence, 4, 128);
 	ReplaceString(Data->IssuingFaction, NewData->IssuingFaction, 5, 64);
-	ReplaceData(Data->IsTimed, NewData->IsTimed, 6);
-	ReplaceData(Data->ExpirationTime, NewData->ExpirationTime, 7);
-	ReplaceData(Data->StartTime, NewData->StartTime, 8);
-	ReplaceData(Data->IsForfeitable, NewData->IsForfeitable, 9);
-	ReplaceData(Data->IsCompleted, NewData->IsCompleted, 10);
-	ReplaceData(Data->IsFailed, NewData->IsFailed, 11);
-	ReplaceData(Data->IsExpired, NewData->IsExpired, 12);
-	ReplaceData(Data->IsFullyVisible, NewData->IsFullyVisible, 13);
-	ReplaceData(Data->StageCount, NewData->StageCount, 14);
-	ReplaceData(Data->StageNum, NewData->StageNum, 15);
+	ReplaceData(&Data->IsTimed, NewData->IsTimed, 6);
+	ReplaceData(&Data->ExpirationTime, NewData->ExpirationTime, 7);
+	ReplaceData(&Data->StartTime, NewData->StartTime, 8);
+	ReplaceData(&Data->IsForfeitable, NewData->IsForfeitable, 9);
+	ReplaceData(&Data->IsCompleted, NewData->IsCompleted, 10);
+	ReplaceData(&Data->IsFailed, NewData->IsFailed, 11);
+	ReplaceData(&Data->IsExpired, NewData->IsExpired, 12);
+	ReplaceData(&Data->IsFullyVisible, NewData->IsFullyVisible, 13);
+	ReplaceData(&Data->StageCount, NewData->StageCount, 14);
+	ReplaceData(&Data->StageNum, NewData->StageNum, 15);
 	Stages.SetData(&NewData->Stages);
-	ReplaceData(Data->StageExpirationTime, NewData->StageExpirationTime, 17);
-	ReplaceData(Data->HasGivenNewMissionMessage, NewData->HasGivenNewMissionMessage, 18);
+	ReplaceData(&Data->StageExpirationTime, NewData->StageExpirationTime, 17);
+	ReplaceData(&Data->HasGivenNewMissionMessage, NewData->HasGivenNewMissionMessage, 18);
 
     //No replace method as DatabaseID is not part of the packet
     Data->DatabaseID = NewData->DatabaseID;
@@ -304,7 +304,7 @@ void AuxMission::SetData(_Mission *NewData)
 
 void AuxMission::SetID(u32 NewID)
 {
-	ReplaceData(Data->ID, NewID, 0);
+	ReplaceData(&Data->ID, NewID, 0);
 }
 
 void AuxMission::SetName(char * NewName)
@@ -334,62 +334,62 @@ void AuxMission::SetIssuingFaction(char * NewIssuingFaction)
 
 void AuxMission::SetIsTimed(bool NewIsTimed)
 {
-	ReplaceData(Data->IsTimed, NewIsTimed, 6);
+	ReplaceData(&Data->IsTimed, NewIsTimed, 6);
 }
 
 void AuxMission::SetExpirationTime(u32 NewExpirationTime)
 {
-	ReplaceData(Data->ExpirationTime, NewExpirationTime, 7);
+	ReplaceData(&Data->ExpirationTime, NewExpirationTime, 7);
 }
 
 void AuxMission::SetStartTime(u32 NewStartTime)
 {
-	ReplaceData(Data->StartTime, NewStartTime, 8);
+	ReplaceData(&Data->StartTime, NewStartTime, 8);
 }
 
 void AuxMission::SetIsForfeitable(bool NewIsForfeitable)
 {
-	ReplaceData(Data->IsForfeitable, NewIsForfeitable, 9);
+	ReplaceData(&Data->IsForfeitable, NewIsForfeitable, 9);
 }
 
 void AuxMission::SetIsCompleted(bool NewIsCompleted)
 {
-	ReplaceData(Data->IsCompleted, NewIsCompleted, 10);
+	ReplaceData(&Data->IsCompleted, NewIsCompleted, 10);
 }
 
 void AuxMission::SetIsFailed(bool NewIsFailed)
 {
-	ReplaceData(Data->IsFailed, NewIsFailed, 11);
+	ReplaceData(&Data->IsFailed, NewIsFailed, 11);
 }
 
 void AuxMission::SetIsExpired(bool NewIsExpired)
 {
-	ReplaceData(Data->IsExpired, NewIsExpired, 12);
+	ReplaceData(&Data->IsExpired, NewIsExpired, 12);
 }
 
 void AuxMission::SetIsFullyVisible(bool NewIsFullyVisible)
 {
-	ReplaceData(Data->IsFullyVisible, NewIsFullyVisible, 13);
+	ReplaceData(&Data->IsFullyVisible, NewIsFullyVisible, 13);
 }
 
 void AuxMission::SetStageCount(u32 NewStageCount)
 {
-	ReplaceData(Data->StageCount, NewStageCount, 14);
+	ReplaceData(&Data->StageCount, NewStageCount, 14);
 }
 
 void AuxMission::SetStageNum(u32 NewStageNum)
 {
-	ReplaceData(Data->StageNum, NewStageNum, 15);
+	ReplaceData(&Data->StageNum, NewStageNum, 15);
 }
 
 void AuxMission::SetStageExpirationTime(u32 NewStageExpirationTime)
 {
-	ReplaceData(Data->StageExpirationTime, NewStageExpirationTime, 17);
+	ReplaceData(&Data->StageExpirationTime, NewStageExpirationTime, 17);
 }
 
 void AuxMission::SetHasGivenNewMissionMessage(bool NewHasGivenNewMissionMessage)
 {
-	ReplaceData(Data->HasGivenNewMissionMessage, NewHasGivenNewMissionMessage, 18);
+	ReplaceData(&Data->HasGivenNewMissionMessage, NewHasGivenNewMissionMessage, 18);
 }
 
 //No replace method as DatabaseID is not part of the packet

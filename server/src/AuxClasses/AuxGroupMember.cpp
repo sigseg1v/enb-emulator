@@ -87,9 +87,9 @@ u32 AuxGroupMember::GetPosition()				{return Data->Position;}
 void AuxGroupMember::SetData(_GroupMember *NewData)
 {
 	ReplaceString(Data->Name, NewData->Name, 0, 64);
-	ReplaceData(Data->GameID, NewData->GameID, 1);
-	ReplaceData(Data->Formation, NewData->Formation, 2);
-	ReplaceData(Data->Position, NewData->Position, 3);
+	ReplaceData(&Data->GameID, NewData->GameID, 1);
+	ReplaceData(&Data->Formation, NewData->Formation, 2);
+	ReplaceData(&Data->Position, NewData->Position, 3);
 
 	CheckData();
 }
@@ -102,19 +102,19 @@ void AuxGroupMember::SetName(char * NewName)
 
 void AuxGroupMember::SetGameID(u32 NewGameID)
 {
-	ReplaceData(Data->GameID, NewGameID, 1);
+	ReplaceData(&Data->GameID, NewGameID, 1);
 	CheckData();
 }
 
 void AuxGroupMember::SetFormation(u32 NewFormation)
 {
-	ReplaceData(Data->Formation, NewFormation, 2);
+	ReplaceData(&Data->Formation, NewFormation, 2);
 	CheckData();
 }
 
 void AuxGroupMember::SetPosition(u32 NewPosition)
 {
-	ReplaceData(Data->Position, NewPosition, 3);
+	ReplaceData(&Data->Position, NewPosition, 3);
 	CheckData();
 }
 

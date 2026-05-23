@@ -12,7 +12,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 #ifndef _AUXBASE_H_INCLUDED_
@@ -47,11 +47,19 @@ protected:
 	void AddFlags(unsigned char *, unsigned int, unsigned char *, long &);
 
 	template <typename T>
-	void ReplaceData(T &orig, T src, unsigned int flagNum)
+	void ReplaceData(T *orig, T src, unsigned int flagNum)
 	{
+		// Was: void ReplaceData(T &orig, T src, ...). Changed to pointer so
+		// the template doesn't need to bind a reference to a member of a
+		// packed struct (GCC rejects that as a hard error). All call sites
+		// were sed-rewritten to pass the address; the address-of-packed-member
+		// warning is suppressed in CMakeLists for the AuxClasses files.
         m_Mutex->Lock();
 
-		if (orig != src)
+		T cur;
+		memcpy(&cur, orig, sizeof(T));
+
+		if (cur != src)
 		{
 			/* The data is different, set the flags */
 			SetAuxBit(m_Flags, flagNum);
@@ -65,19 +73,19 @@ protected:
             }
 
 			/* Change the extended flags for this bit if needed */
-			if (!orig && src)
+			if (!cur && src)
 			{
 				UnsetAuxBit(m_ExtendedFlags, flagNum + m_FlagCount);
 				SetAuxBit(m_ExtendedFlags, flagNum);
 			}
-			else if (!src && orig)
+			else if (!src && cur)
 			{
 				SetAuxBit(m_ExtendedFlags, flagNum + m_FlagCount);
 				UnsetAuxBit(m_ExtendedFlags, flagNum);
 			}
 
 			/* Copy the data */
-			orig = src;
+			memcpy(orig, &src, sizeof(T));
 		}
 
         m_Mutex->Unlock();

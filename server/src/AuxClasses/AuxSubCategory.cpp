@@ -64,8 +64,8 @@ bool AuxSubCategory::GetIsVisible()             {return Data->IsVisible;}
 void AuxSubCategory::SetData(_SubCategory * NewData)
 {
 	ReplaceString(Data->Name, NewData->Name, 0, 32);
-	ReplaceData(Data->SubCategoryID, NewData->SubCategoryID, 1);
-	ReplaceData(Data->IsVisible, NewData->IsVisible, 2);
+	ReplaceData(&Data->SubCategoryID, NewData->SubCategoryID, 1);
+	ReplaceData(&Data->IsVisible, NewData->IsVisible, 2);
 
 	CheckData();
 }
@@ -78,13 +78,13 @@ void AuxSubCategory::SetName(char * NewName)
 
 void AuxSubCategory::SetSubCategoryID(u32 NewSubCategoryID)
 {
-	ReplaceData(Data->SubCategoryID, NewSubCategoryID, 1);
+	ReplaceData(&Data->SubCategoryID, NewSubCategoryID, 1);
 	CheckData();
 }
 
 void AuxSubCategory::SetIsVisible(bool NewIsVisible)
 {
-	ReplaceData(Data->IsVisible, NewIsVisible, 2);
+	ReplaceData(&Data->IsVisible, NewIsVisible, 2);
 	CheckData();
 }
 

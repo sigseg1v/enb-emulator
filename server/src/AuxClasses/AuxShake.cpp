@@ -88,30 +88,30 @@ float AuxShake::GetDamage()			{return Data->Damage;}
 
 void AuxShake::SetData(_Shake *NewData)
 {
-	ReplaceData(Data->ForceX, NewData->ForceX, 0);
-	ReplaceData(Data->ForceY, NewData->ForceY, 1);
-	ReplaceData(Data->ForceZ, NewData->ForceZ, 2);
-	ReplaceData(Data->Damage, NewData->Damage, 3);
+	ReplaceData(&Data->ForceX, NewData->ForceX, 0);
+	ReplaceData(&Data->ForceY, NewData->ForceY, 1);
+	ReplaceData(&Data->ForceZ, NewData->ForceZ, 2);
+	ReplaceData(&Data->Damage, NewData->Damage, 3);
 }
 
 void AuxShake::SetForceX(float NewForceX)
 {
-	ReplaceData(Data->ForceX, NewForceX, 0);
+	ReplaceData(&Data->ForceX, NewForceX, 0);
 }
 
 void AuxShake::SetForceY(float NewForceY)
 {
-	ReplaceData(Data->ForceY, NewForceY, 1);
+	ReplaceData(&Data->ForceY, NewForceY, 1);
 }
 
 void AuxShake::SetForceZ(float NewForceZ)
 {
-	ReplaceData(Data->ForceZ, NewForceZ, 2);
+	ReplaceData(&Data->ForceZ, NewForceZ, 2);
 }
 
 void AuxShake::SetDamage(float NewDamage)
 {
-	ReplaceData(Data->Damage, NewDamage, 3);
+	ReplaceData(&Data->Damage, NewDamage, 3);
 }
 
 /******************************

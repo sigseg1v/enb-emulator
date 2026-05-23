@@ -65,7 +65,7 @@ bool AuxMissionStage::GetIsTimed()					{return Data->IsTimed;}
 void AuxMissionStage::SetData(_MissionStage *NewData)
 {
 	ReplaceString(Data->Text, NewData->Text, 0, sizeof(Data->Text));
-	ReplaceData(Data->IsTimed, NewData->IsTimed, 1);
+	ReplaceData(&Data->IsTimed, NewData->IsTimed, 1);
 
 	CheckData();
 }
@@ -78,7 +78,7 @@ void AuxMissionStage::SetText(char * NewText)
 
 void AuxMissionStage::SetIsTimed(bool NewIsTimed)
 {
-	ReplaceData(Data->IsTimed, NewIsTimed, 1);
+	ReplaceData(&Data->IsTimed, NewIsTimed, 1);
 	CheckData();
 }
 

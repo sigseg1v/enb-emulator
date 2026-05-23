@@ -82,13 +82,13 @@ float AuxLego::GetScale()		{return Data->Scale;}
 
 void AuxLego::SetData(_Lego *NewData)
 {
-	ReplaceData(Data->Scale, NewData->Scale, 0);
+	ReplaceData(&Data->Scale, NewData->Scale, 0);
 	Attachments.SetData(&NewData->Attachments);
 }
 
 void AuxLego::SetScale(float NewScale)
 {
-	ReplaceData(Data->Scale, NewScale, 0);
+	ReplaceData(&Data->Scale, NewScale, 0);
 }
 
 /******************************

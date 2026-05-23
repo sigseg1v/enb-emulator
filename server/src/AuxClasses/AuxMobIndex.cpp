@@ -488,17 +488,17 @@ void AuxMobIndex::SetData(_MobIndex *NewData)
 	ReplaceString(Data.Title, NewData->Title, 2, 64);
 	ReplaceString(Data.Rank, NewData->Rank, 3, 64);
 	Shield.SetData(&NewData->Shield);
-	ReplaceData(Data.MaxShield, NewData->MaxShield, 7);
-	ReplaceData(Data.HullPoints, NewData->HullPoints, 8);
-	ReplaceData(Data.MaxHullPoints, NewData->MaxHullPoints, 9);
-	ReplaceData(Data.IsCloaked, NewData->IsCloaked, 19);
-	ReplaceData(Data.IsCountermeasureActive, NewData->IsCountermeasureActive, 20);
-	ReplaceData(Data.IsIncapacitated, NewData->IsIncapacitated, 21);	
-	ReplaceData(Data.IsOrganic, NewData->IsOrganic, 22);
-	ReplaceData(Data.IsInPVP, NewData->IsInPVP, 23);
-	ReplaceData(Data.IsRescueBeaconActive, NewData->IsRescueBeaconActive, 25);
-	ReplaceData(Data.CombatLevel, NewData->CombatLevel, 26);
-	ReplaceData(Data.GlobalWarpState, NewData->GlobalWarpState, 32);
+	ReplaceData(&Data.MaxShield, NewData->MaxShield, 7);
+	ReplaceData(&Data.HullPoints, NewData->HullPoints, 8);
+	ReplaceData(&Data.MaxHullPoints, NewData->MaxHullPoints, 9);
+	ReplaceData(&Data.IsCloaked, NewData->IsCloaked, 19);
+	ReplaceData(&Data.IsCountermeasureActive, NewData->IsCountermeasureActive, 20);
+	ReplaceData(&Data.IsIncapacitated, NewData->IsIncapacitated, 21);	
+	ReplaceData(&Data.IsOrganic, NewData->IsOrganic, 22);
+	ReplaceData(&Data.IsInPVP, NewData->IsInPVP, 23);
+	ReplaceData(&Data.IsRescueBeaconActive, NewData->IsRescueBeaconActive, 25);
+	ReplaceData(&Data.CombatLevel, NewData->CombatLevel, 26);
+	ReplaceData(&Data.GlobalWarpState, NewData->GlobalWarpState, 32);
 
     QuadrantDamage.SetData(&NewData->QuadrantDamage);
 	DamageSpot.SetData(&NewData->DamageSpot);
@@ -506,13 +506,13 @@ void AuxMobIndex::SetData(_MobIndex *NewData)
 	DamageBlotch.SetData(&NewData->DamageBlotch);
 	Lego.SetData(&NewData->Lego);
 
-    ReplaceData(Data.EngineThrustState, NewData->EngineThrustState, 46);
-	ReplaceData(Data.EngineTrailType, NewData->EngineTrailType, 47);
+    ReplaceData(&Data.EngineThrustState, NewData->EngineThrustState, 46);
+	ReplaceData(&Data.EngineTrailType, NewData->EngineTrailType, 47);
 
     ReplaceString(Data.InterruptibleAbilityName, NewData->InterruptibleAbilityName, 53, 128);
-	ReplaceData(Data.InterruptState, NewData->InterruptState, 54);
-	ReplaceData(Data.InterruptibleActivationTime, NewData->InterruptibleActivationTime, 55);
-	ReplaceData(Data.InterruptProgress, NewData->InterruptProgress, 56);
+	ReplaceData(&Data.InterruptState, NewData->InterruptState, 54);
+	ReplaceData(&Data.InterruptibleActivationTime, NewData->InterruptibleActivationTime, 55);
+	ReplaceData(&Data.InterruptProgress, NewData->InterruptProgress, 56);
 	ReplaceString(Data.FactionIdentifier, NewData->FactionIdentifier, 57, 64);
 }
 
@@ -543,67 +543,67 @@ void AuxMobIndex::SetRank(char *NewRank)
 
 void AuxMobIndex::SetMaxShield(float NewMaxShield)
 {
-	ReplaceData(Data.MaxShield, NewMaxShield, 7);
+	ReplaceData(&Data.MaxShield, NewMaxShield, 7);
 }
 
 void AuxMobIndex::SetHullPoints(float NewHullPoints)
 {
-	ReplaceData(Data.HullPoints, NewHullPoints, 8);
+	ReplaceData(&Data.HullPoints, NewHullPoints, 8);
 }
 
 void AuxMobIndex::SetMaxHullPoints(float NewMaxHullPoints)
 {
-	ReplaceData(Data.MaxHullPoints, NewMaxHullPoints, 9);
+	ReplaceData(&Data.MaxHullPoints, NewMaxHullPoints, 9);
 }
 
 void AuxMobIndex::SetIsCloaked(bool NewIsCloaked)
 {
-	ReplaceData(Data.IsCloaked, NewIsCloaked, 19);
+	ReplaceData(&Data.IsCloaked, NewIsCloaked, 19);
 }
 
 void AuxMobIndex::SetIsCountermeasureActive(bool NewIsCountermeasureActive)
 {
-	ReplaceData(Data.IsCountermeasureActive, NewIsCountermeasureActive, 20);
+	ReplaceData(&Data.IsCountermeasureActive, NewIsCountermeasureActive, 20);
 }
 
 void AuxMobIndex::SetIsIncapacitated(bool NewIsIncapacitated)
 {
-	ReplaceData(Data.IsIncapacitated, NewIsIncapacitated, 21);
+	ReplaceData(&Data.IsIncapacitated, NewIsIncapacitated, 21);
 }
 
 void AuxMobIndex::SetIsOrganic(bool NewIsOrganic)
 {
-	ReplaceData(Data.IsOrganic, NewIsOrganic, 22);
+	ReplaceData(&Data.IsOrganic, NewIsOrganic, 22);
 }
 
 void AuxMobIndex::SetIsInPVP(bool NewIsInPVP)
 {
-	ReplaceData(Data.IsInPVP, NewIsInPVP, 23);
+	ReplaceData(&Data.IsInPVP, NewIsInPVP, 23);
 }
 
 void AuxMobIndex::SetIsRescueBeaconActive(bool NewIsRescueBeaconActive)
 {
-	ReplaceData(Data.IsRescueBeaconActive, NewIsRescueBeaconActive, 25);
+	ReplaceData(&Data.IsRescueBeaconActive, NewIsRescueBeaconActive, 25);
 }
 
 void AuxMobIndex::SetCombatLevel(u32 NewCombatLevel)
 {
-	ReplaceData(Data.CombatLevel, NewCombatLevel, 26);
+	ReplaceData(&Data.CombatLevel, NewCombatLevel, 26);
 }
 
 void AuxMobIndex::SetGlobalWarpState(u32 NewGlobalWarpState)
 {
-	ReplaceData(Data.GlobalWarpState, NewGlobalWarpState, 32);
+	ReplaceData(&Data.GlobalWarpState, NewGlobalWarpState, 32);
 }
 
 void AuxMobIndex::SetEngineThrustState(u32 NewEngineThrustState)
 {
-	ReplaceData(Data.EngineThrustState, NewEngineThrustState, 46);
+	ReplaceData(&Data.EngineThrustState, NewEngineThrustState, 46);
 }
 
 void AuxMobIndex::SetEngineTrailType(u32 NewEngineTrailType)
 {
-	ReplaceData(Data.EngineTrailType, NewEngineTrailType, 47);
+	ReplaceData(&Data.EngineTrailType, NewEngineTrailType, 47);
 }
 
 void AuxMobIndex::SetInterruptibleAbilityName(char * NewInterruptibleAbilityName)
@@ -613,17 +613,17 @@ void AuxMobIndex::SetInterruptibleAbilityName(char * NewInterruptibleAbilityName
 
 void AuxMobIndex::SetInterruptState(u32 NewInterruptState)
 {
-	ReplaceData(Data.InterruptState, NewInterruptState, 54);
+	ReplaceData(&Data.InterruptState, NewInterruptState, 54);
 }
 
 void AuxMobIndex::SetInterruptibleActivationTime(u32 NewInterruptibleActivationTime)
 {
-	ReplaceData(Data.InterruptibleActivationTime, NewInterruptibleActivationTime, 55);
+	ReplaceData(&Data.InterruptibleActivationTime, NewInterruptibleActivationTime, 55);
 }
 
 void AuxMobIndex::SetInterruptProgress(float NewInterruptProgress)
 {
-	ReplaceData(Data.InterruptProgress, NewInterruptProgress, 56);
+	ReplaceData(&Data.InterruptProgress, NewInterruptProgress, 56);
 }
 
 void AuxMobIndex::SetFactionIdentifier(char * NewFactionIdentifier)

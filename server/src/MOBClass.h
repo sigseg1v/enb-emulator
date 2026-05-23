@@ -13,7 +13,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -303,6 +303,6 @@ struct MOB_Info
     float DPS;
 } ATTRIB_PACKED;
 
-MOB_Info MobData[];
+extern MOB_Info MobData[];
 
 #endif // _MOB_CLASS_H_INCLUDED_

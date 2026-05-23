@@ -65,13 +65,13 @@ void AuxMounts::SetData(_Mounts *NewData)
 {
 	for (int i=0;i<20;i++)
 	{
-		ReplaceData(Data->Mount[i], NewData->Mount[i], i);
+		ReplaceData(&Data->Mount[i], NewData->Mount[i], i);
 	}
 }
 
 void AuxMounts::SetMount(unsigned int Index, u32 NewMount)
 {
-	ReplaceData(Data->Mount[Index], NewMount, Index);
+	ReplaceData(&Data->Mount[Index], NewMount, Index);
 }
 
 /******************************

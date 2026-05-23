@@ -135,8 +135,8 @@ void AuxHarvestable::SetData(_Harvestable *NewData)
 {
 	ReplaceString(Data.Name, NewData->Name, 0, 64);
 	CargoInv.SetData(&NewData->CargoInv);
-	ReplaceData(Data.PercentFull, NewData->PercentFull, 2);
-	ReplaceData(Data.TechLevel, NewData->TechLevel, 3);
+	ReplaceData(&Data.PercentFull, NewData->PercentFull, 2);
+	ReplaceData(&Data.TechLevel, NewData->TechLevel, 3);
 }
 
 void AuxHarvestable::SetGameID(u32 NewGameID)
@@ -151,12 +151,12 @@ void AuxHarvestable::SetName(char * NewName)
 
 void AuxHarvestable::SetPercentFull(float NewPercentFull)
 {
-	ReplaceData(Data.PercentFull, NewPercentFull, 2);
+	ReplaceData(&Data.PercentFull, NewPercentFull, 2);
 }
 
 void AuxHarvestable::SetTechLevel(u32 NewTechLevel)
 {
-	ReplaceData(Data.TechLevel, NewTechLevel, 3);
+	ReplaceData(&Data.TechLevel, NewTechLevel, 3);
 }
 
 /******************************

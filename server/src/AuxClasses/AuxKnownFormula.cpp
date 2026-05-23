@@ -56,8 +56,8 @@ u32 AuxKnownFormula::GetTechLevel()                 {return Data->TechLevel;}
 void AuxKnownFormula::SetData(_KnownFormula * NewData)
 {
 	ReplaceString(Data->ItemName, NewData->ItemName, 0, 52);
-	ReplaceData(Data->ItemID, NewData->ItemID, 1);
-	ReplaceData(Data->TechLevel, NewData->TechLevel, 2);
+	ReplaceData(&Data->ItemID, NewData->ItemID, 1);
+	ReplaceData(&Data->TechLevel, NewData->TechLevel, 2);
 }
 
 void AuxKnownFormula::SetItemName(char * NewItemName)
@@ -67,12 +67,12 @@ void AuxKnownFormula::SetItemName(char * NewItemName)
 
 void AuxKnownFormula::SetItemID(u32 NewItemID)
 {
-	ReplaceData(Data->ItemID, NewItemID, 1);
+	ReplaceData(&Data->ItemID, NewItemID, 1);
 }
 
 void AuxKnownFormula::SetTechLevel(u32 NewTechLevel)
 {
-	ReplaceData(Data->TechLevel, NewTechLevel, 2);
+	ReplaceData(&Data->TechLevel, NewTechLevel, 2);
 }
 
 /******************************

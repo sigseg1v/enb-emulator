@@ -224,92 +224,92 @@ s32 AuxRPGInfo::GetSkillPowerUpAbilityNumber()		{return Data->SkillPowerUpAbilit
 
 void AuxRPGInfo::SetData(_RPGInfo *NewData)
 {
-	ReplaceData(Data->Race, NewData->Race, 0);
-	ReplaceData(Data->Profession, NewData->Profession, 1);
+	ReplaceData(&Data->Race, NewData->Race, 0);
+	ReplaceData(&Data->Profession, NewData->Profession, 1);
 	Skills.SetData(&NewData->Skills);
 	Abilities.SetData(&NewData->Abilities);
-	ReplaceData(Data->SkillPoints, NewData->SkillPoints, 4);
-	ReplaceData(Data->TotalSkillPoints, NewData->TotalSkillPoints, 5);
-	ReplaceData(Data->CombatXP, NewData->CombatXP, 6);
-	ReplaceData(Data->CombatLevel, NewData->CombatLevel, 7);
-	ReplaceData(Data->TradeXP, NewData->TradeXP, 8);
-	ReplaceData(Data->TradeLevel, NewData->TradeLevel, 9);
-	ReplaceData(Data->ExploreXP, NewData->ExploreXP, 10);
-	ReplaceData(Data->ExploreLevel, NewData->ExploreLevel, 11);
-	ReplaceData(Data->HullUpgradeLevel, NewData->HullUpgradeLevel, 12);
-	ReplaceData(Data->SkillPowerUpStartTime, NewData->SkillPowerUpStartTime, 13);
-	ReplaceData(Data->SkillPowerUpEndTime, NewData->SkillPowerUpEndTime, 14);
-	ReplaceData(Data->SkillPowerUpAbilityNumber, NewData->SkillPowerUpAbilityNumber, 15);
+	ReplaceData(&Data->SkillPoints, NewData->SkillPoints, 4);
+	ReplaceData(&Data->TotalSkillPoints, NewData->TotalSkillPoints, 5);
+	ReplaceData(&Data->CombatXP, NewData->CombatXP, 6);
+	ReplaceData(&Data->CombatLevel, NewData->CombatLevel, 7);
+	ReplaceData(&Data->TradeXP, NewData->TradeXP, 8);
+	ReplaceData(&Data->TradeLevel, NewData->TradeLevel, 9);
+	ReplaceData(&Data->ExploreXP, NewData->ExploreXP, 10);
+	ReplaceData(&Data->ExploreLevel, NewData->ExploreLevel, 11);
+	ReplaceData(&Data->HullUpgradeLevel, NewData->HullUpgradeLevel, 12);
+	ReplaceData(&Data->SkillPowerUpStartTime, NewData->SkillPowerUpStartTime, 13);
+	ReplaceData(&Data->SkillPowerUpEndTime, NewData->SkillPowerUpEndTime, 14);
+	ReplaceData(&Data->SkillPowerUpAbilityNumber, NewData->SkillPowerUpAbilityNumber, 15);
 }
 
 void AuxRPGInfo::SetRace(u32 NewRace)
 {
-	ReplaceData(Data->Race, NewRace, 0);
+	ReplaceData(&Data->Race, NewRace, 0);
 }
 
 void AuxRPGInfo::SetProfession(u32 NewProfession)
 {
-	ReplaceData(Data->Profession, NewProfession, 1);
+	ReplaceData(&Data->Profession, NewProfession, 1);
 }
 
 void AuxRPGInfo::SetSkillPoints(u32 NewSkillPoints)
 {
-	ReplaceData(Data->SkillPoints, NewSkillPoints, 4);
+	ReplaceData(&Data->SkillPoints, NewSkillPoints, 4);
 }
 
 void AuxRPGInfo::SetTotalSkillPoints(u32 NewTotalSkillPoints)
 {
-	ReplaceData(Data->TotalSkillPoints, NewTotalSkillPoints, 5);
+	ReplaceData(&Data->TotalSkillPoints, NewTotalSkillPoints, 5);
 }
 
 void AuxRPGInfo::SetCombatXP(float NewCombatXP)
 {
-	ReplaceData(Data->CombatXP, NewCombatXP, 6);
+	ReplaceData(&Data->CombatXP, NewCombatXP, 6);
 }
 
 void AuxRPGInfo::SetCombatLevel(u32 NewCombatLevel)
 {
-	ReplaceData(Data->CombatLevel, NewCombatLevel, 7);
+	ReplaceData(&Data->CombatLevel, NewCombatLevel, 7);
 }
 
 void AuxRPGInfo::SetTradeXP(float NewTradeXP)
 {
-	ReplaceData(Data->TradeXP, NewTradeXP, 8);
+	ReplaceData(&Data->TradeXP, NewTradeXP, 8);
 }
 
 void AuxRPGInfo::SetTradeLevel(u32 NewTradeLevel)
 {
-	ReplaceData(Data->TradeLevel, NewTradeLevel, 9);
+	ReplaceData(&Data->TradeLevel, NewTradeLevel, 9);
 }
 
 void AuxRPGInfo::SetExploreXP(float NewExploreXP)
 {
-	ReplaceData(Data->ExploreXP, NewExploreXP, 10);
+	ReplaceData(&Data->ExploreXP, NewExploreXP, 10);
 }
 
 void AuxRPGInfo::SetExploreLevel(u32 NewExploreLevel)
 {
-	ReplaceData(Data->ExploreLevel, NewExploreLevel, 11);
+	ReplaceData(&Data->ExploreLevel, NewExploreLevel, 11);
 }
 
 void AuxRPGInfo::SetHullUpgradeLevel(u32 NewHullUpgradeLevel)
 {
-	ReplaceData(Data->HullUpgradeLevel, NewHullUpgradeLevel, 12);
+	ReplaceData(&Data->HullUpgradeLevel, NewHullUpgradeLevel, 12);
 }
 
 void AuxRPGInfo::SetSkillPowerUpStartTime(u32 NewSkillPowerUpStartTime)
 {
-	ReplaceData(Data->SkillPowerUpStartTime, NewSkillPowerUpStartTime, 13);
+	ReplaceData(&Data->SkillPowerUpStartTime, NewSkillPowerUpStartTime, 13);
 }
 
 void AuxRPGInfo::SetSkillPowerUpEndTime(u32 NewSkillPowerUpEndTime)
 {
-	ReplaceData(Data->SkillPowerUpEndTime, NewSkillPowerUpEndTime, 14);
+	ReplaceData(&Data->SkillPowerUpEndTime, NewSkillPowerUpEndTime, 14);
 }
 
 void AuxRPGInfo::SetSkillPowerUpAbilityNumber(s32 NewSkillPowerUpAbilityNumber)
 {
-	ReplaceData(Data->SkillPowerUpAbilityNumber, NewSkillPowerUpAbilityNumber, 15);
+	ReplaceData(&Data->SkillPowerUpAbilityNumber, NewSkillPowerUpAbilityNumber, 15);
 }
 
 /******************************

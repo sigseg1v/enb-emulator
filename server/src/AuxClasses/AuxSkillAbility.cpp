@@ -119,56 +119,56 @@ bool AuxSkillAbility::GetCanBeUsedWhileIncapacitated()	{return Data->CanBeUsedWh
 
 void AuxSkillAbility::SetData(_SkillAbility * NewData)
 {
-	ReplaceData(Data->HasAbility, NewData->HasAbility, 0);
-	ReplaceData(Data->Usage, NewData->Usage, 1);
-	ReplaceData(Data->Targets, NewData->Targets, 2);
-	ReplaceData(Data->Range, NewData->Range, 3);
-	ReplaceData(Data->Radius, NewData->Radius, 4);
-	ReplaceData(Data->Validity, NewData->Validity, 5);
-	ReplaceData(Data->CanBeUsedWhileIncapacitated, NewData->CanBeUsedWhileIncapacitated, 6);
+	ReplaceData(&Data->HasAbility, NewData->HasAbility, 0);
+	ReplaceData(&Data->Usage, NewData->Usage, 1);
+	ReplaceData(&Data->Targets, NewData->Targets, 2);
+	ReplaceData(&Data->Range, NewData->Range, 3);
+	ReplaceData(&Data->Radius, NewData->Radius, 4);
+	ReplaceData(&Data->Validity, NewData->Validity, 5);
+	ReplaceData(&Data->CanBeUsedWhileIncapacitated, NewData->CanBeUsedWhileIncapacitated, 6);
 
     CheckData();
 }
 
 void AuxSkillAbility::SetHasAbility(bool NewHasAbility)
 {
-	ReplaceData(Data->HasAbility, NewHasAbility, 0);
+	ReplaceData(&Data->HasAbility, NewHasAbility, 0);
     CheckData();
 }
 
 void AuxSkillAbility::SetUsage(u32 NewUsage)
 {
-	ReplaceData(Data->Usage, NewUsage, 1);
+	ReplaceData(&Data->Usage, NewUsage, 1);
     CheckData();
 }
 
 void AuxSkillAbility::SetTargets(u32 NewTargets)
 {
-	ReplaceData(Data->Targets, NewTargets, 2);
+	ReplaceData(&Data->Targets, NewTargets, 2);
     CheckData();
 }
 
 void AuxSkillAbility::SetRange(u32 NewRange)
 {
-	ReplaceData(Data->Range, NewRange, 3);
+	ReplaceData(&Data->Range, NewRange, 3);
     CheckData();
 }
 
 void AuxSkillAbility::SetRadius(u32 NewRadius)
 {
-	ReplaceData(Data->Radius, NewRadius, 4);
+	ReplaceData(&Data->Radius, NewRadius, 4);
     CheckData();
 }
 
 void AuxSkillAbility::SetValidity(u32 NewValidity)
 {
-	ReplaceData(Data->Validity, NewValidity, 5);
+	ReplaceData(&Data->Validity, NewValidity, 5);
     CheckData();
 }
 
 void AuxSkillAbility::SetCanBeUsedWhileIncapacitated(bool NewCanBeUsedWhileIncapacitated)
 {
-	ReplaceData(Data->CanBeUsedWhileIncapacitated, NewCanBeUsedWhileIncapacitated, 6);
+	ReplaceData(&Data->CanBeUsedWhileIncapacitated, NewCanBeUsedWhileIncapacitated, 6);
     CheckData();
 }
 

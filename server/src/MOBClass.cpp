@@ -13,7 +13,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -23,6 +23,14 @@
 #include "PlayerClass.h"
 #include "ObjectManager.h"
 #include "Opcodes.h"
+
+// Legacy admin-command MOB sentinel table. The original code declared
+// MOB_Info MobData[]; without a definition; under MSVC's relaxed rules this
+// linked as a zero-size symbol and the admin commands that walked it
+// (ClientToSectorServer.cpp's /spawn-style commands, ObjectManager hooks)
+// effectively no-oped. We provide a single zero-terminator entry to make
+// the linker happy and preserve that behavior on Linux.
+MOB_Info MobData[] = { { 0, 0, "", 0, 0, 0, 0, 0, 0.0f } };
 #include "ServerManager.h"
 #include "MOBDatabase.h"
 #include "PlayerManager.h"

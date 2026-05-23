@@ -306,8 +306,8 @@ u32 AuxPlayerIndex::GetClientSendUITriggers()			{return Data.ClientSendUITrigger
 
 void AuxPlayerIndex::SetData(_PlayerIndex *NewData)
 {
-	ReplaceData(Data.Credits, NewData->Credits, 0);
-	ReplaceData(Data.XPDebt, NewData->XPDebt, 1);
+	ReplaceData(&Data.Credits, NewData->Credits, 0);
+	ReplaceData(&Data.XPDebt, NewData->XPDebt, 1);
 
 	SecureInv.SetData(&NewData->SecureInv);
 	VendorInv.SetData(&NewData->VendorInv);
@@ -316,29 +316,29 @@ void AuxPlayerIndex::SetData(_PlayerIndex *NewData)
 	RPGInfo.SetData(&NewData->RPGInfo);
 
 	ReplaceString(Data.CommunityEventFlags, NewData->CommunityEventFlags, 7, 64);
-	ReplaceData(Data.MusicID, NewData->MusicID, 8);
+	ReplaceData(&Data.MusicID, NewData->MusicID, 8);
 
 	Missions.SetData(&NewData->Missions);
 	Reputation.SetData(&NewData->Reputation);
 
-	ReplaceData(Data.PIPAvatarID, NewData->PIPAvatarID, 11);
+	ReplaceData(&Data.PIPAvatarID, NewData->PIPAvatarID, 11);
 	ReplaceString(Data.RegistrationStarbase, NewData->RegistrationStarbase, 12, 64);	
 	ReplaceString(Data.RegistrationStarbaseSector, NewData->RegistrationStarbaseSector, 13, 64);
 	ReplaceString(Data.SectorName, NewData->SectorName, 14, 64);
-	ReplaceData(Data.SectorNum, NewData->SectorNum, 15);
-	ReplaceData(Data.ClientSendUITriggers, NewData->ClientSendUITriggers, 16);
+	ReplaceData(&Data.SectorNum, NewData->SectorNum, 15);
+	ReplaceData(&Data.ClientSendUITriggers, NewData->ClientSendUITriggers, 16);
 		
 	GroupInfo.SetData(&NewData->GroupInfo,false);
 }
 
 void AuxPlayerIndex::SetCredits(u64 NewCredits)
 {
-	ReplaceData(Data.Credits, NewCredits, 0);
+	ReplaceData(&Data.Credits, NewCredits, 0);
 }
 
 void AuxPlayerIndex::SetXPDebt(u32 NewXPDebt)
 {
-	ReplaceData(Data.XPDebt, NewXPDebt, 1);
+	ReplaceData(&Data.XPDebt, NewXPDebt, 1);
 }
 
 void AuxPlayerIndex::SetCommunityEventFlags(char * NewCommunityEventFlags)
@@ -348,12 +348,12 @@ void AuxPlayerIndex::SetCommunityEventFlags(char * NewCommunityEventFlags)
 
 void AuxPlayerIndex::SetMusicID(u32 NewMusicID)
 {
-	ReplaceData(Data.MusicID, NewMusicID, 8);
+	ReplaceData(&Data.MusicID, NewMusicID, 8);
 }
 
 void AuxPlayerIndex::SetPIPAvatarID(u32 NewPIPAvatarID)
 {
-	ReplaceData(Data.PIPAvatarID, NewPIPAvatarID, 11);
+	ReplaceData(&Data.PIPAvatarID, NewPIPAvatarID, 11);
 }
 
 void AuxPlayerIndex::SetRegistrationStarbase(char * NewRegistrationStarbase)
@@ -373,12 +373,12 @@ void AuxPlayerIndex::SetSectorName(char * NewSectorName)
 
 void AuxPlayerIndex::SetSectorNum(u32 NewSectorNum)
 {
-	ReplaceData(Data.SectorNum, NewSectorNum, 15);
+	ReplaceData(&Data.SectorNum, NewSectorNum, 15);
 }
 
 void AuxPlayerIndex::SetClientSendUITriggers(u32 NewClientSendUITriggers)
 {
-	ReplaceData(Data.ClientSendUITriggers, NewClientSendUITriggers, 16);
+	ReplaceData(&Data.ClientSendUITriggers, NewClientSendUITriggers, 16);
 }
 
 /******************************

@@ -278,26 +278,26 @@ u32 AuxManufacturingIndex::GetTechFilterBitField()              {return Data.Tec
 void AuxManufacturingIndex::SetData(_ManufacturingIndex *NewData)
 {
     ReplaceString(Data.Name, NewData->Name, 0, 20);
-    ReplaceData(Data.Mode, NewData->Mode, 1);
-    ReplaceData(Data.Validity, NewData->Validity, 2);
+    ReplaceData(&Data.Mode, NewData->Mode, 1);
+    ReplaceData(&Data.Validity, NewData->Validity, 2);
 	ReplaceString(Data.FailureMessage, NewData->FailureMessage, 3, 40);
-    ReplaceData(Data.Difficulty, NewData->Difficulty, 4);
+    ReplaceData(&Data.Difficulty, NewData->Difficulty, 4);
 	Target.SetData(&NewData->Target);
 	Components.SetData(&NewData->Components);
 	Override.SetData(&NewData->Override);
-    ReplaceData(Data.NegotiatedCost, NewData->NegotiatedCost, 8);
-    ReplaceData(Data.BaseCost, NewData->BaseCost, 9);
+    ReplaceData(&Data.NegotiatedCost, NewData->NegotiatedCost, 8);
+    ReplaceData(&Data.BaseCost, NewData->BaseCost, 9);
 	PrimaryCategories.SetData(&NewData->PrimaryCategories);
 	KnownFormulas.SetData(&NewData->KnownFormulas);
 	PreviousAttempts.SetData(&NewData->PreviousAttempts);
-    ReplaceData(Data.CurrentItemCat, NewData->CurrentItemCat, 13);
-    ReplaceData(Data.SuccessProbability, NewData->SuccessProbability, 14);
-    ReplaceData(Data.CriticalSuccessProbability, NewData->CriticalSuccessProbability, 15);
-    ReplaceData(Data.ExpectedQuality, NewData->ExpectedQuality, 16);
-    ReplaceData(Data.MinimumQuality, NewData->MinimumQuality, 17);
-    ReplaceData(Data.MaximumQuality, NewData->MaximumQuality, 18);
-    ReplaceData(Data.AdditionalIterations, NewData->AdditionalIterations, 19);
-    ReplaceData(Data.TechFilterBitField, NewData->TechFilterBitField, 20);
+    ReplaceData(&Data.CurrentItemCat, NewData->CurrentItemCat, 13);
+    ReplaceData(&Data.SuccessProbability, NewData->SuccessProbability, 14);
+    ReplaceData(&Data.CriticalSuccessProbability, NewData->CriticalSuccessProbability, 15);
+    ReplaceData(&Data.ExpectedQuality, NewData->ExpectedQuality, 16);
+    ReplaceData(&Data.MinimumQuality, NewData->MinimumQuality, 17);
+    ReplaceData(&Data.MaximumQuality, NewData->MaximumQuality, 18);
+    ReplaceData(&Data.AdditionalIterations, NewData->AdditionalIterations, 19);
+    ReplaceData(&Data.TechFilterBitField, NewData->TechFilterBitField, 20);
 }
 
 void AuxManufacturingIndex::SetGameID(u32 NewGameID)
@@ -312,12 +312,12 @@ void AuxManufacturingIndex::SetName(char * NewName)
 
 void AuxManufacturingIndex::SetMode(u32 NewMode)
 {
-    ReplaceData(Data.Mode, NewMode, 1);
+    ReplaceData(&Data.Mode, NewMode, 1);
 }
 
 void AuxManufacturingIndex::SetValidity(u32 NewValidity)
 {
-    ReplaceData(Data.Validity, NewValidity, 2);
+    ReplaceData(&Data.Validity, NewValidity, 2);
 }
 
 void AuxManufacturingIndex::SetFailureMessage(char * NewFailureMessage)
@@ -327,57 +327,57 @@ void AuxManufacturingIndex::SetFailureMessage(char * NewFailureMessage)
 
 void AuxManufacturingIndex::SetDifficulty(u32 NewDifficulty)
 {
-    ReplaceData(Data.Difficulty, NewDifficulty, 4);
+    ReplaceData(&Data.Difficulty, NewDifficulty, 4);
 }
 
 void AuxManufacturingIndex::SetNegotiatedCost(u64 NewNegotiatedCost)
 {
-    ReplaceData(Data.NegotiatedCost, NewNegotiatedCost, 8);
+    ReplaceData(&Data.NegotiatedCost, NewNegotiatedCost, 8);
 }
 
 void AuxManufacturingIndex::SetBaseCost(u64 NewBaseCost)
 {
-    ReplaceData(Data.BaseCost, NewBaseCost, 9);
+    ReplaceData(&Data.BaseCost, NewBaseCost, 9);
 }
 
 void AuxManufacturingIndex::SetCurrentItemCat(u32 NewCurrentItemCat)
 {
-    ReplaceData(Data.CurrentItemCat, NewCurrentItemCat, 13);
+    ReplaceData(&Data.CurrentItemCat, NewCurrentItemCat, 13);
 }
 
 void AuxManufacturingIndex::SetSuccessProbability(float NewSuccessProbability)
 {
-    ReplaceData(Data.SuccessProbability, NewSuccessProbability, 14);
+    ReplaceData(&Data.SuccessProbability, NewSuccessProbability, 14);
 }
 
 void AuxManufacturingIndex::SetCriticalSuccessProbability(float NewCriticalSuccessProbability)
 {
-    ReplaceData(Data.CriticalSuccessProbability, NewCriticalSuccessProbability, 15);
+    ReplaceData(&Data.CriticalSuccessProbability, NewCriticalSuccessProbability, 15);
 }
 
 void AuxManufacturingIndex::SetExpectedQuality(float NewExpectedQuality)
 {
-    ReplaceData(Data.ExpectedQuality, NewExpectedQuality, 16);
+    ReplaceData(&Data.ExpectedQuality, NewExpectedQuality, 16);
 }
 
 void AuxManufacturingIndex::SetMinimumQuality(float NewMinimumQuality)
 {
-    ReplaceData(Data.MinimumQuality, NewMinimumQuality, 17);
+    ReplaceData(&Data.MinimumQuality, NewMinimumQuality, 17);
 }
 
 void AuxManufacturingIndex::SetMaximumQuality(float NewMaximumQuality)
 {
-    ReplaceData(Data.MaximumQuality, NewMaximumQuality, 18);
+    ReplaceData(&Data.MaximumQuality, NewMaximumQuality, 18);
 }
 
 void AuxManufacturingIndex::SetAdditionalIterations(u32 NewAdditionalIterations)
 {
-    ReplaceData(Data.AdditionalIterations, NewAdditionalIterations, 19);
+    ReplaceData(&Data.AdditionalIterations, NewAdditionalIterations, 19);
 }
 
 void AuxManufacturingIndex::SetTechFilterBitField(u32 NewTechFilterBitField)
 {
-    ReplaceData(Data.TechFilterBitField, NewTechFilterBitField, 20);
+    ReplaceData(&Data.TechFilterBitField, NewTechFilterBitField, 20);
 }
 
 /******************************

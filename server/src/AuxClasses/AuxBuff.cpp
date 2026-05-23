@@ -12,7 +12,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 #include "AuxBuff.h"
@@ -102,8 +102,12 @@ void AuxBuff::SetData(_Buff *NewData)
 {
 	ReplaceString(Data->BuffType, NewData->BuffType, 0,128);
 	ReplaceString(Data->ScrubTypeName, NewData->ScrubTypeName, 1,64);
-	ReplaceData(Data->IsPermanent, NewData->IsPermanent, 2);
-	ReplaceData(Data->BuffRemovalTime, NewData->BuffRemovalTime, 3);
+	ReplaceData(&Data->IsPermanent, NewData->IsPermanent, 2);
+	// BuffRemovalTime sits inside a packed struct; bouncing through a local
+	// lets ReplaceData<T&> bind without taking the address of a packed member.
+	u32 tmp = Data->BuffRemovalTime;
+	ReplaceData(&tmp, NewData->BuffRemovalTime, 3);
+	Data->BuffRemovalTime = tmp;
 
 	Elements.SetData(&NewData->Elements);
 
@@ -124,13 +128,16 @@ void AuxBuff::SetScrubTypeName(char *NewScrubTypeName)
 
 void AuxBuff::SetIsPermanent(bool NewIsPermanent)
 {
-	ReplaceData(Data->IsPermanent, NewIsPermanent, 2);
+	ReplaceData(&Data->IsPermanent, NewIsPermanent, 2);
 	CheckData();
 }
 
 void AuxBuff::SetBuffRemovalTime(u32 NewBuffRemovalTime)
 {
-	ReplaceData(Data->BuffRemovalTime, NewBuffRemovalTime, 3);
+	// see SetData() â€” packed-member workaround.
+	u32 tmp = Data->BuffRemovalTime;
+	ReplaceData(&tmp, NewBuffRemovalTime, 3);
+	Data->BuffRemovalTime = tmp;
 	CheckData();
 }
 

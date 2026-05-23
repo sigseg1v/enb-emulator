@@ -92,6 +92,12 @@ public:
     operator int ();
     operator long ();
     operator unsigned long ();
+#ifndef WIN32
+    // See note on sql_query::AddData above: needed on LP64 to disambiguate
+    // implicit conversion to uint32_t / uint16_t.
+    operator unsigned int ();
+    operator unsigned short ();
+#endif
     operator double ();
     operator float ();
     operator const char * ();
@@ -178,6 +184,14 @@ public:
     sql_query();
 
     void AddData(char *Field, int Value);
+#ifndef WIN32
+    // On LP64 (Linux x86_64) unsigned long is 64-bit, so uint32_t (== unsigned int)
+    // and uint16_t don't have an unambiguous integer conversion. On LLP64 (Win64)
+    // unsigned long is 32-bit and matches uint32_t directly, so we don't add
+    // these there or we'd create the opposite ambiguity.
+    void AddData(char *Field, unsigned int Value);
+    void AddData(char *Field, unsigned short Value);
+#endif
     void AddData(char *Field, unsigned long Value);
     void AddData(char *Field, long Value);
     void AddData(char *Field, float Value);

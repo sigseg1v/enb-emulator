@@ -95,24 +95,24 @@ float AuxPercent::GetStartValue()		{return Data->StartValue;}
 
 void AuxPercent::SetData(_Percent *NewData)
 {
-	ReplaceData(Data->EndTime, NewData->EndTime, 0);
-	ReplaceData(Data->ChangePerTick, NewData->ChangePerTick, 1);
-	ReplaceData(Data->StartValue, NewData->StartValue, 2);
+	ReplaceData(&Data->EndTime, NewData->EndTime, 0);
+	ReplaceData(&Data->ChangePerTick, NewData->ChangePerTick, 1);
+	ReplaceData(&Data->StartValue, NewData->StartValue, 2);
 }
 
 void AuxPercent::SetEndTime(u32 NewEndTime)
 {
-	ReplaceData(Data->EndTime, NewEndTime, 0);
+	ReplaceData(&Data->EndTime, NewEndTime, 0);
 }
 
 void AuxPercent::SetChangePerTick(float NewChangePerTick)
 {
-	ReplaceData(Data->ChangePerTick, NewChangePerTick, 1);
+	ReplaceData(&Data->ChangePerTick, NewChangePerTick, 1);
 }
 
 void AuxPercent::SetStartValue(float NewStartValue)
 {
-	ReplaceData(Data->StartValue, NewStartValue, 2);
+	ReplaceData(&Data->StartValue, NewStartValue, 2);
 }
 
 /******************************

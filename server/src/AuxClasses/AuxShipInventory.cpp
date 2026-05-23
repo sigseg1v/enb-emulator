@@ -184,12 +184,12 @@ u32 AuxShipInv::GetFutureDevices()			{return Data->FutureDevices;}
 
 void AuxShipInv::SetData(_ShipInv *NewData)
 {
-	ReplaceData(Data->CargoSpace, NewData->CargoSpace, 0);
+	ReplaceData(&Data->CargoSpace, NewData->CargoSpace, 0);
 	ReplaceString(Data->EquipMountModel, NewData->EquipMountModel, 1, 20);
 	Mounts.SetData(&NewData->Mounts);
 	MountBones.SetData(&NewData->MountBones);
-	ReplaceData(Data->FutureWeapons, NewData->FutureWeapons, 4);
-	ReplaceData(Data->FutureDevices, NewData->FutureDevices, 5);
+	ReplaceData(&Data->FutureWeapons, NewData->FutureWeapons, 4);
+	ReplaceData(&Data->FutureDevices, NewData->FutureDevices, 5);
 	CargoInv.SetData(&NewData->CargoInv);
 	EquipInv.SetData(&NewData->EquipInv);
 	AmmoInv.SetData(&NewData->AmmoInv);
@@ -199,7 +199,7 @@ void AuxShipInv::SetData(_ShipInv *NewData)
 
 void AuxShipInv::SetCargoSpace(u32 NewCargoSpace)
 {
-	ReplaceData(Data->CargoSpace, NewCargoSpace, 0);
+	ReplaceData(&Data->CargoSpace, NewCargoSpace, 0);
 }
 
 void AuxShipInv::SetEquipMountModel(char * NewEquipMountModel)
@@ -209,12 +209,12 @@ void AuxShipInv::SetEquipMountModel(char * NewEquipMountModel)
 
 void AuxShipInv::SetFutureWeapons(u32 NewFutureWeapons)
 {
-	ReplaceData(Data->FutureWeapons, NewFutureWeapons, 4);
+	ReplaceData(&Data->FutureWeapons, NewFutureWeapons, 4);
 }
 
 void AuxShipInv::SetFutureDevices(u32 NewFutureDevices)
 {
-	ReplaceData(Data->FutureDevices, NewFutureDevices, 5);
+	ReplaceData(&Data->FutureDevices, NewFutureDevices, 5);
 }
 
 /******************************

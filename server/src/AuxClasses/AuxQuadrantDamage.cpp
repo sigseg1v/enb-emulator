@@ -111,30 +111,30 @@ float AuxQuadrantDamage::GetSlot4()						{return Data->Slot4;}
 
 void AuxQuadrantDamage::SetData(_QuadrantDamage *NewData)
 {
-	ReplaceData(Data->Slot1, NewData->Slot1, 0);
-	ReplaceData(Data->Slot2, NewData->Slot2, 1);
-	ReplaceData(Data->Slot3, NewData->Slot3, 2);
-	ReplaceData(Data->Slot4, NewData->Slot4, 3);
+	ReplaceData(&Data->Slot1, NewData->Slot1, 0);
+	ReplaceData(&Data->Slot2, NewData->Slot2, 1);
+	ReplaceData(&Data->Slot3, NewData->Slot3, 2);
+	ReplaceData(&Data->Slot4, NewData->Slot4, 3);
 }
 
 void AuxQuadrantDamage::SetSlot1(float NewSlot1)
 {
-	ReplaceData(Data->Slot1, NewSlot1, 0);
+	ReplaceData(&Data->Slot1, NewSlot1, 0);
 }
 
 void AuxQuadrantDamage::SetSlot2(float NewSlot2)
 {
-	ReplaceData(Data->Slot2, NewSlot2, 1);
+	ReplaceData(&Data->Slot2, NewSlot2, 1);
 }
 
 void AuxQuadrantDamage::SetSlot3(float NewSlot3)
 {
-	ReplaceData(Data->Slot3, NewSlot3, 2);
+	ReplaceData(&Data->Slot3, NewSlot3, 2);
 }
 
 void AuxQuadrantDamage::SetSlot4(float NewSlot4)
 {
-	ReplaceData(Data->Slot4, NewSlot4, 3);
+	ReplaceData(&Data->Slot4, NewSlot4, 3);
 }
 
 /******************************

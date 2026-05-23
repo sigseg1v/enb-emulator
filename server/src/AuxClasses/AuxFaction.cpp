@@ -76,8 +76,8 @@ u32 AuxFaction::GetOrder()				{return Data->Order;}
 void AuxFaction::SetData(_Faction *NewData)
 {
 	ReplaceString(Data->Name, NewData->Name, 0,64);
-	ReplaceData(Data->Reaction, NewData->Reaction, 1);
-	ReplaceData(Data->Order, NewData->Order, 2);
+	ReplaceData(&Data->Reaction, NewData->Reaction, 1);
+	ReplaceData(&Data->Order, NewData->Order, 2);
 
 	CheckData();
 }
@@ -90,13 +90,13 @@ void AuxFaction::SetName(char * NewName)
 
 void AuxFaction::SetReaction(float NewReaction)
 {
-	ReplaceData(Data->Reaction, NewReaction, 1);
+	ReplaceData(&Data->Reaction, NewReaction, 1);
 	CheckData();
 }
 
 void AuxFaction::SetOrder(u32 NewOrder)
 {
-	ReplaceData(Data->Order, NewOrder, 2);
+	ReplaceData(&Data->Order, NewOrder, 2);
 	CheckData();
 }
 

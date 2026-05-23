@@ -53,10 +53,10 @@ _Damage * AuxDamage::GetData()			{return Data;}
 void AuxDamage::SetData(_Damage * NewData)
 {
 	/*
-	ReplaceData(Data.Slot1, NewData->Slot1, 0);
-	ReplaceData(Data.Slot2, NewData->Slot2, 1);
-	ReplaceData(Data.Slot3, NewData->Slot3, 2);
-	ReplaceData(Data.Slot4, NewData->Slot4, 3);
+	ReplaceData(&Data.Slot1, NewData->Slot1, 0);
+	ReplaceData(&Data.Slot2, NewData->Slot2, 1);
+	ReplaceData(&Data.Slot3, NewData->Slot3, 2);
+	ReplaceData(&Data.Slot4, NewData->Slot4, 3);
 	*/
 }
 

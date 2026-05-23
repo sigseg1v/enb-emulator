@@ -141,6 +141,15 @@ target_compile_options(net7 PRIVATE
     -Wno-sign-compare
     -Wno-reorder
     -Wno-deprecated-declarations
+    # The Aux* SetXXX methods take addresses of packed-struct members so
+    # the ReplaceData<T*> template can memcpy through them. Suppress the
+    # broad-brush warning here; Phase F will narrow it if any genuine
+    # alignment issue surfaces.
+    -Wno-address-of-packed-member
+    # MSVC headers freely emit "char *" pointers for string literals;
+    # GCC's ISO mode warns on every such conversion. Suppress until
+    # Phase F runs the const-correctness pass.
+    -Wno-write-strings
     # -fpermissive: the legacy codebase is full of Windows-isms gcc
     # rejects under strict ISO rules. We accept the laxity during Phase
     # B and tighten it in Phase F.

@@ -99,9 +99,9 @@ void AuxElement::SetData(_Element *NewData)
 {
 	ReplaceString(Data->SourceEntity, NewData->SourceEntity, 0, 64);
 	ReplaceString(Data->SourceObject, NewData->SourceObject, 1, 64);
-	ReplaceData(Data->Magnitude, NewData->Magnitude, 2);
-	ReplaceData(Data->IsActive, NewData->IsActive, 3);
-	ReplaceData(Data->ExpirationTime, NewData->ExpirationTime, 4);
+	ReplaceData(&Data->Magnitude, NewData->Magnitude, 2);
+	ReplaceData(&Data->IsActive, NewData->IsActive, 3);
+	ReplaceData(&Data->ExpirationTime, NewData->ExpirationTime, 4);
 
 	CheckData();
 }
@@ -120,19 +120,19 @@ void AuxElement::SetSourceObject(char *NewSourceObject)
 
 void AuxElement::SetMagnitude(u32 NewMagnitude)
 {
-	ReplaceData(Data->Magnitude, NewMagnitude, 2);
+	ReplaceData(&Data->Magnitude, NewMagnitude, 2);
 	CheckData();
 }
 
 void AuxElement::SetIsActive(bool NewIsActive)
 {
-	ReplaceData(Data->IsActive, NewIsActive, 3);
+	ReplaceData(&Data->IsActive, NewIsActive, 3);
 	CheckData();
 }
 
 void AuxElement::SetExpirationTime(u32 NewExpirationTime)
 {
-	ReplaceData(Data->ExpirationTime, NewExpirationTime, 4);
+	ReplaceData(&Data->ExpirationTime, NewExpirationTime, 4);
 	CheckData();
 }
 

@@ -147,6 +147,8 @@
 	#define _stricmp strcasecmp
 	// This might not be right... _atoi64 is specific to Windows
 	#define _atoi64 atoll
+	// MSVC's strtok_s and POSIX strtok_r have the same arg order.
+	#define strtok_s strtok_r
 
 	// Win32 calling-convention macros — no-ops on GCC
 	#define __stdcall
@@ -193,6 +195,12 @@
 		dst[size - 1] = '\0';
 		return 0;
 	}
+	// MSVC's strcpy_s also has a template overload that deduces destination size
+	// from a fixed-size char array — match it so call sites using the 2-arg form
+	// (strcpy_s(arr, src)) still compile.
+	template <size_t N> static inline int strcpy_s(char (&dst)[N], const char *src) {
+		return strcpy_s(dst, N, src);
+	}
 	static inline int strncpy_s(char *dst, size_t size, const char *src, size_t count) {
 		if (!dst || !src || size == 0) return 22;
 		size_t n = (count < size - 1) ? count : (size - 1);
@@ -200,6 +208,18 @@
 		dst[n] = '\0';
 		return 0;
 	}
+	// MSVC's gmtime_s/localtime_s take (struct tm*, time_t*); POSIX gmtime_r
+	// takes them in the opposite order. Wrap to match the MSVC signature.
+	#include <time.h>
+	static inline int gmtime_s(struct tm *out, const time_t *in) {
+		if (!out || !in) return 22;
+		return gmtime_r(in, out) ? 0 : 22;
+	}
+	static inline int localtime_s(struct tm *out, const time_t *in) {
+		if (!out || !in) return 22;
+		return localtime_r(in, out) ? 0 : 22;
+	}
+
 	static inline int strcat_s(char *dst, size_t size, const char *src) {
 		if (!dst || !src || size == 0) return 22;
 		size_t cur = strnlen(dst, size);

@@ -34,7 +34,7 @@ WORKDIR /src
 COPY . /src/server/
 
 RUN cmake -S /src/server -B /build -G Ninja \
-    && cmake --build /build -j"$(nproc)"
+    && cmake --build /build -j"$(nproc)" -- -k 0
 
 # ---------- runtime stage ----------
 FROM ubuntu:24.04 AS runtime

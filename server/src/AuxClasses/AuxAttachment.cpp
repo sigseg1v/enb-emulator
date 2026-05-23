@@ -112,8 +112,8 @@ char * AuxAttachment::GetDataStr()				{return Data->DataStr;}
 void AuxAttachment::SetData(_Attachment *NewData)
 {
 	ReplaceString(Data->BoneName, NewData->BoneName, 0, 64);
-	ReplaceData(Data->Type, NewData->Type, 1);
-	ReplaceData(Data->Asset, NewData->Asset, 2);
+	ReplaceData(&Data->Type, NewData->Type, 1);
+	ReplaceData(&Data->Asset, NewData->Asset, 2);
 	ReplaceString(Data->DataStr, NewData->DataStr, 3,64);
 
 	CheckData();
@@ -127,13 +127,13 @@ void AuxAttachment::SetBoneName(char *NewBoneName)
 
 void AuxAttachment::SetType(u32 NewType)
 {
-	ReplaceData(Data->Type, NewType, 1);
+	ReplaceData(&Data->Type, NewType, 1);
 	CheckData();
 }
 
 void AuxAttachment::SetAsset(u32 NewAsset)
 {
-	ReplaceData(Data->Asset, NewAsset, 2);
+	ReplaceData(&Data->Asset, NewAsset, 2);
 	CheckData();
 }
 

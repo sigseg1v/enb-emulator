@@ -153,12 +153,12 @@ u32 AuxItem::GetTradeStack()                        {return Data->TradeStack;}
 
 void AuxItem::SetData(_Item * NewData)
 {
-	ReplaceData(Data->ItemTemplateID, NewData->ItemTemplateID, 0);
-	ReplaceData(Data->StackCount, NewData->StackCount, 1);
-	ReplaceData(Data->Price, NewData->Price, 2);
-	ReplaceData(Data->AveCost, NewData->AveCost, 3);
-	ReplaceData(Data->Structure, NewData->Structure, 4);
-	ReplaceData(Data->Quality, NewData->Quality, 5);
+	ReplaceData(&Data->ItemTemplateID, NewData->ItemTemplateID, 0);
+	ReplaceData(&Data->StackCount, NewData->StackCount, 1);
+	ReplaceData(&Data->Price, NewData->Price, 2);
+	ReplaceData(&Data->AveCost, NewData->AveCost, 3);
+	ReplaceData(&Data->Structure, NewData->Structure, 4);
+	ReplaceData(&Data->Quality, NewData->Quality, 5);
 	ReplaceString(Data->InstanceInfo, NewData->InstanceInfo, 6, 64);
 	ReplaceString(Data->ActivatedEffectInstanceInfo, NewData->ActivatedEffectInstanceInfo, 7, 64);
 	ReplaceString(Data->EquipEffectInstanceInfo, NewData->EquipEffectInstanceInfo, 8, sizeof(Data->EquipEffectInstanceInfo));
@@ -170,32 +170,32 @@ void AuxItem::SetData(_Item * NewData)
 
 void AuxItem::SetItemTemplateID(s32 NewItemTemplateID)
 {	
-	ReplaceData(Data->ItemTemplateID, NewItemTemplateID, 0);
+	ReplaceData(&Data->ItemTemplateID, NewItemTemplateID, 0);
 }
 
 void AuxItem::SetStackCount(u32 NewStackCount)
 {	
-	ReplaceData(Data->StackCount, NewStackCount, 1);
+	ReplaceData(&Data->StackCount, NewStackCount, 1);
 }
 
 void AuxItem::SetPrice(u64 NewPrice)
 {	
-	ReplaceData(Data->Price, NewPrice, 2);
+	ReplaceData(&Data->Price, NewPrice, 2);
 }
 
 void AuxItem::SetAveCost(float NewAveCost)
 {	
-	ReplaceData(Data->AveCost, NewAveCost, 3);
+	ReplaceData(&Data->AveCost, NewAveCost, 3);
 }
 
 void AuxItem::SetStructure(float NewStructure)
 {	
-	ReplaceData(Data->Structure, NewStructure, 4);
+	ReplaceData(&Data->Structure, NewStructure, 4);
 }
 
 void AuxItem::SetQuality(float NewQuality)
 {	
-	ReplaceData(Data->Quality, NewQuality, 5);
+	ReplaceData(&Data->Quality, NewQuality, 5);
 }
 
 void AuxItem::SetInstanceInfo(char *NewInstanceInfo)

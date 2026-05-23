@@ -86,35 +86,35 @@ u32 AuxEffect::GetValidity()			{return Data->Validity;}
 
 void AuxEffect::SetData(_Effect * NewData)
 {
-	ReplaceData(Data->Range, NewData->Range, 0);
-	ReplaceData(Data->Usage, NewData->Usage, 1);
-	ReplaceData(Data->Targets, NewData->Targets, 2);
-	ReplaceData(Data->Validity, NewData->Validity, 3);
+	ReplaceData(&Data->Range, NewData->Range, 0);
+	ReplaceData(&Data->Usage, NewData->Usage, 1);
+	ReplaceData(&Data->Targets, NewData->Targets, 2);
+	ReplaceData(&Data->Validity, NewData->Validity, 3);
 
 	CheckData();
 }
 
 void AuxEffect::SetRange(float NewRange)
 {
-	ReplaceData(Data->Range, NewRange, 0);
+	ReplaceData(&Data->Range, NewRange, 0);
 	CheckData();
 }
 
 void AuxEffect::SetUsage(u32 NewUsage)
 {
-	ReplaceData(Data->Usage, NewUsage, 1);
+	ReplaceData(&Data->Usage, NewUsage, 1);
 	CheckData();
 }
 
 void AuxEffect::SetTargets(u32 NewTargets)
 {
-	ReplaceData(Data->Targets, NewTargets, 2);
+	ReplaceData(&Data->Targets, NewTargets, 2);
 	CheckData();
 }
 
 void AuxEffect::SetValidity(u32 NewValidiy)
 {
-	ReplaceData(Data->Validity, NewValidiy, 3);
+	ReplaceData(&Data->Validity, NewValidiy, 3);
 	CheckData();
 }
 

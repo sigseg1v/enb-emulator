@@ -1423,36 +1423,36 @@ void AuxShipIndex::SetData(_ShipIndex *NewData)
 	ReplaceString(Data.Title, NewData->Title, 2, 64);
 	ReplaceString(Data.Rank, NewData->Rank, 3, 64);
 	Energy.SetData(&NewData->Energy);
-	ReplaceData(Data.MaxEnergy, NewData->MaxEnergy, 5);
+	ReplaceData(&Data.MaxEnergy, NewData->MaxEnergy, 5);
 	Shield.SetData(&NewData->Shield);
-	ReplaceData(Data.MaxShield, NewData->MaxShield, 7);
-	ReplaceData(Data.HullPoints, NewData->HullPoints, 8);
-	ReplaceData(Data.MaxHullPoints, NewData->MaxHullPoints, 9);
-	ReplaceData(Data.MaxTiltRate, NewData->MaxTiltRate, 10);
-	ReplaceData(Data.MaxTurnRate, NewData->MaxTurnRate, 11);
-	ReplaceData(Data.MaxTiltAngle, NewData->MaxTiltAngle, 12);	
-	ReplaceData(Data.MaxSpeed, NewData->MaxSpeed, 13);
-	ReplaceData(Data.MinSpeed, NewData->MinSpeed, 14);
-	ReplaceData(Data.Acceleration, NewData->Acceleration, 15);
-	ReplaceData(Data.LockSpeed, NewData->LockSpeed, 16);
-	ReplaceData(Data.LockOrient, NewData->LockOrient, 17);
-	ReplaceData(Data.AutoLevel, NewData->AutoLevel, 18);
-	ReplaceData(Data.IsCloaked, NewData->IsCloaked, 19);
-	ReplaceData(Data.IsCountermeasureActive, NewData->IsCountermeasureActive, 20);
-	ReplaceData(Data.IsIncapacitated, NewData->IsIncapacitated, 21);	
-	ReplaceData(Data.IsOrganic, NewData->IsOrganic, 22);
-	ReplaceData(Data.IsInPVP, NewData->IsInPVP, 23);
-	ReplaceData(Data.IsAutoFollowing, NewData->IsAutoFollowing, 24);
-	ReplaceData(Data.IsRescueBeaconActive, NewData->IsRescueBeaconActive, 25);
-	ReplaceData(Data.CombatLevel, NewData->CombatLevel, 26);
-	ReplaceData(Data.TargetGameID, NewData->TargetGameID, 27);
+	ReplaceData(&Data.MaxShield, NewData->MaxShield, 7);
+	ReplaceData(&Data.HullPoints, NewData->HullPoints, 8);
+	ReplaceData(&Data.MaxHullPoints, NewData->MaxHullPoints, 9);
+	ReplaceData(&Data.MaxTiltRate, NewData->MaxTiltRate, 10);
+	ReplaceData(&Data.MaxTurnRate, NewData->MaxTurnRate, 11);
+	ReplaceData(&Data.MaxTiltAngle, NewData->MaxTiltAngle, 12);	
+	ReplaceData(&Data.MaxSpeed, NewData->MaxSpeed, 13);
+	ReplaceData(&Data.MinSpeed, NewData->MinSpeed, 14);
+	ReplaceData(&Data.Acceleration, NewData->Acceleration, 15);
+	ReplaceData(&Data.LockSpeed, NewData->LockSpeed, 16);
+	ReplaceData(&Data.LockOrient, NewData->LockOrient, 17);
+	ReplaceData(&Data.AutoLevel, NewData->AutoLevel, 18);
+	ReplaceData(&Data.IsCloaked, NewData->IsCloaked, 19);
+	ReplaceData(&Data.IsCountermeasureActive, NewData->IsCountermeasureActive, 20);
+	ReplaceData(&Data.IsIncapacitated, NewData->IsIncapacitated, 21);	
+	ReplaceData(&Data.IsOrganic, NewData->IsOrganic, 22);
+	ReplaceData(&Data.IsInPVP, NewData->IsInPVP, 23);
+	ReplaceData(&Data.IsAutoFollowing, NewData->IsAutoFollowing, 24);
+	ReplaceData(&Data.IsRescueBeaconActive, NewData->IsRescueBeaconActive, 25);
+	ReplaceData(&Data.CombatLevel, NewData->CombatLevel, 26);
+	ReplaceData(&Data.TargetGameID, NewData->TargetGameID, 27);
 	ReplaceString(Data.TargetThreat, NewData->TargetThreat, 28, 128);
 	ReplaceString(Data.TargetThreatSound, NewData->TargetThreatSound, 29, 128);
-	ReplaceData(Data.TargetThreatLevel, NewData->TargetThreatLevel, 30);
-	ReplaceData(Data.PrivateWarpState, NewData->PrivateWarpState, 31);
-	ReplaceData(Data.GlobalWarpState, NewData->GlobalWarpState, 32);
-	ReplaceData(Data.WarpAvailable, NewData->WarpAvailable, 33);
-	ReplaceData(Data.WarpTriggerTime, NewData->WarpTriggerTime, 34);
+	ReplaceData(&Data.TargetThreatLevel, NewData->TargetThreatLevel, 30);
+	ReplaceData(&Data.PrivateWarpState, NewData->PrivateWarpState, 31);
+	ReplaceData(&Data.GlobalWarpState, NewData->GlobalWarpState, 32);
+	ReplaceData(&Data.WarpAvailable, NewData->WarpAvailable, 33);
+	ReplaceData(&Data.WarpTriggerTime, NewData->WarpTriggerTime, 34);
 	Shake.SetData(&NewData->Shake); 
 	Inventory.SetData(&NewData->Inventory);
 	QuadrantDamage.SetData(&NewData->QuadrantDamage);
@@ -1461,20 +1461,20 @@ void AuxShipIndex::SetData(_ShipIndex *NewData)
 	DamageBlotch.SetData(&NewData->DamageBlotch);
 	Lego.SetData(&NewData->Lego);
 	Buffs.SetData(&NewData->Buffs);
-	ReplaceData(Data.TradeMoney, NewData->TradeMoney, 43);
+	ReplaceData(&Data.TradeMoney, NewData->TradeMoney, 43);
 	BaseStats.SetData(&NewData->BaseStats);
 	CurrentStats.SetData(&NewData->CurrentStats);
-	ReplaceData(Data.EngineThrustState, NewData->EngineThrustState, 46);
-	ReplaceData(Data.EngineTrailType, NewData->EngineTrailType, 47);
+	ReplaceData(&Data.EngineThrustState, NewData->EngineThrustState, 46);
+	ReplaceData(&Data.EngineTrailType, NewData->EngineTrailType, 47);
 	ReplaceString(Data.GuildName, NewData->GuildName, 48, 64);
-	ReplaceData(Data.GuildRank, NewData->GuildRank, 49);
+	ReplaceData(&Data.GuildRank, NewData->GuildRank, 49);
 	ReplaceString(Data.GuildRankName, NewData->GuildRankName, 50, 64);
 	ReplaceColor(Data.SameGuildTagColor, NewData->SameGuildTagColor, 51);
 	ReplaceColor(Data.OtherGuildTagColor, NewData->OtherGuildTagColor, 52);	
 	ReplaceString(Data.InterruptAbilityName, NewData->InterruptAbilityName, 53, 128);
-	ReplaceData(Data.InterruptState, NewData->InterruptState, 54);
-	ReplaceData(Data.InterruptActivationTime, NewData->InterruptActivationTime, 55);
-	ReplaceData(Data.InterruptProgress, NewData->InterruptProgress, 56);
+	ReplaceData(&Data.InterruptState, NewData->InterruptState, 54);
+	ReplaceData(&Data.InterruptActivationTime, NewData->InterruptActivationTime, 55);
+	ReplaceData(&Data.InterruptProgress, NewData->InterruptProgress, 56);
 	ReplaceString(Data.FactionIdentifier, NewData->FactionIdentifier, 57, 64);
 }
 
@@ -1505,113 +1505,113 @@ void AuxShipIndex::SetRank(char *NewRank)
 
 void AuxShipIndex::SetMaxEnergy(float NewMaxEnergy)
 {
-	ReplaceData(Data.MaxEnergy, NewMaxEnergy, 5);
+	ReplaceData(&Data.MaxEnergy, NewMaxEnergy, 5);
 }
 
 void AuxShipIndex::SetMaxShield(float NewMaxShield)
 {
-	ReplaceData(Data.MaxShield, NewMaxShield, 7);
+	ReplaceData(&Data.MaxShield, NewMaxShield, 7);
 }
 
 void AuxShipIndex::SetHullPoints(float NewHullPoints)
 {
-	ReplaceData(Data.HullPoints, NewHullPoints, 8);
+	ReplaceData(&Data.HullPoints, NewHullPoints, 8);
 }
 
 void AuxShipIndex::SetMaxHullPoints(float NewMaxHullPoints)
 {
-	ReplaceData(Data.MaxHullPoints, NewMaxHullPoints, 9);
+	ReplaceData(&Data.MaxHullPoints, NewMaxHullPoints, 9);
 }
 
 void AuxShipIndex::SetMaxTiltRate(float NewMaxTiltRate)
 {
-	ReplaceData(Data.MaxTiltRate, NewMaxTiltRate, 10);
+	ReplaceData(&Data.MaxTiltRate, NewMaxTiltRate, 10);
 }
 
 void AuxShipIndex::SetMaxTurnRate(float NewMaxTurnRate)
 {
-	ReplaceData(Data.MaxTurnRate, NewMaxTurnRate, 11);
+	ReplaceData(&Data.MaxTurnRate, NewMaxTurnRate, 11);
 }
 
 void AuxShipIndex::SetMaxTiltAngle(float NewMaxTiltAngle)
 {
-	ReplaceData(Data.MaxTiltAngle, NewMaxTiltAngle, 12);
+	ReplaceData(&Data.MaxTiltAngle, NewMaxTiltAngle, 12);
 }
 
 void AuxShipIndex::SetMaxSpeed(float NewMaxSpeed)
 {
-	ReplaceData(Data.MaxSpeed, NewMaxSpeed, 13);
+	ReplaceData(&Data.MaxSpeed, NewMaxSpeed, 13);
 }
 
 void AuxShipIndex::SetMinSpeed(float NewMinSpeed)
 {
-	ReplaceData(Data.MinSpeed, NewMinSpeed, 14);
+	ReplaceData(&Data.MinSpeed, NewMinSpeed, 14);
 }
 
 void AuxShipIndex::SetAcceleration(float NewAcceleration)
 {
-	ReplaceData(Data.Acceleration, NewAcceleration, 15);
+	ReplaceData(&Data.Acceleration, NewAcceleration, 15);
 }
 
 void AuxShipIndex::SetLockSpeed(bool NewLockSpeed)
 {
-	ReplaceData(Data.LockSpeed, NewLockSpeed, 16);
+	ReplaceData(&Data.LockSpeed, NewLockSpeed, 16);
 }
 
 void AuxShipIndex::SetLockOrient(bool NewLockOrient)
 {
-	ReplaceData(Data.LockOrient, NewLockOrient, 17);
+	ReplaceData(&Data.LockOrient, NewLockOrient, 17);
 }
 
 void AuxShipIndex::SetAutoLevel(bool NewAutoLevel)
 {
-	ReplaceData(Data.AutoLevel, NewAutoLevel, 18);
+	ReplaceData(&Data.AutoLevel, NewAutoLevel, 18);
 }
 
 void AuxShipIndex::SetIsCloaked(bool NewIsCloaked)
 {
-	ReplaceData(Data.IsCloaked, NewIsCloaked, 19);
+	ReplaceData(&Data.IsCloaked, NewIsCloaked, 19);
 }
 
 void AuxShipIndex::SetIsCountermeasureActive(bool NewIsCountermeasureActive)
 {
-	ReplaceData(Data.IsCountermeasureActive, NewIsCountermeasureActive, 20);
+	ReplaceData(&Data.IsCountermeasureActive, NewIsCountermeasureActive, 20);
 }
 
 void AuxShipIndex::SetIsIncapacitated(bool NewIsIncapacitated)
 {
-	ReplaceData(Data.IsIncapacitated, NewIsIncapacitated, 21);
+	ReplaceData(&Data.IsIncapacitated, NewIsIncapacitated, 21);
 	//LogMessage("Set incapacitated: %s\n", NewIsIncapacitated ? "true" : "false" );
 }
 
 void AuxShipIndex::SetIsOrganic(bool NewIsOrganic)
 {
-	ReplaceData(Data.IsOrganic, NewIsOrganic, 22);
+	ReplaceData(&Data.IsOrganic, NewIsOrganic, 22);
 }
 
 void AuxShipIndex::SetIsInPVP(bool NewIsInPVP)
 {
-	ReplaceData(Data.IsInPVP, NewIsInPVP, 23);
+	ReplaceData(&Data.IsInPVP, NewIsInPVP, 23);
 }
 
 void AuxShipIndex::SetIsAutoFollowing(bool NewIsAutoFollowing)
 {
-	ReplaceData(Data.AutoLevel, NewIsAutoFollowing, 24);
+	ReplaceData(&Data.AutoLevel, NewIsAutoFollowing, 24);
 }
 
 void AuxShipIndex::SetIsRescueBeaconActive(bool NewIsRescueBeaconActive)
 {
-	ReplaceData(Data.IsRescueBeaconActive, NewIsRescueBeaconActive, 25);
+	ReplaceData(&Data.IsRescueBeaconActive, NewIsRescueBeaconActive, 25);
 }
 
 void AuxShipIndex::SetCombatLevel(u32 NewCombatLevel)
 {
-	ReplaceData(Data.CombatLevel, NewCombatLevel, 26);
+	ReplaceData(&Data.CombatLevel, NewCombatLevel, 26);
 }
 
 void AuxShipIndex::SetTargetGameID(u32 NewTargetGameID)
 {
-	ReplaceData(Data.TargetGameID, NewTargetGameID, 27);
+	ReplaceData(&Data.TargetGameID, NewTargetGameID, 27);
 }
 
 void AuxShipIndex::SetTargetThreat(char *NewTargetThreat)
@@ -1626,42 +1626,42 @@ void AuxShipIndex::SetTargetThreatSound(char *NewTargetThreatSound)
 
 void AuxShipIndex::SetTargetThreatLevel(u32 NewTargetThreatLevel)
 {
-	ReplaceData(Data.TargetThreatLevel, NewTargetThreatLevel, 30);
+	ReplaceData(&Data.TargetThreatLevel, NewTargetThreatLevel, 30);
 }
 
 void AuxShipIndex::SetPrivateWarpState(u32 NewPrivateWarpState)
 {
-	ReplaceData(Data.PrivateWarpState, NewPrivateWarpState, 31);
+	ReplaceData(&Data.PrivateWarpState, NewPrivateWarpState, 31);
 }
 
 void AuxShipIndex::SetGlobalWarpState(u32 NewGlobalWarpState)
 {
-	ReplaceData(Data.GlobalWarpState, NewGlobalWarpState, 32);
+	ReplaceData(&Data.GlobalWarpState, NewGlobalWarpState, 32);
 }
 
 void AuxShipIndex::SetWarpAvailable(u32 NewWarpAvailable)
 {
-	ReplaceData(Data.WarpAvailable, NewWarpAvailable, 33);
+	ReplaceData(&Data.WarpAvailable, NewWarpAvailable, 33);
 }
 
 void AuxShipIndex::SetWarpTriggerTime(u32 NewWarpTriggerTime)
 {
-	ReplaceData(Data.WarpTriggerTime, NewWarpTriggerTime, 34);
+	ReplaceData(&Data.WarpTriggerTime, NewWarpTriggerTime, 34);
 }
 
 void AuxShipIndex::SetTradeMoney(u64 NewTradeMoney)
 {
-	ReplaceData(Data.TradeMoney, NewTradeMoney, 43);
+	ReplaceData(&Data.TradeMoney, NewTradeMoney, 43);
 }
 
 void AuxShipIndex::SetEngineThrustState(u32 NewEngineThrustState)
 {
-	ReplaceData(Data.EngineThrustState, NewEngineThrustState, 46);
+	ReplaceData(&Data.EngineThrustState, NewEngineThrustState, 46);
 }
 
 void AuxShipIndex::SetEngineTrailType(u32 NewEngineTrailType)
 {
-	ReplaceData(Data.EngineTrailType, NewEngineTrailType, 47);
+	ReplaceData(&Data.EngineTrailType, NewEngineTrailType, 47);
 }
 
 void AuxShipIndex::SetGuildName(char * NewGuildName)
@@ -1671,7 +1671,7 @@ void AuxShipIndex::SetGuildName(char * NewGuildName)
 
 void AuxShipIndex::SetGuildRank(u32 NewGuildRank)
 {
-	ReplaceData(Data.GuildRank, NewGuildRank, 49);
+	ReplaceData(&Data.GuildRank, NewGuildRank, 49);
 }
 
 void AuxShipIndex::SetGuildRankName(char * NewGuildRankName)
@@ -1696,17 +1696,17 @@ void AuxShipIndex::SetInterruptAbilityName(char * NewInterruptAbilityName)
 
 void AuxShipIndex::SetInterruptState(u32 NewInterruptState)
 {
-	ReplaceData(Data.InterruptState, NewInterruptState, 54);
+	ReplaceData(&Data.InterruptState, NewInterruptState, 54);
 }
 
 void AuxShipIndex::SetInterruptActivationTime(u32 NewInterruptActivationTime)
 {
-	ReplaceData(Data.InterruptActivationTime, NewInterruptActivationTime, 55);
+	ReplaceData(&Data.InterruptActivationTime, NewInterruptActivationTime, 55);
 }
 
 void AuxShipIndex::SetInterruptProgress(float NewInterruptProgress)
 {
-	ReplaceData(Data.InterruptProgress, NewInterruptProgress, 56);
+	ReplaceData(&Data.InterruptProgress, NewInterruptProgress, 56);
 }
 
 void AuxShipIndex::SetFactionIdentifier(char * NewFactionIdentifier)

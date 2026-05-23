@@ -430,6 +430,18 @@ sql_var_c::operator unsigned long ()
     return value ? (unsigned long)atoi(value) : 0;
 }
 
+#ifndef WIN32
+sql_var_c::operator unsigned int ()
+{
+    return value ? (unsigned int)strtoul(value, nullptr, 10) : 0;
+}
+
+sql_var_c::operator unsigned short ()
+{
+    return value ? (unsigned short)atoi(value) : 0;
+}
+#endif
+
 sql_var_c::operator double ()
 {
     return value ? atof(value) : 0;
@@ -632,6 +644,20 @@ void sql_query::AddData(char * Field, int Value)
 	sprintf_s(m_Values, sizeof(m_Values), "%s, '%d'", m_Values, Value);
 	AddField(Field);
 }
+
+#ifndef WIN32
+void sql_query::AddData(char * Field, unsigned int Value)
+{
+	sprintf_s(m_Values, sizeof(m_Values), "%s, '%u'", m_Values, Value);
+	AddField(Field);
+}
+
+void sql_query::AddData(char * Field, unsigned short Value)
+{
+	sprintf_s(m_Values, sizeof(m_Values), "%s, '%u'", m_Values, (unsigned int)Value);
+	AddField(Field);
+}
+#endif
 
 void sql_query::AddData(char * Field, unsigned long Value)
 {

@@ -125,28 +125,28 @@ char * AuxSkill::GetAffiliation()		{return Data->Affiliation;}
 
 void AuxSkill::SetData(_Skill * NewData)
 {
-	ReplaceData(Data->Level, NewData->Level, 0);
-	ReplaceData(Data->RecycleTime, NewData->RecycleTime, 1);
-	ReplaceData(Data->LastActivationTime, NewData->LastActivationTime, 2);
+	ReplaceData(&Data->Level, NewData->Level, 0);
+	ReplaceData(&Data->RecycleTime, NewData->RecycleTime, 1);
+	ReplaceData(&Data->LastActivationTime, NewData->LastActivationTime, 2);
 	ReplaceAvail(Data->Availability, NewData->Availability, 3);
-	ReplaceData(Data->QuestOnlyLevel, NewData->QuestOnlyLevel, 4);
-	ReplaceData(Data->MaxSkillLevel, NewData->MaxSkillLevel, 5);
+	ReplaceData(&Data->QuestOnlyLevel, NewData->QuestOnlyLevel, 4);
+	ReplaceData(&Data->MaxSkillLevel, NewData->MaxSkillLevel, 5);
 	ReplaceString(Data->Affiliation, NewData->Affiliation, 6, 64);
 }
 
 void AuxSkill::SetLevel(u32 NewLevel)
 {
-	ReplaceData(Data->Level, NewLevel, 0);
+	ReplaceData(&Data->Level, NewLevel, 0);
 }
 
 void AuxSkill::SetRecycleTime(u32 NewRecycleTime)
 {
-	ReplaceData(Data->RecycleTime, NewRecycleTime, 1);
+	ReplaceData(&Data->RecycleTime, NewRecycleTime, 1);
 }
 
 void AuxSkill::SetLastActivationTime(u32 NewLastActivationTime)
 {
-	ReplaceData(Data->LastActivationTime, NewLastActivationTime, 2);
+	ReplaceData(&Data->LastActivationTime, NewLastActivationTime, 2);
 }
 
 void AuxSkill::SetAvailability(u32 * NewAvailability)
@@ -156,12 +156,12 @@ void AuxSkill::SetAvailability(u32 * NewAvailability)
 
 void AuxSkill::SetQuestOnlyLevel(u32 NewQuestOnlyLevel)
 {
-	ReplaceData(Data->QuestOnlyLevel, NewQuestOnlyLevel, 4);
+	ReplaceData(&Data->QuestOnlyLevel, NewQuestOnlyLevel, 4);
 }
 
 void AuxSkill::SetMaxSkillLevel(u32 NewMaxSkillLevel)
 {
-	ReplaceData(Data->MaxSkillLevel, NewMaxSkillLevel, 5);
+	ReplaceData(&Data->MaxSkillLevel, NewMaxSkillLevel, 5);
 }
 
 void AuxSkill::SetAffiliation(char * NewAffiliation)

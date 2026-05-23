@@ -68,7 +68,7 @@ void AuxCategory::SetData(_Category * NewData)
 {
 	ReplaceString(Data->Name, NewData->Name, 0,32);
     SubCategories.SetData(&NewData->SubCategories);
-	ReplaceData(Data->CategoryID, NewData->CategoryID, 2);
+	ReplaceData(&Data->CategoryID, NewData->CategoryID, 2);
 
 	CheckData();
 }
@@ -81,7 +81,7 @@ void AuxCategory::SetName(char * NewName)
 
 void AuxCategory::SetCategoryID(u32 NewCategoryID)
 {
-	ReplaceData(Data->CategoryID, NewCategoryID, 2);
+	ReplaceData(&Data->CategoryID, NewCategoryID, 2);
 	CheckData();
 }
 

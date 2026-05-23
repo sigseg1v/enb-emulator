@@ -166,55 +166,55 @@ u32 AuxGroupInfo::GetPosition()						{return Data->Position;}
 
 void AuxGroupInfo::SetData(_GroupInfo *NewData, bool group_only)
 {
-	ReplaceData(Data->IsGroupLeader, NewData->IsGroupLeader, 0);
+	ReplaceData(&Data->IsGroupLeader, NewData->IsGroupLeader, 0);
 	if (!group_only)
 	{
-		ReplaceData(Data->LookingForGroup, NewData->LookingForGroup, 1);
-		ReplaceData(Data->AllowGroupInvite, NewData->AllowGroupInvite, 2);
-		ReplaceData(Data->ShowNonCombatantActivities, NewData->ShowNonCombatantActivities, 3);
+		ReplaceData(&Data->LookingForGroup, NewData->LookingForGroup, 1);
+		ReplaceData(&Data->AllowGroupInvite, NewData->AllowGroupInvite, 2);
+		ReplaceData(&Data->ShowNonCombatantActivities, NewData->ShowNonCombatantActivities, 3);
 	}
-	ReplaceData(Data->ForceAutoSplit, NewData->ForceAutoSplit, 4);
-	ReplaceData(Data->RestrictedLootingRights, NewData->RestrictedLootingRights, 5);
-	ReplaceData(Data->AutoReleaseLootingRights, NewData->AutoReleaseLootingRights, 6);
+	ReplaceData(&Data->ForceAutoSplit, NewData->ForceAutoSplit, 4);
+	ReplaceData(&Data->RestrictedLootingRights, NewData->RestrictedLootingRights, 5);
+	ReplaceData(&Data->AutoReleaseLootingRights, NewData->AutoReleaseLootingRights, 6);
 	ReplaceString(Data->FormationName, NewData->FormationName, 7,64);
-	ReplaceData(Data->Formation, NewData->Formation, 8);
-	ReplaceData(Data->Position, NewData->Position, 9);
+	ReplaceData(&Data->Formation, NewData->Formation, 8);
+	ReplaceData(&Data->Position, NewData->Position, 9);
 	Members.SetData(&NewData->Members);
 }
 
 void AuxGroupInfo::SetIsGroupLeader(bool NewIsGroupLeader)
 {
-	ReplaceData(Data->IsGroupLeader, NewIsGroupLeader, 0);
+	ReplaceData(&Data->IsGroupLeader, NewIsGroupLeader, 0);
 }
 
 void AuxGroupInfo::SetLookingForGroup(bool NewLookingForGroup)
 {
-	ReplaceData(Data->LookingForGroup, NewLookingForGroup, 1);
+	ReplaceData(&Data->LookingForGroup, NewLookingForGroup, 1);
 }
 
 void AuxGroupInfo::SetAllowGroupInvite(bool NewAllowGroupInvite)
 {
-	ReplaceData(Data->AllowGroupInvite, NewAllowGroupInvite, 2);
+	ReplaceData(&Data->AllowGroupInvite, NewAllowGroupInvite, 2);
 }
 
 void AuxGroupInfo::SetShowNonCombatantActivities(bool NewShowNonCombatantActivities)
 {
-	ReplaceData(Data->ShowNonCombatantActivities, NewShowNonCombatantActivities, 3);
+	ReplaceData(&Data->ShowNonCombatantActivities, NewShowNonCombatantActivities, 3);
 }
 
 void AuxGroupInfo::SetForceAutoSplit(bool NewForceAutoSplit)
 {
-	ReplaceData(Data->ForceAutoSplit, NewForceAutoSplit, 4);
+	ReplaceData(&Data->ForceAutoSplit, NewForceAutoSplit, 4);
 }
 
 void AuxGroupInfo::SetRestrictedLootingRights(bool NewRestrictedLootingRights)
 {
-	ReplaceData(Data->RestrictedLootingRights, NewRestrictedLootingRights, 5);
+	ReplaceData(&Data->RestrictedLootingRights, NewRestrictedLootingRights, 5);
 }
 
 void AuxGroupInfo::SetAutoReleaseLootingRights(bool NewAutoReleaseLootingRights)
 {
-	ReplaceData(Data->AutoReleaseLootingRights, NewAutoReleaseLootingRights, 6);
+	ReplaceData(&Data->AutoReleaseLootingRights, NewAutoReleaseLootingRights, 6);
 }
 
 void AuxGroupInfo::SetFormationName(char * NewFormationName)
@@ -224,12 +224,12 @@ void AuxGroupInfo::SetFormationName(char * NewFormationName)
 
 void AuxGroupInfo::SetFormation(u32 NewFormation)
 {
-	ReplaceData(Data->Formation, NewFormation, 8);
+	ReplaceData(&Data->Formation, NewFormation, 8);
 }
 
 void AuxGroupInfo::SetPosition(u32 NewPosition)
 {
-	ReplaceData(Data->Position, NewPosition, 9);
+	ReplaceData(&Data->Position, NewPosition, 9);
 }
 
 /******************************

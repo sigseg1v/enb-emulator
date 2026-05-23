@@ -200,19 +200,19 @@ u32	AuxEquipItem::GetItemState()						{return Data->ItemState;}
 
 void AuxEquipItem::SetData(_EquipItem * NewData)
 {
-	ReplaceData(Data->ItemTemplateID, NewData->ItemTemplateID, 0);
-	ReplaceData(Data->StackCount, NewData->StackCount, 1);
-	ReplaceData(Data->Price, NewData->Price, 2);
-	ReplaceData(Data->AveCost, NewData->AveCost, 3);
-	ReplaceData(Data->Structure, NewData->Structure, 4);
-	ReplaceData(Data->Quality, NewData->Quality, 5);
+	ReplaceData(&Data->ItemTemplateID, NewData->ItemTemplateID, 0);
+	ReplaceData(&Data->StackCount, NewData->StackCount, 1);
+	ReplaceData(&Data->Price, NewData->Price, 2);
+	ReplaceData(&Data->AveCost, NewData->AveCost, 3);
+	ReplaceData(&Data->Structure, NewData->Structure, 4);
+	ReplaceData(&Data->Quality, NewData->Quality, 5);
 	ReplaceString(Data->InstanceInfo, NewData->InstanceInfo, 6, 64);
 	ReplaceString(Data->ActivatedEffectInstanceInfo, NewData->ActivatedEffectInstanceInfo, 7, 64);
 	ReplaceString(Data->EquipEffectInstanceInfo, NewData->EquipEffectInstanceInfo, 8, sizeof(Data->EquipEffectInstanceInfo));
 	ReplaceString(Data->BuilderName, NewData->BuilderName, 9, 64);
-	ReplaceData(Data->ReadyTime, NewData->ReadyTime, 10);
-	ReplaceData(Data->TargetRange, NewData->TargetRange, 11);
-	ReplaceData(Data->ItemState, NewData->ItemState, 12);
+	ReplaceData(&Data->ReadyTime, NewData->ReadyTime, 10);
+	ReplaceData(&Data->TargetRange, NewData->TargetRange, 11);
+	ReplaceData(&Data->ItemState, NewData->ItemState, 12);
 	Effect.SetData(&NewData->Effect);
 }
 
@@ -220,12 +220,12 @@ void AuxEquipItem::SetData(_EquipItem * NewData)
 
 void AuxEquipItem::SetItemData(_Item * NewItemData)
 {
-	ReplaceData(Data->ItemTemplateID, NewItemData->ItemTemplateID, 0);
-	ReplaceData(Data->StackCount, NewItemData->StackCount, 1);
-	ReplaceData(Data->Price, NewItemData->Price, 2);
-	ReplaceData(Data->AveCost, NewItemData->AveCost, 3);
-	ReplaceData(Data->Structure, NewItemData->Structure, 4);
-	ReplaceData(Data->Quality, NewItemData->Quality, 5);
+	ReplaceData(&Data->ItemTemplateID, NewItemData->ItemTemplateID, 0);
+	ReplaceData(&Data->StackCount, NewItemData->StackCount, 1);
+	ReplaceData(&Data->Price, NewItemData->Price, 2);
+	ReplaceData(&Data->AveCost, NewItemData->AveCost, 3);
+	ReplaceData(&Data->Structure, NewItemData->Structure, 4);
+	ReplaceData(&Data->Quality, NewItemData->Quality, 5);
 	ReplaceString(Data->InstanceInfo, NewItemData->InstanceInfo, 6,64);
 	ReplaceString(Data->ActivatedEffectInstanceInfo, NewItemData->ActivatedEffectInstanceInfo, 7, 64);
 	ReplaceString(Data->EquipEffectInstanceInfo, NewItemData->EquipEffectInstanceInfo, 8, sizeof(Data->EquipEffectInstanceInfo));
@@ -239,32 +239,32 @@ void AuxEquipItem::SetItemData(_Item * NewItemData)
 
 void AuxEquipItem::SetItemTemplateID(s32 NewItemTemplateID)
 {	
-	ReplaceData(Data->ItemTemplateID, NewItemTemplateID, 0);
+	ReplaceData(&Data->ItemTemplateID, NewItemTemplateID, 0);
 }
 
 void AuxEquipItem::SetStackCount(u32 NewStackCount)
 {	
-	ReplaceData(Data->StackCount, NewStackCount, 1);
+	ReplaceData(&Data->StackCount, NewStackCount, 1);
 }
 
 void AuxEquipItem::SetPrice(u64 NewPrice)
 {	
-	ReplaceData(Data->Price, NewPrice, 2);
+	ReplaceData(&Data->Price, NewPrice, 2);
 }
 
 void AuxEquipItem::SetAveCost(float NewAveCost)
 {	
-	ReplaceData(Data->AveCost, NewAveCost, 3);
+	ReplaceData(&Data->AveCost, NewAveCost, 3);
 }
 
 void AuxEquipItem::SetStructure(float NewStructure)
 {	
-	ReplaceData(Data->Structure, NewStructure, 4);
+	ReplaceData(&Data->Structure, NewStructure, 4);
 }
 
 void AuxEquipItem::SetQuality(float NewQuality)
 {	
-	ReplaceData(Data->Quality, NewQuality, 5);
+	ReplaceData(&Data->Quality, NewQuality, 5);
 }
 
 void AuxEquipItem::SetInstanceInfo(char *NewInstanceInfo)
@@ -289,17 +289,17 @@ void AuxEquipItem::SetBuilderName(char * NewBuilderName)
 
 void AuxEquipItem::SetReadyTime(u32 NewReadyTime)
 {
-	ReplaceData(Data->ReadyTime, NewReadyTime, 10);
+	ReplaceData(&Data->ReadyTime, NewReadyTime, 10);
 }
 
 void AuxEquipItem::SetTargetRange(float NewTargetRange)
 {
-	ReplaceData(Data->TargetRange, NewTargetRange, 11);
+	ReplaceData(&Data->TargetRange, NewTargetRange, 11);
 }
 
 void AuxEquipItem::SetItemState(u32 NewItemState)
 {
-	ReplaceData(Data->ItemState, NewItemState, 12);
+	ReplaceData(&Data->ItemState, NewItemState, 12);
 }
 
 /******************************
