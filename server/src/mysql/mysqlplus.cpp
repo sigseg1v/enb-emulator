@@ -252,6 +252,26 @@ OPENDB *sql_connection_c::grabdb()
             return 0;
         }
 
+        // libmysqlclient 5.7+ defaults to SSL_MODE_PREFERRED, which makes
+        // the client probe the server for SSL even when the server is in
+        // plain-text mode. The 2010 Net-7 mysqld setup is plain-text only
+        // and the probe produces noisy "Unable to get certificate from ''"
+        // errors on every connect. SSL_MODE_DISABLED (=1) opts out.
+        //
+        // The vendored mysql.h (server/src/mysql/mysql.h) is a 2010-era
+        // header that predates the SSL_MODE option, so MYSQL_OPT_SSL_MODE
+        // is not declared. We cast the actual enum integer (35 in 8.0.x)
+        // directly. The function signature in the vendored header takes
+        // `enum mysql_option`, which is layout-compatible with the
+        // runtime libmysqlclient21's enum because we only consume the
+        // numeric value.
+        {
+            unsigned int ssl_mode = 1; // SSL_MODE_DISABLED
+            mysql_options(&open_db->mysql,
+                          static_cast<enum mysql_option>(35) /* MYSQL_OPT_SSL_MODE */,
+                          &ssl_mode);
+        }
+
 		// Note: lots of this getting first time exception caught during lags
         if (!mysql_real_connect(&open_db->mysql, host, user, password, database, portn, 0, CLIENT_REMEMBER_OPTIONS))
         {

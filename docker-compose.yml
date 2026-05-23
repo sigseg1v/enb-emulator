@@ -1,13 +1,124 @@
 # docker-compose.yml
 #
-# Phase B / Phase C dev stack. The server and login images currently fail
-# to build (Phase B is in progress); the postgres + schema-init services
-# work today and let Phase C be developed against a real DB.
+# Phase J dev stack: the running game server.
+#
+# Topology:
+#   mysql  -- holds net7 (content) and net7_user (accounts)
+#   server -- the C++ Net-7 game server, talks to mysql
+#   login  -- Net7SSL TCP auth server, talks to mysql (Phase J WIP)
+#
+# Postgres + pgloader live behind the `postgres` profile and are the
+# long-term Phase C target (mysqlclient -> libpqxx port). MySQL is the
+# short path because the 2010 dumps + the embedded SQL are MySQL-native.
 
 name: enb-emulator
 
 services:
+  mysql:
+    # mysql:8.0 is the closest LTS to what the 2010 codebase was written
+    # against. Strict-mode is loosened via command flags so 2010-vintage
+    # INSERTs don't fail on default values / implicit conversions.
+    image: mysql:8.0
+    command:
+      - --character-set-server=latin1
+      - --collation-server=latin1_swedish_ci
+      - --sql-mode=NO_ENGINE_SUBSTITUTION
+      - --default-authentication-plugin=mysql_native_password
+      - --innodb-flush-log-at-trx-commit=2
+    environment:
+      MYSQL_ROOT_PASSWORD: net7root
+      MYSQL_USER: net7
+      MYSQL_PASSWORD: net7
+      # Pre-create something so the mysql image is happy; the real DBs
+      # are created by 00-create-databases.sql in init/.
+      MYSQL_DATABASE: _bootstrap
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysqldata:/var/lib/mysql
+      - ./db/mysql/init:/docker-entrypoint-initdb.d:ro
+      - ./db/mysql:/dumps:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-unet7", "-pnet7"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 60s
+    restart: unless-stopped
+
+  server:
+    build:
+      context: ./server
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      # Net7Config.cfg is the file the server actually reads on boot
+      # (server/src/Net7.cpp:124). We mount one in via volumes:.
+      TZ: UTC
+    # The server resolves g_DomainName via gethostbyname(); in docker we
+    # remap local.net-7.org to the container's loopback so it succeeds
+    # without external DNS.
+    extra_hosts:
+      - "local.net-7.org:127.0.0.1"
+    volumes:
+      - ./deploy/Net7Config.cfg:/app/Net7Config.cfg:ro
+      # SSL_Listener.cpp:56-57 reads "<g_DomainName>.cer" and "<g_DomainName>.pem"
+      # from CWD. Certs are generated into deploy/certs by `just gen-certs`.
+      - ./deploy/certs/local.net-7.org.cer:/app/local.net-7.org.cer:ro
+      - ./deploy/certs/local.net-7.org.pem:/app/local.net-7.org.pem:ro
+      # SERVER_DATABASE_PATH (Net7.h:143) = "../database/" relative to CWD.
+      # With WORKDIR=/app, that resolves to /database/.
+      - ./server/data:/database:ro
+    ports:
+      # Net-7 listens on:
+      # - 3805 TCP (global server entry)
+      # - 3801 TCP (master server)
+      # - 3501-3800 TCP (sector servers; allocated dynamically)
+      # - 3808 UDP (master <-> proxy)
+      - "3805:3805/tcp"
+      - "3801:3801/tcp"
+      - "3501-3550:3501-3550/tcp"
+      - "3808:3808/udp"
+    restart: unless-stopped
+
+  login:
+    build:
+      context: ./login-server
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - ./deploy/login-config:/app/config:ro
+    ports:
+      # Net7SSL TCP login listens on 7800-7810.
+      - "7800-7810:7800-7810/tcp"
+    restart: unless-stopped
+
+  # --------------------------------------------------------------
+  # Opt-in: phpMyAdmin against the mysql container.
+  # docker compose --profile dev-tools up phpmyadmin
+  # --------------------------------------------------------------
+  phpmyadmin:
+    profiles: ["dev-tools"]
+    image: phpmyadmin:latest
+    environment:
+      PMA_HOST: mysql
+      PMA_USER: net7
+      PMA_PASSWORD: net7
+    ports:
+      - "8081:80"
+    depends_on:
+      - mysql
+    restart: unless-stopped
+
+  # --------------------------------------------------------------
+  # Phase C continuation: Postgres backend. Kept behind a profile so
+  # the default stack stays MySQL until the libpqxx port lands.
+  # docker compose --profile postgres up postgres schema-init
+  # --------------------------------------------------------------
   postgres:
+    profiles: ["postgres"]
     image: postgres:16
     environment:
       POSTGRES_USER: net7
@@ -25,6 +136,7 @@ services:
     restart: unless-stopped
 
   schema-init:
+    profiles: ["postgres"]
     image: postgres:16
     depends_on:
       postgres:
@@ -46,41 +158,8 @@ services:
         echo "schema-init: done"
     restart: "no"
 
-  server:
-    build:
-      context: ./server
-    depends_on:
-      schema-init:
-        condition: service_completed_successfully
-    environment:
-      DB_HOST: postgres
-      DB_USER: net7
-      DB_PASS: net7
-      DB_NAME: net7
-    ports:
-      # Placeholder. Phase B continuation determines the actual port plan.
-      - "7000-7100:7000-7100/udp"
-    restart: unless-stopped
-
-  login:
-    build:
-      context: ./login-server
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      DB_HOST: postgres
-      DB_USER: net7
-      DB_PASS: net7
-      DB_NAME: net7
-    ports:
-      # Placeholder. Phase B continuation determines the actual port plan.
-      - "7800-7810:7800-7810/tcp"
-    restart: unless-stopped
-
-  # Opt-in: `docker compose --profile dev-tools up pgadmin`
   pgadmin:
-    profiles: ["dev-tools"]
+    profiles: ["dev-tools-postgres"]
     image: dpage/pgadmin4:latest
     environment:
       PGADMIN_DEFAULT_EMAIL: dev@localhost
@@ -93,4 +172,5 @@ services:
     restart: unless-stopped
 
 volumes:
+  mysqldata:
   pgdata:

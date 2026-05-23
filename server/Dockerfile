@@ -48,8 +48,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libssl3 \
         liblua5.4-0 \
         libtinyxml2.6.2v5 \
-        libcrypto++8 \
-        libpqxx-7.7 \
+        libcrypto++8t64 \
+        libpqxx-7.8t64 \
         libmysqlclient21 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system net7 \
@@ -57,12 +57,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 COPY --from=build /build/net7 /app/net7
+# Provide a logs/ subdir; Net7.cpp:235 calls _mkdir(SERVER_LOGS_PATH)
+# on boot but we make it owned by the runtime user up-front to avoid
+# any permission surprise under read-only volume mounts.
+RUN mkdir -p /app/logs && chown -R net7:net7 /app
 
-# Ports TBD — Phase B determines the actual server port plan. The legacy
-# server uses a range starting around 7000. We expose a placeholder range
-# here so docker-compose can publish them; tighten in Phase B continuation.
-EXPOSE 7000-7100/udp
-EXPOSE 7000-7100/tcp
+# Net-7 listener footprint (server/src/Net7.h):
+#   3805  TCP  Global server entry
+#   3801  TCP  Master server
+#   3501+ TCP  Sector servers (dynamic allocation)
+#   3808  UDP  Master <-> proxy
+EXPOSE 3805/tcp
+EXPOSE 3801/tcp
+EXPOSE 3501-3800/tcp
+EXPOSE 3808/udp
 
 USER net7
+# Net7Config.cfg, local.net-7.org.{cer,pem} are bind-mounted by
+# docker-compose.yml into /app/ at runtime.
 CMD ["/app/net7"]

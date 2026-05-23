@@ -32,21 +32,53 @@ build-tests:
 
 # ---- dev stack ----
 
-# Bring up the dev stack (postgres, schema-init, server, login) detached.
-dev:
-    docker compose up -d postgres
-    docker compose up schema-init
+# One-shot first-time setup: generate dev SSL certs, bring up mysql, wait
+# for the schema-load init scripts to finish, smoke-check it's reachable.
+init: gen-certs
+    @echo ">>> bringing up mysql + loading dumps"
+    docker compose up -d mysql
+    @echo ">>> waiting for mysql to become healthy"
+    @bash -c 'until [ "$$(docker inspect -f {{{{.State.Health.Status}}}} enb-emulator-mysql-1 2>/dev/null)" = "healthy" ]; do echo "  ...waiting"; sleep 3; done'
+    @echo ">>> verifying net7 + net7_user databases"
+    docker compose exec -T mysql mysql -unet7 -pnet7 -e "SHOW DATABASES; SELECT COUNT(*) AS account_rows FROM net7_user.accounts;"
+    @echo ">>> init complete. Next: 'just run-stack'"
+
+# Generate the self-signed dev cert pair the server expects to find at
+# CWD as <g_DomainName>.cer / .pem (SSL_Listener.cpp:56-57).
+gen-certs:
+    @mkdir -p deploy/certs
+    @if [ ! -f deploy/certs/local.net-7.org.cer ]; then \
+        echo ">>> generating self-signed cert for local.net-7.org"; \
+        openssl req -x509 -newkey rsa:2048 -days 3650 -nodes \
+            -subj "/CN=local.net-7.org/O=Earth-and-Beyond Emulator Dev/C=US" \
+            -addext "subjectAltName=DNS:local.net-7.org,DNS:localhost,IP:127.0.0.1" \
+            -keyout deploy/certs/local.net-7.org.pem \
+            -out    deploy/certs/local.net-7.org.cer; \
+    else \
+        echo "deploy/certs/local.net-7.org.cer exists, skipping"; \
+    fi
+
+# Bring up the full runtime stack (mysql + server + login). Server image
+# is built on demand. Streams logs in the foreground; Ctrl-C to stop.
+run-stack: init
+    docker compose up server login
+
+# Same but detached.
+run-stack-bg: init
     docker compose up -d server login
 
-# Same, but stream all logs in the foreground. Ctrl-C to stop.
+# Convenience: legacy name. Same as run-stack-bg.
+dev: run-stack-bg
+
+# Stream all logs in the foreground.
 dev-fg:
     docker compose up
 
-# Tear down (containers + network; named volume `pgdata` survives).
+# Tear down (containers + network; named volume `mysqldata` survives).
 down:
     docker compose down
 
-# Tear down AND wipe the pgdata volume (destructive — schema is reapplied next `just dev`).
+# Tear down AND wipe the mysqldata volume (destructive — dumps reload next `just init`).
 nuke:
     docker compose down -v
 
@@ -54,25 +86,50 @@ nuke:
 logs SERVICE='server':
     docker compose logs -f {{SERVICE}}
 
-# Shell into a running service. e.g. `just shell postgres`
+# Shell into a running service. e.g. `just shell mysql`
 shell SERVICE='server':
     docker compose exec {{SERVICE}} bash
 
-# psql into the dev postgres.
+# Open a mysql client against the dev DB.
+mysql:
+    docker compose exec mysql mysql -unet7 -pnet7 net7
+
+# Seed a known-good test account into net7_user.accounts. Idempotent.
+# Default user/pass: testuser/testpass. Password is stored as upper-case MD5
+# (matches Net7SSL hash form). Schema is the 2010 dump's `accounts` table:
+#   id (PK), username, password, status, formname, email, last_login,
+#   last_logout, warn_level.
+seed-account USER='testuser' PASS='testpass':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    MD5=$(printf "%s" "{{PASS}}" | md5sum | awk '{print toupper($1)}')
+    docker compose exec -T mysql mysql -unet7 -pnet7 net7_user -e \
+        "INSERT INTO accounts (username, password, status, formname, email) \
+         VALUES ('{{USER}}', '$MD5', 100, 'forum_{{USER}}', '{{USER}}@local') \
+         ON DUPLICATE KEY UPDATE password='$MD5';"
+    echo ">>> seeded {{USER}} with MD5($MD5)"
+
+# ---- Phase C continuation (Postgres) ----
+
+# Bring up the postgres profile and apply the converted schema.
+postgres-dev:
+    docker compose --profile postgres up -d postgres
+    docker compose --profile postgres up schema-init
+
 psql:
-    docker compose exec postgres psql -U net7 -d net7
+    docker compose --profile postgres exec postgres psql -U net7 -d net7
 
-# Apply / re-apply the Postgres schema.
 apply-schema:
-    docker compose run --rm schema-init
+    docker compose --profile postgres run --rm schema-init
 
-# Re-run the MySQL -> Postgres conversion (produces db/postgres/schema.sql).
 convert-schema:
     bash db/postgres/convert.sh
 
-# Bring up pgadmin on http://localhost:8080 (opt-in profile).
 pgadmin:
-    docker compose --profile dev-tools up -d pgadmin
+    docker compose --profile dev-tools-postgres up -d pgadmin
+
+phpmyadmin:
+    docker compose --profile dev-tools up -d phpmyadmin
 
 # ---- test ----
 
