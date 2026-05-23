@@ -1072,8 +1072,143 @@ in `Net7.exe`. The `SSL_Listener` instantiation in
 the sidecar process. The classes remain compiled so that the auth
 helper can be linked against them.
 
-The OpenSSL version pinned to in-tree at `server/src/openssl/` is 1.0.x.
-Phase E will migrate to 3.x.
+The OpenSSL version pinned to in-tree at `server/src/openssl/` is 1.0.x
+(vestigial — Phase E migrated the build to system OpenSSL 3.x; the
+in-tree headers are no longer on the include path).
+
+---
+
+## 8. Flow walkthroughs (Phase H)
+
+The previous sections describe what each module does. This section traces
+three runtime flows across modules so the boundaries are visible.
+
+### 8.1 Login flow (TCP connect → credential check → response)
+
+Client TCP-connects to the MasterServer process; the connection is keyed
+with RSA + RC4. On `GLOBAL_CONNECT`, GlobalServer pulls the ticket apart,
+asks AccountManager to validate it against the DB, and either returns the
+avatar list or `GLOBAL_ERROR`.
+
+```mermaid
+sequenceDiagram
+    actor Client
+    participant MasterServer
+    participant GlobalServer
+    participant AccountManager
+    participant DB
+
+    Client->>MasterServer: TCP connect
+    MasterServer->>Client: RSA public key
+    Client->>MasterServer: Encrypted RC4 session key
+    MasterServer->>MasterServer: DoKeyExchange (decrypt) → SetRC4Key
+    Client->>GlobalServer: 0x006D GLOBAL_CONNECT + ticket
+    GlobalServer->>AccountManager: GetUsernameFromTicket
+    AccountManager->>DB: SELECT * FROM accounts WHERE username
+    DB-->>AccountManager: account row
+    AccountManager-->>GlobalServer: username, id, status
+    alt valid
+        GlobalServer->>AccountManager: BuildAvatarList(account_id)
+        AccountManager->>DB: SELECT * FROM avatar_data WHERE account_id
+        DB-->>AccountManager: 0–5 avatar rows
+        AccountManager-->>GlobalServer: avatar list
+        GlobalServer->>Client: 0x0070 GLOBAL_AVATAR_LIST
+    else invalid
+        GlobalServer->>Client: 0x0075 GLOBAL_ERROR
+    end
+```
+
+Key code: `Connection.cpp:32` (`ReSetConnection`), `Connection.cpp:150`
+(`DoKeyExchange`), `ClientToGlobalServer.cpp:122` (`HandleGlobalConnect`),
+`AccountManager.cpp:1001` (`IssueTicket`), `AccountManager.cpp:101`
+(`GetAccountStatus`), `ClientToGlobalServer.cpp:218` (`SendAvatarList`),
+`AccountManager.cpp:1243` (`BuildAvatarList`).
+
+### 8.2 Character select → sector handoff
+
+Client picks an avatar slot. GlobalServer loads the full character record
+into a Player object, asks SectorManager which sector that character is in
+(falling back to SOL/10711 on error), and issues a sector ticket. The
+client then re-handshakes with the MasterServer; MasterServer answers
+`MASTER_JOIN` with the sector server's IP/port via `SERVER_REDIRECT`.
+
+```mermaid
+sequenceDiagram
+    actor Client
+    participant GlobalServer
+    participant AccountManager
+    participant PlayerManager
+    participant SectorManager
+    participant MasterServer
+    participant DB
+
+    Client->>GlobalServer: 0x006E GLOBAL_TICKET_REQUEST (slot)
+    GlobalServer->>AccountManager: GetAvatarID(username, slot)
+    GlobalServer->>PlayerManager: GetPlayerNode(username)
+    GlobalServer->>AccountManager: ReadDatabase(avatar_id)
+    AccountManager->>DB: SELECT avatar_info, avatar_data, ship_data, ship_info
+    DB-->>AccountManager: CharacterDatabase fields
+    AccountManager-->>GlobalServer: Player populated
+    GlobalServer->>SectorManager: GetSectorManager(sector_id)
+    alt sector live
+        GlobalServer->>Client: 0x006F GLOBAL_TICKET (avatar_id, sector_id, ticket)
+    else fallback
+        GlobalServer->>SectorManager: GetSectorManager(10711)  # SOL
+        GlobalServer->>Client: 0x006F GLOBAL_TICKET (fallback)
+    end
+    Client->>MasterServer: 0x0035 MASTER_JOIN (target sector)
+    MasterServer->>SectorManager: LookupSectorServer(sector_id)
+    MasterServer->>Client: 0x0036 SERVER_REDIRECT (ip, port)
+    Client->>Client: reconnect to SectorServer
+```
+
+Key code: `ClientToGlobalServer.cpp:227` (`HandleGlobalTicketRequest`),
+`ClientToGlobalServer.cpp:305` (`ProcessGlobalTicket`),
+`AccountManager.cpp:511` (`ReadDatabase`), `ClientToGlobalServer.cpp:271`
+(`SendGlobalTicket`), `ClientToMasterServer.cpp:30` (`HandleMasterJoin`),
+`ClientToMasterServer.cpp:43` (`SendServerRedirect`).
+
+### 8.3 Packet receive → opcode dispatch → response
+
+`ConnectionManager::CheckConnections` polls every Connection's socket.
+When data is available, `ProcessRecvInputs` reads the 4-byte
+`EnbTcpHeader`, decrypts (RC4 if applicable), reads the payload, and
+dispatches on `m_ServerType` to the appropriate `Process*Opcode`
+function, which switches on the opcode to a handler. Handlers call back
+into `SendResponse`, which encrypts, frames, and queues onto the
+`MessageQueue`. `PulseConnectionOutput` drains the queue back to the
+socket.
+
+```mermaid
+sequenceDiagram
+    actor Client
+    participant Sock as socket
+    participant Conn as Connection
+    participant MQ as MessageQueue
+    participant Dispatch as Process*Opcode
+    participant Handler as Handle*
+
+    Client->>Sock: TCP packet
+    Sock->>Conn: ConnectionManager::CheckConnections → ProcessRecvInputs
+    Conn->>Conn: recv 4-byte EnbTcpHeader (size, opcode)
+    Conn->>Conn: RC4 decrypt header (if client type)
+    Conn->>Conn: recv payload (size bytes)
+    Conn->>Conn: RC4 decrypt payload
+    Conn->>Dispatch: ProcessGlobalServerOpcode | ProcessMasterServerOpcode | …
+    Dispatch->>Handler: HandleGlobalConnect / HandleCreateCharacter / …
+    Handler->>Conn: SendResponse(opcode, data, len)
+    Conn->>Conn: build header, RC4 encrypt
+    Conn->>MQ: queue outgoing buffer
+    Conn->>Sock: PulseConnectionOutput → send()
+    Sock->>Client: TCP response
+```
+
+Key code: `ConnectionManager.cpp:63` (`CheckConnections`),
+`Connection.cpp:338` (`ProcessRecvInputs` — recv + decrypt loop),
+`Connection.cpp:257` (`RunKeyExchange`), `Connection.cpp:428`
+(`m_ServerType` dispatch switch), `Connection.cpp:285` (`SendResponse`),
+`Connection.cpp:116` (`Send` → MessageQueue), `Connection.cpp:563`
+(`PulseConnectionOutput`), `MessageQueue.cpp:99` (`Add`).
 
 ---
 

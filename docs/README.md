@@ -22,6 +22,9 @@ copies of historical material from the upstream repos.
 | `09-running-locally.md` | How to bring up the dev stack with `docker compose`, apply the schema, create a test account, and point a client at it. |
 | `10-modernization-roadmap.md` | Summary of Phases B through I (from `plans/*.md`) with effort estimates, risks, and an explicit list of things deliberately skipped. |
 | `11-gm-commands.md` | GM and admin slash commands, reformatted from `reference/gm-commands-original.txt`. |
+| `12-content-pipeline.md` | How content flows from the C# editors through the DB into the running server, with per-domain loaders. |
+| `13-gameplay-loop.md` | Server-side walkthrough of the major gameplay systems (combat, sector travel, missions, trading, guilds, chat). |
+| `14-extending.md` | How to add a new ability, mob type, or sector. |
 
 ## Reference material
 
