@@ -138,6 +138,18 @@ test:
     ctest --test-dir build/tests --output-on-failure
     -dotnet test tools/Net7Tools.slnx --nologo
 
+# Integration tests against the live stack (handshake + replay over TCP).
+integration-test:
+    just run-stack-bg
+    @echo "waiting for proxy on tcp/3801..."
+    @until timeout 1 bash -c '</dev/tcp/127.0.0.1/3801' 2>/dev/null; do sleep 1; done
+    cmake -S tests -B build/tests -G Ninja
+    cmake --build build/tests --target handshake_live_test replay_test -j"$(nproc)"
+    NET7_TEST_PROXY_HOST=127.0.0.1 NET7_TEST_PROXY_PORT=3801 \
+        ctest --test-dir build/tests --output-on-failure \
+              -R 'HandshakeDriver|Replay'
+    just down
+
 # ---- package / release ----
 
 # Build OCI images for server + login locally.
