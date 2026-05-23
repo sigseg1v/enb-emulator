@@ -751,21 +751,58 @@ bool Connection::CheckTCPShutdownCycle()
 	return false;
 }
 
-#else // !WIN32 — Linux stub
-// Connection class has lots of out-of-line definitions referenced by
-// TcpListener (which constructs Connection on accept()). For the Phase J
-// Linux build we provide a minimal stub Connection so the linker is
-// satisfied; on accept(), TcpListener will instantiate this stub which
-// just records the socket and logs.
+#else // !WIN32 — Linux partial port
+// Phase J: minimal Linux-side Connection. Runs the Net-7 Westwood RSA+RC4
+// key exchange synchronously in a worker thread; after the handshake
+// completes the socket is held open until the peer closes (or shutdown).
+// Opcode dispatch (Client→{Master,Global,Sector}Server) is still WIN32-
+// only — once handshake succeeds, inbound RC4-decrypted bytes are dropped
+// on the floor. This is enough to make the live handshake test pass.
 #include "Net7.h"
 #include "Connection.h"
 #include "ServerManager.h"
+#include "WestwoodRSA.h"
+#include "WestwoodRC4.h"
+
+#include <sys/socket.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <errno.h>
+
+namespace {
+
+// recv exactly n bytes or fail. Returns true iff exactly n bytes read.
+bool RecvAll(int sock, unsigned char* buf, int n)
+{
+    int got = 0;
+    while (got < n) {
+        int r = (int) recv(sock, buf + got, n - got, 0);
+        if (r <= 0) return false;
+        got += r;
+    }
+    return true;
+}
+
+bool SendAll(int sock, const unsigned char* buf, int n)
+{
+    int sent = 0;
+    while (sent < n) {
+        int r = (int) send(sock, buf + sent, n - sent, MSG_NOSIGNAL);
+        if (r <= 0) return false;
+        sent += r;
+    }
+    return true;
+}
+
+}  // namespace
+
+static void* LaunchConnectionWorker(void* arg);
 
 Connection::Connection(SOCKET s, ServerManager &server_mgr, short port,
                        int server_type, unsigned long* ip_addr)
     : m_Socket(s),
       m_ConnectionActive(true),
-      m_TcpThreadRunning(false),
+      m_TcpThreadRunning(true),
       m_SectorTCPRequest(false),
       m_TcpShutdownCycle(0),
       m_ServerType(server_type),
@@ -783,28 +820,109 @@ Connection::Connection(SOCKET s, ServerManager &server_mgr, short port,
 {
     if (ip_addr) m_IPaddr = *ip_addr;
     unsigned char *ip = (unsigned char *) &m_IPaddr;
-    LogMessage("Net7Proxy (stub): accept on port %d from %u.%u.%u.%u — closing\n",
+    LogMessage("Net7Proxy: accept on port %d from %u.%u.%u.%u\n",
                m_TcpPort, ip[0], ip[1], ip[2], ip[3]);
-    // Immediately mark inactive so ConnectionManager::CheckConnections
-    // reaps us next tick.
-    m_ConnectionActive = false;
-    if (m_Socket != INVALID_SOCKET) {
-        closesocket(m_Socket);
-        m_Socket = INVALID_SOCKET;
-    }
+
+    pthread_create(&m_Thread, nullptr, &LaunchConnectionWorker, this);
+    pthread_detach(m_Thread);
 }
 
 Connection::~Connection() {
+    m_TcpThreadRunning = false;
     if (m_Socket != INVALID_SOCKET) {
+        ::shutdown(m_Socket, SHUT_RDWR);
         closesocket(m_Socket);
         m_Socket = INVALID_SOCKET;
     }
 }
 
 bool Connection::IsActive()                    { return m_ConnectionActive; }
-bool Connection::CheckTCPShutdownCycle()       { return true; }
-void Connection::TerminateConnection()         { m_ConnectionActive = false; }
+bool Connection::CheckTCPShutdownCycle()       { return !m_ConnectionActive; }
+void Connection::TerminateConnection()         { m_ConnectionActive = false; m_TcpThreadRunning = false; }
 void Connection::SendResponse(short /*opcode*/, unsigned char* /*data*/,
                               size_t /*length*/, long /*sequence_num*/) {}
+
+// Mirror of server/src/Connection.cpp::DoKeyExchange (Net-7 raw RSA+RC4).
+// Server sends 74-byte pubkey, then reads 4-byte length + key_length-byte
+// encrypted block, decrypts to recover the reversed RC4 session key.
+bool Connection::DoKeyExchange()
+{
+    unsigned char buffer[128];
+    unsigned char *p = buffer;
+    int length = (int) m_WestwoodRSA.GetModulus(&p);
+    length += (int) m_WestwoodRSA.GetPublicExponent(&p);
+
+    if (!SendAll((int) m_Socket, buffer, length)) {
+        LogMessage("DoKeyExchange: pubkey send failed (errno=%d)\n", errno);
+        return false;
+    }
+
+    if (!RecvAll((int) m_Socket, buffer, 4)) {
+        LogMessage("DoKeyExchange: failed to read 4-byte key length\n");
+        return false;
+    }
+    long key_length = (long) ntohl(*((unsigned long *) buffer));
+    if ((key_length < WWRSA_BLOCK_SIZE) || (key_length > (WWRSA_BLOCK_SIZE + 1))) {
+        LogMessage("DoKeyExchange: bad key_length = %ld\n", key_length);
+        return false;
+    }
+    if (!RecvAll((int) m_Socket, buffer, (int) key_length)) {
+        LogMessage("DoKeyExchange: failed to read %ld-byte encrypted key\n", key_length);
+        return false;
+    }
+
+    p = buffer;
+    if ((key_length == WWRSA_BLOCK_SIZE + 1) && (*p == 0)) {
+        key_length--;
+        p++;
+    }
+
+    unsigned char rc4key[WWRSA_BLOCK_SIZE];
+    if (!m_WestwoodRSA.Decrypt(p, WWRSA_BLOCK_SIZE, rc4key)) {
+        LogMessage("DoKeyExchange: RSA decrypt failed\n");
+        return false;
+    }
+
+    // Reverse the order of the decrypted RC4 session key (bytes 0x3f..0x38).
+    unsigned char rc4_session_key[RC4_KEY_SIZE];
+    for (int i = 0; i < RC4_KEY_SIZE; i++) {
+        rc4_session_key[i] = rc4key[(WWRSA_BLOCK_SIZE - 1) - i];
+    }
+
+    m_CryptIn.PrepareKey(rc4_session_key, RC4_KEY_SIZE);
+    m_CryptOut.PrepareKey(rc4_session_key, RC4_KEY_SIZE);
+
+    LogMessage("DoKeyExchange: RC4 session established on port %d\n", m_TcpPort);
+    return true;
+}
+
+void Connection::RunRecvThread()
+{
+    if (!DoKeyExchange()) {
+        m_ConnectionActive = false;
+        m_TcpThreadRunning = false;
+        return;
+    }
+
+    // Hold the socket open and drain bytes until the peer closes or shutdown.
+    // We don't dispatch opcodes on Linux yet (Client→*Server.cpp are WIN32-
+    // walled). RC4-decrypt-and-discard is enough to keep the wire valid.
+    unsigned char buf[4096];
+    while (m_TcpThreadRunning && m_ConnectionActive) {
+        int n = (int) recv(m_Socket, buf, sizeof(buf), 0);
+        if (n <= 0) break;
+        m_CryptIn.RC4(buf, n);
+        // drop
+    }
+
+    m_ConnectionActive = false;
+    m_TcpThreadRunning = false;
+}
+
+static void* LaunchConnectionWorker(void* arg)
+{
+    ((Connection*) arg)->RunRecvThread();
+    return nullptr;
+}
 
 #endif // WIN32 — Phase J file-level guard
