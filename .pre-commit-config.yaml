@@ -1,9 +1,11 @@
 # pre-commit hooks. Install with `pip install pre-commit && pre-commit install`.
 #
-# Only enforces against files we own (server/compat/, tests/, tools/,
-# new docs, the installer script). The legacy server source under
-# server/src/ is *not* formatted — it would produce a 100k+ line diff
-# and isn't part of Phase F's actionable warning targets.
+# Only enforces against files we own (server/compat/, tests/, new docs/, plans/,
+# top-level config). Vendored upstream code (server/src/, login-server/,
+# proxy/, client/detours/, client/mods/, launcher/, tools/*, server/Makefile.legacy)
+# and preserved-verbatim files (archive/, docs/reference/, db/mysql/) must not
+# be touched by formatters — they would produce huge unrelated diffs and
+# violate the "preserve original" rule in CLAUDE.md.
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -14,18 +16,30 @@ repos:
           (?x)^(
             archive/.* |
             server/src/.* |
+            server/Makefile\.legacy |
             client/detours/.* |
+            client/mods/.* |
             login-server/.* |
-            proxy/.*
+            proxy/.* |
+            launcher/.* |
+            tools/.* |
+            db/mysql/.* |
+            docs/reference/.*
           )$
       - id: end-of-file-fixer
         exclude: |
           (?x)^(
             archive/.* |
             server/src/.* |
+            server/Makefile\.legacy |
             client/detours/.* |
+            client/mods/.* |
             login-server/.* |
             proxy/.* |
+            launcher/.* |
+            tools/.* |
+            db/mysql/.* |
+            docs/reference/.* |
             .*\.rar |
             .*\.rtf |
             .*\.pdf
@@ -45,6 +59,13 @@ repos:
     rev: v0.10.0
     hooks:
       - id: shellcheck
+        # Exclude vendored autotools scripts that we don't own.
+        exclude: |
+          (?x)^(
+            tools/commontools/Libs/.* |
+            server/third_party/.* |
+            vendor/.*
+          )$
 
   - repo: https://github.com/pre-commit/mirrors-clang-format
     rev: v19.1.7

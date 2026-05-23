@@ -4,12 +4,13 @@ Goal: expand Phase A docs with reverse-engineered protocol details, runtime walk
 
 ## Outcome
 
-Phase A docs were already substantial (overview 1086 lines, architecture 617 lines, abilities 310 lines). Phase H closes the runtime-walkthrough gap in `04-server-modules.md` and adds the three "how does it actually work / how do I extend it" docs (12 content pipeline, 13 gameplay loop, 14 extending). Packet-capture deepening is blocked on `unrar` (sudo apt-get install is blocked in this environment).
+Phase A docs were already substantial (overview 1086 lines, architecture 617 lines, abilities 310 lines). Phase H closes the runtime-walkthrough gap in `04-server-modules.md`, adds the three "how does it actually work / how do I extend it" docs (12 content pipeline, 13 gameplay loop, 14 extending), and after the user installed `unrar`, finishes the packet-capture deepening of `docs/03-network-protocol.md` with a 120,431-packet histogram.
 
 ## Items
 
-- [!] `docs/03-network-protocol.md` deepening: open `capturedPackets/*.rar` (extract with `unrar x`), classify packet types, add a packet-type table.
-      Blocked: `unrar` not installed and `sudo apt-get install unrar` is blocked by the permission classifier in this environment. The captures are preserved at `archive/kyp-snapshot/capturedPackets/` for whoever does have a working unrar; the deepening itself is a Phase H continuation.
+- [x] `docs/03-network-protocol.md` deepening: open `capturedPackets/*.rar` (extract with `unrar x`), classify packet types, add a packet-type table.
+      Touches: docs/03-network-protocol.md (§8 rewritten)
+      Notes: 120,431 packets across the 3 captures (54,529 C→S + 65,902 S→C); 95 distinct opcodes; top-25 table cross-referenced against `Opcodes.h`. Captures appear to be 2006 Westwood-server traces (159.153.232.* / EA IP range), making them more authoritative than Net-7-server-only captures. Aux_Data (0x1B) + Advanced_Positional_Update (0x3E) = 71% of all packets, confirming the per-tick flush model in `PlayerManager::RunMovementThread`.
 - [x] `docs/04-server-modules.md` deepening: add sequence diagrams (mermaid) for login → character select → enter sector.
       Touches: docs/04-server-modules.md (new §8 "Flow walkthroughs (Phase H)" — three mermaid sequenceDiagrams: login flow, character-select / sector handoff, packet receive → dispatch → response)
 - [x] `docs/05-abilities.md` deepening: for each ability, link to its `.cpp`, summarise effect, list cooldown/range/damage formula.
@@ -32,6 +33,6 @@ Phase A docs were already substantial (overview 1086 lines, architecture 617 lin
 
 ## Deferred (Phase H continuation)
 
-- Packet-capture-driven deepening of `docs/03-network-protocol.md` — needs `unrar` installed.
+- Per-opcode payload schemas — `docs/03-network-protocol.md` §9 calls these out as deliberately omitted; would mean walking every opcode's producer/consumer pair to extract the implicit struct layout. The captures + histogram now make this actionable but it's still a large unit of work.
 - Per-ability formula tables in `docs/05-abilities.md` — would need to walk every ability's `CalculateEnergy/Range/ChargeUp/UseSkill` body. Worth doing but it's a large unit of work on its own; the current enumeration + file refs are sufficient for navigation.
 - Mission-flow reverse-engineering (e.g. a full worked example of one mission tree end-to-end) — `docs/13-gameplay-loop.md` §3 is the pointer-level treatment; full walkthrough is a Phase H continuation.

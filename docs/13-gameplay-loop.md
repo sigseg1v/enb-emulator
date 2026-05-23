@@ -96,8 +96,8 @@ skill in `Player::Negotiate()` (PlayerClass.h:737).
 Guild operations are dispatched from a single command handler:
 `Player::HandleGuildCommand()` (PlayerGuild.cpp:56), which
 fans out to `HandleCreateGuild()` (line 66),
-`HandlePromoteMember()` (line 82), `HandleRemoveMember()`
-(line 89), `HandleListAllGuildMembers()` (line 74), etc.
+`HandlePromoteMember()` (line 83), `HandleRemoveMember()`
+(line 91), `HandleListAllGuildMembers()` (line 74), etc.
 
 Guild state loads at boot via
 `PlayerManager::LoadGuildsFromSQL()` (GuildManager.cpp:26) —

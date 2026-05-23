@@ -49,13 +49,15 @@ AbilityEnvironmentShield(Player *me) : AbilityBase(me, STAT_SKILL_ENVIRONMENT_SH
    enum-as-defines).
 3. **Stat skill name** — add `STAT_SKILL_FOO` to the same
    file (line 109 shows `STAT_SKILL_ENVIRONMENT_SHIELD`).
-4. **Dispatcher wiring** — *unclear from code.* The
-   client-side skill dispatcher
-   (`Connection::HandleSkillAbility`) is commented out in
-   `ClientToSectorServer.cpp` (around line 447), so adding an
-   ability won't fire end-to-end until that path is restored.
-   Check with someone who's run abilities recently before
-   shipping.
+4. **Dispatcher wiring** — partially gated. The dispatcher
+   `Connection::HandleSkillAbility()` is defined at
+   `ClientToSectorServer.cpp:925` and called from the opcode
+   handler at `ClientToSectorServer.cpp:772`, but the inner
+   `m_Player->HandleSkillAbility(Ability)` is commented out at
+   line 928 — so the dispatcher fires but the per-ability
+   delegation to `Player` is stubbed. Restoring that line (and
+   wiring whatever `Player::HandleSkillAbility(int)` signature
+   tada-o expects) is what makes a new ability fire end-to-end.
 
 ### DB row?
 

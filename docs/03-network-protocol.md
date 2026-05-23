@@ -545,26 +545,118 @@ in-process. The handlers still exist
 
 ## 8. Captured packets
 
-The kyp snapshot includes three packet captures from the original
-Net-7 emulator. They are not protocol documentation but they are the
-closest thing to ground truth for what the client expects.
+The kyp snapshot includes three packet captures, stored as `.rar`
+archives in `archive/kyp-snapshot/capturedPackets/`:
 
-`archive/kyp-snapshot/capturedPackets/`:
+- `capture_1.rar` (78MB extracted)
+- `capture_2.rar` (8.4MB extracted)
+- `capture_3.rar` (14MB extracted)
 
-- `capture_1.rar`
-- `capture_2.rar`
-- `capture_3.rar`
+The file timestamps (2006-10-29) and the destination IPs they target
+(`159.153.232.*`, the historical EA/Westwood address range) make
+these almost certainly captures of the **original Westwood Earth &
+Beyond servers**, not of Net-7. That makes them more valuable than
+"a Net-7 packet dump" would be — they are the closest thing on disk
+to the original protocol that Net-7 is trying to reimplement.
 
-These are `.rar` archives. They appear to be raw packet dumps
-(format and tool unverified - probably from an EnB-specific sniffer
-shipped with the kyp dev workspace; the `Documents/` directory next
-to them references "PacketCapture" tooling but the exact format is
-unknown from code reading and the captures have not been opened in
-this work).
+### 8.1. Format
 
-If you are working on a new opcode handler, opening these captures and
-comparing them against `Opcodes.h` is the closest thing to authoritative
-protocol documentation that survives.
+Plain-text hex dumps with structural annotations. Each packet block
+is:
+
+```
+-----------------------------------------------------------
+Packet #N: SIZE bytes, Direction  IP:PORT
+-----------------------------------------------------------
+
+ LO HI            Length = N bytes
+ LO HI            Opcode 0xNN = SymbolicName
+ ...hex payload, 16 bytes per line, with ASCII gutter...
+```
+
+For the legacy TCP handshake (port 3801 and per-sector login), the
+annotator labels the Westwood RSA+RC4 stages explicitly:
+
+```
+SYN1 / ACK1 / SYN2 / ACK2  — RSA modulus + exponent exchange
+K1 / K2                    — RC4 session-key derivation
+```
+
+This matches the handshake in `server/src/Connection.cpp::DoKeyExchange`.
+
+### 8.2. Headline numbers
+
+| | capture_1 | capture_2 | capture_3 | total |
+|---|---:|---:|---:|---:|
+| packets | 81,986 | 15,803 | 22,642 | 120,431 |
+| client→server | | | | 54,529 |
+| server→client | | | | 65,902 |
+| distinct opcodes | | | | 95 |
+
+All three captures target the same observed server hosts:
+`159.153.232.{35,38,40,42,44,46,47,146}` on ports `3022, 3029, 3034,
+3088, 3338, 3363, 3387, 3388, 3434, 3500, 3501, 3503, 3505, 3801`.
+The dynamic-per-sector pattern in section 4 holds — sector listeners
+are scattered around `3022-3505` rather than the `3501+` range the
+Net-7 source defaults to.
+
+### 8.3. Opcode frequency (top 25 by count)
+
+Aggregated across all three captures:
+
+| Count | Opcode | Symbolic name | In `Opcodes.h`? |
+|---:|---|---|---|
+| 43,988 | `0x1B` | Aux_Data | yes (`AUX_DATA`) |
+| 41,348 | `0x3E` | Advanced_Positional_Update | yes (`ADVANCED_POSITIONAL_UPDATE`) |
+| 8,834 | `0x0B` | Object_To_Object_Effect | yes (`OBJECT_TO_OBJECT_EFFECT`) |
+| 7,042 | `0x89` | Relationship | yes (`RELATIONSHIP`) |
+| 7,035 | `0x04` | Create | yes (`CREATE`) |
+| 6,542 | `0x64` | ClientDamage | yes (`CLIENT_DAMAGE`) |
+| 4,944 | `0x09` | Object_Effect | yes (`OBJECT_EFFECT`) |
+| 4,291 | `0x40` | Constant_Positional_Update | yes (`CONSTANT_POSITIONAL_UPDATE`) |
+| 4,048 | `0x1D` | Message_String | yes (`MESSAGE_STRING`) |
+| 3,794 | `0x25` | ItemBase | yes (`ITEM_BASE`) |
+| 3,756 | `0x07` | Remove | yes (`REMOVE`) |
+| 3,017 | `0x5A` | VerbRequest | yes (`VERB_REQUEST`) |
+| 2,961 | `0x97` | GalaxyMap | yes (`GALAXY_MAP`) |
+| 2,059 | `0x99` | Navigation | yes (`NAVIGATION`) |
+| 1,904 | `0x0E` | Object_To_Object_Duration_Linked_Effect | yes |
+| 1,655 | `0x5C` | VerbUpdate | yes (`VERB_UPDATE`) |
+| 1,581 | `0x9E` | Starbase_Avatar_Change | yes |
+| 1,399 | `0x6A` | Client_Sound | yes (`CLIENT_SOUND`) |
+| 1,397 | `0x19` | Set_Target | yes (`SET_TARGET`) |
+| 1,324 | `0xA5` | ClientChatEvent | yes (`CLIENT_CHAT_EVENT`) |
+| 1,262 | `0x17` | Request_Target | yes (`REQUEST_TARGET`) |
+| 1,097 | `0x20` | PriorityMessageLine | yes |
+| 973 | `0x92` | CameraControl | yes (`CAMERA_CONTROL`) |
+| 732 | `0x2C` | Action | yes (`ACTION`) |
+| 727 | `0x9C` | Warp_Index | yes (`WARP_INDEX`) |
+
+Quick reading: the captures are dominated by per-tick state updates
+(`Aux_Data` + `Advanced_Positional_Update` are 71% of all packets),
+which matches what the source does — `PlayerManager::RunMovementThread`
+flushes those every 100ms.
+
+### 8.4. Workflow for opening a capture
+
+```sh
+cd archive/kyp-snapshot/capturedPackets/
+unrar x capture_1.rar           # extracts to capture_1.txt (~78MB)
+less +/Opcode capture_1.txt     # jump to first annotated opcode
+```
+
+To regenerate the histogram above:
+
+```sh
+grep -hE "Opcode 0x[0-9A-Fa-f]+ =" capture_*.txt \
+  | sed -E "s/.*(Opcode 0x[0-9A-Fa-f]+ = [A-Za-z0-9_]+).*/\1/" \
+  | sort | uniq -c | sort -rn
+```
+
+If you are working on a new opcode handler, the captures plus
+`server/src/Opcodes.h` plus the producer/consumer pair in the C++
+source are jointly the authoritative reference for what the client
+expects.
 
 ---
 

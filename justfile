@@ -96,16 +96,16 @@ push:
 
 # ---- lint ----
 
-# Lint: clang-format (new code only), dotnet format, shellcheck.
+# Lint: clang-format (new code only) + shellcheck. dotnet format is not
+# run here because it does not yet understand the .slnx solution format
+# we adopted in Phase D — re-enable when that lands upstream.
 lint:
     -clang-format --dry-run --Werror tests/**/*.cpp server/compat/*.h 2>/dev/null
-    -dotnet format tools/Net7Tools.slnx --verify-no-changes --no-restore
     shellcheck client/linux-installer/install-enb-linux.sh
 
-# Apply clang-format + dotnet format in place.
+# Apply clang-format in place to new code we own.
 format:
     -clang-format -i tests/**/*.cpp server/compat/*.h
-    -dotnet format tools/Net7Tools.slnx --no-restore
 
 # ---- housekeeping ----
 

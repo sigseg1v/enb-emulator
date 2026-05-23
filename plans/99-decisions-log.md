@@ -112,3 +112,18 @@ Deferred: packet-capture-based deepening of `03-network-protocol.md` is blocked 
 ## 2026-05-22 — Phase D: WFO1000 patched in source, not just suppressed
 
 WFO1000 (WinForms designer code-serialization analyzer) is emitted as an error in .NET 8+ even with `NoWarn` and `WarningsNotAsErrors` set. Two `FormUpdate.cs` files (launchnet7, toolslauncher) trigger it on a `bool AreDetailsVisible` property the original code uses for state, not designer markup. We added `[DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]` directly on the property. The runtime behavior is identical (the designer wouldn't have serialized this anyway); the attribute is what the analyzer wants to see.
+
+## 2026-05-23 — Verification pass: all phases re-verified against real builds; Phase H packet captures unblocked
+
+After the user installed the full dev dependency set (cmake/ninja/clang, OpenSSL 3 dev, libpqxx, libmysqlclient, lua5.4, tinyxml, crypto++, postgresql-client, unrar, .NET 10 SDK), every previously-scaffolded phase was re-checked against the actual toolchain rather than against doc claims:
+
+- **Phase B (server build)**: `cmake --build build/server` produces `[178/178] Linking CXX executable net7` and a 13 MB ELF that prints its usage banner. The earlier "best-effort, may fail mid-build" caveat is obsolete — server links clean.
+- **Phase C (Postgres)**: `psql -f db/postgres/schema.sql` applies 71/71 tables clean against a freshly-launched Postgres 16 (worked around a host-port collision on 5432 by binding the dev container to 127.0.0.1:5433).
+- **Phase D (.NET 10 tools)**: `dotnet build tools/Net7Tools.slnx` succeeds with 0 errors and ~4489 CA1416 platform warnings (expected — WinForms on Linux).
+- **Phase G (tests)**: all 6 gtest cases pass via ctest, including the env-gated libpq Postgres smoke (with `NET7_TEST_DB_DSN` pointed at the Phase-C container).
+- **Phase H (captures)**: with `unrar` available, extracted all three captures (78 MB + 8.4 MB + 14 MB), confirmed 120,431 packets / 95 distinct opcodes, and rewrote `docs/03-network-protocol.md` §8 with a real histogram cross-referenced against `Opcodes.h`. Captures' destination IPs (159.153.232.* / EA-Westwood range, 2006-dated) suggest these are original-server traces, which is more authoritative than Net-7 self-captures would have been.
+- **Phase I (lint)**: `pre-commit run --all-files` clean after adding excludes for vendored autotools scripts.
+
+Two real bugs surfaced during verification, both fixed:
+- `just lint` / `just format` invoked `dotnet format` against the `.slnx` solution — `dotnet format` does not yet understand `.slnx`. Removed from both targets with an inline comment noting why.
+- `docs/14-extending.md` claimed `HandleSkillAbility` was at "ClientToSectorServer.cpp:447, commented out". Actual: defined at line 925, called at line 772, inner `m_Player->HandleSkillAbility(Ability)` delegation commented at line 928. Doc text corrected.
