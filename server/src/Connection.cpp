@@ -605,3 +605,12 @@ char *Connection::GetLogInfo()
 	sprintf_s(m_loginfo, sizeof(m_loginfo), "[TCP port:%d IP:%3d.%3d.%3d.%3d id:%08x acc:%16s this:%08x] ", m_TcpPort, ip[0], ip[1], ip[2], ip[3], m_AvatarID, m_AccountUsername ? m_AccountUsername : "?", this);
 	return m_loginfo;
 }
+
+// kyp-era inter-server opcodes — both MasterServerToSectorServer.cpp and
+// SectorServerToSectorServer.cpp wrap their definitions in #if 0, so the
+// only way the build link succeeds is for the dispatcher above (lines 444,
+// 448) to call something that exists. tada-o appears to no longer use the
+// master/sector hand-off these dispatched (standalone server only); provide
+// empty stubs.
+void Connection::ProcessMasterServerToSectorServerOpcode(short /*opcode*/, short /*bytes*/) { }
+void Connection::ProcessSectorServerToSectorServerOpcode(short /*opcode*/, short /*bytes*/) { }

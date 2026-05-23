@@ -53,6 +53,15 @@ list(FILTER NET7_SRC EXCLUDE REGEX "/src/LUA/lua/msvc-")
 # but exclude from the build. (Their *_DEP_.cpp source still references the
 # pre-rename header name and won't compile.)
 list(FILTER NET7_SRC EXCLUDE REGEX "_DEP_\\.cpp$")
+# Equipable.cpp / CMobEquippable.cpp are duplicate implementations of the
+# same class. Their respective headers Equipable.h and CMobEquippable.h
+# share the include guard _EQUIPABLE_H_INCLUDED_, so each translation unit
+# sees only whichever header it picked up first. PlayerClass.h (transitively
+# pulled in by most of the server) includes CMobEquippable.h first, so the
+# kyp-era version is what callers expect to link against. Exclude the
+# Equipable.cpp duplicate to avoid 35 ODR / multiple-definition errors.
+# The authoritative pair is server/src/CMobEquippable.{h,cpp}.
+list(FILTER NET7_SRC EXCLUDE REGEX "/src/Equipable\\.cpp$")
 
 # Compat shim sources (real implementations, not just headers).
 file(GLOB NET7_COMPAT_SRC CONFIGURE_DEPENDS

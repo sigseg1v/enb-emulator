@@ -34,15 +34,15 @@ Goal: get the C++ server building on Linux as far as practical in one invocation
 
 ### B3 — Build iteration
 
-- [ ] `cmake -S server -B build/server -G Ninja` succeeds (configure step).
+- [x] `cmake -S server -B build/server -G Ninja` succeeds (configure step).
       Touches: server/CMakeLists.txt
-      Notes:
-- [ ] `cmake --build build/server` produces first error log. Capture in `server/BUILD_ERRORS.md` with grouping by error class.
+      Notes: Done in earlier waves; runs cleanly inside the build docker image.
+- [x] `cmake --build build/server` produces first error log. Capture in `server/BUILD_ERRORS.md` with grouping by error class.
       Touches: server/BUILD_ERRORS.md
-      Notes:
-- [ ] Iterate fix waves. Commit after each wave with running count: "Phase B: build errors X → Y".
+      Notes: First wave logged ~600+ errors; categorized and worked down across waves 1-12.
+- [x] Iterate fix waves. Commit after each wave with running count: "Phase B: build errors X → Y".
       Touches: server/src/, server/compat/
-      Notes:
+      Notes: Trajectory: 600+ → 466 → 159 → 213 → 15 → 0 compile errors. As of wave 12 (commit 9090889) ALL compile errors resolved; build proceeds to link step. Link errors are now mysqlclient symbols, addressed by linking libmysqlclient via wave 13.
 
 ### B4 — Stop conditions
 
