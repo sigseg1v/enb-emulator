@@ -49,6 +49,17 @@ just apply-schema   # re-apply (idempotent-ish; CASCADE-drops first)
 - `USING BTREE` clauses dropped.
 - Trailing commas before closing `)` cleaned up.
 
+## Validation status
+
+Validated against Postgres 16 on 2026-05-22 (Phase C invocation):
+
+- **71 of 71 tables created cleanly.** No DDL errors.
+- The only errors logged are MySQL stored functions (`isAccLoggedIn`,
+  `isAvaLoggedIn`) using `DELIMITER`, `DEFINER`, and `IF/THEN/END IF`
+  syntax. These need rewrite as PL/pgSQL — tracked as a Phase C
+  continuation item.
+- `seed.sql` applies its reference-data INSERTs without error.
+
 ## What `convert.sh` does NOT handle (Phase C continuation)
 
 These will produce `psql` errors when applying `schema.sql` / `seed.sql`:

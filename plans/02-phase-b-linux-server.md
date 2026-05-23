@@ -46,16 +46,20 @@ Goal: get the C++ server building on Linux as far as practical in one invocation
 
 ### B4 — Stop conditions
 
-- [ ] Stop iterating when: (a) server links, (b) error count plateaus across 3 consecutive waves, or (c) context budget low.
-      Notes:
-- [ ] Final `BUILD_ERRORS.md` update enumerating remaining error classes and a hand-off list for Phase B continuation in a future invocation.
+- [x] Stop iterating when: (a) server links, (b) error count plateaus across 3 consecutive waves, or (c) context budget low.
+      Notes: **Met condition (a): wave 15 produces a 14 MB `net7` ELF that prints its usage text. Commit aa5fd2c.**
+- [x] Final `BUILD_ERRORS.md` update enumerating remaining error classes and a hand-off list for Phase B continuation in a future invocation.
       Touches: server/BUILD_ERRORS.md
-      Notes:
+      Notes: Written; lists 7 categories of remaining hand-off work (mailslot IPC, CreateProcess, kyp-era stubs, mysqlclient, OpenSSL 3.x compat, etc.).
 
 ## Verification (Phase B done for now when)
 
-- `cmake -S server -B build/server` configures cleanly.
-- `cmake --build build/server 2>&1 | tee server/BUILD_ERRORS.md` runs to completion (errors are fine; crashes/configure failures aren't).
-- `server/compat/WIN32_INVENTORY.md` and `server/BUILD_ERRORS.md` are committed.
-- Master plan updated.
-- Proceed to Phase C without stopping.
+- [x] `cmake -S server -B build/server` configures cleanly. (Done inside docker build.)
+- [x] `cmake --build build/server` runs to completion. (Wave 15: `[178/178] Linking CXX executable net7`.)
+- [x] `server/BUILD_ERRORS.md` committed. (`WIN32_INVENTORY.md` skipped — inventory ended up inline in the Net7.h shim block rather than a separate file.)
+- [x] Master plan updated. (Phase B → complete in 00-master.md.)
+- [x] Proceed to Phase C without stopping.
+
+## Outcome
+
+Phase B reached its "best-effort" target ahead of expectations: the server not only compiles but also links and starts. The binary prints its usage banner when invoked without args. Runtime correctness for any code path exercising the stubbed kyp-era functions (mailslot, CreateProcess, Player::SetTCPTerminate/AddScanSkill/etc.) will silently no-op — see `server/BUILD_ERRORS.md` for the hand-off list. Phase E will address the OpenSSL 1.0 compat shim; Phase C replaces the mysqlclient link with libpqxx.
