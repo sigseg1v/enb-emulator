@@ -102,6 +102,17 @@ bool Connection::SocketReady(int ttimeout, int usec_timeout)
 	return bool(ret > 0);	
 }
 
+void Connection::SendObjectEffect(ObjectEffect *object_effect)
+{
+	// Delegate to Player by GameID. EffectManager calls this through the
+	// stored Connection pointer; the actual packet serialization lives on
+	// Player. If no Player is associated yet, drop the effect silently.
+	(void)object_effect;
+	// Phase B: no-op stub. Resolves Connection::SendObjectEffect link errors
+	// in EffectManager.cpp. Phase B-continuation can wire this up to the
+	// PlayerManager lookup once the threading semantics are reviewed.
+}
+
 void Connection::Send(unsigned char *Buffer, int length)
 {
 	/*

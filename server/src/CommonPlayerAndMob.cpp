@@ -125,7 +125,7 @@ void CommonPlayerAndMob::RecalculateShieldRegen()
 	float RechargeShield = m_Stats.GetStat(STAT_SHIELD_RECHARGE);
 	float StartValue = GetShield();
 	float ChargeRate = (RechargeShield / MaxShield) / 1000.0f;
-	unsigned long EndTime = GetNet7TickCount() + unsigned long((1.0f - StartValue) / ChargeRate);
+	unsigned long EndTime = GetNet7TickCount() + (unsigned long)((1.0f - StartValue) / ChargeRate);
 	ShieldUpdate(EndTime, ChargeRate, StartValue);
 }
 

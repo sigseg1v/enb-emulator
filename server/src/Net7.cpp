@@ -13,7 +13,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -417,7 +417,7 @@ void LaunchNet7SSL()
 {
 	char cmd[MAX_PATH];
 	char app_path[MAX_PATH];
-	STARTUPINFO si = {NULL};
+	STARTUPINFO si = {0};
 	GetCurrentDirectory(MAX_PATH, app_path);
 
 	strcpy_s(cmd, sizeof(cmd), "Net7SSL.exe");
@@ -479,7 +479,7 @@ void TerminateNet7SSL()
 #ifndef WIN32
 unsigned long GetCurrentDirectory(unsigned long size, char *path)
 {
-    if (getcwd(path, size) < 0)
+    if (getcwd(path, size) == NULL)
     {
         return 0;
     }

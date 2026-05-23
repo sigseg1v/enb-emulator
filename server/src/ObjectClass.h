@@ -13,7 +13,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -136,6 +136,11 @@ public:
 	bool			GetClassSpecific()							{ return m_ClassSpecific; };
 
 	virtual float	GetShieldLevel()							{ return 0.0f; };
+
+	// DamageMOB: overridden by MOB. Equipable.cpp calls this on a generic
+	// Object pointer. No-op default so non-MOB Objects ignore damage.
+	virtual void	DamageMOB(long /*attacker_id*/, long /*damage_type*/,
+								float /*damage*/, long /*flags*/ = 0) { }
 
     virtual void    SetDestination(long destination_sector)     { };
     virtual void    SetAppearsInRadar()                         { };

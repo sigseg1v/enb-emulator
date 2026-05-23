@@ -49,6 +49,10 @@ list(FILTER NET7_SRC EXCLUDE REGEX "/src/Debug/")
 list(FILTER NET7_SRC EXCLUDE REGEX "/src/Release/")
 list(FILTER NET7_SRC EXCLUDE REGEX "/src/LUA/luabind/msvc-")
 list(FILTER NET7_SRC EXCLUDE REGEX "/src/LUA/lua/msvc-")
+# Files renamed to *_DEP_.{cpp,h} are deprecated — keep around for reference
+# but exclude from the build. (Their *_DEP_.cpp source still references the
+# pre-rename header name and won't compile.)
+list(FILTER NET7_SRC EXCLUDE REGEX "_DEP_\\.cpp$")
 
 # Compat shim sources (real implementations, not just headers).
 file(GLOB NET7_COMPAT_SRC CONFIGURE_DEPENDS
@@ -109,6 +113,19 @@ if(NOT PostgreSQL_FOUND)
     message(STATUS "net7: PostgreSQL client lib not found (Phase C concern).")
 endif()
 
+# libmysqlclient — server/src/mysql/mysqlplus.cpp wraps the C API. Phase C
+# replaces this with libpqxx; for Phase B we link the stock C client lib so
+# the binary actually produces an executable.
+find_library(MYSQLCLIENT_LIB NAMES mysqlclient)
+find_path(MYSQLCLIENT_INCLUDE_DIR mysql.h PATH_SUFFIXES mysql)
+if(MYSQLCLIENT_LIB)
+    message(STATUS "net7: mysqlclient: ${MYSQLCLIENT_LIB}")
+else()
+    message(WARNING
+        "net7: libmysqlclient not found. Install libmysqlclient-dev. "
+        "Link will fail.")
+endif()
+
 # --------------------------------------------------------------------------
 # Target
 # --------------------------------------------------------------------------
@@ -164,6 +181,13 @@ target_link_libraries(net7 PRIVATE
     ${CRYPTOPP_LIBRARIES}
     dl
 )
+
+if(MYSQLCLIENT_LIB)
+    target_link_libraries(net7 PRIVATE ${MYSQLCLIENT_LIB})
+    if(MYSQLCLIENT_INCLUDE_DIR)
+        target_include_directories(net7 PRIVATE ${MYSQLCLIENT_INCLUDE_DIR})
+    endif()
+endif()
 
 if(TinyXML_FOUND)
     target_link_libraries(net7 PRIVATE ${TinyXML_LIBRARIES})

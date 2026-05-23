@@ -3,7 +3,7 @@
 #ifndef _HULK_CLASS_H_INCLUDED_
 #define _HULK_CLASS_H_INCLUDED_
 
-#include "AuxHulk.h"
+#include "AuxClasses/AuxHulkIndex.h"
 #include "ObjectClass.h"
 
 class Hulk : public Object
@@ -13,7 +13,7 @@ public:
     virtual ~Hulk();
 
 private:
-	AuxHulk	m_AuxHulk;			// aux to hulk
+	AuxHulkIndex	m_AuxHulk;	// aux to hulk (renamed from AuxHulk; class is AuxHulkIndex)
 
 };
 

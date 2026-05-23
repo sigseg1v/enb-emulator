@@ -12,7 +12,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -885,6 +885,7 @@ bool Player::CheckMiningConditions(long slot, float reactor_energy)
 {
     Object *obj = GetObjectManager()->GetObjectFromID(ShipIndex()->GetTargetGameID());
     bool fail = false;
+    ItemBase * itembase = NULL; // declared before any goto bailout below
 
 	if (!obj)
 	{
@@ -892,8 +893,8 @@ bool Player::CheckMiningConditions(long slot, float reactor_energy)
         fail = true;
         goto bailout;
     }
-		
-	ItemBase * itembase = obj->GetItem(slot);
+
+	itembase = obj->GetItem(slot);
     
     if (itembase == 0 || obj->GetStack(slot) == 0 || slot >= MAX_ITEMS_PER_RESOURCE || (obj->ObjectType() != OT_HULK && obj->ObjectType() != OT_RESOURCE))
     {

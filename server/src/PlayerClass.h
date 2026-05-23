@@ -13,7 +13,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -475,6 +475,14 @@ public:
     void        ClearPrices();
 	bool		CheckForInstalls();
 	void		FinishAllInstalls();
+
+	// kyp-era stubs referenced from Connection.cpp / Equipable.cpp. tada-o
+	// rewired or dropped these but kyp call sites still exist; provide
+	// no-op declarations and inline empty defs so the build links.
+	void		SetTCPTerminate()				{ }
+	void		ChangeProspectSkill(float)		{ }
+	void		AddScanSkill(float)				{ }
+	void		ChangeTractorBeamSpeed(float)	{ }
     //save/load status
 	void		LoadGMItems();
 	void		SaveWarnLvl(long WarnChar, long warn_inc, char *WMsg);

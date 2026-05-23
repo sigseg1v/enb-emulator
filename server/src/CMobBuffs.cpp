@@ -12,7 +12,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -199,7 +199,8 @@ int CMobBuffs::_AddBuff(struct Buff *AddBuff, int colour, char *StatSource)
 	
 	if(!AddBuff->IsPermanent)
 	{
-		m_expireTimes.insert(pair<long,int>(AddBuff->ExpireTime,m_BuffID));
+		long expire = AddBuff->ExpireTime; // copy out of packed struct
+		m_expireTimes.insert(pair<long,int>(expire,m_BuffID));
 	}
 
 	m_BuffID++;
@@ -247,7 +248,8 @@ int CMobBuffs::RefreshOrAddBuff(struct Buff *RefreshBuff)
 
 			if(!mapbuff->BuffData.IsPermanent)
 			{
-				m_expireTimes.insert(pair<long,int>(mapbuff->BuffData.ExpireTime,Buff->first));
+				long expire = mapbuff->BuffData.ExpireTime; // copy out of packed struct
+				m_expireTimes.insert(pair<long,int>(expire,Buff->first));
 			}
 
 			if (player)

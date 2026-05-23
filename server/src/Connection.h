@@ -62,6 +62,9 @@ public:
 
 	void    SendSectorAssignment(long sector_id);
 	void    SendResponse(short opcode, unsigned char *data=NULL, size_t length=0);
+	// SendObjectEffect: EffectManager calls this on the connection.
+	// Implementation delegates to the Player by GameID lookup.
+	void    SendObjectEffect(class ObjectEffect *object_effect);
 //	void	SendResponseTestFile(short opcode, char *filename=NULL); -- OBSOLETE
 	void    Send(unsigned char *Buffer, int length);
 

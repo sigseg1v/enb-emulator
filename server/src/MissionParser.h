@@ -12,7 +12,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 #ifndef _MISSIONPARSER_H
@@ -42,6 +42,12 @@
 #include "MissionManager.h"
 
 struct SectorData;
+
+// MissionList: the original struct was commented out (lines 54-146); the
+// public method GetMissionList() and member m_MissionList still reference
+// it. Restore a working typedef so the class compiles.
+class Mission;
+typedef std::vector<Mission*> MissionList;
 
 class MissionParser :
 	protected  XmlParser

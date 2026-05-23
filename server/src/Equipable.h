@@ -12,7 +12,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 #ifndef _EQUIPABLE_H_INCLUDED_
@@ -108,6 +108,12 @@ private:
     void RemoveItemStateFlag(unsigned long);
 
     void RemoveTimeNode(TimeNode *node);
+    // No-arg overload (definition lives in Equipable.cpp:1688).
+    void RemoveTimeNode();
+
+    // CheckForItem: kyp-era code uses this for item description matching;
+    // declared here so callers in Equipable.cpp link.
+    bool CheckForItem(char *description, char *search);
 
     void Activate();
 	bool Reload(unsigned int quantity);
@@ -154,6 +160,10 @@ private:
 
     TimeNode *m_EquipTimeNode;
 	TimeNode *m_CoolDownNode;
+    // Equipable.cpp uses m_TimeNode as a value-typed scratch TimeNode for
+    // both Install and EquipDevice paths. Keep alongside the pointer
+    // members; semantics get cleaned up in a follow-up pass.
+    TimeNode m_TimeNode;
 
     AuxEquipItem * m_AuxEquipItem;
     AuxItem * m_AuxAmmoItem;

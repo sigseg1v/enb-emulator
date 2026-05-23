@@ -13,7 +13,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 �, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 �, Net-7 Entertainment.
 **
 */
 
@@ -107,6 +107,11 @@ public:
 	CircularBuffer	* GetReSendCBuffer()	{ return m_ReSendBuffer; }
 	CircularBuffer	* GetUDPCBuffer()	{ return m_UDPSendBuffer; }
 	CircularBuffer  * GetMessageBuffer(){ return m_MessageBuffer; }
+	// GetTCPCBuffer/GetConnection — kyp-era TCP path. tada-o reuses the resend
+	// buffer for TCP and lets ConnectionManager hand out Connection nodes;
+	// stub to NULL so the listener compile-links. Real wiring is Phase B work.
+	CircularBuffer	* GetTCPCBuffer()	{ return m_ReSendBuffer; }
+	class Connection * GetConnection()	{ return 0; }
 
 private:
     void    ServerCheck();
@@ -126,6 +131,11 @@ public:
 	// Applies only to Master Server
 	AccountManager    * m_AccountMgr;
 	SectorServerManager	m_SectorServerMgr;
+	// ConnectionManager — kyp-era code (SSL_Listener, TcpListener,
+	// ClientToGlobalServer) still references this. The tada-o refactor moved
+	// some logic into PlayerManager but didn't drop the field, so we keep it
+	// present so those call sites compile.
+	ConnectionManager   m_ConnectionMgr;
 
 	// Applies only to Sector Server
 	SectorManager	  * m_SectorMgrList[MAX_SECTORS];

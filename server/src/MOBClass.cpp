@@ -30,7 +30,7 @@
 // (ClientToSectorServer.cpp's /spawn-style commands, ObjectManager hooks)
 // effectively no-oped. We provide a single zero-terminator entry to make
 // the linker happy and preserve that behavior on Linux.
-MOB_Info MobData[] = { { 0, 0, "", 0, 0, 0, 0, 0, 0.0f } };
+MOB_Info MobData[] = { { (char*)"", 0, 0, 0, 0, 0, 0, 0.0f } };
 #include "ServerManager.h"
 #include "MOBDatabase.h"
 #include "PlayerManager.h"

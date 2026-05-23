@@ -1077,7 +1077,7 @@ char *PlayerManager::WhoHtml(size_t *response_length)
 		{
 			if (p)
 			{
-				in.S_un.S_addr = p->PlayerIPAddr();
+				in.s_addr = p->PlayerIPAddr();
 				sprintf_s(data, length, 
 					"%s		<player name=\"%s\" ip=\"%s\" clevel=\"%d\" elevel=\"%d\" tlevel=\"%d\" "
 					"race=\"%d\" profession=\"%d\"/>\r\n", 
@@ -1087,7 +1087,7 @@ char *PlayerManager::WhoHtml(size_t *response_length)
 			} 
             else 
             {
-				in.S_un.S_addr = 0;
+				in.s_addr = 0;
             }
             //strcat(data, "      <player name=\"");
             //strcat(data, p->Database()->avatar.avatar_first_name);

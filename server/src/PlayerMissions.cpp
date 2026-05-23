@@ -12,7 +12,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 #include <float.h>
@@ -1546,9 +1546,12 @@ void Player::EndStageReward(long mission_id, long stage, long slot)
 					break;
 
 				case ITEM_BLUEPRINT:
-					m_ManuRecipes.insert(pair<int,int>(rNode->data,1));	// Unlock a scmatic
-					SaveNewRecipe(rNode->data);				            // Save the scamatic
+				{
+					int recipe = rNode->data; // copy out of packed struct
+					m_ManuRecipes.insert(pair<int,int>(recipe,1));	// Unlock a scmatic
+					SaveNewRecipe(recipe);				            // Save the scamatic
 					break;
+				}
 
 				case AWARD_SKILL:
 					if (PlayerIndex()->RPGInfo.Skills.Skill[rNode->data].GetAvailability()[0] == 3)

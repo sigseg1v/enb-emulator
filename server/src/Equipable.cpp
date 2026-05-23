@@ -504,7 +504,7 @@ void Equipable::Hack(unsigned long InstallDelay)
 
 }
 
-void Equipable::FinishInstall(Player *update)
+void Equipable::FinishInstall(Player *update, int /*Slot*/)
 {
 	/* Remove our time node */
 	RemoveTimeNode();
@@ -795,7 +795,7 @@ bool Equipable::UseDevice(Object * Target)
 		ItemBuff.BuffType[127]='\0';
 		// Calculate ready time 
 		unsigned long myTime = GetNet7TickCount();
-		m_ReadyTime = myTime + unsigned long(m_ItemBase->ActivatableRechargeTime() * 1000.0f);
+		m_ReadyTime = myTime + (unsigned long)(m_ItemBase->ActivatableRechargeTime() * 1000.0f);
 
 		float Duration = 0.0f;
 		int statNum = 0;
@@ -961,7 +961,7 @@ bool Equipable::UseWeapon(Object * Target)
     {
         if (p->FireEnergyCannon(&m_ItemInstance))
         {
-            m_ReadyTime = GetNet7TickCount() + unsigned long(m_ItemInstance.WeaponReload * 1000.0f);
+            m_ReadyTime = GetNet7TickCount() + (unsigned long)(m_ItemInstance.WeaponReload * 1000.0f);
             return true;
         }
         else
@@ -1072,7 +1072,7 @@ bool Equipable::UseWeapon(Object * Target)
 		// cap to double firing rate
 		if (turboAmount > 50.0f)
 			turboAmount = 50.0f;
-		m_ReadyTime = myTime + unsigned long(m_ItemInstance.WeaponReload * 1000.0f * (1.0f-turboAmount/100));
+		m_ReadyTime = myTime + (unsigned long)(m_ItemInstance.WeaponReload * 1000.0f * (1.0f-turboAmount/100));
 
 		int AmmoShots = m_ItemBase->Fields(22)->iData;
 		m_Target = p->ShipIndex()->GetTargetGameID();
@@ -1524,7 +1524,7 @@ void Equipable::SetStats(bool Remove)
 				}
 
     			float ChargeRate = (RechargeShield / MaxShield) / 1000.0f;
-				unsigned long EndTime = GetNet7TickCount() + unsigned long((1.0f - StartValue) / ChargeRate);
+				unsigned long EndTime = GetNet7TickCount() + (unsigned long)((1.0f - StartValue) / ChargeRate);
 
 				p->ShieldUpdate(EndTime, ChargeRate, StartValue);
 
@@ -1559,7 +1559,7 @@ void Equipable::SetStats(bool Remove)
 				}
 
 				float ChargeRate = (RechargeEnergy / MaxEnergy) / 1000.0f;
-				unsigned long EndTime = GetNet7TickCount() + unsigned long((1.0f - StartValue) / ChargeRate);
+				unsigned long EndTime = GetNet7TickCount() + (unsigned long)((1.0f - StartValue) / ChargeRate);
 
 				p->EnergyUpdate(EndTime, ChargeRate, StartValue);
 

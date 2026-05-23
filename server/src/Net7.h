@@ -109,6 +109,10 @@
     	#define BOOL			bool
 	#define u64				u_int64_t
 	#define s64				int64_t
+	// MSVC integer typedefs.
+	typedef int64_t  __int64;
+	typedef int32_t  __int32;
+	typedef int16_t  __int16;
     	#define u32				u_int32_t
 	#define s32				int32_t
 	#define u16				u_int16_t
@@ -131,6 +135,8 @@
 	#include <netdb.h>
 	#include <pthread.h>
 	#include <unistd.h>
+	#include <cstdint>     // uintptr_t for _beginthreadex shim
+	#include <sys/ioctl.h> // FIONBIO for ioctlsocket shim
 
 	#define SERVER_LOGS_PATH        "../logs/"
 	#define SERVER_HTML_PATH        "../html/"
@@ -234,6 +240,133 @@
 	int SetCurrentDirectory(const char *path);
 	void Sleep(unsigned long dwMilliseconds);
 	bool DeleteFile(const char *filename);
+
+	// Win32 error / handle / process / mailslot API stubs.
+	// These are not functional on Linux; they exist so the legacy code
+	// compiles. Phase B-continuation replaces the call sites with POSIX
+	// equivalents (Unix domain sockets for mailslots, etc.).
+	static inline unsigned long GetLastError() { return (unsigned long)errno; }
+	static inline int CloseHandle(HANDLE) { return 1; }
+	#define WAIT_TIMEOUT 258
+	#define WAIT_OBJECT_0 0
+	#define INFINITE 0xFFFFFFFFU
+	#define ERROR_ALREADY_EXISTS 183
+	#define ERROR_INSUFFICIENT_BUFFER 122
+
+	// fopen_s / memcpy_s / sscanf_s — MSVC bounds-checked variants
+	#include <stdio.h>
+	#include <string.h>
+	static inline int fopen_s(FILE **pFile, const char *filename, const char *mode) {
+		if (!pFile) return 22;
+		*pFile = fopen(filename, mode);
+		return *pFile ? 0 : errno;
+	}
+	static inline int memcpy_s(void *dst, size_t dstSize, const void *src, size_t srcSize) {
+		if (!dst || !src) return 22;
+		if (srcSize > dstSize) return 34;
+		memcpy(dst, src, srcSize);
+		return 0;
+	}
+	#define sscanf_s sscanf
+	#define _strnicmp strncasecmp
+
+	// TCHAR / TEXT — Win32 wide-vs-narrow string macros. Treat as narrow.
+	typedef char TCHAR;
+	#define TEXT(x) x
+	#define _TEXT(x) x
+	#define _T(x) x
+
+	// Win32 thread / process bring-up. _beginthreadex returns a HANDLE-ish.
+	#include <pthread.h>
+	struct _STARTUPINFOA { unsigned long cb; };
+	typedef struct _STARTUPINFOA STARTUPINFO;
+	typedef struct _STARTUPINFOA STARTUPINFOA;
+	typedef struct {
+		HANDLE hProcess;
+		HANDLE hThread;
+		unsigned long dwProcessId;
+		unsigned long dwThreadId;
+	} PROCESS_INFORMATION;
+	typedef struct { unsigned short wYear, wMonth, wDayOfWeek, wDay, wHour, wMinute, wSecond, wMilliseconds; } SYSTEMTIME;
+	typedef void* LPSECURITY_ATTRIBUTES;
+	#define CREATE_DEFAULT_ERROR_MODE 0
+	static inline uintptr_t _beginthreadex(void*, unsigned, unsigned (__stdcall *)(void*), void*, unsigned, unsigned*) { return 0; }
+	static inline int TerminateProcess(HANDLE, unsigned int) { return 0; }
+	static inline int WriteFile(HANDLE, const void*, unsigned long, unsigned long*, void*) { return 0; }
+	static inline HANDLE CreateMutex(LPSECURITY_ATTRIBUTES, int, const char*) { errno = 0; return INVALID_HANDLE_VALUE; }
+	static inline int CreateProcess(const char*, char*, void*, void*, int, unsigned long, void*, void*, STARTUPINFO*, PROCESS_INFORMATION*) { return 0; }
+	static inline HANDLE CreateMailslot(const char*, unsigned long, unsigned long, LPSECURITY_ATTRIBUTES) { return INVALID_HANDLE_VALUE; }
+	#define MAILSLOT_WAIT_FOREVER ((unsigned long)-1)
+	#define MAILSLOT_NO_MESSAGE ((unsigned long)-1)
+	static inline int GetMailslotInfo(HANDLE, unsigned long*, unsigned long*, unsigned long*, unsigned long*) { return 0; }
+
+	// File API stubs — these never actually do anything on Linux. Call sites
+	// for CreateFile/ReadFile/WriteFile are the mailslot/IPC ones that need
+	// a real POSIX replacement in Phase B-continuation.
+	#define GENERIC_READ  0x80000000U
+	#define GENERIC_WRITE 0x40000000U
+	#define FILE_SHARE_READ  0x1U
+	#define FILE_SHARE_WRITE 0x2U
+	#define FILE_ATTRIBUTE_NORMAL 0x80U
+	#define OPEN_EXISTING 3
+	#define CREATE_ALWAYS 2
+	#define CREATE_SUSPENDED 0x4U
+	struct _OVERLAPPED { unsigned long Internal, InternalHigh, Offset, OffsetHigh; HANDLE hEvent; };
+	typedef struct _OVERLAPPED OVERLAPPED;
+	typedef OVERLAPPED *LPOVERLAPPED;
+	typedef unsigned long *LPDWORD;
+	typedef long LPARAM;
+	typedef unsigned int WPARAM;
+	static inline HANDLE CreateFile(const char*, unsigned long, unsigned long, LPSECURITY_ATTRIBUTES, unsigned long, unsigned long, HANDLE) { return INVALID_HANDLE_VALUE; }
+	static inline int ReadFile(HANDLE, void*, unsigned long, unsigned long*, LPOVERLAPPED) { return 0; }
+	static inline unsigned long ResumeThread(HANDLE) { return (unsigned long)-1; }
+
+	// socket / select compat
+	#define SD_BOTH SHUT_RDWR
+	// FIONBIO is in <sys/ioctl.h>. ioctlsocket -> ioctl on a fd.
+	static inline int ioctlsocket(int sock, long cmd, unsigned long *argp) {
+		return ::ioctl(sock, cmd, argp);
+	}
+
+	// MAXINT/_mkdir/lstrlen/_access — old MSVC names.
+	#include <sys/stat.h>
+	#include <sys/types.h>
+	#include <unistd.h> // access()
+	#define MAXINT 0x7FFFFFFF
+	#define _mkdir(p) mkdir((p), 0755)
+	#define lstrlen strlen
+	#define _access access
+
+	// CreateEvent — no real event-object semantics on Linux; stub to invalid.
+	static inline HANDLE CreateEvent(LPSECURITY_ATTRIBUTES, int, int, const char*) { return INVALID_HANDLE_VALUE; }
+	static inline int SetEvent(HANDLE) { return 0; }
+	static inline int ResetEvent(HANDLE) { return 0; }
+
+	static inline void GetSystemTime(SYSTEMTIME *st) {
+		if (!st) return;
+		struct timespec ts;
+		clock_gettime(CLOCK_REALTIME, &ts);
+		struct tm utc;
+		gmtime_r(&ts.tv_sec, &utc);
+		st->wYear = (unsigned short)(utc.tm_year + 1900);
+		st->wMonth = (unsigned short)(utc.tm_mon + 1);
+		st->wDayOfWeek = (unsigned short)utc.tm_wday;
+		st->wDay = (unsigned short)utc.tm_mday;
+		st->wHour = (unsigned short)utc.tm_hour;
+		st->wMinute = (unsigned short)utc.tm_min;
+		st->wSecond = (unsigned short)utc.tm_sec;
+		st->wMilliseconds = (unsigned short)(ts.tv_nsec / 1000000);
+	}
+
+	// Map MSVC SEH (__try/__except) to standard C++ try/catch. The filter
+	// expression and EXCEPTION_EXECUTE_HANDLER are accepted but ignored.
+	#define __try try
+	#define __except(filter) catch(...)
+	#define EXCEPTION_EXECUTE_HANDLER 1
+
+	// Windows in_addr has a S_un union wrapping s_addr. Call sites that
+	// use `addr.S_un.S_addr` need to be rewritten to `addr.s_addr` (POSIX);
+	// done on a per-file basis since macros can't rewrite member access.
 
 #endif
 
