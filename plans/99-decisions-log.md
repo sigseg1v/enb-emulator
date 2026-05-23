@@ -180,3 +180,17 @@ The test client at `tests/client/` is intentionally structured in three independ
 **Subtle correctness item caught**: the capture text format embeds annotation hex (e.g. the decrypted "RC4 session key:" line under SYN2) that is *not* part of the on-wire packet. Our `ParseCapture` caps each packet's byte count at the header's declared length so annotation bytes never leak into wire data. This was caught by `WestwoodRsa.DecryptCapturedSyn2YieldsSessionKey` failing on first run with 92 bytes instead of 84.
 
 **Login opcode (0x02) task**: dropped as a separate item — the replay engine sends any captured client→server packet identically, so "login" is just one entry in the capture stream rather than special-case code.
+
+## 2026-05-23 — Phase J: Net7Proxy ported to Linux as file-level WIN32-walled shell
+
+Net7Proxy was originally a client launcher (CreateProcess + Detours + MessageBox). The 9.5K LOC is heavily entangled — Connection.cpp, ClientTo{Master,Global,Sector}Server.cpp, UDPProxy{MVAS,ToClient,ToGlobal}.cpp, SSL_Connection.cpp, UDPClient.cpp all depend on classes that don't exist in `proxy/` (AccountManager, PlayerManager, SectorManager, ItemBaseManager). A full port would require dragging those classes in from `server/src/` or stubbing them — neither matches the explicit Phase J success criterion of "bind 3801 and accept connections."
+
+**Decision**: each translation unit we can't realistically port gets wrapped top-to-bottom in `#ifdef WIN32 ... #endif`. The compile leaves a thin Linux build path: `Net7.{cpp,h}` (new Linux main + win32 shims include), `ServerManager.cpp` (small portability deltas), `TcpListener.cpp` (already Linux-aware), `Mutex.cpp` + `MessageQueue.cpp` (POSIX-clean), and Linux-stub bodies of `Connection` and `SSL_Connection` that accept-and-close. Result: a 343 KB ELF binary that binds 3801/3805/3500 in its docker netns and logs each incoming connection.
+
+**Honest limits (carry forward to next phase)**:
+- The accept handler is a stub. Westwood handshake will fail. RC4 session-key install, opcode dispatch, UDP proxying — none of it runs on Linux.
+- ~8.5K of 9.5K LOC is `#ifdef WIN32`-walled. License headers preserved verbatim per CC BY-NC-SA 3.0 rules.
+- `SSLv2_client_method` (gone in OpenSSL 3) was sidestepped in `RegisterSectorServer` by returning true early on Linux — dead code in a single-host dev stack but a real follow-up if/when a multi-host topology is needed.
+- `pthread_create` shim (`proxy/compat/threading_shim.cpp`) is a copy of `server/compat/`; same caveat as Phase J server (lone-return null `_beginthreadex` handle).
+
+**Why this matters more than the size suggests**: the live test client at `tests/client/` can now point `NET7_TEST_PROXY_HOST=127.0.0.1` at the running proxy and exercise its TCP accept path. The next step is to give the Linux Connection class an actual SYN1→ACK1 RSA response so the handshake test moves from "self-paired loopback" to "client vs. live server", which is the gating step for any real protocol-replay testing.

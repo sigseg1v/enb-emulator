@@ -46,14 +46,17 @@ This phase exists because Phases A–I delivered a server that compiles and an i
       Touches: `server/src/Net7.h` (quieted `GetMailslotInfo` poll spam at line 301)
       Notes: Actual state observed in container via `/proc/net/udp`: 196 UDP sockets bound, span 0x0DAD–0x0EE0 (3501–3808), covering all sector ports + UDP_MASTER (3808). The previous "_beginthreadex returns 0 so sectors don't bind" diagnosis was wrong: SectorManager calls `UDP_Connection(port, …)` synchronously after `_beginthreadex`, and `UDP_Connection`'s ctor binds the socket directly with `pthread_create` (not `_beginthreadex`) for its receive loop. The dead `_beginthreadex` return only loses the RunEventThreadAPI thread, which matters only once players are joined. The "GetMailslotInfo failed with 2" log spam was the visible symptom but not the blocker; quieted by changing the inline stub in `Net7.h:301` to return TRUE with 0 messages (MAILSLOT_NO_MESSAGE).
 
-- [ ] Stand up TCP listeners for client handshake — currently nobody listens on 3801 (MASTER_SERVER_PORT) or 3805 (GLOBAL_SERVER_PORT) or 443 (SSL_PORT).
-      Status: not started — this is the actual blocker for any client connection.
-      Touches: `proxy/` (port Net7Proxy to Linux) and/or `login-server/Net7SSL/`
-      Notes: Topology per captured packets at `archive/kyp-snapshot/capturedPackets/capture_1.txt`:
-        - Client → TCP 3801 (Net7Proxy): 4-step Westwood RSA+RC4 handshake (SYN1/ACK1+RSA/SYN2+session-key/ACK2+CORD-port). Captures show this is plain TCP, not SSL.
-        - Then client → per-sector port (UDP, e.g. 3387 in capture) for game opcodes.
-        - SSL on port 443 only for initial auth (Net7SSL).
-      `proxy/ServerManager.cpp:61` is the listener: `TcpListener master_tcp_listener(m_IpAddressInternal, MASTER_SERVER_PORT, *this, CONNECTION_TYPE_CLIENT_TO_MASTER_SERVER)`. ~9.5K LOC of 2010 Windows code; ~11 of its 35 files have `#ifdef WIN32` Linux-aware blocks already, so port surface is real but tractable.
+- [x] Stand up TCP listeners for client handshake — bind 3801 (MASTER_SERVER_PORT) and 3805 (GLOBAL_SERVER_PORT) on Linux.
+      Status: done (bind + accept verified in-container; handshake/dispatch NOT done — accept loop logs peer IP and drops the socket).
+      Touches: `proxy/CMakeLists.txt` (new), `proxy/Dockerfile` (new), `docker-compose.yml` (new `proxy` service; removed 3801/3805 from `server`), `proxy/Net7.h` (Linux includes + win32 shims), `proxy/Net7.cpp` (new Linux main; legacy client-launcher main `#ifdef WIN32`-wrapped), `proxy/Connection.cpp` (file-level `#ifdef WIN32` + Linux stub Connection class that accepts then closes), `proxy/SSL_Connection.cpp` / `proxy/SSL_Listener.cpp` / `proxy/ServerManager.cpp` / `proxy/SectorServerManager.cpp` (Linux-portability shims), `proxy/UDPClient.cpp` / `proxy/UDPProxyMVAS.cpp` / `proxy/UDPProxyToClient.cpp` / `proxy/UDPProxyToGlobal.cpp` / `proxy/ClientToMasterServer.cpp` / `proxy/ClientToGlobalServer.cpp` / `proxy/ClientToSectorServer.cpp` (file-level WIN32 guards), `proxy/SectorManager.h` (new stub forward decl), `proxy/compat/` (copy of `server/compat/` — `win32_shim.h`, `threading_shim.{h,cpp}`).
+      Verification: `docker compose exec proxy ss -tlnp` shows `0.0.0.0:3500 0.0.0.0:3801 0.0.0.0:3805` all owned by `net7proxy pid=1`. Host-side `bash -c 'exec 3<>/dev/tcp/127.0.0.1/3801'` returns 0. `docker compose logs proxy` shows `Net7Proxy (stub): accept on port 3801 from 172.18.0.1 — closing` lines, confirming the accept path runs end-to-end.
+      Limits / honest accounting:
+        - Linux accept handler is a stub. It logs peer IP and closes immediately. There is no RSA exchange, no RC4 session-key install, no opcode dispatch, no UDP proxy. The Westwood handshake will not complete.
+        - `SSL_Connection` is stubbed; the SSL listener is gated off on Linux (`g_LocalCert` false).
+        - All real client-handling code (`Connection.cpp` body, `ClientTo*Server.cpp`, `UDPProxy*.cpp`) is `#ifdef WIN32`-walled and compiles to nothing on Linux — roughly 8.5K of the 9.5K LOC.
+        - `SSLv2_client_method` (removed in OpenSSL 3) was sidestepped by making `RegisterSectorServer` return true early on Linux; the upstream-auth call site is dead code in a single-host dev stack but still merits a follow-up.
+        - The `_beginthreadex` → `pthread_create` shim under `proxy/compat/` is a copy of `server/compat/` and shares the same Phase J caveat: lone-return value (thread handle) is null, which only matters for thread-handle-bearing call sites.
+      Topology reference (unchanged): `archive/kyp-snapshot/capturedPackets/capture_1.txt`.
 
 - [ ] Build login-server (Net7SSL) on Linux under OpenSSL 3.
       Status: deferred — secondary to Net7Proxy because captures show real game traffic uses plain TCP+Westwood on port 3801, not SSL.
