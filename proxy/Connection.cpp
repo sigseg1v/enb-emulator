@@ -752,15 +752,17 @@ bool Connection::CheckTCPShutdownCycle()
 }
 
 #else // !WIN32 — Linux partial port
-// Phase J: minimal Linux-side Connection. Runs the Net-7 Westwood RSA+RC4
-// key exchange synchronously in a worker thread; after the handshake
-// completes the socket is held open until the peer closes (or shutdown).
-// Opcode dispatch (Client→{Master,Global,Sector}Server) is still WIN32-
-// only — once handshake succeeds, inbound RC4-decrypted bytes are dropped
-// on the floor. This is enough to make the live handshake test pass.
+// Phase J: Linux-side Connection. Runs the Net-7 Westwood RSA+RC4 key
+// exchange in a worker thread, then a framed read loop that mirrors the
+// Win32 RunRecvThread (read 4-byte EnbTcpHeader, RC4-decrypt, read payload,
+// RC4-decrypt, dispatch by m_ServerType). ProcessMasterServerOpcode is
+// real (linked from ClientToMasterServer.cpp); ProcessGlobalServerOpcode
+// and ProcessSectorServerOpcode are logging stubs in ClientToServer_linux_stubs.cpp.
 #include "Net7.h"
 #include "Connection.h"
 #include "ServerManager.h"
+#include "PacketStructures.h"
+#include "Opcodes.h"
 #include "WestwoodRSA.h"
 #include "WestwoodRC4.h"
 
@@ -839,8 +841,47 @@ Connection::~Connection() {
 bool Connection::IsActive()                    { return m_ConnectionActive; }
 bool Connection::CheckTCPShutdownCycle()       { return !m_ConnectionActive; }
 void Connection::TerminateConnection()         { m_ConnectionActive = false; m_TcpThreadRunning = false; }
-void Connection::SendResponse(short /*opcode*/, unsigned char* /*data*/,
-                              size_t /*length*/, long /*sequence_num*/) {}
+
+// Build [size, opcode, payload...] frame, RC4-encrypt the whole thing
+// (size field included — matches the Win32 wire format at Connection.cpp:597-626),
+// and send it. Wire layout mirrors the Win32 m_SendBuffer build: size is
+// length + sizeof(long) (4 bytes for the header) and lives at offset 0;
+// opcode at offset 2; payload follows at offset sizeof(long)=4.
+//
+// NB: the Win32 path enqueues into m_SendQueue and lets RunSendThread do
+// the RC4 + send. We don't have RunSendThread on Linux yet, so we encrypt
+// + send inline. The connection is single-writer (RunRecvThread dispatches
+// synchronously) so this is safe for now; if/when we add async producers
+// (UDP plane, timer threads) we'll need a Mutex around m_CryptOut.
+void Connection::SendResponse(short opcode, unsigned char* data,
+                              size_t length, long /*sequence_num*/)
+{
+    if (m_Socket == INVALID_SOCKET || !m_ConnectionActive) return;
+    if (length > MAX_BUFFER - sizeof(long)) {
+        LogMessage("SendResponse: payload %zu too large for opcode 0x%04x\n",
+                   length, (unsigned short) opcode);
+        return;
+    }
+
+    size_t total = length + sizeof(long);
+    *((short *) &m_SendBuffer[0]) = (short) total;
+    *((short *) &m_SendBuffer[2]) = opcode;
+    if (length && data) {
+        memcpy(m_SendBuffer + sizeof(long), data, length);
+    }
+
+    if (m_ServerType != CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY &&
+        m_ServerType != CONNECTION_TYPE_GLOBAL_PROXY_TO_SERVER) {
+        m_CryptOut.RC4(m_SendBuffer, (int) total);
+    }
+
+    if (!SendAll((int) m_Socket, m_SendBuffer, (int) total)) {
+        LogMessage("SendResponse: send failed on port %d (errno=%d)\n",
+                   m_TcpPort, errno);
+        m_TcpThreadRunning = false;
+        m_ConnectionActive = false;
+    }
+}
 
 // Mirror of server/src/Connection.cpp::DoKeyExchange (Net-7 raw RSA+RC4).
 // Server sends 74-byte pubkey, then reads 4-byte length + key_length-byte
@@ -904,17 +945,73 @@ void Connection::RunRecvThread()
         return;
     }
 
-    // Hold the socket open and drain bytes until the peer closes or shutdown.
-    // We don't dispatch opcodes on Linux yet (Client→*Server.cpp are WIN32-
-    // walled). RC4-decrypt-and-discard is enough to keep the wire valid.
-    unsigned char buf[4096];
-    while (m_TcpThreadRunning && m_ConnectionActive) {
-        int n = (int) recv(m_Socket, buf, sizeof(buf), 0);
-        if (n <= 0) break;
-        m_CryptIn.RC4(buf, n);
-        // drop
+    // Framed reader — mirrors Win32 Connection.cpp:410-545.
+    // Wire: [EnbTcpHeader {short size; short opcode;}][payload bytes].
+    // size is total frame length (including the 4-byte header).
+    // size and opcode are RC4-encrypted in the same stream as the payload.
+    EnbTcpHeader header;
+    memset(&header, 0, sizeof(header));
+
+    while (m_TcpThreadRunning && m_ConnectionActive && !g_ServerShutdown) {
+        if (!RecvAll((int) m_Socket, (unsigned char *) &header, sizeof(header))) {
+            // Distinguish graceful close from error to match Win32 logging.
+            int e = errno;
+            if (e == ECONNRESET) {
+                LogMessage("TCP connection on port %d was reset\n", m_TcpPort);
+            } else {
+                LogMessage("TCP connection on port %d closed (errno=%d)\n",
+                           m_TcpPort, e);
+            }
+            break;
+        }
+
+        if (m_ServerType != CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY &&
+            m_ServerType != CONNECTION_TYPE_GLOBAL_PROXY_TO_SERVER) {
+            m_CryptIn.RC4((unsigned char *) &header, sizeof(header));
+        }
+
+        short opcode = header.opcode;
+        int payload_bytes = (int) (unsigned short) header.size - (int) sizeof(EnbTcpHeader);
+
+        if (payload_bytes < 0 || payload_bytes >= MAX_BUFFER) {
+            LogMessage("Bad frame on port %d: size=%u opcode=0x%04x — aborting\n",
+                       m_TcpPort, (unsigned short) header.size,
+                       (unsigned short) opcode);
+            break;
+        }
+
+        if (payload_bytes > 0) {
+            if (!RecvAll((int) m_Socket, m_RecvBuffer, payload_bytes)) {
+                LogMessage("Short payload read on port %d: opcode=0x%04x expected=%d\n",
+                           m_TcpPort, (unsigned short) opcode, payload_bytes);
+                break;
+            }
+            if (m_ServerType != CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY &&
+                m_ServerType != CONNECTION_TYPE_GLOBAL_PROXY_TO_SERVER) {
+                m_CryptIn.RC4(m_RecvBuffer, payload_bytes);
+            }
+        }
+
+        short bytes = (short) payload_bytes;
+
+        switch (m_ServerType) {
+        case CONNECTION_TYPE_CLIENT_TO_GLOBAL_SERVER:
+            ProcessGlobalServerOpcode(opcode, bytes);
+            break;
+        case CONNECTION_TYPE_CLIENT_TO_MASTER_SERVER:
+            ProcessMasterServerOpcode(opcode, bytes);
+            break;
+        case CONNECTION_TYPE_CLIENT_TO_SECTOR_SERVER:
+            ProcessSectorServerOpcode(opcode, bytes);
+            break;
+        default:
+            LogMessage("Linux stub: unhandled server type %d, opcode 0x%04x (%d bytes)\n",
+                       m_ServerType, (unsigned short) opcode, bytes);
+            break;
+        }
     }
 
+    LogDebug("Connection thread exiting on port %d\n", m_TcpPort);
     m_ConnectionActive = false;
     m_TcpThreadRunning = false;
 }

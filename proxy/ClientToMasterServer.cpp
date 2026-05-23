@@ -1,6 +1,13 @@
 // ClientToMasterServer.cpp
-// Phase J: heavy opcode dispatch — WIN32-only on Linux. See Connection.cpp.
-#ifdef WIN32
+//
+// Phase J: opcode dispatch for Master Server (TCP 3801). Compiles on
+// both Win32 (original behaviour: full SendMasterLogin → UDP MVAS round-
+// trip → SendServerRedirect) and Linux (option-b stub: log + hardcoded
+// ServerRedirect using the proxy's own IP). The Win32 path still
+// requires g_ServerMgr->m_UDPConnection / m_UDPClient — neither is
+// constructed on the Linux proxy yet (UDP proxy plane is still WIN32-
+// walled at file level — see proxy/UDPProxyMVAS.cpp, UDPClient.cpp, etc.)
+// so the Linux branch bypasses them entirely.
 
 /*************************************
  *   /////////////////////////////   *
@@ -13,7 +20,9 @@
 #include "Opcodes.h"
 #include "ServerManager.h"
 #include "PacketStructures.h"
+#ifdef WIN32
 #include "UDPClient.h"
+#endif
 
 void Connection::ProcessMasterServerOpcode(short opcode, short bytes)
 {
@@ -24,11 +33,13 @@ void Connection::ProcessMasterServerOpcode(short opcode, short bytes)
 		break;
 
 	default :
-		LogMessage("ProcessMasterServerOpcode -- UNRECOGNIZED OPCODE 0x%04x\n", opcode);
+		LogMessage("ProcessMasterServerOpcode -- UNRECOGNIZED OPCODE 0x%04x (%d bytes)\n",
+			(unsigned short) opcode, (int) bytes);
 		break;
 	}
 }
 
+#ifdef WIN32
 void Connection::HandleMasterJoin()
 {
 	// The player's client is displaying the inter-sector wait screen
@@ -68,6 +79,30 @@ void Connection::HandleMasterJoin()
 		g_ServerMgr->m_UDPClient->StartLoginTimer();
 	}
 }
+#else
+// Linux option-b stub: log the join + send a hardcoded ServerRedirect
+// back. No MVAS round-trip (the UDP proxy plane is still WIN32-walled),
+// so we point the client at SECTOR_SERVER_PORT on the proxy itself —
+// once we port ClientToSectorServer.cpp, the client's next TCP to 3500
+// lands here too.
+void Connection::HandleMasterJoin()
+{
+	MasterJoin * join = (MasterJoin *) m_RecvBuffer;
+	long sector_id = ntohl(join->ToSectorID);
+	m_AvatarID = ntohl(join->avatar_id_lsb);
+
+	LogMessage("<client> MasterJoin avatar_id=%ld ToSectorID=%ld FromSectorID=%ld (Linux stub)\n",
+		(long) m_AvatarID, (long) sector_id, (long) ntohl(join->FromSectorID));
+
+	g_LoggedIn = true;
+
+	// Linux stub: skip MVAS SendMasterLogin (no UDP plane), send a
+	// hardcoded ServerRedirect that points the client at the proxy's
+	// own SECTOR_SERVER_PORT. This lets us see what the client sends
+	// next without requiring the full UDP login round-trip.
+	SendServerRedirect(sector_id);
+}
+#endif
 
 void Connection::SendServerRedirect(long sector_id)
 {
@@ -82,5 +117,3 @@ void Connection::SendServerRedirect(long sector_id)
     //LogMessage("<proxy> Master Server sending ServerRedirect packet, SectorID = %d\n", sector_id);
 	SendResponse(ENB_OPCODE_0036_SERVER_REDIRECT, (unsigned char *) &redirect, sizeof(redirect));
 }
-
-#endif // WIN32 — Phase J file-level guard
