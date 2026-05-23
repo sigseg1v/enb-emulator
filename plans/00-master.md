@@ -14,7 +14,7 @@ This is the source of truth for what's done and what's next across invocations. 
 | F | Warning cleanup | [06-phase-f-warnings.md](06-phase-f-warnings.md) | complete (baseline + 2 categories fixed; long-tail deferred per WARNINGS_BASELINE.md) | 2026-05-22 | 2026-05-22 |
 | G | Tests | [07-phase-g-tests.md](07-phase-g-tests.md) | complete (3 binaries, CI ctest job, fixed Phase D sln→slnx CI regression; subsystem tests need source isolation first) | 2026-05-22 | 2026-05-22 |
 | H | Deepen docs | [08-phase-h-docs.md](08-phase-h-docs.md) | complete (4 new docs + §8 flow walkthroughs; packet-capture deepening blocked on unrar) | 2026-05-22 | 2026-05-22 |
-| I | Dev env polish | [09-phase-i-dev-env.md](09-phase-i-dev-env.md) | in progress | 2026-05-22 | 2026-05-22 |
+| I | Dev env polish | [09-phase-i-dev-env.md](09-phase-i-dev-env.md) | complete (justfile/Dockerfiles/CI matrix/release.yml/pre-commit; wine-tools profile deferred) | 2026-05-22 | 2026-05-22 |
 
 Decisions log: [99-decisions-log.md](99-decisions-log.md).
 

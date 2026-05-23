@@ -21,9 +21,13 @@ jobs:
           grep -q "^## Status table" plans/00-master.md
 
   cmake-configure:
-    name: cmake-configure (server)
-    runs-on: ubuntu-24.04
+    name: cmake-configure (server, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-22.04]
     steps:
       - uses: actions/checkout@v4
       - name: Install build deps
@@ -40,17 +44,21 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cmake-configure-logs
+          name: cmake-configure-logs-${{ matrix.os }}
           path: |
             build/server/CMakeFiles/CMakeOutput.log
             build/server/CMakeFiles/CMakeError.log
           if-no-files-found: ignore
 
   cmake-build:
-    name: cmake-build (server)
+    name: cmake-build (server, ${{ matrix.os }})
     needs: cmake-configure
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
     continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-22.04]
     steps:
       - uses: actions/checkout@v4
       - name: Install build deps
@@ -63,17 +71,29 @@ jobs:
             libpq-dev libpqxx-dev
       - name: Configure
         run: cmake -S server -B build/server -G Ninja
-      - name: Build (best-effort; captures BUILD_ERRORS.md)
+      - name: Build (best-effort; captures BUILD_ERRORS.md + WARNINGS.txt)
         run: |
           set +e
           cmake --build build/server -j"$(nproc)" 2>&1 | tee server/BUILD_ERRORS.md
           echo "build exit: $?"
+          # Phase F continuation: extract just the -W warnings as a
+          # separate artifact so the count + distribution is trackable
+          # over time without trawling the full build log.
+          grep -E "warning: .*\[-W" server/BUILD_ERRORS.md > server/WARNINGS.txt || true
+          wc -l server/WARNINGS.txt
       - name: Upload BUILD_ERRORS.md
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: server-build-errors
+          name: server-build-errors-${{ matrix.os }}
           path: server/BUILD_ERRORS.md
+          if-no-files-found: ignore
+      - name: Upload WARNINGS.txt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-warnings-${{ matrix.os }}
+          path: server/WARNINGS.txt
           if-no-files-found: ignore
 
   db-schema:

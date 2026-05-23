@@ -11,9 +11,10 @@
 FROM ubuntu:24.04 AS build
 
 ENV DEBIAN_FRONTEND=noninteractive
-# Phase E migrates this to 0x30000000L cleanly. For Phase B we ride the
-# 1.1.x-compat API surface inside an OpenSSL 3.x runtime.
-ENV OPENSSL_API_COMPAT=0x10100000L
+# Phase E completed: server/src is clean against OpenSSL 3.0.
+# CMakeLists.txt now bakes in OPENSSL_API_COMPAT=0x30000000L; this
+# env var is kept as a safety net for out-of-tree consumers.
+ENV OPENSSL_API_COMPAT=0x30000000L
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \

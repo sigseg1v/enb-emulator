@@ -1,0 +1,53 @@
+# pre-commit hooks. Install with `pip install pre-commit && pre-commit install`.
+#
+# Only enforces against files we own (server/compat/, tests/, tools/,
+# new docs, the installer script). The legacy server source under
+# server/src/ is *not* formatted — it would produce a 100k+ line diff
+# and isn't part of Phase F's actionable warning targets.
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: |
+          (?x)^(
+            archive/.* |
+            server/src/.* |
+            client/detours/.* |
+            login-server/.* |
+            proxy/.*
+          )$
+      - id: end-of-file-fixer
+        exclude: |
+          (?x)^(
+            archive/.* |
+            server/src/.* |
+            client/detours/.* |
+            login-server/.* |
+            proxy/.* |
+            .*\.rar |
+            .*\.rtf |
+            .*\.pdf
+          )$
+      - id: check-yaml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=2048"]
+        exclude: |
+          (?x)^(
+            archive/.* |
+            vendor/.*
+          )$
+
+  - repo: https://github.com/koalaman/shellcheck-precommit
+    rev: v0.10.0
+    hooks:
+      - id: shellcheck
+
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v19.1.7
+    hooks:
+      - id: clang-format
+        files: ^(tests|server/compat)/.*\.(cpp|h|hpp)$

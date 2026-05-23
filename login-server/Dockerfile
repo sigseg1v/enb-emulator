@@ -14,6 +14,10 @@
 FROM ubuntu:24.04 AS build
 
 ENV DEBIAN_FRONTEND=noninteractive
+# proxy/login-server still call SSLv2_client_method (removed in 1.1) and
+# WestwoodRSA was migrated to BN_new in Phase E. Until those land in a
+# real CMake build we keep the 1.0.x compat shim available — and bump
+# to 3.0 as soon as the targets enter the build (Phase E continuation).
 ENV OPENSSL_API_COMPAT=0x10100000L
 
 RUN apt-get update && apt-get install -y --no-install-recommends \

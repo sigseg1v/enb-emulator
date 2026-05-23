@@ -5,31 +5,50 @@
 #
 # Most targets call docker/cmake/dotnet; none of them require root.
 
+IMAGE_REGISTRY := env_var_or_default("IMAGE_REGISTRY", "ghcr.io/anthropics/enb-emulator")
+IMAGE_TAG      := env_var_or_default("IMAGE_TAG", "dev")
+
 # Default: list targets.
 default:
     @just --list
 
 _default: default
 
-# Build the C++ server. EXPECTED to fail mid-build during Phase B —
-# that's what the BUILD_ERRORS.md tracking is for.
+# ---- build ----
+
+# Build the C++ server (Phase B: best-effort, may fail mid-build).
 build:
     cmake -S server -B build/server -G Ninja
     cmake --build build/server -j"$(nproc)"
 
-# Build the C# tool suite. Requires Phase D upgrade (csproj -> SDK style)
-# before this succeeds.
+# Build the C# tool suite (Net7Tools.slnx, .NET 10).
 build-tools:
-    dotnet build tools/Net7Tools.sln
+    dotnet build tools/Net7Tools.slnx
 
-# Dev stack: postgres, schema apply, server + login.
+# Build the gtest harness (Phase G).
+build-tests:
+    cmake -S tests -B build/tests -G Ninja
+    cmake --build build/tests -j"$(nproc)"
+
+# ---- dev stack ----
+
+# Bring up the dev stack (postgres, schema-init, server, login) detached.
 dev:
     docker compose up -d postgres
     docker compose up schema-init
     docker compose up -d server login
 
+# Same, but stream all logs in the foreground. Ctrl-C to stop.
+dev-fg:
+    docker compose up
+
+# Tear down (containers + network; named volume `pgdata` survives).
 down:
     docker compose down
+
+# Tear down AND wipe the pgdata volume (destructive — schema is reapplied next `just dev`).
+nuke:
+    docker compose down -v
 
 # Tail a service's logs.    e.g. `just logs server`
 logs SERVICE='server':
@@ -51,27 +70,49 @@ apply-schema:
 convert-schema:
     bash db/postgres/convert.sh
 
-# Run such tests as exist. Both halves currently expected to fail or be
-# empty; the `|| true` keeps `just test` from being a hard error during
-# Phase B/D.
-test:
-    cmake --build build/server --target test 2>&1 || true
-    dotnet test tools/Net7Tools.sln 2>&1 || true
+# Bring up pgadmin on http://localhost:8080 (opt-in profile).
+pgadmin:
+    docker compose --profile dev-tools up -d pgadmin
 
-# Build OCI images for server + login.
+# ---- test ----
+
+# Run the gtest harness + (best-effort) dotnet test.
+test:
+    ctest --test-dir build/tests --output-on-failure
+    -dotnet test tools/Net7Tools.slnx --nologo
+
+# ---- package / release ----
+
+# Build OCI images for server + login locally.
 package:
     docker compose build server login
 
-# Lint placeholder. Phase F wires up clang-format and `dotnet format`.
+# Build + push OCI images to {{IMAGE_REGISTRY}}:{{IMAGE_TAG}}.
+push:
+    docker build -t {{IMAGE_REGISTRY}}/server:{{IMAGE_TAG}} server/
+    docker build -t {{IMAGE_REGISTRY}}/login:{{IMAGE_TAG}}  login-server/
+    docker push  {{IMAGE_REGISTRY}}/server:{{IMAGE_TAG}}
+    docker push  {{IMAGE_REGISTRY}}/login:{{IMAGE_TAG}}
+
+# ---- lint ----
+
+# Lint: clang-format (new code only), dotnet format, shellcheck.
 lint:
-    @echo "TODO: clang-format + dotnet format"
+    -clang-format --dry-run --Werror tests/**/*.cpp server/compat/*.h 2>/dev/null
+    -dotnet format tools/Net7Tools.slnx --verify-no-changes --no-restore
+    shellcheck client/linux-installer/install-enb-linux.sh
+
+# Apply clang-format + dotnet format in place.
+format:
+    -clang-format -i tests/**/*.cpp server/compat/*.h
+    -dotnet format tools/Net7Tools.slnx --no-restore
+
+# ---- housekeeping ----
 
 clean:
     rm -rf build/ tools/**/bin tools/**/obj
 
-# Sanity check that the plan files exist and the master file still has
-# its status table. Useful in CI so a deleted/renamed plan is caught
-# immediately.
+# Sanity-check that plans/ exists and has a status table.
 verify-plans:
     @test -d plans || (echo "plans/ missing" && exit 1)
     @ls plans/00-master.md plans/01-phase-a-merge.md plans/02-phase-b-linux-server.md > /dev/null

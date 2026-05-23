@@ -1,0 +1,44 @@
+# docker-compose.override.yml.example
+#
+# Copy to docker-compose.override.yml to enable hot-reload-friendly dev
+# mounts: the server source tree and the build directory get bind-mounted
+# into the server container so `cmake --build /build` on the host updates
+# the container's binary without rebuilding the image.
+#
+# Why an example file and not the override directly: docker-compose
+# auto-applies docker-compose.override.yml when it exists, which would
+# silently change `just package` behaviour for anyone who pulled the
+# repo expecting the image-build path. Opt-in via copy keeps the default
+# stack reproducible.
+#
+# After copying:
+#   1. `just build` once to populate build/server/ on the host.
+#   2. `just dev` — the server container will exec the host's binary at
+#      /build/net7 on each restart.
+#   3. Iterate: `cmake --build build/server && docker compose restart server`.
+
+services:
+  server:
+    # Skip the image build; reuse a minimal runtime base and exec the
+    # host-built binary directly.
+    image: ubuntu:24.04
+    build: !reset null
+    volumes:
+      - ./server/src:/src/server/src:ro
+      - ./build/server:/build:ro
+    command: ["/build/net7"]
+    # Drop the depends_on guard during interactive dev — if you just
+    # want to poke at the server, you may not want to block on
+    # schema-init re-completing every time.
+    depends_on: !reset
+      - postgres
+
+  login:
+    image: ubuntu:24.04
+    build: !reset null
+    volumes:
+      - ./login-server:/src/login-server:ro
+      - ./build/login-server:/build:ro
+    command: ["/build/login-server"]
+    depends_on: !reset
+      - postgres
