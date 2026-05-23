@@ -40,33 +40,51 @@ Goal: consolidate the three upstream repos into a clean layout, write docs, writ
 
 ### A3 — Docs
 
-- [ ] `docs/README.md` — index
-- [ ] `docs/01-overview.md`
+- [x] `docs/README.md` — index
+      Notes: Doc index with one-line per-file descriptions, conventions, reference-material table; points readers at 01-overview then 02-architecture.
+- [x] `docs/01-overview.md`
+      Notes: Preservation framing, three upstreams with credit, current Phase A/B-I status, NC license summary, get-started paths for client/server/tools.
 - [ ] `docs/02-architecture.md` — from Net-7 architecture RTF + Net7.cpp/ServerManager/ConnectionManager code reading
 - [ ] `docs/03-network-protocol.md` — ports, client→login→sector handoff
 - [ ] `docs/04-server-modules.md` — one section per top-level manager class, with file:line refs
 - [ ] `docs/05-abilities.md` — full ability list, mark which are tada-o-new
-- [ ] `docs/06-database-schema.md` — per-table summary of all 71 tables
-- [ ] `docs/07-tools-toolchain.md` — one paragraph per C# editor
-- [ ] `docs/08-build.md`
-- [ ] `docs/09-running-locally.md`
-- [ ] `docs/10-modernization-roadmap.md` — Phase B/C/D/E/F/G/H/I summary with effort estimates
-- [ ] `docs/11-gm-commands.md` — reformatted from GMCommands.txt
+- [x] `docs/06-database-schema.md` — per-table summary of all 71 tables
+      Notes: All 71 net7.sql tables grouped thematically (world/assets/mobs/avatars/items/effects/skills/factions/starbases/missions/audit); per-table PK/cols/key cols/FKs/owning editor; full net7_user.sql 42-table list at end; editor-to-table cross-reference; Postgres conversion gotchas (preserved sic spellings, binary(1), zerofill, identifier folding).
+- [x] `docs/07-tools-toolchain.md` — one paragraph per C# editor
+      Notes: All 21 tools covered (17 in Net7Tools.sln + 4 legacy VC6 .dsp + 1 standalone .sln); per-tool purpose, type, entry point, dependencies; content-pipeline section (editor → DB → server); Phase D upgrade matrix; runtime requirements (WinForms means Windows-only at runtime).
+- [x] `docs/08-build.md`
+      Notes: Linux CMake (Phase B in progress), Windows VS server build, legacy Makefile reference, C# tools (.NET 10 SDK), Linux client installer, dev env via just+docker, Debian/Fedora/Arch/Windows dependency lists, troubleshooting.
+- [x] `docs/09-running-locally.md`
+      Notes: docker-compose stack walkthrough (postgres+login+server), schema apply via psql, test account creation paths, client connection (Linux+Windows), expected-by-phase table; ports flagged as TODO pending Phase B output.
+- [x] `docs/10-modernization-roadmap.md` — Phase B/C/D/E/F/G/H/I summary with effort estimates
+      Notes: Per-phase goal/approach/effort/risks/deliverables for B-I derived from plans/02..09; explicit "deliberately skipped" section (no Avalonia, no full RE, no engine rewrite, no DRM-free distribution, no commercial use, no asio migration, no Crypto++ replacement, etc.); total effort estimate (4-6 months FTE / 12-18 months weekend hacking).
+- [x] `docs/11-gm-commands.md` — reformatted from GMCommands.txt
+      Notes: Reformatted faithfully from reference/gm-commands-original.txt; split into account admin (`//`) and in-game admin (`/`) sections; per-command table with Description and Example; noted that command list is partial and access-level numerics are unverified.
 - [ ] `docs/reference/` — preserved original architecture RTF + FAQ
 - [x] Top-level `README.md` (done during bootstrap)
 
 ### A4 — Phase B scaffolding
 
-- [ ] `justfile` with build/lint/test/dev/package/clean targets
-- [ ] `docker-compose.yml` with postgres + server + login services
-- [ ] `server/CMakeLists.txt` — modern CMake, Linux-first
-- [ ] `server/compat/win32_shim.h` — typedef + macro stubs for the common Windows-isms
-- [ ] `server/Dockerfile`, `login-server/Dockerfile`
-- [ ] `db/postgres/convert.sh` + `db/postgres/schema.sql` — schema conversion script + first-pass output
-- [ ] `db/postgres/README.md` — what was converted, what residual fixes are needed
-- [ ] `.github/workflows/build.yml` — CI matrix
-- [ ] `tests/` scaffold — gtest, one smoke test, README explaining gaps
-- [ ] `tools/README.md` — .NET 10 + WinForms + runtime-Windows-only note
+- [x] `justfile` with build/lint/test/dev/package/clean targets
+      Notes: /data/dev/enb-emulator/justfile. `just --list` succeeds (16 recipes).
+- [x] `docker-compose.yml` with postgres + server + login services
+      Notes: /data/dev/enb-emulator/docker-compose.yml. Includes schema-init job, optional `pgadmin` (profile `dev-tools`). `docker compose config` parses.
+- [x] `server/CMakeLists.txt` — modern CMake, Linux-first
+      Notes: /data/dev/enb-emulator/server/CMakeLists.txt. GLOB_RECURSE with MSVC-output exclusions; finds 181 .cpp under src/ post-exclude. Configure surfaces the expected missing-Lua-dev error cleanly until liblua5.4-dev is installed.
+- [x] `server/compat/win32_shim.h` — typedef + macro stubs for the common Windows-isms
+      Notes: /data/dev/enb-emulator/server/compat/win32_shim.h plus threading_shim.{h,cpp}, mailslot_shim.{h,cpp}, README.md. Threading + mailslot are STUBS — flagged in README status table.
+- [x] `server/Dockerfile`, `login-server/Dockerfile`
+      Notes: /data/dev/enb-emulator/server/Dockerfile (real multi-stage build); /data/dev/enb-emulator/login-server/Dockerfile (scaffolding — conditional on a future login-server/CMakeLists.txt).
+- [x] `db/postgres/convert.sh` + `db/postgres/schema.sql` — schema conversion script + first-pass output
+      Notes: /data/dev/enb-emulator/db/postgres/convert.sh (executable). Generates schema.sql (55433 lines, 71 CREATE TABLE) and seed.sql (2931 lines, 42 CREATE TABLE) from db/mysql/. Residual issues documented in README.md.
+- [x] `db/postgres/README.md` — what was converted, what residual fixes are needed
+      Notes: /data/dev/enb-emulator/db/postgres/README.md. Covers the `text`, escape-string, NUL-byte, hex-literal, tinyint(1), index-extraction, FK, reserved-word, and ON UPDATE issues for Phase C.
+- [x] `.github/workflows/build.yml` — CI matrix
+      Notes: /data/dev/enb-emulator/.github/workflows/build.yml. 6 jobs: lint-plans, cmake-configure, cmake-build (continue-on-error, uploads BUILD_ERRORS.md), db-schema (hard requirement), dotnet-build (continue-on-error pre-Phase-D), installer-shellcheck.
+- [x] `tests/` scaffold — gtest, one smoke test, README explaining gaps
+      Notes: /data/dev/enb-emulator/tests/CMakeLists.txt (FetchContent GoogleTest v1.15.2), /data/dev/enb-emulator/tests/smoke_test.cpp, /data/dev/enb-emulator/tests/README.md.
+- [x] `tools/README.md` — .NET 10 + WinForms + runtime-Windows-only note
+      Notes: /data/dev/enb-emulator/tools/README.md. Lists all 21 tools, documents build vs. runtime split, pre-Phase-D caveat.
 
 ## Verification (Phase A done when)
 

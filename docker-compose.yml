@@ -1,0 +1,96 @@
+# docker-compose.yml
+#
+# Phase B / Phase C dev stack. The server and login images currently fail
+# to build (Phase B is in progress); the postgres + schema-init services
+# work today and let Phase C be developed against a real DB.
+
+name: enb-emulator
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: net7
+      POSTGRES_PASSWORD: net7
+      POSTGRES_DB: net7
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U net7 -d net7"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  schema-init:
+    image: postgres:16
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: net7
+    volumes:
+      - ./db/postgres:/db:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "schema-init: applying /db/schema.sql"
+        psql -h postgres -U net7 -d net7 -v ON_ERROR_STOP=1 -f /db/schema.sql
+        if [ -f /db/seed.sql ]; then
+          echo "schema-init: applying /db/seed.sql"
+          psql -h postgres -U net7 -d net7 -v ON_ERROR_STOP=0 -f /db/seed.sql || true
+        fi
+        echo "schema-init: done"
+    restart: "no"
+
+  server:
+    build:
+      context: ./server
+    depends_on:
+      schema-init:
+        condition: service_completed_successfully
+    environment:
+      DB_HOST: postgres
+      DB_USER: net7
+      DB_PASS: net7
+      DB_NAME: net7
+    ports:
+      # Placeholder. Phase B continuation determines the actual port plan.
+      - "7000-7100:7000-7100/udp"
+    restart: unless-stopped
+
+  login:
+    build:
+      context: ./login-server
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_USER: net7
+      DB_PASS: net7
+      DB_NAME: net7
+    ports:
+      # Placeholder. Phase B continuation determines the actual port plan.
+      - "7800-7810:7800-7810/tcp"
+    restart: unless-stopped
+
+  # Opt-in: `docker compose --profile dev-tools up pgadmin`
+  pgadmin:
+    profiles: ["dev-tools"]
+    image: dpage/pgadmin4:latest
+    environment:
+      PGADMIN_DEFAULT_EMAIL: dev@localhost
+      PGADMIN_DEFAULT_PASSWORD: net7
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    ports:
+      - "8080:80"
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+volumes:
+  pgdata:

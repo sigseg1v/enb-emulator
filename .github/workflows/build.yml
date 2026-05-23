@@ -1,0 +1,134 @@
+name: build
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+
+  lint-plans:
+    name: lint-plans
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Plans directory + master status table exist
+        run: |
+          set -euo pipefail
+          test -d plans
+          ls plans/00-master.md plans/01-phase-a-merge.md plans/02-phase-b-linux-server.md
+          grep -q "^## Status table" plans/00-master.md
+
+  cmake-configure:
+    name: cmake-configure (server)
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            g++ cmake ninja-build pkg-config \
+            libssl-dev liblua5.4-dev liblua5.4-0 \
+            libtinyxml-dev libcrypto++-dev \
+            libpq-dev libpqxx-dev
+      - name: Configure
+        run: cmake -S server -B build/server -G Ninja
+      - name: Upload CMake logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmake-configure-logs
+          path: |
+            build/server/CMakeFiles/CMakeOutput.log
+            build/server/CMakeFiles/CMakeError.log
+          if-no-files-found: ignore
+
+  cmake-build:
+    name: cmake-build (server)
+    needs: cmake-configure
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            g++ cmake ninja-build pkg-config \
+            libssl-dev liblua5.4-dev liblua5.4-0 \
+            libtinyxml-dev libcrypto++-dev \
+            libpq-dev libpqxx-dev
+      - name: Configure
+        run: cmake -S server -B build/server -G Ninja
+      - name: Build (best-effort; captures BUILD_ERRORS.md)
+        run: |
+          set +e
+          cmake --build build/server -j"$(nproc)" 2>&1 | tee server/BUILD_ERRORS.md
+          echo "build exit: $?"
+      - name: Upload BUILD_ERRORS.md
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-build-errors
+          path: server/BUILD_ERRORS.md
+          if-no-files-found: ignore
+
+  db-schema:
+    name: db-schema (postgres apply)
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: net7
+          POSTGRES_PASSWORD: net7
+          POSTGRES_DB: net7
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U net7 -d net7"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install psql
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client
+      - name: Convert MySQL schema -> Postgres
+        run: bash db/postgres/convert.sh
+      - name: Apply schema
+        env:
+          PGPASSWORD: net7
+        run: |
+          psql -h 127.0.0.1 -U net7 -d net7 -v ON_ERROR_STOP=1 \
+               -f db/postgres/schema.sql
+
+  dotnet-build:
+    name: dotnet-build (tools)
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build tool suite
+        run: dotnet build tools/Net7Tools.sln
+
+  installer-shellcheck:
+    name: installer-shellcheck
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck
+      - name: Lint installer
+        run: shellcheck client/linux-installer/install-enb-linux.sh
