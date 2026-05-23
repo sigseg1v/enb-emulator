@@ -298,7 +298,14 @@
 	static inline HANDLE CreateMailslot(const char*, unsigned long, unsigned long, LPSECURITY_ATTRIBUTES) { return INVALID_HANDLE_VALUE; }
 	#define MAILSLOT_WAIT_FOREVER ((unsigned long)-1)
 	#define MAILSLOT_NO_MESSAGE ((unsigned long)-1)
-	static inline int GetMailslotInfo(HANDLE, unsigned long*, unsigned long*, unsigned long*, unsigned long*) { return 0; }
+	// Quiet successful no-op: pretend the mailslot has zero queued messages so the
+	// 50ms poll in MailManager::CheckMessages doesn't spam the log. Once Net7SSL is
+	// running (Phase J continuation) this needs to be a real Unix-domain-socket peek.
+	static inline int GetMailslotInfo(HANDLE, unsigned long* /*max_msg_size*/, unsigned long *next_size, unsigned long *msg_count, unsigned long* /*read_timeout*/) {
+		if (next_size) *next_size = (unsigned long)-1;  // MAILSLOT_NO_MESSAGE
+		if (msg_count) *msg_count = 0;
+		return 1;
+	}
 
 	// File API stubs — these never actually do anything on Linux. Call sites
 	// for CreateFile/ReadFile/WriteFile are the mailslot/IPC ones that need
