@@ -1,4 +1,6 @@
 // ClientToGlobalServer.cpp
+// Phase J: heavy opcode dispatch — WIN32-only on Linux. See Connection.cpp.
+#ifdef WIN32
 
 /***********************************************
  *   ///////////////////////////////////////   *
@@ -281,3 +283,5 @@ void Connection::HandleAvatarList(short bytes)
 {
 	m_UDPClient->ProcessAvatarList(m_RecvBuffer, bytes);
 }
+
+#endif // WIN32 — Phase J file-level guard

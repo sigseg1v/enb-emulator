@@ -1,3 +1,5 @@
+// Phase J: WIN32-only on Linux. See Connection.cpp / UDPClient.cpp.
+#ifdef WIN32
 #include "Net7.h"
 #include "UDPClient.h"
 #include "ServerManager.h"
@@ -198,3 +200,5 @@ void UDPClient::SendClientAlive()
         m_AlternatePorts = !m_AlternatePorts;
     }
 }
+
+#endif // WIN32 — Phase J file-level guard

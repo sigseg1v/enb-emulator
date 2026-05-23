@@ -1,4 +1,6 @@
 // ClientToSectorServer.cpp
+// Phase J: heavy opcode dispatch — WIN32-only on Linux. See Connection.cpp.
+#ifdef WIN32
 
 #include "Net7.h"
 #include "Connection.h"
@@ -752,3 +754,5 @@ void Connection::HandleWarp()
 	//send client position update first, so we don't get rubber banding
 	g_ServerMgr->m_UDPClient->SendPositionIfChanged();
 }
+
+#endif // WIN32 — Phase J file-level guard

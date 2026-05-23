@@ -1,4 +1,6 @@
 // ClientToMasterServer.cpp
+// Phase J: heavy opcode dispatch — WIN32-only on Linux. See Connection.cpp.
+#ifdef WIN32
 
 /*************************************
  *   /////////////////////////////   *
@@ -80,3 +82,5 @@ void Connection::SendServerRedirect(long sector_id)
     //LogMessage("<proxy> Master Server sending ServerRedirect packet, SectorID = %d\n", sector_id);
 	SendResponse(ENB_OPCODE_0036_SERVER_REDIRECT, (unsigned char *) &redirect, sizeof(redirect));
 }
+
+#endif // WIN32 — Phase J file-level guard

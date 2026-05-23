@@ -1,3 +1,7 @@
+// Phase J: UDPClient is the client-side UDP receiver used by Net7Proxy's
+// original launcher to relay between an in-process ENB.exe and the
+// server. Not relevant to the server-side Linux net7proxy; WIN32-only.
+#ifdef WIN32
 #include "Net7.h"
 #include "UDPClient.h"
 #include "opcodes.h"
@@ -460,3 +464,5 @@ void UDPClient::RecordLastHandoff(char *msg, short bytes)
 	memset(&m_Server_handoff, 0, sizeof(m_Server_handoff));
 	memcpy(&m_Server_handoff, msg, bytes);
 }
+
+#endif // WIN32 — Phase J file-level guard

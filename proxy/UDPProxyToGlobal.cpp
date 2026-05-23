@@ -1,3 +1,5 @@
+// Phase J: WIN32-only on Linux. See Connection.cpp / UDPClient.cpp.
+#ifdef WIN32
 #include "Net7.h"
 #include "UDPClient.h"
 #include "opcodes.h"
@@ -510,3 +512,5 @@ void __cdecl LoginCheckThread(void *Param)
 
 	login_thread_running = false;
 }
+
+#endif // WIN32 — Phase J file-level guard
