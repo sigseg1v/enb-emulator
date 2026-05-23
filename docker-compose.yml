@@ -72,14 +72,36 @@ services:
       - ./server/data:/database:ro
     ports:
       # Net-7 listens on:
-      # - 3805 TCP (global server entry)
-      # - 3801 TCP (master server)
       # - 3501-3800 TCP (sector servers; allocated dynamically)
       # - 3808 UDP (master <-> proxy)
-      - "3805:3805/tcp"
-      - "3801:3801/tcp"
+      # Note: 3801 (master) and 3805 (global) are owned by the `proxy`
+      # service (Net7Proxy), not this server. The server reaches the
+      # proxy over the same docker network when needed.
       - "3501-3550:3501-3550/tcp"
       - "3808:3808/udp"
+    restart: unless-stopped
+
+  # --------------------------------------------------------------
+  # Net7Proxy server-side TCP listener (Phase J).
+  # Binds 3801 (MASTER_SERVER_PORT) for the Westwood RSA+RC4 client
+  # handshake, plus 3805 (GLOBAL_SERVER_PORT). The 9.5K LOC of original
+  # client-launcher logic under proxy/ is `#ifdef WIN32`-gated and
+  # compiles to nothing on Linux; the Linux build path is a thin
+  # ServerManager + TcpListener that accepts connections and (today)
+  # drops them after logging the peer IP. Handshake + downstream
+  # dispatch is the next pass.
+  # --------------------------------------------------------------
+  proxy:
+    build:
+      context: ./proxy
+    depends_on:
+      mysql:
+        condition: service_healthy
+    extra_hosts:
+      - "local.net-7.org:127.0.0.1"
+    ports:
+      - "3801:3801/tcp"
+      - "3805:3805/tcp"
     restart: unless-stopped
 
   login:
