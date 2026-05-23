@@ -46,14 +46,15 @@ This phase exists because Phases A–I delivered a server that compiles and an i
       Touches: `server/src/Net7.h` (quieted `GetMailslotInfo` poll spam at line 301)
       Notes: Actual state observed in container via `/proc/net/udp`: 196 UDP sockets bound, span 0x0DAD–0x0EE0 (3501–3808), covering all sector ports + UDP_MASTER (3808). The previous "_beginthreadex returns 0 so sectors don't bind" diagnosis was wrong: SectorManager calls `UDP_Connection(port, …)` synchronously after `_beginthreadex`, and `UDP_Connection`'s ctor binds the socket directly with `pthread_create` (not `_beginthreadex`) for its receive loop. The dead `_beginthreadex` return only loses the RunEventThreadAPI thread, which matters only once players are joined. The "GetMailslotInfo failed with 2" log spam was the visible symptom but not the blocker; quieted by changing the inline stub in `Net7.h:301` to return TRUE with 0 messages (MAILSLOT_NO_MESSAGE).
 
-- [x] Stand up TCP listeners for client handshake — bind 3801 (MASTER_SERVER_PORT) and 3805 (GLOBAL_SERVER_PORT) on Linux.
-      Status: done (bind + accept verified in-container; handshake/dispatch NOT done — accept loop logs peer IP and drops the socket).
+- [x] Stand up TCP listeners for client handshake — bind 3801 (MASTER_SERVER_PORT) and 3805 (GLOBAL_SERVER_PORT) on Linux + run real Net-7 RSA+RC4 handshake.
+      Status: done (bind + accept + Net-7 DoKeyExchange verified end-to-end; live tests pass against the running container).
       Touches: `proxy/CMakeLists.txt` (new), `proxy/Dockerfile` (new), `docker-compose.yml` (new `proxy` service; removed 3801/3805 from `server`), `proxy/Net7.h` (Linux includes + win32 shims), `proxy/Net7.cpp` (new Linux main; legacy client-launcher main `#ifdef WIN32`-wrapped), `proxy/Connection.cpp` (file-level `#ifdef WIN32` + Linux stub Connection class that accepts then closes), `proxy/SSL_Connection.cpp` / `proxy/SSL_Listener.cpp` / `proxy/ServerManager.cpp` / `proxy/SectorServerManager.cpp` (Linux-portability shims), `proxy/UDPClient.cpp` / `proxy/UDPProxyMVAS.cpp` / `proxy/UDPProxyToClient.cpp` / `proxy/UDPProxyToGlobal.cpp` / `proxy/ClientToMasterServer.cpp` / `proxy/ClientToGlobalServer.cpp` / `proxy/ClientToSectorServer.cpp` (file-level WIN32 guards), `proxy/SectorManager.h` (new stub forward decl), `proxy/compat/` (copy of `server/compat/` — `win32_shim.h`, `threading_shim.{h,cpp}`).
       Verification: `docker compose exec proxy ss -tlnp` shows `0.0.0.0:3500 0.0.0.0:3801 0.0.0.0:3805` all owned by `net7proxy pid=1`. Host-side `bash -c 'exec 3<>/dev/tcp/127.0.0.1/3801'` returns 0. `docker compose logs proxy` shows `Net7Proxy (stub): accept on port 3801 from 172.18.0.1 — closing` lines, confirming the accept path runs end-to-end.
       Limits / honest accounting:
-        - Linux accept handler is a stub. It logs peer IP and closes immediately. There is no RSA exchange, no RC4 session-key install, no opcode dispatch, no UDP proxy. The Westwood handshake will not complete.
+        - **Handshake works**: Linux accept handler now runs `DoKeyExchange()` (74-byte pubkey send → 4+64-byte encrypted-key recv → RC4 session install). Confirmed in proxy logs: `DoKeyExchange: RC4 session established on port 3801`. Live ctest passes.
+        - **Opcode dispatch still stubbed**: after handshake, the recv thread drains inbound bytes through `m_CryptIn.RC4()` and discards them. `ClientToMasterServer.cpp` / `ClientToGlobalServer.cpp` / `ClientToSectorServer.cpp` are still `#ifdef WIN32`-walled. Live replay test sends client→server packets and verifies they don't error on the wire, but server response opcodes are not yet produced.
+        - **UDP proxy plane still stubbed**: `UDPProxyMVAS.cpp`, `UDPProxyToClient.cpp`, `UDPProxyToGlobal.cpp`, `UDPClient.cpp` compile to nothing on Linux. No sector-handoff path.
         - `SSL_Connection` is stubbed; the SSL listener is gated off on Linux (`g_LocalCert` false).
-        - All real client-handling code (`Connection.cpp` body, `ClientTo*Server.cpp`, `UDPProxy*.cpp`) is `#ifdef WIN32`-walled and compiles to nothing on Linux — roughly 8.5K of the 9.5K LOC.
         - `SSLv2_client_method` (removed in OpenSSL 3) was sidestepped by making `RegisterSectorServer` return true early on Linux; the upstream-auth call site is dead code in a single-host dev stack but still merits a follow-up.
         - The `_beginthreadex` → `pthread_create` shim under `proxy/compat/` is a copy of `server/compat/` and shares the same Phase J caveat: lone-return value (thread handle) is null, which only matters for thread-handle-bearing call sites.
       Topology reference (unchanged): `archive/kyp-snapshot/capturedPackets/capture_1.txt`.
@@ -69,9 +70,12 @@ This phase exists because Phases A–I delivered a server that compiles and an i
       Notes: Self-contained (no Net7.h dependency). Six gtest cases pin: capture parser correctness, modulus matches captured ACK1 packet bytes 17..80, RSA encrypt/decrypt round-trip, RC4 round-trip + RFC 6229 test vector, and decrypt of captured SYN2 recovers the annotated session key at plaintext[63..56] reversed (per `proxy/Connection.cpp:230-268` DoClientKeyExchange).
 
 - [x] Test client: full 4-step handshake driver over TCP (live + loopback).
-      Status: done (commit ba791a0)
+      Status: done (commit ba791a0); upgraded to also include a Net-7-protocol variant for live tests against the actual proxy.
       Touches: `tests/client/tcp_client.{h,cpp}`, `tests/client/handshake_driver.{h,cpp}`, `tests/client/handshake_live_test.cpp`
-      Notes: `RunClientHandshake()` sends SYN1, validates ACK1 (modulus equality check against our embedded N), encrypts and sends SYN2 with reversed-key layout, parses ACK2 to extract CORD port. Loopback test spawns a thread that plays the server side of the handshake on an ephemeral localhost port and verifies the client-chosen RC4 key matches what the server decoded. Live test is env-gated via `NET7_TEST_PROXY_HOST` and skips when unset.
+      Notes: Two handshake variants live in `handshake_driver.cpp`:
+        - `RunClientHandshake()` — Westwood-envelope (4-step SYN1/ACK1/SYN2/ACK2) matching the captures. Used by the loopback self-test where both sides speak this protocol.
+        - `RunNet7Handshake()` — raw RSA exchange Net-7 actually speaks (server sends 74-byte pubkey on connect, client sends 4+64-byte encrypted-key block, no ACK). Used by the live test against the proxy container.
+      The original docs incorrectly conflated the two; Net-7's `Connection::DoKeyExchange` strips the Westwood session envelope entirely. Loopback test verifies the client-chosen RC4 key matches what the synthetic server decoded; live test verifies the proxy accepts our key block without error.
 
 - [x] Test client: replay subset of captured packets, observe responses.
       Status: done (commit 4e2d192) — login (opcode 0x02) and any other client→server opcode is subsumed by the generic replay engine, no special-case needed.
@@ -79,7 +83,7 @@ This phase exists because Phases A–I delivered a server that compiles and an i
       Notes: `RunReplay()` walks a filtered packet list, sends each Client→Server packet (RC4-encrypted if `apply_rc4`), and reads + decrypts the expected response for Server→Client packets. Opcode-only equality check on responses (full byte-compare would fail — server state diverges run-to-run). Offline tests pass; live test is env-gated.
 
 - [~] Wire integration tests into CI.
-      Status: partial (commit 0c915af) — offline tests (handshake parser, RSA round-trip, RC4, capture parser, loopback handshake) now build and run in the existing ctest CI job. Live tests will land once a Net7Proxy compose service is up.
+      Status: partial — offline tests (handshake parser, RSA round-trip, RC4, capture parser, loopback handshake, post-handshake opcode pinning) build and run in the existing ctest CI job. Live tests pass locally via `just integration-test` against the proxy container; CI activation needs a docker-compose-up step in the ctest workflow before setting `NET7_TEST_PROXY_HOST`.
       Touches: `.github/workflows/build.yml` (added libssl-dev), `tests/CMakeLists.txt`
       Notes: 14/14 ctest pass locally (12 ran + 2 properly skipped). Adding `NET7_TEST_PROXY_HOST` to the CI step will activate the live tests once the proxy listener is reachable from the runner.
 

@@ -194,3 +194,13 @@ Net7Proxy was originally a client launcher (CreateProcess + Detours + MessageBox
 - `pthread_create` shim (`proxy/compat/threading_shim.cpp`) is a copy of `server/compat/`; same caveat as Phase J server (lone-return null `_beginthreadex` handle).
 
 **Why this matters more than the size suggests**: the live test client at `tests/client/` can now point `NET7_TEST_PROXY_HOST=127.0.0.1` at the running proxy and exercise its TCP accept path. The next step is to give the Linux Connection class an actual SYN1→ACK1 RSA response so the handshake test moves from "self-paired loopback" to "client vs. live server", which is the gating step for any real protocol-replay testing.
+
+## 2026-05-23 — Phase J: Two distinct handshake wire protocols (capture vs. Net-7)
+
+While porting `DoKeyExchange` to Linux on the proxy, discovered the test client's `RunClientHandshake` driver speaks the **historical Westwood Online envelope** (4-step SYN1/ACK1/SYN2/ACK2 with session ID + cookies, 86-byte ACK1) extracted from `capturedPackets/capture_1.txt`. The Net-7 emulator does **not** speak this envelope on TCP 3801 — `server/src/Connection.cpp:150` and the corresponding `proxy/Connection.cpp` send a raw 74-byte RSA pubkey (modulus + exponent only) and expect 4-byte length + 64-byte encrypted block in return. ClientDetours patches the original game client to skip the Westwood envelope and talk this simpler protocol directly.
+
+**Decision**: keep both. `RunClientHandshake()` stays for capture-validation and for the loopback self-test where both sides speak the historical protocol. Added a parallel `RunNet7Handshake()` (no SYN1, server initiates with 74 bytes, no ACK packet) used by the live tests against the proxy container. The previous live test docs incorrectly claimed `RunClientHandshake` could talk to a Net-7 server — that was wrong; the test was unreachable until this split.
+
+**Outcome**: `NET7_TEST_PROXY_HOST=127.0.0.1 ctest -R HandshakeDriver|Replay` now passes end-to-end against the running container. Proxy logs `DoKeyExchange: RC4 session established on port 3801` for each connection. The Linux Connection class's RC4 stream is keyed identically to the test client's, proving the wire and the crypto are both right.
+
+**Honest limit**: opcode dispatch (ClientToMasterServer / Global / Sector) still WIN32-walled. After handshake the proxy drains RC4-decrypted bytes and discards them. Live replay test sends captured client packets and asserts the send path doesn't error; it cannot yet assert anything about server responses.
