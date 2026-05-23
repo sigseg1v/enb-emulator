@@ -44,10 +44,14 @@ Goal: consolidate the three upstream repos into a clean layout, write docs, writ
       Notes: Doc index with one-line per-file descriptions, conventions, reference-material table; points readers at 01-overview then 02-architecture.
 - [x] `docs/01-overview.md`
       Notes: Preservation framing, three upstreams with credit, current Phase A/B-I status, NC license summary, get-started paths for client/server/tools.
-- [ ] `docs/02-architecture.md` — from Net-7 architecture RTF + Net7.cpp/ServerManager/ConnectionManager code reading
-- [ ] `docs/03-network-protocol.md` — ports, client→login→sector handoff
-- [ ] `docs/04-server-modules.md` — one section per top-level manager class, with file:line refs
-- [ ] `docs/05-abilities.md` — full ability list, mark which are tada-o-new
+- [x] `docs/02-architecture.md` — from Net-7 architecture RTF + Net7.cpp/ServerManager/ConnectionManager code reading
+      Notes: 811 lines. Process topology (Master+Global+Auth or Sector), startup from Net7.cpp main():91, server roles, MailslotManager IPC, UDP_SSLcomms, main loop (50ms tick / ~10Hz movement), database layer, in-memory managers, sector mgmt. Three mermaid diagrams (topology, startup sequence, login flow). Heavy file:line refs.
+- [x] `docs/03-network-protocol.md` — ports, client→login→sector handoff
+      Notes: 617 lines. UDP transport, packet framing (EnbTcpHeader 4B / EnbUdpHeader 12B), Westwood RSA-512 + RC4 + OpenSSL, port table (443, 3500-3501+, 3801, 3805, 3806, 3807, 3808, 3809), login flow + sector handoff (three mermaid diagrams), full opcode tables for 0x00xx/0x10xx/0x20xx/0x30xx/0x40xx/0x50xx + server-to-server 0x78xx-0x79xx, captured-packets reference, "Unknown from code reading" section called out.
+- [x] `docs/04-server-modules.md` — one section per top-level manager class, with file:line refs
+      Notes: 1086 lines. Seven groupings: ServerManager/ConnectionManager/SectorServerManager/MailManager/SaveManager/StringManager+GMemoryHandler; SectorManager/ObjectManager/EffectManager; PlayerManager + Player + CMob/MOB/MOBSpawn + CMobBuffs + Equipable; AccountManager; Groups + GuildManager; ItemBaseManager + 5 other content loaders; UDP_Connection + Connection + SSL_Listener/SSL_Connection. Constructor/method/field refs throughout.
+- [x] `docs/05-abilities.md` — full ability list, mark which are tada-o-new
+      Notes: 310 lines. Skill-vs-ability distinction (58 skills, 138 ability IDs, MAX_ABILITY_IDS=138), AbilityBase lifecycle (Use→Update→Execute, Confirmation), m_AbilityList[138] O(1) dispatch, SetupAbilities() mapping from CMobClass.cpp:885-1091, dispatch flowchart, tada-o-new annotation (22 abilities flagged), full table of 28 classes with ability IDs handled + summaries + tada-o-new flag, "Gaps and known issues" (AHacking's wrong skill ID, COMPULSORY_CONTEMPLATION not implemented, ARally rank-6 gap, AAfterburn memory-leak comment), add-an-ability cookbook.
 - [x] `docs/06-database-schema.md` — per-table summary of all 71 tables
       Notes: All 71 net7.sql tables grouped thematically (world/assets/mobs/avatars/items/effects/skills/factions/starbases/missions/audit); per-table PK/cols/key cols/FKs/owning editor; full net7_user.sql 42-table list at end; editor-to-table cross-reference; Postgres conversion gotchas (preserved sic spellings, binary(1), zerofill, identifier folding).
 - [x] `docs/07-tools-toolchain.md` — one paragraph per C# editor
@@ -60,7 +64,8 @@ Goal: consolidate the three upstream repos into a clean layout, write docs, writ
       Notes: Per-phase goal/approach/effort/risks/deliverables for B-I derived from plans/02..09; explicit "deliberately skipped" section (no Avalonia, no full RE, no engine rewrite, no DRM-free distribution, no commercial use, no asio migration, no Crypto++ replacement, etc.); total effort estimate (4-6 months FTE / 12-18 months weekend hacking).
 - [x] `docs/11-gm-commands.md` — reformatted from GMCommands.txt
       Notes: Reformatted faithfully from reference/gm-commands-original.txt; split into account admin (`//`) and in-game admin (`/`) sections; per-command table with Description and Example; noted that command list is partial and access-level numerics are unverified.
-- [ ] `docs/reference/` — preserved original architecture RTF + FAQ
+- [x] `docs/reference/` — preserved original architecture RTF + FAQ
+      Notes: faq-original.txt, gm-commands-original.txt, net7-architecture-original.rtf, original-readme.txt all in place under docs/reference/.
 - [x] Top-level `README.md` (done during bootstrap)
 
 ### A4 — Phase B scaffolding

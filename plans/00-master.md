@@ -6,8 +6,8 @@ This is the source of truth for what's done and what's next across invocations. 
 
 | # | Phase | File | Status | Started | Last updated |
 |---|---|---|---|---|---|
-| A | Repo merge + scaffolding | [01-phase-a-merge.md](01-phase-a-merge.md) | in progress | 2026-05-22 | 2026-05-22 |
-| B | Best-effort Linux server build | [02-phase-b-linux-server.md](02-phase-b-linux-server.md) | not started | — | — |
+| A | Repo merge + scaffolding | [01-phase-a-merge.md](01-phase-a-merge.md) | complete | 2026-05-22 | 2026-05-22 |
+| B | Best-effort Linux server build | [02-phase-b-linux-server.md](02-phase-b-linux-server.md) | in progress | 2026-05-22 | 2026-05-22 |
 | C | Postgres migration | [03-phase-c-postgres.md](03-phase-c-postgres.md) | not started | — | — |
 | D | C# tools → .NET 10 | [04-phase-d-csharp-tools.md](04-phase-d-csharp-tools.md) | not started | — | — |
 | E | OpenSSL 1.0 → 3.x | [05-phase-e-openssl.md](05-phase-e-openssl.md) | not started | — | — |
