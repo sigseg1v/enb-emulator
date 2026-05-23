@@ -15,7 +15,7 @@ This is the source of truth for what's done and what's next across invocations. 
 | G | Tests | [07-phase-g-tests.md](07-phase-g-tests.md) | complete (3 binaries, CI ctest job, fixed Phase D sln→slnx CI regression; subsystem tests need source isolation first) | 2026-05-22 | 2026-05-22 |
 | H | Deepen docs | [08-phase-h-docs.md](08-phase-h-docs.md) | complete (4 new docs + §8 flow walkthroughs + capture analysis in docs/03 §8 with 120k-packet histogram) | 2026-05-22 | 2026-05-23 |
 | I | Dev env polish | [09-phase-i-dev-env.md](09-phase-i-dev-env.md) | complete (justfile/Dockerfiles/CI matrix/release.yml/pre-commit; wine-tools profile deferred) | 2026-05-22 | 2026-05-22 |
-| J | Runnable end-to-end | [10-phase-j-runnable.md](10-phase-j-runnable.md) | in progress (server UDP binds verified; Net7Proxy Linux port done with real Net-7 RSA+RC4 handshake — `NET7_TEST_PROXY_HOST=127.0.0.1 ctest` passes 17/17 against the running container; opcode dispatch + login-server still WIN32-walled) | 2026-05-23 | 2026-05-23 |
+| J | Runnable end-to-end | [10-phase-j-runnable.md](10-phase-j-runnable.md) | in progress (server UDP binds verified; Net7Proxy Linux port + real Net-7 RSA+RC4 handshake — ctest 17/17 against the running container; Net7SSL login-server Linux port — port 443 binds, TLSv1.3 handshake succeeds via openssl s_client; opcode dispatch + MySQL account lookup still WIN32-walled) | 2026-05-23 | 2026-05-23 |
 
 Decisions log: [99-decisions-log.md](99-decisions-log.md).
 

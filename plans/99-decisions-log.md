@@ -204,3 +204,20 @@ While porting `DoKeyExchange` to Linux on the proxy, discovered the test client'
 **Outcome**: `NET7_TEST_PROXY_HOST=127.0.0.1 ctest -R HandshakeDriver|Replay` now passes end-to-end against the running container. Proxy logs `DoKeyExchange: RC4 session established on port 3801` for each connection. The Linux Connection class's RC4 stream is keyed identically to the test client's, proving the wire and the crypto are both right.
 
 **Honest limit**: opcode dispatch (ClientToMasterServer / Global / Sector) still WIN32-walled. After handshake the proxy drains RC4-decrypted bytes and discards them. Live replay test sends captured client packets and asserts the send path doesn't error; it cannot yet assert anything about server responses.
+
+## 2026-05-23 — Phase J: Net7SSL login-server port mirrors Net7Proxy strategy
+
+Same WIN32-walling pattern as the Net7Proxy port (commits 6579152..3665511): of the 6.7K LOC under `login-server/Net7SSL/`, **8 translation units** are entirely WIN32-walled because they pull in `Connection_B` (blocking-TCP session machinery), `mysqlplus.cpp` (vendored 2010 MySQL header that doesn't build on Linux), `MailslotManager` (Win32 mailslot IPC, no POSIX equivalent), `UDPClient` (MVAS keep-alive bus), and headers that don't exist anywhere in the tree (`MessageQueue.h`, `StaticData.h`, case-mismatched `Connection_B.h` vs. `connection_B.h`). Walled TUs: `Net7SSL.cpp`, `Connection.cpp`, `ClientToGlobalServer.cpp`, `ConnectionManager.cpp`, `AccountManager.cpp`, `UDPClient.cpp`, `TcpListener_B.cpp`, `SSL_ServerManager.cpp`, `SSL_Connection.cpp`.
+
+**Linux build path** (compiles cleanly): `Net7SSL.cpp` (Linux main + globals + LogMessage + dir-helper stubs), `SSL_Listener.cpp` (already mostly Linux-aware; updated `SSLv23_server_method` → `TLS_server_method` for OpenSSL 3 and walled the Connection-manager dispatch with a Linux branch that drives `SSL_accept()` inline then closes), `Mutex.{h,cpp}` (POSIX), `WestwoodRSA.cpp` + `WestwoodRC4.cpp` (already OpenSSL 3 clean from Phase E; just needed `Net7.h` → `Net7SSL.h` include fix), `compat/` (verbatim copy from `proxy/compat/`).
+
+**Decision: cert load downgraded from fatal to warning**. The original `SSL_Listener::SSL_Listener` `return`-ed early on missing cert files, leaving the listener thread never started and port 443 never bound. For Phase J we log the warning and continue — the listener binds, `SSL_accept()` will fail on each connection, but operators can verify the port topology and provision certs without touching the code.
+
+**Decision: port-443 publishing in compose maps to host 4443**. Rootless Docker forbids publishing host ports below 1024. The container binds 443 internally (protocol-correct) but the host map is `4443:443`. Production deployments on rootful Docker flip to `443:443`. The login container also runs as root (commented `USER net7`) for the same reason. `CAP_NET_BIND_SERVICE` on the binary is the cleaner prod path, deferred.
+
+**End-to-end verification**: `docker compose up -d login` brings the container up healthy. `docker compose exec login ss -tlnp` shows `LISTEN 0.0.0.0:443 net7ssl pid=1`. `echo | openssl s_client -connect 127.0.0.1:4443 -servername local.net-7.org` completes a real **TLSv1.3 handshake** (cert presented and parsed), and the login container logs `SSL handshake OK (TLSv1.3)` for the connection.
+
+**Honest limits (carry to Phase K)**:
+- Linux net7ssl is a **handshake-only** stub. No HTTP/auth request parsing, no MySQL ticket store, no `AuthLogin` / `SectorServer` / `TouchSession` endpoint handlers.
+- `AccountManager` (MySQL-driven), `ConnectionManager`, `MailManager` (mailslot IPC), `UDPClient` (MVAS bus) all link to nothing on Linux.
+- Same `_beginthreadex` shim caveat as proxy/server (lone-return null thread handle).
