@@ -83,7 +83,11 @@ void SSL_Listener::RunThread()
 	name.sin_port = htons(m_TcpPort);
 
 	struct in_addr in;
+#ifdef WIN32
 	in.S_un.S_addr = m_IpAddress;
+#else
+	in.s_addr = m_IpAddress;
+#endif
 
 	if (bind(m_ListenerSocket, (struct sockaddr *) &name, sizeof(name)))
     {

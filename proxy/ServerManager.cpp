@@ -48,6 +48,7 @@ void ServerManager::RunMasterServer()
 	SSL_Listener *ssl_listener = 0;
 	TcpListener *global_server_listener = 0;
 
+#ifdef WIN32
 	if (g_LocalCert)
 	{
 		// Instantiate the SSL Listener object
@@ -56,6 +57,17 @@ void ServerManager::RunMasterServer()
 		// Instantiate the TCP Listener object for the Global Server
 		global_server_listener = new TcpListener(m_IpAddressInternal, GLOBAL_SERVER_PORT, *this, CONNECTION_TYPE_CLIENT_TO_GLOBAL_SERVER);
 	}
+#else
+	// Phase J: on Linux, always stand up the GLOBAL_SERVER_PORT listener
+	// (it's plain TCP, not SSL). The SSL listener is gated separately on
+	// cert availability since the Linux SSL_Connection class is currently
+	// a stub.
+	global_server_listener = new TcpListener(m_IpAddressInternal, GLOBAL_SERVER_PORT, *this, CONNECTION_TYPE_CLIENT_TO_GLOBAL_SERVER);
+	if (g_LocalCert)
+	{
+		ssl_listener = new SSL_Listener(m_IpAddressInternal, ssl_port, *this);
+	}
+#endif
 
 	// Instantiate the TCP Listener object for the Master (galaxy) Server
 	TcpListener master_tcp_listener(m_IpAddressInternal, MASTER_SERVER_PORT, *this, CONNECTION_TYPE_CLIENT_TO_MASTER_SERVER);
@@ -67,9 +79,12 @@ void ServerManager::RunMasterServer()
 
     sector_comms.Shutdown();
 
-	if (g_LocalCert)
+	if (ssl_listener)
 	{
 		ssl_listener->Shutdown();
+	}
+	if (global_server_listener)
+	{
 		global_server_listener->Shutdown();
 	}
 	master_tcp_listener.Shutdown();
@@ -82,10 +97,17 @@ FILE *OpenLogFile(FILE *logfile, char *name)
     {
         // If the log file is not open, then open it
         // Create log filename with the current date
+        char filename[MAX_PATH];
+#ifdef WIN32
         SYSTEMTIME systime;
         GetSystemTime(&systime);
-        char filename[MAX_PATH];
         sprintf(filename, "%s_%04d_%02d_%02d.log", name, systime.wYear, systime.wMonth, systime.wDay);
+#else
+        time_t now = time(NULL);
+        struct tm *t = gmtime(&now);
+        snprintf(filename, MAX_PATH, "%s_%04d_%02d_%02d.log", name,
+                 t->tm_year + 1900, t->tm_mon + 1, t->tm_mday);
+#endif
         logfile = fopen(filename, "a+");
     }
     return logfile;
@@ -360,7 +382,18 @@ bool ServerManager::RegisterSectorServer(short first_port, short max_sectors)
 	SSL * ssl;
 
     SSLeay_add_ssl_algorithms();
+#ifdef WIN32
+	// SSLv2 is gone in OpenSSL 3.x — and the entire RegisterSectorServer
+	// flow targets the legacy net-7.org auth registration HTTPS endpoint.
+	// On Linux Phase J we don't register against an external auth server;
+	// short-circuit to success so the local listener path keeps running.
 	ssl_client_method = SSLv2_client_method();
+#else
+	(void)first_port; (void)max_sectors; (void)buffer;
+	(void)ssl_context; (void)ssl;
+	LogMessage("RegisterSectorServer: skipped on Linux (no external auth server)\n");
+	return true;
+#endif
 	SSL_load_error_strings();
 	ssl_context = SSL_CTX_new(ssl_client_method);
 	if (!ssl_context)
