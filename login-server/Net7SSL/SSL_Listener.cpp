@@ -194,13 +194,16 @@ void SSL_Listener::RunThread()
 				LogMessage("Refused connection to %d.%d.%d.%d : On the SSL shitlist.\n", ip[0], ip[1], ip[2], ip[3]);
 			}
 #else
-			// Phase J Linux: SSL_Connection / SSL_DenyList / ConnectionManager
-			// are still WIN32-walled. Drive the SSL handshake inline, then
-			// close. This proves the listener works end-to-end (cert is
-			// presented, handshake completes if the cert files are present)
-			// without dragging in the rest of the connection-management
-			// machinery for Phase J.
-			LogMessage("Accepted SSL connection from %d.%d.%d.%d (Phase J Linux stub: handshake-and-close)\n",
+			// Phase J Linux: drive SSL_accept inline, then read one HTTP
+			// request, dispatch via HandleHttpsRequest() (LinuxAuth.cpp),
+			// write the response, and close. No threading, no connection
+			// pooling — for the auth flow each TLS session is one round
+			// trip. The heavy SSL_Connection class (per-connection thread,
+			// state machine, ConnectionManager wiring) stays WIN32-walled.
+			extern char *HandleHttpsRequest(char *recv_buffer, size_t *out_len,
+											unsigned long client_ip);
+
+			LogMessage("Accepted SSL connection from %d.%d.%d.%d\n",
 				ip[0], ip[1], ip[2], ip[3]);
 			SSL *ssl = SSL_new(m_ssl_context);
 			if (ssl)
@@ -215,6 +218,40 @@ void SSL_Listener::RunThread()
 				else
 				{
 					LogMessage("  SSL handshake OK (%s)\n", SSL_get_version(ssl));
+
+					// One read is sufficient for the GET-with-query-string
+					// requests the client sends. Buffer is sized to match
+					// SSL_RECV_BUFFER from SSL_Connection.h.
+					constexpr size_t kRecvSize = 2048;
+					char recv_buf[kRecvSize + 1];
+					int n = SSL_read(ssl, recv_buf, (int)kRecvSize);
+					if (n > 0)
+					{
+						recv_buf[n] = 0;
+						// Log just the first request line so debug output
+						// doesn't drown in the rest of the HTTP headers.
+						const char *eol = strpbrk(recv_buf, "\r\n");
+						int first_len = eol ? (int)(eol - recv_buf) : n;
+						LogMessage("  HTTP: %.*s\n", first_len, recv_buf);
+
+						size_t resp_len = 0;
+						char *resp = HandleHttpsRequest(recv_buf, &resp_len, addr);
+						if (resp && resp_len > 0)
+						{
+							int wrote = SSL_write(ssl, resp, (int)resp_len);
+							if (wrote <= 0)
+							{
+								int werr = SSL_get_error(ssl, wrote);
+								LogMessage("  SSL_write failed (err=%d)\n", werr);
+							}
+						}
+						if (resp) delete [] resp;
+					}
+					else if (n < 0)
+					{
+						int rerr = SSL_get_error(ssl, n);
+						LogMessage("  SSL_read failed (err=%d)\n", rerr);
+					}
 					SSL_shutdown(ssl);
 				}
 				SSL_free(ssl);

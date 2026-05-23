@@ -130,6 +130,14 @@ services:
         condition: service_healthy
     extra_hosts:
       - "local.net-7.org:127.0.0.1"
+    environment:
+      # Phase J: LinuxAuth.cpp reads these to talk to the MySQL container.
+      # Defaults are baked into the binary; env overrides make swapping
+      # the backing DB straightforward in CI / staging.
+      MYSQL_HOST: "mysql:3306"
+      MYSQL_USER: "net7"
+      MYSQL_PASS: "net7"
+      MYSQL_DB: "net7_user"
     volumes:
       # SSL_Listener.cpp reads "<g_DomainName>.cer" and "<g_DomainName>.pem"
       # from CWD; the same certs the server container uses also work here.

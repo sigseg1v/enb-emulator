@@ -49,6 +49,15 @@ message(STATUS "net7ssl: discovered ${_net7ssl_src_count} .cpp files under login
 find_package(OpenSSL 3.0 REQUIRED)
 find_package(Threads REQUIRED)
 
+# libmysqlclient is consumed via pkg-config; the upstream package ships
+# either `mysqlclient` or (on noble) the unprefixed name. Fall back to
+# the linker flag if pkg-config can't find it.
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(MYSQLCLIENT IMPORTED_TARGET mysqlclient)
+if(NOT MYSQLCLIENT_FOUND)
+    message(STATUS "net7ssl: pkg-config didn't find mysqlclient; falling back to -lmysqlclient")
+endif()
+
 # --------------------------------------------------------------------------
 # Target
 # --------------------------------------------------------------------------
@@ -91,6 +100,12 @@ target_link_libraries(net7ssl PRIVATE
     OpenSSL::SSL
     OpenSSL::Crypto
 )
+
+if(MYSQLCLIENT_FOUND)
+    target_link_libraries(net7ssl PRIVATE PkgConfig::MYSQLCLIENT)
+else()
+    target_link_libraries(net7ssl PRIVATE mysqlclient)
+endif()
 
 # --------------------------------------------------------------------------
 # Install
