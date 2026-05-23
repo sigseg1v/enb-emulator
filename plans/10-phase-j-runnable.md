@@ -60,25 +60,25 @@ This phase exists because Phases A–I delivered a server that compiles and an i
       Touches: `login-server/`, new `login-server/CMakeLists.txt`, `SSLv23_server_method`→`TLS_server_method`, win32 shims
       Notes: ~6.7K LOC. `SSL_Listener.cpp` is already mostly Linux-aware (existing `#ifdef WIN32` paths). Needed for full auth flow; not needed for protocol-replay testing against the master/sector listeners.
 
-- [ ] Test client: port Westwood RSA+RC4 handshake to a standalone C++ tool.
-      Status: not started
-      Touches: `tests/client/` (new), reference `proxy/WestwoodRSA.cpp` + `proxy/WestwoodRC4.cpp` (already Linux-portable), captures at `archive/kyp-snapshot/capturedPackets/capture_1.txt:216-219` (SYN1/ACK1/SYN2/ACK2 exchange)
-      Notes: Client logic can be developed and unit-tested independently of the live server (against canned captures).
+- [x] Test client: port Westwood RSA+RC4 handshake to a standalone C++ tool.
+      Status: done (commits 7472211..ba791a0)
+      Touches: `tests/client/westwood/westwood_rsa.{h,cpp}`, `tests/client/westwood/westwood_rc4.{h,cpp}`, `tests/client/capture_parser.{h,cpp}`, `tests/client/handshake_test.cpp`
+      Notes: Self-contained (no Net7.h dependency). Six gtest cases pin: capture parser correctness, modulus matches captured ACK1 packet bytes 17..80, RSA encrypt/decrypt round-trip, RC4 round-trip + RFC 6229 test vector, and decrypt of captured SYN2 recovers the annotated session key at plaintext[63..56] reversed (per `proxy/Connection.cpp:230-268` DoClientKeyExchange).
 
-- [ ] Test client: send Login opcode (0x02), parse server response.
-      Status: not started
-      Touches: `tests/client/`
-      Notes: requires a working server-side TCP listener (Net7Proxy port) plus the Westwood handshake completed.
+- [x] Test client: full 4-step handshake driver over TCP (live + loopback).
+      Status: done (commit ba791a0)
+      Touches: `tests/client/tcp_client.{h,cpp}`, `tests/client/handshake_driver.{h,cpp}`, `tests/client/handshake_live_test.cpp`
+      Notes: `RunClientHandshake()` sends SYN1, validates ACK1 (modulus equality check against our embedded N), encrypts and sends SYN2 with reversed-key layout, parses ACK2 to extract CORD port. Loopback test spawns a thread that plays the server side of the handshake on an ephemeral localhost port and verifies the client-chosen RC4 key matches what the server decoded. Live test is env-gated via `NET7_TEST_PROXY_HOST` and skips when unset.
 
-- [ ] Test client: replay subset of captured packets, observe responses.
-      Status: not started
-      Touches: `tests/client/`, packet sources under `archive/kyp-snapshot/capturedPackets/` (3 RAR archives, decoded text format with hex bytes + opcode annotations)
-      Notes: scope = replay engine that parses the capture text format, drives the same packet sequence, and asserts server responses match.
+- [x] Test client: replay subset of captured packets, observe responses.
+      Status: done (commit 4e2d192) — login (opcode 0x02) and any other client→server opcode is subsumed by the generic replay engine, no special-case needed.
+      Touches: `tests/client/replay.{h,cpp}`, `tests/client/replay_test.cpp`, `tests/client/captures/capture_1_post_handshake.txt`
+      Notes: `RunReplay()` walks a filtered packet list, sends each Client→Server packet (RC4-encrypted if `apply_rc4`), and reads + decrypts the expected response for Server→Client packets. Opcode-only equality check on responses (full byte-compare would fail — server state diverges run-to-run). Offline tests pass; live test is env-gated.
 
-- [ ] Wire integration tests into CI.
-      Status: not started
-      Touches: `.github/workflows/build.yml`, new compose service for client harness
-      Notes: dependent on Net7Proxy port + working test client.
+- [~] Wire integration tests into CI.
+      Status: partial (commit 0c915af) — offline tests (handshake parser, RSA round-trip, RC4, capture parser, loopback handshake) now build and run in the existing ctest CI job. Live tests will land once a Net7Proxy compose service is up.
+      Touches: `.github/workflows/build.yml` (added libssl-dev), `tests/CMakeLists.txt`
+      Notes: 14/14 ctest pass locally (12 ran + 2 properly skipped). Adding `NET7_TEST_PROXY_HOST` to the CI step will activate the live tests once the proxy listener is reachable from the runner.
 
 - [ ] Update `plans/00-master.md` status table + `plans/99-decisions-log.md` entry for Phase J scope.
       Status: in progress (this file)
