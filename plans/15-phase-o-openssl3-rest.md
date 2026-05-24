@@ -43,17 +43,22 @@ Built proxy + login-server + the gtest suite from a clean tree against host Open
 - [x] Drop the 1.1 compat shim from the top-level build. No such shim exists.
 - [x] CI matrix: confirm Ubuntu 24.04 OpenSSL 3.x build of proxy + login-server is green. Confirmed locally; CI matrix already runs `cmake --build` on both targets.
 
-## Latent concern — defer to its own follow-up
+## Phase O+ — vendored OpenSSL 1.0 header tree deletion (DONE 2026-05-24, commit f65211c)
 
-`server/src/openssl/` is a 2010-vintage **vendored** OpenSSL 1.0 header tree (~1960-line `ssl.h`, 966-line `evp.h`, full crypto headers). It survives because:
+Latent landmine identified during Phase O audit and immediately resolved as Phase O+ (in-line continuation per the no-stop-at-boundaries rule):
 
-1. `target_include_directories(net7 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" ...)` puts `server/src` before the system include path, so `#include "openssl/ssl.h"` (e.g. `server/src/ServerManager.cpp:24`) resolves to the vendored copy.
-2. The two .cpp files that touch the vendored tree (`ServerManager.cpp` via `"openssl/ssl.h"`, `WestwoodRSA.cpp` via `<openssl/ssl.h>`) only call SSL/RSA APIs that are ABI-stable between OpenSSL 1.0 and 3.x — or the calls are walled off entirely (`ServerManager.cpp::RegisterSectorServer` is `#if 0`).
-3. Phase M patched the vendored `opensslconf.h` to gate the `OPENSSL_SYSNAME_WIN32` define on `_WIN32` so the headers stop dragging `<windows.h>` in on Linux.
+`server/src/openssl/` was a 2010-vintage 73-file vendored OpenSSL 1.0 header tree (~30k LOC). `target_include_directories(net7 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" ...)` put it ahead of the system OpenSSL 3.x headers on the include path, so every `#include "openssl/ssl.h"` from server/src — and `#include <openssl/ssl.h>` from server/src/WestwoodRSA.cpp, because GCC searches `-I` paths for both forms — resolved against the vendored copy. The server then linked against `libssl.so.3 + libcrypto.so.3` at runtime via `find_package(OpenSSL 3.0 REQUIRED)`. Compiled against 1.0 struct layouts, called into 3.x ABI. Worked only because:
 
-This works today but is a landmine: any future call site that exercises a 1.x-vs-3.x ABI-divergent struct (e.g. `EVP_MD_CTX`, `RSA`, `BIGNUM` internals) will silently corrupt memory because the header layout disagrees with the runtime library layout.
+1. `ServerManager.cpp::RegisterSectorServer` (the SSL-using site) was in an `#if 0` deadblock.
+2. `WestwoodRSA.cpp`'s RSA/BIGNUM uses happen to be ABI-stable between 1.0 and 3.x.
+3. Phase M had patched the vendored `opensslconf.h` so it stopped dragging `<windows.h>` in on Linux.
 
-**Follow-up plan O+**: delete `server/src/openssl/` entirely, switch all `#include "openssl/..."` to `<openssl/...>`, rely on `find_package(OpenSSL 3.0 REQUIRED)` for headers and linkage. Scoped to one separate plan file because (a) needs an audit of every consumer in server/src and proxy/login-server, (b) requires re-running the full integration suite to catch any ABI-divergent corner case, (c) genuinely orthogonal to Phase O's "drop the 1.1 compat shim" goal.
+**Resolution:**
+- Deleted the entire 73-file vendored tree (`server/src/openssl/aes.h … x509v3.h`).
+- Switched the one remaining quote-form server-native include (`server/src/ServerManager.cpp:24`) from `"openssl/ssl.h"` to `<openssl/ssl.h>`.
+- Normalised the four other server-native quote-form includes to angle form for convention consistency (`login-server/Net7SSL/SSL_{Listener,Connection}.h`, `proxy/SSL_Connection.cpp:19`, `proxy/ServerManager.cpp:9`) — proxy and login-server CMakeLists never had a `-I src` analog so they were already grabbing the system header, but the convention should be uniform.
+
+**Verified:** all four targets (server, proxy, login-server/net7ssl, tests) build clean against system OpenSSL 3.0.13 with zero preprocessor or linker complaints; `ldd` shows `libssl.so.3 + libcrypto.so.3` on every binary; ctest 23/23 pass with the 9 expected env-gated skips. Server binary 14 MB (was 13.7 MB — slight increase from genuinely using the 3.x struct layouts).
 
 ## Definition of done
 

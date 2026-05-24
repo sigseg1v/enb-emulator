@@ -446,3 +446,13 @@ The Phase O plan asserted proxy and login-server were pinned to `OPENSSL_API_COM
 The migration must have landed piecemeal alongside Phase E (server-native) and Phase J (Net7SSL TCP/TLS handshake on Linux) — neither of which updated this plan file. Closing Phase O complete and filing **Phase O+** as a follow-up to delete the vendored `server/src/openssl/` 2010 OpenSSL 1.0 header tree (still on the include path; works today only because the two consumers happen to touch ABI-stable APIs or `#if 0` deadcode — silent landmine for any future call site that exercises an ABI-divergent struct).
 
 **Alternatives considered:** (1) Delete the vendored tree as part of Phase O. Rejected — it requires an audit of every `#include "openssl/..."` in server/src and a re-run of the full integration suite; orthogonal to the "drop the 1.1 compat shim" goal and deserves its own plan. (2) Reopen Phase E to absorb this. Rejected — Phase E closed with explicit scope; better to file Phase O+ than retroactively expand a closed phase.
+
+## 2026-05-24 — Phase O+ in-line continuation: deleted vendored OpenSSL 1.0 header tree
+
+While verifying Phase O, audit found `server/src/openssl/` was still on the include path *before* the system OpenSSL 3.x headers. The server binary linked `libssl.so.3 + libcrypto.so.3` but compiled against 2010 OpenSSL 1.0 struct layouts. Worked only because the two server-side consumers (ServerManager.cpp's openssl use is `#if 0` deadcode; WestwoodRSA.cpp uses RSA/BIGNUM which are largely ABI-stable). Per "no stop at phase boundaries", filed and resolved as Phase O+ in the same invocation:
+
+- Deleted the 73-file vendored tree (~30k LOC of crypto headers).
+- Switched server/src/ServerManager.cpp's `"openssl/ssl.h"` to angle form so the system header unambiguously wins.
+- Normalised the four other server-native `"openssl/..."` includes to angle form (proxy/login-server's CMakeLists never had a `-I src` analog so they were already grabbing the system header — convention update for uniformity).
+
+**Alternatives considered:** (1) Keep the vendored tree and patch it forward to OpenSSL 3.x layouts. Rejected — re-vendoring 30k LOC of crypto headers is multi-day work and pointless when the system package is one apt-install away. (2) Move the vendored tree to `server/third_party/openssl-1.0-vendored/` for posterity. Rejected — git history preserves it just fine; on-disk it's a stale landmine.
