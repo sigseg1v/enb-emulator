@@ -1159,13 +1159,45 @@ so Tier 12 is split:
 
       Build: 0 warnings, 0 errors.
 
-      **Wave 3+ (still pending):**
-        - `mainFrm.selected*` static-globals refactor decision
-          (currently parked behind `EditorGlobals` static class)
-        - Real Avalonia property panel (replacing NullPropertyHost
-          with a reflection-driven editor)
-        - Real Avalonia data grid (replacing NullGridSyncSink)
-        - Real DAO-backed `IFactionLookup` installed by MainWindow
+      **Wave 3+ (DONE):**
+        - [x] Real Avalonia property panel — `Utilities/PropertyPanelHost.cs`
+              implements `IPropertyHost` via reflection. Groups by
+              `[Category]`, per-type editors: bool→CheckBox,
+              int/float/double→NumericUpDown, string→TextBox,
+              `System.Drawing.Color`→swatch + hex TextBox, fallback
+              read-only TextBox. Tooltips from `[Description]`. Wired
+              into `c_PropertyPanel` (StackPanel inside ScrollViewer).
+        - [x] Real Avalonia data grid — `Utilities/DataGridSyncSink.cs`
+              implements `IGridSyncSink`. Wraps DataGrid + DataTable,
+              sets `ItemsSource = table.DefaultView`. Append/Remove/
+              Select walk rows by `sector_object_id`. Wired into
+              `c_ObjectsGrid` lazily on sector selection (since
+              `SectorObjectsSql` requires a sector name in its ctor).
+        - [x] Real DAO-backed `IFactionLookup` —
+              `Utilities/FactionLookupAdapter.cs` wraps `FactionSql`
+              for `findNameByID` / `findIDbyName`. Installed into
+              `EditorGlobals.Factions` in `MainWindow.SafeBoot`.
+        - [x] `AvaloniaNotificationSink` — `Utilities/AvaloniaNotificationSink.cs`
+              replaces `NullNotificationSink` with MsBox.Avalonia
+              message-box popup, parent-attached to MainWindow.
+        - [x] MainWindow wiring — `Windows/MainWindow.axaml{,.cs}`
+              constructs all DAOs (`SystemsSql`, `SectorsSql`,
+              `SectorObjectsSql`, `FactionSql`, `MobsSQL`,
+              `BaseAssetSQL`), populates TreeView from
+              `TreeWindow.setupInitialTree()`, hosts PCanvas in
+              `<Border x:Name=c_SectorHost/c_SystemHost/c_UniverseHost>`
+              (PCanvas is `Control`, not `Canvas`), and dispatches
+              `File → New …` through `NewFrmDialog` →
+              `NewSystem/NewSector/NewSectorObjectType+Object`.
+        - [x] `mainFrm.selected*` static-globals refactor decision —
+              **accepted as-is**. Parked behind `EditorGlobals` static
+              class (`SectorID` + `Factions`). The original tool's
+              `mainFrm` was equally global; replacing with proper DI
+              would mean rewriting dialog signatures across the suite
+              and is not load-bearing for the port.
+
+      Build: 0 warnings, 0 errors.
+      Smoke: `dotnet run -- --smoke` → login + main + piccolo all OK.
 
 The WinForms binary continues to build and runs under WINE on Linux
 (`tools/README.md`). The Avalonia port is the end state; WINE is the
