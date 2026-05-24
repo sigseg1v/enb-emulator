@@ -26,6 +26,7 @@ with that in mind.
 7. [In-memory state managers](#7-in-memory-state-managers)
 8. [Sector management](#8-sector-management)
 9. [Where the original design diverges from the code](#9-where-the-original-design-diverges-from-the-code)
+10. [Wire-format header layout (`common/`)](#10-wire-format-header-layout-common)
 
 ---
 
@@ -335,21 +336,22 @@ in `UDP_Connection::RunRecvThread` at
 
 ### Port assignments
 
-`server/src/Net7.h:179-189`:
+Defined in `common/include/net7/Ports.h` (Phase R Wave 2 — was triplicated
+across the three trees, and SECTOR_SERVER_PORT had drifted to 3500 in
+proxy/ vs 3501 in server+login because the same macro name was being used
+for two different concepts). Single source of truth now lives in `common/`.
 
 | Port | Macro | Used for | Role |
 |---|---|---|---|
 | 443 | `SSL_PORT` | HTTPS auth | Net7SSL |
-| 3805 | `GLOBAL_SERVER_PORT` | TCP (legacy) | Net7 |
-| 3801 | `MASTER_SERVER_PORT` | TCP (legacy) | Net7 |
-| 3501 | `SECTOR_SERVER_PORT` | TCP (legacy, starts here, increments per sector) | Net7 |
+| 3805 | `GLOBAL_SERVER_PORT` | TCP | Proxy (listens), Net7 (advertises) |
+| 3801 | `MASTER_SERVER_PORT` | TCP | Net7 (master role) |
+| 3500 | `PROXY_LOCAL_TCP_PORT` | TCP, proxy's own local terminator | Proxy |
+| 3501 | `SECTOR_SERVER_PORT` | TCP, sectors start here and increment per sector | Net7 (sector role) |
 | 3806 | `MVAS_LOGIN_PORT` | UDP | Net7 (MVAS = MVASlaunch, the launcher) |
 | 3807 | `SSL_LOCALCERT_LOGIN_PORT` | TCP for local-cert dev mode | Net7SSL |
 | 3808 | `UDP_MASTER_SERVER_PORT` | UDP master dispatch | Net7 |
 | 3809 | `PROXY_SERVER_PORT` | Net7Proxy local | Proxy |
-
-3500 is reserved as Net7Proxy's local TCP port; that is why sectors
-start at 3501.
 
 ### Auth flow at the protocol layer
 
@@ -809,3 +811,61 @@ it onto the source, the following are the gotchas:
 
 For the actual on-the-wire protocol, see `docs/03-network-protocol.md`.
 For per-module deep dives, see `docs/04-server-modules.md`.
+
+---
+
+## 10. Wire-format header layout (`common/`)
+
+Phase R (2026-05-23) extracted shared protocol headers into
+`common/include/net7/`. Before Phase R, the following headers were
+duplicated across `proxy/`, `server/src/`, and `login-server/Net7SSL/`:
+
+| Header | Purpose | Wire-load-bearing? |
+|---|---|---|
+| `Opcodes.h` | Opcode constants (`OPCODE_LOGIN`, `OPCODE_VERSION_REQUEST`, ...) | Yes |
+| `PacketStructures.h` | All packed structs for wire-format packets | Yes |
+| `Ports.h` (extracted from each Net7.h) | TCP/UDP port assignments | Yes |
+| `Packing.h` (new) | `ATTRIB_PACKED` macro + `u8/u16/.../BSTR` typedefs | Yes (typedefs reach into wire structs) |
+| `Mutex.h` | RAII mutex wrapper | No |
+| `WestwoodRC4.h` | RC4 stream cipher used in the session handshake | Yes (algorithm + key sizes) |
+| `WestwoodRSA.h` | RSA exchange for the initial RC4 key swap | Yes |
+
+All seven now live in exactly one place and are consumed by all three
+subprojects via a `target_include_directories(... PRIVATE common/include)`
+line in each CMakeLists.txt.
+
+Two real wire-format drifts were caught during the consolidation:
+
+1. **`MasterJoin` layout drift.** Server's and login's copies of
+   `PacketStructures.h` still used `long` fields after Phase K had fixed
+   proxy's copy to `int32_t`. `long` is 8 bytes on Linux x86_64 vs 4 on
+   Win32; the wire format is 4. The mismatched copies were latent because
+   neither server nor login currently writes `MasterJoin` (only proxy
+   parses it on inbound), but the next handler ported to read it on the
+   server side would have read zeros.
+
+2. **`SECTOR_SERVER_PORT` semantic conflict.** proxy's `Net7.h` defined
+   `SECTOR_SERVER_PORT 3500`; server's and login's defined it as `3501`.
+   The same macro name meant two different things — proxy used it for its
+   own local TCP bind, server/login used it for the canonical sector
+   server port. The split was intentional ("we start from 3501 now because
+   3500 is used as the local TCP port in Net7Proxy" — comment in original
+   Net7SSL.h) but the name reuse made it invisible until the consolidation
+   surfaced it. Resolved by splitting into `PROXY_LOCAL_TCP_PORT` (3500)
+   and `SECTOR_SERVER_PORT` (3501); proxy's 9 call sites of the old name
+   were rewritten to `PROXY_LOCAL_TCP_PORT`.
+
+### Rule of thumb
+
+If you're adding a struct, opcode, constant, or port number that crosses
+a process boundary, it goes in `common/include/net7/`, never in a
+per-process header.
+
+Headers that are NOT in `common/`:
+- `Net7.h` / `Net7SSL.h` — per-process Windows compatibility blocks,
+  threading shims, mailslot-related constants. Each tree's `Net7.h` now
+  does `#include <net7/Ports.h>` to get the unified port macros.
+- `ServerManager.h`, `ConnectionManager.h`, etc. — process-local state.
+
+Deferred to Wave 3 backlog (not wire-format, lower priority):
+`Globals.h`, `CircularBuffer.h`, `cmdcodes.h`, `Net7Types.h`.

@@ -36,6 +36,10 @@ The source of truth for "what's done / what's next" across invocations is the `p
 ├── plans/             multi-phase plan files — source of truth for progress
 ├── docs/              comprehensive documentation: architecture, protocol, modules, schema, abilities, tools, build
 ├── LICENSES/          license texts and the license map
+├── common/            shared protocol/wire-format headers (Phase R)
+│   └── include/net7/  Opcodes.h, PacketStructures.h, Ports.h, Packing.h, Mutex.h, WestwoodRC4.h, WestwoodRSA.h
+│                      — included into server/, proxy/, login-server/ via PRIVATE include dir
+│                      — single source of truth for anything that crosses a process boundary
 ├── server/            C++ server (from tada-o)
 │   ├── src/           all .cpp / .h
 │   ├── compat/        Win32 → POSIX shims (new code)
@@ -88,6 +92,7 @@ The source of truth for "what's done / what's next" across invocations is the `p
 |---|---|
 | A new server ability | `server/src/Abilities/` |
 | A new C++ subsystem | `server/src/<subsystem>/` |
+| A wire-format struct, opcode, or port macro | `common/include/net7/` (NOT a per-process header) |
 | A POSIX shim for a Win32 API | `server/compat/` |
 | A new C# editor or tool | `tools/<kebab-name>/` |
 | A new documentation page | `docs/<NN-topic>.md` (numbered) |
