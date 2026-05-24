@@ -3,6 +3,7 @@
 // New code; project default license (LICENSES/enb-emulator).
 
 using N7.CliClient;
+using N7.CliClient.Repl;
 
 if (args.Length == 0 || args[0] is "-h" or "--help")
 {
@@ -20,6 +21,17 @@ if (args[0] == "--smoke")
 {
     Console.WriteLine($"ok: {ClientInfo.Name} {ClientInfo.Version}");
     return 0;
+}
+
+if (args[0] == "repl")
+{
+    var repl = new Repl();
+    // Workflow commands (connect, login, chat, enumerate ...) get
+    // registered here as Items 9-13 land. Today the REPL ships with
+    // the built-in `help` / `quit` only.
+    using var cts = new CancellationTokenSource();
+    Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
+    return await repl.RunAsync(Console.In, Console.Out, cts.Token);
 }
 
 Console.Error.WriteLine($"unknown argument: {args[0]}");
@@ -41,7 +53,7 @@ static void PrintHelp()
           --smoke           print a one-line "ok" and exit (used by CI)
 
         commands:
-          (workflows + REPL land in Items 8/9 of plans/19-phase-s-cli-client.md)
+          repl              interactive REPL (help, quit; more in Items 9-13)
 
         hard rules (see plans/19-phase-s-cli-client.md):
           1. never modify the server to ease the CLI client

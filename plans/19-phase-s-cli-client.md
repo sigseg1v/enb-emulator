@@ -373,10 +373,33 @@ CliClient.UnitTests/
 
         111 tests passing (was 96).
 
-- [ ] Item 8 — REPL (`connect`, `login`, `chat`, `enumerate sectors|missions|items`, `quit`)
-      Status: not started
-      Touches: tools/cli-client/Repl/Repl.cs, Commands.cs
-      Notes: System.CommandLine or a hand-rolled prompt; readable output; tab-completion is nice-to-have, not required.
+- [x] Item 8 — REPL (`connect`, `login`, `chat`, `enumerate sectors|missions|items`, `quit`)
+      Status: done (skeleton — workflow commands plug in via Items 9-13)
+      Touches:
+        - src/CliClient.Core/Repl/Repl.cs (dispatch loop + tokeniser)
+        - src/CliClient.Core/Repl/ICommandHandler.cs (command contract)
+        - src/CliClient.App/Program.cs (wires `cli-client repl` subcommand)
+        - tests/CliClient.UnitTests/Repl/ReplTests.cs
+      Notes:
+        Hand-rolled REPL (no System.CommandLine dependency). Dispatches on
+        first whitespace-separated token; case-insensitive. Built-in handlers:
+        `help` (list + per-command usage) and `quit` (exit code 0). Everything
+        else — `connect`, `login`, `chat`, `enumerate ...` — gets registered
+        externally as Items 9-13 land, via repl.Register(ICommandHandler).
+        Keeps the REPL itself a thin dispatcher with no network knowledge.
+
+        Tokenisation supports double-quote grouping (`chat "hello world" team`
+        → 3 tokens). No shell escape sequences — interactive use, not scripting.
+
+        Exit-code mapping: handler returns 0 = success keep looping, positive
+        = non-fatal error recorded, negative = quit (with `-(rc+1)` as exit).
+
+        `cli-client repl` smoke-tested: `echo "help\nquit" | cli-client repl`
+        prints command list and exits cleanly.
+
+        Tab-completion deferred (plan called it nice-to-have, not required).
+
+        127 tests passing (was 111).
 
 - [ ] Item 9 — Workflow: connect-and-login (smoke-test target)
       Status: not started
