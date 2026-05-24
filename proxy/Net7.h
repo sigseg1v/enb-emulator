@@ -129,17 +129,9 @@ typedef int   SOCKET;
 #  define WAIT_FAILED    0xFFFFFFFFu
 #endif
 
-// Win32 helpers used by Linux-active code.
-static inline void Sleep(DWORD ms) {
-    ::usleep(static_cast<useconds_t>(ms) * 1000u);
-}
-static inline DWORD GetTickCount() {
-    struct timespec ts;
-    ::clock_gettime(CLOCK_MONOTONIC, &ts);
-    return static_cast<DWORD>(
-        (static_cast<uint64_t>(ts.tv_sec) * 1000ull
-         + static_cast<uint64_t>(ts.tv_nsec) / 1000000ull) & 0xFFFFFFFFu);
-}
+// Phase M: Sleep() and GetTickCount() were inlined Win32-name shims here;
+// they've been retired. Live call sites use ::usleep(ms * 1000) and
+// Net7TickMs() (declared in <net7/Ticks.h>, included below) directly.
 
 // The Net7Proxy logs/database paths are unused on the server-side Linux
 // build (Net7Proxy was originally a client-side launcher). Keep the names
@@ -201,6 +193,9 @@ typedef signed char     s8;
 // Proxy's old SECTOR_SERVER_PORT (3500) was renamed to PROXY_LOCAL_TCP_PORT
 // to distinguish it from the canonical sector server port (3501).
 #include <net7/Ports.h>
+
+// Phase M vocabulary sweep: monotonic ms tick counter replaces GetTickCount().
+#include <net7/Ticks.h>
 
 #define	MAX_BUFFER					25000
 extern unsigned short ssl_port;

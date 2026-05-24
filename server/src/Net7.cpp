@@ -98,7 +98,7 @@ int main(int argc, char* argv[])
 {
     // Let the user know when this was compiled for reference purposes
     printf("Net7: Built on %s, at %s\n\n",__DATE__, __TIME__);
-    g_StartTick = GetTickCount();
+    g_StartTick = Net7TickMs();
 
     bool standalone = false;
     bool master_server = false;
@@ -320,7 +320,7 @@ int main(int argc, char* argv[])
 	struct hostent * host = gethostbyname(g_DomainName);
 	if (!host)
 	{
-        int err = WSAGetLastError();
+        int err = errno;
         printf("Unable to resolve IP address for %s (error=%d)\n", g_DomainName, err);
         return(1);
     }
@@ -402,7 +402,7 @@ int main(int argc, char* argv[])
 
 unsigned long GetNet7TickCount()
 {
-    return (GetTickCount() - g_StartTick);
+    return (Net7TickMs() - g_StartTick);
 }
 
 #ifdef WIN32
@@ -502,22 +502,12 @@ int SetCurrentDirectory(const char *path)
     return 1;
 }
 
-void Sleep(unsigned long dwMilliseconds)
-{
-    usleep((unsigned int) dwMilliseconds * 1000);
-}
-
 bool DeleteFile(const char *file)
 {
     return (!remove(file));
 }
 
-long GetTickCount()
-{
-    timeval tv;
-    gettimeofday(&tv, 0);
-    return (tv.tv_sec * 1000) + (tv.tv_usec / 1000);
-}
-
+// Phase M: Sleep() and GetTickCount() were removed. Call sites use
+// usleep() and Net7TickMs() (<net7/Ticks.h>) directly now.
 
 #endif

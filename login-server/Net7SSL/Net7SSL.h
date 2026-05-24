@@ -183,17 +183,9 @@
 	#  define WAIT_FAILED    0xFFFFFFFFu
 	#endif
 
-	// Win32 helpers used by Linux-active code.
-	static inline void Sleep(DWORD ms) {
-	    ::usleep(static_cast<useconds_t>(ms) * 1000u);
-	}
-	static inline DWORD GetTickCount() {
-	    struct timespec ts;
-	    ::clock_gettime(CLOCK_MONOTONIC, &ts);
-	    return static_cast<DWORD>(
-	        (static_cast<uint64_t>(ts.tv_sec) * 1000ull
-	         + static_cast<uint64_t>(ts.tv_nsec) / 1000000ull) & 0xFFFFFFFFu);
-	}
+	// Phase M: Sleep() and GetTickCount() were inlined Win32-name shims here;
+	// they've been retired. Live call sites use ::usleep(ms * 1000) and
+	// Net7TickMs() (declared in <net7/Ticks.h>, included below) directly.
 
 	unsigned long GetCurrentDirectory(unsigned long size, char *path);
 	int SetCurrentDirectory(const char *path);
@@ -221,6 +213,9 @@
 // Port macros + CLIENT_TYPE_* tags live in common/include/net7/Ports.h
 // (Phase R Wave 2 — wire-load-bearing, kept in exactly one place).
 #include <net7/Ports.h>
+
+// Phase M vocabulary sweep: monotonic ms tick counter replaces GetTickCount().
+#include <net7/Ticks.h>
 
 #define	MAX_BUFFER					4096
 //#define SSL_PORT					8891	// handles authentication - HTTPS protocol (0x22BB)

@@ -231,10 +231,11 @@
 		return 0;
 	}
 
-	long GetTickCount();
+	// Phase M: GetTickCount() retired in favor of Net7TickMs()
+	// (see <net7/Ticks.h>, included above). Sleep() retired in favor of
+	// usleep() — call sites multiply ms × 1000.
 	unsigned long GetCurrentDirectory(unsigned long size, char *path);
 	int SetCurrentDirectory(const char *path);
-	void Sleep(unsigned long dwMilliseconds);
 	bool DeleteFile(const char *filename);
 
 	// Win32 GetLastError: keep as an errno passthrough. CloseHandle, the
@@ -355,6 +356,9 @@
 // Port macros + CLIENT_TYPE_* tags live in common/include/net7/Ports.h
 // (Phase R Wave 2 — wire-load-bearing, kept in exactly one place).
 #include <net7/Ports.h>
+
+// Phase M vocabulary sweep: monotonic ms tick counter replaces GetTickCount().
+#include <net7/Ticks.h>
 
 #define	MAX_BUFFER					25000
 //#define SSL_PORT					8891	// handles authentication - HTTPS protocol (0x22BB)
