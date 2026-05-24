@@ -15,7 +15,7 @@
 
 #include "Net7SSL.h"
 #include "MailslotManager.h"
-#include "compat/posix_ipc.h"
+#include <net7/PosixIpc.h>
 
 #include <cstring>
 #include <new>

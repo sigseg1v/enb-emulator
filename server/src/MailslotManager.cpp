@@ -19,7 +19,7 @@
 // native and the IPC bus is AF_UNIX SOCK_DGRAM through net7ipc::PosixIpc.
 #include "MailslotManager.h"
 #include "Net7.h"
-#include "../compat/posix_ipc.h"
+#include <net7/PosixIpc.h>
 
 #include <cstring>
 #include <new>

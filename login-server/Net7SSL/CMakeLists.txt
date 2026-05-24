@@ -36,8 +36,10 @@ file(GLOB NET7SSL_SRC CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
 )
 
-file(GLOB NET7SSL_COMPAT_SRC CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/compat/*.cpp"
+# Phase M: shared common/ sources (net7ipc::PosixIpc, etc.). The local
+# compat/ tree is being dismantled — net7ipc moved to common/.
+set(NET7SSL_COMPAT_SRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../common/PosixIpc.cpp"
 )
 
 list(LENGTH NET7SSL_SRC _net7ssl_src_count)

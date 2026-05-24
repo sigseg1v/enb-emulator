@@ -1,23 +1,22 @@
-// server/compat/posix_ipc.h
+// common/include/net7/PosixIpc.h
 //
-// Phase J continuation: AF_UNIX SOCK_DGRAM replacement for the Win32
-// mailslot IPC used between the Net7 server and the Net7SSL login
-// server. Same-host, low-volume (one ping every 10s in the current
-// codebase), message-oriented — datagram semantics match mailslots
-// exactly, no framing layer needed.
+// Phase M: relocated from server/compat/posix_ipc.h (and the duplicate
+// at login-server/Net7SSL/compat/posix_ipc.h). One copy now, shared by
+// both server and login binaries.
+//
+// AF_UNIX SOCK_DGRAM replacement for the Win32 mailslot IPC used
+// between the Net7 server and the Net7SSL login server. Same-host,
+// low-volume (one ping every 10s in the current codebase), message-
+// oriented — datagram semantics match mailslots exactly, no framing
+// layer needed.
 //
 // Each process binds a "recv" socket at a well-known path and opens a
 // "send" socket on demand to the peer's path. Buffers are bounded to
 // the mailslot wire ceiling (1024 bytes) so an oversized message gets
 // truncated rather than overwriting unrelated memory.
-//
-// Header is included on both POSIX and Win32 (the Win32 path compiles
-// to nothing — see #ifndef _WIN32 guard).
 
-#ifndef NET7_POSIX_IPC_H
-#define NET7_POSIX_IPC_H
-
-#ifndef _WIN32
+#ifndef NET7_POSIX_IPC_H_
+#define NET7_POSIX_IPC_H_
 
 #include <cstddef>
 #include <string>
@@ -66,5 +65,4 @@ private:
 
 }  // namespace net7ipc
 
-#endif  // !_WIN32
-#endif  // NET7_POSIX_IPC_H
+#endif  // NET7_POSIX_IPC_H_

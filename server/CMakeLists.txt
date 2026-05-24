@@ -63,9 +63,10 @@ list(FILTER NET7_SRC EXCLUDE REGEX "_DEP_\\.cpp$")
 # The authoritative pair is server/src/CMobEquippable.{h,cpp}.
 list(FILTER NET7_SRC EXCLUDE REGEX "/src/Equipable\\.cpp$")
 
-# Compat shim sources (real implementations, not just headers).
-file(GLOB NET7_COMPAT_SRC CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/compat/*.cpp"
+# Phase M: shared common/ sources (net7ipc::PosixIpc, etc.). The Phase B
+# compat shim layer is being dismantled — net7ipc moved to common/.
+set(NET7_COMPAT_SRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/../common/PosixIpc.cpp"
 )
 
 message(STATUS "net7: ${CMAKE_CURRENT_SOURCE_DIR}")

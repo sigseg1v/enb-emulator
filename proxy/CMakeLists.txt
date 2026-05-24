@@ -33,9 +33,9 @@ file(GLOB PROXY_SRC CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
 )
 
-file(GLOB PROXY_COMPAT_SRC CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/compat/*.cpp"
-)
+# Phase M: proxy has no AF_UNIX IPC of its own; the local compat/ tree is
+# header-only after the threading_shim deletion that follows.
+set(PROXY_COMPAT_SRC "")
 
 list(LENGTH PROXY_SRC _proxy_src_count)
 message(STATUS "net7proxy: discovered ${_proxy_src_count} .cpp files under proxy/")

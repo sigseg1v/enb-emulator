@@ -1,10 +1,9 @@
-// server/compat/posix_ipc.cpp
+// common/PosixIpc.cpp
 //
-// See posix_ipc.h. AF_UNIX SOCK_DGRAM replacement for Win32 mailslots.
+// Phase M: relocated from server/compat/posix_ipc.cpp. Implementation of
+// net7ipc::PosixIpc — AF_UNIX SOCK_DGRAM replacement for Win32 mailslots.
 
-#ifndef _WIN32
-
-#include "posix_ipc.h"
+#include <net7/PosixIpc.h>
 
 #include <cerrno>
 #include <cstdio>
@@ -148,5 +147,3 @@ void PosixIpc::Reset() {
 }
 
 }  // namespace net7ipc
-
-#endif  // !_WIN32
