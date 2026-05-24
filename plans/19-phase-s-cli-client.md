@@ -314,10 +314,34 @@ CliClient.UnitTests/
         Current tests: in-process loopback TcpListener fakes that run the server side of
         the handshake. 70 tests passing (was 63 before Item 5).
 
-- [ ] Item 6 — Packet/chat log sinks (NDJSON + readable text)
-      Status: not started
-      Touches: tools/cli-client/Logging/PacketLog.cs, ChatLog.cs, ConsoleSink.cs
-      Notes: one packet = one NDJSON line: {ts, direction, opcode_hex, opcode_name, length, payload_hex, decoded?}; flush on each line.
+- [x] Item 6 — Packet/chat log sinks (NDJSON + readable text)
+      Status: done
+      Touches:
+        - src/CliClient.Core/Logging/PacketDirection.cs (Inbound/Outbound enum)
+        - src/CliClient.Core/Logging/OpcodeNameLookup.cs (reflection over OpcodeId.Known)
+        - src/CliClient.Core/Logging/PacketLog.cs (NDJSON sink, thread-safe, flush-per-line)
+        - src/CliClient.Core/Logging/ChatLog.cs (readable text sink)
+        - src/CliClient.Core/Logging/ConsoleSink.cs (single-line console pretty-printer)
+        - tests/CliClient.UnitTests/Logging/{PacketLogTests,ChatLogTests,ConsoleSinkTests,OpcodeNameLookupTests}.cs
+      Notes:
+        PacketLog line schema matches plan exactly: {ts, direction, opcode_hex, opcode_name,
+        length, payload_hex, decoded?}. opcode_name omitted when unknown; decoded omitted
+        when caller passes null. Hex is lowercase no-separator. Files opened with
+        FileShare.Read so `tail -F` works while the client is running. Every Log() call
+        takes the gate, writes, and flushes — a crash mid-session loses zero packets.
+
+        OpcodeNameLookup is the source of "MasterJoin" / "ServerRedirect" / etc. names —
+        reflected once at type init from the static fields of OpcodeId.Known, so adding a
+        new known opcode in Item 15 automatically lights up its log name.
+
+        ChatLog is plain UTF-8: `YYYY-MM-DDTHH:MM:SS.fffZ [channel] sender: message`.
+        Channel defaults to "chat" when null/empty.
+
+        ConsoleSink fans out to Console.Out (or any TextWriter — tests use StringWriter).
+        Truncates payloads to first 32 bytes + ellipsis to keep lines skimmable.
+        Outbound = →, inbound = ←.
+
+        96 tests passing (was 70 before Item 6).
 
 - [ ] Item 7 — HealthGuard (rule 2 enforcement)
       Status: not started
