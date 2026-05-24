@@ -27,7 +27,6 @@
 #include "StationLoader.h"
 #include "CBAssetParser.h"
 #include "SaveManager.h"
-#include "SSL_Connection.h"
 #include "MailslotManager.h"
 #include "ObjectManager.h"
 #include "Opcodes.h"
@@ -948,29 +947,6 @@ void ServerManager::SetPlayerMgrGlobalMemoryHandler()
 {
     m_PlayerMgr.SetGlobalMemoryHandler(m_GlobMemMgr);
 }
-
-#if 0
-SSL_Connection* ServerManager::GetSSLConnection()
-{
-	SSL_Connection *c;
-#if 0
-	c = m_SSL_Connections->GetNode();
-#else
-	c = 0;
-	return c;
-#endif
-
-	//is this node active? If so, kill it.
-	if (c->IsActive())
-	{
-		c->KillConnection();
-	}
-
-	c->SetGameID(1);
-
-	return c;
-}
-#endif
 
 void ServerManager::AddSector(long sector_id, char *sector_name, char *system_name, char *parent_sector_name)
 {

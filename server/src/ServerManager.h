@@ -22,7 +22,6 @@
 
 #include "AccountManager.h"
 #include "SectorServerManager.h"
-#include "ConnectionManager.h"
 #include "SectorManager.h"
 #include "ItemBaseManager.h"
 #include "SkillParser.h"
@@ -42,7 +41,6 @@
 class Player;
 class SaveManager;
 class CircularBuffer;
-class SSL_Listener;
 class SectorManager;
 class ObjectManager;
 
@@ -84,8 +82,6 @@ public:
 	SectorManager ** GetSectorManagerList();
 	long	GetSectorCount();
 
-	SSL_Connection *GetSSLConnection();
-
 	void	ResetMySQLFileTimer();
     void    ResetChatFileTimer();
     void    ResetLogFileTimer();
@@ -107,36 +103,13 @@ public:
 	CircularBuffer	* GetReSendCBuffer()	{ return m_ReSendBuffer; }
 	CircularBuffer	* GetUDPCBuffer()	{ return m_UDPSendBuffer; }
 	CircularBuffer  * GetMessageBuffer(){ return m_MessageBuffer; }
-	// GetTCPCBuffer/GetConnection — kyp-era TCP path call sites. On Linux the
-	// callers (TcpListener.cpp, Connection.cpp) compile and link, but
-	// TcpListener is never constructed (ServerManager.cpp:147–165 has all
-	// `new TcpListener(...)` commented out) and no Connection is ever
-	// instantiated. The previous stubs returned silent NULL / a wrong-but-
-	// non-null pointer, which would silently corrupt state if the dead path
-	// were ever revived. Phase P (audit baseline 2026-05-23) makes them loud:
-	// if anything actually reaches these on Linux we want a crash, not a
-	// silent NULL deref deep inside the listener loop. Real revival belongs
-	// in proxy/ServerManager.cpp (which already binds 3801) or a Phase B-
-	// continuation rebuild of this listener.
-#ifdef WIN32
-	CircularBuffer	* GetTCPCBuffer()	{ return m_ReSendBuffer; }
-	class Connection * GetConnection()	{ return 0; }
-#else
-	CircularBuffer	* GetTCPCBuffer()
-	{
-		LogMessage("FATAL: ServerManager::GetTCPCBuffer() reached on Linux — "
-		           "kyp-era TCP path was supposed to be inert. See "
-		           "plans/16-phase-p-stub-debt-audit.md\n");
-		abort();
-	}
-	class Connection * GetConnection()
-	{
-		LogMessage("FATAL: ServerManager::GetConnection() reached on Linux — "
-		           "kyp-era TCP path was supposed to be inert. See "
-		           "plans/16-phase-p-stub-debt-audit.md\n");
-		abort();
-	}
-#endif
+	// GetTCPCBuffer / GetConnection / m_ConnectionMgr / SSL_Listener / TcpListener
+	// were part of kyp's flat single-process TCP design. tada-o moved that role
+	// to proxy/ (which binds GLOBAL_SERVER_PORT) and login-server/Net7SSL/, so
+	// server/src/ runs purely as a UDP-fed sector/master logic core on Linux.
+	// Phase Q (2026-05-23) deleted the cluster outright; if you need the
+	// server to terminate TCP again, build it on top of proxy/ServerManager.cpp
+	// rather than reviving these.
 
 private:
     void    ServerCheck();
@@ -156,11 +129,6 @@ public:
 	// Applies only to Master Server
 	AccountManager    * m_AccountMgr;
 	SectorServerManager	m_SectorServerMgr;
-	// ConnectionManager — kyp-era code (SSL_Listener, TcpListener,
-	// ClientToGlobalServer) still references this. The tada-o refactor moved
-	// some logic into PlayerManager but didn't drop the field, so we keep it
-	// present so those call sites compile.
-	ConnectionManager   m_ConnectionMgr;
 
 	// Applies only to Sector Server
 	SectorManager	  * m_SectorMgrList[MAX_SECTORS];
@@ -205,7 +173,6 @@ private:
     Mutex               m_Mutex;
 	bool				m_SectorAssignmentsComplete;
 	long				m_SectorEffectID;
-	//SSL_Listener	  * m_SSL_listener;
 
 	CircularBuffer	  * m_UDPSendBuffer;
 	CircularBuffer    * m_ReSendBuffer;
