@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: CC-BY-NC-SA-3.0
 // Part of the Earth & Beyond emulator preservation project.
-// New code; project default license (LICENSES/enb-emulator).
+// License: LICENSES/enb-emulator
 
 using N7.CliClient.Repl;
 using Xunit;
