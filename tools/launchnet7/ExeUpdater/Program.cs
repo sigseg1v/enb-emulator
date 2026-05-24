@@ -5,7 +5,6 @@ using System.IO;
 using System.Diagnostics;
 using System.Threading;
 using System.Reflection;
-using System.Windows.Forms;
 
 namespace ExeUpdater
 {
@@ -205,7 +204,8 @@ Usage: ExeUpdater.exe [-exeFileName <fileName>] [-waitForPid <pid>] [-waitforPro
 - waitforfile: Wait for the process by trying to get an exclusive handle on the exe file.
 - noargs: When calling the replaced/restarted exe two arguments are normally given -delete <fileName> -pid <pid> of this exe. This information can be used to delete this exe if temporary used.
 ";
-            MessageBox.Show(text, "ExeUpdater - Information", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            Console.WriteLine("=== ExeUpdater - Information ===");
+            Console.WriteLine(text);
         }
     }
 }

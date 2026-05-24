@@ -1,16 +1,22 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Library</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>W3DParser</RootNamespace>
     <AssemblyName>W3D Parser</AssemblyName>
-    <UseWindowsForms>true</UseWindowsForms>
     <Nullable>disable</Nullable>
     <LangVersion>latest</LangVersion>
     <ImplicitUsings>disable</ImplicitUsings>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <NoWarn>CS0108;CS0114;CS0414;CS0219;CS0162;CS0168;CS0169;CS0612;CS0618;CS0628;CS1591;CS8981;CS0436;NU1701;MSB3277</NoWarn>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- System.Drawing.Color (the only System.Drawing type used) lives in
+         System.Drawing.Primitives, which IS cross-platform. We do not pull
+         System.Drawing.Common (Bitmap/Graphics/Font), so this library runs
+         on Linux and macOS without libgdiplus. -->
+    <PackageReference Include="System.Drawing.Common" Version="9.0.0" />
+  </ItemGroup>
   <ItemGroup>
     <!-- TexturesChunke.cs (typo 'Chunke') duplicates TexturesChunk.cs; original csproj only compiled the correctly-named file. -->
     <Compile Remove="Chunks/TexturesChunke.cs" />
