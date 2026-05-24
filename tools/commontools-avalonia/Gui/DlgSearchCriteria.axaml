@@ -1,0 +1,27 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="CommonTools.Gui.DlgSearchCriteria"
+        Title="Search Criteria"
+        Width="490" Height="160"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+    <Grid Margin="10" RowDefinitions="Auto,Auto,Auto,*,Auto"
+                     ColumnDefinitions="Auto,*,Auto,Auto">
+        <TextBlock Grid.Row="0" Grid.Column="0" Text="Field:"      VerticalAlignment="Center" Margin="0,0,8,8"/>
+        <ComboBox  Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="3" x:Name="guiFieldCbo" Margin="0,0,0,8"/>
+
+        <TextBlock Grid.Row="1" Grid.Column="0" Text="Pattern:"    VerticalAlignment="Center" Margin="0,0,8,8"/>
+        <TextBox   Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" x:Name="guiPatternTxt" Margin="0,0,4,8"/>
+        <Button    Grid.Row="1" Grid.Column="3" x:Name="guiPatternTipBtn" Content="?" Width="22" Margin="0,0,0,8"/>
+
+        <TextBlock Grid.Row="2" Grid.Column="0" Text="Comparison:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+        <ComboBox  Grid.Row="2" Grid.Column="1" x:Name="guiComparisonCbo" FontFamily="Monospace" Margin="0,0,4,8"/>
+        <TextBox   Grid.Row="2" Grid.Column="2" Grid.ColumnSpan="2" x:Name="guiComparisonTxt" Width="100" HorizontalAlignment="Right" Margin="0,0,0,8"/>
+
+        <StackPanel Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="4"
+                    Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="guiOkBtn"     Content="Ok"     Width="80" Margin="0,0,8,0"/>
+            <Button x:Name="guiCancelBtn" Content="Cancel" Width="80"/>
+        </StackPanel>
+    </Grid>
+</Window>

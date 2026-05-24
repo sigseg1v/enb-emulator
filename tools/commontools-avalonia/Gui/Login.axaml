@@ -1,0 +1,28 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="CommonTools.Gui.Login"
+        Title="Login"
+        Width="290" Height="195"
+        CanResize="False"
+        WindowStartupLocation="CenterScreen">
+    <Grid Margin="14" RowDefinitions="Auto,Auto,Auto,Auto,*,Auto"
+                     ColumnDefinitions="Auto,*">
+        <TextBlock Grid.Row="0" Grid.Column="0" Text="Username:" VerticalAlignment="Center" Margin="0,0,12,8"/>
+        <TextBox   Grid.Row="0" Grid.Column="1" x:Name="LoginUsername" Margin="0,0,0,8"/>
+
+        <TextBlock Grid.Row="1" Grid.Column="0" Text="Password:" VerticalAlignment="Center" Margin="0,0,12,8"/>
+        <TextBox   Grid.Row="1" Grid.Column="1" x:Name="LoginPassword" PasswordChar="*" Margin="0,0,0,8"/>
+
+        <TextBlock Grid.Row="2" Grid.Column="0" Text="SQL Host:" VerticalAlignment="Center" Margin="0,0,12,8"/>
+        <TextBox   Grid.Row="2" Grid.Column="1" x:Name="SQLServer" Margin="0,0,0,8"/>
+
+        <TextBlock Grid.Row="3" Grid.Column="0" Text="SQL Port:" VerticalAlignment="Center" Margin="0,0,12,8"/>
+        <TextBox   Grid.Row="3" Grid.Column="1" x:Name="SQLPort" Width="80" HorizontalAlignment="Left" Margin="0,0,0,8"/>
+
+        <StackPanel Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2"
+                    Orientation="Horizontal" HorizontalAlignment="Stretch">
+            <Button x:Name="ExitLogin"  Content="Cancel" Width="80" Margin="0,0,8,0"/>
+            <Button x:Name="LoginButton" Content="Login"  Width="80" HorizontalAlignment="Right"/>
+        </StackPanel>
+    </Grid>
+</Window>

@@ -46,6 +46,9 @@
   <Folder Name="/enbpatcher-avalonia/">
     <Project Path="enbpatcher-avalonia/EnbPatcherAvalonia.csproj" />
   </Folder>
+  <Folder Name="/commontools-avalonia/">
+    <Project Path="commontools-avalonia/CommonToolsAvalonia.csproj" />
+  </Folder>
   <Folder Name="/w3d-parser/">
     <Project Path="w3d-parser/W3d Parser.csproj" />
   </Folder>

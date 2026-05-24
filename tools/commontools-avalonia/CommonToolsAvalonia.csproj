@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>CommonTools</RootNamespace>
+    <AssemblyName>CommonToolsAvalonia</AssemblyName>
+    <Nullable>disable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <NoWarn>CS0108;CS0114;CS0414;CS0219;CS0162;CS0168;CS0169;CS0612;CS0618;CS0628;CS1591;CS8981;CS0436;NU1701;MSB3277</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- test/ is a sibling Exe project; don't sweep its sources into the library.
+         (Avalonia SDK targets auto-include *.axaml as AvaloniaResource, so we
+         only need to exclude — not re-include — them here.) -->
+    <Compile Remove="test/**" />
+    <None Remove="test/**" />
+    <EmbeddedResource Remove="test/**" />
+    <AvaloniaResource Remove="test/**" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="MySql.Data" Version="9.4.0" />
+    <PackageReference Include="Avalonia" Version="11.2.3" />
+    <PackageReference Include="Avalonia.Controls.DataGrid" Version="11.2.3" />
+    <PackageReference Include="MessageBox.Avalonia" Version="3.2.0" />
+    <!-- Force the patched DBus dep (see toolspatcher-avalonia for context). -->
+    <PackageReference Include="Tmds.DBus.Protocol" Version="0.21.3" />
+  </ItemGroup>
+</Project>

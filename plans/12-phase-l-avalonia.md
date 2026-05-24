@@ -117,12 +117,13 @@ The existing WinForms targets stay in the tree. They still build via `dotnet bui
       lower end, **5-6 months** likely with debug + parity verification.
       Status: complete
 
-- [ ] **avalonia-common shared library**: extract login dialog, MySQL
-      helper, and progress-update patterns from `commontools` into a new
-      `tools/avalonia-common/` library so subsequent ports don't re-solve
-      them. **Deferred** — first do another small editor (dataimport)
-      to see what's actually shared before extracting prematurely.
-      Status: deferred
+- [x] **avalonia-common shared library**: now realized as
+      `tools/commontools-avalonia/` (see Tier 2 below). The shared
+      pieces — Login window, DlgSearch, DlgSearchCriteria, DlgEditXml,
+      DB layer, Xml helpers, Enumeration, TableButtonHandler — all
+      live there. Subsequent editor ports `<ProjectReference>` this
+      instead of `tools/commontools/`.
+      Status: complete
 
 ### Tier 1.5 — second patcher port (no-deps)
 
@@ -146,47 +147,107 @@ The existing WinForms targets stay in the tree. They still build via `dotnet bui
       tools still TBD until first DB-aware editor is ported.
       Status: complete
 
+### Tier 2 — shared library port (complete)
+
+- [x] **commontools-avalonia**: full Avalonia port of `tools/commontools/`.
+      New project at `tools/commontools-avalonia/` targeting `net10.0`
+      (cross-platform, no `-windows` suffix). Library output
+      `CommonToolsAvalonia.dll` with `RootNamespace=CommonTools` so
+      downstream consumers can swap a ProjectReference and keep `using`
+      lines unchanged.
+
+      Ported pieces:
+      - **Login** (Window) — same public API (`isValid()`,
+        `updateVersion()`, `LoginData` static) so consumers don't
+        change. Reads/writes `Config.xml` next to the entry assembly.
+      - **DlgEditXml** (Window) — simple textbox + ok/cancel.
+      - **DlgSearchCriteria** (Window) — field/comparator/pattern
+        dialog with the "% wildcard" tip popup.
+      - **DlgSearch** (Window) — search criteria list + result table.
+        WinForms `ListView` replaced with Avalonia `DataGrid`
+        (`Avalonia.Controls.DataGrid` package; columns added at
+        runtime from `Net7.Tables` enum; `DataTable.DefaultView`
+        bound directly). `ListViewColumnSorter` dropped — DataGrid's
+        built-in sort handles it.
+      - **DB / DBErrorReporter** — extracted MessageBox calls behind
+        a `DBErrorReporter.Show = Action<string, string>` sink. The
+        DB layer no longer depends on any UI framework. `Login`'s
+        ctor installs an Avalonia MsBox sink; library hosts (and
+        the smoke test) can install a console sink instead.
+      - **Database/, Xml/, Singleton.cs, Enumeration.cs,
+        TableButtonHandler.cs, Gui/SearchCriteria.cs** — copied
+        verbatim or ported to Avalonia ComboBox/ListBox APIs.
+
+      Build: `dotnet build` clean (0 warnings, 0 errors).
+      Test: `tools/commontools-avalonia/test/` is a headless
+      Avalonia smoke test (`Avalonia.Headless` 11.2.3) that
+      instantiates each of the 4 windows without a display and
+      verifies the DBErrorReporter sink rerouted by Login's ctor
+      fires. Output:
+      ```
+      login    OK: 290x195 "Login"
+      editxml  OK: 600x450 "Edit XML"
+      crit     OK: 490x160 "Search Criteria"
+      search   OK: 640x500 "Search"
+      smoke OK: all 4 commontools-avalonia windows instantiated
+      ```
+      Registered in `tools/Net7Tools.slnx`. Whole solution still builds.
+      Touches: new `tools/commontools-avalonia/` (4 axaml + .cs,
+      11 .cs ports, csproj, test/ subproject).
+      Status: complete
+
+      **Landmines hit:**
+      - Avalonia SDK auto-includes `*.axaml` as `AvaloniaResource`.
+        Adding an explicit `<AvaloniaResource Include="**/*.axaml" />`
+        produces `AVLN2002: Duplicate x:Class`. Don't.
+      - `test/` lives under the library project dir, so SDK's default
+        `**/*.cs` glob sweeps `test/Program.cs` into the library. Fix
+        with `<Compile Remove="test/**" />` (+ `None`,
+        `EmbeddedResource`, `AvaloniaResource` removes).
+      - `void InitializeComponent() => AvaloniaXamlLoader.Load(this);`
+        as a hand-rolled override is a silent landmine: Avalonia's
+        XAML compiler *generates* `InitializeComponent` which is what
+        wires up x:Name fields. A hand-rolled one shadows the generated
+        version → x:Name fields stay null → ctor NREs at the first
+        field access. Don't write one. Smoke test caught it.
+
 ### Future tier ordering (deferred until session focus returns to Phase L)
 
 When picking up Phase L again, the recommended order:
 
-1. **commontools-avalonia** — shared library. Required by dataimport,
-   missioneditor, talktreeeditor. ~2-3 days (4 dialogs: Login,
-   DlgSearch, DlgSearchCriteria, DlgEditXml; plus DB layer extraction
-   which should be UI-independent already).
+1. **dataimport-avalonia** — 1 form, depends on commontools-avalonia.
+   ~half a day.
 
-2. **dataimport-avalonia** — 1 form, depends on commontools. ~half a
-   day after commontools is up.
-
-3. **launchnet7-avalonia** — 4 forms (Main, Options, Patch, About). No
+2. **launchnet7-avalonia** — 4 forms (Main, Options, Patch, About). No
    commontools dep. ~1-2 days.
 
-4. **faction-editor-avalonia** — 3 forms, MySQL. ~1-2 days after
-   commontools.
+3. **faction-editor-avalonia** — 3 forms, MySQL. ~1-2 days (depends on
+   commontools-avalonia).
 
-5. **mob-editor-avalonia** — 3 forms, MySQL, larger LOC. ~2 days after
-   commontools.
+4. **mob-editor-avalonia** — 3 forms, MySQL, larger LOC. ~2 days
+   (depends on commontools-avalonia).
 
-6. **talktreeeditor-avalonia** — 5 forms, depends on commontools. ~2-3 days.
+5. **talktreeeditor-avalonia** — 5 forms, depends on
+   commontools-avalonia. ~2-3 days.
 
-7. **toolslauncher-avalonia** — 6 forms incl. IRC client + FTP window.
+6. **toolslauncher-avalonia** — 6 forms incl. IRC client + FTP window.
    ~3-5 days (IRC integration via Meebey.SmartIrc4Net is the wildcard).
 
-8. **effect-editor-avalonia** (SQLBind) — 5 forms, particle effects.
+7. **effect-editor-avalonia** (SQLBind) — 5 forms, particle effects.
    ~3 days.
 
-9. **station-tools-avalonia** — 8 forms. ~4-5 days.
+8. **station-tools-avalonia** — 8 forms. ~4-5 days.
 
-10. **missioneditor-avalonia** — 9 forms incl. tree view. Depends on
-    commontools. ~5 days.
+9. **missioneditor-avalonia** — 9 forms incl. tree view. Depends on
+   commontools-avalonia. ~5 days.
 
-11. **sector-editor-avalonia** — 16 forms, custom map canvas
+10. **sector-editor-avalonia** — 16 forms, custom map canvas
     (System.Drawing.Graphics → Avalonia DrawingContext is the major
     work). ~2-3 weeks.
 
 ### Tier 2+ — deferred
 
-The remaining 12 editors (commontools, dataimport, faction-editor, mob-editor, launchnet7, talktreeeditor, effect-editor, toolslauncher, station-tools, missioneditor, sector-editor) are tracked as future Phase L sub-items. **Not in scope for this session.** With realistic ~3-6 month total for the suite, this is its own project.
+The remaining 10 editors (dataimport, faction-editor, mob-editor, launchnet7, talktreeeditor, effect-editor, toolslauncher, station-tools, missioneditor, sector-editor) are tracked as future Phase L sub-items. **Not in scope for this session.** With realistic ~3-6 month total for the suite, this is its own project.
 
 For immediate Linux runnability of the editors: the WinForms binaries already run under WINE — `tools/README.md` documents this. That's the realistic interim story until Avalonia ports land.
 

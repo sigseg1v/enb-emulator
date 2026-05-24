@@ -311,3 +311,35 @@ Phase L this session delivered:
 - GTK# / Eto.Forms: lower quality / less active than Avalonia; rejected.
 - MAUI: requires macOS for Mac Catalyst-style workflows; weak Linux desktop story; rejected.
 - Half-migrate dataimport without commontools first: would produce a broken tool. Rejected per CLAUDE.md no-half-implementations rule.
+
+---
+
+## 2026-05-23 — Phase L: commontools-avalonia shared library port
+
+User directive carry: "for winforms we need it to run on linux so switch it to avalonia." Phase L Tier 2 picked up the shared-library port that was blocking dataimport / faction-editor / mob-editor / talktreeeditor / missioneditor.
+
+**commontools-avalonia (Tier 2):** new `tools/commontools-avalonia/` project, `net10.0` (no `-windows` suffix), library output `CommonToolsAvalonia.dll` with `RootNamespace=CommonTools`. Downstream consumers swap a single `<ProjectReference>` and keep `using` lines unchanged.
+
+Ports:
+- **Login** (Window) — preserved public API (`isValid()`, `updateVersion()`, `LoginData` static class with Host/Port/User/Pass/ConnStr/ApplicationVersion/FormattedVersion). `Application.StartupPath` → `AppContext.BaseDirectory`. Constructor installs a `DBErrorReporter.Show` sink that routes DB errors through MsBox.Avalonia.
+- **DlgEditXml**, **DlgSearchCriteria** — straight ports to AXAML + code-behind.
+- **DlgSearch** — bigger change: WinForms ListView → Avalonia DataGrid (`Avalonia.Controls.DataGrid` package). Columns added at runtime from `Net7.Tables` enum; bound to `DataTable.DefaultView`. WinForms `ListViewColumnSorter` dropped — DataGrid sorts built-in.
+- **DB** — extracted 4 `MessageBox.Show` calls behind a `DBErrorReporter.Show = Action<string, string>` static sink. The DB layer now has zero UI-framework dependencies. Library hosts (and the smoke test) can swap in a console sink.
+- **Database/, Xml/, Singleton.cs, Gui/SearchCriteria.cs** — copied verbatim (no UI dep).
+- **Enumeration.cs, Gui/TableButtonHandler.cs** — repointed to Avalonia ComboBox/ListBox APIs (`ItemsSource =` instead of `Items.AddRange` + sorting).
+
+**Testing**: new `tools/commontools-avalonia/test/CommonToolsAvaloniaSmoke.csproj` — Exe project using `Avalonia.Headless` 11.2.3 to instantiate all 4 windows without a display. Verifies AXAML parses, x:Name fields wire up, and the DBErrorReporter sink rerouted by Login's ctor fires. Output:
+```
+login    OK: 290x195 "Login"
+editxml  OK: 600x450 "Edit XML"
+crit     OK: 490x160 "Search Criteria"
+search   OK: 640x500 "Search"
+smoke OK: all 4 commontools-avalonia windows instantiated
+```
+
+**Landmines hit (recorded so future ports don't re-step on them):**
+1. **Avalonia auto-includes `*.axaml` as `AvaloniaResource`** via SDK targets. An explicit `<AvaloniaResource Include="**/*.axaml" />` causes `AVLN2002: Duplicate x:Class` — don't add one. Only `<Remove>` is needed if you want to exclude a subdirectory.
+2. **`test/` subdirectory got swept into the library csproj**'s default `**/*.cs` compile glob, breaking the smoke build with "Avalonia.Headless not found" against the library. Fix: `<Compile Remove="test/**" />` plus `None`, `EmbeddedResource`, `AvaloniaResource` removes in the same ItemGroup. Document the pattern for any future tool whose tests live inside the project dir.
+3. **Hand-rolled `void InitializeComponent() => AvaloniaXamlLoader.Load(this);` shadows the generator-emitted `InitializeComponent`** — and the generated one is what wires up `x:Name` fields into the partial class. Result: x:Name fields stay null, ctor NRE on first field access. The library compiled clean and the smoke test caught it at runtime. Don't hand-roll it. (Verified the earlier toolspatcher-avalonia + enbpatcher-avalonia POCs only *call* `InitializeComponent()`; they don't define an override, so they're correct.)
+
+**Net result**: 5/14 WinForms-flagged tools have Linux-native paths AND the shared library is no longer a bottleneck. Per-form ordering documented in `plans/12-phase-l-avalonia.md` Tier 2+. Next when Phase L resumes: `dataimport-avalonia` (1 form, just needs commontools-avalonia ProjectReference), then `launchnet7-avalonia`, `faction-editor-avalonia`, `mob-editor-avalonia`.
