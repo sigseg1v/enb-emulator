@@ -1027,9 +1027,11 @@ so Tier 12 is split:
       Smoke: `dotnet run -- --smoke` → `piccolo: ok`. Build: 0 warnings,
       0 errors.
 
-- [ ] **Tier 12e — Sprites + windows**
-      Status: deferred — depends on Tier 12d. Same rationale: pivoted
-      to Phase S for higher leverage. Resume after Phase S/T.
+- [~] **Tier 12e — Sprites + windows**
+      Status: Wave 1 in tree. SystemWindow + 5 simple sprites
+      (Sector, SectorBounds, SectorBoundsSprite, SectorSprite,
+      SystemSprite) ported and exercised by PiccoloSmoke against a
+      fixture DataTable. Build clean, smoke green.
       Touches: `tools/sector-editor-avalonia/Sprites/` (Mob, Planet,
       Stargate, Starbase, Decoration, Harvestable, Sector,
       SectorBounds; one Sprite per type plus a paired "data" class),
@@ -1043,6 +1045,65 @@ so Tier 12 is split:
       types onto the canvas (Avalonia `DragDrop` API, not WinForms
       `DoDragDrop`), and the `mainFrm.selected*` static-globals
       anti-pattern (refactor or preserve, decision per-call-site).
+
+      **Wave 1 (landed):**
+        - `Utilities/IPropertyHost.cs` — abstracts WinForms PropertyGrid.
+          `object SelectedObject { get; set; }` plus a `NullPropertyHost`
+          implementation for the smoke harness. Sprite code consumes only
+          this interface; the panel implementation (Wave 2+ — reflection-
+          driven Avalonia property editor) lands separately.
+        - `Sprites/Sector.cs` — placeholder/preview circle at fixed
+          (100,500) with a random dash-dot-dot pen. One-screen file.
+        - `Sprites/SystemSprite.cs` — stub matching the original; ctor
+          takes a name and does nothing. Kept for tree-window callsite
+          compatibility.
+        - `Sprites/SectorBounds.cs` — galaxy-scale dashed rectangle
+          drawn on UniverseWindow. Pen=red dashed, brush=transparent.
+        - `Sprites/SectorBoundsSprite.cs` — sector-local coord frame:
+          XY axes (`new PPath(); xEdge.AddLine(...)`), bounds rectangle,
+          "0,0"/"+X"/"+Y" labels. boundsRectangle.Pickable=false so the
+          decoration doesn't eat clicks meant for sprites inside it.
+        - `Sprites/SectorSprite.cs` — full DB-bound sector circle.
+          Reads ~30 columns from the DataRow into a `SectorProps`,
+          pushes that into `IPropertyHost` on click. updateChangedInfo
+          preserves the original SQL typos (`grix_x`, `mex_tilt`) with
+          comments explaining why — fixing them is a schema audit, not
+          a port. The sector_type→string mapping uses a C# switch
+          expression instead of the original if/else chain.
+        - `Windows/SystemWindow.cs` — renders one solar system's
+          sectors as a galaxy-scale scene graph. Drops the original
+          `pg.PropertyValueChanged` WinForms wiring; exposes
+          `OnPropertyValueChanged(string, object)` for the future
+          Avalonia panel to call. Sets `canvas.BackColor = Color.Black`
+          (via shim's new `System.Drawing.Color BackColor` property).
+        - `PiccoloShim/PCanvas.cs` — backfilled `BackColor` property
+          mirroring original Piccolo PCanvas API. Disambiguated to
+          `System.Drawing.Color` because both that and `Avalonia.Media.Color`
+          are in scope inside PCanvas.cs.
+        - `PiccoloShim/PiccoloSmoke.cs` — extended with a `RunSpriteSmoke`
+          pass that builds a fixture DataTable (all 35 sector columns
+          incl. the typo columns), constructs SectorBoundsSprite +
+          SectorBounds + Sector + SystemSprite + SystemWindow + 3
+          SectorSprites, picks on Earth's center, raises MouseDown,
+          confirms host.SelectedObject got populated, and round-trips
+          `OnPropertyValueChanged` + `newSector`.
+      Smoke: `dotnet run -- --smoke` → `piccolo: ok` (incl. sprite
+      construction round-trips). Build: 0 warnings, 0 errors.
+
+      **Wave 2+ (still pending):**
+        - Mob + MobSprite (template for the 5 other sprite pairs)
+        - Planet + PlanetSprite
+        - Stargate + StargateSprite
+        - Starbase + StarbaseSprite
+        - Decoration + DecorationSprite
+        - Harvestable + HarvestableSprite
+        - `Windows/SectorWindow.cs` (1825 LOC — the big one)
+        - `Windows/UniverseWindow.cs` (10 LOC)
+        - `Windows/TreeWindow.cs` (43 LOC)
+        - 15 dialog ports (NewSystem/NewSector/NewMob/... etc.)
+        - `mainFrm.selected*` static-globals refactor decision
+        - Real Avalonia property panel (replacing NullPropertyHost
+          with a reflection-driven editor)
 
 The WinForms binary continues to build and runs under WINE on Linux
 (`tools/README.md`). The Avalonia port is the end state; WINE is the

@@ -35,6 +35,19 @@ namespace SectorEditorAvalonia.PiccoloShim
             return p;
         }
 
+        // Path-builder convenience used by sector-editor sprites that
+        // construct an empty PPath then call AddLine(...) on it.
+        public void AddLine(float x1, float y1, float x2, float y2)
+        {
+            Shape = PPathShape.Line;
+            LineStart = new PointF(x1, y1);
+            LineEnd = new PointF(x2, y2);
+            X = System.Math.Min(x1, x2);
+            Y = System.Math.Min(y1, y2);
+            Width = System.Math.Abs(x2 - x1);
+            Height = System.Math.Abs(y2 - y1);
+        }
+
         public override void Render(DrawingContext ctx)
         {
             var fill = ToAvalonia(Brush);

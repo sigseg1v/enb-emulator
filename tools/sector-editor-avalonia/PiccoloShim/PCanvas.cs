@@ -22,6 +22,10 @@ namespace SectorEditorAvalonia.PiccoloShim
 
         public PNode LastPickedNode { get; private set; }
 
+        // System.Drawing.Color BackColor mirror, for callsite compat with
+        // the original Piccolo PCanvas (`canvas.BackColor = Color.Black;`).
+        public System.Drawing.Color BackColor { get; set; } = System.Drawing.Color.FromArgb(255, 20, 20, 30);
+
         public PCanvas()
         {
             Focusable = true;
@@ -32,7 +36,7 @@ namespace SectorEditorAvalonia.PiccoloShim
         {
             base.Render(context);
             context.FillRectangle(
-                new SolidColorBrush(Avalonia.Media.Color.FromRgb(20, 20, 30)),
+                new SolidColorBrush(Avalonia.Media.Color.FromArgb(BackColor.A, BackColor.R, BackColor.G, BackColor.B)),
                 new Rect(Bounds.Size));
 
             using (context.PushTransform(Matrix.CreateTranslation(Camera.TranslateX, Camera.TranslateY)

@@ -22,6 +22,7 @@ namespace SectorEditorAvalonia.PiccoloShim
         public Pen Pen;
         public object Tag;
         public bool ChildrenPickable = true;
+        public bool Pickable = true;
         public bool Visible = true;
 
         private readonly List<PNode> _children = new List<PNode>();
@@ -87,12 +88,15 @@ namespace SectorEditorAvalonia.PiccoloShim
         internal PNode PickTopDown(PointF localPoint)
         {
             if (!Visible) return null;
-            for (int i = _children.Count - 1; i >= 0; i--)
+            if (ChildrenPickable)
             {
-                if (!ChildrenPickable) break;
-                var hit = _children[i].PickTopDown(localPoint);
-                if (hit != null) return hit;
+                for (int i = _children.Count - 1; i >= 0; i--)
+                {
+                    var hit = _children[i].PickTopDown(localPoint);
+                    if (hit != null) return hit;
+                }
             }
+            if (!Pickable) return null;
             return HitTest(localPoint) ? this : null;
         }
 
