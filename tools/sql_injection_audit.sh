@@ -45,7 +45,16 @@
 #   * Manual string concatenation via `+` / `<<` (the codebase does not
 #     use this pattern in query construction).
 #   * Macros that expand to sprintf at preprocessing time.
-#   * Dynamic SQL built across multiple lines (would need AST parsing).
+#
+# Cross-line patterns
+# -------------------
+# The check now uses a small look-ahead window: when an unsafe-build
+# keyword is seen on a line, the next CROSS_LINE_WINDOW lines are also
+# inspected for a SQL keyword. This catches the common idiom:
+#     sprintf_s(buf, sizeof(buf),
+#         "SELECT ... WHERE x = '%d'", x);
+# where the function-call open and the SQL string literal sit on
+# different physical lines and so escaped the strict single-line check.
 #
 # Exit codes
 #   0 — clean
@@ -61,6 +70,10 @@ EXCLUDE_RE='(server/third_party/|server/src/openssl/|server/src/mysql/|server/sr
 
 SQL_KW='SELECT|INSERT|UPDATE|DELETE|REPLACE|CALL'
 UNSAFE_BUILD='sprintf|snprintf|strcat|strncat|stpcpy'
+# Look-ahead window (lines after an unsafe-build site) within which a
+# SQL keyword still counts as part of the same site. 8 covers every
+# multi-line sprintf we encountered in this codebase.
+CROSS_LINE_WINDOW=8
 
 # Walk one file and emit "path:lineno:line" for any unsafe-build line
 # that isn't inside a Win32-walled block. Pure bash + sed; no heavy deps.
@@ -69,8 +82,12 @@ scan_file() {
     # LC_ALL=C so awk treats input as bytes — the source tree has
     # Latin-1 © glyphs in license headers that trip the locale-aware
     # regex engine and spam "Invalid multibyte data" warnings.
-    LC_ALL=C awk -v path="$path" -v sqlre="$SQL_KW" -v buildre="$UNSAFE_BUILD" '
-        BEGIN { walled = 0; depth_at_wall = -1; depth = 0 }
+    LC_ALL=C awk -v path="$path" -v sqlre="$SQL_KW" -v buildre="$UNSAFE_BUILD" -v window="$CROSS_LINE_WINDOW" '
+        BEGIN {
+            walled = 0; depth_at_wall = -1; depth = 0
+            pending_line = 0       # line number of the unsafe-build site we are following, 0 if none
+            pending_text = ""      # the original line text (for reporting)
+        }
         {
             line = $0
             # Track nesting of #if/#ifdef so we know when a WIN32 wall closes.
@@ -93,20 +110,60 @@ scan_file() {
                 depth_at_wall = -1
             }
 
-            if (walled) next
-            # Skip pure comment lines
-            if (match(line, /^[[:space:]]*\/\//)) next
-            if (match(line, /^[[:space:]]*\*/)) next
+            if (walled) { pending_line = 0; next }
 
-            if (match(line, buildre) && match(line, sqlre)) {
-                # Skip if the SQL keyword is only inside a // comment
-                cmt = index(line, "//")
-                if (cmt > 0) {
-                    head = substr(line, 1, cmt - 1)
-                    if (!match(head, sqlre) || !match(head, buildre)) next
+            is_line_comment = match(line, /^[[:space:]]*\/\//)
+            is_block_cont   = match(line, /^[[:space:]]*\*/)
+
+            # Strip trailing // comment so a SQL keyword inside a comment
+            # tail does not trigger.
+            effective = line
+            cmt = index(effective, "//")
+            if (cmt > 0) effective = substr(effective, 1, cmt - 1)
+
+            has_build = match(effective, buildre)
+            has_sql   = match(effective, sqlre)
+
+            if (!is_line_comment && !is_block_cont) {
+                # Same-line classic case.
+                if (has_build && has_sql) {
+                    printf("%s:%d:%s\n", path, NR, line)
+                    pending_line = 0
+                    next
                 }
-                printf("%s:%d:%s\n", path, NR, line)
+                # Cross-line: an unsafe-build site opens a multi-line call
+                # whose closing args (the SQL string literal) sit a few
+                # lines below. Only open the window if this line genuinely
+                # looks like an UNCLOSED format-string call -- a sprintf/
+                # snprintf with at least one trailing comma and unbalanced
+                # parens. Other unsafe-build flavours (strcat / stpcpy)
+                # never span lines this way.
+                if (has_build && match(effective, /[sf]?n?printf/)) {
+                    # Trim trailing whitespace before counting commas/parens.
+                    sub(/[[:space:]]+$/, "", effective)
+                    opens  = gsub(/\(/, "(", effective)
+                    closes = gsub(/\)/, ")", effective)
+                    if (opens > closes && substr(effective, length(effective), 1) == ",") {
+                        pending_line = NR
+                        pending_text = line
+                        next
+                    }
+                }
+                # The continuation line itself must contain a SQL keyword
+                # inside a string literal -- bare identifiers like
+                # XML_TAG_ID_FOO_UPDATE in switch cases would otherwise
+                # false-positive.
+                if (pending_line > 0 && (NR - pending_line) <= window) {
+                    if (match(effective, /"[^"]*(SELECT|INSERT|UPDATE|DELETE|REPLACE|CALL)[^"]*"/)) {
+                        printf("%s:%d:%s\n", path, pending_line, pending_text)
+                        pending_line = 0
+                        next
+                    }
+                }
             }
+
+            # Close the window once we pass it without finding a SQL keyword.
+            if (pending_line > 0 && (NR - pending_line) > window) pending_line = 0
         }
     ' "$path"
 }
