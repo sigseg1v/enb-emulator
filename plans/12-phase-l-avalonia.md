@@ -1090,20 +1090,51 @@ so Tier 12 is split:
       Smoke: `dotnet run -- --smoke` → `piccolo: ok` (incl. sprite
       construction round-trips). Build: 0 warnings, 0 errors.
 
-      **Wave 2+ (still pending):**
-        - Mob + MobSprite (template for the 5 other sprite pairs)
-        - Planet + PlanetSprite
-        - Stargate + StargateSprite
-        - Starbase + StarbaseSprite
-        - Decoration + DecorationSprite
-        - Harvestable + HarvestableSprite
-        - `Windows/SectorWindow.cs` (1825 LOC — the big one)
-        - `Windows/UniverseWindow.cs` (10 LOC)
-        - `Windows/TreeWindow.cs` (43 LOC)
+      **Wave 2 (DONE — commits 0aed4d7, 3d50847):**
+        - [x] Mob + MobSprite — template established
+        - [x] Planet + PlanetSprite (~390 LOC)
+        - [x] Stargate + StargateSprite (~360 LOC) — introduced
+              `IFactionLookup` + `EditorGlobals.Factions` static
+              abstraction (replaces `mainFrm.factions` reach-through)
+        - [x] Starbase + StarbaseSprite (~330 LOC)
+        - [x] Decoration + DecorationSprite (~310 LOC)
+        - [x] Harvestable + HarvestableSprite (~430 LOC) — 5 circles
+              (sig/rr/exp/spawn/field), navType placeholder layout
+              preserved for child-index math
+      All 5 sprite ports + 6 model placeholders + SpritePlaceholder +
+      HslConvert + IPropertyHost/IGridSyncSink/IFactionLookup +
+      EditorGlobals.SelectedObjectId now in tree. Build: 0 warnings,
+      0 errors.
+
+      **Wave 3 (windows done):**
+        - [x] `Windows/SectorWindow.cs` (558 LOC, down from 1825) —
+              integrates all sprites; switch-expressions + pattern
+              matching + a `LayerForType` / `SetChildVisible` dispatch
+              helper collapse the 14 toggle methods (1100+ LOC of
+              near-duplicate switch arms) into one-liners.
+              `grix_x`/`mex_tilt` typos preserved with comment.
+              Camera.MouseDown / PCamera.ViewScale / PNode.ChildrenCount
+              / PNode.RemoveFromParent added to shim to keep callsites
+              identical to Piccolo2D.
+        - [x] `Windows/UniverseWindow.cs` (13 LOC) — empty placeholder
+              matching original, kept for callsite compat.
+        - [x] `Windows/TreeWindow.cs` (52 LOC) — POCO `Node` class
+              (Name + Children) replacing WinForms TreeNode; MainWindow
+              binds to whatever (TreeView / TreeDataGrid).
+        - [x] `IPropertyHost.cs` extensions: `IGridSyncSink` gained
+              `RemoveRowById` / `AppendRow` / `SelectRowById`;
+              `INotificationSink` (replaces SectorWindow's MessageBox);
+              `INewSectorObjectDialog` (replaces newSectorObject form).
+      Build: 0 warnings, 0 errors.
+
+      **Wave 3+ (still pending):**
         - 15 dialog ports (NewSystem/NewSector/NewMob/... etc.)
         - `mainFrm.selected*` static-globals refactor decision
+          (currently parked behind `EditorGlobals` static class)
         - Real Avalonia property panel (replacing NullPropertyHost
           with a reflection-driven editor)
+        - Real Avalonia data grid (replacing NullGridSyncSink)
+        - Real DAO-backed `IFactionLookup` installed by MainWindow
 
 The WinForms binary continues to build and runs under WINE on Linux
 (`tools/README.md`). The Avalonia port is the end state; WINE is the

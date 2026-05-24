@@ -16,6 +16,20 @@ namespace SectorEditorAvalonia.PiccoloShim
         public float TranslateY;
         public float Scale = 1.0f;
 
+        // Piccolo's PCamera intercepted all mouse input before layers got
+        // it. The original sector editor wired `canvas.Camera.MouseDown`
+        // to a "place-new-object" position-picker. PCanvas raises this on
+        // every pointer-press regardless of pick result.
+        public event PInputEventHandler MouseDown;
+        internal void RaiseMouseDown(PInputEventArgs e) => MouseDown?.Invoke(this, e);
+
+        // API-compat alias for callsites that used Piccolo's `ViewScale`.
+        public float ViewScale
+        {
+            get => Scale;
+            set => Scale = value;
+        }
+
         public void Pan(float dx, float dy)
         {
             TranslateX += dx;

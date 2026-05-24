@@ -68,6 +68,10 @@ namespace SectorEditorAvalonia.PiccoloShim
             {
                 picked.RaiseMouseDown(MakeArgs(world, picked));
             }
+            // Camera always sees the click — used by the sector editor's
+            // place-new-object position-picker, which fires regardless of
+            // whether a node was hit.
+            Camera.RaiseMouseDown(MakeArgs(world, picked));
         }
 
         protected override void OnPointerMoved(PointerEventArgs e)

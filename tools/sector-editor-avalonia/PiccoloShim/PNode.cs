@@ -30,7 +30,16 @@ namespace SectorEditorAvalonia.PiccoloShim
 
         public IReadOnlyList<PNode> Children => _children;
         public int ChildCount => _children.Count;
+        // API-compat alias for Piccolo callsites — Piccolo named it ChildrenCount.
+        public int ChildrenCount => _children.Count;
         public PNode GetChild(int index) => _children[index];
+
+        // Piccolo's `PNode.RemoveFromParent()` — detach from this node's
+        // parent (if any). Quietly no-ops when already orphan.
+        public void RemoveFromParent()
+        {
+            Parent?.RemoveChild(this);
+        }
 
         public virtual void AddChild(PNode child)
         {

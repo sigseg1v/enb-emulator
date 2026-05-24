@@ -40,11 +40,54 @@ namespace SectorEditorAvalonia.Utilities
     public interface IGridSyncSink
     {
         void OnCellChanged(string columnName, object newValue);
+
+        // SectorWindow drives the grid for add/delete/select operations
+        // that originated on the canvas. The MainWindow's implementation
+        // routes these to the actual Avalonia DataGrid; the smoke harness
+        // ignores them.
+        void RemoveRowById(int id);
+        void AppendRow(int sectorObjectId, string name, int baseAssetId, int type);
+        void SelectRowById(int id);
     }
 
     public sealed class NullGridSyncSink : IGridSyncSink
     {
         public void OnCellChanged(string columnName, object newValue) { }
+        public void RemoveRowById(int id) { }
+        public void AppendRow(int sectorObjectId, string name, int baseAssetId, int type) { }
+        public void SelectRowById(int id) { }
+    }
+
+    /// <summary>
+    /// Replaces the original sector-editor's <c>MessageBox.Show</c> calls
+    /// inside SectorWindow (currently only the "no object selected" error
+    /// on delete). The MainWindow installs the real Avalonia message-box
+    /// implementation; the smoke harness routes to Console.
+    /// </summary>
+    public interface INotificationSink
+    {
+        void ShowError(string message);
+    }
+
+    public sealed class NullNotificationSink : INotificationSink
+    {
+        public void ShowError(string message)
+        {
+            System.Console.Error.WriteLine("[notify] " + message);
+        }
+    }
+
+    /// <summary>
+    /// Position-picking dialog handed to SectorWindow.newSectorObject()
+    /// in the original tool. The first canvas click after assignment
+    /// fills in the position and reveals the dialog. The MainWindow
+    /// supplies the real Avalonia window; the smoke harness leaves it
+    /// null (and SectorWindow's canvasCamera_MouseDown short-circuits).
+    /// </summary>
+    public interface INewSectorObjectDialog
+    {
+        void setPosition(System.Drawing.PointF position);
+        void Show();
     }
 
     /// <summary>
