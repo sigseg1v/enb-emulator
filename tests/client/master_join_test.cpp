@@ -114,25 +114,19 @@ TEST(MasterJoin, LiveMasterJoinReturnsServerRedirect) {
         ASSERT_TRUE(client.RecvExact(rsp_payload.data(), payload_len, 5000))
             << "short payload read: " << client.last_error();
         rx.Crypt(rsp_payload.data(), payload_len);
-        // ServerRedirect layout still depends on platform `long` width
-        // (PacketStructures.h struct ServerRedirect uses long for
-        // sector_id and ip_address — the long → int32_t migration is a
-        // separate Phase K item):
-        //   Win32 (long=4):    sector_id(4) + ip_address(4) + port(2) = 10 byte payload, port at offset 8
-        //   Linux x86_64 (8):  sector_id(8) + ip_address(8) + port(2) = 18 byte payload, port at offset 16
-        // Probe both — either is a pass for this test.
-        bool found = false;
-        for (int probe : {8, 16}) {
-            if (probe + 2 > payload_len) continue;
-            uint16_t maybe_port;
-            std::memcpy(&maybe_port, &rsp_payload[probe], 2);
-            if (maybe_port == 3500) {
-                found = true;
-                break;
-            }
-        }
-        EXPECT_TRUE(found)
-            << "ServerRedirect did not contain port=3500 at expected offset; "
+        // ServerRedirect layout post-migration (Phase K):
+        //   sector_id(int32_t, 4) + ip_address(int32_t, 4) + port(short, 2)
+        //   = 10 byte payload on every platform, port at offset 8.
+        // The historical {8, 16} probe pair handled the pre-migration Linux
+        // layout (8+8+2 = 18, port at 16); collapsing to just {8} now that
+        // PacketStructures.h::ServerRedirect uses int32_t.
+        ASSERT_GE(payload_len, 10)
+            << "ServerRedirect payload too small for sector_id+ip+port; "
                "payload_len=" << payload_len;
+        uint16_t maybe_port;
+        std::memcpy(&maybe_port, &rsp_payload[8], 2);
+        EXPECT_EQ(maybe_port, 3500)
+            << "ServerRedirect port at offset 8 was 0x" << std::hex << maybe_port
+            << " (expected 3500=0x0DAC); payload_len=" << std::dec << payload_len;
     }
 }

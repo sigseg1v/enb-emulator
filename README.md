@@ -1,6 +1,6 @@
-# Earth & Beyond emulator — preservation project
+# Earth & Beyond emulator preservation project
 
-> A consolidated, modernised home for the Earth & Beyond MMO server emulator. The goal is to keep the game playable on contemporary hardware — Linux server, Linux or Windows client — and bring the codebase forward enough that contributors can actually work on it again.
+> A consolidated, modernised home for the Earth & Beyond MMO server emulator. The goal is to keep the game playable on contemporary hardware; Linux server, Linux or Windows client; and bring the codebase forward enough that contributors can actually work on it again.
 
 ## What this is
 
@@ -13,6 +13,8 @@ This project is **one repo** that consolidates:
 | **tada-o fork** of Net-7 server (svn r2974, 2010-03-15) | `server/`, `login-server/`, `proxy/`, `launcher/`, `client/detours/`, `client/mods/`, `db/mysql/` | Newer/more complete C++ server (~162K LOC), the MySQL schema + seed data, ~20 ability implementations that other forks only had stubs for |
 | **kyp snapshot** (older Net-7 snapshot, 2014 GitHub dump) | `tools/`, `archive/kyp-snapshot/` | Full C# editor suite (Sector, Mob, Mission, Faction, Item, Effect, TalkTree editors plus Station Tools, EnBPatcher, LaunchNet7, W3D Parser, etc.), the original Net-7 architecture documentation, packet captures, the historical Linux-port attempt |
 | **enb-linux-installer** | `client/linux-installer/` | A GPLv3 bash script that automates installing and configuring the Windows client under WINE on Linux distros |
+
+These projects it's based on are super old code but the Net-7 current codebase is private and otherwise inaccessible for extending, so this is the best I can do for now. If more modern code for that was released I'd be happy to build on it.
 
 ## Project status
 
@@ -49,7 +51,7 @@ just test         # ctest + dotnet test
 just package      # build OCI image of the server
 ```
 
-Today `just dev` brings up Postgres and *attempts* to build/run the server. Build is not yet clean on Linux — that's Phase B. See `server/BUILD_ERRORS.md` (after Phase B has been worked on) for the running error list.
+Today `just dev` brings up Postgres and *attempts* to build/run the server. Build is not yet clean on Linux - that's Phase B. See `server/BUILD_ERRORS.md` (after Phase B has been worked on) for the running error list.
 
 ### C# content tools
 
@@ -63,14 +65,14 @@ Build is cross-platform after Phase D. Runtime is Windows-only (WinForms). On Li
 
 See `CLAUDE.md` for the full directory map and rules. Short version:
 
-- `server/`, `login-server/`, `proxy/`, `launcher/` — C++ server-side
-- `client/` — Linux installer + client mods + Detours
-- `tools/` — C# content editors
-- `db/` — MySQL dumps (original) + Postgres schema (converted)
-- `docs/` — architecture, protocol, modules, schema, abilities, tools, build, running, roadmap
-- `plans/` — multi-phase plan files (source of truth for what's done/next)
-- `archive/` — historical material from upstream repos that didn't make it into the active tree
-- `LICENSES/` — license texts and the directory-by-directory license map
+- `server/`, `login-server/`, `proxy/`, `launcher/` - C++ server-side
+- `client/` - Linux installer + client mods + Detours
+- `tools/` - C# content editors
+- `db/` - MySQL dumps (original) + Postgres schema (converted)
+- `docs/` - architecture, protocol, modules, schema, abilities, tools, build, running, roadmap
+- `plans/` - multi-phase plan files (source of truth for what's done/next)
+- `archive/` - historical material from upstream repos that didn't make it into the active tree
+- `LICENSES/` - license texts and the directory-by-directory license map
 
 ## License
 
@@ -78,27 +80,21 @@ See `CLAUDE.md` for the full directory map and rules. Short version:
 
 The project default license is **Creative Commons Attribution-NonCommercial-ShareAlike 3.0 United States** because the bulk of the inherited code (the Net-7 server) is under that license and we can't relicense it.
 
-- `LICENSES/enb-emulator` — project default (CC BY-NC-SA 3.0)
-- `LICENSES/Net7` — original Net-7 license header + deed URL
-- `LICENSES/Tada-O` — note that tada-o adds no separate license; modifications inherit CC BY-NC-SA 3.0 under ShareAlike
-- `LICENSES/enb-linux-installer` — GPLv3 verbatim (governs only `client/linux-installer/`)
+- `LICENSES/enb-emulator` - project default (CC BY-NC-SA 3.0)
+- `LICENSES/Net7` - original Net-7 license header + deed URL
+- `LICENSES/Tada-O` - note that tada-o adds no separate license; modifications inherit CC BY-NC-SA 3.0 under ShareAlike
+- `LICENSES/enb-linux-installer` - GPLv3 verbatim (governs only `client/linux-installer/`)
 
 Precedence: per-file header > per-folder `LICENSE` > project default. See `LICENSES/README.md` for the full directory-by-directory map.
 
-What this means practically:
-- You may use, modify, and redistribute this for non-commercial purposes.
-- You may *not* run a paid server, sell mods, charge for access, or otherwise commercialise this or any derivative.
-- Derivatives must be released under CC BY-NC-SA 3.0 (or a later compatible CC license).
-- Don't strip license headers — they're load-bearing.
-
 ## Credits
 
-- **Net-7 Entertainment** (2005–2009) — the original team that built the emulator from reverse-engineered protocol work. None of this exists without them.
-- **The tada-o contributors** — the post-Net-7 fork that landed the abilities, guild, and combat work consolidated here.
-- **kyp / therealkyp** — the 2014 GitHub snapshot that preserved the C# editor suite, packet captures, and architecture docs.
-- **Nimsy** — the original WINE-on-Linux guide whose steps became the basis of the installer.
-- **ciphersimian** — author of the `enb-linux-installer` script.
-- Westwood Studios — *Earth & Beyond* (2002, may it rest in peace).
+- **Net-7 Entertainment** (2005–2009) - the original team that built the emulator from reverse-engineered protocol work. None of this exists without them.
+- **The tada-o contributors** - the post-Net-7 fork that landed the abilities, guild, and combat work consolidated here.
+- **kyp / therealkyp** - the 2014 GitHub snapshot that preserved the C# editor suite, packet captures, and architecture docs.
+- **Nimsy** - the original WINE-on-Linux guide whose steps became the basis of the installer.
+- **ciphersimian** - author of the `enb-linux-installer` script.
+- Westwood Studios - *Earth & Beyond* (2002, o7).
 
 ## Contributing
 

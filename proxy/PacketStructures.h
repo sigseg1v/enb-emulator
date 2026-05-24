@@ -3,6 +3,8 @@
 #ifndef _PACKET_STRUCTURES_H_INCLUDED_
 #define _PACKET_STRUCTURES_H_INCLUDED_
 
+#include <stdint.h>
+
 struct EnbTcpHeader
 {
     short   size;
@@ -254,8 +256,8 @@ struct GlobalTicket
 
 struct ServerRedirect
 {
-    long    sector_id;
-    long    ip_address;
+    int32_t sector_id;     // explicitly 4-byte on all platforms (Phase K)
+    int32_t ip_address;    // — Win32 client expects 4-byte fields on the wire
     short   port;
 } ATTRIB_PACKED;
 
