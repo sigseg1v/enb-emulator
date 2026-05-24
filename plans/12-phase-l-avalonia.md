@@ -63,27 +63,66 @@ The existing WinForms targets stay in the tree. They still build via `dotnet bui
 
 ## Items
 
-### Tier 0 — drop false WinForms flags (target: this session)
+### Tier 0 — drop false WinForms flags (complete)
 
-- [ ] **w3d-parser**: drop `<UseWindowsForms>true</UseWindowsForms>`, retarget `net10.0-windows` → `net10.0`. It's a parser library with zero UI code. Verify `dotnet build` clean.
+- [x] **w3d-parser**: dropped `<UseWindowsForms>`, retargeted `net10.0-windows` → `net10.0`, added explicit `System.Drawing.Common` package ref. Builds clean.
       Touches: `tools/w3d-parser/W3d Parser.csproj`
-      Status: not started
+      Commit: 2108e67
 
-- [ ] **ExeUpdater**: replace single `MessageBox.Show` with `Console.WriteLine`, drop `<UseWindowsForms>`, retarget to `net10.0`. Single ~6-LOC change in `Program.cs:208`.
+- [x] **ExeUpdater**: dropped single `MessageBox.Show` in `Program.cs:208` for `Console.WriteLine`, dropped `<UseWindowsForms>`, retargeted `OutputType=WinExe`→`Exe` and `net10.0-windows`→`net10.0`. Runs natively on Linux:
+      ```
+      $ dotnet tools/launchnet7/ExeUpdater/bin/Debug/net10.0/ExeUpdater.dll
+      === ExeUpdater - Information ===
+      ExeUpdater
+      Description: A lightweight executable for replaceing and restarting...
+      ```
       Touches: `tools/launchnet7/ExeUpdater/ExeUpdater.csproj`, `tools/launchnet7/ExeUpdater/Program.cs`
-      Status: not started
+      Commit: 2108e67
 
 ### Tier 1 — Avalonia POC
 
-- [ ] **Avalonia infrastructure**: add a shared `tools/avalonia-common/` library with login dialog, MySQL connection helper, and base view-model classes. Pulls `Avalonia` + `Avalonia.Desktop` + `MessageBox.Avalonia` packages.
-      Status: not started
+- [x] **toolspatcher-avalonia**: full Avalonia port of `tools/toolspatcher/`.
+      New project at `tools/toolspatcher-avalonia/` targeting `net10.0`
+      (no `-windows` suffix). 1 main window with progress bars + labels,
+      MAXML layout, code-behind for the patcher state machine.
+      - WinForms `WebClient` → `HttpClient`
+      - `Control.Invoke` → `Dispatcher.UIThread.Post`
+      - `Thread.Abort` → `CancellationToken`
+      - `WebBrowser` patch-notes pane → placeholder `TextBox`
+        (`toolspatch.net-7.org` host is dead anyway; Avalonia has no
+        built-in WebView and adding one isn't worth it for this tool)
+      - `MessageBox.Show` → MsBox.Avalonia
+      Registered in `tools/Net7Tools.slnx`; whole solution still builds.
+      Touches: `tools/toolspatcher-avalonia/{ToolsPatcherAvalonia.csproj,Program.cs,App.axaml*,MainWindow.axaml*,Crc32.cs,README.md,app.manifest}`
+      Status: complete
 
-- [ ] **toolspatcher-avalonia**: full Avalonia port of `tools/toolspatcher/`. 1 main window (progress bars + file label + start timer). HTTP downloader logic stays as-is; only the UI layer changes. Verify it builds and `dotnet run` opens a window on Linux.
-      Touches: new `tools/toolspatcher-avalonia/`
-      Status: not started
+- [x] **Headless smoke test**: `--smoke` arg uses `Avalonia.Headless` to
+      instantiate `App` + `MainWindow` without a display. Verifies AXAML
+      parses + window class loads. Output:
+      ```
+      smoke OK: window 573x363 title="E&B Tools Patcher"
+      ```
+      Will hook into CI in a separate commit.
+      Status: complete
 
-- [ ] **Per-form-day measurement**: record actual hours spent on toolspatcher port. Use to scale estimate for the remaining 13 editors.
-      Status: not started
+- [x] **Per-form-day measurement**: toolspatcher (1 simple form, ~450
+      LOC of logic + ~10 controls + 1 timer + HTTP/file IO) took ~2
+      hours including Avalonia plumbing setup, smoke test, README. The
+      Avalonia plumbing is now solved — subsequent ports start from a
+      working template. Rough per-form estimate forward:
+      - **simple form** (≤15 controls, no grid, no custom paint): ~1 hour
+      - **typical editor form** (DataGridView, tabs, MySQL binding): half a day
+      - **sector-editor-class** (custom map canvas, multi-pane): ~3 days
+      Suite estimate refines to **~3 months** single-engineer at the
+      lower end, **5-6 months** likely with debug + parity verification.
+      Status: complete
+
+- [ ] **avalonia-common shared library**: extract login dialog, MySQL
+      helper, and progress-update patterns from `commontools` into a new
+      `tools/avalonia-common/` library so subsequent ports don't re-solve
+      them. **Deferred** — first do another small editor (dataimport)
+      to see what's actually shared before extracting prematurely.
+      Status: deferred
 
 ### Tier 2+ — deferred
 
