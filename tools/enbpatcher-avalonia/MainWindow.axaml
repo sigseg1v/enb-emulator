@@ -1,0 +1,39 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        x:Class="EnbPatcherAvalonia.MainWindow"
+        Width="573" Height="363"
+        Title="E&amp;B Patcher"
+        CanResize="False">
+  <Grid Margin="12" RowDefinitions="Auto,Auto,Auto,Auto,Auto,*">
+    <StackPanel Grid.Row="0" HorizontalAlignment="Left">
+      <TextBlock Name="VerLabel"    Text="Server Version: " />
+      <TextBlock Name="ClientVer"   Text="Client Version: " />
+    </StackPanel>
+
+    <TextBlock Grid.Row="1" Name="CFileName" Margin="0,12,0,0" Text="File Downloading:" />
+
+    <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,4,0,0">
+      <ProgressBar Grid.Column="0" Name="FileProgress" Height="20" Minimum="0" Maximum="100" />
+      <TextBlock   Grid.Column="1" Name="ProgressValue" Margin="8,0,0,0" Text="0%" />
+    </Grid>
+
+    <TextBlock Grid.Row="3" Name="label2" Margin="0,8,0,0" Text="Total Progress:" />
+
+    <Grid Grid.Row="4" ColumnDefinitions="*,Auto" Margin="0,4,0,0">
+      <ProgressBar Grid.Column="0" Name="TotalProgress" Height="20" Minimum="0" Maximum="100" />
+      <TextBlock   Grid.Column="1" Name="TotalProgressValue" Margin="8,0,0,0" Text="0%" />
+    </Grid>
+
+    <!-- Original WinForms loaded http://patch.net-7.org/PatchNotes.html in
+         a WebBrowser. Host is gone; Avalonia has no built-in WebView. -->
+    <TextBox Grid.Row="5" Name="PatchNotes"
+             Margin="0,12,0,0"
+             IsReadOnly="True"
+             AcceptsReturn="True"
+             TextWrapping="Wrap"
+             Text="Patch notes panel (legacy WebBrowser was http://patch.net-7.org/PatchNotes.html — host is gone)" />
+  </Grid>
+</Window>

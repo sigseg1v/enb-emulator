@@ -124,6 +124,66 @@ The existing WinForms targets stay in the tree. They still build via `dotnet bui
       to see what's actually shared before extracting prematurely.
       Status: deferred
 
+### Tier 1.5 — second patcher port (no-deps)
+
+- [x] **enbpatcher-avalonia**: ported `tools/enbpatcher/` (which had no
+      csproj and didn't build at all upstream). Same shape as
+      toolspatcher — same author wrote both. Differences: URL
+      (patch.net-7.org), self-name (EnBPatcher.exe), launcher
+      (LaunchNet7.exe), game dir (c:\net7\bin). Smoke test passes:
+      ```
+      smoke OK: window 573x363 title="E&B Patcher"
+      ```
+      Registered in tools/Net7Tools.slnx.
+      Touches: new `tools/enbpatcher-avalonia/`
+      Status: complete
+
+- [x] **Confirm copy-template velocity**: second port took ~30 min
+      vs. the first port's ~2 hr. Plumbing is now boilerplate;
+      MainWindow.axaml.cs translation is the only real work for
+      similarly-shaped tools. Per-form estimate for the
+      simple-patcher class drops to **~30 min each**. Editor-class
+      tools still TBD until first DB-aware editor is ported.
+      Status: complete
+
+### Future tier ordering (deferred until session focus returns to Phase L)
+
+When picking up Phase L again, the recommended order:
+
+1. **commontools-avalonia** — shared library. Required by dataimport,
+   missioneditor, talktreeeditor. ~2-3 days (4 dialogs: Login,
+   DlgSearch, DlgSearchCriteria, DlgEditXml; plus DB layer extraction
+   which should be UI-independent already).
+
+2. **dataimport-avalonia** — 1 form, depends on commontools. ~half a
+   day after commontools is up.
+
+3. **launchnet7-avalonia** — 4 forms (Main, Options, Patch, About). No
+   commontools dep. ~1-2 days.
+
+4. **faction-editor-avalonia** — 3 forms, MySQL. ~1-2 days after
+   commontools.
+
+5. **mob-editor-avalonia** — 3 forms, MySQL, larger LOC. ~2 days after
+   commontools.
+
+6. **talktreeeditor-avalonia** — 5 forms, depends on commontools. ~2-3 days.
+
+7. **toolslauncher-avalonia** — 6 forms incl. IRC client + FTP window.
+   ~3-5 days (IRC integration via Meebey.SmartIrc4Net is the wildcard).
+
+8. **effect-editor-avalonia** (SQLBind) — 5 forms, particle effects.
+   ~3 days.
+
+9. **station-tools-avalonia** — 8 forms. ~4-5 days.
+
+10. **missioneditor-avalonia** — 9 forms incl. tree view. Depends on
+    commontools. ~5 days.
+
+11. **sector-editor-avalonia** — 16 forms, custom map canvas
+    (System.Drawing.Graphics → Avalonia DrawingContext is the major
+    work). ~2-3 weeks.
+
 ### Tier 2+ — deferred
 
 The remaining 12 editors (commontools, dataimport, faction-editor, mob-editor, launchnet7, talktreeeditor, effect-editor, toolslauncher, station-tools, missioneditor, sector-editor) are tracked as future Phase L sub-items. **Not in scope for this session.** With realistic ~3-6 month total for the suite, this is its own project.
