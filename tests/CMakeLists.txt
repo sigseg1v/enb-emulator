@@ -75,6 +75,33 @@ else()
     message(STATUS "net7-tests: libpq not found — skipping postgres_smoke_test")
 endif()
 
+# --- DB: mysqlplus wrapper round-trip (env-gated; Phase N) --------------
+# Compiles the actual wrapper TU into the test binary so we cover the
+# libpqxx-backed API end-to-end. Self-skips when NET7_TEST_DB_DSN is unset.
+if(PkgConfig_FOUND)
+    pkg_check_modules(LIBPQXX IMPORTED_TARGET libpqxx)
+endif()
+if(LIBPQXX_FOUND)
+    add_executable(mysqlplus_wrapper_test
+        db/mysqlplus_wrapper_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/../server/src/mysql/mysqlplus.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/../server/src/Mutex.cpp
+        db/wrapper_test_stubs.cpp
+    )
+    target_include_directories(mysqlplus_wrapper_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../server/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../common/include
+    )
+    target_compile_definitions(mysqlplus_wrapper_test PRIVATE LINUX __linux__)
+    target_compile_options(mysqlplus_wrapper_test PRIVATE
+        -Wno-write-strings -fpermissive)
+    target_link_libraries(mysqlplus_wrapper_test PRIVATE
+        GTest::gtest_main PkgConfig::LIBPQXX Threads::Threads)
+    gtest_discover_tests(mysqlplus_wrapper_test)
+else()
+    message(STATUS "net7-tests: libpqxx not found — skipping mysqlplus_wrapper_test")
+endif()
+
 # --- Client: Westwood RSA/RC4 + capture parser ---------------------------
 # The standalone test client lives at tests/client/. Built only if OpenSSL
 # is available (Westwood RSA leans on libcrypto BIGNUM ops).

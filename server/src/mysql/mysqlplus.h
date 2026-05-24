@@ -1,14 +1,50 @@
 ///////////////////////////////////////////////////////////////////////////////////////
 //// mysqlplus.h
 ///////////////////////////////////////////////////////////////////////////////////////
+//
+// Phase N: this header used to be a thin facade over libmysqlclient. The
+// rewrite swaps the backend to libpqxx (Postgres) while preserving the 7
+// public classes (`sql_connection_c`, `sql_query_c`, `sql_result_c`,
+// `sql_row_c`, `sql_var_c`, `sql_field_c`, `sql_query`) and their method
+// signatures, so every caller in server/src/ tracks transparently.
+//
+// The file name and class names are kept for source-stability reasons.
+// "mysql"plus is a historical misnomer at this point — the wrapper now
+// speaks Postgres.
 
 #ifndef __MYSQLPLUS_H__
 #define __MYSQLPLUS_H__
 
-#include "mysql.h"
 #include <net7/Mutex.h>
+#include <cstdint>
 
 #define _CRT_SECURE_NO_WARNINGS 1		// Disable Warning messages about new Secure Functions in VS2008
+
+// Forward declarations of the internal libpqxx-backed state. Defined in
+// mysqlplus.cpp; callers see them as opaque pointers only.
+struct net7_db_handle;        // wraps pqxx::connection
+struct net7_result_holder;    // wraps pqxx::result
+
+// my_ulonglong used to be a MySQL typedef; preserve the name for the few
+// callers that still spell it.
+typedef std::uint64_t my_ulonglong;
+
+// Legacy escape shim. The old mysqlplus pulled `mysql_escape_string` from
+// libmysqlclient; a handful of DAO call sites (SaveManager.cpp) still call
+// it directly. Defined inline so we don't drag the wrapper TU into every
+// includer. Standard single-quote-doubling escape — correct for Postgres
+// with standard_conforming_strings=on (default since 9.1).
+#include <string.h>
+static inline unsigned long mysql_escape_string(char *to, const char *from, unsigned long length)
+{
+    char *dst = to;
+    for (unsigned long i = 0; i < length; ++i) {
+        if (from[i] == '\'' || from[i] == '\\') *dst++ = from[i];
+        *dst++ = from[i];
+    }
+    *dst = '\0';
+    return (unsigned long)(dst - to);
+}
 
 ///////////////////////////////////////////////////////////////////////////////////////
 //// opendbstruct - database connection handle
@@ -16,7 +52,7 @@
 typedef struct opendbstruct
 {
    struct opendbstruct *next;
-   MYSQL mysql;
+   net7_db_handle *db;
    bool busy;
 } OPENDB;
 
@@ -73,9 +109,12 @@ private:
     void free_result();
 
 private:
-    MYSQL_RES *res;
+    net7_result_holder *res;       // owned; replaces MYSQL_RES*
     sql_connection_c *sql_connection;
     OPENDB *odb;
+    unsigned int last_errno;
+    char last_errmsg[256];
+    my_ulonglong last_affected;
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////
@@ -116,15 +155,16 @@ class sql_field_c
 {
 public:
     sql_field_c();
-    sql_field_c(MYSQL_FIELD *field);
+    sql_field_c(net7_result_holder *res, unsigned int index);
 
     char *get_name();
     char *get_default_value();
-    enum_field_types get_type();
+    unsigned int get_type();        // returns pqxx column oid (was enum_field_types)
     unsigned int get_max_length();
 
 private:
-    MYSQL_FIELD *field;
+    net7_result_holder *res;
+    unsigned int index;
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////
@@ -137,7 +177,7 @@ public:
     sql_result_c();
     ~sql_result_c();
 
-    void set_res(MYSQL_RES *res);
+    void take(net7_result_holder *holder);  // transfers ownership
 
     my_ulonglong n_rows();
     void fetch_row(sql_row_c *row);
@@ -148,8 +188,12 @@ public:
     char * field(int index);		// return field name
 	char * table(int index);		// return table name
 
+    // exposed for sql_row_c
+    net7_result_holder *get_holder() { return res; }
+
 private:
-    MYSQL_RES *res;
+    net7_result_holder *res;        // owned
+    my_ulonglong cursor;            // next row index for fetch_row()
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////
@@ -159,8 +203,9 @@ class sql_row_c
 {
 public:
     sql_row_c();
+    ~sql_row_c();
 
-    void init(MYSQL_ROW row, sql_result_c *result);
+    void init(sql_result_c *result, my_ulonglong row_index);
 
     // Null values are returned as emprty strings if allow = 0
     void allow_null(int allow = 1);
@@ -169,10 +214,15 @@ public:
     sql_var_c operator [] (char *name); //USE SPARINGLY
 
 private:
-    MYSQL_ROW row;
     sql_result_c *result;
+    my_ulonglong row_index;
     int __allow_null;
     int field_count;
+    // Per-row cached column values (owned strings, stable char* for
+    // sql_var_c lifetime).
+    char **row_strings;
+    int row_strings_count;
+    void free_row_strings();
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////

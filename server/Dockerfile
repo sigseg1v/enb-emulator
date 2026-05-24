@@ -29,7 +29,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libcrypto++-dev \
         libpq-dev \
         libpqxx-dev \
-        libmysqlclient-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -54,7 +53,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libtinyxml2.6.2v5 \
         libcrypto++8t64 \
         libpqxx-7.8t64 \
-        libmysqlclient21 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system net7 \
     && useradd  --system --gid net7 --home /app net7

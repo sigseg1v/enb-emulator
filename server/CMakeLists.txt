@@ -115,26 +115,13 @@ if(NOT CRYPTOPP_FOUND)
     endif()
 endif()
 
-# libpq / libpqxx — not strictly required during Phase B scaffolding (the
-# server still talks to MySQL), but Phase C will add Postgres. We surface
-# their presence here so the build environment is correct ahead of time.
-find_package(PostgreSQL QUIET)
-if(NOT PostgreSQL_FOUND)
-    message(STATUS "net7: PostgreSQL client lib not found (Phase C concern).")
-endif()
-
-# libmysqlclient — server/src/mysql/mysqlplus.cpp wraps the C API. Phase C
-# replaces this with libpqxx; for Phase B we link the stock C client lib so
-# the binary actually produces an executable.
-find_library(MYSQLCLIENT_LIB NAMES mysqlclient)
-find_path(MYSQLCLIENT_INCLUDE_DIR mysql.h PATH_SUFFIXES mysql)
-if(MYSQLCLIENT_LIB)
-    message(STATUS "net7: mysqlclient: ${MYSQLCLIENT_LIB}")
-else()
-    message(WARNING
-        "net7: libmysqlclient not found. Install libmysqlclient-dev. "
-        "Link will fail.")
-endif()
+# Phase N: server/src/mysql/mysqlplus.cpp is now libpqxx-backed. libpqxx
+# pulls libpq in transitively (and ships its own pkg-config / CMake
+# config), so we just need libpqxx.
+find_package(PostgreSQL REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LIBPQXX REQUIRED IMPORTED_TARGET libpqxx)
+message(STATUS "net7: libpqxx ${LIBPQXX_VERSION} — ${LIBPQXX_LINK_LIBRARIES}")
 
 # --------------------------------------------------------------------------
 # Target
@@ -193,12 +180,7 @@ target_link_libraries(net7 PRIVATE
     dl
 )
 
-if(MYSQLCLIENT_LIB)
-    target_link_libraries(net7 PRIVATE ${MYSQLCLIENT_LIB})
-    if(MYSQLCLIENT_INCLUDE_DIR)
-        target_include_directories(net7 PRIVATE ${MYSQLCLIENT_INCLUDE_DIR})
-    endif()
-endif()
+target_link_libraries(net7 PRIVATE PkgConfig::LIBPQXX PostgreSQL::PostgreSQL)
 
 if(TinyXML_FOUND)
     target_link_libraries(net7 PRIVATE ${TinyXML_LIBRARIES})

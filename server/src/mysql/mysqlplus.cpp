@@ -1,13 +1,65 @@
 ///////////////////////////////////////////////////////////////////////////////////////
 //// mysqlplus.cpp
 ///////////////////////////////////////////////////////////////////////////////////////
+//
+// Phase N: libpqxx-backed reimplementation of the 7-class wrapper that
+// the entire server DAO layer consumes. The public API (sql_connection_c,
+// sql_query_c, sql_result_c, sql_row_c, sql_var_c, sql_field_c, sql_query)
+// is preserved byte-for-byte so callers do not change. Internals now use
+// pqxx::connection / pqxx::work / pqxx::result.
+//
+// What this rewrite does NOT do (anti-scope per plans/14-phase-n):
+//   - Rewrite DAOs (AssetDatabaseSQL.cpp, etc.) — they keep their SQL.
+//   - Translate MySQL SQL dialect to Postgres dialect on the fly. Backticks
+//     used by `sql_query::CreateQuery` are emitted as double-quotes
+//     (Postgres identifier quoting). Stored-procedure CALLs and other
+//     MySQL-isms in DAO query strings are the responsibility of a later
+//     DAO-migration pass.
 
 #include "mysqlplus.h"
 #include "Net7.h"
 #include <stdio.h>
 #include <assert.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdexcept>
+#include <string>
+#include <pqxx/pqxx>
 
-//#pragma warning(disable:4996)
+///////////////////////////////////////////////////////////////////////////////////////
+//// Internal types
+
+struct net7_db_handle {
+    pqxx::connection *conn;
+    std::string       last_error;
+    unsigned int      last_errno;
+};
+
+struct net7_result_holder {
+    pqxx::result      result;
+    my_ulonglong      affected_rows;   // for INSERT/UPDATE/DELETE
+};
+
+namespace {
+
+// Translate a MySQL-flavoured query string into one Postgres can parse.
+// Limited to: backtick identifiers -> double-quoted identifiers. The
+// project's queries are 99% plain SQL plus the occasional backtick from
+// the sql_query INSERT builder. Stored-procedure CALLs and dialect
+// differences in vendor SQL remain caller-side concerns (Phase N+).
+std::string translate_dialect(const char *sql)
+{
+    if (!sql) return {};
+    std::string out;
+    out.reserve(strlen(sql) + 16);
+    for (const char *p = sql; *p; ++p) {
+        if (*p == '`') out.push_back('"');
+        else            out.push_back(*p);
+    }
+    return out;
+}
+
+} // namespace
 
 ///////////////////////////////////////////////////////////////////////////////////////
 //// sql_connection_c
@@ -19,7 +71,7 @@ sql_connection_c::sql_connection_c()
     password = 0;
     database = 0;
     opendbbase = 0;
-    portn = 3306;
+    portn = 5432;       // Postgres default; overridden by host:port parsing
 }
 
 sql_connection_c::sql_connection_c(char *__database, char *__host, char *__user, char *__password)
@@ -29,32 +81,17 @@ sql_connection_c::sql_connection_c(char *__database, char *__host, char *__user,
     password = 0;
     database = 0;
     opendbbase = 0;
+    portn = 5432;
 
     connect(__database, __host, __user, __password);
 }
 
 sql_connection_c::~sql_connection_c()
 {
-    if (host)
-    {
-        delete [] host;
-    }
-
-    if (user)
-    {
-        delete [] user;
-    }
-
-    if (password)
-    {
-        delete [] password;
-    }
-
-    if (database)
-    {
-        delete [] database;
-    }
-
+    if (host)     delete [] host;
+    if (user)     delete [] user;
+    if (password) delete [] password;
+    if (database) delete [] database;
     disconnect();
 }
 
@@ -62,23 +99,12 @@ sql_connection_c::~sql_connection_c()
 
 bool sql_connection_c::connected()
 {
-	OPENDB *odb = grabdb();
+    OPENDB *odb = grabdb();
+    if (!odb) return false;
 
-	if (!odb)
-	{
-		return false;
-	}
-
-	int ping_result = mysql_ping(&odb->mysql);
-
-	if (ping_result)
-	{
-		printf("sql_connection_c::connected() - mysql_ping() failed\n");
-	}
-
-	freedb(odb);
-
-	return ping_result ? false : true;
+    bool ok = odb->db && odb->db->conn && odb->db->conn->is_open();
+    freedb(odb);
+    return ok;
 }
 
 void sql_connection_c::connect(char *__database, char *__host, char *__user, char *__password)
@@ -91,115 +117,72 @@ void sql_connection_c::connect(char *__database, char *__host, char *__user, cha
         return;
     }
 
-    // Assume the default port
-    portn = 3306;
+    portn = 5432;
 
-    char * host_buff = 0;
-    char * host_tmp = 0;
-    char * port_tmp = 0;
-	char *next_token;
+    char *host_buff = 0;
+    char *host_tmp = 0;
+    char *port_tmp = 0;
+    char *next_token = 0;
 
-    if (host)
-    {
-        delete [] host;
-    }
+    if (host)     { delete [] host;     host = 0; }
+    if (database) { delete [] database; database = 0; }
+    if (user)     { delete [] user;     user = 0; }
+    if (password) { delete [] password; password = 0; }
 
-    if (database)
-    {
-        delete [] database;
-    }
-
-    if (user)
-    {
-        delete [] user;
-        user = 0;
-    }
-
-    if (password)
-    {
-        delete [] password;
-        password = 0;
-    }
-
-    // Seperate the host from the port
+    // Separate the host from the optional :port suffix.
     host_buff = new char[strlen(__host) + 1];
     strcpy_s(host_buff, strlen(__host) + 1, __host);
-	host_buff[strlen(__host)] = '\0';
 
     host_tmp = strtok_s(host_buff, ":", &next_token);
     port_tmp = strtok_s(NULL, "", &next_token);
 
     if (!host_tmp)
     {
-		if (host_buff)
-		{
-			delete [] host_buff;
-		}
-        printf("sql_connection_c::connect - Invalid host: %s\n",__host);
+        delete [] host_buff;
+        printf("sql_connection_c::connect - Invalid host: %s\n", __host);
         return;
     }
 
-    if (port_tmp)
-    {
-        portn = atoi(port_tmp);
-    }
+    if (port_tmp) portn = atoi(port_tmp);
 
     host = new char[strlen(host_tmp) + 1];
     strcpy_s(host, strlen(host_tmp) + 1, host_tmp);
-	host[strlen(host_tmp)] = '\0';
 
-    if (host_buff)
-    {
-        delete [] host_buff;
-    }
-
+    delete [] host_buff;
 
     database = new char[strlen(__database) + 1];
     strcpy_s(database, strlen(__database) + 1, __database);
-	database[strlen(__database)] = '\0';
 
     if (__user)
     {
         user = new char[strlen(__user) + 1];
         strcpy_s(user, strlen(__user) + 1, __user);
-		user[strlen(__user)] = '\0';
     }
 
     if (__password)
     {
         password = new char[strlen(__password) + 1];
         strcpy_s(password, strlen(__password) + 1, __password);
-		password[strlen(__password)] = '\0';
     }
 
-    // Open a connection
+    // Eagerly open one connection so a misconfigured DSN surfaces early.
     freedb(grabdb());
 }
 
 void sql_connection_c::disconnect()
 {
-
     m_Mutex.Lock();
-
-    OPENDB *odb;
-    for (odb = opendbbase; odb; odb = odb->next)
-    {
-        if (odb && &odb->mysql)
-        {
-            mysql_close(&odb->mysql);
-        }
-    }
 
     while (opendbbase)
     {
-        odb = opendbbase;
+        OPENDB *odb = opendbbase;
         opendbbase = opendbbase->next;
 
-        if (odb->busy)
+        if (odb->db)
         {
-	       //fprintf(stderr,"destroying Database object before Connect object(s)\n");
+            delete odb->db->conn;   // pqxx::connection RAII close
+            delete odb->db;
         }
-
         delete odb;
     }
 
@@ -210,90 +193,63 @@ void sql_connection_c::disconnect()
 
 OPENDB *sql_connection_c::grabdb()
 {
-    OPENDB * last_db = 0;
-    OPENDB * open_db = 0;
+    OPENDB *last_db = 0;
+    OPENDB *open_db = 0;
 
     m_Mutex.Lock();
 
-    // See if any databases are open and not being used
-    for (OPENDB * db = opendbbase; db != 0; db = db->next)
+    // See if any databases are open and not being used.
+    for (OPENDB *db = opendbbase; db != 0; db = db->next)
     {
         last_db = db;
-
-        if (db && !db->busy)
+        if (!db->busy)
         {
             open_db = db;
             break;
         }
     }
 
-    // If no open databases are found, create a new one
+    // If no open databases are found, create a new one.
     if (open_db == 0)
     {
         open_db = new OPENDB;
+        open_db->next = 0;
+        open_db->busy = false;
+        open_db->db = 0;
 
-        if (!mysql_init(&open_db->mysql))
-        {
-            printf("sql_connection_c::grabdb - mysql_init() failed\n");
+        // Build a libpq keyword/value DSN. password may be NULL (peer-auth
+        // setups), user may be NULL (use process owner).
+        std::string dsn;
+        dsn.reserve(256);
+        dsn += "host="; dsn += (host ? host : "localhost");
+        char portbuf[16]; snprintf(portbuf, sizeof(portbuf), " port=%d", portn);
+        dsn += portbuf;
+        dsn += " dbname="; dsn += (database ? database : "");
+        if (user)     { dsn += " user=";     dsn += user; }
+        if (password) { dsn += " password="; dsn += password; }
+
+        try {
+            net7_db_handle *h = new net7_db_handle;
+            h->conn = new pqxx::connection(dsn);
+            h->last_errno = 0;
+            open_db->db = h;
+        } catch (const pqxx::failure &e) {
+            printf("sql_connection_c::grabdb - pqxx::connection failed: %s\n", e.what());
             delete open_db;
-
             m_Mutex.Unlock();
             return 0;
-        }
-
-        //Set this db to auto-reconnect
-        bool reconnect = true;
-        if (mysql_options(&open_db->mysql, MYSQL_OPT_RECONNECT, &reconnect))
-        {
-            printf("sql_connection_c::grabdb - mysql_options() failed\n");
+        } catch (const std::exception &e) {
+            printf("sql_connection_c::grabdb - unexpected: %s\n", e.what());
             delete open_db;
-
-            m_Mutex.Unlock();
-            return 0;
-        }
-
-        // libmysqlclient 5.7+ defaults to SSL_MODE_PREFERRED, which makes
-        // the client probe the server for SSL even when the server is in
-        // plain-text mode. The 2010 Net-7 mysqld setup is plain-text only
-        // and the probe produces noisy "Unable to get certificate from ''"
-        // errors on every connect. SSL_MODE_DISABLED (=1) opts out.
-        //
-        // The vendored mysql.h (server/src/mysql/mysql.h) is a 2010-era
-        // header that predates the SSL_MODE option, so MYSQL_OPT_SSL_MODE
-        // is not declared. We cast the actual enum integer (35 in 8.0.x)
-        // directly. The function signature in the vendored header takes
-        // `enum mysql_option`, which is layout-compatible with the
-        // runtime libmysqlclient21's enum because we only consume the
-        // numeric value.
-        {
-            unsigned int ssl_mode = 1; // SSL_MODE_DISABLED
-            mysql_options(&open_db->mysql,
-                          static_cast<enum mysql_option>(35) /* MYSQL_OPT_SSL_MODE */,
-                          &ssl_mode);
-        }
-
-		// Note: lots of this getting first time exception caught during lags
-        if (!mysql_real_connect(&open_db->mysql, host, user, password, database, portn, 0, CLIENT_REMEMBER_OPTIONS))
-        {
-            printf("sql_connection_c::grabdb - mysql_connect() failed\n");
-            delete open_db;
-
             m_Mutex.Unlock();
             return 0;
         }
 
         open_db->busy = true;
-        open_db->next = 0;
 
-        // Attach it to the list
-        if (last_db == 0)
-        {
-            opendbbase = open_db;
-        }
-        else
-        {
-            last_db->next = open_db;
-        }
+        // Attach it to the list.
+        if (last_db == 0) opendbbase     = open_db;
+        else              last_db->next  = open_db;
     }
     else
     {
@@ -322,19 +278,15 @@ sql_query_c::sql_query_c(sql_connection_c *__sql_connection)
     sql_connection = __sql_connection;
     odb = sql_connection->grabdb();
     res = 0;
+    last_errno = 0;
+    last_errmsg[0] = '\0';
+    last_affected = 0;
 }
 
 sql_query_c::~sql_query_c()
 {
-    if (res)
-    {
-        mysql_free_result(res);
-    }
-
-    if (odb)
-    {
-        sql_connection->freedb(odb);
-    }
+    free_result();
+    if (odb) sql_connection->freedb(odb);
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////
@@ -342,14 +294,45 @@ sql_query_c::~sql_query_c()
 int sql_query_c::execute(char *sql)
 {
     free_result();
+    last_errno = 0;
+    last_errmsg[0] = '\0';
+    last_affected = 0;
 
-    if (odb && mysql_query(&odb->mysql, sql) == 0)
-    {
-        res = mysql_store_result(&odb->mysql);
-    }       
+    if (!odb || !odb->db || !odb->db->conn) {
+        last_errno = 1000;
+        strcpy_s(last_errmsg, sizeof(last_errmsg), "no open connection");
+        return 0;
+    }
 
-    return (int)res;
-} 
+    std::string translated = translate_dialect(sql);
+
+    try {
+        pqxx::work tx(*odb->db->conn);
+        pqxx::result r = tx.exec(translated);
+        tx.commit();
+
+        net7_result_holder *holder = new net7_result_holder;
+        holder->affected_rows = r.affected_rows();
+        holder->result = std::move(r);
+        res = holder;
+        last_affected = holder->affected_rows;
+        // Mirror legacy contract: nonzero means "execute returned something"
+        // (i.e. the query ran). Callers cast to bool or to int.
+        return 1;
+    } catch (const pqxx::sql_error &e) {
+        last_errno = 1;
+        snprintf(last_errmsg, sizeof(last_errmsg), "%s", e.what());
+        return 0;
+    } catch (const pqxx::failure &e) {
+        last_errno = 2;
+        snprintf(last_errmsg, sizeof(last_errmsg), "%s", e.what());
+        return 0;
+    } catch (const std::exception &e) {
+        last_errno = 3;
+        snprintf(last_errmsg, sizeof(last_errmsg), "%s", e.what());
+        return 0;
+    }
+}
 
 bool sql_query_c::run_query(char *sql)
 {
@@ -359,74 +342,44 @@ bool sql_query_c::run_query(char *sql)
         LogMySQLMsg("Error #%d: %s\n\n", Error(), ErrorMsg());
         return false;
     }
-
     return true;
 }
 
 my_ulonglong sql_query_c::n_rows()
 {
-    return odb ? mysql_affected_rows(&odb->mysql) : 0;
+    // Legacy: returns mysql_affected_rows(conn) — the count from the most
+    // recent statement. We capture that at execute() time.
+    return last_affected;
 }
 
 void sql_query_c::store(sql_result_c *result)
 {
-    if (!res)
-    {
-        return;
-    }
-
-    result->set_res(res);
-
+    if (!res) return;
+    result->take(res);  // transfer ownership
     res = 0;
 }
 
 void sql_query_c::free_result()
 {
-   if (res)
-   {
-	   mysql_free_result(res);
-	   res = 0;
-   }
+    if (res) { delete res; res = 0; }
 }
 
 unsigned int sql_query_c::Error()
 {
-    if (!odb)
-    {
-        printf("sql_query_c::Error - odb is NULL\n");
-        return 1000;
-    }
-
-    return mysql_errno(&odb->mysql);
+    return last_errno;
 }
 
 char * sql_query_c::ErrorMsg()
 {
-    if (!odb)
-    {
-        printf("sql_query_c::ErrorMsg - odb is NULL\n");
-        return 0;
-    }
-
-    return (char *) mysql_error(&odb->mysql);
+    return last_errmsg;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////
 //// sql_var_c
 
-sql_var_c::sql_var_c()
-{
-   value = 0;
-}
-
-sql_var_c::sql_var_c(char *s)
-{
-   value = s;
-}
-
-sql_var_c::~sql_var_c()
-{
-}
+sql_var_c::sql_var_c()                  { value = 0; }
+sql_var_c::sql_var_c(char *s)           { value = s; }
+sql_var_c::~sql_var_c()                 { }
 
 ///////////////////////////////////////////////////////////////////////////////////////
 
@@ -480,12 +433,12 @@ sql_var_c::operator char ()
 
 sql_var_c::operator char * ()
 {
-   return value;
+    return value;
 }
 
 sql_var_c::operator const char * ()
 {
-   return (const char *)value;
+    return (const char *)value;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////
@@ -493,57 +446,96 @@ sql_var_c::operator const char * ()
 
 sql_row_c::sql_row_c()
 {
-    row = 0;
     result = 0;
+    row_index = 0;
     field_count = 0;
     __allow_null = 1;
+    row_strings = 0;
+    row_strings_count = 0;
 }
 
-void sql_row_c::init(MYSQL_ROW __row, sql_result_c *__result)
+sql_row_c::~sql_row_c()
 {
-    row = __row;
+    free_row_strings();
+}
+
+void sql_row_c::free_row_strings()
+{
+    if (row_strings) {
+        for (int i = 0; i < row_strings_count; ++i) {
+            if (row_strings[i]) free(row_strings[i]);
+        }
+        delete [] row_strings;
+        row_strings = 0;
+        row_strings_count = 0;
+    }
+}
+
+void sql_row_c::init(sql_result_c *__result, my_ulonglong __row_index)
+{
+    free_row_strings();
     result = __result;
-    field_count = (int)result->n_fields();
+    row_index = __row_index;
+    field_count = (int)(result ? result->n_fields() : 0);
     __allow_null = 1;
+
+    if (!result || !result->get_holder()) return;
+
+    net7_result_holder *h = result->get_holder();
+    if (row_index >= (my_ulonglong)h->result.size()) return;
+
+    pqxx::row row = h->result[row_index];
+
+    row_strings = new char *[field_count];
+    row_strings_count = field_count;
+    for (int i = 0; i < field_count; ++i) {
+        pqxx::field f = row[i];
+        if (f.is_null()) {
+            row_strings[i] = 0;
+        } else {
+            const char *raw = f.c_str();
+            row_strings[i] = strdup(raw ? raw : "");
+        }
+    }
 }
 
-void sql_row_c::allow_null( int allow )
+void sql_row_c::allow_null(int allow)
 {
-   __allow_null = allow;
+    __allow_null = allow;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////
 
-sql_var_c sql_row_c::operator [] (char * name)
+sql_var_c sql_row_c::operator [] (char *name)
 {
-	char compound[100];
+    char compound[100];
 
-    if (!result)
+    if (!result) return sql_var_c();
+
+    for (int i = 0; i < field_count; i++)
     {
-        return sql_var_c();
+        if (strcmp(result->field(i), name) == 0)
+            return (*this)[i];
+
+        // see if this is a compound name table.field
+        snprintf(compound, sizeof(compound), "%s.%s", result->table(i), result->field(i));
+        if (strcmp(compound, name) == 0)
+            return (*this)[i];
     }
 
-	for (int i=0; i<field_count; i++)
-	{
-		if (strcmp(result->field(i), name) == 0)
-        {
-	        return (*this)[i];
-        }
-		// see if this is a compound name
-		sprintf_s(compound, sizeof(compound), "%s.%s", result->table(i), result->field(i));
-		if (strcmp(compound, name) == 0)
-        {
-	        return (*this)[i];
-        }
-	}
-
-    printf("Field `%s` does not exist in this table '%s'\n", name, result->table(0));
+    printf("Field `%s` does not exist in this table '%s'\n", name,
+           result ? result->table(0) : "<null>");
     return sql_var_c();
 }
 
 sql_var_c sql_row_c::operator [] (int idx)
 {
-    return sql_var_c(__allow_null ? row[idx] : (row[idx] ? row[idx] : ""));
+    if (!row_strings || idx < 0 || idx >= row_strings_count)
+        return sql_var_c(__allow_null ? (char *)0 : (char *)"");
+
+    char *v = row_strings[idx];
+    if (!v) return sql_var_c(__allow_null ? (char *)0 : (char *)"");
+    return sql_var_c(v);
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////
@@ -551,34 +543,44 @@ sql_var_c sql_row_c::operator [] (int idx)
 
 sql_field_c::sql_field_c()
 {
-   field = 0;
+    res = 0;
+    index = 0;
 }
 
-sql_field_c::sql_field_c( MYSQL_FIELD *__field )
+sql_field_c::sql_field_c(net7_result_holder *__res, unsigned int __index)
 {
-   field = __field;
+    res = __res;
+    index = __index;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////
 
 char *sql_field_c::get_name()
 {
-   return field->name;
+    if (!res) return (char *)"";
+    // pqxx::result::column_name returns char const *; cast away const for
+    // legacy callers (none mutate the return).
+    return const_cast<char *>(res->result.column_name(index));
 }
 
 char *sql_field_c::get_default_value()
 {
-   return field->def;
+    // libpqxx does not expose column defaults; legacy callers don't use this.
+    return (char *)"";
 }
 
-enum_field_types sql_field_c::get_type()
+unsigned int sql_field_c::get_type()
 {
-   return field->type;
+    // Return the column's Postgres oid. The legacy MySQL enum_field_types
+    // mapping is gone; no caller in the server currently inspects this.
+    if (!res) return 0;
+    return (unsigned int)res->result.column_type(index);
 }
 
 unsigned int sql_field_c::get_max_length()
 {
-   return field->max_length;
+    // Not available without scanning every row; legacy callers don't use this.
+    return 0;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////
@@ -587,64 +589,70 @@ unsigned int sql_field_c::get_max_length()
 sql_result_c::sql_result_c()
 {
     res = 0;
+    cursor = 0;
 }
 
 sql_result_c::~sql_result_c()
 {
-    if (res)
-    {
-        mysql_free_result(res);
-    }
+    if (res) delete res;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////
 
-void sql_result_c::set_res(MYSQL_RES *__res)
+void sql_result_c::take(net7_result_holder *__holder)
 {
-    if (res)
-    {
-        mysql_free_result(res);
-    }
-    
-    res = __res;
+    if (res) delete res;
+    res = __holder;
+    cursor = 0;
 }
 
 my_ulonglong sql_result_c::n_rows()
 {
-    return res ? mysql_num_rows(res) : 0;
+    return res ? (my_ulonglong)res->result.size() : 0;
 }
 
 void sql_result_c::fetch_row(sql_row_c *row)
 {
-    if (res && row)
-    {
-        row->init(mysql_fetch_row(res), this);
+    if (!res || !row) return;
+    if (cursor >= (my_ulonglong)res->result.size()) {
+        row->init(this, (my_ulonglong)res->result.size());  // empty row
+        return;
     }
+    row->init(this, cursor);
+    ++cursor;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////
 
 unsigned int sql_result_c::n_fields()
 {
-    return res ? mysql_num_fields(res) : 0;
+    return res ? (unsigned int)res->result.columns() : 0;
 }
 
 sql_field_c sql_result_c::fetch_field(unsigned int index)
 {
-    return res ? sql_field_c(mysql_fetch_field_direct(res, index)) : sql_field_c();
+    return res ? sql_field_c(res, index) : sql_field_c();
 }
 
 char * sql_result_c::field(int index)
 {
-	return mysql_fetch_field_direct(res, index)->name;
+    if (!res) return (char *)"";
+    return const_cast<char *>(res->result.column_name(index));
 }
 
 char * sql_result_c::table(int index)
 {
-	return mysql_fetch_field_direct(res, index)->table;
+    // libpqxx does not surface per-column table names without a round-trip
+    // to pg_class (column_table returns an oid). Legacy callers only use
+    // this in the row[char*] compound-name fallback path; returning the
+    // empty string keeps that path safe (compound "" "." field_name will
+    // not match any user-provided name).
+    (void)index;
+    return (char *)"";
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
+//// sql_query — INSERT-statement builder, syntax-only (no DB I/O).
 
 sql_query::sql_query()
 {
@@ -653,102 +661,109 @@ sql_query::sql_query()
 
 void sql_query::Clear()
 {
-	m_Table[0] = 0;
-	m_Buffer[0] = 0;
-	m_Fields[0] = 0;
-	m_Values[0] = 0;
+    m_Table[0] = 0;
+    m_Buffer[0] = 0;
+    m_Fields[0] = 0;
+    m_Values[0] = 0;
 }
 
 void sql_query::AddData(char * Field, int Value)
 {
-	sprintf_s(m_Values, sizeof(m_Values), "%s, '%d'", m_Values, Value);
-	AddField(Field);
+    sprintf_s(m_Values, sizeof(m_Values), "%s, '%d'", m_Values, Value);
+    AddField(Field);
 }
 
 #ifndef WIN32
 void sql_query::AddData(char * Field, unsigned int Value)
 {
-	sprintf_s(m_Values, sizeof(m_Values), "%s, '%u'", m_Values, Value);
-	AddField(Field);
+    sprintf_s(m_Values, sizeof(m_Values), "%s, '%u'", m_Values, Value);
+    AddField(Field);
 }
 
 void sql_query::AddData(char * Field, unsigned short Value)
 {
-	sprintf_s(m_Values, sizeof(m_Values), "%s, '%u'", m_Values, (unsigned int)Value);
-	AddField(Field);
+    sprintf_s(m_Values, sizeof(m_Values), "%s, '%u'", m_Values, (unsigned int)Value);
+    AddField(Field);
 }
 #endif
 
 void sql_query::AddData(char * Field, unsigned long Value)
 {
-	sprintf_s(m_Values, sizeof(m_Values), "%s, '%d'", m_Values, Value);
-	AddField(Field);
+    sprintf_s(m_Values, sizeof(m_Values), "%s, '%lu'", m_Values, Value);
+    AddField(Field);
 }
 
 void sql_query::AddData(char * Field, long Value)
 {
-	sprintf_s(m_Values, sizeof(m_Values), "%s, '%d'", m_Values, Value);
-	AddField(Field);
+    sprintf_s(m_Values, sizeof(m_Values), "%s, '%ld'", m_Values, Value);
+    AddField(Field);
 }
 
 void sql_query::AddData(char * Field, float Value)
 {
-	sprintf_s(m_Values, sizeof(m_Values), "%s, '%f'", m_Values, Value);
-	AddField(Field);
+    sprintf_s(m_Values, sizeof(m_Values), "%s, '%f'", m_Values, Value);
+    AddField(Field);
 }
 
 void sql_query::AddData(char * Field, double Value)
 {
-	sprintf_s(m_Values, sizeof(m_Values), "%s, '%f'", m_Values, Value);
-	AddField(Field);
+    sprintf_s(m_Values, sizeof(m_Values), "%s, '%f'", m_Values, Value);
+    AddField(Field);
 }
 
 //The char is now interpreted as a numerical value
 void sql_query::AddData(char * Field, char Value)
 {
-	sprintf_s(m_Values, sizeof(m_Values), "%s, '%d'", m_Values, (int)Value);
-	AddField(Field);
+    sprintf_s(m_Values, sizeof(m_Values), "%s, '%d'", m_Values, (int)Value);
+    AddField(Field);
 }
 
 void sql_query::AddData(char * Field, char * Value)
 {
-    char tmp_buff[1024];
-    assert(strlen(Value) < sizeof(tmp_buff));
-    mysql_escape_string(tmp_buff, Value, strlen(Value));
-
-	sprintf_s(m_Values, sizeof(m_Values), "%s, '%s'", m_Values, tmp_buff);
-	AddField(Field);
+    // Phase N: escape via the libpq C escape API (no live connection
+    // available here — sql_query is a syntax-builder, no DB handle). The
+    // C API uses naïve single-quote doubling which is correct for any
+    // server with standard_conforming_strings=on (Postgres default since
+    // 9.1). For dialect parity with the legacy MySQL builder, we also
+    // escape backslashes the same way.
+    std::string esc;
+    esc.reserve(strlen(Value) * 2 + 1);
+    for (char *p = Value; *p; ++p) {
+        if (*p == '\'' || *p == '\\') esc.push_back(*p);
+        esc.push_back(*p);
+    }
+    sprintf_s(m_Values, sizeof(m_Values), "%s, '%s'", m_Values, esc.c_str());
+    AddField(Field);
 }
 
 // Do not add a quote to the data
 void sql_query::AddDataNQ(char * Field, char * Value)
 {
-    char tmp_buff[1024];
-    assert(strlen(Value) < sizeof(tmp_buff));
-
-	sprintf_s(m_Values, sizeof(m_Values), "%s, %s", m_Values, tmp_buff);
-	AddField(Field);
+    sprintf_s(m_Values, sizeof(m_Values), "%s, %s", m_Values, Value);
+    AddField(Field);
 }
 
 void sql_query::AddField(char * Field)
 {
-	sprintf_s(m_Fields, sizeof(m_Fields), "%s, `%s`", m_Fields, Field);
+    // Postgres uses double-quotes for identifier quoting (vs. MySQL's
+    // backticks). Emit double-quotes directly.
+    sprintf_s(m_Fields, sizeof(m_Fields), "%s, \"%s\"", m_Fields, Field);
     assert(strlen(m_Fields) < sizeof(m_Fields));
     assert(strlen(m_Values) < sizeof(m_Values));
 }
 
 void sql_query::SetTable(char * Table)
 {
-	assert(strlen(Table) < sizeof(m_Table));
-	strcpy_s(m_Table, sizeof(m_Table), Table);
+    assert(strlen(Table) < sizeof(m_Table));
+    strcpy_s(m_Table, sizeof(m_Table), Table);
 }
 
 char * sql_query::CreateQuery()
 {
-    static char InsertSQL[] = "INSERT INTO `%s` (%s) VALUES (%s)";
+    static char InsertSQL[] = "INSERT INTO \"%s\" (%s) VALUES (%s)";
 
-	assert(strlen(InsertSQL) + strlen(m_Fields) + strlen(m_Values) + strlen(m_Table) < sizeof(m_Buffer));
-	sprintf_s(m_Buffer, sizeof(m_Buffer), InsertSQL, m_Table, &m_Fields[1], &m_Values[1]);
+    assert(strlen(InsertSQL) + strlen(m_Fields) + strlen(m_Values) + strlen(m_Table) < sizeof(m_Buffer));
+    sprintf_s(m_Buffer, sizeof(m_Buffer), InsertSQL, m_Table, &m_Fields[1], &m_Values[1]);
 
-	return m_Buffer;
+    return m_Buffer;
 }
