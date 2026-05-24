@@ -75,10 +75,52 @@ xUnit `[Collection("server")]` ensures the docker stack stands up exactly once p
 
 ## Items
 
-- [ ] Item 1 — Project scaffold + csproj + slnx wiring + ServerFixture skeleton
-      Status: not started
-      Touches: tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj, ServerFixture.cs, ClientFixture.cs, tools/Net7Tools.slnx (or a new test slnx)
-      Notes: xunit, xunit.runner.visualstudio, Microsoft.NET.Test.Sdk, ProjectReference to CliClient.Core. ServerFixture does `docker compose up -d --wait`, polls health endpoints (or TCP-probes 3500/443/3809), exposes connection info, tears down with `docker compose down -v` on dispose.
+- [x] Item 1 — Project scaffold + csproj + slnx wiring + ServerFixture skeleton
+      Status: done
+      Touches: tests/integration/CliClient.IntegrationTests/{CliClient.IntegrationTests.csproj, Directory.Build.props, RepoRoot.cs, ServerFixture.cs, ServerCollection.cs, ClientFixture.cs, Smoke/HarnessSmokeTest.cs, README.md}
+      Notes:
+        ▸ Project lives at tests/integration/CliClient.IntegrationTests/.
+           Linux-first Directory.Build.props mirrors the cli-client one
+           (EnableWindowsTargeting=false, nullable, TreatWarningsAsErrors).
+           xunit 2.9.2 + xunit.runner.visualstudio 2.8.2 + Microsoft.NET.Test.Sdk
+           17.11.1 (same versions as CliClient.UnitTests for consistency).
+           ProjectReference up three levels into tools/cli-client/src/CliClient.Core.
+        ▸ No slnx — neither cli-client nor the test project uses one today; each
+           csproj builds standalone via `dotnet build <csproj>`. Net7Tools.slnx
+           stays the WinForms-era solution. Adding a Cli.slnx wrapper is
+           optional follow-up work, not blocking.
+        ▸ ServerFixture is the docker-compose lifecycle owner: implements
+           IAsyncLifetime, runs `docker compose up -d --wait` from the repo
+           root on InitializeAsync, TCP-probes 4443/3805/3801/3500 with a
+           120s deadline + 1s interval, runs `docker compose down -v` on
+           DisposeAsync. Exposes LoginHost/LoginPort/GlobalHost/GlobalPort/
+           MasterHost/MasterPort/SectorHost/SectorPort/MysqlPort as the
+           single source of truth for endpoints. CI escape hatch:
+           CLI_INTEGRATION_SKIP_COMPOSE=1 skips up/down (TCP probe still
+           runs) so a sibling job can stand the stack up out-of-band.
+        ▸ ServerCollection ([CollectionDefinition("ServerCollection")])
+           bound to ServerFixture. Tests that need the live stack declare
+           [Collection(ServerCollection.Name)] + ctor param.
+        ▸ ClientFixture is the per-test seam: constructs a fresh
+           OpcodeRegistry (with full named-opaque coverage + the typed
+           ServerRedirectCodec), an AuthLoginClient pointed at the
+           ServerFixture's TLS endpoint with acceptUntrustedCertificates:
+           true (docker-compose ships a self-signed dev cert), and a
+           ConnectGlobalAsync(user, pass) convenience that does login →
+           new CliSession → ConnectGlobalAsync and returns the connected
+           session. Caller owns disposal.
+        ▸ RepoRoot.Path walks up from AppContext.BaseDirectory looking for
+           docker-compose.yml so tests don't hard-code the repo location.
+           Throws cleanly if the marker is missing.
+        ▸ HarnessSmokeTest has 2 [Fact]s that pass without docker:
+           RepoRoot_Resolves_ToDirectoryContainingDockerCompose +
+           CliClientCore_IsReferenced_OpcodeRegistryConstructs (asserts
+           OpcodeNames.Count == 207). Build green, 2/2 passing locally.
+        ▸ Caught one compile error first try: ClientFixture referenced a
+           non-existent AuthLoginResponse.RejectionReason property; fixed
+           to dump RawBody.TrimEnd() into the error message instead
+           (which is also more diagnostic — you see exactly what the
+           server returned).
 
 - [ ] Item 2 — Fixture player account seeding
       Status: not started

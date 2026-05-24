@@ -1,0 +1,16 @@
+<Project>
+  <!--
+    Integration tests are Linux-first, cross-platform, no WinForms/GDI+.
+    Mirror the cli-client Directory.Build.props so this project shares
+    its hygiene (nullable, warnings-as-errors, no Windows-targeting).
+  -->
+  <PropertyGroup>
+    <EnableWindowsTargeting>false</EnableWindowsTargeting>
+    <RuntimeIdentifiers>linux-x64;linux-arm64;win-x64;osx-x64;osx-arm64</RuntimeIdentifiers>
+
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningsNotAsErrors></WarningsNotAsErrors>
+  </PropertyGroup>
+</Project>
