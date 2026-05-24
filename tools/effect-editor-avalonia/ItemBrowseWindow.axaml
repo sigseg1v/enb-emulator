@@ -1,0 +1,41 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="620" d:DesignHeight="320"
+        x:Class="EffectEditorAvalonia.ItemBrowseWindow"
+        Title="Item Browse" Width="620" Height="340"
+        WindowStartupLocation="CenterOwner">
+  <Grid Margin="8" ColumnDefinitions="180,8,*" RowDefinitions="*,Auto,Auto">
+
+    <!-- Filters column -->
+    <StackPanel Grid.Column="0" Grid.Row="0" Spacing="6">
+      <TextBlock Text="Item Name:" />
+      <TextBox x:Name="c_ItemName" />
+      <TextBlock Text="Item Level:" />
+      <ComboBox x:Name="c_ItemLevel" HorizontalAlignment="Stretch" />
+      <TextBlock Text="Item Type:" />
+      <ComboBox x:Name="c_ItemType"  HorizontalAlignment="Stretch" />
+      <Button x:Name="c_SearchBtn" Width="100" Content="Search" Click="OnSearch" />
+    </StackPanel>
+
+    <!-- Grid -->
+    <DataGrid Grid.Column="2" Grid.Row="0" x:Name="c_Grid"
+              AutoGenerateColumns="True" IsReadOnly="True"
+              SelectionMode="Single" GridLinesVisibility="All" />
+
+    <!-- Description below grid -->
+    <TextBox Grid.Column="2" Grid.Row="1" x:Name="c_Desc"
+             Margin="0,6,0,0" Height="50" AcceptsReturn="True" TextWrapping="Wrap"
+             IsReadOnly="True" />
+
+    <!-- Bottom buttons -->
+    <StackPanel Grid.Column="0" Grid.ColumnSpan="3" Grid.Row="2"
+                Margin="0,6,0,0" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="6">
+      <Button x:Name="c_AddBtn"    Width="80" Content="Add"    Click="OnAdd" />
+      <Button x:Name="c_CloseBtn"  Width="80" Content="Cancel" Click="OnCancel" />
+      <TextBlock x:Name="c_RowCount" Margin="12,0,0,0" VerticalAlignment="Center" />
+    </StackPanel>
+  </Grid>
+</Window>

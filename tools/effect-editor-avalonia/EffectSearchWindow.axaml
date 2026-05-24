@@ -1,0 +1,20 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="640" d:DesignHeight="420"
+        x:Class="EffectEditorAvalonia.EffectSearchWindow"
+        Title="Effect Search" Width="640" Height="420"
+        WindowStartupLocation="CenterOwner">
+  <DockPanel Margin="8" LastChildFill="True">
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="6" Margin="0,8,0,0">
+      <Button x:Name="c_DeleteBtn" Width="100" Content="Delete..." Click="OnDelete" />
+      <Button x:Name="c_OkBtn"     Width="100" Content="OK"        Click="OnOk" />
+      <Button x:Name="c_CancelBtn" Width="100" Content="Cancel"    Click="OnCancel" />
+    </StackPanel>
+    <DataGrid x:Name="c_Grid" AutoGenerateColumns="True"
+              IsReadOnly="True" GridLinesVisibility="All"
+              SelectionMode="Single" />
+  </DockPanel>
+</Window>

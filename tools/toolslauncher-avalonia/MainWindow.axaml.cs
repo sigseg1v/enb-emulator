@@ -50,7 +50,7 @@ namespace ToolsLauncherAvalonia
         // (display name, avalonia project name, "(not yet ported)" stub)
         readonly List<(string Label, string Project, bool Ported)> _editors = new()
         {
-            ("Effect Editor",   "effect-editor-avalonia",       false),
+            ("Effect Editor",   "effect-editor-avalonia",       true),
             ("Item Editor",     "item-editor-avalonia",         false),
             ("Mission Editor",  "missioneditor-avalonia",       false),
             ("Mob Editor",      "mob-editor-avalonia",          true),

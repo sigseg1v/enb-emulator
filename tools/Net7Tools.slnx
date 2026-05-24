@@ -67,6 +67,9 @@
   <Folder Name="/toolslauncher-avalonia/">
     <Project Path="toolslauncher-avalonia/ToolsLauncherAvalonia.csproj" />
   </Folder>
+  <Folder Name="/effect-editor-avalonia/">
+    <Project Path="effect-editor-avalonia/EffectEditorAvalonia.csproj" />
+  </Folder>
   <Folder Name="/w3d-parser/">
     <Project Path="w3d-parser/W3d Parser.csproj" />
   </Folder>

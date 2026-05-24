@@ -570,25 +570,108 @@ The existing WinForms targets stay in the tree. They still build via `dotnet bui
 
       **11/14 tools have Linux-native paths now.**
 
-### Future tier ordering (remaining 4 tools — continuing per "do all plans" directive)
+### Tier 9 — particle effect editor port (complete)
+
+- [x] **effect-editor-avalonia** — Avalonia port of
+      `tools/effect-editor/SQLBind/`, the 5-form editor for
+      `item_effect_base`, `item_effects`, and `item_effect_container`.
+      Touches: `tools/effect-editor-avalonia/` (csproj, app.manifest,
+      App.axaml{,.cs}, MainWindow.axaml{,.cs}, EffectSearchWindow.axaml{,.cs},
+      EditItemWindow.axaml{,.cs}, ItemBrowseWindow.axaml{,.cs}, CodeValue.cs,
+      Program.cs, README.md) + slnx entry + `toolslauncher-avalonia`
+      `_editors` flag flipped from `false` → `true`.
+      Status: complete
+
+      **Mapping** (5 forms + login + program → 5 windows + program):
+      - `Program.cs` (Config.xml roundtrip + custom Login) → `App.axaml.cs`
+        (faction-editor's Login→MainWindow swap pattern) + `Program.cs`
+        with `--smoke` flag. Custom `Login.cs` with version check against
+        a `versions` table dropped — uses the shared
+        `commontools-avalonia` `CommonTools.Gui.Login`, which persists
+        creds via `LoginData`.
+      - `Form1.cs` + `.Designer.cs` (~600 LOC main editor) →
+        `MainWindow.axaml{,.cs}` — 740×475, EffectType combo,
+        Name/Description/Tooltip, 3 var stat/type slots, 2 constant
+        stat/type/value slots, friend/enemy/group/RequireT flag
+        checkboxes, Buff dropdown, VisualEffect, Save / New /
+        Edit Items buttons.
+      - `EffectSearch.cs` + `.designer.cs` →
+        `EffectSearchWindow.axaml{,.cs}`.
+      - `EditItem.cs` + `.designer.cs` (~700 LOC, 5 hand-laid-out
+        effect rows) → `EditItemWindow.axaml{,.cs}` with 5 rows
+        constructed programmatically via a `MakeRow(int)` helper
+        (one `EffectSlot` object per row, holding combo + 3 var
+        textboxes + computed-string TextBlock).
+      - `ItemBrowse.cs` + `.designer.cs` →
+        `ItemBrowseWindow.axaml{,.cs}`.
+      - `CodeValue.cs` (formats combo entries as `"Label (N)"`) →
+        verbatim port.
+      - `EffectComboHandel.cs` (sic) → folded into `MainWindow`'s
+        `FillStats` / `FillBuffs` / `FillVarTypes` static helpers.
+      - `SQLDataBase.cs` (private MySQL wrapper, all sprintf-style SQL)
+        → dropped. Uses `commontools-avalonia`'s `DB.Instance`.
+
+      **Key mechanical changes:**
+      - **All SQL parameterised.** Every `SELECT/INSERT/UPDATE/DELETE`
+        goes through `DB.Instance.executeQuery(sql, paramKeys[],
+        paramVals[])` / `executeCommand(...)`. The original built SQL
+        by string concatenation throughout (`"WHERE name LIKE '%" +
+        textbox.Text + "%'"`, etc.) — roughly 20 textbook SQL-injection
+        holes silently closed.
+      - **`(none)` sentinel at combo index 0** in the per-effect-slot
+        combos in `EditItemWindow`. The original relied on
+        `SelectedIndex == -1` to mean "delete"; we add an explicit
+        `(none)` row so `SelectedIndex == 0` deterministically maps to
+        DELETE on save.
+      - **DB-touching combo loads in ctor wrapped in try/catch** so
+        the `--smoke` test can validate AXAML compile + control wiring
+        without a running MySQL. Same defensive pattern as
+        mob-editor-avalonia.
+
+      **Preserved verbatim** (these are the bits users would notice
+      regressing):
+      - `Flag1` bit-packing — `TFriend << 4`, `TEnemy << 5`,
+        `TGroupM << 6`.
+      - `Flag2 RequireT` encoding — sets bit 0 when checked, sets
+        bit 1 when unchecked (the original's surprising "both bits"
+        inversion is kept exactly).
+      - `NewEffect` defaults — `'none'/'none'/'none'`, `NO_STAT`,
+        `BUFF_NONE`, zeros everywhere.
+      - Variable-type combo content — `Not Used (0)`,
+        `Increase Value (1)`, `Increase Percent (2)`,
+        `Decrease Value (3)`, `Decrease Percent (4)`, `Duration (5)`.
+      - Item-type combo ordering in `ItemBrowseWindow` — `_itemTypes`
+        prepends `(any)` so `SelectedIndex - 1` still maps to the DB
+        `type` column value the original computed.
+      - `%valueN.Mf%` printf parser in `EditItemWindow.Render(int)` —
+        the quirky `for`-loop shape from `EditItem.DisplayString` is
+        preserved exactly (uses an `"f%"` sentinel string-search
+        rather than a regex). The user-facing in-editor tooltip
+        preview depends on it.
+
+      Smoke: `dotnet run -- --smoke` instantiates `Login` (290×195) +
+      `MainWindow` (740×475) + `EffectSearchWindow` (640×420) +
+      `ItemBrowseWindow` (620×340) + `EditItemWindow` (680×580). All
+      5 print OK, no DB required.
+
+      **12/14 tools have Linux-native paths now.**
+
+### Future tier ordering (remaining 3 tools — continuing per "do all plans" directive)
 
 Recommended order:
 
-1. **effect-editor-avalonia** (SQLBind) — 5 forms, particle effects.
-   ~3 days.
+1. **station-tools-avalonia** — 8 forms. ~4-5 days.
 
-2. **station-tools-avalonia** — 8 forms. ~4-5 days.
-
-3. **missioneditor-avalonia** — 9 forms incl. tree view. Depends on
+2. **missioneditor-avalonia** — 9 forms incl. tree view. Depends on
    commontools-avalonia. ~5 days.
 
-4. **sector-editor-avalonia** — 16 forms, custom map canvas
+3. **sector-editor-avalonia** — 16 forms, custom map canvas
    (System.Drawing.Graphics → Avalonia DrawingContext is the major
    work). ~2-3 weeks.
 
 ### Tier 2+ — deferred
 
-The remaining 4 editors (effect-editor, station-tools, missioneditor, sector-editor) are tracked as future Phase L sub-items. With realistic ~3-6 month total for the suite, this is its own project — but per the user directive "do all plans / dont stop at phase boundaries," subsequent invocations should keep grinding through them.
+The remaining 3 editors (station-tools, missioneditor, sector-editor) are tracked as future Phase L sub-items. With realistic ~3-6 month total for the suite, this is its own project — but per the user directive "do all plans / dont stop at phase boundaries," subsequent invocations should keep grinding through them.
 
 For immediate Linux runnability of the editors: the WinForms binaries already run under WINE — `tools/README.md` documents this. That's the realistic interim story until Avalonia ports land.
 

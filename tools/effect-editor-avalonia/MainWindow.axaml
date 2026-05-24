@@ -1,0 +1,107 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="740" d:DesignHeight="475"
+        x:Class="EffectEditorAvalonia.MainWindow"
+        Title="Effect Editor" Width="740" Height="475"
+        CanResize="False">
+  <Grid Margin="8" RowDefinitions="Auto,Auto,Auto,Auto,*,Auto">
+
+    <!-- Row 0: Search button -->
+    <Button Grid.Row="0" x:Name="c_SearchBtn" Width="80" Height="24" HorizontalAlignment="Left"
+            Content="Search" Click="OnSearch" />
+
+    <!-- Row 1: Effect Type + EffectName -->
+    <Grid Grid.Row="1" Margin="0,8,0,0" ColumnDefinitions="80,140,12,60,*">
+      <TextBlock Grid.Column="0" Text="Effect Type:" VerticalAlignment="Center" />
+      <ComboBox Grid.Column="1" x:Name="c_EffectTypeCbo" Width="135" />
+      <TextBlock Grid.Column="3" Text="Name:" VerticalAlignment="Center" HorizontalAlignment="Right" />
+      <TextBox  Grid.Column="4" x:Name="c_EffectName" Width="195" HorizontalAlignment="Left" />
+    </Grid>
+
+    <!-- Row 2: Description (not displayed on client) -->
+    <Grid Grid.Row="2" Margin="0,4,0,0" ColumnDefinitions="80,*,Auto">
+      <TextBlock Grid.Column="0" Text="Description:" VerticalAlignment="Center" />
+      <TextBox  Grid.Column="1" x:Name="c_EffectDesc" Width="195" HorizontalAlignment="Left" />
+      <TextBlock Grid.Column="2" Text="(Not displayed on client)" VerticalAlignment="Center"
+                 Foreground="Gray" Margin="6,0,0,0" />
+    </Grid>
+
+    <!-- Row 3: Tooltip (displayed on client) -->
+    <Grid Grid.Row="3" Margin="0,4,0,0" ColumnDefinitions="80,*">
+      <TextBlock Grid.Column="0" Text="Tooltip:" VerticalAlignment="Center" />
+      <TextBox  Grid.Column="1" x:Name="c_EffectToolTip" />
+    </Grid>
+
+    <!-- Row 4: Three groups side by side: Variables | Constants | Target -->
+    <Grid Grid.Row="4" Margin="0,8,0,0" ColumnDefinitions="*,8,*,8,*"
+          RowDefinitions="*,8,*">
+
+      <HeaderedContentControl Grid.Column="0" Grid.RowSpan="3"
+                              Header="Variable Types"
+                              BorderBrush="Gray" BorderThickness="1" Padding="6">
+        <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="Auto,*,8,*">
+          <TextBlock Grid.Row="0" Grid.Column="0" Text="Var1:" VerticalAlignment="Center" Margin="0,2,4,2" />
+          <ComboBox  Grid.Row="0" Grid.Column="1" x:Name="c_VarStat1" Margin="0,2" HorizontalAlignment="Stretch" />
+          <ComboBox  Grid.Row="0" Grid.Column="3" x:Name="c_VarType1" Margin="0,2" HorizontalAlignment="Stretch" />
+          <TextBlock Grid.Row="1" Grid.Column="0" Text="Var2:" VerticalAlignment="Center" Margin="0,2,4,2" />
+          <ComboBox  Grid.Row="1" Grid.Column="1" x:Name="c_VarStat2" Margin="0,2" HorizontalAlignment="Stretch" />
+          <ComboBox  Grid.Row="1" Grid.Column="3" x:Name="c_VarType2" Margin="0,2" HorizontalAlignment="Stretch" />
+          <TextBlock Grid.Row="2" Grid.Column="0" Text="Var3:" VerticalAlignment="Center" Margin="0,2,4,2" />
+          <ComboBox  Grid.Row="2" Grid.Column="1" x:Name="c_VarStat3" Margin="0,2" HorizontalAlignment="Stretch" />
+          <ComboBox  Grid.Row="2" Grid.Column="3" x:Name="c_VarType3" Margin="0,2" HorizontalAlignment="Stretch" />
+        </Grid>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Grid.Column="2" Grid.RowSpan="3"
+                              Header="Constants"
+                              BorderBrush="Gray" BorderThickness="1" Padding="6">
+        <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="Auto,*,8,*">
+          <TextBlock Grid.Row="0" Grid.Column="0" Text="Const1:" VerticalAlignment="Center" Margin="0,2,4,2" />
+          <ComboBox  Grid.Row="0" Grid.Column="1" x:Name="c_ConstStat1" Margin="0,2" HorizontalAlignment="Stretch" />
+          <ComboBox  Grid.Row="0" Grid.Column="3" x:Name="c_ConstType1" Margin="0,2" HorizontalAlignment="Stretch" />
+          <TextBlock Grid.Row="1" Grid.Column="0" Text="Value:" VerticalAlignment="Center" Margin="0,2,4,2" />
+          <TextBox   Grid.Row="1" Grid.Column="1" x:Name="c_ConstValue1" Margin="0,2" />
+          <TextBlock Grid.Row="1" Grid.Column="3" Text="(No signs or %)" Foreground="Gray" VerticalAlignment="Center" Margin="0,2" />
+          <TextBlock Grid.Row="2" Grid.Column="0" Text="Const2:" VerticalAlignment="Center" Margin="0,2,4,2" />
+          <ComboBox  Grid.Row="2" Grid.Column="1" x:Name="c_ConstStat2" Margin="0,2" HorizontalAlignment="Stretch" />
+          <ComboBox  Grid.Row="2" Grid.Column="3" x:Name="c_ConstType2" Margin="0,2" HorizontalAlignment="Stretch" />
+          <TextBlock Grid.Row="3" Grid.Column="0" Text="Value:" VerticalAlignment="Center" Margin="0,2,4,2" />
+          <TextBox   Grid.Row="3" Grid.Column="1" x:Name="c_ConstValue2" Margin="0,2" />
+          <TextBlock Grid.Row="3" Grid.Column="3" Text="(No signs or %)" Foreground="Gray" VerticalAlignment="Center" Margin="0,2" />
+        </Grid>
+      </HeaderedContentControl>
+
+      <HeaderedContentControl Grid.Column="4" Grid.RowSpan="3"
+                              x:Name="c_TargetTypeGrp"
+                              Header="Activatable"
+                              BorderBrush="Gray" BorderThickness="1" Padding="6">
+        <StackPanel Spacing="4">
+          <RadioButton x:Name="c_TFriend" GroupName="TargetGrp" Content="Target Friendly" IsChecked="True" />
+          <RadioButton x:Name="c_TEnemy"  GroupName="TargetGrp" Content="Target Enemy" />
+          <RadioButton x:Name="c_TGroupM" GroupName="TargetGrp" Content="Target Group Member" />
+          <RadioButton x:Name="c_TSelf"   GroupName="TargetGrp" Content="Target Self" />
+          <CheckBox    x:Name="c_RequireT" Content="Require Target" />
+          <Grid ColumnDefinitions="80,*">
+            <TextBlock Grid.Column="0" Text="Buff:" VerticalAlignment="Center" />
+            <ComboBox  Grid.Column="1" x:Name="c_EffectBuff" HorizontalAlignment="Stretch" />
+          </Grid>
+          <Grid ColumnDefinitions="80,*">
+            <TextBlock Grid.Column="0" Text="Visual Effect:" VerticalAlignment="Center" />
+            <TextBox   Grid.Column="1" x:Name="c_VisualEffect" />
+          </Grid>
+        </StackPanel>
+      </HeaderedContentControl>
+    </Grid>
+
+    <!-- Row 5: bottom buttons -->
+    <StackPanel Grid.Row="5" Margin="0,8,0,0" Orientation="Horizontal" Spacing="8">
+      <Button x:Name="c_SaveBtn"      Width="115" Height="36" Content="Save/Update" Click="OnSave" />
+      <Button x:Name="c_NewBtn"       Width="115" Height="36" Content="New"         Click="OnNew" />
+      <Button x:Name="c_EditItemsBtn" Width="115" Height="36" Content="Edit Items"  Click="OnEditItems"
+              HorizontalAlignment="Right" />
+      <TextBlock x:Name="c_Status" VerticalAlignment="Center" Foreground="Gray" Margin="12,0,0,0" />
+    </StackPanel>
+  </Grid>
+</Window>
