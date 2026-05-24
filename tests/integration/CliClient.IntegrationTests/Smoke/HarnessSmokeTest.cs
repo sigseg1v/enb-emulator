@@ -38,4 +38,20 @@ public sealed class HarnessSmokeTest
         Assert.Equal(OpcodeNames.Count, added);
         Assert.Equal(207, added);
     }
+
+    [Fact]
+    public void SeedSql_IsCopiedToOutput_AndMentionsEveryPooledAccount()
+    {
+        var seedPath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "seed.sql");
+        Assert.True(File.Exists(seedPath),
+            $"Fixtures/seed.sql not next to the test assembly at '{seedPath}'");
+
+        var seed = File.ReadAllText(seedPath);
+        foreach (var account in TestAccounts.Pool)
+        {
+            Assert.Contains(account.Username, seed);
+            Assert.Contains(account.Id.ToString(), seed);
+        }
+        Assert.Contains("UPPER(MD5('testpw'))", seed);
+    }
 }

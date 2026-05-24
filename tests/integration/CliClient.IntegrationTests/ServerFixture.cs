@@ -68,6 +68,8 @@ public sealed class ServerFixture : IAsyncLifetime
         await WaitForPortAsync(GlobalHost, GlobalPort, ReadyTimeout);
         await WaitForPortAsync(MasterHost, MasterPort, ReadyTimeout);
         await WaitForPortAsync(SectorHost, SectorPort, ReadyTimeout);
+
+        await SeedFixtureAccountsAsync(TimeSpan.FromMinutes(1));
     }
 
     public async Task DisposeAsync()
@@ -77,6 +79,58 @@ public sealed class ServerFixture : IAsyncLifetime
             // -v wipes the named volumes (mysqldata, net7-ipc). Faster
             // than tearing down without; per-test-run isolation.
             await RunComposeAsync("down -v", TimeSpan.FromMinutes(2));
+        }
+    }
+
+    /// <summary>
+    /// Apply <c>Fixtures/seed.sql</c> against the mysql container via
+    /// <c>docker compose exec -T mysql mysql ...</c>. Idempotent
+    /// (seed.sql does DELETE + INSERT on a fixed ID range, so a re-run
+    /// inside the same compose lifetime resets the seed pool cleanly).
+    /// </summary>
+    private async Task SeedFixtureAccountsAsync(TimeSpan timeout)
+    {
+        var seedPath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "seed.sql");
+        if (!File.Exists(seedPath))
+            throw new FileNotFoundException(
+                "Could not find Fixtures/seed.sql next to the test assembly. " +
+                "Did the csproj <None Include=\"Fixtures/**/*\" CopyToOutputDirectory> entry survive?",
+                seedPath);
+
+        var psi = new ProcessStartInfo("docker",
+            "compose exec -T mysql mysql -unet7 -pnet7 net7_user")
+        {
+            WorkingDirectory = RepoRoot.Path,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+
+        using var p = Process.Start(psi) ?? throw new InvalidOperationException(
+            "Failed to launch 'docker compose exec mysql' for seed.");
+
+        var seedSql = await File.ReadAllTextAsync(seedPath);
+        await p.StandardInput.WriteAsync(seedSql);
+        p.StandardInput.Close();
+
+        using var cts = new CancellationTokenSource(timeout);
+        try
+        {
+            await p.WaitForExitAsync(cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            try { p.Kill(entireProcessTree: true); } catch { /* best effort */ }
+            throw new TimeoutException(
+                $"Fixture seed exceeded {timeout.TotalSeconds:F0}s.");
+        }
+
+        if (p.ExitCode != 0)
+        {
+            var stderr = await p.StandardError.ReadToEndAsync();
+            throw new InvalidOperationException(
+                $"Fixture seed exited with code {p.ExitCode}.\n--- stderr ---\n{stderr}");
         }
     }
 

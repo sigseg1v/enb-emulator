@@ -122,10 +122,45 @@ xUnit `[Collection("server")]` ensures the docker stack stands up exactly once p
            (which is also more diagnostic — you see exactly what the
            server returned).
 
-- [ ] Item 2 — Fixture player account seeding
-      Status: not started
-      Touches: tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql, ServerFixture.cs (seed step)
-      Notes: a deterministic set of test accounts (e.g. `test01`/`test02` with known characters in known sectors) inserted into the postgres DB after `compose up`. Each test claims an account from the pool to avoid cross-test interference.
+- [x] Item 2 — Fixture player account seeding
+      Status: done
+      Touches: tests/integration/CliClient.IntegrationTests/{Fixtures/seed.sql (new), TestAccounts.cs (new), ServerFixture.cs (SeedFixtureAccountsAsync), CliClient.IntegrationTests.csproj (CopyToOutputDirectory for Fixtures/), Smoke/HarnessSmokeTest.cs (seed-shape smoke)}
+      Notes:
+        ▸ Seed lives at Fixtures/seed.sql, copied to bin/ via csproj
+           <None Include="Fixtures/**/*" CopyToOutputDirectory>. 5
+           deterministic accounts (cli_test01..cli_test05) at IDs
+           9_000_001..9_000_005 — well clear of the dump's
+           AUTO_INCREMENT=15965 so seed and real data never collide.
+        ▸ Password hash is UPPER(MD5('testpw')) per
+           login-server/Net7SSL/LinuxAuth.cpp:227 (Linux auth path).
+           Same plaintext "testpw" for every account so tests don't
+           track per-account secrets.
+        ▸ Plan said "postgres DB after compose up" — actually the
+           default compose stack is MySQL (postgres is behind the
+           --profile postgres flag). Pivoted to MySQL accordingly:
+           seed runs via `docker compose exec -T mysql mysql -unet7
+           -pnet7 net7_user` with seed.sql piped over stdin. The
+           --profile postgres path can pick this up later when N+
+           moves the auth layer to libpqxx.
+        ▸ ServerFixture.SeedFixtureAccountsAsync runs after the TCP
+           probes succeed (i.e. after up --wait + ports are listening
+           = mysql is genuinely up). 60s timeout on the exec itself.
+        ▸ Seed is idempotent inside a compose lifetime (DELETE WHERE
+           id BETWEEN ... + INSERT) so a re-run in the same
+           containers reseeds cleanly. Cross-run isolation comes from
+           `down -v` in DisposeAsync.
+        ▸ Skipped: a lease/pool with claim/release semantics — xUnit
+           collection-fixture tests serialise by default, so the 5
+           accounts can be referenced directly by index from
+           TestAccounts.Pool. Add a lease if a parallel scenario ever
+           emerges.
+        ▸ New smoke test SeedSql_IsCopiedToOutput_AndMentionsEvery-
+           PooledAccount runs without docker — asserts the file
+           shipped to bin/ and every TestAccounts.Pool entry +
+           the UPPER(MD5(...)) hash form appear in it. Catches
+           mismatches between TestAccounts.cs and seed.sql at unit-
+           test time, not integration-test time. 3/3 smoke tests
+           passing.
 
 - [ ] Item 3 — Handshake tests (RSA + TLS login)
       Status: not started
