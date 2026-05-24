@@ -3,8 +3,11 @@
 // New code; project default license (LICENSES/enb-emulator).
 
 using N7.CliClient;
+using N7.CliClient.Logging;
+using N7.CliClient.Net;
 using N7.CliClient.Opcodes;
 using N7.CliClient.Opcodes.Inbound;
+using N7.CliClient.Opcodes.Outbound;
 using N7.CliClient.Repl;
 using N7.CliClient.Session;
 using N7.CliClient.Workflows;
@@ -41,6 +44,11 @@ if (args[0] == "repl")
 if (args[0] == "connect-and-login")
 {
     return await RunConnectAndLoginAsync(args.Skip(1).ToArray());
+}
+
+if (args[0] == "send-chat")
+{
+    return await RunSendChatAsync(args.Skip(1).ToArray());
 }
 
 Console.Error.WriteLine($"unknown argument: {args[0]}");
@@ -114,6 +122,113 @@ static async Task<int> RunConnectAndLoginAsync(string[] argv)
     return 0;
 }
 
+static async Task<int> RunSendChatAsync(string[] argv)
+{
+    string? user = null, pass = null, message = null;
+    string loginHost = "127.0.0.1", globalHost = "127.0.0.1";
+    int loginPort = 443, globalPort = 3500;
+    int gameId = 0;
+    ChatChannel channel = ChatChannel.Broadcast;
+    bool strictTls = false;
+
+    for (int i = 0; i < argv.Length; i++)
+    {
+        string a = argv[i];
+        string? next() => i + 1 < argv.Length ? argv[++i] : null;
+        switch (a)
+        {
+            case "--user":        user = next(); break;
+            case "--pass":        pass = next(); break;
+            case "--login-host":  loginHost = next() ?? loginHost; break;
+            case "--login-port":  loginPort = int.Parse(next() ?? "443"); break;
+            case "--global-host": globalHost = next() ?? globalHost; break;
+            case "--global-port": globalPort = int.Parse(next() ?? "3500"); break;
+            case "--game-id":     gameId = int.Parse(next() ?? "0"); break;
+            case "--channel":     channel = ParseChannel(next()); break;
+            case "--message":     message = next(); break;
+            case "--strict-tls":  strictTls = true; break;
+            default:
+                Console.Error.WriteLine($"unknown option: {a}");
+                return 2;
+        }
+    }
+
+    if (string.IsNullOrEmpty(user) || string.IsNullOrEmpty(pass))
+    {
+        Console.Error.WriteLine("--user and --pass are required");
+        return 2;
+    }
+    if (string.IsNullOrEmpty(message))
+    {
+        Console.Error.WriteLine("--message is required and must be non-empty");
+        return 2;
+    }
+    if (gameId == 0)
+    {
+        // The server cross-checks GameId against the avatar attached to
+        // the session. Phase S Items 10-12 / Phase K still need to wire
+        // avatar-select before we can read this value end-to-end; pass it
+        // explicitly for now.
+        Console.Error.WriteLine("--game-id is required (non-zero avatar id)");
+        return 2;
+    }
+
+    var registry = new OpcodeRegistry();
+    registry.Register(new ServerRedirectCodec());
+
+    var console = new N7.CliClient.Logging.ConsoleSink();
+    var options = new ConnectAndLoginOptions
+    {
+        Username = user,
+        Password = pass,
+        LoginHost = loginHost,
+        LoginPort = loginPort,
+        GlobalHost = globalHost,
+        GlobalPort = globalPort,
+        IdleDuration = TimeSpan.Zero,
+        AcceptUntrustedLoginCertificate = !strictTls,
+    };
+
+    using var cts = new CancellationTokenSource();
+    Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
+
+    using var guard = new HealthGuard(sink: console);
+
+    // We need our own session here (ConnectAndLogin owns its session
+    // internally and disposes it). Inline the auth + connect sequence.
+    var auth = new N7.CliClient.Auth.AuthLoginClient(
+        loginHost, loginPort,
+        acceptUntrustedCertificates: !strictTls);
+    var login = await auth.LoginAsync(
+        new N7.CliClient.Auth.AuthLoginRequest(user, pass), cts.Token);
+    if (!login.Valid || string.IsNullOrEmpty(login.Ticket))
+    {
+        Console.Error.WriteLine("login rejected");
+        return 1;
+    }
+
+    await using var session = new CliSession(registry, login.Ticket);
+    await session.ConnectGlobalAsync(globalHost, globalPort, cts.Token);
+
+    var chat = new SendChat(session, packetLog: null, console: console);
+    await chat.SendAsync(gameId, channel, message, cts.Token);
+
+    Console.WriteLine($"sent: gameId={gameId} channel={channel}");
+    return 0;
+}
+
+static ChatChannel ParseChannel(string? s) =>
+    (s ?? "broadcast").ToLowerInvariant() switch
+    {
+        "target"    => ChatChannel.Target,
+        "group"     => ChatChannel.Group,
+        "guild"     => ChatChannel.Guild,
+        "local"     => ChatChannel.Local,
+        "broadcast" => ChatChannel.Broadcast,
+        _ => throw new ArgumentException(
+            $"unknown chat channel '{s}' (use: target|group|guild|local|broadcast)"),
+    };
+
 static void PrintHelp()
 {
     Console.WriteLine($"""
@@ -135,6 +250,14 @@ static void PrintHelp()
                             [--strict-tls]
                             smoke-test workflow: TLS login + global TCP connect
                             + idle for N seconds + clean disconnect
+          send-chat         --user X --pass Y --game-id N --message "text"
+                            [--channel target|group|guild|local|broadcast]
+                            [--login-host h] [--login-port p]
+                            [--global-host h] [--global-port p] [--strict-tls]
+                            log in, connect, send one ClientChat packet, exit.
+                            NOTE: server expects --game-id to match the avatar
+                            currently attached to the session — Phase K's avatar
+                            handoff must be live for this to do anything visible.
 
         hard rules (see plans/19-phase-s-cli-client.md):
           1. never modify the server to ease the CLI client

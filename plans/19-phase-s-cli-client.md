@@ -447,10 +447,41 @@ CliClient.UnitTests/
       Touches: tools/cli-client/Workflows/EnumerateItems.cs
       Notes: query item-base data via the appropriate opcode (TBD — may need real-client trace to confirm shape); output ./out/items-<ts>.json
 
-- [ ] Item 13 — Workflow: send chat
-      Status: not started
-      Touches: tools/cli-client/Workflows/SendChat.cs
-      Notes: REPL `chat <channel> <text>`; received chat already auto-logged via ChatLog.cs.
+- [x] Item 13 — Workflow: send chat
+      Status: done
+      Touches:
+        - src/CliClient.Core/Opcodes/Outbound/ClientChatCodec.cs (0x0033 codec)
+        - src/CliClient.Core/Workflows/SendChat.cs (workflow class)
+        - src/CliClient.App/Program.cs (wires `cli-client send-chat` subcommand)
+        - tests/CliClient.UnitTests/Opcodes/ClientChatCodecTests.cs (12 tests)
+        - tests/CliClient.UnitTests/Workflows/SendChatTests.cs (4 tests, incl. loopback)
+      Notes:
+        Wire layout: int32 LE GameID + byte Type + int16 LE Size + ASCII string + NUL.
+        Matches the Win32 client's packed (long=4 bytes, LE) emission of
+        `struct ClientChat` in common/include/net7/PacketStructures.h:572.
+        ChatChannel enum: 0=Target, 1=Group, 2=Guild, 3=Local, 4=Broadcast — matches
+        the switch in server/src/PlayerConnection.cpp:4515 (Player::HandleClientChat).
+
+        Codec rejects empty messages (server's HandleClientChat indexes
+        chat->String[0] unconditionally before checking the slash branch — refuse
+        rather than potentially trip a server-side OOB read). Codec rejects strings
+        whose UTF-8-length+1 exceeds int16.
+
+        Workflow: SendChat is a thin wrapper around codec.EncodeOutbound +
+        Packet.ForOpcode + session.SendAsync, with optional PacketLog + ConsoleSink
+        plumbing. Does NOT manage session lifecycle — caller must hand it an
+        already-connected CliSession.
+
+        CLI subcommand: `cli-client send-chat --user X --pass Y --game-id N
+        --message "text" [--channel target|group|guild|local|broadcast]
+        [--login-host h] [--login-port p] [--global-host h] [--global-port p]
+        [--strict-tls]`. Inlines the auth + connect-global sequence (doesn't
+        reuse ConnectAndLogin because that workflow owns + disposes its own
+        session). Honest help text notes the server cross-checks --game-id
+        against the avatar attached to the session, so end-to-end visible
+        chat requires Phase K's avatar handoff to be live.
+
+        148 tests passing (was 132).
 
 - [ ] Item 14 — Codec unit tests in xUnit (CliClient.UnitTests)
       Status: not started
