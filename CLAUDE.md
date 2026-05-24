@@ -58,6 +58,8 @@ The source of truth for "what's done / what's next" across invocations is the `p
 │   ├── mysql/         original MySQL dumps
 │   └── postgres/      converted Postgres schema (new)
 ├── tests/             gtest harness + smoke tests (new)
+│   └── integration/CliClient.IntegrationTests/  Phase T xUnit suite that drives CliClient.Core
+│                      against the live docker-compose stack — see docs/16-integration-tests.md
 ├── vendor/            third-party binaries without source (with THIRD_PARTY_BINARIES.md notes)
 ├── archive/           historical material — old snapshots, packet captures, original docs
 ├── justfile           build / lint / test / dev / package targets
@@ -146,4 +148,6 @@ See `docs/08-build.md` and `docs/09-running-locally.md` for the details.
 - Network protocol: `docs/03-network-protocol.md`
 - DB schema: `docs/06-database-schema.md`
 - Modernization roadmap: `docs/10-modernization-roadmap.md`
+- CLI client (Phase S): `docs/15-cli-client.md`
+- Integration tests (Phase T): `docs/16-integration-tests.md`
 - Open work: `plans/00-master.md`

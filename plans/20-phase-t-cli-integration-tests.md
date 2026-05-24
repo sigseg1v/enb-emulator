@@ -505,10 +505,36 @@ xUnit `[Collection("server")]` ensures the docker stack stands up exactly once p
            of the C++ pipeline gives quicker signal on server-
            protocol regressions during a PR's lifecycle.
 
-- [ ] Item 9 — Documentation: docs/13-integration-tests.md
-      Status: not started
-      Touches: docs/13-integration-tests.md, CLAUDE.md (repo-map row)
-      Notes: how to add a new opcode test, how golden files are produced/refreshed, how to debug a failing test (capture logs in CI artifacts, replay locally via `just integration`).
+- [x] Item 9 — Documentation: docs/16-integration-tests.md (renumbered — 13 was taken by 13-gameplay-loop.md)
+      Status: done
+      Touches: docs/16-integration-tests.md (new), docs/README.md (index row), CLAUDE.md (repo-map sub-line + Pointers section)
+      Notes:
+        ▸ Plan-file path was `docs/13-integration-tests.md` but slot
+           13 is already `13-gameplay-loop.md`. Bumped to slot 16
+           (next free after 15-cli-client.md) — same convention
+           Phase S used.
+        ▸ Doc covers: hard rules (verbatim from plan), folder
+           layout, per-category coverage table (Smoke /
+           Handshake / Opcodes / Workflows / Verification /
+           Robustness — which need docker, which don't), fixture
+           accounts mechanics (TestAccounts.Pool, seed.sql,
+           idempotent seeding), ScriptedServer architecture +
+           when it must NOT be used, capture-replay format with a
+           5-step "how to add a fixture" walkthrough (and the
+           "do NOT 'fix' a divergence without primary-source proof"
+           rule restated), how to add a new opcode test (drain on
+           opcode-not-ordering, own EncryptedTcpConnection per
+           test, register codec in ClientFixture.cs), how to
+           debug locally + in CI (TRX upload + compose-logs
+           dumps), justfile recipe table (`cli-integration` vs
+           `cli-integration-fast`), and an explicit "what this
+           suite is NOT" section (not a fuzzer, not a load test,
+           not the only test harness).
+        ▸ CLAUDE.md repo-map row updated with a sub-line under
+           tests/ pointing at the new doc; Pointers section gets
+           two new rows (CLI client + Integration tests) since
+           Phase S/T are now the most-asked-about additions.
+        ▸ docs/README.md index gets the row 16 entry.
 
 - [ ] Item 10 — Opcode coverage push: ratchet a "tested opcodes" metric in CI
       Status: not started

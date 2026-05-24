@@ -26,6 +26,7 @@ copies of historical material from the upstream repos.
 | `13-gameplay-loop.md` | Server-side walkthrough of the major gameplay systems (combat, sector travel, missions, trading, guilds, chat). |
 | `14-extending.md` | How to add a new ability, mob type, or sector. |
 | `15-cli-client.md` | Headless C# CLI client (`tools/cli-client/`): subcommands, log formats, how to add a new opcode, and the hard rules that keep it honest. |
+| `16-integration-tests.md` | Phase T xUnit suite that drives `CliClient.Core` against the live docker-compose stack: layout, fixture accounts, how to add an opcode test, how to add a capture-replay fixture, how to debug a failure locally and in CI. |
 
 ## Reference material
 
