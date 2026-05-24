@@ -107,11 +107,36 @@ public:
 	CircularBuffer	* GetReSendCBuffer()	{ return m_ReSendBuffer; }
 	CircularBuffer	* GetUDPCBuffer()	{ return m_UDPSendBuffer; }
 	CircularBuffer  * GetMessageBuffer(){ return m_MessageBuffer; }
-	// GetTCPCBuffer/GetConnection — kyp-era TCP path. tada-o reuses the resend
-	// buffer for TCP and lets ConnectionManager hand out Connection nodes;
-	// stub to NULL so the listener compile-links. Real wiring is Phase B work.
+	// GetTCPCBuffer/GetConnection — kyp-era TCP path call sites. On Linux the
+	// callers (TcpListener.cpp, Connection.cpp) compile and link, but
+	// TcpListener is never constructed (ServerManager.cpp:147–165 has all
+	// `new TcpListener(...)` commented out) and no Connection is ever
+	// instantiated. The previous stubs returned silent NULL / a wrong-but-
+	// non-null pointer, which would silently corrupt state if the dead path
+	// were ever revived. Phase P (audit baseline 2026-05-23) makes them loud:
+	// if anything actually reaches these on Linux we want a crash, not a
+	// silent NULL deref deep inside the listener loop. Real revival belongs
+	// in proxy/ServerManager.cpp (which already binds 3801) or a Phase B-
+	// continuation rebuild of this listener.
+#ifdef WIN32
 	CircularBuffer	* GetTCPCBuffer()	{ return m_ReSendBuffer; }
 	class Connection * GetConnection()	{ return 0; }
+#else
+	CircularBuffer	* GetTCPCBuffer()
+	{
+		LogMessage("FATAL: ServerManager::GetTCPCBuffer() reached on Linux — "
+		           "kyp-era TCP path was supposed to be inert. See "
+		           "plans/16-phase-p-stub-debt-audit.md\n");
+		abort();
+	}
+	class Connection * GetConnection()
+	{
+		LogMessage("FATAL: ServerManager::GetConnection() reached on Linux — "
+		           "kyp-era TCP path was supposed to be inert. See "
+		           "plans/16-phase-p-stub-debt-audit.md\n");
+		abort();
+	}
+#endif
 
 private:
     void    ServerCheck();
