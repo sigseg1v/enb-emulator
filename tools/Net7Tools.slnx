@@ -76,6 +76,9 @@
   <Folder Name="/missioneditor-avalonia/">
     <Project Path="missioneditor-avalonia/MissionEditorAvalonia.csproj" />
   </Folder>
+  <Folder Name="/sector-editor-avalonia/">
+    <Project Path="sector-editor-avalonia/SectorEditorAvalonia.csproj" />
+  </Folder>
   <Folder Name="/w3d-parser/">
     <Project Path="w3d-parser/W3d Parser.csproj" />
   </Folder>

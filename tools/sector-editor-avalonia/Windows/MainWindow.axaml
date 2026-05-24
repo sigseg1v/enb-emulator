@@ -1,0 +1,59 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="SectorEditorAvalonia.Windows.MainWindow"
+        Width="1100" Height="720"
+        Title="Net7 Sector Editor (Avalonia)">
+  <DockPanel>
+    <Menu DockPanel.Dock="Top">
+      <MenuItem Header="_File">
+        <MenuItem Header="_New System..." x:Name="c_NewSystem" />
+        <MenuItem Header="_New Sector..." x:Name="c_NewSector" />
+        <Separator />
+        <MenuItem Header="_Save" x:Name="c_Save" />
+        <Separator />
+        <MenuItem Header="_Exit" x:Name="c_Exit" />
+      </MenuItem>
+      <MenuItem Header="_Tools">
+        <MenuItem Header="_Options..." x:Name="c_Options" />
+        <MenuItem Header="_Sound Effects..." x:Name="c_SoundEffects" />
+      </MenuItem>
+      <MenuItem Header="_Help">
+        <MenuItem Header="_About" x:Name="c_About" />
+      </MenuItem>
+    </Menu>
+    <Grid DockPanel.Dock="Bottom" Background="#202020" Height="22">
+      <TextBlock x:Name="c_Status" Foreground="LightGray" VerticalAlignment="Center"
+                 Margin="6,0,0,0" Text="ready" />
+    </Grid>
+    <Grid ColumnDefinitions="280,4,*,4,360">
+      <DockPanel Grid.Column="0">
+        <TextBlock DockPanel.Dock="Top" Margin="4" FontWeight="Bold"
+                   Text="Universe / Systems / Sectors" />
+        <TreeView x:Name="c_Tree" />
+      </DockPanel>
+      <GridSplitter Grid.Column="1" Background="DarkGray" />
+      <TabControl Grid.Column="2" x:Name="c_Tabs">
+        <TabItem Header="Sector">
+          <Canvas x:Name="c_SectorCanvas" Background="Black" />
+        </TabItem>
+        <TabItem Header="System">
+          <Canvas x:Name="c_SystemCanvas" Background="Black" />
+        </TabItem>
+        <TabItem Header="Universe">
+          <Canvas x:Name="c_UniverseCanvas" Background="Black" />
+        </TabItem>
+        <TabItem Header="Objects">
+          <DataGrid x:Name="c_ObjectsGrid" />
+        </TabItem>
+      </TabControl>
+      <GridSplitter Grid.Column="3" Background="DarkGray" />
+      <DockPanel Grid.Column="4">
+        <TextBlock DockPanel.Dock="Top" Margin="4" FontWeight="Bold"
+                   Text="Properties" />
+        <ScrollViewer>
+          <StackPanel x:Name="c_PropertyPanel" Margin="4" />
+        </ScrollViewer>
+      </DockPanel>
+    </Grid>
+  </DockPanel>
+</Window>

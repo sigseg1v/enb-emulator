@@ -485,3 +485,47 @@ server/CMakeLists.txt, login-server/CMakeLists.txt, and proxy/CMakeLists.txt all
 **Status:** explicitly deferred per user instruction. **Do not bump autonomously.** Tracked as task #60. When the user approves: bump all three CMakeLists, run full build + 23/23 gtest + 8/8 integration; if a vendored boost TU breaks, flip that target back to 20 (or 17) rather than touch upstream.
 
 Risks: a handful of legacy implicit-conversion warnings may upgrade under stricter conformance; the vendored boost subset in `server/third_party/` predates C++23 and may need either a version bump or a per-target carve-out. No code change committed at this time.
+
+## 2026-05-24 — Phase S queued: headless CLI client in C# / .NET 10
+
+Filed `plans/19-phase-s-cli-client.md`. A passive observer client that speaks the real-client protocol against the emulator: RC4+RSA handshake, TLS login (`/AuthLogin`), global→master→sector handoff, opcode round-trips. Purpose: testing + data extraction (enumerate sectors/missions/items) + verification of server behaviour vs. captured real-client traces.
+
+**Hard rules baked into the plan (and which the CLI client implementation must respect):**
+1. **NEVER modify the server to make things easier for the CLI client.** The server is written to talk to the real Win32 client; the CLI client adapts. The only exception is if a real-client capture or decompile proves the server is wrong — in which case the server is fixed to match the real client, and it just happens to also fix the CLI client.
+2. The CLI client **always respects the server**: limits, rate-limits, error replies, signs of overload → it stops the offending workflow immediately. No retry storms, no bypasses.
+3. The CLI client **MAY** request broader data than the real client *if* the server serves it without modification (example: client-side sector-radius filtering that the server doesn't enforce — CLI client may pull the whole sector).
+4. The CLI client is **not authoritative on protocol shape.** Real client wins on any disagreement.
+
+**Choice of C# / .NET 10:** reuses the .NET 10 toolchain already standing for `tools/`; the editor suite already understands the wire shapes; `System.IO.Pipelines` + `Span<byte>` makes the codec straightforward. Cross-platform (Linux primary). Logs to NDJSON for `jq` consumption.
+
+**Scheduling:** Phase S runs after Phase L (Avalonia editor tier) wraps. The CLI client doesn't block Phase L, but it's a peer to the editor suite and shares the same `tools/` parent — landing it after L keeps the .NET surface contiguous.
+
+**Out of scope (recorded so it doesn't drift in):** 3D scene/W3D mesh inspection, combat/ability execution (Phase K not done — don't pre-implement against vapor), GUI/TUI, multi-account orchestration, **any server-side instrumentation**.
+
+## 2026-05-24 — Phase T queued: CLI-client-driven integration test suite
+
+Filed `plans/20-phase-t-cli-integration-tests.md`. Real xUnit integration test project at `tests/integration/CliClient.IntegrationTests/` that references the `CliClient.Core` library (Phase S), spins docker compose via `ServerFixture : IAsyncLifetime`, drives the client in-process, and asserts opcode-by-opcode + workflow-by-workflow.
+
+**Library/console split in Phase S** is what makes Phase T possible — instead of shelling out to `dotnet run --project CliClient.App` and scraping logs (brittle: process race conditions, log-flush timing, parsing pain), the integration tests `new GlobalConnection(...)` directly, `await` responses, and `Assert.Equal` on decoded fields. Real test reporter output, fast, debuggable.
+
+**Capture-replay tests** are the single highest-value class — they replay frames from `archive/kyp-snapshot/capturedPackets/` against our server and assert that the server's reply matches the real-server's reply byte-for-byte. That's the closest thing we have to a ground-truth gate on server correctness.
+
+**Coverage ratchet**: a meta-test counts how many opcodes from `common/include/net7/Opcodes.h` have at least one round-trip test; CI enforces "never goes down". Phase T starts at single-digit coverage and ramps with Phase K.
+
+**Same hard rules as Phase S apply** — tests must never drive a server change. If a test fails because the server diverges from the real client, the fix is to align the server with the real client (with packet-capture/decomp citation), not to align it with the test.
+
+## 2026-05-24 — CLAUDE.md "Server integrity rules" added (NEVER weaken the server for tooling)
+
+Triggered by queueing Phases S + T. Codified as a top-level CLAUDE.md section because the rule isn't specific to one phase — it applies forever, to every future agent, to every consumer of the server (CLI client, test suite, editor suite, fuzzers, future tooling).
+
+**The two rules:**
+1. Never weaken / relax / loosen the server's security or correctness posture to satisfy any tooling consumer. Tools adapt to the server; the server does not adapt to tools.
+2. Never make the server accept inputs or behaviours the real server did not — accuracy is the preservation value.
+
+**The only escape hatch:** a primary-source citation proving the real EnB client+server pair allowed it. Accepted: packet captures (RARs in `archive/kyp-snapshot/capturedPackets/`), decompilation of retail binary, first-hand Net-7/Westwood developer docs, byte-level reproduction against live retail trace. Not accepted: "the CLI client needs it", "the test would be easier", "behind a `#ifdef DEV`", "kyp/tada-o already had it".
+
+**Process:** server changes invoking the escape hatch must cite the primary source in the commit message. Reviewers reject otherwise.
+
+**Scope:** `server/src/`, `login-server/Net7Mysql/`, `login-server/Net7SSL/`, `proxy/`. Does not restrict tightening changes (rejecting inputs we currently accept that the real server also rejected) — those are always welcome.
+
+This rule was written explicitly because Phases S + T create new strong incentives to "just tweak the server a little so the test passes". That direction silently destroys both the security posture and the preservation value, so the rule has to land before either phase starts.

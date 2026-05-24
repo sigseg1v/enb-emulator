@@ -902,17 +902,98 @@ The existing WinForms targets stay in the tree. They still build via `dotnet bui
       **14/15 tools have Linux-native paths now** (only sector-editor
       remains).
 
-### Future tier ordering (remaining 1 tool — continuing per "do all plans" directive)
+### Tier 12 — sector-editor-avalonia (in progress — sub-tiered)
 
-1. **sector-editor-avalonia** — 16 forms, custom map canvas
-   (System.Drawing.Graphics → Avalonia DrawingContext is the major
-   work). ~2-3 weeks.
+Discovery on first read: the original sector editor is **not just a
+large editor with a custom canvas** — it depends on **Piccolo2D**
+(`UMD.HCIL.Piccolo.dll`), a defunct .NET 2.0-era 2D scene-graph library
+(University of Maryland HCIL, BSD). 149 Piccolo references thread through
+`SectorWindow.cs` / `SystemWindow.cs` / `GUI/mainFrm.cs` / all 9 sprite
+classes. There is no Avalonia port of Piccolo2D. Trying to do this in a
+single commit produces either an unreviewable diff or a broken half-port,
+so Tier 12 is split:
 
-### Tier 2+ — deferred
+- [~] **Tier 12a — project scaffold + window shell**
+      Status: in progress (this commit)
+      Touches: `tools/sector-editor-avalonia/` (csproj, App.axaml{,cs},
+      app.manifest, Program.cs with `--smoke`, `Windows/MainWindow.{axaml,axaml.cs}`,
+      README, `tools/Net7Tools.slnx`)
+      Notes: `dotnet build` clean, `--smoke` instantiates shared
+      `commontools-avalonia` Login + MainWindow shell (TreeView left,
+      tabbed canvas centre, properties right). No data layer, no
+      dialogs, no Piccolo shim, no sprites yet. Continuation tracked
+      below.
 
-The remaining 1 editor (sector-editor) is tracked as a future Phase L sub-item. With realistic ~2-3 weeks effort, this is the largest single port left in the suite — per the user directive "do all plans / dont stop at phase boundaries," subsequent invocations should keep grinding.
+- [ ] **Tier 12b — Sql/ layer ported through `commontools-avalonia` DB**
+      Status: not started
+      Touches: `tools/sector-editor-avalonia/Sql/` (Database.cs facade,
+      SectorsSql, SystemsSql, MobsSQL, BaseAssetSQL, FactionSql,
+      Navs, SectorObjects, SectorObjectsSql, MobConvertSQL, Helpers,
+      Sectors, Systems)
+      Notes: kills the ~150 sprintf-style SQL sites in the original
+      (every `UPDATE sectors SET ... where sector_id='" + r["sector_id"] + "'`
+      becomes a `DB.Instance.executeCommand(query, params, values)` call).
+      This is the "closes a stack of SQL-injection holes" tier — same
+      shape as faction-editor / mob-editor / station-tools Sql layer
+      ports.
 
-For immediate Linux runnability of the editors: the WinForms binaries already run under WINE — `tools/README.md` documents this. That's the realistic interim story until the last Avalonia port lands.
+- [ ] **Tier 12c — simple dialogs**
+      Status: not started
+      Touches: `tools/sector-editor-avalonia/Dialogs/` (NewSystem,
+      NewSector, NewSectorObject, NewSectorObjectType, NewFrm, OptionsGui,
+      SoundEffects, HarvestableResTypes, MobGroup, Destination,
+      frmContrast, BaseAssets, Settings, AboutBox1, AboutBox2)
+      Notes: 15 dialogs ranging from trivial (AboutBox, frmContrast =
+      brightness slider) to medium (BaseAssets, NewSectorObject).
+      Login is reused from commontools-avalonia. Some dialogs go away
+      if their feature drops with the Piccolo shim (e.g. SoundEffects
+      only makes sense once the sound-effect-id picker is wired into
+      sprites).
+
+- [ ] **Tier 12d — Piccolo shim on Avalonia primitives**
+      Status: not started
+      Touches: `tools/sector-editor-avalonia/PiccoloShim/` (PCanvas,
+      PLayer, PNode, PPath, PImage, PText, PInputEventArgs,
+      PInputEventHandler, PDragEventHandler, PPanEventHandler, PCamera)
+      Notes: minimal internal-only shim. Maps Piccolo's structured 2D
+      scene-graph API onto Avalonia primitives:
+      - `PCanvas` → Avalonia `Canvas` inside a `ScrollViewer`, with
+        a `ScaleTransform`+`TranslateTransform` for pan/zoom
+      - `PLayer` → Avalonia `Panel` (z-ordered children)
+      - `PNode` → Avalonia `Control` (renders via overridden
+        `Render(DrawingContext)`)
+      - `PPath.CreateEllipse(x,y,w,h)` → Avalonia `Ellipse` with
+        `Canvas.Left/Top`
+      - `PImage` → Avalonia `Image` with `Bitmap` source
+      - `PText` → Avalonia `TextBlock`
+      - `MouseDown/MouseDrag/MouseUp` → Avalonia `PointerPressed`/
+        `PointerMoved`/`PointerReleased` with `PInputEventArgs.Position`
+        re-derived from `e.GetPosition(canvas)`
+      - `MouseWheelZoomController` → Avalonia `PointerWheelChanged`
+        bumping the `ScaleTransform`
+      - `PDragEventHandler`/`PPanEventHandler` → captured-pointer
+        translation deltas applied to the layer's `RenderTransform`
+      Sprites can then port near-1:1 against the shim.
+
+- [ ] **Tier 12e — Sprites + windows**
+      Status: not started
+      Touches: `tools/sector-editor-avalonia/Sprites/` (Mob, Planet,
+      Stargate, Starbase, Decoration, Harvestable, Sector,
+      SectorBounds; one Sprite per type plus a paired "data" class),
+      `Windows/SectorWindow.cs`, `Windows/SystemWindow.cs`,
+      `Windows/UniverseWindow.cs`, `Windows/TreeWindow.cs`, and the
+      wire-up in `Windows/MainWindow.axaml.cs`
+      Notes: mechanical port against the Tier 12d shim. The fiddly
+      pieces: QuaternionCalc (port verbatim), AdobeColors (replace
+      with `commontools-avalonia`'s HslConvert per mob-editor
+      precedent — Win32-only the original uses), drag-drop of object
+      types onto the canvas (Avalonia `DragDrop` API, not WinForms
+      `DoDragDrop`), and the `mainFrm.selected*` static-globals
+      anti-pattern (refactor or preserve, decision per-call-site).
+
+The WinForms binary continues to build and runs under WINE on Linux
+(`tools/README.md`). The Avalonia port is the end state; WINE is the
+interim story until Tier 12e lands.
 
 ## Decisions
 
