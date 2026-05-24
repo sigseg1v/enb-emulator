@@ -44,21 +44,47 @@ The walled `AccountManager.cpp` is dormant on Linux now, but the moment Phase J 
 - Don't change the SQL dialect of the *queries* yet — that's Phase N+ if needed. Postgres handles most MySQL flavour with libpqxx straight-through (backticks already swapped in Phase C schema conversion).
 - Don't touch login-server's `Net7Mysql/` yet (that's Phase R territory — same job for the auth server).
 
-## Items (placeholder — flesh out when Phase N starts)
+## Items
 
-- [ ] Re-read `MIGRATION_PATTERN.md` and confirm it's still accurate.
-- [ ] Reimplement `sql_connection_c` (connect / disconnect / grabdb).
-- [ ] Reimplement `sql_query_c` so its `execute()` signature **requires** a parameter pack (or `pqxx::params`). The legacy `execute(char *sql)` becomes a deprecated overload that asserts on `%`-characters in the string.
-- [ ] Reimplement `sql_result_c` (row iteration).
-- [ ] Reimplement `sql_param_c` (parameter binding) — back it with `pqxx::params::append()`.
-- [ ] Reimplement the remaining 3 classes (`sql_field_c`, `sql_row_c`, error wrappers).
-- [ ] CMakeLists update.
-- [ ] DAO compile pass — fix the minor friction the migration doc anticipated.
-- [ ] Convert the 36 dynamic-SQL sites listed above to parameterised form, one file at a time. After each file: re-run the audit grep, confirm count drops by N.
-- [ ] Delete `SafeUsername`/`SafePassword` from `LinuxAuth.cpp`.
-- [ ] Add `tools/sql_injection_audit.sh` and wire to CI.
-- [ ] Wire `postgres_smoke_test` to a real DAO call + hostile-input round-trip.
-- [ ] Drop libmysqlclient from server's Dockerfile.
+### Wave 1 — wrapper rewrite (DONE 2026-05-24, commit fdfcbe5)
+
+- [x] Re-read `MIGRATION_PATTERN.md` and confirm it's still accurate.
+      Notes: pattern table still applicable; opaque-handle approach kept libpqxx headers out of `mysqlplus.h`.
+- [x] Reimplement `sql_connection_c` (connect / disconnect / grabdb).
+      Notes: OPENDB now holds `net7_db_handle *db`; default port 5432; DSN built from (database, host[:port], user, password) into libpq keyword=value form.
+- [x] Reimplement `sql_query_c::execute` (single-arg overload preserved).
+      Notes: runs under `pqxx::work`, captures result + affected_rows, translates `pqxx::sql_error`/`pqxx::failure`/`std::exception` into `Error()`/`ErrorMsg()`.
+- [x] Reimplement `sql_result_c` (row iteration via `take(net7_result_holder*)` / `get_holder()`).
+- [x] Reimplement `sql_row_c` (now takes row index; strdup's column values into a per-row `char**` cache so `sql_var_c` lifetime contract still holds).
+- [x] Reimplement `sql_field_c` (forwards to `pqxx::result`; `get_type()` returns the pqxx oid as unsigned int — no DAO currently calls it).
+- [x] CMakeLists update.
+      Notes: dropped `find_library(MYSQLCLIENT_LIB)`; added `pkg_check_modules(LIBPQXX REQUIRED IMPORTED_TARGET libpqxx)` + `find_package(PostgreSQL REQUIRED)`.
+- [x] DAO compile pass — the ~25 `*SQL.cpp` translation units build clean against the new wrapper.
+      Notes: zero source changes required in the DAOs themselves; the public class signatures held.
+- [x] Drop `libmysqlclient21` (runtime) + `libmysqlclient-dev` (build) from `server/Dockerfile`.
+      Notes: rebuilt image links libpqxx-7.8 + libpq.so.5 only; binary 13.7 MB (verified via ldd).
+- [x] `mysql_escape_string` shim in `mysqlplus.h` for SaveManager's 3 legacy call sites.
+      Notes: standard SQL single-quote/backslash doubling; assumes `standard_conforming_strings = on` (Postgres default since 9.1).
+- [x] Wrapper round-trip test (`tests/db/mysqlplus_wrapper_test.cpp`).
+      Notes: 3 env-gated cases: SELECT 1, multi-row VALUES table, hostile-literal escape round-trip. Self-skips when `NET7_TEST_DB_DSN` unset; verified locally (3/3 SKIPPED).
+- [x] Live integration suite (the 8 tests behind `tests/it/`) still green against rebuilt container.
+
+### Wave 2 — parameterised API + DAO migration (DEFERRED to Phase N+)
+
+These were originally lumped into Phase N but are wide-scope (touches every DAO call site) and belong in their own phase. Tracked here for handoff:
+
+- [ ] Add typed `execute(template, args...)` overload backed by `pqxx::params`.
+      Why: only way to retire the `sprintf`+raw-SQL injection surface for good.
+      How to apply: extend `sql_query_c` with a variadic template that builds `pqxx::params` and calls `tx.exec_params`. Keep the single-arg `execute(char *)` as a transitional overload that asserts on `%`-characters once Wave 3 lands.
+- [ ] Convert the 36 dynamic-SQL sites enumerated above (34 in `AccountManager.cpp`, 2 in `LinuxAuth.cpp`) to parameterised form.
+- [ ] Delete `SafeUsername`/`SafePassword` from `LinuxAuth.cpp` once `tx.exec_params` is the only path.
+- [ ] Add `tools/sql_injection_audit.sh` and wire to CI (greps for `sprintf.*FROM|INSERT|UPDATE|DELETE` outside `#ifdef WIN32`).
+- [ ] Extend `postgres_smoke_test` to a real DAO round-trip + hostile-input case (currently only the wrapper test exercises this; the DAO test still uses raw libpq).
+
+### Wave 3 — dialect cleanup (DEFERRED)
+
+- [ ] Per-DAO query rewrites where the SQL itself is MySQL-specific (`LIMIT offset, count`, `INTERVAL` arithmetic, etc.).
+      Notes: most queries are static `SELECT * FROM table` loaders that work straight-through; this wave is small but needs a query-by-query sweep against a populated Postgres.
 
 ## Decisions deferred
 
