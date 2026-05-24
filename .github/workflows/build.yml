@@ -206,7 +206,9 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             g++ cmake ninja-build pkg-config libssl-dev
       - name: Build Net7Proxy docker image
-        run: docker build -t enb-proxy:ci proxy/
+        # Dockerfile COPYs from `proxy/` and `common/`, so the build
+        # context must be the repo root, not `proxy/` itself.
+        run: docker build -t enb-proxy:ci -f proxy/Dockerfile .
       - name: Run proxy detached
         run: |
           docker run -d --name net7proxy-ci \
