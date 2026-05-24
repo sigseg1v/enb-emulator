@@ -432,20 +432,64 @@ CliClient.UnitTests/
 
         132 tests passing (was 127).
 
-- [ ] Item 10 — Workflow: enumerate sectors (visit each sector, dump objects)
-      Status: not started
-      Touches: tools/cli-client/Workflows/EnumerateSectors.cs
-      Notes: respect rule 3 — try broader queries first, fall back to real-client-shaped queries if server stalls. Output: ./out/sectors-<ts>/<sector-id>.json
+- [!] Item 10 — Workflow: enumerate sectors (visit each sector, dump objects)
+      Status: blocked on Phase K
+      Touches: tools/cli-client/src/CliClient.Core/Workflows/EnumerateSectors.cs (deferred)
+      Notes:
+        Blocked-by:
+          - plans/11-phase-k-ingame.md "Wire ticket handoff" [!] — without
+            ticket handoff, the CLI client cannot attach an avatar to a
+            sector, so there is nothing to enumerate.
+          - plans/11-phase-k-ingame.md ProcessGlobalServerOpcode [~] —
+            only 0x0000 VersionRequest is ported on the Linux dispatch;
+            the avatar-select chain (HandleGlobalConnect, HandleGlobalTicketRequest,
+            HandleCreateCharacter, ProcessGlobalTicket) all log-and-return
+            on Linux, so the workflow cannot drive past avatar select.
+          - plans/11-phase-k-ingame.md ProcessSectorServerOpcode [~] —
+            only 0x0002 LOGIN is ported; without the ~49 remaining
+            in-sector opcode handlers there is no object stream to dump.
+        Real EnB has no single "enumerate sectors" opcode. The real client
+        warps from sector to sector and the server pushes object state via
+        0x0005 START, 0x0008 SIMPLE_POSITIONAL_UPDATE, 0x0025 ITEM_BASE,
+        0x002F INIT_RENDER_STATE etc. as objects enter scan range.
+        Implementing this workflow honestly means driving a full
+        warp-and-observe loop, which requires the above Phase K items.
+        Stub implementations that throw NotImplementedException are not
+        worth the maintenance churn — revisit when Phase K's avatar
+        handoff lights up. Phase T will own the live-fire test.
 
-- [ ] Item 11 — Workflow: enumerate missions
-      Status: not started
-      Touches: tools/cli-client/Workflows/EnumerateMissions.cs
-      Notes: walk mission-board NPCs; capture mission text + stages + rewards; output ./out/missions-<ts>.json
+- [!] Item 11 — Workflow: enumerate missions
+      Status: blocked on Phase K
+      Touches: tools/cli-client/src/CliClient.Core/Workflows/EnumerateMissions.cs (deferred)
+      Notes:
+        Same Phase K block as Item 10 — mission boards are NPCs inside
+        starbases (server-side: 0x0054 TALK_TREE / 0x0055 SELECT_TALK_TREE /
+        0x0056 TALK_TREE_ACTION). Workflow needs to be docked at each
+        starbase, target each mission-board NPC, and walk the talk tree.
+        Requires: ticket handoff, in-sector dispatch, starbase docking
+        (0x004E STARBASE_REQUEST and friends) — none of which are wired
+        on Linux today. Deferred until Phase K hits the talk-tree
+        handlers.
 
-- [ ] Item 12 — Workflow: enumerate items
-      Status: not started
-      Touches: tools/cli-client/Workflows/EnumerateItems.cs
-      Notes: query item-base data via the appropriate opcode (TBD — may need real-client trace to confirm shape); output ./out/items-<ts>.json
+- [!] Item 12 — Workflow: enumerate items
+      Status: blocked on Phase K
+      Touches: tools/cli-client/src/CliClient.Core/Workflows/EnumerateItems.cs (deferred)
+      Notes:
+        EnB has no bulk-item-dump opcode. Item data flows via 0x0025
+        ITEM_BASE on demand when the server reports an object that
+        references an item id (inventory, loot, ammo, equipped weapons,
+        manufacturing outputs). The real client builds up its item
+        knowledge incrementally over a play session by following these
+        references.
+        The closest thing to a "give me everything" approach would be
+        walking the item-base table in the DB directly — but that
+        bypasses the server entirely and isn't a CLI-client workflow
+        (use a SQL query / the editor suite instead). Honest
+        opcode-driven enumeration requires the full in-game session,
+        same Phase K dependency as Items 10/11.
+        Defer; if a real need surfaces for "dump every item" before
+        Phase K is further along, do it via direct DB query and call
+        it out as outside Phase S's scope.
 
 - [x] Item 13 — Workflow: send chat
       Status: done
@@ -483,10 +527,44 @@ CliClient.UnitTests/
 
         148 tests passing (was 132).
 
-- [ ] Item 14 — Codec unit tests in xUnit (CliClient.UnitTests)
-      Status: not started
-      Touches: tools/cli-client/tests/CliClient.UnitTests/PacketCodecTests.cs, HandshakeTests.cs, OpcodeRegistryTests.cs
-      Notes: take frames from archive/kyp-snapshot/capturedPackets/ (RAR-archived), decode them, re-encode, byte-compare. Every registered opcode round-trips a known-good payload. CI gates `dotnet test` on this project.
+- [x] Item 14 — Codec unit tests in xUnit (CliClient.UnitTests)
+      Status: done
+      Touches: tools/cli-client/tests/CliClient.UnitTests/Captures/CaptureFixture.cs,
+               tools/cli-client/tests/CliClient.UnitTests/Captures/RetailCaptureTests.cs,
+               tools/cli-client/tests/CliClient.UnitTests/Captures/fixtures/capture3-frames.txt,
+               tools/cli-client/src/CliClient.Core/Opcodes/Outbound/MasterJoinCodec.cs (Ticket: string → byte[])
+      Notes: ▸ Hand-extracted 3 reference frames from archive/kyp-snapshot/capturedPackets/capture_3.rar
+                (unrar to a tmp scratch — the .rar stays in tree as ground truth, the .txt is large
+                so we don't commit it). Each frame committed verbatim hex with provenance metadata
+                in tests/CliClient.UnitTests/Captures/fixtures/capture3-frames.txt:
+                  master_join     (#224, Client→Server :3387, 64-byte payload)
+                  server_redirect (#226, Server→Client :3387, 10-byte payload)
+                  client_chat     (line 18515, sub-packet, 14-byte payload, "/who")
+             ▸ CaptureFixture.cs is a tiny text loader (records, key:value, hex: block — strips #
+                comments). Zero dependencies — runs in the same xUnit process. Test project's
+                .csproj copies Captures/fixtures/** to output via PreserveNewest.
+             ▸ Three retail-byte tests in RetailCaptureTests.cs:
+                  ServerRedirect_RetailCapture_Decodes — decode + assert sector_id=0x19290000,
+                      IP=44.232.153.159, port=3503 (LE — the codec's known port-asymmetry holds
+                      on real bytes, not just synthetic ones).
+                  MasterJoin_RetailCapture_RoundTrips_Exactly — decode all 11 BE int32 fields +
+                      20-byte ticket, then re-encode and assert byte-equal with the captured 64
+                      bytes. This is the gold-standard test: any field offset / endianness /
+                      ticket-handling bug becomes a single failing assert.
+                  ClientChat_RetailCapture_DecodesAndPrefixRoundTrips — decode, then re-encode
+                      and prefix-match against the leading 12 bytes (codec models the mandatory
+                      header; the trailing 2-byte optional `_data_size` field is by-design dropped).
+             ▸ Root-cause fix surfaced by retail data: MasterJoinCodec previously modelled
+                Ticket as `string` with `Encoding.ASCII.GetString` — wrong for retail, which uses
+                a binary 20-byte ticket (0x89, 0xF7, 0xDF, …). ASCII would map non-printable
+                bytes to '?', destroying round-trip. Changed the record's Ticket field to
+                `byte[]` (exactly 20 bytes; codec zero-pads shorter inputs), added
+                `MasterJoinRequest.AsciiTicket(string)` static helper for Net-7-emulator
+                callers, overrode record Equals/GetHashCode to use SequenceEqual on the
+                byte array (default record equality is reference for arrays). Updated
+                MasterJoinCodecTests.cs to drive the new API; production callers were
+                unaffected (no MasterJoinRequest constructor in src/ outside the codec).
+             ▸ 155 tests passing (was 151 after the codec API change; 148 before Item 14).
 
 - [ ] Item 15 — Opcode coverage push: register decoders for every opcode in Opcodes.h
       Status: not started

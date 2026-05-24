@@ -16,4 +16,9 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\CliClient.Core\CliClient.Core.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="Captures/fixtures/**/*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
 </Project>

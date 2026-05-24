@@ -17,8 +17,11 @@ namespace N7.CliClient.Opcodes.Outbound;
 /// Mirrors <c>struct MasterJoin</c> in
 /// <c>common/include/net7/PacketStructures.h:262-282</c>. All 11 int32
 /// fields are wire-big-endian (server uses <c>ntohl</c> to read them).
-/// The 20-byte ticket is ASCII bytes, copied verbatim — no byte-order
-/// concept.
+/// The 20-byte ticket field is opaque binary on the wire — retail EnB
+/// used non-ASCII tickets, the Net-7 emulator uses ASCII "user-rand".
+/// We model the field as a fixed-length byte buffer to keep both worlds
+/// representable; <see cref="MasterJoinRequest.AsciiTicket"/> converts
+/// from the Net-7-style ASCII string when that's what the caller has.
 /// </remarks>
 public sealed record MasterJoinRequest(
     int Unknown1,
@@ -32,7 +35,58 @@ public sealed record MasterJoinRequest(
     int Unknown8,
     int Unknown9,
     int Unknown10,
-    string Ticket);
+    byte[] Ticket)
+{
+    public bool Equals(MasterJoinRequest? other) =>
+        other is not null
+        && Unknown1 == other.Unknown1
+        && Unknown2 == other.Unknown2
+        && Unknown3 == other.Unknown3
+        && AvatarIdMsb == other.AvatarIdMsb
+        && AvatarIdLsb == other.AvatarIdLsb
+        && ToSectorId == other.ToSectorId
+        && FromSectorId == other.FromSectorId
+        && PlayerLevel == other.PlayerLevel
+        && Unknown8 == other.Unknown8
+        && Unknown9 == other.Unknown9
+        && Unknown10 == other.Unknown10
+        && Ticket.AsSpan().SequenceEqual(other.Ticket.AsSpan());
+
+    public override int GetHashCode()
+    {
+        var hc = new HashCode();
+        hc.Add(Unknown1); hc.Add(Unknown2); hc.Add(Unknown3);
+        hc.Add(AvatarIdMsb); hc.Add(AvatarIdLsb);
+        hc.Add(ToSectorId); hc.Add(FromSectorId);
+        hc.Add(PlayerLevel);
+        hc.Add(Unknown8); hc.Add(Unknown9); hc.Add(Unknown10);
+        hc.AddBytes(Ticket);
+        return hc.ToHashCode();
+    }
+
+    /// <summary>
+    /// Build a 20-byte ticket buffer from a Net-7 emulator-style ASCII
+    /// ticket (e.g. "user-12345"). Shorter strings are zero-padded;
+    /// strings longer than the 20-byte field throw. Retail captures
+    /// used binary tickets and bypass this helper.
+    /// </summary>
+    public static byte[] AsciiTicket(string ascii)
+    {
+        ArgumentNullException.ThrowIfNull(ascii);
+
+        byte[] buf = new byte[MasterJoinCodec.TicketLength];
+        int copied = Encoding.ASCII.GetBytes(ascii.AsSpan(), buf);
+        if (copied > MasterJoinCodec.TicketLength)
+        {
+            // Defensive — GetBytes would have thrown ArgumentException
+            // first, but the contract is "≤20 bytes" so report it that way.
+            throw new ArgumentException(
+                $"ASCII ticket is {copied} bytes, max {MasterJoinCodec.TicketLength}",
+                nameof(ascii));
+        }
+        return buf;
+    }
+}
 
 /// <summary>
 /// Codec for opcode 0x0035 MASTER_JOIN (client → master).
@@ -67,10 +121,7 @@ public sealed class MasterJoinCodec : IOpcodeCodec
         int u9 = BinaryPrimitives.ReadInt32BigEndian(payload[36..40]);
         int u10 = BinaryPrimitives.ReadInt32BigEndian(payload[40..44]);
 
-        ReadOnlySpan<byte> ticketBytes = payload.Slice(44, TicketLength);
-        int nul = ticketBytes.IndexOf((byte)0);
-        if (nul < 0) nul = ticketBytes.Length;
-        string ticket = Encoding.ASCII.GetString(ticketBytes[..nul]);
+        byte[] ticket = payload.Slice(44, TicketLength).ToArray();
 
         return new MasterJoinRequest(
             u1, u2, u3, avatarMsb, avatarLsb,
@@ -84,6 +135,14 @@ public sealed class MasterJoinCodec : IOpcodeCodec
             throw new ArgumentException(
                 $"expected MasterJoinRequest, got {message?.GetType().Name ?? "null"}",
                 nameof(message));
+
+        ArgumentNullException.ThrowIfNull(req.Ticket);
+        if (req.Ticket.Length > TicketLength)
+        {
+            throw new ArgumentException(
+                $"ticket is {req.Ticket.Length} bytes, max {TicketLength}",
+                nameof(message));
+        }
 
         byte[] buf = new byte[WireSize];
         Span<byte> span = buf;
@@ -100,16 +159,10 @@ public sealed class MasterJoinCodec : IOpcodeCodec
         BinaryPrimitives.WriteInt32BigEndian(span[36..40], req.Unknown9);
         BinaryPrimitives.WriteInt32BigEndian(span[40..44], req.Unknown10);
 
-        // Ticket: ASCII, zero-padded to 20 bytes.
+        // Ticket: opaque bytes, zero-padded to 20.
         Span<byte> ticketSpan = span.Slice(44, TicketLength);
         ticketSpan.Clear();
-        int copied = Encoding.ASCII.GetBytes(req.Ticket.AsSpan(), ticketSpan);
-        if (copied > TicketLength)
-        {
-            throw new ArgumentException(
-                $"ticket is {copied} bytes (or more), max {TicketLength}",
-                nameof(message));
-        }
+        req.Ticket.AsSpan().CopyTo(ticketSpan);
 
         return buf;
     }

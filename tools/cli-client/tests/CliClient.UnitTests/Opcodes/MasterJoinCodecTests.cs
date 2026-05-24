@@ -37,7 +37,7 @@ public sealed class MasterJoinCodecTests
             ToSectorId: 0, FromSectorId: 0,
             PlayerLevel: 0,
             Unknown8: 0, Unknown9: 0, Unknown10: 0,
-            Ticket: "ABCDEFGHIJ1234567890");
+            Ticket: MasterJoinRequest.AsciiTicket("ABCDEFGHIJ1234567890"));
 
         byte[] wire = new MasterJoinCodec().EncodeOutbound(req);
 
@@ -60,7 +60,7 @@ public sealed class MasterJoinCodecTests
             FromSectorId: 0,
             PlayerLevel: 0,
             Unknown8: 0, Unknown9: 0, Unknown10: 0,
-            Ticket: "T");
+            Ticket: MasterJoinRequest.AsciiTicket("T"));
 
         byte[] wire = new MasterJoinCodec().EncodeOutbound(req);
 
@@ -82,7 +82,7 @@ public sealed class MasterJoinCodecTests
             ToSectorId: 0, FromSectorId: 0,
             PlayerLevel: 0,
             Unknown8: 0, Unknown9: 0, Unknown10: 0,
-            Ticket: "T");
+            Ticket: MasterJoinRequest.AsciiTicket("T"));
 
         byte[] wire = new MasterJoinCodec().EncodeOutbound(req);
 
@@ -101,7 +101,7 @@ public sealed class MasterJoinCodecTests
     {
         var req = new MasterJoinRequest(
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            Ticket: "ABC");
+            Ticket: MasterJoinRequest.AsciiTicket("ABC"));
 
         byte[] wire = new MasterJoinCodec().EncodeOutbound(req);
 
@@ -115,16 +115,24 @@ public sealed class MasterJoinCodecTests
     [Fact]
     public void Encode_TicketTooLong_Throws()
     {
+        Assert.Throws<ArgumentException>(
+            () => MasterJoinRequest.AsciiTicket(
+                new string('X', MasterJoinCodec.TicketLength + 1)));
+    }
+
+    [Fact]
+    public void Encode_BinaryTicketTooLong_Throws()
+    {
         var req = new MasterJoinRequest(
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            Ticket: new string('X', MasterJoinCodec.TicketLength + 1));
+            Ticket: new byte[MasterJoinCodec.TicketLength + 1]);
 
         Assert.Throws<ArgumentException>(
             () => new MasterJoinCodec().EncodeOutbound(req));
     }
 
     [Fact]
-    public void Encode_Decode_RoundTrips()
+    public void Encode_Decode_RoundTrips_AsciiTicket()
     {
         var original = new MasterJoinRequest(
             Unknown1: 1, Unknown2: 2, Unknown3: 3,
@@ -132,7 +140,7 @@ public sealed class MasterJoinCodecTests
             ToSectorId: 100, FromSectorId: 99,
             PlayerLevel: 50,
             Unknown8: 8, Unknown9: 9, Unknown10: 10,
-            Ticket: "ABCDEFGHIJ1234567890");
+            Ticket: MasterJoinRequest.AsciiTicket("ABCDEFGHIJ1234567890"));
 
         var codec = new MasterJoinCodec();
         byte[] wire = codec.EncodeOutbound(original);
@@ -142,14 +150,49 @@ public sealed class MasterJoinCodecTests
     }
 
     [Fact]
-    public void Decode_TrimsNullTerminator()
+    public void Encode_Decode_RoundTrips_BinaryTicket()
     {
+        // Retail captures carry non-ASCII tickets. Make sure the byte[]
+        // model preserves every byte intact, including 0x00 inside the
+        // ticket (which an ASCII-only model would truncate at).
+        byte[] ticket = new byte[]
+        {
+            0x89, 0x77, 0x24, 0xDF, 0x40, 0x36, 0x32, 0xDD,
+            0x42, 0x34, 0xA7, 0x59, 0x6F, 0xDF, 0x5A, 0x82,
+            0x13, 0xB2, 0x70, 0xE8,
+        };
+        var original = new MasterJoinRequest(
+            2, 2, 0x40E5E7E8,
+            0x3E221201, unchecked((int)0xF7645CC0),
+            0x2919, 0, 0, 1, 1, 0x7FFFFFFF,
+            ticket);
+
+        var codec = new MasterJoinCodec();
+        byte[] wire = codec.EncodeOutbound(original);
+        var decoded = (MasterJoinRequest)codec.DecodeInbound(wire);
+
+        Assert.Equal(original, decoded);
+        Assert.Equal(ticket, decoded.Ticket);
+    }
+
+    [Fact]
+    public void Decode_PreservesTicketBytesVerbatim()
+    {
+        // Build a wire payload by hand with a deliberately non-ASCII ticket.
         var codec = new MasterJoinCodec();
         byte[] wire = codec.EncodeOutbound(new MasterJoinRequest(
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, Ticket: "SHORT"));
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            Ticket: MasterJoinRequest.AsciiTicket("SHORT")));
 
         var decoded = (MasterJoinRequest)codec.DecodeInbound(wire);
-        Assert.Equal("SHORT", decoded.Ticket);
+        Assert.Equal(20, decoded.Ticket.Length);
+        Assert.Equal((byte)'S', decoded.Ticket[0]);
+        Assert.Equal((byte)'H', decoded.Ticket[1]);
+        Assert.Equal((byte)'O', decoded.Ticket[2]);
+        Assert.Equal((byte)'R', decoded.Ticket[3]);
+        Assert.Equal((byte)'T', decoded.Ticket[4]);
+        for (int i = 5; i < 20; i++)
+            Assert.Equal(0, decoded.Ticket[i]);
     }
 
     [Fact]
@@ -165,5 +208,12 @@ public sealed class MasterJoinCodecTests
     {
         var codec = new MasterJoinCodec();
         Assert.Throws<ArgumentException>(() => codec.EncodeOutbound("not a request"));
+    }
+
+    [Fact]
+    public void AsciiTicket_Null_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(
+            () => MasterJoinRequest.AsciiTicket(null!));
     }
 }

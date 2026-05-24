@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: CC-BY-NC-SA-3.0
+# Part of the Earth & Beyond emulator preservation project.
+# New code; project default license (LICENSES/enb-emulator).
+#
+# Retail-server packet payload samples extracted by hand from
+# archive/kyp-snapshot/capturedPackets/capture_3.rar (the .txt dump
+# inside it lists 22,642 framed packets from a live Westwood EnB
+# session captured against 159.153.232.0/24). These are the
+# DECRYPTED payloads — the 4-byte (Length, Opcode) prefix has
+# already been stripped, only the opcode body remains.
+#
+# Format per record:
+#   [name]
+#   provenance: <one-line capture pointer for human cross-check>
+#   opcode: 0xXX
+#   payload-bytes: NN
+#   hex: <whitespace-separated hex bytes>
+#
+# The loader (CaptureFixture.cs) strips '#' comments, splits the
+# value of `hex:` on whitespace, and parses each token as a byte.
+
+[master_join]
+provenance: capture_3.txt Packet #224, Client->Server 159.153.232.146:3387
+opcode: 0x35
+payload-bytes: 64
+hex:
+  00 00 00 02 00 00 00 02 40 E5 E7 E8 3E 22 12 01
+  F7 64 5C C0 00 00 29 19 00 00 00 00 00 00 00 00
+  00 00 00 01 00 00 00 01 7F FF FF FF 89 77 24 DF
+  40 36 32 DD 42 34 A7 59 6F DF 5A 82 13 B2 70 E8
+
+[server_redirect]
+provenance: capture_3.txt Packet #226, Server->Client 159.153.232.146:3387
+opcode: 0x36
+payload-bytes: 10
+hex:
+  19 29 00 00 2C E8 99 9F AF 0D
+
+[client_chat]
+provenance: capture_3.txt line 18515 (sub-packet inside frame #1209's container)
+opcode: 0x33
+payload-bytes: 14
+hex:
+  EE CC AA 00 04 05 00 2F 77 68 6F 00 00 00
+# Decoded by hand:
+#   GameId   = 0x00AACCEE  (LE int32 at [0..3])
+#   Type     = 4 (Broadcast)
+#   Size     = 5 (LE int16 at [5..6], "/who\0" = 5 bytes)
+#   Message  = "/who"
+# Trailing 2 zero bytes are the optional `_data_size` / `_unknown_data`
+# region from PacketStructures.h struct ClientChat — the real client
+# emits them; our codec rounds-trips only the leading 12 mandatory
+# bytes. See RetailCaptureTests for the prefix-match assertion.
