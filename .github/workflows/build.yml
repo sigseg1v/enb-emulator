@@ -20,6 +20,14 @@ jobs:
           ls plans/00-master.md plans/01-phase-a-merge.md plans/02-phase-b-linux-server.md
           grep -q "^## Status table" plans/00-master.md
 
+  check-no-mojibake:
+    name: check-no-mojibake (license-header guard)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: No U+FFFD replacement chars in tracked source
+        run: bash tools/check_no_mojibake.sh
+
   cmake-configure:
     name: cmake-configure (server, ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
