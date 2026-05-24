@@ -343,3 +343,22 @@ smoke OK: all 4 commontools-avalonia windows instantiated
 3. **Hand-rolled `void InitializeComponent() => AvaloniaXamlLoader.Load(this);` shadows the generator-emitted `InitializeComponent`** — and the generated one is what wires up `x:Name` fields into the partial class. Result: x:Name fields stay null, ctor NRE on first field access. The library compiled clean and the smoke test caught it at runtime. Don't hand-roll it. (Verified the earlier toolspatcher-avalonia + enbpatcher-avalonia POCs only *call* `InitializeComponent()`; they don't define an override, so they're correct.)
 
 **Net result**: 5/14 WinForms-flagged tools have Linux-native paths AND the shared library is no longer a bottleneck. Per-form ordering documented in `plans/12-phase-l-avalonia.md` Tier 2+. Next when Phase L resumes: `dataimport-avalonia` (1 form, just needs commontools-avalonia ProjectReference), then `launchnet7-avalonia`, `faction-editor-avalonia`, `mob-editor-avalonia`.
+
+## 2026-05-23 — Delete kyp-era TCP cluster from server/src/ (Phase Q supersedes Phase P)
+
+User pushed back on the Phase-P pattern of `#ifdef WIN32` walling + loud `abort()` stubs: "cant we just implement what we need in the proper order instead of commenting everything out." Investigated. Findings:
+
+- tada-o's split-process design moves TCP termination into `proxy/` (binds `GLOBAL_SERVER_PORT` 3805 unconditionally on Linux per `proxy/ServerManager.cpp:65`) and SSL handling into `login-server/Net7SSL/`.
+- `server/src/ServerManager.cpp:142-153` has every `new TcpListener` / `new SSL_Listener` call commented out — by design, not by accident.
+- Connection / ConnectionManager / TcpListener / SSL_Listener / SSL_Connection / ClientTo{Master,Global,Sector}Server / EffectManager were never instantiated on Linux at runtime. Phase P's loud-abort stubs were proving they weren't reached — but the right answer is to delete the dead code, not to wall it.
+
+Deleted 15 files (~thousands of LOC). Kept `PlayerConnection.cpp` despite its misleading name — it's the live UDP send layer for `Player::Send*` methods, not part of the kyp-era TCP cluster. Initial attempt to delete it produced ~50 undefined-reference linker errors from live ability/MOB/GroupManager code; restored.
+
+Alternatives considered:
+1. Keep loud-abort stubs (Phase P approach) — rejected: half-measure.
+2. Revive kyp-era TCP listener in `server/src/` for single-process topology — rejected: would undo crash-isolation, per-process OpenSSL ABI flexibility, N-sector fan-out, network attack-surface confinement. The split is the right architecture.
+3. Delete the cluster (chosen) — single source of truth for TCP termination is `proxy/`. Sector server is purely UDP-fed.
+
+## 2026-05-23 — Open Phase R for `common/` header extraction
+
+The split-process design has one real un-mitigated cost: `Net7.h`, `Opcodes.h`, `PacketStructures.h` are triplicated across `proxy/`, `server/src/`, `login-server/Net7SSL/` and already drifted (confirmed via diff). Phase R extracts a `common/include/net7/` subtree consumed by all three CMake builds.
