@@ -94,7 +94,7 @@
 	#endif
 	// Win32 socket name closesocket -> POSIX close.
 	#define closesocket(s) ::close(s)
-	#define stricmp strcasecmp
+	#define strcasecmp strcasecmp
 	#ifndef WSAECONNRESET
 	#define WSAECONNRESET	ECONNRESET
 	#endif
@@ -122,15 +122,15 @@
 	#define CONFIG_FILE				"Net7Config.cfg"
 
 	// Some MSVC <-> GCC redefines
-	#define _snprintf snprintf
+	#define snprintf snprintf
 	#define _vsnprintf vsnprintf
-	#define _strcmpi strcasecmp
+	#define strcasecmp strcasecmp
 	#define _isnan isnan
 	#define _alloca alloca
 	#define _sleep Sleep
-	#define _stricmp strcasecmp
-	// _atoi64 is specific to MSVC; atoll is the POSIX equivalent.
-	#define _atoi64 atoll
+	#define strcasecmp strcasecmp
+	// atoll is specific to MSVC; atoll is the POSIX equivalent.
+	#define atoll atoll
 	// MSVC-only safe-string wrappers; map to their POSIX counterparts.
 	#define strcpy_s(dst, sz, src)  strncpy((dst), (src), (sz)-1)
 	#define sprintf_s(dst, sz, ...) snprintf((dst), (sz), __VA_ARGS__)

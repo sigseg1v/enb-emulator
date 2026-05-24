@@ -804,7 +804,7 @@ void AccountManager::SetupTickets()
     {
         for (int i=0; i<m_NumAccounts; i++)
         {
-            if (_strcmpi(m_Accounts[i].UserName, username) == 0)
+            if (strcasecmp(m_Accounts[i].UserName, username) == 0)
             {
                 return &m_Accounts[i];
             }
@@ -910,7 +910,7 @@ void AccountManager::SetupTickets()
 
                 if (ReadDatabase(&database, avatar_id))
                 {
-                    if (_strcmpi(database.avatar.avatar_first_name, name) == 0)
+                    if (strcasecmp(database.avatar.avatar_first_name, name) == 0)
                     {
                         return false;
                     }

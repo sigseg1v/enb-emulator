@@ -82,7 +82,7 @@ bool AssetContent::LoadAssetContent()
         current_asset_id = (long)AssetSQLData["base_id"];
 		char *name = (char*)AssetSQLData["descr"];
 
-		if (_stricmp(name, "NULL") != 0)
+		if (strcasecmp(name, "NULL") != 0)
 		{
 			current_asset = new AssetData;
 

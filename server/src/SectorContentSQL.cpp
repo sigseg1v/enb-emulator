@@ -583,7 +583,7 @@ SectorData * SectorContentParser::GetSectorData(char *sector_name)
 	for( SectorDataMap::iterator sector = m_SectorList.begin(); sector != m_SectorList.end(); ++sector)
 	{
 		SectorData *this_sector = sector->second;
-		if (this_sector && 0 == _stricmp(sector_name, this_sector->name))
+		if (this_sector && 0 == strcasecmp(sector_name, this_sector->name))
 		{
 			sector_id = this_sector->sector_id;
 		}

@@ -72,13 +72,16 @@ Server still builds. Existing Phase J integration tests (5/5 green at Phase J cl
 
 ### Cheap trivial replacements (do first — high impact, low risk)
 
-- [ ] **`_snprintf` → `snprintf`** (~59 hits). Identical signature on Linux. Single search-and-replace pass with spot review for `_snprintf_s` (none expected).
-      Status: not started
-      Touches: server/src/, proxy/, login-server/Net7SSL/, login-server/Net7Mysql/
+- [x] **`_snprintf` → `snprintf`** (52 hits across 8 files). Identical signature on Linux. Sed sweep then verified `git grep` returns zero call sites (Net7.h's `#define _snprintf snprintf` macro retired in the same pass). Server rebuilds clean.
+      Status: complete
+      Touches: server/src/{FieldClass,PlayerConnection,PlayerExperience,PlayerMissions,SectorManager}.cpp, proxy/ServerManager.cpp, login-server/Net7SSL/{Net7SSL.cpp,Net7SSL.h}
 
-- [ ] **`stricmp` / `_stricmp` → `strcasecmp`** (~77 hits). Identical semantics on Linux (POSIX). Drop the existing `<strings.h>` include guard from compat/win32_shim.h once everything migrates.
-      Status: not started
-      Touches: all in-scope dirs
+- [x] **`stricmp` / `_stricmp` / `_strcmpi` → `strcasecmp`** (47+30 hits + ~13 `_strcmpi`). Identical semantics on POSIX. Sed sweep across 11 files. Net7.h's `#define stricmp strcasecmp`, `#define _strcmpi strcasecmp`, `#define _stricmp strcasecmp` macros retired. Server rebuilds clean.
+      Status: complete
+      Touches: server/src/{AccountManager,AssetDatabaseSQL,ConnectionManager,Net7,PlayerConnection,PlayerManager,PlayerMisc,SectorContentSQL,xmlParser/xmlParser_}.cpp, login-server/Net7SSL/{ConnectionManager.cpp,Net7SSL.{cpp,h}}
+
+- [x] **`_atoi64` → `atoll`** (3 call sites in server/src/ClientToSectorServer.cpp, server/src/PlayerConnection.cpp, login-server/Net7SSL/Net7SSL.h). MSVC name retired from Net7.h.
+      Status: complete
 
 - [ ] **`_beginthreadex` → `pthread_create`** (8 call sites). Replace `m_*Thread = (HANDLE)_beginthreadex(...)` with `pthread_create(&m_*Thread, NULL, ...)`. Change the field type from `HANDLE` to `pthread_t`. Change the thread-fn signature from `unsigned __stdcall (*)(void*)` returning unsigned → `void* (*)(void*)` returning `void*`. Sites:
       - server/src/ConnectionManager.cpp:24

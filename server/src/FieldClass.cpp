@@ -349,7 +349,7 @@ void Field::ResetResource()
 			}
 			SetDatabaseFieldRespawnTime();
 			char buffer[100];
-			_snprintf(buffer, 100, "Field %s[%d] respawn increased to %d mins.", Name(), GetSector(), m_Respawn_timer);
+			snprintf(buffer, 100, "Field %s[%d] respawn increased to %d mins.", Name(), GetSector(), m_Respawn_timer);
 			g_PlayerMgr->ChatSendChannel(GameID(), "Dev", buffer);
 		}
 	}
@@ -621,7 +621,7 @@ void Field::CheckFieldRespawn(u32 tick)
 			if (Level() < 8)
 			{
 				m_LevelBoost++;
-				_snprintf(buffer, 100, "Field %s[%d] level increased to %d.", Name(), GetSector(), (Level() + m_LevelBoost));
+				snprintf(buffer, 100, "Field %s[%d] level increased to %d.", Name(), GetSector(), (Level() + m_LevelBoost));
 				g_PlayerMgr->ChatSendChannel(GameID(), "Dev", buffer);
 				m_FieldRespawn = (current_tick + 5000); //respawn field in 5 seconds
 			}
@@ -657,7 +657,7 @@ void Field::CheckFieldRespawn(u32 tick)
 				break;
 			}
 
-			_snprintf(buffer, 100, "Field %s[%d] respawn decreased to %d mins.", Name(), GetSector(), m_Respawn_timer);
+			snprintf(buffer, 100, "Field %s[%d] respawn decreased to %d mins.", Name(), GetSector(), m_Respawn_timer);
 			g_PlayerMgr->ChatSendChannel(GameID(), "Dev", buffer);
 			//save this value
 			SetDatabaseFieldRespawnTime();

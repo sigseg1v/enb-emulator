@@ -1515,7 +1515,7 @@ int SectorManager::GetJobList(u8 *buffer)
 			FactionData * fData = g_ServerMgr->m_FactionData.GetFactionData(jn->Sponsor);
 			AddDataSN(ptr, fData->m_name, index);			//sponsor
 			long XP_reward = (jn->Level * 50);
-			_snprintf(str_buffer, 64, "%d XP", XP_reward);
+			snprintf(str_buffer, 64, "%d XP", XP_reward);
 			AddDataSN(ptr, str_buffer, index);			//reward
 			jobs++;
 		}

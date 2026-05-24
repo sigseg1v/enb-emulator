@@ -1862,7 +1862,7 @@ void Player::DoJobEnvironmentals(JobNode *jn, long mission_slot)
 				char *name = new char[name_len + 1];
 				memset(name, 0, name_len+1);
 
-				_snprintf(name, name_len, "%s for %s", jn->Mob->m_Name, this->Name());
+				snprintf(name, name_len, "%s for %s", jn->Mob->m_Name, this->Name());
 
 				SendVaMessage("Creating %s at level %d", name, jn->Mob->m_Level);
 				float radius = obj->Radius() * (((float)(rand()%20)/20.0f) + 1.1f); // place mob out between 1 and 2 radii of the target object, so that it's never inside the nav

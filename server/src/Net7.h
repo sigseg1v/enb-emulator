@@ -99,7 +99,6 @@
 	#define SOCKET          int
 	#define INVALID_SOCKET	-1
 	#define closesocket	close
-	#define stricmp strcasecmp
 	#define WSAGetLastError() (errno)
 	#define WSAECONNRESET	ECONNRESET
 
@@ -144,15 +143,10 @@
 	#define SERVER_USER_PATH        "../database/Users/"
 	#define CONFIG_FILE				"Net7Config.cfg"
 
-	// Some MSVC <-> GCC redefines
-	#define _snprintf snprintf
-	#define _strcmpi strcasecmp
+	// Phase M removed the MSVC-prefixed compat macros (_snprintf, _stricmp,
+	// _strcmpi, _atoi64). Call sites use the POSIX names directly now.
 	#define _isnan isnan
 	#define _alloca alloca
-	#define _sleep Sleep
-	#define _stricmp strcasecmp
-	// This might not be right... _atoi64 is specific to Windows
-	#define _atoi64 atoll
 	// MSVC's strtok_s and POSIX strtok_r have the same arg order.
 	#define strtok_s strtok_r
 

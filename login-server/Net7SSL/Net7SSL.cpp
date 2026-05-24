@@ -156,28 +156,28 @@ int main_prog(int argc, char* argv[])
 			Info = strtok(NULL, "\n");
 			do
             {
-				if (!_strcmpi(VarName, "domain")) 
+				if (!strcasecmp(VarName, "domain")) 
                 {
 					strcpy(g_DomainName, Info);
 				}
-				if (!_strcmpi(VarName, "mysql_user")) 
+				if (!strcasecmp(VarName, "mysql_user")) 
                 {
 					strcpy(g_MySQL_User, Info);
                 }
-				if (!_strcmpi(VarName, "mysql_pass")) 
+				if (!strcasecmp(VarName, "mysql_pass")) 
                 {
 					strcpy(g_MySQL_Pass, Info);
 				}
-				if (!_strcmpi(VarName, "mysql_host")) 
+				if (!strcasecmp(VarName, "mysql_host")) 
                 {
 					strcpy(g_MySQL_Host, Info);
 				}
-				if (!_strcmpi(VarName, "internal_ip")) 
+				if (!strcasecmp(VarName, "internal_ip")) 
                 {
 					strcpy(g_InternalIP, Info);
 					use_config_internal = true;
 				}
-				if (!_strcmpi(VarName, "galaxy_name")) 
+				if (!strcasecmp(VarName, "galaxy_name")) 
                 {
 					strcpy_s(g_Galaxy_Name, sizeof(g_Galaxy_Name), Info);
 					g_Galaxy_Name[sizeof(g_Galaxy_Name)-1] = '\0';
@@ -465,7 +465,7 @@ bool RegisterSectorServer(short first_port, short max_sectors)
 
     // TODO: change this from a hard-coded username something that is set on the command line
     // or a data file.
-	_snprintf(buffer, 128,
+	snprintf(buffer, 128,
 		"GET /sectorserver.cgi?username=VectoR&port=%d&max_sectors=%d&version=%d.%d HTTP/1.1\r\n"
 		"User-Agent: AuthLogin\r\n"
         "Host: %s\r\n"

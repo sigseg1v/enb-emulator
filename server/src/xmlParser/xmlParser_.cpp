@@ -274,7 +274,7 @@ char myIsTextWideChar(const void *b, int len) { return FALSE; }
         static inline int xstrlen(XMLCSTR c)   { return (int)strlen(c); }
         static inline int xstrnicmp(XMLCSTR c1, XMLCSTR c2, int l) { return _strnicmp(c1,c2,l);}
         static inline int xstrncmp(XMLCSTR c1, XMLCSTR c2, int l) { return strncmp(c1,c2,l);}
-        static inline int xstricmp(XMLCSTR c1, XMLCSTR c2) { return _stricmp(c1,c2); }
+        static inline int xstricmp(XMLCSTR c1, XMLCSTR c2) { return strcasecmp(c1,c2); }
         static inline XMLSTR xstrstr(XMLCSTR c1, XMLCSTR c2) { return (XMLSTR)strstr(c1,c2); }
         static inline XMLSTR xstrcpy(XMLSTR c1, XMLCSTR c2) { return (XMLSTR)strcpy(c1,c2); }
     #endif

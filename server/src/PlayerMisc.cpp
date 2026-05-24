@@ -1339,7 +1339,7 @@ bool Player::IsMyFriend(char *name)
 {
 	for (int i=0;i < m_NumFriends;i++)
 	{
-		if (name && _stricmp(m_FriendNames[i],name) == 0)
+		if (name && strcasecmp(m_FriendNames[i],name) == 0)
 		{
 			return true;
 		}
@@ -1353,13 +1353,13 @@ void Player::AddFriend(char *name)
 
 	for (i=0;i < m_NumFriends;i++)
 	{
-		if (name && _stricmp(m_FriendNames[i],name) == 0)
+		if (name && strcasecmp(m_FriendNames[i],name) == 0)
 		{
 			SendClientChatError(CHAT_ERROR_DUPLICATE_NAME,CCE_ADD_FRIEND,name);
 			break;
 		}
 	}
-	if (name && _stricmp(name,Name()) == 0)
+	if (name && strcasecmp(name,Name()) == 0)
 	{
 		SendClientChatError(CHAT_ERROR_YOURSELF,CCE_ADD_FRIEND,name);
 	}
@@ -1398,7 +1398,7 @@ void Player::RemoveFriend(char *name)
 
 	for (i=0;i < m_NumFriends;i++)
 	{
-		if (name && _stricmp(m_FriendNames[i],name) == 0)
+		if (name && strcasecmp(m_FriendNames[i],name) == 0)
 		{
 			m_FriendNames[i][0] = 0;
 			break;
@@ -1445,7 +1445,7 @@ bool Player::IsIgnored(char *name)
 {
 	for (int i=0;i < m_NumIgnore;i++)
 	{
-		if (name && _stricmp(m_IgnoreNames[i],name) == 0)
+		if (name && strcasecmp(m_IgnoreNames[i],name) == 0)
 		{
 			return true;
 		}
@@ -1459,13 +1459,13 @@ void Player::AddIgnore(char *name)
 
 	for (i=0;i < m_NumIgnore;i++)
 	{
-		if (name && _stricmp(m_IgnoreNames[i],name) == 0)
+		if (name && strcasecmp(m_IgnoreNames[i],name) == 0)
 		{
 			SendClientChatError(CHAT_ERROR_DUPLICATE_NAME,CCE_IGNORE,name);
 			break;
 		}
 	}
-	if (name && _stricmp(name,Name()) == 0)
+	if (name && strcasecmp(name,Name()) == 0)
 	{
 		SendClientChatError(CHAT_ERROR_YOURSELF,CCE_IGNORE,name);
 	}
@@ -1504,7 +1504,7 @@ void Player::RemoveIgnore(char *name)
 
 	for (i=0;i < m_NumIgnore;i++)
 	{
-		if (name && _stricmp(m_IgnoreNames[i],name) == 0)
+		if (name && strcasecmp(m_IgnoreNames[i],name) == 0)
 		{
 			m_IgnoreNames[i][0] = 0;
 			break;

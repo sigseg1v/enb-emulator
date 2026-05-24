@@ -4557,7 +4557,7 @@ void Connection::HandleClientChat()
 				{
 					if (m_Player->AdminLevel() >= 30)      // Beta to Admin
 					{
-						m_Player->PlayerIndex()->SetCredits(m_Player->PlayerIndex()->GetCredits() + _atoi64(param));
+						m_Player->PlayerIndex()->SetCredits(m_Player->PlayerIndex()->GetCredits() + atoll(param));
 						m_Player->SendAuxPlayer();
 					} 
 					else 

@@ -151,61 +151,61 @@ int main(int argc, char* argv[])
 			Info = strtok_s(NULL, "\n", &next_token);
 			do
             {
-				if (!_strcmpi(VarName, "domain")) 
+				if (!strcasecmp(VarName, "domain")) 
                 {
 					strcpy_s(g_DomainName, sizeof(g_DomainName), Info);
 					g_DomainName[sizeof(g_DomainName)-1] = '\0';
 				}
-				if (!_strcmpi(VarName, "internal_ip")) 
+				if (!strcasecmp(VarName, "internal_ip")) 
                 {
 					strcpy_s(g_InternalIP, sizeof(g_InternalIP), Info);
 					g_InternalIP[sizeof(g_InternalIP)-1] = '\0';
 				}
-				if (!_strcmpi(VarName, "mysql_user")) 
+				if (!strcasecmp(VarName, "mysql_user")) 
                 {
 					strcpy_s(g_MySQL_User, sizeof(g_MySQL_User), Info);
 					g_MySQL_User[sizeof(g_MySQL_User)-1] = '\0';
                 }
-				if (!_strcmpi(VarName, "mysql_pass")) 
+				if (!strcasecmp(VarName, "mysql_pass")) 
                 {
 					strcpy_s(g_MySQL_Pass, sizeof(g_MySQL_Pass), Info);
 					g_MySQL_Pass[sizeof(g_MySQL_Pass)-1] = '\0';
 				}
-				if (!_strcmpi(VarName, "mysql_host")) 
+				if (!strcasecmp(VarName, "mysql_host")) 
                 {
 					strcpy_s(g_MySQL_Host, sizeof(g_MySQL_Host), Info);
 					g_MySQL_Host[sizeof(g_MySQL_Host)-1] = '\0';
 				}
-				if (!_strcmpi(VarName, "ticket_user")) 
+				if (!strcasecmp(VarName, "ticket_user")) 
                 {
 					strcpy_s(g_Ticket_User, sizeof(g_Ticket_User), Info);
 					g_Ticket_User[sizeof(g_Ticket_User)-1] = '\0';
                 }
-				if (!_strcmpi(VarName, "ticket_pass")) 
+				if (!strcasecmp(VarName, "ticket_pass")) 
                 {
 					strcpy_s(g_Ticket_Pass, sizeof(g_Ticket_Pass), Info);
 					g_Ticket_Pass[sizeof(g_Ticket_Pass)-1] = '\0';
 				}
-				if (!_strcmpi(VarName, "ticket_host")) 
+				if (!strcasecmp(VarName, "ticket_host")) 
                 {
 					strcpy_s(g_Ticket_Host, sizeof(g_Ticket_Host), Info);
 					g_Ticket_Host[sizeof(g_Ticket_Host)-1] = '\0';
 				}
-				if (!_strcmpi(VarName, "ticket_db")) 
+				if (!strcasecmp(VarName, "ticket_db")) 
                 {
 					strcpy_s(g_Ticket_DB, sizeof(g_Ticket_DB), Info);
 					g_Ticket_DB[sizeof(g_Ticket_DB)-1] = '\0';
 				}
-				if (!_strcmpi(VarName, "galaxy_name")) 
+				if (!strcasecmp(VarName, "galaxy_name")) 
                 {
 					strcpy_s(g_Galaxy_Name, sizeof(g_Galaxy_Name), Info);
 					g_Galaxy_Name[sizeof(g_Galaxy_Name)-1] = '\0';
 				}
-				if (!_strcmpi(VarName, "use_dase"))
+				if (!strcasecmp(VarName, "use_dase"))
 				{
 					g_DASE = atoi(Info);
 				}
-				if (!_strcmpi(VarName, "beta_mode"))
+				if (!strcasecmp(VarName, "beta_mode"))
 				{
 					strcpy_s(g_Beta_Mode, sizeof(g_Beta_Mode), Info);
 				}

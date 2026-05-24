@@ -544,7 +544,7 @@ void Player::ResourceEmptyXP(Object *obj)
 	float XP_for_clear = 50.0f;//(float)obj->Level() * 25.0f; //Should this be fixed for all roids or vary for level? For now, let's award clearing level 7 and above with extra XP
 	if (obj->Level() > 6) XP_for_clear = (float)obj->Level() * 25.0f;
 	char *buffer = (char*)m_ScratchBuffer;
-	_snprintf(buffer, 1024, "Emptied %s:", obj->Name());
+	snprintf(buffer, 1024, "Emptied %s:", obj->Name());
 
 	AwardExploreXP(buffer, (long)XP_for_clear);
 

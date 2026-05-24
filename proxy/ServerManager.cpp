@@ -317,7 +317,7 @@ void DumpBuffer(unsigned char *buffer, int length)
 	for (int i = 0; i < length; i++)
 	{
 		//sprintf_s(line + strlen(line), 128, "%02X ", buffer[i]);
-		_snprintf(line + strlen(line), 128, "%02X ", buffer[i]);
+		snprintf(line + strlen(line), 128, "%02X ", buffer[i]);
 		if ((i % 16) == 15)
 		{
 			LogMessage("%s\n",line);
@@ -346,7 +346,7 @@ void DumpBufferToFile(unsigned char *buffer, int length, char *filename, bool ra
 			line[0] = 0;
 			for (int i = 0; i < length; i++)
 			{
-				_snprintf(line + strlen(line), 128, "%02X ", buffer[i]);
+				snprintf(line + strlen(line), 128, "%02X ", buffer[i]);
 				if ((i % 16) == 15)
 				{
 					fprintf(f, "%s\n", line);
@@ -463,7 +463,7 @@ bool ServerManager::RegisterSectorServer(short first_port, short max_sectors)
 
     // TODO: change this from a hard-coded username something that is set on the command line
     // or a data file.
-	_snprintf(buffer, 128,
+	snprintf(buffer, 128,
 		"GET /sectorserver.cgi?username=VectoR&port=%d&max_sectors=%d&version=%d.%d HTTP/1.1\r\n"
 		"User-Agent: AuthLogin\r\n"
         "Host: %s\r\n"

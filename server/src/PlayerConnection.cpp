@@ -375,7 +375,7 @@ bool Player::WaitForLoginAck(long stage)
 			//assume player is dead, log them out
 			LogMessage(" ---!!> Player %s timed out during login stage %d\n", Name(), m_LoginStage);
 			//send message to GM+
-			_snprintf(buffer, 100, "Player %s timed out during login", Name());
+			snprintf(buffer, 100, "Player %s timed out during login", Name());
 			g_PlayerMgr->ChatSendChannel(GameID(), "GM", buffer);
 			g_PlayerMgr->DropPlayerFromGalaxy(this);
 			return false;
@@ -700,7 +700,7 @@ long Player::TryLoungeFile(long sector_id)
 	char old_path[MAX_PATH];
 	char lounge_npc[MAX_PATH];
 
-	_snprintf(lounge_npc, sizeof(lounge_npc), "LoungeNPC_%d.dat", sector_id);
+	snprintf(lounge_npc, sizeof(lounge_npc), "LoungeNPC_%d.dat", sector_id);
 
 	GetCurrentDirectory(sizeof(old_path), old_path);
 	SetCurrentDirectory(SERVER_DATABASE_PATH);
@@ -3358,7 +3358,7 @@ void Player::HandleRequestTarget(unsigned char *data)
 	{
 		int Lvl = newtarget->Level();
 		char Threat[40];
-		_snprintf(Threat, sizeof(Threat), "Level %d", Lvl);
+		snprintf(Threat, sizeof(Threat), "Level %d", Lvl);
 		ShipIndex()->SetTargetThreat(Threat);
 		//ShipIndex()->SetTargetThreatLevel(Lvl);		// If Player Use this
 	} 
@@ -4058,7 +4058,7 @@ void Player::HandleAction(unsigned char *data)
 				if (obj->ObjectType() == OT_STATION && m_RegisteredSectorID != obj->Destination())
 				{
 					SendClientSound("Reg_OK",0,0);
-					_snprintf(message, 128, "%s control: Registration Confirmed.", obj->Name());
+					snprintf(message, 128, "%s control: Registration Confirmed.", obj->Name());
 					SendMessageString(message,5);
 
 					m_RegisteredSectorID = obj->Destination();
@@ -4118,7 +4118,7 @@ void Player::HandleAction(unsigned char *data)
 						CancelTrade();
 					}
 					// Register when you dock at a station
-					_snprintf(message, 128, "%s control: Registration Confirmed.", obj->Name());
+					snprintf(message, 128, "%s control: Registration Confirmed.", obj->Name());
 					SendMessageString(message,5);
 					m_RegisteredSectorID = obj->Destination();
 					SaveRegisteredStarbase();
@@ -4850,7 +4850,7 @@ void Player::HandleSlashCommands(char *Msg)
 				char *setting = strtok_s(param," ", &next_token);
 				if (setting)
 				{
-					if (_stricmp(setting, "on") == 0)
+					if (strcasecmp(setting, "on") == 0)
 					{
 						g_ServerMgr->SetHalloween(true);
 						SendVaMessageC(12,"Halloween Items Activated!");					
@@ -5560,10 +5560,10 @@ void Player::HandleSlashCommands(char *Msg)
 						//subscribe to channel
 						int channel_id = g_PlayerMgr->GetChannelFromName(channel);
 						if (channel_id == INVALID_CHANNEL ||
-							(_stricmp(channel, "Errors") == 0 && AdminLevel() < BETA_PLUS) ||
-							(_stricmp(channel, "Staff") == 0 && AdminLevel() < BETA_PLUS) ||
-							(_stricmp(channel, "GM") == 0 && AdminLevel() < GM) ||
-							(_stricmp(channel, "Dev") == 0 && AdminLevel() < DEV))
+							(strcasecmp(channel, "Errors") == 0 && AdminLevel() < BETA_PLUS) ||
+							(strcasecmp(channel, "Staff") == 0 && AdminLevel() < BETA_PLUS) ||
+							(strcasecmp(channel, "GM") == 0 && AdminLevel() < GM) ||
+							(strcasecmp(channel, "Dev") == 0 && AdminLevel() < DEV))
 						{
 							m_ChannelSubscription[channel_id] = false;
 							if (AdminLevel() < GM)
@@ -5692,7 +5692,7 @@ void Player::HandleSlashCommands(char *Msg)
 									}
 									myItem.Quality = Quality;
 									myItem.Structure = 1.0f;
-									_snprintf(myItem.BuilderName, sizeof(myItem.BuilderName), "%s GM/DEV", Name());
+									snprintf(myItem.BuilderName, sizeof(myItem.BuilderName), "%s GM/DEV", Name());
 
 								if (CargoAddItem(&myItem) != -2)
 								{
@@ -5726,8 +5726,8 @@ void Player::HandleSlashCommands(char *Msg)
 					if (AdminLevel() >= GM)      // Beta to Admin
 #endif
 					{
-						AwardCredits(_atoi64(param), 0);
-						//PlayerIndex()->SetCredits(PlayerIndex()->GetCredits() + _atoi64(param));
+						AwardCredits(atoll(param), 0);
+						//PlayerIndex()->SetCredits(PlayerIndex()->GetCredits() + atoll(param));
 						//SaveCreditLevel();
 						//SendAuxPlayer();
 					} 
@@ -5919,7 +5919,7 @@ void Player::HandleSlashCommands(char *Msg)
 
 					if (asset && asset->m_Name)
 					{
-						_snprintf(msg_buffer, sizeof(msg_buffer), "%d:%s", basset, asset->m_Name);
+						snprintf(msg_buffer, sizeof(msg_buffer), "%d:%s", basset, asset->m_Name);
 						SendPushMessage(msg_buffer, "MessageLine", 3000, 3);
 					}
 
@@ -5944,7 +5944,7 @@ void Player::HandleSlashCommands(char *Msg)
 				char *setting = strtok_s(param," ", &next_token);
 				if (setting)
 				{
-					if (_stricmp(setting, "on") == 0)
+					if (strcasecmp(setting, "on") == 0)
 					{
 						m_DebugMissions = true;
 						SendVaMessageC(12,"Mission debugging activated.");					
@@ -6512,7 +6512,7 @@ void Player::HandleSlashCommands(char *Msg)
 							if (p && p->PlayerIndex()->GetSectorNum() != SectorID && p->PlayerIndex()->GetSectorNum() <= MAX_SECTOR_ID)
 							{
 								char Message[200];
-								_snprintf(Message, sizeof(Message), 
+								snprintf(Message, sizeof(Message), 
 									"%s is asking you to goto SectorID: %d.  Do you want to take this WormHole?", 
 									this->Name(), SectorID);
 								p->SendConfirmation(Message, this->GameID(), SectorID, 3);	// Send GM Wormhole Conform
@@ -7040,7 +7040,7 @@ void Player::HandleSlashCommands(char *Msg)
 					if (PlayerIndex()->GetSectorNum() <= MAX_SECTOR_ID)
 					{
 						char thissector[5];
-						_snprintf(thissector, 5, "%d\0", PlayerIndex()->GetSectorNum());
+						snprintf(thissector, 5, "%d\0", PlayerIndex()->GetSectorNum());
 						HandleWormholeRequest(thissector);
 					}
 
@@ -7389,7 +7389,7 @@ void Player::HandleSlashCommands(char *Msg)
 				msg_sent =  true;
 			}
 
-			if (_strcmpi(pch, "talktree") == 0)
+			if (strcasecmp(pch, "talktree") == 0)
 			{
 				char string[] = 
 					"That was one heck of an explotion! Are you alright over there?\0"
@@ -7790,11 +7790,11 @@ bool Player::HandleInvis(char *param)
 {
 	if (param)
 	{
-		if (_stricmp(param, "ON") == 0)
+		if (strcasecmp(param, "ON") == 0)
 		{
 			SetInvisible(true);
 		}
-		else if (_stricmp(param, "OFF") == 0)
+		else if (strcasecmp(param, "OFF") == 0)
 		{
 			SetInvisible(false);
 		}
@@ -7814,11 +7814,11 @@ bool Player::HandlePacketOptRequest(char *param)
 {
 	if (param)
 	{
-		if (_stricmp(param, "ON") == 0)
+		if (strcasecmp(param, "ON") == 0)
 		{
 			m_PeriodicCacheSize = PERIODIC_CACHE_SEND_SIZE_OPT;
 		}
-		else if (_stricmp(param, "OFF") == 0)
+		else if (strcasecmp(param, "OFF") == 0)
 		{
 			m_PeriodicCacheSize = PERIODIC_CACHE_SEND_SIZE;
 		}
@@ -7863,7 +7863,7 @@ bool Player::HandleKick(char *param)
 
 	if (target) 
 	{
-		_snprintf(Message, 1024, "Player '%s' kicked by '%s': %s", target->Name(), Name(), reason);
+		snprintf(Message, 1024, "Player '%s' kicked by '%s': %s", target->Name(), Name(), reason);
 		LogMessage(" ** Kick: %s\n", Message);
 
 		target->SendVaMessage("You have been kicked by %s: %s", Name(), reason);
@@ -7909,7 +7909,7 @@ bool Player::HandleBaseItemListCreate()
 {
 	char QueryString[256];
 	//ok we run a query on the item database, find all the ores and populate the base_ore_list table
-	_snprintf(QueryString, sizeof(QueryString), "SELECT * FROM `item_base` WHERE `category` = '81'");
+	snprintf(QueryString, sizeof(QueryString), "SELECT * FROM `item_base` WHERE `category` = '81'");
 	sql_connection_c connection( "net7", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
 	sql_result_c result;
 	sql_result_c *ItemList_result = &result;
@@ -7986,7 +7986,7 @@ bool Player::HandleAggroSetting(char *param)
 		sql_connection_c connection( "net7", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
 		sql_query_c MobUpdate(&connection);
 
-		_snprintf(queryString, sizeof(queryString),
+		snprintf(queryString, sizeof(queryString),
 			"UPDATE `mob_base` SET `aggressiveness` = '%d' WHERE `mob_id` = '%d'", aggro_level, mob->GetMOBType());
 		MobUpdate.run_query(queryString);
 
@@ -8170,7 +8170,7 @@ void Player::HandleSetTurrets()
 			if (mob->IsTurret())
 			{
 				//Now set type to be type 42 in database
-				_snprintf(queryString, sizeof(queryString), 
+				snprintf(queryString, sizeof(queryString), 
 					"UPDATE net7.sector_objects SET type = '42' WHERE sector_object_id = '%d'", object_uid);
 
 				TurretQuery.run_query(queryString);
@@ -8183,7 +8183,7 @@ void Player::HandleSetTurrets()
 				char *name = obj->Name();
 				if (strstr(name, "turret") || strstr(name, "Turret"))
 				{
-					_snprintf(queryString, sizeof(queryString), 
+					snprintf(queryString, sizeof(queryString), 
 						"SELECT * FROM net7.sector_objects_turrets WHERE turret_id = '%d'", object_uid);
 
 					//is this turret in the DB?
@@ -8239,7 +8239,7 @@ void Player::HandleSetRespawns()
 			{
 				long rtime = 30 - rand()%5;
 				f->SetRespawnTimer(rtime);
-				_snprintf(queryString, sizeof(queryString),
+				snprintf(queryString, sizeof(queryString),
 					"UPDATE net7.sector_objects_harvestable SET respawn_timer = '%d' WHERE resource_id = '%d'", rtime, object_uid);
 
 				RespawnQuery.run_query(queryString);
@@ -8483,7 +8483,7 @@ bool Player::HandleNavChangeRequest(char *param, int option)
 				LogMessage("%s changed %s sig to: %.2f\n", AccountUsername(), obj->Name(), value);
 				s->SetSignature(value);
 				//commit to DB
-				_snprintf(queryString, sizeof(queryString),
+				snprintf(queryString, sizeof(queryString),
 					"UPDATE `sector_nav_points` SET `signature` = '%f' WHERE `sector_object_id` = '%d'", 
 					value, s->GetDatabaseUID());
 				change = true;
@@ -8503,7 +8503,7 @@ bool Player::HandleNavChangeRequest(char *param, int option)
 			SendVaMessageC(12, "Setting %s server radius to %.2f (Commit to DB)", obj->Name(), value);
 			LogMessage("%s changed %s radius to: %.2f\n", AccountUsername(), obj->Name(), value);
 			s->SetObjectRadius(value);
-			_snprintf(queryString, sizeof(queryString),
+			snprintf(queryString, sizeof(queryString),
 				"UPDATE `sector_nav_points` SET `object_radius_patch` = '%f' WHERE `sector_object_id` = '%d'", 
 				value, s->GetDatabaseUID());
 			change = true;
@@ -8566,7 +8566,7 @@ bool Player::HandleChangeFieldRequest(char *param, int option)
 			{
 				f->SetFieldRadius((float)value);
 				//commit to DB & re-pop
-				_snprintf(queryString, sizeof(queryString), 
+				snprintf(queryString, sizeof(queryString), 
 					"UPDATE `sector_objects_harvestable` SET `max_field_radius` = '%d' WHERE `resource_id` = '%d'", 
 					value, f->GetDatabaseUID());
 				change = true;
@@ -8582,7 +8582,7 @@ bool Player::HandleChangeFieldRequest(char *param, int option)
 			{
 				f->SetFieldType(value);
 				//commit to DB & re-pop
-				_snprintf(queryString, sizeof(queryString),
+				snprintf(queryString, sizeof(queryString),
 					"UPDATE `sector_objects_harvestable` SET `field` = '%d' WHERE `resource_id` = '%d'", 
 					value, f->GetDatabaseUID());
 				change = true;
@@ -8597,7 +8597,7 @@ bool Player::HandleChangeFieldRequest(char *param, int option)
 			{
 				f->SetLevel(value);
 				//commit to DB & re-pop
-				_snprintf(queryString, sizeof(queryString), 
+				snprintf(queryString, sizeof(queryString), 
 					"UPDATE `sector_objects_harvestable` SET `level` = '%d' WHERE `resource_id` = '%d'", 
 					value, f->GetDatabaseUID());
 				change = true;
@@ -8613,7 +8613,7 @@ bool Player::HandleChangeFieldRequest(char *param, int option)
 			{
 				SendVaMessage("New asteroid field count: cannot display new changes until server re-start");
 				//commit to DB & re-pop
-				_snprintf(queryString, sizeof(queryString),
+				snprintf(queryString, sizeof(queryString),
 					"UPDATE `sector_objects_harvestable` SET `res_count` = '%d' WHERE `resource_id` = '%d'", 
 					value, f->GetDatabaseUID());
 				change = true;
@@ -8631,7 +8631,7 @@ bool Player::HandleChangeFieldRequest(char *param, int option)
 				f->AddItemID(value, 0.0f);
 				//need to make a new entry
 				sql_result_c result;
-				_snprintf(queryString, sizeof(queryString), 
+				snprintf(queryString, sizeof(queryString), 
 					"SELECT * FROM sector_objects_harvestable_oretypes WHERE resource_id = '%d' AND additional_ore_item_id = '%d'", 
 					f->GetDatabaseUID(), value);
 				FieldUpdate.execute(queryString);
@@ -8669,7 +8669,7 @@ bool Player::HandleChangeFieldRequest(char *param, int option)
 				//delete from DB
 				if (base_ore)
 				{
-					_snprintf(queryString, sizeof(queryString), 
+					snprintf(queryString, sizeof(queryString), 
 						"DELETE FROM sector_objects_harvestable_oretypes WHERE resource_id = '%d' AND additional_ore_item_id = '%d'", 
 						f->GetDatabaseUID(), value);
 					change = true;
@@ -8689,7 +8689,7 @@ bool Player::HandleChangeFieldRequest(char *param, int option)
 				ItemBase *base_ore = g_ItemBaseMgr->GetItem(value);
 				//is this ore already in the DB?
 				sql_result_c result;
-				_snprintf(queryString, sizeof(queryString), 
+				snprintf(queryString, sizeof(queryString), 
 					"SELECT * FROM base_ore_list WHERE sector_id = '%d' AND item_id = '%d'", 
 					PlayerIndex()->GetSectorNum(), value);
 				FieldUpdate.execute(queryString);
@@ -8732,7 +8732,7 @@ bool Player::HandleChangeFieldRequest(char *param, int option)
 				//delete from DB
 				if (base_ore)
 				{
-					_snprintf(queryString, sizeof(queryString), 
+					snprintf(queryString, sizeof(queryString), 
 						"DELETE FROM base_ore_list WHERE sector_id = '%d' AND item_id = '%d'", 
 						PlayerIndex()->GetSectorNum(), value);
 					change = true;
@@ -8924,35 +8924,35 @@ bool Player::HandleCommitRequest(long Target)
 		sql_connection_c connection( "net7", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
 		sql_query_c PositionUpdate(&connection);
 
-		_snprintf(queryString, sizeof(queryString), 
+		snprintf(queryString, sizeof(queryString), 
 			"UPDATE `sector_objects` SET `position_x` = '%.2f' WHERE `sector_object_id` = '%d'", 
 			obj->PosX(), obj->GetDatabaseUID());
 		PositionUpdate.run_query(queryString);
-		_snprintf(queryString, sizeof(queryString), 
+		snprintf(queryString, sizeof(queryString), 
 			"UPDATE `sector_objects` SET `position_y` = '%.2f' WHERE `sector_object_id` = '%d'", 
 			obj->PosY(), obj->GetDatabaseUID());
 		PositionUpdate.run_query(queryString);
-		_snprintf(queryString, sizeof(queryString), 
+		snprintf(queryString, sizeof(queryString), 
 			"UPDATE `sector_objects` SET `position_z` = '%.2f' WHERE `sector_object_id` = '%d'", 
 			obj->PosZ(), obj->GetDatabaseUID());
 		PositionUpdate.run_query(queryString);
-		_snprintf(queryString, sizeof(queryString), 
+		snprintf(queryString, sizeof(queryString), 
 			"UPDATE `sector_objects` SET `orientation_u` = '%.6f' WHERE `sector_object_id` = '%d'", 
 			ori[0], obj->GetDatabaseUID());
 		PositionUpdate.run_query(queryString);
-		_snprintf(queryString, sizeof(queryString), 
+		snprintf(queryString, sizeof(queryString), 
 			"UPDATE `sector_objects` SET `orientation_v` = '%.6f' WHERE `sector_object_id` = '%d'", 
 			ori[1], obj->GetDatabaseUID());
 		PositionUpdate.run_query(queryString);
-		_snprintf(queryString, sizeof(queryString), 
+		snprintf(queryString, sizeof(queryString), 
 			"UPDATE `sector_objects` SET `orientation_w` = '%.6f' WHERE `sector_object_id` = '%d'", 
 			ori[2], obj->GetDatabaseUID());
 		PositionUpdate.run_query(queryString);
-		_snprintf(queryString, sizeof(queryString), 
+		snprintf(queryString, sizeof(queryString), 
 			"UPDATE `sector_objects` SET `orientation_z` = '%.6f' WHERE `sector_object_id` = '%d'", 
 			ori[3], obj->GetDatabaseUID());
 		PositionUpdate.run_query(queryString);
-		_snprintf(queryString, sizeof(queryString), 
+		snprintf(queryString, sizeof(queryString), 
 			"UPDATE `sector_objects` SET `scale` = '%.4f' WHERE `sector_object_id` = '%d'", 
 			obj->Scale(), obj->GetDatabaseUID());
 		PositionUpdate.run_query(queryString);
@@ -8961,11 +8961,11 @@ bool Player::HandleCommitRequest(long Target)
 		switch (obj->ObjectType())
 		{
 		case OT_PLANET:
-			_snprintf(queryString, sizeof(queryString), 
+			snprintf(queryString, sizeof(queryString), 
 				"UPDATE `sector_objects_planets` SET `rotate_rate` = '%f' WHERE `planet_id` = '%d'", 
 				obj->Spin(), obj->GetDatabaseUID());
 			PositionUpdate.run_query(queryString);
-			_snprintf(queryString, sizeof(queryString), 
+			snprintf(queryString, sizeof(queryString), 
 				"UPDATE `sector_objects_planets` SET `tilt_angle` = '%f' WHERE `planet_id` = '%d'", 
 				obj->Tilt(), obj->GetDatabaseUID());
 			PositionUpdate.run_query(queryString);
@@ -9542,7 +9542,7 @@ bool Player::HandleBassetRequest(char *param)
 
 		if (asset && asset->m_Name)
 		{
-			_snprintf(msg_buffer, sizeof(msg_buffer), "%d:%s", basset, asset->m_Name);
+			snprintf(msg_buffer, sizeof(msg_buffer), "%d:%s", basset, asset->m_Name);
 			SendPushMessage(msg_buffer, "MessageLine", 3000, 3);
 		}
 
@@ -10243,19 +10243,19 @@ void Player::GetPostFix(char *FName, int length)
 
 	if (Hijackee())
 	{
-		_snprintf(FName, length, "%s", GetHijackeeName());
+		snprintf(FName, length, "%s", GetHijackeeName());
 	}
 	else if (GetInvisible())
 	{
-		_snprintf(FName, length, "%s", Name());
+		snprintf(FName, length, "%s", Name());
 	}
 	else if (PostFix[0])
 	{
-		_snprintf(FName, length, "%s [%s]", Name(), PostFix);
+		snprintf(FName, length, "%s [%s]", Name(), PostFix);
 	}
 	else
 	{
-		_snprintf(FName, length, "%s", Name());
+		snprintf(FName, length, "%s", Name());
 	}
 }
 

@@ -262,7 +262,7 @@ Player * PlayerManager::GetPlayer(char * Name)
 
 	while (GetNextPlayerOnList(p, m_GlobalPlayerList))
     {
-        if (p->Name() && _stricmp(p->Name(), Name) == 0)
+        if (p->Name() && strcasecmp(p->Name(), Name) == 0)
         {
             retval = (Player*)p;
             break;
@@ -416,9 +416,9 @@ bool PlayerManager::CheckAccountInUse(char *username)
     
 	while (GetNextPlayerOnList(p, m_GlobalPlayerList))    
 	{
-		// strncmp changed to _stricmp here to prevent multiple 
+		// strncmp changed to strcasecmp here to prevent multiple 
 		// useraccount logins by changing caps
-		if (_stricmp(p->AccountUsername(), username) == 0)
+		if (strcasecmp(p->AccountUsername(), username) == 0)
 		{
 			if (p->Active())
 			{			
@@ -1012,7 +1012,7 @@ void PlayerManager::ChatSendPrivate(long GameID, char * Nick, char * Message)
         {
             while (GetNextPlayerOnList(p_list, m_GlobalPlayerList))  
 			{
-				if (p_list->Name() && !_stricmp(p_list->Name(), nickTrim))
+				if (p_list->Name() && !strcasecmp(p_list->Name(), nickTrim))
                 {
                     p_list->SendClientChatEvent(CHEV_PRIVATE_MESSAGE, p, Channel, Message);
                     FoundPlayer = true;

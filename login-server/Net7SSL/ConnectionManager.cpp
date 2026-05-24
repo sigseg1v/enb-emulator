@@ -119,7 +119,7 @@ bool ConnectionManager::CheckAccountInUse(char *accountname, Connection_B *c)
 		{
 			if (p->connection->GetAccountName())
 			{
-				if (_stricmp(p->connection->GetAccountName(), accountname) == 0 && p->connection != c)
+				if (strcasecmp(p->connection->GetAccountName(), accountname) == 0 && p->connection != c)
 				{
 					//g_PlayerMgr->ErrorBroadcast("Account user %s trying to log in twice!\n", accountname);
 					LogMessage("Account user %s trying to log in twice!\n", accountname);
