@@ -306,37 +306,94 @@ The existing WinForms targets stay in the tree. They still build via `dotnet bui
 
       **7/14 tools have Linux-native paths now.**
 
-### Future tier ordering (remaining 8 tools — deferred until session focus returns to Phase L)
+### Tier 5 — first MySQL editor port (complete)
+
+- [x] **faction-editor-avalonia** — full Avalonia port of
+      `tools/faction-editor/` (factions + faction_matrix editor; original
+      was a 3-form WinForms app: Login, mainFrm, About).
+      Files added (13):
+      - `FactionEditorAvalonia.csproj` — `net10.0`, Avalonia 11.2.3,
+        DataGrid package, MsBox.Avalonia, Tmds.DBus.Protocol 0.21.3
+        (forced upgrade for CVE GHSA-xrw6-gwf8-vvr9), project ref to
+        `commontools-avalonia`.
+      - `app.manifest`, `App.axaml{,.cs}` — Fluent theme +
+        DataGrid theme include; `OnExplicitShutdown` + Login `Closed`
+        handoff swap so the Login dialog can hand off to MainWindow
+        without dispatcher deadlock (same pattern as
+        `dataimport-avalonia`).
+      - `Program.cs` — entry + `--smoke` headless test that
+        instantiates Login + MainWindow + AboutBox.
+      - `MainWindow.axaml{,.cs}` — DockPanel layout: menu + toolbar
+        + status bar + TabControl (General Details / Faction Matrix)
+        + GridSplitter + DataGrid (lifted `FactionRow` to top-level
+        type so `x:DataType` compiled binding resolves cleanly).
+      - `FactionRow.cs` — top-level POCO for grid binding.
+      - `FactionMatrixProps.cs` — relation-entry POCO (dropped
+        original PropertyGrid `[Description]` / `[Category]` /
+        `[ReadOnly]` attributes since Avalonia has no PropertyGrid).
+      - `AboutBox.axaml{,.cs}` — 420x240 modal.
+      - `SQL/FactionsSQL.cs`, `SQL/FactionMatrixSQL.cs` — wrap
+        `DB.Instance.executeQuery/executeCommand` with `?name`
+        placeholders. **Silently closes SQL-injection holes that the
+        original had via string concatenation through user-supplied
+        name/description/PDA_text fields.**
+      - `README.md` — full mapping doc.
+
+      Dropped vs. original:
+      - WinForms `PropertyGrid` for relation entries → ad-hoc panel
+        (NumericUpDown + read-only TextBox + CheckBox).
+        Avalonia has no PropertyGrid equivalent.
+      - `Properties.Settings.Default` connection-info cache →
+        commontools-avalonia's JSON settings store.
+      - `dbInstance.cs` / `Database/Login.cs` → CommonTools.Database.DB
+        + CommonTools.Gui.Login.
+
+      Smoke output:
+      ```
+      login    OK: 290x195 "Login"
+      main     OK: 720x600 "Faction Editor"
+      about    OK: 420x240 "About Faction Editor"
+      smoke OK: all 3 faction-editor-avalonia windows instantiated
+      ```
+
+      Registered in `tools/Net7Tools.slnx` under
+      `/faction-editor-avalonia/`. Whole solution still builds
+      (0 errors; the 4485 warnings are pre-existing legacy
+      WinForms CA1416s in the unported projects).
+      Touches: new `tools/faction-editor-avalonia/` (13 files +
+      slnx entry).
+      Status: complete
+
+      **8/14 tools have Linux-native paths now.**
+
+### Future tier ordering (remaining 7 tools — deferred until session focus returns to Phase L)
 
 Recommended order:
 
-1. **faction-editor-avalonia** — 3 forms, MySQL. ~1-2 days (depends on
-   commontools-avalonia).
-
-2. **mob-editor-avalonia** — 3 forms, MySQL, larger LOC. ~2 days
+1. **mob-editor-avalonia** — 3 forms, MySQL, larger LOC. ~2 days
    (depends on commontools-avalonia).
 
-3. **talktreeeditor-avalonia** — 5 forms, depends on
+2. **talktreeeditor-avalonia** — 5 forms, depends on
    commontools-avalonia. ~2-3 days.
 
-4. **toolslauncher-avalonia** — 6 forms incl. IRC client + FTP window.
+3. **toolslauncher-avalonia** — 6 forms incl. IRC client + FTP window.
    ~3-5 days (IRC integration via Meebey.SmartIrc4Net is the wildcard).
 
-5. **effect-editor-avalonia** (SQLBind) — 5 forms, particle effects.
+4. **effect-editor-avalonia** (SQLBind) — 5 forms, particle effects.
    ~3 days.
 
-6. **station-tools-avalonia** — 8 forms. ~4-5 days.
+5. **station-tools-avalonia** — 8 forms. ~4-5 days.
 
-7. **missioneditor-avalonia** — 9 forms incl. tree view. Depends on
+6. **missioneditor-avalonia** — 9 forms incl. tree view. Depends on
    commontools-avalonia. ~5 days.
 
-8. **sector-editor-avalonia** — 16 forms, custom map canvas
+7. **sector-editor-avalonia** — 16 forms, custom map canvas
    (System.Drawing.Graphics → Avalonia DrawingContext is the major
    work). ~2-3 weeks.
 
 ### Tier 2+ — deferred
 
-The remaining 8 editors (faction-editor, mob-editor, talktreeeditor, effect-editor, toolslauncher, station-tools, missioneditor, sector-editor) are tracked as future Phase L sub-items. With realistic ~3-6 month total for the suite, this is its own project — but per the user directive "do all plans / dont stop at phase boundaries," subsequent invocations should keep grinding through them.
+The remaining 7 editors (mob-editor, talktreeeditor, effect-editor, toolslauncher, station-tools, missioneditor, sector-editor) are tracked as future Phase L sub-items. With realistic ~3-6 month total for the suite, this is its own project — but per the user directive "do all plans / dont stop at phase boundaries," subsequent invocations should keep grinding through them.
 
 For immediate Linux runnability of the editors: the WinForms binaries already run under WINE — `tools/README.md` documents this. That's the realistic interim story until Avalonia ports land.
 

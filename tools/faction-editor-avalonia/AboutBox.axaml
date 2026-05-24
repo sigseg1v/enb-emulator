@@ -1,0 +1,19 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="FactionEditorAvalonia.AboutBox"
+        Width="420" Height="240"
+        Title="About Faction Editor"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+  <Grid Margin="16" RowDefinitions="Auto,Auto,Auto,Auto,*,Auto">
+    <TextBlock Grid.Row="0" Text="Net-7 Faction Editor" FontSize="18" FontWeight="Bold" />
+    <TextBlock Grid.Row="1" Name="c_Version" Text="Version 1.0.0.0" Margin="0,8,0,0" />
+    <TextBlock Grid.Row="2" Margin="0,8,0,0"
+               Text="Edits the factions and faction_matrix tables." TextWrapping="Wrap" />
+    <TextBlock Grid.Row="3" Margin="0,8,0,0"
+               Text="Avalonia port of the original Net-7 WinForms editor."
+               TextWrapping="Wrap" />
+    <Button Grid.Row="5" Content="OK" Width="80" HorizontalAlignment="Right"
+            Click="OnOkClick" IsDefault="True" />
+  </Grid>
+</Window>
