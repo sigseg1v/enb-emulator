@@ -17,9 +17,19 @@
 //   ProcessGlobalServerOpcode:
 //     0x0000 VersionRequest  -> 0x0001 VersionResponse (status = 0 if
 //                               major=42 minor=0, 1 if outdated, 2 if newer)
+//     0x0035 MasterJoin      -> silent drop (matches Win32's TODO no-op)
 //   ProcessSectorServerOpcode:
 //     0x0002 LOGIN           -> activate the proxy↔server connection state
 //                               (matches Win32 ClientToSectorServer.cpp:22-31)
+//     0x0014 MOVE            -> silent no-op (Win32 `break;` falls through
+//                               to UDP-forward; Linux has no UDP plane).
+//     0x009F STARBASE_ROOM_CHANGE -> silent no-op (Win32 HandleStarbaseRoomChange
+//                                    body is comment-only).
+//     0x00B9 LOGOFF_REQUEST  -> set g_LoggedIn=true (matches Win32's odd
+//                               "set true on logoff" — g_LoggedIn is a
+//                               one-way connection-active latch, not a
+//                               logged-in/logged-out flag).
+//     0x003A SERVER_HANDOFF  -> silent no-op (Win32 body is comment-only).
 //
 // This file is Linux-only (the WIN32 build picks up the real dispatch
 // from ClientToGlobalServer.cpp / ClientToSectorServer.cpp).
@@ -96,6 +106,33 @@ void Connection::ProcessSectorServerOpcode(short opcode, short bytes)
         g_ServerMgr->m_UDPClient->SetConnectionActive(true);
         g_ServerMgr->m_UDPConnection->SetLoginComplete(false);
         m_SectorTCPRequest = false;
+        break;
+
+    case ENB_OPCODE_0014_MOVE:
+        // Win32 body is `break;` — the work happens in the bottom-of-switch
+        // ForwardClientOpcode call, which doesn't exist on Linux. Silently
+        // consume the frame; the proxy has nowhere to forward it without
+        // the UDP plane.
+        break;
+
+    case ENB_OPCODE_009F_STARBASE_ROOM_CHANGE:
+        // Win32 calls HandleStarbaseRoomChange (ClientToSectorServer.cpp:742),
+        // whose body is entirely commented out — it's a no-op even on Win32.
+        break;
+
+    case ENB_OPCODE_00B9_LOGOFF_REQUEST:
+        // Matches Win32 ClientToSectorServer.cpp:78-86. Win32 sets
+        // g_LoggedIn=true on logoff (counter-intuitive; g_LoggedIn is a
+        // connection-active sentinel polled by Net7.cpp:754, not a
+        // logged-in/logged-out flag) then drops through to SERVER_HANDOFF,
+        // whose body is fully commented out.
+        g_LoggedIn = true;
+        LogMessage("<client> SectorServer LOGOFF_REQUEST\n");
+        break;
+
+    case ENB_OPCODE_003A_SERVER_HANDOFF:
+        // Win32 body is `//DumpBuffer(...) //LogMessage(...) //SetConnectionActive(false)`
+        // — all commented out. Silent no-op preserves parity.
         break;
 
     default:
