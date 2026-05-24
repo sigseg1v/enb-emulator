@@ -19,9 +19,9 @@ Goal: take the Phase J "TLS terminates, handshake works, opcodes are dispatched"
       Touches: `docker-compose.yml` (added `"3500:3500/tcp"` under proxy.ports).
       Notes: Verified end-to-end: `exec 3<>/dev/tcp/127.0.0.1/3500` succeeds from the host, proxy logs `accept on port 3500 from 172.18.0.1` + `DoKeyExchange: ...` (handshake starts then fails on empty input — expected for a no-op test connection). Integration suite still 5/5.
 
-- [ ] Port `ProcessMasterServerOpcode` chain end-to-end (avatar select → ServerRedirect). Currently `HandleMasterJoin` is the only handler exercised; full table at `proxy/ClientToMasterServer.cpp:Process…`.
-      Status: not started
-      Touches: `proxy/ClientToMasterServer.cpp` (already WIN32-unwalled), upstream callers
+- [x] Port `ProcessMasterServerOpcode` chain end-to-end (avatar select → ServerRedirect). Currently `HandleMasterJoin` is the only handler exercised; full table at `proxy/ClientToMasterServer.cpp:Process…`.
+      Status: done — ProcessMasterServerOpcode in `proxy/ClientToMasterServer.cpp:30-43` only dispatches one opcode (0x0035 MASTER_JOIN); everything else falls into the UNRECOGNIZED OPCODE default and logs. Linux HandleMasterJoin (Phase J commit 5bd0afd / 6ffe642) drives the full SendMasterLogin → ServerRedirect flow via the UDP plane subset (commit a357d11), with a Phase J fallback to hardcoded local ServerRedirect on UDP timeout. The "chain end-to-end" framing was based on a wrong assumption that the master server had multiple handlers — the design is much simpler: master server = one opcode in, one opcode out. The deeper avatar-select flow lives in ProcessGlobalServerOpcode, not here.
+      Notes: live `MasterJoin.LiveMasterJoinReturnsServerRedirect` test covers this end-to-end (6/7 in `just integration-test`). The UDP plane fallback path is exercised because server-side HandleMasterHandoff is still a stub (carries forward as a server-side Phase K item, separate from the proxy port).
 
 - [~] Port `ProcessGlobalServerOpcode` handlers. Group by dependency on UDP plane vs. pure-TCP — port pure-TCP ones first.
       Status: in progress — first pure-TCP handler (VersionRequest 0x0000 → VersionResponse 0x0001) ported and verified end-to-end. The five UDP-plane-dependent handlers (HandleGlobalConnect, HandleGlobalTicketRequest, HandleDeleteCharacter, HandleCreateCharacter, ProcessGlobalTicket) carry over — they all call into `g_ServerMgr->m_UDPConnection->SendTicket/DeleteCharacter/CreateCharacter/SendAvatarLogin`, which require the server-side UDP plane and the server-side AccountManager (MySQL access from the server container) to actually respond. The Linux dispatcher now lives in `proxy/ClientToServer_linux_stubs.cpp` (renamed conceptually but file kept for now); unimplemented opcodes still log + return for visibility into what real clients send.
@@ -29,9 +29,11 @@ Goal: take the Phase J "TLS terminates, handshake works, opcodes are dispatched"
       Touches remaining: `proxy/ClientToGlobalServer.cpp` (still WIN32-walled — full removal needs the UDP plane).
       Notes: integration test 7/7 green. Proxy log confirms `<client> VersionRequest major=42 minor=0 -> status=0`.
 
-- [ ] Port `ProcessSectorServerOpcode` handlers, same staging.
-      Status: not started
-      Touches: `proxy/ClientToSectorServer.cpp`
+- [~] Port `ProcessSectorServerOpcode` handlers, same staging.
+      Status: in progress — first pure-TCP handler (LOGIN 0x0002, the connection-activate state-change) ported and verified end-to-end. The Win32 LOGIN handler set six bits of state; on Linux we port five (g_LoggedIn, m_SectorConnection, UDPConnection/UDPClient SetConnectionActive, SetLoginComplete, m_SectorTCPRequest) and skip `time_debug = 50` — that one is consumed only inside `UDPProxyToClient.cpp` which is itself WIN32-walled, so it has no observer on Linux. The remaining ~50 sector-server handlers in `proxy/ClientToSectorServer.cpp` are all UDP-plane-dependent or Player-state-dependent and carry into subsequent commits.
+      Touches done: `proxy/ClientToServer_linux_stubs.cpp` (real Linux ProcessSectorServerOpcode dispatch with 0x0002 LOGIN case + includes for ServerManager.h / UDPClient.h), `tests/client/sector_login_test.cpp` (new live smoke test on port 3500), `tests/CMakeLists.txt` (build target), `justfile` (wire into `just integration-test` via NET7_TEST_SECTOR_PORT=3500 + `SectorLogin` filter).
+      Touches remaining: `proxy/ClientToSectorServer.cpp` (still WIN32-walled — full removal needs Player state + UDP plane).
+      Notes: integration test 8/8 green. Proxy log confirms `<client> SectorServer LOGIN — connection active`. Test is a weak smoke check (LOGIN sends no response so the only client-observable signal is "socket stays open"); stronger verification via `docker logs enb-emulator-proxy-1 | grep "SectorServer LOGIN"`.
 
 - [~] Port the UDP proxy plane (`UDPClient`, `UDPProxyMVAS`, `UDPProxyToClient`, `UDPProxyToGlobal`). POSIX UDP sockets + blocking recv thread.
       Status: minimum-viable subset done — HandleMasterJoin now drives a real SendMasterLogin -> server:3808 UDP exchange.

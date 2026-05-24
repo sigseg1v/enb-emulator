@@ -17,7 +17,9 @@
 //   ProcessGlobalServerOpcode:
 //     0x0000 VersionRequest  -> 0x0001 VersionResponse (status = 0 if
 //                               major=42 minor=0, 1 if outdated, 2 if newer)
-//   ProcessSectorServerOpcode: everything stubbed
+//   ProcessSectorServerOpcode:
+//     0x0002 LOGIN           -> activate the proxy↔server connection state
+//                               (matches Win32 ClientToSectorServer.cpp:22-31)
 //
 // This file is Linux-only (the WIN32 build picks up the real dispatch
 // from ClientToGlobalServer.cpp / ClientToSectorServer.cpp).
@@ -28,6 +30,8 @@
 #include "Connection.h"
 #include "Opcodes.h"
 #include "PacketStructures.h"
+#include "ServerManager.h"
+#include "UDPClient.h"
 
 #include <arpa/inet.h>
 
@@ -79,8 +83,26 @@ void Connection::ProcessGlobalServerOpcode(short opcode, short bytes)
 
 void Connection::ProcessSectorServerOpcode(short opcode, short bytes)
 {
-    LogMessage("Linux stub: ProcessSectorServerOpcode 0x%04x (%d bytes) — not yet implemented\n",
-               (unsigned short) opcode, (int) bytes);
+    switch ((unsigned short) opcode) {
+    case ENB_OPCODE_0002_LOGIN:
+        // Matches Win32 ClientToSectorServer.cpp:22-31. Activates the proxy↔
+        // server connection state so subsequent UDP traffic from the game server
+        // gets relayed back to this client. time_debug=50 from Win32 is skipped:
+        // it's only consumed by UDPProxyToClient.cpp, which is itself WIN32-walled.
+        g_LoggedIn = true;
+        g_ServerMgr->m_SectorConnection = this;
+        LogMessage("<client> SectorServer LOGIN — connection active\n");
+        g_ServerMgr->m_UDPConnection->SetConnectionActive(true);
+        g_ServerMgr->m_UDPClient->SetConnectionActive(true);
+        g_ServerMgr->m_UDPConnection->SetLoginComplete(false);
+        m_SectorTCPRequest = false;
+        break;
+
+    default:
+        LogMessage("Linux stub: ProcessSectorServerOpcode 0x%04x (%d bytes) — not yet implemented\n",
+                   (unsigned short) opcode, (int) bytes);
+        break;
+    }
 }
 
 #endif // !WIN32

@@ -177,6 +177,24 @@ if(OpenSSL_FOUND)
         Threads::Threads
     )
     gtest_discover_tests(version_request_test)
+
+    # Phase K: LOGIN (0x0002) dispatch on the sector-server port (3500).
+    add_executable(sector_login_test
+        client/sector_login_test.cpp
+        client/handshake_driver.cpp
+        client/tcp_client.cpp
+        client/westwood/westwood_rsa.cpp
+        client/westwood/westwood_rc4.cpp
+    )
+    target_include_directories(sector_login_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/client
+    )
+    target_link_libraries(sector_login_test PRIVATE
+        GTest::gtest_main
+        OpenSSL::Crypto
+        Threads::Threads
+    )
+    gtest_discover_tests(sector_login_test)
 else()
     message(STATUS "net7-tests: OpenSSL not found — skipping handshake_test")
 endif()
