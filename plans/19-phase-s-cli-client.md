@@ -224,10 +224,49 @@ CliClient.UnitTests/
       round-trip test above already proves wire compatibility with the
       server-side decrypt code we mirrored.
 
-- [ ] Item 4 — Login flow (TLS to Net7SSL, /AuthLogin POST, ticket extraction)
-      Status: not started
-      Touches: tools/cli-client/Auth/Login.cs, Net/LoginConnection.cs
-      Notes: TLSv1.3, accept self-signed dev cert via env-gated knob, follow the AuthLogin contract already in login-server/
+- [x] Item 4 — Login flow (TLS to Net7SSL, /AuthLogin GET, ticket extraction)
+      Status: done
+      Touches: tools/cli-client/src/CliClient.Core/Auth/AuthLoginRequest.cs,
+               tools/cli-client/src/CliClient.Core/Auth/AuthLoginResponse.cs,
+               tools/cli-client/src/CliClient.Core/Auth/AuthLoginClient.cs,
+               tools/cli-client/src/CliClient.Core/CliClient.Core.csproj,
+               tools/cli-client/tests/CliClient.UnitTests/Auth/AuthLoginResponseTests.cs,
+               tools/cli-client/tests/CliClient.UnitTests/Auth/AuthLoginClientTests.cs
+      Notes: Reality check: the original plan said "AuthLogin POST" but
+      `login-server/Net7SSL/LinuxAuth.cpp:41` is explicit that "The
+      client only ever sends GET requests" against /AuthLogin —
+      credentials go in the query string and the server's `strstr`-based
+      parser scans the raw recv buffer for the four tags. Implemented
+      as GET to match.
+      `AuthLoginRequest` — username/password/serviceID/version record;
+      defaults to ServiceId="EA-ENB", Version="2.5" (real client values
+      from the C++ server's expected-version check).
+      `AuthLoginResponse` — bool Valid, string Ticket, string RawBody.
+      Parser handles both CRLF and LF line endings (server emits CRLF
+      per LinuxAuth.cpp:408); only the literal "Valid=TRUE" (uppercase)
+      authenticates — anything else is a failure to be loud about.
+      `AuthLoginClient` — TLS-over-TCP with SslClientAuthenticationOptions.
+      EnabledSslProtocols=None (OS default TLS 1.2/1.3) so we don't
+      lock CI to a specific server build. Sends a textbook HTTP/1.1
+      GET with Host/User-Agent/Accept/Connection headers so a captured
+      request looks like the real client. Default cert validation
+      requires a valid chain; opt-in `acceptUntrustedCertificates`
+      flag (loud-by-design, emits "WARNING: accepting untrusted TLS
+      cert" via the diagnostics sink) for local docker/CI with
+      self-signed dev certs. No env-var backdoor — caller must
+      explicitly pass true.
+      Tests (13 new, 44 total passing):
+      `AuthLoginResponseTests` — success/failure/case-sensitivity,
+      LF tolerance, unknown-keys-ignored, null-body guard (6 tests).
+      `AuthLoginClientTests` — port/host validation, URL builder shape,
+      URL encoding of special chars, body-extract from CRLF/LF/no-headers
+      responses (7 tests).
+      Required `<InternalsVisibleTo Include="CliClient.UnitTests" />`
+      in CliClient.Core.csproj to test internal helpers
+      (BuildUrl/ExtractBody) without exposing them publicly.
+      Build clean (0 warnings, 0 errors). dotnet test: Passed 44, Failed 0.
+      Live integration test against a real Net7SSL server lands in
+      Item 9 (Workflow: connect-and-login smoke target) and Phase T.
 
 - [ ] Item 5 — Global → master → sector handoff (TCP redirect, server-list parse)
       Status: not started

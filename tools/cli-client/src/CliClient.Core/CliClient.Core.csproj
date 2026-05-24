@@ -6,4 +6,7 @@
     <IsPackable>false</IsPackable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="CliClient.UnitTests" />
+  </ItemGroup>
 </Project>
