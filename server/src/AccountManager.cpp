@@ -13,7 +13,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -84,9 +84,8 @@ void AccountManager::SetupTickets()
 
     void AccountManager::UpdateLoginTime(long account_id)
     {
-	    char queryString[256];
 	    sql_query_c TimeUpdate(&m_SQL_Conn);
-		
+
 		char timestr[32];
 		time_t rawtime;
 		tm gmttime;
@@ -94,20 +93,20 @@ void AccountManager::SetupTickets()
 		gmtime_s(&gmttime, &rawtime);
 		strftime(timestr, sizeof(timestr), "%Y/%m/%d %H:%M:%S", &gmttime);
 
-	    sprintf_s(queryString, sizeof(queryString), "CALL net7_user.accLogin(%d, '%s')", account_id, timestr);
-	    TimeUpdate.run_query(queryString);
+	    TimeUpdate.AddParam((long)account_id);
+	    TimeUpdate.AddParam(timestr);
+	    TimeUpdate.run_query_params("CALL net7_user.accLogin(?, ?)");
     }
 
     long AccountManager::GetAccountStatus(char *username)
     {
-        char query_str[256];
 	    sql_query_c account_query (&m_SQL_Conn);
-	    sql_result_c account_result;      
+	    sql_result_c account_result;
         sql_row_c account_row;
-    
-        sprintf_s(query_str, sizeof(query_str), "SELECT `status` FROM `accounts` WHERE `username` = '%s'", username);
 
-        if (!account_query.run_query(query_str) || account_query.n_rows() == 0)
+        account_query.AddParam(username);
+        if (!account_query.run_query_params("SELECT `status` FROM `accounts` WHERE `username` = ?")
+            || account_query.n_rows() == 0)
         {
             return -2;
         }
@@ -120,14 +119,13 @@ void AccountManager::SetupTickets()
 
     bool AccountManager::GetEmailAddress(char *username, char *buffer, int buflen)
     {
-        char query_str[256];
 	    sql_query_c account_query (&m_SQL_Conn);
-	    sql_result_c account_result;      
+	    sql_result_c account_result;
         sql_row_c account_row;
-    
-        sprintf_s(query_str, sizeof(query_str), "SELECT `email` FROM `accounts` WHERE `username` = '%s'", username);
 
-        if (!account_query.run_query(query_str) || account_query.n_rows() == 0)
+        account_query.AddParam(username);
+        if (!account_query.run_query_params("SELECT `email` FROM `accounts` WHERE `username` = ?")
+            || account_query.n_rows() == 0)
         {
             return false;
         }
@@ -141,14 +139,13 @@ void AccountManager::SetupTickets()
 
     long AccountManager::GetAccountID(char *username)
     {
-        char query_str[256];
 	    sql_query_c account_query(&m_SQL_Conn);
-	    sql_result_c account_result;        
+	    sql_result_c account_result;
         sql_row_c account_row;
-    
-        sprintf_s(query_str, sizeof(query_str), "SELECT `id` FROM `accounts` WHERE `username` = '%s'", username);
 
-        if (!account_query.run_query(query_str) || account_query.n_rows() == 0)
+        account_query.AddParam(username);
+        if (!account_query.run_query_params("SELECT `id` FROM `accounts` WHERE `username` = ?")
+            || account_query.n_rows() == 0)
         {
             return -1;
         }
@@ -162,15 +159,15 @@ void AccountManager::SetupTickets()
     //Validates the username/password set, returns the account if valid
     long AccountManager::ValidateAccount(char *username, char *password)
     {
-	    char query_str[256];
 	    sql_query_c account_query(&m_SQL_Conn);
-	    sql_result_c account_result;      
+	    sql_result_c account_result;
         sql_row_c account_row;
 
-        sprintf_s(query_str, sizeof(query_str), 
-			"SELECT `id` FROM `accounts` WHERE `username` = '%s' AND `password` = '%s'", username, password);
-
-        if (!account_query.run_query(query_str) || account_query.n_rows() == 0)
+        account_query.AddParam(username);
+        account_query.AddParam(password);
+        if (!account_query.run_query_params(
+                "SELECT `id` FROM `accounts` WHERE `username` = ? AND `password` = ?")
+            || account_query.n_rows() == 0)
         {
             return -1;
         }
@@ -209,12 +206,11 @@ void AccountManager::SetupTickets()
     {
 	    LogMessage("Changing access to (%d) for `%s`\n", status, username);
 
-        char query_str[256];
 	    sql_query_c account_query(&m_SQL_Conn);
-
-	    sprintf_s(query_str, sizeof(query_str), 
-			"UPDATE `accounts` SET `status`='%d' WHERE `username`='%s'", status, username);
-        if (!account_query.run_query(query_str))
+	    account_query.AddParam((long)status);
+	    account_query.AddParam(username);
+        if (!account_query.run_query_params(
+                "UPDATE `accounts` SET `status`=? WHERE `username`=?"))
         {
             return false;
         }
@@ -226,12 +222,13 @@ void AccountManager::SetupTickets()
     {
 	    LogMessage("Changing password on %s\n", username);
 
-	    char query_str[256];
 	    sql_query_c account_query(&m_SQL_Conn);
-
-	    sprintf_s(query_str, sizeof(query_str), 
-			"UPDATE `accounts` SET `password`= MD5('%s') WHERE `username`='%s'", password, username);
-        if (!account_query.run_query(query_str))
+	    // MD5() runs server-side over the bound literal â€” bind value never
+	    // escapes the parameter slot.
+	    account_query.AddParam(password);
+	    account_query.AddParam(username);
+        if (!account_query.run_query_params(
+                "UPDATE `accounts` SET `password`= MD5(?) WHERE `username`=?"))
         {
             return false;
         }
@@ -241,11 +238,11 @@ void AccountManager::SetupTickets()
 
     bool AccountManager::IsForbidden(char *name)
     {
-	    char query_str[256];
 	    sql_query_c account_query (&m_SQL_Conn);
-
-	    sprintf_s(query_str, sizeof(query_str), "SELECT * FROM `forbidden_names` WHERE `nickname` =  '%s'", name);
-	    if (account_query.run_query(query_str) && account_query.n_rows() > 0)
+	    account_query.AddParam(name);
+	    if (account_query.run_query_params(
+	            "SELECT * FROM `forbidden_names` WHERE `nickname` = ?")
+	        && account_query.n_rows() > 0)
         {
             return true;
         }
@@ -255,11 +252,11 @@ void AccountManager::SetupTickets()
 
     bool AccountManager::IsUsernameUnique(char *name)
     {
-	    char query_str[256];
 	    sql_query_c account_query (&m_SQL_Conn);
-
-	    sprintf_s(query_str, sizeof(query_str), "SELECT * FROM `avatar_data` WHERE `first_name` =  '%s'", name);
-	    if (account_query.run_query(query_str) && account_query.n_rows() > 0)
+	    account_query.AddParam(name);
+	    if (account_query.run_query_params(
+	            "SELECT * FROM `avatar_data` WHERE `first_name` = ?")
+	        && account_query.n_rows() > 0)
         {
             return false;
         }
@@ -269,21 +266,20 @@ void AccountManager::SetupTickets()
 
     void AccountManager::DeleteCharacter(long avatar_id)
     {
-        char query_str[256];
 	    sql_query_c account_query (&m_SQL_Conn);
 
 	    //Delete this character from the tables
-        sprintf_s(query_str, sizeof(query_str), "DELETE FROM `ship_info` WHERE `avatar_id` = '%d'", avatar_id);
-	    account_query.run_query(query_str);
+	    account_query.AddParam((long)avatar_id);
+	    account_query.run_query_params("DELETE FROM `ship_info` WHERE `avatar_id` = ?");
 
-	    sprintf_s(query_str, sizeof(query_str), "DELETE FROM `ship_data` WHERE `avatar_id` = '%d'", avatar_id);
-	    account_query.run_query(query_str);
+	    account_query.AddParam((long)avatar_id);
+	    account_query.run_query_params("DELETE FROM `ship_data` WHERE `avatar_id` = ?");
 
-	    sprintf_s(query_str, sizeof(query_str), "DELETE FROM `avatar_data` WHERE `avatar_id` = '%d'", avatar_id);
-	    account_query.run_query(query_str);
+	    account_query.AddParam((long)avatar_id);
+	    account_query.run_query_params("DELETE FROM `avatar_data` WHERE `avatar_id` = ?");
 
-	    sprintf_s(query_str, sizeof(query_str), "DELETE FROM `avatar_info` WHERE `avatar_id` = '%d'", avatar_id);
-	    account_query.run_query(query_str);
+	    account_query.AddParam((long)avatar_id);
+	    account_query.run_query_params("DELETE FROM `avatar_info` WHERE `avatar_id` = ?");
 
 		g_SaveMgr->AddSaveMessage(SAVE_CODE_FULL_CHARACTER_WIPE, avatar_id, 0, 0);
 
@@ -298,22 +294,21 @@ void AccountManager::SetupTickets()
 
     bool AccountManager::SaveDatabase(CharacterDatabase * database, long avatar_id)
     {
-	    char query_str[256];
 	    sql_query_c account_query (&m_SQL_Conn);
 
         //We need to completely remove the character we are saving (in this order due to foreign keys)
 
-	    sprintf_s(query_str, sizeof(query_str), "DELETE FROM `ship_info` WHERE `avatar_id` = '%d'", avatar_id);
-	    if (!account_query.run_query(query_str)) return false;
+	    account_query.AddParam((long)avatar_id);
+	    if (!account_query.run_query_params("DELETE FROM `ship_info` WHERE `avatar_id` = ?")) return false;
 
-	    sprintf_s(query_str, sizeof(query_str), "DELETE FROM `ship_data` WHERE `avatar_id` = '%d'", avatar_id);
-	    if (!account_query.run_query(query_str)) return false;
+	    account_query.AddParam((long)avatar_id);
+	    if (!account_query.run_query_params("DELETE FROM `ship_data` WHERE `avatar_id` = ?")) return false;
 
-	    sprintf_s(query_str, sizeof(query_str), "DELETE FROM `avatar_data` WHERE `avatar_id` = '%d'", avatar_id);
-	    if (!account_query.run_query(query_str)) return false;
+	    account_query.AddParam((long)avatar_id);
+	    if (!account_query.run_query_params("DELETE FROM `avatar_data` WHERE `avatar_id` = ?")) return false;
 
-	    sprintf_s(query_str, sizeof(query_str), "DELETE FROM `avatar_info` WHERE `avatar_id` = '%d'", avatar_id);
-	    if (!account_query.run_query(query_str)) return false;
+	    account_query.AddParam((long)avatar_id);
+	    if (!account_query.run_query_params("DELETE FROM `avatar_info` WHERE `avatar_id` = ?")) return false;
 
 	    sql_query account_builder;
 
@@ -512,7 +507,6 @@ void AccountManager::SetupTickets()
     {
 	    memset(database, 0, sizeof(CharacterDatabase));
 
-	    char query_str[256];
 		long sector_id;
 	    sql_query_c account_query (&m_SQL_Conn);
 	    sql_result_c account_result;
@@ -522,9 +516,9 @@ void AccountManager::SetupTickets()
 	    ///////////////////////////    Read in AvatarInfo   ///////////////////////////////
 	    ///////////////////////////////////////////////////////////////////////////////////
 
-        sprintf_s(query_str, sizeof(query_str), "SELECT * FROM `avatar_info` WHERE `avatar_id` = '%d'", avatar_id);
-
-	    if (!account_query.run_query(query_str) || account_query.n_rows() == 0)
+        account_query.AddParam((long)avatar_id);
+	    if (!account_query.run_query_params("SELECT * FROM `avatar_info` WHERE `avatar_id` = ?")
+	        || account_query.n_rows() == 0)
 	    {
 		    //LogMessage("Could not load AvatarInfo for id %d\n", avatar_id);
 		    return false;
@@ -557,9 +551,9 @@ void AccountManager::SetupTickets()
 	    ///////////////////////////    Read in AvatarData   ///////////////////////////////
 	    ///////////////////////////////////////////////////////////////////////////////////
 
-        sprintf_s(query_str, sizeof(query_str), "SELECT * FROM `avatar_data` WHERE `avatar_id` = '%d'", avatar_id);
-
-	    if (!account_query.run_query(query_str) || account_query.n_rows() == 0)
+        account_query.AddParam((long)avatar_id);
+	    if (!account_query.run_query_params("SELECT * FROM `avatar_data` WHERE `avatar_id` = ?")
+	        || account_query.n_rows() == 0)
 	    {
 		    //LogMessage("Could not load AvatarData for id %d\n", avatar_id);
 		    return false;
@@ -638,9 +632,9 @@ void AccountManager::SetupTickets()
 	    ///////////////////////////     Read in ShipData    ///////////////////////////////
 	    ///////////////////////////////////////////////////////////////////////////////////
     
-        sprintf_s(query_str, sizeof(query_str), "SELECT * FROM `ship_data` WHERE `avatar_id` = '%d'", avatar_id);
-
-	    if (!account_query.run_query(query_str) || account_query.n_rows() == 0)
+        account_query.AddParam((long)avatar_id);
+	    if (!account_query.run_query_params("SELECT * FROM `ship_data` WHERE `avatar_id` = ?")
+	        || account_query.n_rows() == 0)
 	    {
 		    //LogMessage("Could not load ShipInfo for id %d\n", avatar_id);
 		    return false;
@@ -706,9 +700,9 @@ void AccountManager::SetupTickets()
     
         //Load in the mounts and location of the player
         //assume that the data is intact
-        sprintf_s(query_str, sizeof(query_str), "SELECT * FROM `ship_info` WHERE `avatar_id` = '%d'", avatar_id);
-
-	    if (!account_query.run_query(query_str) || account_query.n_rows() == 0)
+        account_query.AddParam((long)avatar_id);
+	    if (!account_query.run_query_params("SELECT * FROM `ship_info` WHERE `avatar_id` = ?")
+	        || account_query.n_rows() == 0)
 	    {
 		    //LogMessage("Could not load ShipInfo for id %d\n", avatar_id);
 		    return false;

@@ -120,7 +120,10 @@ public:
     void AddParam(const char *v);
     void AddParamNull();
     void ClearParams();
-    int execute_params(const char *sql);
+    int  execute_params(const char *sql);
+    // Same as execute_params(), but logs error on failure (parity with
+    // run_query() vs execute()). Returns true on success.
+    bool run_query_params(const char *sql);
 
     void store(sql_result_c *result);
 

@@ -419,6 +419,17 @@ void sql_query_c::ClearParams()
     if (params) { delete params; params = 0; }
 }
 
+bool sql_query_c::run_query_params(const char *sql)
+{
+    if (execute_params(sql) == 0 && Error() > 0)
+    {
+        LogMySQLMsg("Error executing parameterised query:\n\n%s\n\n", sql);
+        LogMySQLMsg("Error #%d: %s\n\n", Error(), ErrorMsg());
+        return false;
+    }
+    return true;
+}
+
 int sql_query_c::execute_params(const char *sql)
 {
     free_result();
