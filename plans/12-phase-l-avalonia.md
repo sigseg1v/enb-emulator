@@ -1127,8 +1127,39 @@ so Tier 12 is split:
               `INewSectorObjectDialog` (replaces newSectorObject form).
       Build: 0 warnings, 0 errors.
 
+      **Wave 3 — dialog ports (DONE):**
+        - [x] `Dialogs/AboutBox.cs` (~65 LOC) — merges AboutBox1/2;
+              reflection over AssemblyInfo.
+        - [x] `Dialogs/Settings.cs` (~80 LOC) + `Utilities/EditorSettings.cs`
+              (~60 LOC) — replaces WinForms Properties.Settings.Default
+              with a JSON-backed store beside the binary.
+        - [x] `Dialogs/NewSystem.cs`, `Dialogs/NewSector.cs`,
+              `Dialogs/NewSectorObjectType.cs`, `Dialogs/NewFrm.cs` —
+              system / sector / type-picker / 3-way dispatcher.
+        - [x] `Dialogs/NewSectorObject.cs` (~370 LOC, down from 624) —
+              6-typed-object creator. Collapses 23-line × 6-arm column
+              copy-paste into `FillCommonFromBase(...)` helper; preserves
+              identical column writes + sound-effect-range default
+              + Y-flip in setPosition. Implements INewSectorObjectDialog.
+        - [x] `Dialogs/OptionsGui.cs` (~110 LOC, down from 749) — 9
+              toggles × 6 categories collapsed into a single
+              `Toggles[]` × `Categories[]` table + one dispatching
+              CheckBox handler.
+        - [x] `Dialogs/SoundEffects.cs`, `Dialogs/Destination.cs`,
+              `Dialogs/HarvestableResTypes.cs`, `Dialogs/MobGroup.cs`,
+              `Dialogs/BaseAssets.cs` — pickers / two-list editors /
+              two-grid editor. DataGridView → Avalonia DataGrid,
+              ListView → Avalonia ListBox, quirky group_index dedup
+              preserved verbatim in MobGroup.
+        - [x] `Dialogs/frmContrast.cs` (~70 LOC) — Slider dropdown.
+        - [x] Login dialog: not ported (redundant) — sector-editor-avalonia
+              already uses `CommonTools.Gui.Login` via `Program.cs`,
+              which is the shared cross-tool login with `LoginData.User/
+              Pass/Host/Port` and Config.xml roundtrip already covered.
+
+      Build: 0 warnings, 0 errors.
+
       **Wave 3+ (still pending):**
-        - 15 dialog ports (NewSystem/NewSector/NewMob/... etc.)
         - `mainFrm.selected*` static-globals refactor decision
           (currently parked behind `EditorGlobals` static class)
         - Real Avalonia property panel (replacing NullPropertyHost

@@ -120,6 +120,10 @@ namespace SectorEditorAvalonia.Utilities
     public static class EditorGlobals
     {
         public static int SelectedObjectId;
+        // SectorWindow installs this on activation so dialogs (Destination,
+        // MobGroup, HarvestableResTypes) can query within the current
+        // sector context. Replaces `mainFrm.sectorID`.
+        public static int SectorID;
         public static IFactionLookup Factions = new NullFactionLookup();
     }
 }
