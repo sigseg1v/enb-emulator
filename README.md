@@ -18,19 +18,7 @@ These projects it's based on are super old code but the Net-7 current codebase i
 
 ## Project status
 
-Tracked in `plans/00-master.md`. The summary:
-
-| Phase | What | Status |
-|---|---|---|
-| A | Repo merge + scaffolding + docs | in progress |
-| B | Best-effort Linux server build (CMake, Win32→POSIX shims) | not started |
-| C | Postgres migration (schema + start of C++ call-site migration) | not started |
-| D | C# tools → .NET 10 (WinForms on net10.0-windows) | not started |
-| E | OpenSSL 1.0 → 3.x | not started |
-| F | Warning cleanup | not started |
-| G | Tests | not started |
-| H | Deepen docs (protocol RE, runtime walkthroughs) | not started |
-| I | Dev env polish (justfile, docker-compose hot-reload, CI matrix, OCI images) | not started |
+Tracked in `plans/*.md`. 
 
 ## Quickstart
 
