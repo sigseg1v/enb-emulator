@@ -13,8 +13,8 @@ struct EnbTcpHeader
 
 struct VersionRequest
 {
-    long    Major;      // 4 bytes
-    long    Minor;      // 4 bytes
+    int32_t Major;      // 4 bytes on every platform (Phase K — was `long`,
+    int32_t Minor;      // 4 bytes   which is 8 bytes on Linux x86_64)
 } ATTRIB_PACKED;
 
 struct EnbUdpHeader
@@ -226,17 +226,23 @@ struct GlobalCreateCharacter
 
 struct MasterJoin
 {
-    long    unknown1;
-    long    unknown2;
-    long    unknown3;
-    long    avatar_id_msb;
-    long    avatar_id_lsb;
-    long    ToSectorID;
-    long    FromSectorID;
-    long    PlayerLevel;
-    long    unknown8;
-    long    unknown9;
-    long    unknown10;
+    // Phase K: 11 * int32_t + 20-byte ticket = 64 bytes on every platform.
+    // Was `long`-based, which is 8 bytes on Linux x86_64 (struct = 108B) vs
+    // 4 bytes on Win32 (struct = 64B). The wire format is 64 bytes; the Linux
+    // mismatch caused HandleMasterJoin to read avatar_id_lsb / ToSectorID from
+    // bytes 32 / 40 instead of 16 / 20, yielding zeros and triggering the
+    // SendMasterLogin-timeout fallback path on every join.
+    int32_t unknown1;
+    int32_t unknown2;
+    int32_t unknown3;
+    int32_t avatar_id_msb;
+    int32_t avatar_id_lsb;
+    int32_t ToSectorID;
+    int32_t FromSectorID;
+    int32_t PlayerLevel;
+    int32_t unknown8;
+    int32_t unknown9;
+    int32_t unknown10;
     char    ticket[20];
 } ATTRIB_PACKED;
 
