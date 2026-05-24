@@ -913,29 +913,32 @@ classes. There is no Avalonia port of Piccolo2D. Trying to do this in a
 single commit produces either an unreviewable diff or a broken half-port,
 so Tier 12 is split:
 
-- [~] **Tier 12a — project scaffold + window shell**
-      Status: in progress (this commit)
+- [x] **Tier 12a — project scaffold + window shell**
+      Status: done (commit 91ea17c)
       Touches: `tools/sector-editor-avalonia/` (csproj, App.axaml{,cs},
       app.manifest, Program.cs with `--smoke`, `Windows/MainWindow.{axaml,axaml.cs}`,
       README, `tools/Net7Tools.slnx`)
       Notes: `dotnet build` clean, `--smoke` instantiates shared
       `commontools-avalonia` Login + MainWindow shell (TreeView left,
       tabbed canvas centre, properties right). No data layer, no
-      dialogs, no Piccolo shim, no sprites yet. Continuation tracked
-      below.
+      dialogs, no Piccolo shim, no sprites yet.
 
-- [ ] **Tier 12b — Sql/ layer ported through `commontools-avalonia` DB**
-      Status: not started
+- [x] **Tier 12b — Sql/ layer ported through `commontools-avalonia` DB**
+      Status: done
       Touches: `tools/sector-editor-avalonia/Sql/` (Database.cs facade,
-      SectorsSql, SystemsSql, MobsSQL, BaseAssetSQL, FactionSql,
-      Navs, SectorObjects, SectorObjectsSql, MobConvertSQL, Helpers,
-      Sectors, Systems)
-      Notes: kills the ~150 sprintf-style SQL sites in the original
-      (every `UPDATE sectors SET ... where sector_id='" + r["sector_id"] + "'`
-      becomes a `DB.Instance.executeCommand(query, params, values)` call).
-      This is the "closes a stack of SQL-injection holes" tier — same
-      shape as faction-editor / mob-editor / station-tools Sql layer
-      ports.
+      BaseAssetSQL, FactionSql, MobsSQL, Navs, SectorObjects,
+      SectorObjectsSql, Sectors, SectorsSql, Systems, SystemsSql)
+      Notes: every `UPDATE … SET col='"+r["col"]+"'` site in the
+      WinForms editor now rides a `?col` placeholder routed through
+      `CommonTools.Database.DB.Instance.executeCommand(query, paramNames,
+      paramValues)`. Dropped two files: `Helpers.cs` (SQLData → replaced
+      by commontools `LoginData.ConnStr`) and `MobConvertSQL.cs` (one-shot
+      migration script targeting a defunct `tmp_enbemulator` database —
+      dead code, not carried). `Database.executeQuery(DatabaseName, …)`
+      facade kept as the entry point so the Tier 12e sprite port reads
+      as a near-1:1 translation; second DatabaseName value rejected
+      with a loud throw to surface any forgotten call site. Build clean,
+      smoke green.
 
 - [ ] **Tier 12c — simple dialogs**
       Status: not started
