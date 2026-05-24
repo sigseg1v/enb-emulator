@@ -82,7 +82,6 @@ bool SectorContentParser::ParseSectorContent(long parse_id)
     Object *current_object = 0;
 	MOB *turret;
 	MOBSpawn *mobspawn;
-	char QueryString[1024];
 
 	if(!g_MySQL_User || !g_MySQL_Pass) {
 		printf("You need to set a mysql user/pass in the net7.cfg\n");
@@ -224,7 +223,8 @@ bool SectorContentParser::ParseSectorContent(long parse_id)
         sql_result_c *Object_result = &object_result;
         
         //TODO: just change the sectorID
-        sprintf_s(QueryString, sizeof(QueryString), 
+        GameObjects.AddParam((long)current_sector->sector_id);
+        const char *game_objects_sql =
 			"SELECT * FROM `sector_objects` left join `sector_nav_points`"
             " on sector_objects.sector_object_id = sector_nav_points.sector_object_id"
             " left join `sector_objects_harvestable`"
@@ -242,15 +242,14 @@ bool SectorContentParser::ParseSectorContent(long parse_id)
 			//" left join `net7_user.server_local_field_respawn_times`"
 			//" left join `server_local_field_respawn_times`"
 			//" on sector_object.sector_object_id = server_local_field_respawn_times.resource_id"
-            " where sector_objects.sector_id='%d'", current_sector->sector_id);
+            " where sector_objects.sector_id=?";
 
-		char query2[256];
-        
-		if ( !GameObjects.execute( QueryString ) )
+		if ( !GameObjects.execute_params( game_objects_sql ) )
 		{
 			printf( "MySQL Error (GameObjects)\n" );
 			return 0;
 		}
+
 
 		GameObjects.store(Object_result);		
 
@@ -392,10 +391,9 @@ bool SectorContentParser::ParseSectorContent(long parse_id)
 					sql_query_c FldUpdate(&connection);
 					sql_result_c FldResult;
 
-					sprintf_s(query2, sizeof(query2), 
-						"SELECT * FROM net7_user.server_local_field_respawn_times WHERE resource_id = '%d'", object_uid);
-
-					FldUpdate.execute(query2);
+					FldUpdate.AddParam((long)object_uid);
+					FldUpdate.execute_params(
+						"SELECT * FROM net7_user.server_local_field_respawn_times WHERE resource_id = ?");
 					FldUpdate.store(&FldResult);
 					long local_respawn = 0;
 					
@@ -697,14 +695,12 @@ void SectorContentParser::AddResourceTypes(Object *obj, long resource_id, sql_co
 {
     sql_query_c Resource_types( connection );
     sql_result_c result;
-    char QueryString[128];
 
-    sprintf_s(QueryString, sizeof(QueryString), 
-		"SELECT * FROM `sector_objects_harvestable_restypes` WHERE `group_id` = '%d'", resource_id);
-
-    if ( !Resource_types.execute( QueryString ) )
+    Resource_types.AddParam(resource_id);
+    if ( !Resource_types.execute_params(
+            "SELECT * FROM `sector_objects_harvestable_restypes` WHERE `group_id` = ?" ) )
     {
-        printf( "MySQL Error (Reading Resouce types for resource_id %d)\n", resource_id );
+        printf( "MySQL Error (Reading Resouce types for resource_id %ld)\n", resource_id );
         return;
     }
 
@@ -756,17 +752,15 @@ void SectorContentParser::AddFieldOreIDs(Object *obj, long object_id, sql_connec
 {
     sql_query_c Ore_types( connection );
     sql_result_c result;
-    char QueryString[128];
 
 	//first blank out all existing entries in list
 	obj->BlankItemIDs();
 
-	sprintf_s(QueryString, sizeof(QueryString),
-		"SELECT * FROM `sector_objects_harvestable_oretypes` WHERE `resource_id` = '%d'", object_id);
-
-    if ( !Ore_types.execute( QueryString ) )
+	Ore_types.AddParam(object_id);
+    if ( !Ore_types.execute_params(
+            "SELECT * FROM `sector_objects_harvestable_oretypes` WHERE `resource_id` = ?" ) )
     {
-		printf( "MySQL Error (Reading sector_objects_harvestable_oretypes types for resource_id %d)\n", object_id );
+		printf( "MySQL Error (Reading sector_objects_harvestable_oretypes types for resource_id %ld)\n", object_id );
         return;
     }
 
@@ -873,15 +867,14 @@ void SectorContentParser::LoadAsteroidContentSelection(sql_connection_c *connect
 {
     sql_query_c Ore_types( connection );
     sql_result_c result;
-    char QueryString[128];
 	u32 ore_index = 0;
 	AsteroidSubcatVec *sub_cat_vec;
 
 	for (int i = 1; i <= RESOURCE_TYPE_SIZE; i++)
 	{
-		sprintf_s(QueryString, sizeof(QueryString), 
-			"SELECT * FROM `asteroid_content_selection` WHERE `asteroid_type` = '%d'", i);
-		if ( !Ore_types.execute( QueryString ) )
+		Ore_types.AddParam((long)i);
+		if ( !Ore_types.execute_params(
+				"SELECT * FROM `asteroid_content_selection` WHERE `asteroid_type` = ?" ) )
 		{
 			printf( "MySQL Error (Reading asteroid_content_selection types for asteroid_type %d)\n", i );
 			return;
