@@ -140,6 +140,25 @@ if(OpenSSL_FOUND)
         Threads::Threads
     )
     gtest_discover_tests(replay_test)
+
+    # Phase K: opcode round-trip against the live proxy. Send MasterJoin
+    # after handshake, expect ServerRedirect. Env-gated like the others.
+    add_executable(master_join_test
+        client/master_join_test.cpp
+        client/handshake_driver.cpp
+        client/tcp_client.cpp
+        client/westwood/westwood_rsa.cpp
+        client/westwood/westwood_rc4.cpp
+    )
+    target_include_directories(master_join_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/client
+    )
+    target_link_libraries(master_join_test PRIVATE
+        GTest::gtest_main
+        OpenSSL::Crypto
+        Threads::Threads
+    )
+    gtest_discover_tests(master_join_test)
 else()
     message(STATUS "net7-tests: OpenSSL not found — skipping handshake_test")
 endif()

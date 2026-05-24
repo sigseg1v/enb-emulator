@@ -112,6 +112,11 @@ services:
     ports:
       - "3801:3801/tcp"
       - "3805:3805/tcp"
+      # Phase K: SECTOR_SERVER_PORT — second-stage connect target the
+      # client hits after MasterJoin returns a ServerRedirect. Same
+      # Connection ctor / handshake / framed-dispatch path as 3801/3805,
+      # routed with m_ServerType=CLIENT_TO_SECTOR_SERVER.
+      - "3500:3500/tcp"
     restart: unless-stopped
 
   # --------------------------------------------------------------
