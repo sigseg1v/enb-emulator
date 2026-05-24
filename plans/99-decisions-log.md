@@ -589,3 +589,35 @@ Tier 12e splits into waves because the sprite/window port is ~6000 LOC across 6 
 **PiccoloSmoke now exercises real sprite construction**: the original `PiccoloSmoke.Run` covered the shim's primitive APIs only (PNode/PLayer/PCanvas/event-fire/drag). Wave 1 adds `RunSpriteSmoke()` that builds a 35-column fixture DataTable (all sector columns + the typo columns), constructs SectorBoundsSprite + SectorBounds + Sector + SystemSprite + SystemWindow with 2 sectors, picks on Earth's coords, raises MouseDown, asserts the picked Tag is a SectorSprite, asserts host.SelectedObject got populated, then round-trips `OnPropertyValueChanged` + `newSector`. This is the first time the shim has been tested against real Net-7-derived sprite code rather than synthetic primitives — the prior Tier 12d note's caveat is now retired for these 5 sprites.
 
 Wave 2 next: Mob + MobSprite (template for the other sprite pairs) → Planet/Stargate/Starbase/Decoration/Harvestable → SectorWindow (the big one, 1825 LOC) → dialogs → real property panel.
+
+## 2026-05-24 — `Replay.LivePostHandshakeReplay` honesty fix
+
+**Discovery.** The C++ ctest `Replay.LivePostHandshakeReplay` was claiming
+to verify "Linux opcode dispatch produces the same opcode the original
+server did on the same input" but actually verified the proxy's Phase J
+fallback path. Chain: the test sends MasterJoin (`0x0035`) expecting
+ServerRedirect (`0x0036`) in reply; the proxy normally relays MasterJoin
+to a real MVAS over UDP/3808 and forwards the response, but when MVAS is
+unreachable it falls back to `Connection::SendServerRedirect()` locally
+(`proxy/ClientToMasterServer.cpp:124`) — which emits `0x0036` regardless.
+The `integration-test` CI job only runs the proxy container, so MVAS was
+unreachable and the fallback fired on every CI run. Result: the assertion
+`opcode_mismatches == 0` was trivially green and would have stayed green
+even if `UDPConnection::SendMasterLogin` were entirely broken.
+
+**Fix.** `tests/client/replay_test.cpp` now gates `verify_response_opcode`
+on `NET7_TEST_REAL_MVAS=1`. The proxy-only `integration-test` CI job runs
+without the env var (test still exercises handshake + reply path + RC4
+ciphering, but no longer asserts a round-trip it can't verify). A new
+step in `cli-integration-test` brings up the full docker-compose stack
+(mysql + login + proxy + server) and re-runs the ctest with
+`NET7_TEST_REAL_MVAS=1` so the strict round-trip actually fires once per
+CI build, against a real MVAS.
+
+**Why this matters.** "Tests pass for the right reason" is load-bearing
+for the preservation goal. A test that passes because the proxy synthesised
+the expected opcode in a stub path tells us nothing about whether the real
+Linux dispatch works; that's exactly the kind of false-green CI signal
+that would let a UDP-plane regression land silently. The fix preserves
+the test's existence (still catches handshake/reply regressions) while
+removing the overclaim and restoring it under conditions where it's true.

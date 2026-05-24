@@ -231,7 +231,13 @@ jobs:
         run: |
           cmake -S tests -B build/tests -G Ninja
           cmake --build build/tests --target handshake_live_test replay_test -j"$(nproc)"
-      - name: Run live ctest
+      - name: Run live ctest (proxy-only — handshake + reply path only)
+        # NOTE: This job runs the proxy in isolation, with no MVAS / sector
+        # server behind it. The Replay.LivePostHandshakeReplay test
+        # therefore does NOT set NET7_TEST_REAL_MVAS, so its strict
+        # response-opcode round-trip is skipped (with a warning). The
+        # strict round-trip assertion runs in cli-integration-test below,
+        # which brings up the full docker-compose stack.
         env:
           NET7_TEST_PROXY_HOST: 127.0.0.1
           NET7_TEST_PROXY_PORT: "3801"
@@ -274,6 +280,26 @@ jobs:
         run: |
           dotnet build tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
             --configuration Debug
+      - name: Build + run C++ ctest with real MVAS behind the proxy
+        # The integration-test job above can only verify the proxy's
+        # reply path (its fallback ServerRedirect has the same opcode the
+        # capture expected, so a round-trip assertion there is trivially
+        # green). Here the full docker-compose stack is up, including
+        # MVAS, so the proxy's UDPConnection::SendMasterLogin can reach
+        # a real server and the strict response-opcode round-trip is
+        # meaningful. Setting NET7_TEST_REAL_MVAS=1 enables that strict
+        # assertion in tests/client/replay_test.cpp.
+        env:
+          NET7_TEST_PROXY_HOST: 127.0.0.1
+          NET7_TEST_PROXY_PORT: "3801"
+          NET7_TEST_REAL_MVAS: "1"
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            g++ cmake ninja-build pkg-config libssl-dev
+          cmake -S tests -B build/tests -G Ninja
+          cmake --build build/tests --target handshake_live_test replay_test -j"$(nproc)"
+          ctest --test-dir build/tests --output-on-failure -R 'Replay\.LivePostHandshakeReplay'
       - name: Run integration suite
         env:
           # ServerFixture owns the lifecycle when we DON'T pass this.
