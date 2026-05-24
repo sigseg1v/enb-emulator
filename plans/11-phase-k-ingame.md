@@ -48,8 +48,8 @@ Goal: take the Phase J "TLS terminates, handshake works, opcodes are dispatched"
       Status: not started
       Touches: `tests/client/replay_test.cpp`, `tests/client/captures/`
 
-- [ ] Wire `master_join_test` into the `just integration-test` target. Currently `gtest_discover_tests` registers it but the recipe doesn't invoke ctest in a way that picks it up automatically (the existing suite is hardcoded). Should be one ctest invocation after the proxy/login containers are up.
-      Status: not started
+- [x] Wire `master_join_test` into the `just integration-test` target.
+      Status: done — added `master_join_test` to the cmake `--target` list and `MasterJoin` to the ctest `-R` filter. `just integration-test` now reports 6/6 green (5 prior tests + new MasterJoin round-trip).
       Touches: `justfile`
 
 - [ ] PacketStructures.h `long` → `int32_t` migration. The structs sent over the wire use `long`, which is 4 bytes on Win32 and 8 bytes on Linux x86_64. This makes MasterJoin 64 vs 108 bytes and ServerRedirect 10 vs 18 bytes, and `proxy/Connection.cpp` Linux SendResponse currently stamps `size = payload + sizeof(long)` (= 8) leaving a 4-byte gap between header and payload. A real Win32 client talking to a Linux proxy would fail; right now only the test client compiled on Linux works because both sides agree on long=8.

@@ -158,10 +158,10 @@ integration-test:
         echo ">>> reusing existing proxy on tcp/3801"
     fi
     cmake -S tests -B build/tests -G Ninja
-    cmake --build build/tests --target handshake_live_test replay_test -j"$(nproc)"
+    cmake --build build/tests --target handshake_live_test replay_test master_join_test -j"$(nproc)"
     NET7_TEST_PROXY_HOST=127.0.0.1 NET7_TEST_PROXY_PORT=3801 \
         ctest --test-dir build/tests --output-on-failure \
-              -R 'HandshakeDriver|Replay'
+              -R 'HandshakeDriver|Replay|MasterJoin'
     if [ "$spawned" = "1" ]; then
         docker rm -f net7proxy-local
     fi
