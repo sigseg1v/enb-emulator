@@ -58,6 +58,9 @@
   <Folder Name="/faction-editor-avalonia/">
     <Project Path="faction-editor-avalonia/FactionEditorAvalonia.csproj" />
   </Folder>
+  <Folder Name="/mob-editor-avalonia/">
+    <Project Path="mob-editor-avalonia/MobEditorAvalonia.csproj" />
+  </Folder>
   <Folder Name="/w3d-parser/">
     <Project Path="w3d-parser/W3d Parser.csproj" />
   </Folder>

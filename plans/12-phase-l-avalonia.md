@@ -366,28 +366,99 @@ The existing WinForms targets stay in the tree. They still build via `dotnet bui
 
       **8/14 tools have Linux-native paths now.**
 
-### Future tier ordering (remaining 7 tools — deferred until session focus returns to Phase L)
+### Tier 6 — second MySQL editor port (complete)
+
+- [x] **mob-editor-avalonia** — full Avalonia port of
+      `tools/mob-editor/`. Original count of "3 forms" in the table above
+      undercounted: the editor actually has **5 windows** (mainFrm,
+      About, MobBaseAssets, ItemBaseAssets, plus the standalone Login).
+      All 5 ported.
+      - `mainFrm.cs` → `MainWindow.axaml{,.cs}` — 1100x760 layout:
+        toolbar (New / Copy / Save / Delete / Refresh), left pane has
+        the mob `DataGrid` + name-filter `TextBox`, right pane is a
+        `TabControl` (General Details / Equipped / Inventory).
+      - `MobBaseAssets.cs` → `MobBaseAssetsWindow.axaml{,.cs}` —
+        modal asset picker: `ComboBox` of `main_cat` values + flat
+        `ListBox` of "`<base_id>: <descr>  (<filename>)`". Returns
+        `SelectedID`.
+      - `ItemBaseAssets.cs` → `ItemBaseAssetsWindow.axaml{,.cs}` —
+        modal item picker: category `ComboBox` + Level filter
+        `ComboBox` + flat `ListBox`. Add inserts a `mob_items` row
+        via `MobItemsSQL.insertRecord` and exposes `NewMobItem`.
+      - `About.cs` → `AboutBox.axaml{,.cs}`.
+      - WinForms `PropertyGrid` for per-`mob_items` row props →
+        ad-hoc panel (NumericUpDown for usage / drop / qty). Avalonia
+        has no PropertyGrid.
+      - `DataGridView` of mobs → `DataGrid` (separate
+        `Avalonia.Controls.DataGrid` package; theme pulled in via
+        `App.axaml` `<StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml" />`).
+      - `ListView` w/ `ListViewGroup` headers + thumbnails → flat
+        `ListBox`. The repo never shipped the `images/` tree the
+        original loaded thumbnails from, and Avalonia has no native
+        grouped-thumbnail `ListView`, so we collapse to a `ListBox`
+        and (for the item picker) add a Level filter combo to
+        recover the original's grouping affordance.
+      - `Utilities/AdobeColors.cs` (**425 LOC** Win32-only
+        Photoshop-style colour picker) → `HslConvert.cs` (~40 LOC).
+        The `mobs` table tint is H/S/V floats; we only need round-trip
+        to a `Color` for the swatch rectangle on the General tab.
+      - `BackgroundWorker` → `Task.Run` + `Dispatcher.UIThread.Post`.
+      - `OpenFileDialog` → `StorageProvider.OpenFilePickerAsync`.
+      - `MessageBox.Show` → MsBox.Avalonia.
+      - All 5 SQL wrappers (`MobsSQL`, `MobItemsSQL`, `BaseAssetSQL`,
+        `ItemBaseSQL`, `FactionSql`) ported to use parameterised
+        `DB.Instance.executeQuery/executeCommand` with `?name`
+        placeholders. The original concatenated user-supplied `name`
+        and `ai` strings into SQL — port closes those injection holes
+        silently. `item_base.2d_asset` uses backticks because the
+        column name starts with a digit.
+      - Modal-picker windows get parameterless ctors
+        (`: this(null)` / `: this(0, 0, null, null, null)`) so the
+        AXAML runtime loader can find a public ctor (silences AVLN3001).
+      - Top-level `MobRow.cs` POCO satisfies `x:DataType` for the
+        compiled-bindings `DataGrid` (same AVLN2100 fix pattern as
+        faction-editor).
+      - Smoke test (`dotnet run -- --smoke`):
+      ```
+      login    OK: 290x195 "Login"
+      main     OK: 1100x760 "Mob Editor"
+      about    OK: 420x240 "About Mob Editor"
+      mobAssets OK: 500x500 "Choose Mob Base Asset"
+      itemAssets OK: 560x540 "Choose Item Base Asset"
+      smoke OK: all 5 mob-editor-avalonia windows instantiated
+      ```
+
+      Registered in `tools/Net7Tools.slnx` under
+      `/mob-editor-avalonia/`. Whole solution still builds
+      (0 errors; 4486 pre-existing legacy WinForms CA1416 warnings).
+      Touches: new `tools/mob-editor-avalonia/` (20 files: csproj,
+      app.manifest, App.axaml{,.cs}, 5 SQL wrappers, AboutBox,
+      MobRow.cs, HslConvert.cs, MobBaseAssetsWindow.axaml{,.cs},
+      ItemBaseAssetsWindow.axaml{,.cs}, MainWindow.axaml{,.cs},
+      Program.cs, README.md) + slnx entry.
+      Status: complete
+
+      **9/14 tools have Linux-native paths now.**
+
+### Future tier ordering (remaining 6 tools — deferred until session focus returns to Phase L)
 
 Recommended order:
 
-1. **mob-editor-avalonia** — 3 forms, MySQL, larger LOC. ~2 days
-   (depends on commontools-avalonia).
-
-2. **talktreeeditor-avalonia** — 5 forms, depends on
+1. **talktreeeditor-avalonia** — 5 forms, depends on
    commontools-avalonia. ~2-3 days.
 
-3. **toolslauncher-avalonia** — 6 forms incl. IRC client + FTP window.
+2. **toolslauncher-avalonia** — 6 forms incl. IRC client + FTP window.
    ~3-5 days (IRC integration via Meebey.SmartIrc4Net is the wildcard).
 
-4. **effect-editor-avalonia** (SQLBind) — 5 forms, particle effects.
+3. **effect-editor-avalonia** (SQLBind) — 5 forms, particle effects.
    ~3 days.
 
-5. **station-tools-avalonia** — 8 forms. ~4-5 days.
+4. **station-tools-avalonia** — 8 forms. ~4-5 days.
 
-6. **missioneditor-avalonia** — 9 forms incl. tree view. Depends on
+5. **missioneditor-avalonia** — 9 forms incl. tree view. Depends on
    commontools-avalonia. ~5 days.
 
-7. **sector-editor-avalonia** — 16 forms, custom map canvas
+6. **sector-editor-avalonia** — 16 forms, custom map canvas
    (System.Drawing.Graphics → Avalonia DrawingContext is the major
    work). ~2-3 weeks.
 

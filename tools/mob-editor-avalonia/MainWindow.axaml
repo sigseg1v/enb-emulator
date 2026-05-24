@@ -1,0 +1,204 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="using:MobEditorAvalonia"
+        x:Class="MobEditorAvalonia.MainWindow"
+        Width="1100" Height="760"
+        Title="Mob Editor"
+        WindowStartupLocation="CenterScreen">
+  <DockPanel>
+
+    <Menu DockPanel.Dock="Top">
+      <MenuItem Header="_File">
+        <MenuItem Header="_New"      Click="OnNewClick" />
+        <MenuItem Header="_Copy Row" Click="OnNewFromClick" />
+        <MenuItem Header="_Save"     Click="OnSaveClick" />
+        <MenuItem Header="_Delete"   Click="OnDeleteClick" />
+        <Separator />
+        <MenuItem Header="E_xit"     Click="OnExitClick" />
+      </MenuItem>
+      <MenuItem Header="_Edit">
+        <MenuItem Header="_Refresh Table" Click="OnRefreshClick" />
+      </MenuItem>
+      <MenuItem Header="_Help">
+        <MenuItem Header="_About" Click="OnAboutClick" />
+      </MenuItem>
+    </Menu>
+
+    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal"
+                Margin="6,4,6,0" Spacing="4">
+      <Button Content="New"      Click="OnNewClick" />
+      <Button Content="Copy Row" Click="OnNewFromClick" />
+      <Button Content="Save"     Click="OnSaveClick" />
+      <Button Content="Delete"   Click="OnDeleteClick" />
+      <Border Width="1" Background="Gray" Margin="6,0" />
+      <Button Content="Refresh"  Click="OnRefreshClick" />
+    </StackPanel>
+
+    <Border DockPanel.Dock="Bottom" BorderBrush="Gray" BorderThickness="0,1,0,0" Padding="6,2">
+      <TextBlock Name="c_Status" Text="Ready" />
+    </Border>
+
+    <Grid ColumnDefinitions="380,4,*">
+
+      <!-- Left pane: mob list + filter -->
+      <DockPanel Grid.Column="0" Margin="6">
+        <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto,Auto"
+              RowDefinitions="Auto,Auto" Margin="0,0,0,4">
+          <TextBlock Grid.Row="0" Grid.Column="0" Text="Level filter:"
+                     VerticalAlignment="Center" Margin="0,0,6,0" />
+          <ComboBox  Grid.Row="0" Grid.Column="1" Name="c_LevelFilterCombo"
+                     SelectionChanged="OnLevelFilterChanged" />
+
+          <TextBox   Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Name="c_SearchText"
+                     Watermark="Search by name…" Margin="0,4,4,0" />
+          <ComboBox  Grid.Row="1" Grid.Column="2" Name="c_SearchMode" Margin="0,4,4,0" />
+          <Button    Grid.Row="1" Grid.Column="3" Content="Search" Click="OnSearchClick" Margin="0,4,0,0" />
+        </Grid>
+
+        <DataGrid Name="c_MobGrid" Margin="0,4,0,0"
+                  x:DataType="local:MobRow"
+                  IsReadOnly="True" CanUserResizeColumns="True"
+                  GridLinesVisibility="All"
+                  SelectionMode="Single"
+                  SelectionChanged="OnMobGridSelectionChanged">
+          <DataGrid.Columns>
+            <DataGridTextColumn Header="ID"    Binding="{Binding MobID}" Width="60" />
+            <DataGridTextColumn Header="Name"  Binding="{Binding Name}"  Width="*" />
+            <DataGridTextColumn Header="Level" Binding="{Binding Level}" Width="60" />
+          </DataGrid.Columns>
+        </DataGrid>
+      </DockPanel>
+
+      <GridSplitter Grid.Column="1" ResizeDirection="Columns"
+                    Background="Gray" HorizontalAlignment="Stretch" />
+
+      <!-- Right pane: detail tabs -->
+      <TabControl Grid.Column="2" Margin="4">
+
+        <TabItem Header="General Details">
+          <Grid Margin="8" ColumnDefinitions="130,*,130,*"
+                RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*">
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="Name:"     VerticalAlignment="Center" Margin="0,4" />
+            <TextBox   Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="3" Name="c_NameText" Margin="0,4"
+                       TextChanged="OnNameChanged" />
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="Level:"    VerticalAlignment="Center" Margin="0,4" />
+            <ComboBox  Grid.Row="1" Grid.Column="1" Name="c_LevelCombo" Margin="0,4"
+                       SelectionChanged="OnLevelChanged" />
+            <TextBlock Grid.Row="1" Grid.Column="2" Text="Type:"     VerticalAlignment="Center" Margin="0,4" />
+            <ComboBox  Grid.Row="1" Grid.Column="3" Name="c_TypeCombo" Margin="0,4"
+                       SelectionChanged="OnTypeChanged" />
+
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="Faction:"  VerticalAlignment="Center" Margin="0,4" />
+            <ComboBox  Grid.Row="2" Grid.Column="1" Name="c_FactionCombo" Margin="0,4"
+                       SelectionChanged="OnFactionChanged" />
+            <TextBlock Grid.Row="2" Grid.Column="2" Text="Base asset:" VerticalAlignment="Center" Margin="0,4" />
+            <Grid      Grid.Row="2" Grid.Column="3" ColumnDefinitions="*,Auto" Margin="0,4">
+              <TextBox  Grid.Column="0" Name="c_BaseAssetText"
+                        TextChanged="OnBaseAssetChanged" />
+              <Button   Grid.Column="1" Content="…" Width="32" Margin="4,0,0,0"
+                        Click="OnPickBaseAssetClick" />
+            </Grid>
+
+            <TextBlock Grid.Row="3" Grid.Column="0" Text="Scale:"    VerticalAlignment="Center" Margin="0,4" />
+            <TextBox   Grid.Row="3" Grid.Column="1" Name="c_ScaleText" Margin="0,4"
+                       TextChanged="OnScaleChanged" />
+            <TextBlock Grid.Row="3" Grid.Column="2" Text="AI:"       VerticalAlignment="Center" Margin="0,4" />
+            <TextBox   Grid.Row="3" Grid.Column="3" Name="c_AiText"  Margin="0,4"
+                       TextChanged="OnAiChanged" />
+
+            <TextBlock Grid.Row="4" Grid.Column="0" Text="HSL tint:" VerticalAlignment="Top"    Margin="0,8" />
+            <Grid      Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="3"
+                       ColumnDefinitions="Auto,*,Auto,*,Auto,*" Margin="0,4">
+              <TextBlock Grid.Column="0" Text="H:" VerticalAlignment="Center" Margin="0,0,4,0" />
+              <NumericUpDown Grid.Column="1" Name="c_HueValue" FormatString="0.###"
+                             Minimum="0" Maximum="1" Increment="0.05"
+                             ValueChanged="OnHueChanged" />
+              <TextBlock Grid.Column="2" Text="S:" VerticalAlignment="Center" Margin="8,0,4,0" />
+              <NumericUpDown Grid.Column="3" Name="c_SaturationValue" FormatString="0.###"
+                             Minimum="0" Maximum="1" Increment="0.05"
+                             ValueChanged="OnSaturationChanged" />
+              <TextBlock Grid.Column="4" Text="V:" VerticalAlignment="Center" Margin="8,0,4,0" />
+              <NumericUpDown Grid.Column="5" Name="c_LightnessValue" FormatString="0.###"
+                             Minimum="0" Maximum="1" Increment="0.05"
+                             ValueChanged="OnLightnessChanged" />
+            </Grid>
+
+            <Rectangle Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="3"
+                       Height="32" Margin="0,4" StrokeThickness="1" Stroke="Gray"
+                       Name="c_TintSwatch" />
+          </Grid>
+        </TabItem>
+
+        <TabItem Header="Equipped">
+          <DockPanel Margin="8">
+            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6">
+              <Button Content="Add equipped item…" Click="OnAddEquippedClick" />
+              <Button Content="Remove selected"    Click="OnRemoveEquippedClick" />
+            </StackPanel>
+            <Grid ColumnDefinitions="*,8,260">
+              <ListBox  Grid.Column="0" Name="c_EquippedList"
+                        SelectionChanged="OnEquippedSelectionChanged" Margin="0,6,0,0" />
+              <Border   Grid.Column="2" BorderBrush="Gray" BorderThickness="1"
+                        Margin="0,6,0,0" Padding="8">
+                <StackPanel Spacing="6">
+                  <TextBlock Text="Equipped Item Properties" FontWeight="Bold" />
+                  <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto">
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Usage chance:"
+                               VerticalAlignment="Center" Margin="0,4,8,4" />
+                    <NumericUpDown Grid.Row="0" Grid.Column="1" Name="c_EquippedUsage"
+                                   FormatString="0" Minimum="0" Maximum="100" Margin="0,4"
+                                   ValueChanged="OnEquippedUsageChanged" />
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Drop chance:"
+                               VerticalAlignment="Center" Margin="0,4,8,4" />
+                    <NumericUpDown Grid.Row="1" Grid.Column="1" Name="c_EquippedDrop"
+                                   FormatString="0" Minimum="0" Maximum="100" Margin="0,4"
+                                   ValueChanged="OnEquippedDropChanged" />
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Quantity:"
+                               VerticalAlignment="Center" Margin="0,4,8,4" />
+                    <NumericUpDown Grid.Row="2" Grid.Column="1" Name="c_EquippedQty"
+                                   FormatString="0" Minimum="0" Maximum="9999" Margin="0,4"
+                                   ValueChanged="OnEquippedQtyChanged" />
+                  </Grid>
+                </StackPanel>
+              </Border>
+            </Grid>
+          </DockPanel>
+        </TabItem>
+
+        <TabItem Header="Inventory">
+          <DockPanel Margin="8">
+            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6">
+              <Button Content="Add inventory item…" Click="OnAddInventoryClick" />
+              <Button Content="Remove selected"     Click="OnRemoveInventoryClick" />
+            </StackPanel>
+            <Grid ColumnDefinitions="*,8,260">
+              <ListBox  Grid.Column="0" Name="c_InventoryList"
+                        SelectionChanged="OnInventorySelectionChanged" Margin="0,6,0,0" />
+              <Border   Grid.Column="2" BorderBrush="Gray" BorderThickness="1"
+                        Margin="0,6,0,0" Padding="8">
+                <StackPanel Spacing="6">
+                  <TextBlock Text="Inventory Item Properties" FontWeight="Bold" />
+                  <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto">
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Drop chance:"
+                               VerticalAlignment="Center" Margin="0,4,8,4" />
+                    <NumericUpDown Grid.Row="0" Grid.Column="1" Name="c_InventoryDrop"
+                                   FormatString="0" Minimum="0" Maximum="100" Margin="0,4"
+                                   ValueChanged="OnInventoryDropChanged" />
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Quantity:"
+                               VerticalAlignment="Center" Margin="0,4,8,4" />
+                    <NumericUpDown Grid.Row="1" Grid.Column="1" Name="c_InventoryQty"
+                                   FormatString="0" Minimum="0" Maximum="9999" Margin="0,4"
+                                   ValueChanged="OnInventoryQtyChanged" />
+                  </Grid>
+                </StackPanel>
+              </Border>
+            </Grid>
+          </DockPanel>
+        </TabItem>
+
+      </TabControl>
+    </Grid>
+
+  </DockPanel>
+</Window>
