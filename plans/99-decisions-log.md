@@ -400,3 +400,28 @@ The split-process design has one real un-mitigated cost: `Net7.h`, `Opcodes.h`, 
 **Why Wave 3 is deferred (not done):** the remaining duplicated headers (Globals.h, CircularBuffer.h, cmdcodes.h, Net7Types.h) are NOT wire-format — they're utility/config. Their drift, if any, is low-stakes. Phase R's stated exit criterion was eliminating the wire-format drift, and Waves 1+2 did that. Wave 3 is moved to a backlog item on the plan.
 
 **Outstanding before Phase R close:** CLAUDE.md + docs/02-architecture.md updates to point at `common/` and document the split.
+
+## 2026-05-23 — Phase M dissolves the compat/ tree; Phase B → M scope handoff documented
+
+Phase B's "compat shim layer" (`server/compat/`, `proxy/compat/`, `login-server/Net7SSL/compat/`) was scoped to **"get the build green"** — typedef `HANDLE` to `void*`, `Sleep` to `usleep`, stub `_beginthreadex` to `pthread_create`. It succeeded: Phase B linked. But it left two debts:
+
+1. The shim layer **gave the codebase no reason to grow up.** Live Linux code kept calling `Sleep(100)` because the shim made it free. Every shim was a permanent invitation to keep Win32-ifying.
+2. The shims **lied at the boundary.** `HANDLE` typedef'd to `void*` means real handle-typed POSIX values (file descriptors, pthread_t) had to be jammed into `void*` with reinterpret_cast everywhere.
+
+**Phase M's decision: dissolve the compat/ tree entirely.** Three directories deleted (commits 81dee86, 069b28b, f1d94a5, ac54f08, f075f49). The minimum Win32 vocabulary the legacy code still names (`SOCKET`, `HANDLE`, `DWORD`, `LPTSTR`, `LPVOID`, `Sleep`, `GetTickCount`) is inlined into each tree's umbrella header (`server/src/Net7.h`, `proxy/Net7.h`, `login-server/Net7SSL/Net7SSL.h`) as POSIX-equivalent typedefs and inline functions. This was a deliberate choice over "rip them all out in Phase M": the typedefs in the umbrella header are *transparent* (a `SOCKET` is now literally an `int` with no cast), and the goal of stripping the inlined block to zero is gated on the surrounding TUs (proxy/Connection.cpp, login-server/Net7SSL/Connection.cpp) being unwalled from their `#ifdef WIN32` walls — which is Phase K work, not Phase M.
+
+**What Phase M did finish:**
+- `_beginthreadex` → `pthread_create` for every Linux-active call site (3 TUs). Walled sites in proxy + login-server tracked as Phase K continuation.
+- Mailslot IPC → AF_UNIX SOCK_DGRAM via `net7ipc::PosixIpc` (already a real impl from Phase J). `MailslotManager.cpp` in both server and login-server now holds a `PosixIpc*` and forwards. `mailslot_shim.{cpp,h}` deleted.
+- Win32 named-mutex single-instance guard → `flock()` on a pid file via `net7ipc::SingleInstance` RAII helper.
+- Vendored OpenSSL 1.0 `opensslconf.h` was hardcoding `OPENSSL_SYSNAME_WIN32`, which dragged `<windows.h>` into every TU that includes an `openssl/*.h` header. Patched to gate the define on `_WIN32` so the vendored tree compiles cleanly on Linux without a dummy `windows.h` shim.
+- `compat/` directories deleted from all three trees; CMakeLists references stripped; `common/PosixIpc.cpp` compiled directly into server + login.
+- 20/20 integration + unit tests still green after every Phase M commit.
+
+**Outstanding (genuinely Phase M tail / Phase K-gated):**
+- ~58 live Win32 symbol uses across `proxy/{ServerManager,SSL_Listener,TcpListener,Net7,UDPClient_linux}.cpp`, `login-server/Net7SSL/SSL_Listener.cpp`, etc. These are mostly `Sleep()`, `GetTickCount()`, `SOCKET`. They're behind the inlined umbrella typedefs so they work — they're just not POSIX-shaped. Sweep deferred until Phase K unwalls the surrounding TUs (so the call-site rewrites land alongside the structural rewrites, not as a separate touch-everything pass).
+
+**Alternatives considered:**
+1. Keep the compat/ tree and grow it (Phase B status quo). Rejected — see point 1 above.
+2. Strip the inlined typedefs from the umbrella headers now and rewrite all ~58 live sites in Phase M. Rejected — the rewrites land naturally in Phase K when their TUs are touched anyway; doing them in a separate sweep means re-touching the same files.
+3. Keep `compat/` as a "future Win32 cross-compile" surface. Rejected per CLAUDE.md "this is a server-native-Linux project now; Win32 builds of the server are not maintained."

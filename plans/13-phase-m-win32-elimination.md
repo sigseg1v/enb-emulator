@@ -170,8 +170,9 @@ Server still builds. Existing Phase J integration tests (5/5 green at Phase J cl
       Status: complete
       Touches: docs/08-build.md
 
-- [ ] **Append a decisions-log entry** capturing the Phase B → Phase M transition (Phase B was scoped to "compiles + links," Phase M finishes the job).
-      Status: not started
+- [x] **Append a decisions-log entry** capturing the Phase B → Phase M transition. Done — see `99-decisions-log.md` entry "2026-05-23 — Phase M dissolves the compat/ tree; Phase B → M scope handoff documented".
+      Status: complete
+      Touches: plans/99-decisions-log.md
 
 ## Decisions
 
