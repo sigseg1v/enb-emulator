@@ -37,22 +37,38 @@ Likely additional candidates surfaced during work: `Globals.h`, `Mutex.h`, `Circ
 
 ## Checklist
 
-- [ ] Inventory of duplicated headers
+### Wave 1 — utility + opcode headers (done 2026-05-23, commit 779a277)
+
+- [x] Inventory of duplicated headers
+      Status: done
+      Notes: confirmed Mutex.h, Opcodes.h, WestwoodRC4.h, WestwoodRSA.h, PacketStructures.h, Net7.h(/Net7SSL.h) duplicated; lots of others (Globals.h, CircularBuffer.h, cmdcodes.h, Net7Types.h) also overlap but are deferred to a later wave.
+- [x] Per-file diff classification for Wave 1 set
+      Status: done
+      Notes: Opcodes.h — server is strict superset of proxy (adds INVENTORY_SORT 0x0028, FIND_MEMBER 0x0053, CHAT_LIST/ERROR 0x00A4/A6, guild opcodes 0xC5-D5, WAIT_AUX 0x3000, AUX_RESPONSE 0x3001; one rename: ACCOUNTVALIDATE→ACCOUNTVALID at same value 0x2001). Server wins. Mutex/WestwoodRC4/WestwoodRSA: server versions carry the CC BY-NC-SA 3.0 license header that the other two trees stripped at some point — server wins on both correctness and license-header preservation grounds.
+- [x] Create `common/include/net7/` directory
+      Status: done
+      Notes: bare include dir (no INTERFACE library needed yet — directly added to each target's PRIVATE include dirs in their respective CMakeLists.txt).
+- [x] Move Wave 1 winners into `common/`, update includes (~43 source files)
+      Status: done
+      Notes: bulk sed of `#include "<Header>.h"` → `#include <net7/<Header>.h>` across proxy/, server/src/, login-server/Net7SSL/. Two relative-path includes needed manual fix (server/src/mysql/mysqlplus.h, server/src/AuxClasses/AuxBase.h had `#include "../Mutex.h"`).
+- [x] Drop Wave 1 per-process duplicates
+      Status: done
+      Notes: `git rm` on the 7 dupes (proxy/{Opcodes,Mutex,WestwoodRC4,WestwoodRSA}.h + login-server/Net7SSL/{Mutex,WestwoodRC4,WestwoodRSA}.h; server/src copies became `common/` via rename).
+- [x] All three subprojects build clean on Linux (Wave 1)
+      Status: done
+      Notes: net7 [169/169], net7proxy [23/23], net7ssl [18/18] all linked successfully after Wave 1.
+
+### Wave 2 — PacketStructures + port macros (next)
+
+- [ ] PacketStructures.h per-struct merge
       Status: not started
-      Touches: proxy/, server/src/, login-server/Net7SSL/
-- [ ] Per-file diff classification
+      Notes: server/login still use `long` in MasterJoin (Phase K only fixed proxy/). Need to apply int32_t fix to server/ + login/, verify no other struct has wire-size divergence between trees, then unify into common/include/net7/PacketStructures.h.
+- [ ] Extract port macros from Net7.h into common/include/net7/Ports.h
       Status: not started
-- [ ] Create `common/include/net7/` directory + CMake INTERFACE library
-      Status: not started
-- [ ] Move winners into `common/`, update includes
-      Status: not started
-- [ ] Drop per-process duplicates
-      Status: not started
+      Notes: Net7.h's overall structure differs per-process (server's has Win32 mailslot constants, proxy's has UDP plane tuning, login's has SSL config), but the bare port macros (GLOBAL_SERVER_PORT, MASTER_SERVER_PORT, SSL_PORT, etc.) are wire-load-bearing and need to be unified. Extract just those; keep per-process Net7.h for everything else.
 - [ ] Update CLAUDE.md + docs/02-architecture.md to point at `common/`
       Status: not started
-- [ ] All three subprojects build clean on Linux
-      Status: not started
-- [ ] Integration tests pass (5/5)
+- [ ] Integration tests pass after Wave 2 (currently 8/8 in Phase K — must stay green)
       Status: not started
 
 ## Non-goals

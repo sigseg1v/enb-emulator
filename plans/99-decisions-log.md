@@ -362,3 +362,22 @@ Alternatives considered:
 ## 2026-05-23 — Open Phase R for `common/` header extraction
 
 The split-process design has one real un-mitigated cost: `Net7.h`, `Opcodes.h`, `PacketStructures.h` are triplicated across `proxy/`, `server/src/`, `login-server/Net7SSL/` and already drifted (confirmed via diff). Phase R extracts a `common/include/net7/` subtree consumed by all three CMake builds.
+
+## 2026-05-23 — Phase R Wave 1 done: utility + opcode headers consolidated (commit 779a277)
+
+**Wave 1 scope (done):** Mutex.h, Opcodes.h, WestwoodRC4.h, WestwoodRSA.h → `common/include/net7/`. ~43 source files rewritten to `#include <net7/...>`. All three binaries link clean (net7 [169/169], net7proxy [23/23], net7ssl [18/18]).
+
+**Per-file winner selection rationale:**
+- **Opcodes.h** — server's copy was a strict superset of proxy's (proxy was missing INVENTORY_SORT 0x0028, FIND_MEMBER 0x0053, CHAT_LIST/ERROR 0x00A4/A6, the entire guild block 0xC5-D5, WAIT_AUX 0x3000, AUX_RESPONSE 0x3001). One rename: `ACCOUNTVALIDATE` (proxy) → `ACCOUNTVALID` (server) at the same value 0x2001 — server's name follows the C identifier the rest of the codebase uses, so server wins; no callers in either tree referenced the old name.
+- **Mutex.h / WestwoodRC4.h / WestwoodRSA.h** — server's versions carry the canonical CC BY-NC-SA 3.0 license headers. The proxy/ and login-server/ copies had stripped them at some earlier reorg. Choosing server's copy is correct on both correctness (most up-to-date) and license-preservation grounds.
+
+**Mechanics:**
+- `common/include/` added to each subproject's PRIVATE include dirs in their CMakeLists.txt (no INTERFACE library — overkill for four headers).
+- Bulk sed across all three trees for `#include "<H>.h"` → `#include <net7/<H>.h>`. Two relative-path strays needed manual fix: `server/src/mysql/mysqlplus.h`, `server/src/AuxClasses/AuxBase.h` had `#include "../Mutex.h"`.
+- `grep -a` (force text mode) needed for ISO-8859-1 files — default grep treats latin1 as binary and silently skips.
+
+**Wave 2 deferred:**
+- **PacketStructures.h** — can't be done as a file-level rename. Server and login still use `long` in MasterJoin where Phase K fixed proxy to int32_t (silent on x86_64 in proxy because server never writes m_MasterJoin, but a latent wire-size bomb). Wave 2 needs to apply the same int32_t fix to server + login, sweep for any other size-divergent fields between trees, then unify.
+- **Net7.h** — structurally different per-process (server has Win32 mailslot constants, proxy has UDP plane tuning, login has SSL config). Wave 2 will extract just the port macros (GLOBAL_SERVER_PORT 3805, MASTER_SERVER_PORT, SSL_PORT, etc.) into `common/include/net7/Ports.h` and leave the per-process Net7.h files for everything else.
+
+**Headers we know are also duplicated but Wave 3+:** Globals.h, CircularBuffer.h, cmdcodes.h, Net7Types.h.
