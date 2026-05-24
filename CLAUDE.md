@@ -73,6 +73,9 @@ The source of truth for "what's done / what's next" across invocations is the `p
 ## Coding rules
 
 - **C++**: target Linux first, Windows second. New code must compile on g++ 13+ with `-Wall -Wextra`. Don't reintroduce Win32 APIs in new code; use shims in `server/compat/` or POSIX directly.
+- **"Runs on Linux" scope** — this means the *server* runs **natively** on Linux (no WINE). The Win32 cleanup applies to **server-native code only**: `server/src/`, `login-server/Net7Mysql/`, `login-server/Net7SSL/`, `proxy/`. It does **NOT** apply to:
+  - **`client/**`** — the EnB client is a Win32 binary that runs under WINE (or on Windows). It's allowed and expected to use Win32 APIs. `client/detours/`, `client/mods/`, the linux-installer's WINE prefix — all stay Win32. Document this in any client-touching plan.
+  - **`server/third_party/**` and vendored deps (boost, cryptopp, zlib, lua, MySQL Connector/C)** — we *consume* these libraries; we don't rewrite them. boost::interprocess on Linux uses real POSIX primitives through the same boost API; cryptopp / openssl / etc. likewise. Anything that looks like a Win32 symbol *inside* `third_party/` or a vendored header is upstream's concern, not ours.
 - **SQL**: target Postgres syntax in new code. Existing MySQL-flavoured SQL is being migrated. Don't add new MySQL-isms.
 - **C#**: tools target `net10.0-windows` with `<UseWindowsForms>true</UseWindowsForms>`. SDK-style csproj only.
 - **No binaries in git** by default. Exception: third-party tools/libs we don't have source for go in `vendor/` (or alongside their project) with a `THIRD_PARTY_BINARIES.md` listing what they are, where they came from, and why we can't rebuild from source. The `.gitignore` uses `!` re-includes for these paths.
