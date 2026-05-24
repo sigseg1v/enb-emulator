@@ -23,7 +23,7 @@
 #include <map>
 #include <vector>
 #include "XmlParser.h"
-#include "PacketStructures.h"
+#include <net7/PacketStructures.h>
 #include "mysql/mysqlplus.h"
 #include "TalkTree.h"
 #include "TalkTreeParser.h"

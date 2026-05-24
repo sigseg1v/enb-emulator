@@ -21,7 +21,7 @@
 #include "PlayerManager.h"
 #include "SectorManager.h"
 #include <net7/Opcodes.h>
-#include "PacketStructures.h"
+#include <net7/PacketStructures.h>
 #include <float.h>
 #include "UDPConnection.h"
 #include "MemoryHandler.h"

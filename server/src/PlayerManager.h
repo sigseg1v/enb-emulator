@@ -25,7 +25,7 @@
 #include <vector>
 #include <map>
 #include <net7/Mutex.h>
-#include "PacketStructures.h"
+#include <net7/PacketStructures.h>
 #include "SectorData.h"
 #include "VectorMath.h"
 #include "AuxClasses/AuxGroupInfo.h"

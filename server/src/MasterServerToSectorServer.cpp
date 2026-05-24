@@ -25,7 +25,7 @@
 #include "Net7.h"
 #include <net7/Opcodes.h>
 #include "ServerManager.h"
-#include "PacketStructures.h"
+#include <net7/PacketStructures.h>
 
 #if 0
 void Connection::ProcessMasterServerToSectorServerOpcode(short opcode, short bytes)

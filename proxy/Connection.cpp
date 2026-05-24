@@ -11,7 +11,7 @@
 #include "Net7.h"
 #include "Connection.h"
 #include "ServerManager.h"
-#include "PacketStructures.h"
+#include <net7/PacketStructures.h>
 #include <net7/Opcodes.h>
 #include "UDPClient.h"
 //#include "PlayerClass.h"
@@ -761,7 +761,7 @@ bool Connection::CheckTCPShutdownCycle()
 #include "Net7.h"
 #include "Connection.h"
 #include "ServerManager.h"
-#include "PacketStructures.h"
+#include <net7/PacketStructures.h>
 #include <net7/Opcodes.h>
 #include <net7/WestwoodRSA.h>
 #include <net7/WestwoodRC4.h>

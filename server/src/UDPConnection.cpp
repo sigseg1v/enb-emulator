@@ -21,7 +21,7 @@
 
 #include "ServerManager.h"
 #include "UDPConnection.h"
-#include "PacketStructures.h"
+#include <net7/PacketStructures.h>
 #include "PlayerClass.h"
 #include <net7/Opcodes.h>
 

@@ -103,7 +103,7 @@ bool StartENBClient()
 #ifdef WIN32
 int main(int argc, char* argv[])
 {
-    long port = SECTOR_SERVER_PORT;
+    long port = PROXY_LOCAL_TCP_PORT;
     char *domain = "";
 	char cmd_buffer[MAX_PATH];
 	g_cmd = &cmd_buffer[0];
@@ -382,7 +382,7 @@ int main(int argc, char* argv[])
     // master-server path (RunMasterServer creates the TCP listeners).
     ServerManager server_mgr(true /*master*/,
                              ip_address_internal,
-                             (short) SECTOR_SERVER_PORT,
+                             (short) PROXY_LOCAL_TCP_PORT,
                              (short) 1,
                              true /*standalone*/,
                              ip_address_internal);

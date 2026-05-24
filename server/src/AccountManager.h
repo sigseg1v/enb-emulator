@@ -22,7 +22,7 @@
 
 #include "Net7.h"
 #include <net7/Mutex.h>
-#include "PacketStructures.h"
+#include <net7/PacketStructures.h>
 
 #define MAX_ACCOUNTS	1024
 #define TICKET_EXPIRE_TIME  300000  //5 minutes (in milliseconds)

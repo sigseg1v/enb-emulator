@@ -53,7 +53,7 @@ void ServerManager::RunMasterServer()
 	{
 		// Instantiate the SSL Listener object
 		ssl_listener = new SSL_Listener(m_IpAddressInternal, ssl_port, *this);
-		RegisterSectorServer(SECTOR_SERVER_PORT, m_MaxSectors);
+		RegisterSectorServer(PROXY_LOCAL_TCP_PORT, m_MaxSectors);
 		// Instantiate the TCP Listener object for the Global Server
 		global_server_listener = new TcpListener(m_IpAddressInternal, GLOBAL_SERVER_PORT, *this, CONNECTION_TYPE_CLIENT_TO_GLOBAL_SERVER);
 	}
@@ -73,7 +73,7 @@ void ServerManager::RunMasterServer()
 	TcpListener master_tcp_listener(m_IpAddressInternal, MASTER_SERVER_PORT, *this, CONNECTION_TYPE_CLIENT_TO_MASTER_SERVER);
 
     //give ourselves 1 port for sector serving.
-    TcpListener sector_comms(m_IpAddressInternal, SECTOR_SERVER_PORT, *this, CONNECTION_TYPE_CLIENT_TO_SECTOR_SERVER);
+    TcpListener sector_comms(m_IpAddressInternal, PROXY_LOCAL_TCP_PORT, *this, CONNECTION_TYPE_CLIENT_TO_SECTOR_SERVER);
 
     MainLoop();
 

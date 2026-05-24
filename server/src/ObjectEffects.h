@@ -1,7 +1,7 @@
 #ifndef _OBJECT_EFFECTS_H_INCLUDED_
 #define _OBJECT_EFFECTS_H_INCLUDED_
 
-#include "PacketStructures.h"
+#include <net7/PacketStructures.h>
 #include <net7/Mutex.h>
 #include <map>
 

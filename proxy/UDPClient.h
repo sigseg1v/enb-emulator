@@ -10,7 +10,7 @@
 
 #pragma warning(disable:4786) 
 
-#include "PacketStructures.h"
+#include <net7/PacketStructures.h>
 #include <vector>
 #include <map>
 

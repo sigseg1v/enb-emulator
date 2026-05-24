@@ -12,7 +12,7 @@
 
 #include "Net7SSL.h"
 #include "Connection_B.h"
-#include "PacketStructures.h"
+#include <net7/PacketStructures.h>
 #include "ServerManager.h"
 
 Connection_B::Connection_B()

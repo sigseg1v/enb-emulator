@@ -3,7 +3,7 @@
 #include "Net7.h"
 #include "UDPClient.h"
 #include "opcodes.h"
-#include "PacketStructures.h"
+#include <net7/PacketStructures.h>
 #include "PacketMethods.h"
 #include "Connection.h"
 #include "ServerManager.h"

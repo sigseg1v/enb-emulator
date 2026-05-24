@@ -163,22 +163,12 @@
 #define CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY          9
 #define CONNECTION_TYPE_GLOBAL_PROXY_TO_SERVER		    10
 
-#define CLIENT_TYPE_FIXED_PORT                          1
-#define CLIENT_TYPE_MULTI_PORT                          2
-
+// Port macros + CLIENT_TYPE_* tags live in common/include/net7/Ports.h
+// (Phase R Wave 2 — wire-load-bearing, kept in exactly one place).
+#include <net7/Ports.h>
 
 #define	MAX_BUFFER					4096
-#define SSL_PORT					443		// handles authentication (0x01BB)
 //#define SSL_PORT					8891	// handles authentication - HTTPS protocol (0x22BB)
-
-#define GLOBAL_SERVER_PORT			3805	// handles multiple galaxies
-#define MASTER_SERVER_PORT			3801	// handles a single galaxy
-#define SECTOR_SERVER_PORT			3501	// handles a single sector - note we start from 3501 now because 3500 is used as the local TCP port in Net7Proxy
-#define MVAS_LOGIN_PORT				3806
-
-#define SSL_LOCALCERT_LOGIN_PORT    3807
-#define UDP_MASTER_SERVER_PORT      3808
-#define PROXY_SERVER_PORT           3809
 
 
 #define	RACE_TERRAN					0

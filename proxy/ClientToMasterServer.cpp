@@ -8,7 +8,7 @@
 //
 // Phase J carry-over: HandleMasterJoin used to be a Linux stub that
 // short-circuited the MVAS round-trip and sent a hardcoded
-// ServerRedirect pointing at the proxy's own SECTOR_SERVER_PORT. As of
+// ServerRedirect pointing at the proxy's own PROXY_LOCAL_TCP_PORT. As of
 // Phase K the Linux UDP plane is partially ported (UDPClient_linux.cpp)
 // so we now call SendMasterLogin like the Win32 path; if it times out
 // we fall back to the hardcoded redirect to preserve the "client moves
@@ -24,7 +24,7 @@
 #include "Connection.h"
 #include <net7/Opcodes.h>
 #include "ServerManager.h"
-#include "PacketStructures.h"
+#include <net7/PacketStructures.h>
 #include "UDPClient.h"
 
 void Connection::ProcessMasterServerOpcode(short opcode, short bytes)
@@ -87,7 +87,7 @@ void Connection::HandleMasterJoin()
 // (proxy -> server:3808 UDP, opcode 0x2008, wait for 0x2009 confirm).
 // If the server doesn't respond within the WaitForResponse window we
 // fall through to a hardcoded ServerRedirect at the proxy's
-// SECTOR_SERVER_PORT so the client's state machine keeps moving — same
+// PROXY_LOCAL_TCP_PORT so the client's state machine keeps moving — same
 // behaviour the Phase J option-b stub had, just now driven by an
 // actually-attempted UDP exchange.
 void Connection::HandleMasterJoin()
@@ -120,7 +120,7 @@ void Connection::HandleMasterJoin()
 	{
 		// Server didn't confirm; fall back to the Phase J option-b path:
 		// hand the client a redirect back at the proxy's own
-		// SECTOR_SERVER_PORT and let the next TCP frame surface here.
+		// PROXY_LOCAL_TCP_PORT and let the next TCP frame surface here.
 		LogMessage("<proxy> SendMasterLogin failed/timed-out; sending proxy-local ServerRedirect\n");
 		SendServerRedirect(sector_id);
 		return;
@@ -140,7 +140,7 @@ void Connection::HandleMasterJoin()
 
 	// Redirect the client to the appropriate sector server. The
 	// ServerRedirect payload still points at m_IpAddress / our
-	// SECTOR_SERVER_PORT — once ProcessSectorServerOpcode is ported the
+	// PROXY_LOCAL_TCP_PORT — once ProcessSectorServerOpcode is ported the
 	// client's next-stage TCP traffic resumes here.
 	SendServerRedirect(sector_id);
 }
@@ -154,7 +154,7 @@ void Connection::SendServerRedirect(long sector_id)
     memset(&redirect, 0, sizeof(redirect));
 	redirect.sector_id = ntohl(sector_id);
 	redirect.ip_address = ntohl(m_ServerMgr.m_IpAddress);
-    redirect.port = SECTOR_SERVER_PORT;
+    redirect.port = PROXY_LOCAL_TCP_PORT;
 
     //LogMessage("<proxy> Master Server sending ServerRedirect packet, SectorID = %d\n", sector_id);
 	SendResponse(ENB_OPCODE_0036_SERVER_REDIRECT, (unsigned char *) &redirect, sizeof(redirect));

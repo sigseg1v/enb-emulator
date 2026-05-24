@@ -12,7 +12,7 @@
 #include "Connection.h"
 #include <net7/Opcodes.h>
 #include "ServerManager.h"
-#include "PacketStructures.h"
+#include <net7/PacketStructures.h>
 #include "PacketMethods.h"
 #include "UDPClient.h"
 

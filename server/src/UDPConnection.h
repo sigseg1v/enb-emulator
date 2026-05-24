@@ -24,7 +24,7 @@
 #include <net7/Mutex.h>
 #include "MessageQueue.h"
 #include "PlayerManager.h"
-#include "PacketStructures.h"
+#include <net7/PacketStructures.h>
 
 class Player;
 class Object;

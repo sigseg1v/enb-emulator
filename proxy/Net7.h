@@ -129,21 +129,14 @@ typedef signed char     s8;
 #define CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY          9
 #define CONNECTION_TYPE_GLOBAL_PROXY_TO_SERVER		    10
 
-#define CLIENT_TYPE_FIXED_PORT                          1
-#define CLIENT_TYPE_MULTI_PORT                          2
+// Port macros + CLIENT_TYPE_* tags live in common/include/net7/Ports.h
+// (Phase R Wave 2 — wire-load-bearing, kept in exactly one place).
+// Proxy's old SECTOR_SERVER_PORT (3500) was renamed to PROXY_LOCAL_TCP_PORT
+// to distinguish it from the canonical sector server port (3501).
+#include <net7/Ports.h>
 
 #define	MAX_BUFFER					25000
-#define SSL_PORT					443 	// handles authentication (0x01BB)
 extern unsigned short ssl_port;
-
-#define GLOBAL_SERVER_PORT			3805	// handles multiple galaxies
-#define MASTER_SERVER_PORT			3801	// handles a single galaxy
-#define SECTOR_SERVER_PORT			3500	// handles a single sector
-
-#define MVAS_LOGIN_PORT				3806
-#define SSL_LOCALCERT_LOGIN_PORT    3807
-#define UDP_MASTER_SERVER_PORT      3808
-#define PROXY_SERVER_PORT           3809
 
 #define	RACE_TERRAN					0
 #define RACE_JENQUAI				1

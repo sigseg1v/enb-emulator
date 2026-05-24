@@ -13,7 +13,7 @@
 #include "Net7SSL.h"
 #include "Connection_B.h"
 #include <net7/Opcodes.h>
-#include "PacketStructures.h"
+#include <net7/PacketStructures.h>
 #include "PacketMethods.h"
 #include "AccountManager.h"
 #include "ConnectionManager.h"

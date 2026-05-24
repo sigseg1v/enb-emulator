@@ -23,7 +23,7 @@
 #include "Net7.h"
 #include "SectorManager.h"
 #include <net7/Opcodes.h>
-#include "PacketStructures.h"
+#include <net7/PacketStructures.h>
 #include "ServerManager.h"
 #include "ItemBase.h"
 #include "SectorData.h"

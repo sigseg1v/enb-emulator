@@ -9,7 +9,7 @@
 #endif
 #include <net7/WestwoodRSA.h>
 #include <net7/WestwoodRC4.h>
-#include "PacketStructures.h"
+#include <net7/PacketStructures.h>
 //#include "PlayerManager.h"
 #include "MessageQueue.h"
 //#include "ItemBase.h"

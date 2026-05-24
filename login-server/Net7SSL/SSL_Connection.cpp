@@ -18,7 +18,7 @@
 #include "Net7SSL.h"
 #include "SSL_Connection.h"
 #include "ServerManager.h"
-#include "PacketStructures.h"
+#include <net7/PacketStructures.h>
 #include "AccountManager.h"
 #include "mysql/mysqlplus.h"
 

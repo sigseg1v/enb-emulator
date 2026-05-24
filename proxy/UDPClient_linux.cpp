@@ -59,7 +59,7 @@
 #include "Net7.h"
 #include "UDPClient.h"
 #include <net7/Opcodes.h>
-#include "PacketStructures.h"
+#include <net7/PacketStructures.h>
 #include "PacketMethods.h"
 #include "ServerManager.h"
 

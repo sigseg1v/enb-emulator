@@ -29,7 +29,7 @@
 #include "Net7.h"
 #include "Connection.h"
 #include <net7/Opcodes.h>
-#include "PacketStructures.h"
+#include <net7/PacketStructures.h>
 #include "ServerManager.h"
 #include "UDPClient.h"
 

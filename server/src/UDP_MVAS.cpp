@@ -21,7 +21,7 @@
 #include "ServerManager.h"
 #include "UDPConnection.h"
 #include <net7/Opcodes.h>
-#include "PacketStructures.h"
+#include <net7/PacketStructures.h>
 #include "PlayerClass.h"
 
 #define CURRENT_MVAS 174

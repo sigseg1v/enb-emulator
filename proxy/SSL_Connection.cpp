@@ -17,7 +17,7 @@
 #include "SSL_Connection.h"
 #include "ServerManager.h"
 #include "openssl/ssl.h"
-#include "PacketStructures.h"
+#include <net7/PacketStructures.h>
 #include "mysql/mysqlplus.h"
 #include "AccountManager.h"
 #include "UDPClient.h"

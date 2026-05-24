@@ -5,7 +5,7 @@
 #include "Net7.h"
 #include "UDPClient.h"
 #include "opcodes.h"
-#include "PacketStructures.h"
+#include <net7/PacketStructures.h>
 #include "ServerManager.h"
 
 void __cdecl LaunchUDPCRecvThread(void *arg)

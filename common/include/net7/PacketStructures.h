@@ -1,9 +1,30 @@
 // PacketStructures.h
+/* Net-7 Entertainment: Net-7 Earth and Beyond emulator project
+**
+** This code/content is licensed under the Creative Commons license, it is interactive content. You can view the terms of our:
+** Creative Commons Attribution-Noncommercial-Share Alike 3.0 United States License
+** http://creativecommons.org/licenses/by-nc-sa/3.0/us/
+**
+** Net-7 Emulator Project, an Earth & Beyond emulator by Net7 Entertainment is licensed under a Creative Commons Attribution-Noncommercial-Share Alike 3.0 United States License
+**
+** Based on a work at http://www.earthandbeyond.com
+**
+** Permissions beyond the scope of this license may be available at http://www.dreamersofdawn.org/docs/More_Information.htm
+**
+** The license can be modified at our discretion within the bounds of Creative Commons at any time.
+**
+** Copyright of our assets/code/software began in 2005-2009 �, Net-7 Entertainment.
+**
+*/
 
-#ifndef _PACKET_STRUCTURES_SSL_H_INCLUDED_
-#define _PACKET_STRUCTURES_SSL_H_INCLUDED_
+#ifndef _PACKET_STRUCTURES_H_INCLUDED_
+#define _PACKET_STRUCTURES_H_INCLUDED_
 
-#include "Net7SSL.h" // ATTRIB_PACKED
+// Phase R Wave 2: this header used to live in three places (proxy/, server/src/,
+// login-server/Net7SSL/) and #include "Net7.h" (or Net7SSL.h) for ATTRIB_PACKED
+// + u8/u16/.../BSTR. Those bits are now in common/include/net7/Packing.h so this
+// file stands alone and can be shared across all three subprojects.
+#include <net7/Packing.h>
 
 struct EnbTcpHeader
 {
@@ -13,8 +34,10 @@ struct EnbTcpHeader
 
 struct VersionRequest
 {
-    long    Major;      // 4 bytes
-    long    Minor;      // 4 bytes
+    // Phase K: int32_t guarantees 4 bytes on every platform. `long` is 8 bytes
+    // on Linux x86_64 vs 4 bytes on Win32, and the wire format is 4 bytes.
+    int32_t Major;
+    int32_t Minor;
 } ATTRIB_PACKED;
 
 //New header for use with UDP comms.
@@ -192,6 +215,16 @@ struct InvMove
     long Num;
 } ATTRIB_PACKED;
 
+struct InvSort
+{
+	long ID;
+	long TargetInv;
+	long Sort1;
+	long Sort2;
+	long Sort3;
+	char Reverse;
+} ATTRIB_PACKED;
+
 struct ItemState
 {
     long GameID;
@@ -228,17 +261,23 @@ struct GlobalCreateCharacter
 
 struct MasterJoin
 {
-    long    unknown1;
-    long    unknown2;
-    long    unknown3;
-    long    avatar_id_msb;
-    long    avatar_id_lsb;
-    long    ToSectorID;
-    long    FromSectorID;
-    long    PlayerLevel;
-    long    unknown8;
-    long    unknown9;
-    long    unknown10;
+    // Phase K: 11 * int32_t + 20-byte ticket = 64 bytes on every platform.
+    // Was `long`, which is 8 bytes on Linux x86_64 (struct = 108B) vs 4 bytes
+    // on Win32 (struct = 64B). The wire format is 64 bytes; the Linux
+    // mismatch caused HandleMasterJoin to read avatar_id_lsb / ToSectorID
+    // from bytes 32 / 40 instead of 16 / 20, yielding zeros and triggering
+    // the SendMasterLogin-timeout fallback path on every join.
+    int32_t unknown1;
+    int32_t unknown2;
+    int32_t unknown3;
+    int32_t avatar_id_msb;
+    int32_t avatar_id_lsb;
+    int32_t ToSectorID;
+    int32_t FromSectorID;
+    int32_t PlayerLevel;
+    int32_t unknown8;
+    int32_t unknown9;
+    int32_t unknown10;
     char    ticket[20];
 } ATTRIB_PACKED;
 
@@ -258,8 +297,9 @@ struct GlobalTicket
 
 struct ServerRedirect
 {
-    long    sector_id;
-    long    ip_address;
+    // Phase K: int32_t — Win32 client expects 4-byte fields on the wire.
+    int32_t sector_id;
+    int32_t ip_address;
     short   port;
 } ATTRIB_PACKED;
 
@@ -588,6 +628,11 @@ struct ClientChatRequest
 	char	_unknown_data[1];	// optional block of data of data_size length
 } ATTRIB_PACKED;
 
+#define CHAT_LIST_FRIENDS			0
+#define CHAT_LIST_IGNORES			1
+#define CHAT_LIST_MEMBERS_CHANNEL	2
+#define CHAT_LIST_ACTIVE_CHANNELS	3
+#define CHAT_LIST_CURRENT_CHANNELS	4
 struct ClientChatList
 {
 	long ListType;				// list id

@@ -33,7 +33,7 @@
 #define ASTEROID_FIELD ((char(0xFF))
  
 
-#include "PacketStructures.h"
+#include <net7/PacketStructures.h>
 #include <map>
 #include <vector>
 
