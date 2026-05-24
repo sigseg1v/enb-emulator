@@ -1,0 +1,53 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:TalkTreeEditorAvalonia"
+        mc:Ignorable="d" d:DesignWidth="940" d:DesignHeight="450"
+        x:Class="TalkTreeEditorAvalonia.MainWindow"
+        Title="Talk Tree" Width="940" Height="450"
+        WindowStartupLocation="CenterScreen">
+  <DockPanel LastChildFill="True">
+    <!-- Bottom buttons -->
+    <Grid DockPanel.Dock="Bottom" Margin="6" ColumnDefinitions="Auto,Auto,*,Auto,Auto">
+      <Button Grid.Column="0" x:Name="c_AddBtn"    Width="80" Content="Add"     Click="OnNodeAdd"    Margin="0,0,4,0" />
+      <Button Grid.Column="1" x:Name="c_RemoveBtn" Width="80" Content="Remove"  Click="OnNodeRemove" />
+      <Button Grid.Column="3" x:Name="c_OkBtn"     Width="80" Content="Ok"      Click="OnOk"     Margin="0,0,4,0" />
+      <Button Grid.Column="4" x:Name="c_CancelBtn" Width="80" Content="Cancel"  Click="OnCancel" />
+    </Grid>
+
+    <Grid ColumnDefinitions="500,*">
+      <!-- Left: tree of NPC nodes -->
+      <DockPanel Grid.Column="0" LastChildFill="True" Margin="6">
+        <TreeView x:Name="c_TalkTree"
+                  SelectionChanged="OnTreeSelectionChanged">
+          <TreeView.ItemTemplate>
+            <TreeDataTemplate DataType="local:TreeItem" ItemsSource="{Binding Children}">
+              <TextBlock Text="{Binding Text}" />
+            </TreeDataTemplate>
+          </TreeView.ItemTemplate>
+        </TreeView>
+      </DockPanel>
+
+      <!-- Right: NPC text + 4 reply rows + XML/back buttons -->
+      <DockPanel Grid.Column="1" LastChildFill="False" Margin="6">
+        <TextBlock DockPanel.Dock="Top" Text="NPC says:" FontWeight="Bold" Margin="0,0,0,4" />
+        <TextBox DockPanel.Dock="Top" x:Name="c_NpcText"
+                 Height="150" AcceptsReturn="True"
+                 TextWrapping="Wrap"
+                 VerticalContentAlignment="Top"
+                 TextChanged="OnNpcTextChanged" />
+
+        <TextBlock DockPanel.Dock="Top" Text="Your Reply:"
+                   FontWeight="Bold" Foreground="DarkRed" Margin="0,12,0,4" />
+
+        <StackPanel DockPanel.Dock="Top" Orientation="Vertical" Spacing="4" x:Name="c_ReplyStack" />
+
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="4" Margin="0,8,0,0">
+          <Button x:Name="c_EditXmlBtn"     Width="80"  Content="XML"  Click="OnEditXml" />
+          <Button x:Name="c_PreviousBtn"    Width="60"  Content="Back" IsEnabled="False" Click="OnNodePrevious" />
+        </StackPanel>
+      </DockPanel>
+    </Grid>
+  </DockPanel>
+</Window>

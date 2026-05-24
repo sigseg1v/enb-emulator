@@ -440,31 +440,83 @@ The existing WinForms targets stay in the tree. They still build via `dotnet bui
 
       **9/14 tools have Linux-native paths now.**
 
-### Future tier ordering (remaining 6 tools — deferred until session focus returns to Phase L)
+### Tier 7 — first non-SQL editor port (complete)
+
+- [x] **talktreeeditor-avalonia** — first editor port with **no DB
+      access**. Full port of `tools/talktreeeditor/`: NPC conversation
+      tree editor invoked modally from `missioneditor`/`sector-editor`
+      with an XML string in/out. Preserves `SetConversation(string)` +
+      `GetConversation(out string)` contract; additionally accepts XML
+      as `argv[0]`.
+      Touches: `tools/talktreeeditor-avalonia/` (csproj, app.manifest,
+      App.axaml{,.cs}, MainWindow.axaml{,.cs}, TreeItem.cs, TalkNode.cs,
+      Reply/{Branch,Trade,Flag}Control.axaml{,.cs}, Program.cs,
+      README.md) + slnx entry.
+      Status: complete
+
+      **Key mechanical changes:**
+      - WinForms `TreeView` mutates `TreeNode` directly; Avalonia
+        binds via `HierarchicalDataTemplate`. Introduced explicit
+        `TreeItem` data model (`Tag` / `Children` / `Parent` /
+        `FirstChild` / `NextSibling`) — `TalkNode.parentNode` retyped
+        from `TreeNode` to `TreeItem`. `TreeItem.Text` raises
+        `PropertyChanged` so post-mutation refresh doesn't need
+        rebuilding the tree.
+      - Reply UserControls **dropped the typed back-reference** to
+        the parent form. `BranchControl` exposes
+        `event Action<string> GotoRequested`; `FlagControl` exposes
+        `void SetStagesProvider(Func<List<CodeValue>>)`. No
+        compile-time coupling to `MainWindow`.
+      - 4 reply rows created programmatically in `MainWindow` ctor
+        (rather than design-time `Panel` array) — captured-index
+        closures wire each row's `typeCbo.SelectionChanged`.
+      - `_replyTypeNames` intentionally omits `Trade` (matching the
+        original `tools/talktreeeditor/Reply/Flag.cs:23`); `Trade`
+        survives in `TalkNodeTypes` enum and in load/save for
+        round-tripping legacy XML.
+      - Reuses `commontools-avalonia`'s `DlgEditXml` for the raw-XML
+        editor (no DB-related work was needed in commontools).
+      - `MsBox.Avalonia.Enums.Icon` aliased to `MsBoxIcon` to avoid
+        collision with `Avalonia.Controls.Window.Icon` (`WindowIcon`).
+      - Compiled bindings: `TreeDataTemplate` declares
+        `DataType="local:TreeItem"`.
+
+      **No Login window** — first editor in this tier with zero DB
+      surface. `App.OnFrameworkInitializationCompleted` goes straight
+      to `MainWindow`.
+
+      **`Validate()` ported verbatim** from `FrmTalkTree.cs:661`:
+      unique IDs, first node id=1 + no Trade reply, non-empty text,
+      branch destinations exist, `Mission_Goto_Stage` references known
+      stage or -2 sentinel, all nodes reachable from node 1.
+
+      Smoke: `dotnet run -- --smoke` instantiates `MainWindow` + all
+      3 reply controls (no DB needed).
+
+      **10/14 tools have Linux-native paths now.**
+
+### Future tier ordering (remaining 5 tools — deferred until session focus returns to Phase L)
 
 Recommended order:
 
-1. **talktreeeditor-avalonia** — 5 forms, depends on
-   commontools-avalonia. ~2-3 days.
-
-2. **toolslauncher-avalonia** — 6 forms incl. IRC client + FTP window.
+1. **toolslauncher-avalonia** — 6 forms incl. IRC client + FTP window.
    ~3-5 days (IRC integration via Meebey.SmartIrc4Net is the wildcard).
 
-3. **effect-editor-avalonia** (SQLBind) — 5 forms, particle effects.
+2. **effect-editor-avalonia** (SQLBind) — 5 forms, particle effects.
    ~3 days.
 
-4. **station-tools-avalonia** — 8 forms. ~4-5 days.
+3. **station-tools-avalonia** — 8 forms. ~4-5 days.
 
-5. **missioneditor-avalonia** — 9 forms incl. tree view. Depends on
+4. **missioneditor-avalonia** — 9 forms incl. tree view. Depends on
    commontools-avalonia. ~5 days.
 
-6. **sector-editor-avalonia** — 16 forms, custom map canvas
+5. **sector-editor-avalonia** — 16 forms, custom map canvas
    (System.Drawing.Graphics → Avalonia DrawingContext is the major
    work). ~2-3 weeks.
 
 ### Tier 2+ — deferred
 
-The remaining 7 editors (mob-editor, talktreeeditor, effect-editor, toolslauncher, station-tools, missioneditor, sector-editor) are tracked as future Phase L sub-items. With realistic ~3-6 month total for the suite, this is its own project — but per the user directive "do all plans / dont stop at phase boundaries," subsequent invocations should keep grinding through them.
+The remaining 5 editors (effect-editor, toolslauncher, station-tools, missioneditor, sector-editor) are tracked as future Phase L sub-items. With realistic ~3-6 month total for the suite, this is its own project — but per the user directive "do all plans / dont stop at phase boundaries," subsequent invocations should keep grinding through them.
 
 For immediate Linux runnability of the editors: the WinForms binaries already run under WINE — `tools/README.md` documents this. That's the realistic interim story until Avalonia ports land.
 

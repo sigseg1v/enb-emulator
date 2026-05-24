@@ -1,0 +1,12 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="400" d:DesignHeight="28"
+             x:Class="TalkTreeEditorAvalonia.Reply.BranchControl">
+  <StackPanel Orientation="Horizontal" Spacing="4">
+    <TextBox x:Name="c_GotoTxt"  Width="50"  Watermark="goto" TextChanged="OnTextChanged" />
+    <TextBox x:Name="c_ReplyTxt" Width="240" Watermark="branch reply text" TextChanged="OnTextChanged" />
+    <Button  x:Name="c_GotoBtn"  Width="50"  Content="Goto" Click="OnGotoClick" />
+  </StackPanel>
+</UserControl>
