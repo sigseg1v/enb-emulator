@@ -387,6 +387,23 @@ int main(int argc, char* argv[])
                              true /*standalone*/,
                              ip_address_internal);
 
+    // Phase K: stand up a UDPClient pointing at the game server's
+    // UDP_MASTER_SERVER_PORT (3808). HandleMasterJoin will use this to
+    // send the MasterHandoff opcode and wait for the sector-port reply.
+    // The ip_addr arg is a FALLBACK only — UDPClient::OpenFixedPort
+    // first tries getenv("NET7_GAME_SERVER_HOST") (default "server",
+    // which docker resolves to the game server container).
+    UDPClient udp_to_server(MVAS_LOGIN_PORT,
+                            CLIENT_TYPE_FIXED_PORT,
+                            ip_address_internal);
+
+    // The proxy uses ONE UDPClient instance for both roles on Linux:
+    // both m_UDPConnection (send-to-server) and m_UDPClient (recv-from-
+    // server) point at it. The Win32 path had two distinct objects
+    // (FIXED + MULTI port); on Linux we only port FIXED, and that one
+    // object handles both the send and recv halves.
+    server_mgr.SetUDPConnections(&udp_to_server, &udp_to_server);
+
     server_mgr.RunServer();
 
     return 0;

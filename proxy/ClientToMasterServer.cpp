@@ -1,13 +1,18 @@
 // ClientToMasterServer.cpp
 //
-// Phase J: opcode dispatch for Master Server (TCP 3801). Compiles on
+// Phase K: opcode dispatch for Master Server (TCP 3801). Compiles on
 // both Win32 (original behaviour: full SendMasterLogin → UDP MVAS round-
-// trip → SendServerRedirect) and Linux (option-b stub: log + hardcoded
-// ServerRedirect using the proxy's own IP). The Win32 path still
-// requires g_ServerMgr->m_UDPConnection / m_UDPClient — neither is
-// constructed on the Linux proxy yet (UDP proxy plane is still WIN32-
-// walled at file level — see proxy/UDPProxyMVAS.cpp, UDPClient.cpp, etc.)
-// so the Linux branch bypasses them entirely.
+// trip → SendServerRedirect) and Linux (minimal port: SendMasterLogin
+// hits the server's UDP_MASTER_SERVER_PORT, waits up to ~5s for the
+// 0x2009 confirm, then sends ServerRedirect).
+//
+// Phase J carry-over: HandleMasterJoin used to be a Linux stub that
+// short-circuited the MVAS round-trip and sent a hardcoded
+// ServerRedirect pointing at the proxy's own SECTOR_SERVER_PORT. As of
+// Phase K the Linux UDP plane is partially ported (UDPClient_linux.cpp)
+// so we now call SendMasterLogin like the Win32 path; if it times out
+// we fall back to the hardcoded redirect to preserve the "client moves
+// on" property.
 
 /*************************************
  *   /////////////////////////////   *
@@ -20,9 +25,7 @@
 #include "Opcodes.h"
 #include "ServerManager.h"
 #include "PacketStructures.h"
-#ifdef WIN32
 #include "UDPClient.h"
-#endif
 
 void Connection::ProcessMasterServerOpcode(short opcode, short bytes)
 {
@@ -80,26 +83,65 @@ void Connection::HandleMasterJoin()
 	}
 }
 #else
-// Linux option-b stub: log the join + send a hardcoded ServerRedirect
-// back. No MVAS round-trip (the UDP proxy plane is still WIN32-walled),
-// so we point the client at SECTOR_SERVER_PORT on the proxy itself —
-// once we port ClientToSectorServer.cpp, the client's next TCP to 3500
-// lands here too.
+// Linux: drive the same SendMasterLogin round-trip as the Win32 path
+// (proxy -> server:3808 UDP, opcode 0x2008, wait for 0x2009 confirm).
+// If the server doesn't respond within the WaitForResponse window we
+// fall through to a hardcoded ServerRedirect at the proxy's
+// SECTOR_SERVER_PORT so the client's state machine keeps moving — same
+// behaviour the Phase J option-b stub had, just now driven by an
+// actually-attempted UDP exchange.
 void Connection::HandleMasterJoin()
 {
 	MasterJoin * join = (MasterJoin *) m_RecvBuffer;
 	long sector_id = ntohl(join->ToSectorID);
 	m_AvatarID = ntohl(join->avatar_id_lsb);
 
-	LogMessage("<client> MasterJoin avatar_id=%ld ToSectorID=%ld FromSectorID=%ld (Linux stub)\n",
+	LogMessage("<client> MasterJoin avatar_id=%ld ToSectorID=%ld FromSectorID=%ld\n",
 		(long) m_AvatarID, (long) sector_id, (long) ntohl(join->FromSectorID));
 
 	g_LoggedIn = true;
 
-	// Linux stub: skip MVAS SendMasterLogin (no UDP plane), send a
-	// hardcoded ServerRedirect that points the client at the proxy's
-	// own SECTOR_SERVER_PORT. This lets us see what the client sends
-	// next without requiring the full UDP login round-trip.
+	g_ServerMgr->m_MasterConnection = this;
+
+	long  sector_ipaddr = 0;
+	short sector_port   = -1;
+
+	if (g_ServerMgr->m_UDPConnection)
+	{
+		sector_port = g_ServerMgr->m_UDPConnection->SendMasterLogin(
+			m_AvatarID, sector_id, &sector_ipaddr);
+	}
+	else
+	{
+		LogMessage("<proxy> HandleMasterJoin: m_UDPConnection null; cannot SendMasterLogin\n");
+	}
+
+	if (sector_port == -1)
+	{
+		// Server didn't confirm; fall back to the Phase J option-b path:
+		// hand the client a redirect back at the proxy's own
+		// SECTOR_SERVER_PORT and let the next TCP frame surface here.
+		LogMessage("<proxy> SendMasterLogin failed/timed-out; sending proxy-local ServerRedirect\n");
+		SendServerRedirect(sector_id);
+		return;
+	}
+
+	LogMessage("<server> Master Login received - UDP sector port: %d\n", sector_port);
+	if (g_ServerMgr->m_UDPConnection)
+	{
+		g_ServerMgr->m_UDPConnection->SetClientPort(sector_port);
+		g_ServerMgr->m_UDPConnection->SetClientIP(sector_ipaddr);
+		g_ServerMgr->m_UDPConnection->SetSectorID(sector_id);
+	}
+	if (g_ServerMgr->m_UDPClient)
+	{
+		g_ServerMgr->m_UDPClient->SetSectorID(sector_id);
+	}
+
+	// Redirect the client to the appropriate sector server. The
+	// ServerRedirect payload still points at m_IpAddress / our
+	// SECTOR_SERVER_PORT — once ProcessSectorServerOpcode is ported the
+	// client's next-stage TCP traffic resumes here.
 	SendServerRedirect(sector_id);
 }
 #endif
