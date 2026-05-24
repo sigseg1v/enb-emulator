@@ -33,7 +33,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
-COPY . /src/server/
+# Build context is the repo root (docker-compose context: .); copy only
+# what the server build needs: server/ itself and common/ (Phase R shared
+# headers + Phase M net7ipc::PosixIpc).
+COPY server/ /src/server/
+COPY common/ /src/common/
 
 RUN cmake -S /src/server -B /build -G Ninja \
     && cmake --build /build -j"$(nproc)" -- -k 0

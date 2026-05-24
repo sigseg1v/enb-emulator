@@ -25,7 +25,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
-COPY . /src/proxy/
+# Build context is the repo root (docker-compose context: .); copy only
+# what the proxy build needs: proxy/ itself and common/ (Phase R shared
+# headers + Phase M net7ipc::PosixIpc).
+COPY proxy/  /src/proxy/
+COPY common/ /src/common/
 
 RUN cmake -S /src/proxy -B /build -G Ninja \
     && cmake --build /build -j"$(nproc)" -- -k 0

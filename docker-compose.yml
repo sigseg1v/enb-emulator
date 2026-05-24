@@ -48,7 +48,11 @@ services:
 
   server:
     build:
-      context: ./server
+      # Phase R: build context is the repo root so the Dockerfile can
+      # COPY common/ (shared protocol headers + net7ipc::PosixIpc) in
+      # addition to server/.
+      context: .
+      dockerfile: server/Dockerfile
     depends_on:
       mysql:
         condition: service_healthy
@@ -103,7 +107,10 @@ services:
   # --------------------------------------------------------------
   proxy:
     build:
-      context: ./proxy
+      # Phase R: build context is the repo root so the Dockerfile can
+      # COPY common/ in addition to proxy/.
+      context: .
+      dockerfile: proxy/Dockerfile
     depends_on:
       mysql:
         condition: service_healthy
@@ -129,7 +136,10 @@ services:
   # --------------------------------------------------------------
   login:
     build:
-      context: ./login-server
+      # Phase R: build context is the repo root so the Dockerfile can
+      # COPY common/ in addition to login-server/.
+      context: .
+      dockerfile: login-server/Dockerfile
     depends_on:
       mysql:
         condition: service_healthy
