@@ -1,38 +1,20 @@
-// crc32.cs
+// Crc32.cs
+//
+// CRC32 over Stream / file / byte buffer. Adapted from Mike Krueger's
+// SharpZipLib implementation. Polynomial:
+//   x^32+x^26+x^23+x^22+x^16+x^12+x^11+x^10+x^8+x^7+x^5+x^4+x^2+x+1
+//
+// History: the upstream Net7Tools tree carried at least four independent
+// copies of this file (one per tool that needed it). The Avalonia ports
+// initially copied that pattern. This is the single shared implementation
+// the Avalonia tools reference; the per-port duplicates were removed.
 using System;
 using System.IO;
 
-namespace EnbPatcherAvalonia
+namespace CommonTools.Cryptography
 {
-
-    /// <summary>
-    /// Modified from Mike Krueger's code.
-    /// Generate a table for a byte-wise 32-bit CRC calculation on the polynomial:
-    /// x^32+x^26+x^23+x^22+x^16+x^12+x^11+x^10+x^8+x^7+x^5+x^4+x^2+x+1.
-    ///
-    /// Polynomials over GF(2) are represented in binary, one bit per coefficient,
-    /// with the lowest powers in the most significant bit.  Then adding polynomials
-    /// is just exclusive-or, and multiplying a polynomial by x is a right shift by
-    /// one.  If we call the above polynomial p, and represent a byte as the
-    /// polynomial q, also with the lowest power in the most significant bit (so the
-    /// byte 0xb1 is the polynomial x^7+x^3+x+1), then the CRC is (q*x^32) mod p,
-    /// where a mod b means the remainder after dividing a by b.
-    ///
-    /// This calculation is done using the shift-register method of multiplying and
-    /// taking the remainder.  The register is initialized to zero, and for each
-    /// incoming bit, x^32 is added mod p to the register if the bit is a one (where
-    /// x^32 mod p is p+x^32 = x^26+...+1), and the register is multiplied mod p by
-    /// x (which is shifting right by one and adding x^32 mod p if the bit shifted
-    /// out is a one).  We start with the highest power (least significant bit) of
-    /// q and repeat for all eight bits of q.
-    ///
-    /// The table is simply the CRC of all possible eight bit values.  This is all
-    /// the information needed to generate CRC's on data a byte at a time for all
-    /// combinations of CRC register values and incoming bytes.
-    /// </summary>
     public sealed class Crc32
     {
-        #region Fields
         private readonly static uint CrcSeed = 0xFFFFFFFF;
 
         private readonly static uint[] CrcTable = new uint[] {
@@ -64,7 +46,7 @@ namespace EnbPatcherAvalonia
    0x2EB40D81, 0xB7BD5C3B, 0xC0BA6CAD, 0xEDB88320, 0x9ABFB3B6,
    0x03B6E20C, 0x74B1D29A, 0xEAD54739, 0x9DD277AF, 0x04DB2615,
    0x73DC1683, 0xE3630B12, 0x94643B84, 0x0D6D6A3E, 0x7A6A5AA8,
-   0xE40ECF0B, 0x9309FF9D, 0x0A00AE27, 0x7D079EB1, 0xF00F9344, 
+   0xE40ECF0B, 0x9309FF9D, 0x0A00AE27, 0x7D079EB1, 0xF00F9344,
    0x8708A3D2, 0x1E01F268, 0x6906C2FE, 0xF762575D, 0x806567CB,
    0x196C3671, 0x6E6B06E7, 0xFED41B76, 0x89D32BE0, 0x10DA7A5A,
    0x67DD4ACC, 0xF9B9DF6F, 0x8EBEEFF9, 0x17B7BE43, 0x60B08ED5,
@@ -86,37 +68,19 @@ namespace EnbPatcherAvalonia
    0x37D83BF0, 0xA9BCAE53, 0xDEBB9EC5, 0x47B2CF7F, 0x30B5FFE9,
    0xBDBDF21C, 0xCABAC28A, 0x53B39330, 0x24B4A3A6, 0xBAD03605,
    0xCDD70693, 0x54DE5729, 0x23D967BF, 0xB3667A2E, 0xC4614AB8,
-   0x5D681B02, 0x2A6F2B94, 0xB40BBE37, 0xC30C8EA1, 0x5A05DF1B, 
+   0x5D681B02, 0x2A6F2B94, 0xB40BBE37, 0xC30C8EA1, 0x5A05DF1B,
    0x2D02EF8D
   };
 
-        private uint crc = 0; // crc data checksum so far.
-        #endregion
+        private uint crc = 0;
 
-        #region Constructors
-        public Crc32()
-        {
-        }
-        #endregion
+        public Crc32() { }
 
-        #region Properties
-        /// <summary>
-        /// Returns the CRC32 data checksum computed so far.
-        /// </summary>
         public uint Value
         {
-            get
-            {
-                return crc;
-            }
-            set
-            {
-                crc = value;
-            }
+            get { return crc; }
+            set { crc = value; }
         }
-        #endregion
-
-        #region Methods
 
         public static uint GetStreamCRC32(Stream stream)
         {
@@ -154,20 +118,11 @@ namespace EnbPatcherAvalonia
             return crc32.Value;
         }
 
-        /// <summary>
-        /// Resets the CRC32 data checksum as if no update was ever called.
-        /// </summary>
         public void Reset()
         {
             crc = 0;
         }
 
-        /// <summary>
-        /// Updates the checksum with the int bval.
-        /// </summary>
-        /// <param name = "bval">
-        /// the byte is taken as the lower 8 bits of bval
-        /// </param>
         public void Update(int bval)
         {
             crc ^= CrcSeed;
@@ -175,40 +130,18 @@ namespace EnbPatcherAvalonia
             crc ^= CrcSeed;
         }
 
-        /// <summary>
-        /// Updates the checksum with the bytes taken from the array.
-        /// </summary>
-        /// <param name="buffer">
-        /// buffer an array of bytes
-        /// </param>
         public void Update(byte[] buffer)
         {
             Update(buffer, 0, buffer.Length);
         }
 
-        /// <summary>
-        /// Adds the byte array to the data checksum.
-        /// </summary>
-        /// <param name = "buf">
-        /// the buffer which contains the data
-        /// </param>
-        /// <param name = "off">
-        /// the offset in the buffer where the data starts
-        /// </param>
-        /// <param name = "len">
-        /// the length of the data
-        /// </param>
         public void Update(byte[] buf, int off, int len)
         {
             if (buf == null)
-            {
                 throw new ArgumentNullException("buf");
-            }
 
             if (off < 0 || len < 0 || off + len > buf.Length)
-            {
                 throw new ArgumentOutOfRangeException();
-            }
 
             crc ^= CrcSeed;
 
@@ -219,7 +152,5 @@ namespace EnbPatcherAvalonia
 
             crc ^= CrcSeed;
         }
-        #endregion
     }
 }
-

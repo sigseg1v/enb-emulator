@@ -9,6 +9,7 @@ using Avalonia.Threading;
 using MsBox.Avalonia;
 using MsBox.Avalonia.Enums;
 using MsBoxIcon = MsBox.Avalonia.Enums.Icon;
+using CommonTools.Cryptography;
 
 namespace EnbPatcherAvalonia
 {

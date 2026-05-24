@@ -14,6 +14,11 @@
     <AvaloniaResource Include="Assets\**" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Crc32 lives in commontools-avalonia/Cryptography/Crc32.cs so all
+         Avalonia tools share one implementation. -->
+    <ProjectReference Include="..\commontools-avalonia\CommonToolsAvalonia.csproj" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.2.3" />
     <PackageReference Include="Avalonia.Desktop" Version="11.2.3" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.2.3" />
