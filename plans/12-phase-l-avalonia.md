@@ -940,18 +940,30 @@ so Tier 12 is split:
       with a loud throw to surface any forgotten call site. Build clean,
       smoke green.
 
-- [ ] **Tier 12c — simple dialogs**
-      Status: not started
-      Touches: `tools/sector-editor-avalonia/Dialogs/` (NewSystem,
-      NewSector, NewSectorObject, NewSectorObjectType, NewFrm, OptionsGui,
+- [x] **Tier 12c — Props/ POCOs + Utilities scaffolding**
+      Status: done
+      Touches: `tools/sector-editor-avalonia/Props/` (BaseProps,
+      SystemProps, SectorProps, MobProps, PlanetProps, StargateProps,
+      StarbaseProps, HarvestableProps), `tools/sector-editor-avalonia/
+      Utilities/` (HE_GlobalVars, QuaternionCalc)
+      Notes: Props ported with [Category]/[Description]/[ReadOnly]/
+      [DefaultProperty]/[Browsable] preserved; all WinForms-only
+      [Editor()]/[TypeConverter()] attributes dropped because Avalonia
+      has no PropertyGrid equivalent (the Tier 12e UI will need a
+      bespoke editor pane). Color uses System.Drawing.Color
+      (cross-platform via System.Drawing.Primitives on .NET 10).
+      HarvestableProps: renamed `private String field` →
+      `field_value` to avoid C# 14's contextual `field` accessor
+      keyword. HE_GlobalVars: only the const string tables were
+      lifted (the WinForms StringConverter subclasses go away with
+      PropertyGrid). QuaternionCalc: pure-math port verbatim.
+      **15 dialogs descoped to Tier 12e** (NewSystem, NewSector,
+      NewSectorObject, NewSectorObjectType, NewFrm, OptionsGui,
       SoundEffects, HarvestableResTypes, MobGroup, Destination,
-      frmContrast, BaseAssets, Settings, AboutBox1, AboutBox2)
-      Notes: 15 dialogs ranging from trivial (AboutBox, frmContrast =
-      brightness slider) to medium (BaseAssets, NewSectorObject).
-      Login is reused from commontools-avalonia. Some dialogs go away
-      if their feature drops with the Piccolo shim (e.g. SoundEffects
-      only makes sense once the sound-effect-id picker is wired into
-      sprites).
+      frmContrast, BaseAssets, Settings, AboutBox1, AboutBox2) —
+      they depend on mainFrm static-globals, Sprites, and Piccolo
+      shim being in place; porting them now would produce untested
+      broken scaffolds. Build clean, smoke green.
 
 - [ ] **Tier 12d — Piccolo shim on Avalonia primitives**
       Status: not started
