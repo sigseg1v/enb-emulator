@@ -1,0 +1,33 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        x:Class="DataImportAvalonia.MainWindow"
+        Width="486" Height="283"
+        Title="Data Import"
+        CanResize="False"
+        WindowStartupLocation="CenterScreen">
+  <Grid Margin="12" RowDefinitions="Auto,Auto,*,Auto">
+    <!-- Row 0: Table picker -->
+    <Grid Grid.Row="0" ColumnDefinitions="Auto,*" Margin="0,0,0,8">
+      <TextBlock Grid.Column="0" Text="Table:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+      <ComboBox  Grid.Column="1" x:Name="guiTableCbo" HorizontalAlignment="Stretch"/>
+    </Grid>
+
+    <!-- Row 1: File path + Browse -->
+    <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto">
+      <TextBlock Grid.Column="0" Text="File:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+      <TextBox   Grid.Column="1" x:Name="guiFileTxt"/>
+      <Button    Grid.Column="2" x:Name="guiFileBtn" Content="Browse" Width="80" Margin="8,0,0,0"/>
+    </Grid>
+
+    <!-- Row 2: spacer (preserves original layout's gap before action row) -->
+
+    <!-- Row 3: Action buttons -->
+    <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right">
+      <Button x:Name="guiImportBtn" Content="Import" Width="80" Margin="0,0,8,0"/>
+      <Button x:Name="guiCloseBtn"  Content="Close"  Width="80"/>
+    </StackPanel>
+  </Grid>
+</Window>

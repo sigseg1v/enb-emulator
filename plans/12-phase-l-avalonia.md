@@ -211,43 +211,56 @@ The existing WinForms targets stay in the tree. They still build via `dotnet bui
         version → x:Name fields stay null → ctor NREs at the first
         field access. Don't write one. Smoke test caught it.
 
-### Future tier ordering (deferred until session focus returns to Phase L)
+### Tier 3 — first commontools-avalonia consumer (complete)
 
-When picking up Phase L again, the recommended order:
+- [x] **dataimport-avalonia** — 1 form, depends on commontools-avalonia.
+  - Ports `tools/dataimport/` (377 LOC) to a Linux-native build.
+  - Layout: 7-control form (Table ComboBox, File TextBox + Browse,
+    Import/Close) rewritten as `Grid` + `StackPanel`.
+  - `OpenFileDialog` → `StorageProvider.OpenFilePickerAsync`.
+  - Login → MainWindow handoff uses `ShutdownMode.OnExplicitShutdown`
+    in `App.OnFrameworkInitializationCompleted`, swapping `MainWindow`
+    on the Login `Closed` event. The naive
+    `login.ShowDialog(null).GetAwaiter().GetResult()` from the lifecycle
+    callback would deadlock the dispatcher — caught during design.
+  - 4 files + slnx entry; `dotnet build` clean (0 warn/0 err);
+    `--smoke` headless test passes (`window 486x283 title="Data Import v1.0 Build 0.0"`).
+  - **6/14 tools have Linux-native paths now.**
 
-1. **dataimport-avalonia** — 1 form, depends on commontools-avalonia.
-   ~half a day.
+### Future tier ordering (remaining 9 tools — deferred until session focus returns to Phase L)
 
-2. **launchnet7-avalonia** — 4 forms (Main, Options, Patch, About). No
+Recommended order:
+
+1. **launchnet7-avalonia** — 4 forms (Main, Options, Patch, About). No
    commontools dep. ~1-2 days.
 
-3. **faction-editor-avalonia** — 3 forms, MySQL. ~1-2 days (depends on
+2. **faction-editor-avalonia** — 3 forms, MySQL. ~1-2 days (depends on
    commontools-avalonia).
 
-4. **mob-editor-avalonia** — 3 forms, MySQL, larger LOC. ~2 days
+3. **mob-editor-avalonia** — 3 forms, MySQL, larger LOC. ~2 days
    (depends on commontools-avalonia).
 
-5. **talktreeeditor-avalonia** — 5 forms, depends on
+4. **talktreeeditor-avalonia** — 5 forms, depends on
    commontools-avalonia. ~2-3 days.
 
-6. **toolslauncher-avalonia** — 6 forms incl. IRC client + FTP window.
+5. **toolslauncher-avalonia** — 6 forms incl. IRC client + FTP window.
    ~3-5 days (IRC integration via Meebey.SmartIrc4Net is the wildcard).
 
-7. **effect-editor-avalonia** (SQLBind) — 5 forms, particle effects.
+6. **effect-editor-avalonia** (SQLBind) — 5 forms, particle effects.
    ~3 days.
 
-8. **station-tools-avalonia** — 8 forms. ~4-5 days.
+7. **station-tools-avalonia** — 8 forms. ~4-5 days.
 
-9. **missioneditor-avalonia** — 9 forms incl. tree view. Depends on
+8. **missioneditor-avalonia** — 9 forms incl. tree view. Depends on
    commontools-avalonia. ~5 days.
 
-10. **sector-editor-avalonia** — 16 forms, custom map canvas
-    (System.Drawing.Graphics → Avalonia DrawingContext is the major
-    work). ~2-3 weeks.
+9. **sector-editor-avalonia** — 16 forms, custom map canvas
+   (System.Drawing.Graphics → Avalonia DrawingContext is the major
+   work). ~2-3 weeks.
 
 ### Tier 2+ — deferred
 
-The remaining 10 editors (dataimport, faction-editor, mob-editor, launchnet7, talktreeeditor, effect-editor, toolslauncher, station-tools, missioneditor, sector-editor) are tracked as future Phase L sub-items. **Not in scope for this session.** With realistic ~3-6 month total for the suite, this is its own project.
+The remaining 9 editors (faction-editor, mob-editor, launchnet7, talktreeeditor, effect-editor, toolslauncher, station-tools, missioneditor, sector-editor) are tracked as future Phase L sub-items. **Not in scope for this session.** With realistic ~3-6 month total for the suite, this is its own project.
 
 For immediate Linux runnability of the editors: the WinForms binaries already run under WINE — `tools/README.md` documents this. That's the realistic interim story until Avalonia ports land.
 
