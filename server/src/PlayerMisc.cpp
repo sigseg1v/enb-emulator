@@ -13,7 +13,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -1174,7 +1174,6 @@ bool Player::DisplayPlayerFactionStanding(char *username)
 }
 bool Player::EditFactionStanding(char *param)
 {
-	char queryString[256];
 	char *next_token;
 
 	char *p_faction_id = strtok_s(param, " ", &next_token);
@@ -1212,9 +1211,11 @@ bool Player::EditFactionStanding(char *param)
 	sql_connection_c connection( "net7", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
 	sql_query_c FactionUpdate(&connection);
 
-	sprintf_s(queryString, sizeof(queryString),
-		"UPDATE `faction_matrix` SET `base_value` = '%f' WHERE `faction_id` = '%d' AND `faction_entry_id` = '%d'", new_faction_standing, player_faction_id, faction_id );
-	FactionUpdate.run_query(queryString);
+	FactionUpdate.AddParam((double)new_faction_standing);
+	FactionUpdate.AddParam((long)player_faction_id);
+	FactionUpdate.AddParam((long)faction_id);
+	FactionUpdate.run_query_params(
+		"UPDATE `faction_matrix` SET `base_value` = ? WHERE `faction_id` = ? AND `faction_entry_id` = ?");
 
 	return true;
 }

@@ -7956,7 +7956,6 @@ bool Player::HandleAggroSetting(char *param)
 {
 	bool success = false;
 	long aggro_level = atoi(param);
-	char queryString[256];
 	ObjectManager *om = GetObjectManager();
 
 	Object *obj = om->GetObjectFromID(ShipIndex()->GetTargetGameID());
@@ -7984,9 +7983,10 @@ bool Player::HandleAggroSetting(char *param)
 		sql_connection_c connection( "net7", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
 		sql_query_c MobUpdate(&connection);
 
-		snprintf(queryString, sizeof(queryString),
-			"UPDATE `mob_base` SET `aggressiveness` = '%d' WHERE `mob_id` = '%d'", aggro_level, mob->GetMOBType());
-		MobUpdate.run_query(queryString);
+		MobUpdate.AddParam((long)aggro_level);
+		MobUpdate.AddParam((long)mob->GetMOBType());
+		MobUpdate.run_query_params(
+			"UPDATE `mob_base` SET `aggressiveness` = ? WHERE `mob_id` = ?");
 
 		usleep(200 * 1000);
 		ShipIndex()->CurrentStats.SetScanRange(scan_range);
@@ -8140,8 +8140,6 @@ bool Player::HandleRestartSectorComms(char *param)
 
 void Player::HandleSetTurrets()
 {
-	char queryString[256];
-
 	SendVaMessageC(17,"Setting up turrets. This is done as a one-time op to populate the table to get baseline turrets working.");
 	SendVaMessageC(17,"Factions for turrets and specific MOB_ID (from MOB database/editor) will need to be selected afterwards.");
 
@@ -8168,10 +8166,9 @@ void Player::HandleSetTurrets()
 			if (mob->IsTurret())
 			{
 				//Now set type to be type 42 in database
-				snprintf(queryString, sizeof(queryString), 
-					"UPDATE net7.sector_objects SET type = '42' WHERE sector_object_id = '%d'", object_uid);
-
-				TurretQuery.run_query(queryString);
+				TurretQuery.AddParam(object_uid);
+				TurretQuery.run_query_params(
+					"UPDATE net7.sector_objects SET type = '42' WHERE sector_object_id = ?");
 			}
 
 #if 0
@@ -8181,11 +8178,11 @@ void Player::HandleSetTurrets()
 				char *name = obj->Name();
 				if (strstr(name, "turret") || strstr(name, "Turret"))
 				{
-					snprintf(queryString, sizeof(queryString), 
-						"SELECT * FROM net7.sector_objects_turrets WHERE turret_id = '%d'", object_uid);
+					TurretQuery.AddParam(object_uid);
 
 					//is this turret in the DB?
-					TurretQuery.execute(queryString);
+					TurretQuery.execute_params(
+						"SELECT * FROM net7.sector_objects_turrets WHERE turret_id = ?");
 					TurretQuery.store(&result);
 
 					if (result.n_rows() == 0)
@@ -8209,14 +8206,11 @@ void Player::HandleSetTurrets()
 
 void Player::HandleSetRespawns()
 {
-	char queryString[256];
-
 	SendVaMessageC(17,"Setting up Respawns. This is done as a one-time op.");
 
 	sql_connection_c connection( "net7", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
 	sql_query_c RespawnQuery(&connection);
 
-	sql_result_c result;
 	Object *obj;
 
 	//go through each object in the galaxy database
@@ -8237,10 +8231,10 @@ void Player::HandleSetRespawns()
 			{
 				long rtime = 30 - rand()%5;
 				f->SetRespawnTimer(rtime);
-				snprintf(queryString, sizeof(queryString),
-					"UPDATE net7.sector_objects_harvestable SET respawn_timer = '%d' WHERE resource_id = '%d'", rtime, object_uid);
-
-				RespawnQuery.run_query(queryString);
+				RespawnQuery.AddParam(rtime);
+				RespawnQuery.AddParam(object_uid);
+				RespawnQuery.run_query_params(
+					"UPDATE net7.sector_objects_harvestable SET respawn_timer = ? WHERE resource_id = ?");
 			}
 		}
 	}
@@ -8454,9 +8448,6 @@ return (success);
 bool Player::HandleNavChangeRequest(char *param, int option)
 {
 	bool success = false;
-	bool change = false;
-	bool update_done = false;
-	char queryString[256];
 	ObjectManager *om = GetObjectManager();
 
 	Object *obj = om->GetObjectFromID(ShipIndex()->GetTargetGameID());
@@ -8464,8 +8455,8 @@ bool Player::HandleNavChangeRequest(char *param, int option)
 
 	if (param) value = (float)atof(param);
 
-	if (obj && (obj->ObjectType() == OT_NAV || obj->ObjectType() == OT_DECO 
-		|| obj->ObjectType() == OT_PLANET || obj->ObjectType() == OT_CAPSHIP 
+	if (obj && (obj->ObjectType() == OT_NAV || obj->ObjectType() == OT_DECO
+		|| obj->ObjectType() == OT_PLANET || obj->ObjectType() == OT_CAPSHIP
 		|| obj->ObjectType() == OT_STATION) )
 	{
 		sql_connection_c connection( "net7", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
@@ -8481,10 +8472,10 @@ bool Player::HandleNavChangeRequest(char *param, int option)
 				LogMessage("%s changed %s sig to: %.2f\n", AccountUsername(), obj->Name(), value);
 				s->SetSignature(value);
 				//commit to DB
-				snprintf(queryString, sizeof(queryString),
-					"UPDATE `sector_nav_points` SET `signature` = '%f' WHERE `sector_object_id` = '%d'", 
-					value, s->GetDatabaseUID());
-				change = true;
+				NavUpdate.AddParam((double)value);
+				NavUpdate.AddParam((long)s->GetDatabaseUID());
+				NavUpdate.run_query_params(
+					"UPDATE `sector_nav_points` SET `signature` = ? WHERE `sector_object_id` = ?");
 			}
 			else
 			{
@@ -8501,21 +8492,17 @@ bool Player::HandleNavChangeRequest(char *param, int option)
 			SendVaMessageC(12, "Setting %s server radius to %.2f (Commit to DB)", obj->Name(), value);
 			LogMessage("%s changed %s radius to: %.2f\n", AccountUsername(), obj->Name(), value);
 			s->SetObjectRadius(value);
-			snprintf(queryString, sizeof(queryString),
-				"UPDATE `sector_nav_points` SET `object_radius_patch` = '%f' WHERE `sector_object_id` = '%d'", 
-				value, s->GetDatabaseUID());
-			change = true;
+			NavUpdate.AddParam((double)value);
+			NavUpdate.AddParam((long)s->GetDatabaseUID());
+			NavUpdate.run_query_params(
+				"UPDATE `sector_nav_points` SET `object_radius_patch` = ? WHERE `sector_object_id` = ?");
 			break;
 
-		default: 
+		default:
 			break;
 		}
 
 		success = true;
-		if (change == true)
-		{
-			NavUpdate.run_query(queryString);
-		}
 	}
 	else
 	{
@@ -8529,8 +8516,6 @@ bool Player::HandleChangeFieldRequest(char *param, int option)
 {
 	bool success = false;
 	bool change = false;
-	bool update_done = false;
-	char queryString[256];
 	ObjectManager *om = GetObjectManager();
 
 	Object *obj = om->GetObjectFromID(ShipIndex()->GetTargetGameID());
@@ -8564,9 +8549,10 @@ bool Player::HandleChangeFieldRequest(char *param, int option)
 			{
 				f->SetFieldRadius((float)value);
 				//commit to DB & re-pop
-				snprintf(queryString, sizeof(queryString), 
-					"UPDATE `sector_objects_harvestable` SET `max_field_radius` = '%d' WHERE `resource_id` = '%d'", 
-					value, f->GetDatabaseUID());
+				FieldUpdate.AddParam((long)value);
+				FieldUpdate.AddParam((long)f->GetDatabaseUID());
+				FieldUpdate.run_query_params(
+					"UPDATE `sector_objects_harvestable` SET `max_field_radius` = ? WHERE `resource_id` = ?");
 				change = true;
 			}
 			else
@@ -8580,9 +8566,10 @@ bool Player::HandleChangeFieldRequest(char *param, int option)
 			{
 				f->SetFieldType(value);
 				//commit to DB & re-pop
-				snprintf(queryString, sizeof(queryString),
-					"UPDATE `sector_objects_harvestable` SET `field` = '%d' WHERE `resource_id` = '%d'", 
-					value, f->GetDatabaseUID());
+				FieldUpdate.AddParam((long)value);
+				FieldUpdate.AddParam((long)f->GetDatabaseUID());
+				FieldUpdate.run_query_params(
+					"UPDATE `sector_objects_harvestable` SET `field` = ? WHERE `resource_id` = ?");
 				change = true;
 			}
 			else
@@ -8595,9 +8582,10 @@ bool Player::HandleChangeFieldRequest(char *param, int option)
 			{
 				f->SetLevel(value);
 				//commit to DB & re-pop
-				snprintf(queryString, sizeof(queryString), 
-					"UPDATE `sector_objects_harvestable` SET `level` = '%d' WHERE `resource_id` = '%d'", 
-					value, f->GetDatabaseUID());
+				FieldUpdate.AddParam((long)value);
+				FieldUpdate.AddParam((long)f->GetDatabaseUID());
+				FieldUpdate.run_query_params(
+					"UPDATE `sector_objects_harvestable` SET `level` = ? WHERE `resource_id` = ?");
 				change = true;
 			}
 			else
@@ -8611,9 +8599,10 @@ bool Player::HandleChangeFieldRequest(char *param, int option)
 			{
 				SendVaMessage("New asteroid field count: cannot display new changes until server re-start");
 				//commit to DB & re-pop
-				snprintf(queryString, sizeof(queryString),
-					"UPDATE `sector_objects_harvestable` SET `res_count` = '%d' WHERE `resource_id` = '%d'", 
-					value, f->GetDatabaseUID());
+				FieldUpdate.AddParam((long)value);
+				FieldUpdate.AddParam((long)f->GetDatabaseUID());
+				FieldUpdate.run_query_params(
+					"UPDATE `sector_objects_harvestable` SET `res_count` = ? WHERE `resource_id` = ?");
 				change = true;
 			}
 			break;
@@ -8629,10 +8618,10 @@ bool Player::HandleChangeFieldRequest(char *param, int option)
 				f->AddItemID(value, 0.0f);
 				//need to make a new entry
 				sql_result_c result;
-				snprintf(queryString, sizeof(queryString), 
-					"SELECT * FROM sector_objects_harvestable_oretypes WHERE resource_id = '%d' AND additional_ore_item_id = '%d'", 
-					f->GetDatabaseUID(), value);
-				FieldUpdate.execute(queryString);
+				FieldUpdate.AddParam((long)f->GetDatabaseUID());
+				FieldUpdate.AddParam((long)value);
+				FieldUpdate.execute_params(
+					"SELECT * FROM sector_objects_harvestable_oretypes WHERE resource_id = ? AND additional_ore_item_id = ?");
 				FieldUpdate.store(&result);
 
 				if (result.n_rows() == 0)
@@ -8651,7 +8640,6 @@ bool Player::HandleChangeFieldRequest(char *param, int option)
 					}
 				}
 				change = true;
-				update_done = true;
 			}
 			else
 			{
@@ -8662,14 +8650,15 @@ bool Player::HandleChangeFieldRequest(char *param, int option)
 		case 7: //remove base ore -  - so it doesn't drops in this zone
 			//1. check item is valid
 			if (value > 0 && value < 10000)
-			{				
+			{
 				ItemBase *base_ore = g_ItemBaseMgr->GetItem(value);
 				//delete from DB
 				if (base_ore)
 				{
-					snprintf(queryString, sizeof(queryString), 
-						"DELETE FROM sector_objects_harvestable_oretypes WHERE resource_id = '%d' AND additional_ore_item_id = '%d'", 
-						f->GetDatabaseUID(), value);
+					FieldUpdate.AddParam((long)f->GetDatabaseUID());
+					FieldUpdate.AddParam((long)value);
+					FieldUpdate.run_query_params(
+						"DELETE FROM sector_objects_harvestable_oretypes WHERE resource_id = ? AND additional_ore_item_id = ?");
 					change = true;
 					SendVaMessageC(13, "%s removed from field's ore list.", base_ore->Name());
 				}
@@ -8683,14 +8672,14 @@ bool Player::HandleChangeFieldRequest(char *param, int option)
 		case 8: //add base ore to 'base_ore_list' - so it drops in this zone
 			//1. check item is valid
 			if (value > 0 && value < 10000)
-			{				
+			{
 				ItemBase *base_ore = g_ItemBaseMgr->GetItem(value);
 				//is this ore already in the DB?
 				sql_result_c result;
-				snprintf(queryString, sizeof(queryString), 
-					"SELECT * FROM base_ore_list WHERE sector_id = '%d' AND item_id = '%d'", 
-					PlayerIndex()->GetSectorNum(), value);
-				FieldUpdate.execute(queryString);
+				FieldUpdate.AddParam((long)PlayerIndex()->GetSectorNum());
+				FieldUpdate.AddParam((long)value);
+				FieldUpdate.execute_params(
+					"SELECT * FROM base_ore_list WHERE sector_id = ? AND item_id = ?");
 				FieldUpdate.store(&result);
 
 				if (result.n_rows() == 0 && base_ore)
@@ -8714,7 +8703,6 @@ bool Player::HandleChangeFieldRequest(char *param, int option)
 					}
 				}
 				change = true;
-				update_done = true;
 			}
 			else
 			{
@@ -8725,14 +8713,15 @@ bool Player::HandleChangeFieldRequest(char *param, int option)
 		case 9: //remove base ore -  - so it doesn't drops in this zone
 			//1. check item is valid
 			if (value > 0 && value < 10000)
-			{				
+			{
 				ItemBase *base_ore = g_ItemBaseMgr->GetItem(value);
 				//delete from DB
 				if (base_ore)
 				{
-					snprintf(queryString, sizeof(queryString), 
-						"DELETE FROM base_ore_list WHERE sector_id = '%d' AND item_id = '%d'", 
-						PlayerIndex()->GetSectorNum(), value);
+					FieldUpdate.AddParam((long)PlayerIndex()->GetSectorNum());
+					FieldUpdate.AddParam((long)value);
+					FieldUpdate.run_query_params(
+						"DELETE FROM base_ore_list WHERE sector_id = ? AND item_id = ?");
 					change = true;
 					SendVaMessageC(13, "%s removed from Sector's Base Ore list.", base_ore->Name());
 				}
@@ -8749,10 +8738,6 @@ bool Player::HandleChangeFieldRequest(char *param, int option)
 
 		if (change == true)
 		{
-			if (!update_done) 
-			{
-				FieldUpdate.run_query(queryString);
-			}
 			//now blank & re-pop field
 			long scan_range = ShipIndex()->CurrentStats.GetScanRange();
 			ShipIndex()->CurrentStats.SetScanRange(10); //set ship almost blind
@@ -8911,7 +8896,6 @@ bool Player::HandleLevelOutRequest(long Target)
 bool Player::HandleCommitRequest(long Target)
 {
 	bool success = false;
-	char queryString[256];
 
 	Object *obj = GetObjectManager()->GetObjectFromID(Target);
 
@@ -8922,58 +8906,45 @@ bool Player::HandleCommitRequest(long Target)
 		sql_connection_c connection( "net7", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
 		sql_query_c PositionUpdate(&connection);
 
-		snprintf(queryString, sizeof(queryString), 
-			"UPDATE `sector_objects` SET `position_x` = '%.2f' WHERE `sector_object_id` = '%d'", 
-			obj->PosX(), obj->GetDatabaseUID());
-		PositionUpdate.run_query(queryString);
-		snprintf(queryString, sizeof(queryString), 
-			"UPDATE `sector_objects` SET `position_y` = '%.2f' WHERE `sector_object_id` = '%d'", 
-			obj->PosY(), obj->GetDatabaseUID());
-		PositionUpdate.run_query(queryString);
-		snprintf(queryString, sizeof(queryString), 
-			"UPDATE `sector_objects` SET `position_z` = '%.2f' WHERE `sector_object_id` = '%d'", 
-			obj->PosZ(), obj->GetDatabaseUID());
-		PositionUpdate.run_query(queryString);
-		snprintf(queryString, sizeof(queryString), 
-			"UPDATE `sector_objects` SET `orientation_u` = '%.6f' WHERE `sector_object_id` = '%d'", 
-			ori[0], obj->GetDatabaseUID());
-		PositionUpdate.run_query(queryString);
-		snprintf(queryString, sizeof(queryString), 
-			"UPDATE `sector_objects` SET `orientation_v` = '%.6f' WHERE `sector_object_id` = '%d'", 
-			ori[1], obj->GetDatabaseUID());
-		PositionUpdate.run_query(queryString);
-		snprintf(queryString, sizeof(queryString), 
-			"UPDATE `sector_objects` SET `orientation_w` = '%.6f' WHERE `sector_object_id` = '%d'", 
-			ori[2], obj->GetDatabaseUID());
-		PositionUpdate.run_query(queryString);
-		snprintf(queryString, sizeof(queryString), 
-			"UPDATE `sector_objects` SET `orientation_z` = '%.6f' WHERE `sector_object_id` = '%d'", 
-			ori[3], obj->GetDatabaseUID());
-		PositionUpdate.run_query(queryString);
-		snprintf(queryString, sizeof(queryString), 
-			"UPDATE `sector_objects` SET `scale` = '%.4f' WHERE `sector_object_id` = '%d'", 
-			obj->Scale(), obj->GetDatabaseUID());
-		PositionUpdate.run_query(queryString);
+		const long uid = (long)obj->GetDatabaseUID();
+
+		// All updates target sector_objects.<field> WHERE sector_object_id = ?
+		struct { const char *sql; double value; } so_updates[] = {
+			{ "UPDATE `sector_objects` SET `position_x` = ? WHERE `sector_object_id` = ?",   (double)obj->PosX()  },
+			{ "UPDATE `sector_objects` SET `position_y` = ? WHERE `sector_object_id` = ?",   (double)obj->PosY()  },
+			{ "UPDATE `sector_objects` SET `position_z` = ? WHERE `sector_object_id` = ?",   (double)obj->PosZ()  },
+			{ "UPDATE `sector_objects` SET `orientation_u` = ? WHERE `sector_object_id` = ?", (double)ori[0]      },
+			{ "UPDATE `sector_objects` SET `orientation_v` = ? WHERE `sector_object_id` = ?", (double)ori[1]      },
+			{ "UPDATE `sector_objects` SET `orientation_w` = ? WHERE `sector_object_id` = ?", (double)ori[2]      },
+			{ "UPDATE `sector_objects` SET `orientation_z` = ? WHERE `sector_object_id` = ?", (double)ori[3]      },
+			{ "UPDATE `sector_objects` SET `scale` = ? WHERE `sector_object_id` = ?",        (double)obj->Scale() },
+		};
+		for (size_t i = 0; i < sizeof(so_updates)/sizeof(so_updates[0]); ++i)
+		{
+			PositionUpdate.AddParam(so_updates[i].value);
+			PositionUpdate.AddParam(uid);
+			PositionUpdate.run_query_params(so_updates[i].sql);
+		}
 
 		//store specialist information
 		switch (obj->ObjectType())
 		{
 		case OT_PLANET:
-			snprintf(queryString, sizeof(queryString), 
-				"UPDATE `sector_objects_planets` SET `rotate_rate` = '%f' WHERE `planet_id` = '%d'", 
-				obj->Spin(), obj->GetDatabaseUID());
-			PositionUpdate.run_query(queryString);
-			snprintf(queryString, sizeof(queryString), 
-				"UPDATE `sector_objects_planets` SET `tilt_angle` = '%f' WHERE `planet_id` = '%d'", 
-				obj->Tilt(), obj->GetDatabaseUID());
-			PositionUpdate.run_query(queryString);
+			PositionUpdate.AddParam((double)obj->Spin());
+			PositionUpdate.AddParam(uid);
+			PositionUpdate.run_query_params(
+				"UPDATE `sector_objects_planets` SET `rotate_rate` = ? WHERE `planet_id` = ?");
+			PositionUpdate.AddParam((double)obj->Tilt());
+			PositionUpdate.AddParam(uid);
+			PositionUpdate.run_query_params(
+				"UPDATE `sector_objects_planets` SET `tilt_angle` = ? WHERE `planet_id` = ?");
 			break;
 		default:
 			break;
 		} ;
 
 		SendVaMessage("Object %s committed to Net7 Database.", obj->Name());
-		LogMessage("%s just committed changes to object %s %d\n", AccountUsername(), obj->Name(), obj->GetDatabaseUID());
+		LogMessage("%s just committed changes to object %s %ld\n", AccountUsername(), obj->Name(), uid);
 	}
 	else
 	{

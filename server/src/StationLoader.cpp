@@ -75,15 +75,13 @@ StationLoader::~StationLoader()
 
 int StationLoader::GetStationSectorID(int ObjectID)
 {
-	char queryString[3048];
 	sql_connection_c connection("net7", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
 	sql_query_c stnSectorID( &connection );
 	sql_result_c Station_result;
 
-	sprintf_s(queryString, sizeof(queryString),
-		"SELECT `gate_to` FROM `sector_objects` WHERE `sector_objects`.`sector_object_id` = '%d'", ObjectID);
-
-	if ( !stnSectorID.execute( queryString ) )
+	stnSectorID.AddParam((long)ObjectID);
+	if ( !stnSectorID.execute_params(
+			"SELECT `gate_to` FROM `sector_objects` WHERE `sector_objects`.`sector_object_id` = ?" ) )
 	{
 		printf("\n");
 		LogMessage( "MySQL Login error/Database error: (User: %s Pass: %s)\n", g_MySQL_User, g_MySQL_Pass );
@@ -106,12 +104,11 @@ int StationLoader::GetStationSectorID(int ObjectID)
 bool StationLoader::LoadStations()
 {
     bool success = false;
-	char queryString[3048];
 	StationTemplate *current_station = NULL;
 	int StationCount = 0;
 	int StationsinDB = 0;
 
-	if(!g_MySQL_User || !g_MySQL_Pass) 
+	if(!g_MySQL_User || !g_MySQL_Pass)
     {
 		LogMessage("You need to set a mysql user/pass in the net7.cfg\n");
 		return 0;
@@ -122,14 +119,10 @@ bool StationLoader::LoadStations()
 	sql_result_c Station_result;
 
 #ifdef DEV_QUICK_START
-	//sprintf(queryString, "SELECT * FROM `starbases` WHERE `sector_id` = "); //can use this for remote SP testing to speed up loading (load only Jove's Fury)
 	int limit = 20;
 #endif
 
-	strcpy_s(queryString, sizeof(queryString), "SELECT * FROM `starbases`");
-	queryString[sizeof(queryString)-1] = '\0';
-
-	if ( !stnStations.execute( queryString ) )
+	if ( !stnStations.execute_params( "SELECT * FROM `starbases`" ) )
 	{
 		printf("\n");
 		LogMessage( "MySQL Login error/Database error: (User: %s Pass: %s)\n", g_MySQL_User, g_MySQL_Pass );
@@ -328,21 +321,17 @@ void StationLoader::AddTerminals(StationTemplate *current_station, long room_id,
 
 void StationLoader::AddNPCs(StationTemplate *current_station, long room_id, sql_connection_c *connection)
 {
-    char queryString[512];
-    
     // Add NPC id's for each room
     sql_query_c stnNPCs( connection );
     sql_result_c NPCs_result;
-    
-    //sprintf(queryString, "SELECT * FROM `starbase_npcs` WHERE `room_id` = '%d'", room_id);
-    sprintf_s(queryString, sizeof(queryString), 
-		"SELECT * FROM `starbase_npcs` left join `starbase_npc_avatar_templates`"
-        " on starbase_npcs.npc_Id = starbase_npc_avatar_templates.avatar_template_id"
-        " left join `starbase_vendors`"
-        " on starbase_npcs.npc_Id = starbase_vendors.vendor_id" 
-        " WHERE `room_id` = '%d'", room_id);
 
-    if ( !stnNPCs.execute( queryString ) )
+    stnNPCs.AddParam(room_id);
+    if ( !stnNPCs.execute_params(
+            "SELECT * FROM `starbase_npcs` left join `starbase_npc_avatar_templates`"
+            " on starbase_npcs.npc_Id = starbase_npc_avatar_templates.avatar_template_id"
+            " left join `starbase_vendors`"
+            " on starbase_npcs.npc_Id = starbase_vendors.vendor_id"
+            " WHERE `room_id` = ?" ) )
     {
         LogMessage( "Error reading with MySQL (NPCs)\n" );
         return;
@@ -493,11 +482,11 @@ void StationLoader::AddNPCs(StationTemplate *current_station, long room_id, sql_
                 // Load Vendor Information
                 sql_query_c stnVG( connection );
                 sql_result_c NPCVG_result;
-                
-                sprintf_s(queryString, sizeof(queryString),
-					"SELECT `id`,`itemid`,`sell_price`,`buy_price`,`quanity` FROM `starbase_vender_inventory` WHERE  `starbase_vender_inventory`.`groupid` = '%d'", current_npc->VGroup);
-                
-                if ( !stnVG.execute( queryString ) )
+
+                stnVG.AddParam((long)current_npc->VGroup);
+                if ( !stnVG.execute_params(
+                        "SELECT `id`,`itemid`,`sell_price`,`buy_price`,`quanity` FROM `starbase_vender_inventory`"
+                        " WHERE  `starbase_vender_inventory`.`groupid` = ?" ) )
                 {
                     LogMessage( "Error reading with MySQL (Vendors)\n" );
                     return;

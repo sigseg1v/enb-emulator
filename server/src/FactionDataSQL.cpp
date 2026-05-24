@@ -13,7 +13,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -110,13 +110,12 @@ bool Factions::LoadFactions()
 		current_faction->m_Faction_gain_sfx = g_StringMgr->GetStr((char*)FactionSQLData["faction_gain_sound"]);
 		
 		//OK now load in the faction relationships for this faction
-		sprintf_s(QueryString, sizeof(QueryString),
-			"SELECT * FROM `faction_matrix` WHERE faction_id = '%d'", current_faction_id);
-
 		sql_query_c Faction_matrix( &connection );
         sql_result_c *matrix_result = &matrix;
-        
-		if ( !Faction_matrix.execute( QueryString ) )
+
+		Faction_matrix.AddParam((long)current_faction_id);
+		if ( !Faction_matrix.execute_params(
+				"SELECT * FROM `faction_matrix` WHERE faction_id = ?" ) )
 		{
 			printf( "MySQL Error (Faction Matrix)\n" );
 			return 0;
