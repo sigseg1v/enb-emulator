@@ -175,10 +175,54 @@ CliClient.UnitTests/
       Build clean under `<TreatWarningsAsErrors>true</TreatWarningsAsErrors>`
       and `<Nullable>enable</Nullable>` — 0 warnings, 0 errors.
 
-- [ ] Item 3 — RC4 + RSA handshake (mirror common/include/net7/WestwoodRC4.h + WestwoodRSA.h)
-      Status: not started
-      Touches: tools/cli-client/Net/RC4.cs, RSAHandshake.cs
-      Notes: Port byte-for-byte from the C++ headers. Validate against a fixture capture (archive/kyp-snapshot/capturedPackets/) if one exists.
+- [x] Item 3 — RC4 + RSA handshake (mirror common/include/net7/WestwoodRC4.h + WestwoodRSA.h)
+      Status: done
+      Touches: tools/cli-client/src/CliClient.Core/Net/WestwoodRC4.cs,
+               tools/cli-client/src/CliClient.Core/Net/WestwoodRSA.cs,
+               tools/cli-client/src/CliClient.Core/Net/RsaHandshake.cs,
+               tools/cli-client/tests/CliClient.UnitTests/Net/WestwoodRC4Tests.cs,
+               tools/cli-client/tests/CliClient.UnitTests/Net/WestwoodRSATests.cs,
+               tools/cli-client/tests/CliClient.UnitTests/Net/RsaHandshakeTests.cs
+      Notes: Implementation breakdown ---
+      `WestwoodRC4` — direct port of the KSA + PRGA loops from
+      `proxy/WestwoodRC4.cpp`. Standard RC4; the Westwood-specific bit
+      is the 8-byte session key (`KeySize = 8`, mirrors RC4_KEY_SIZE in
+      `proxy/Connection.h`). Two instances per connection (inbound +
+      outbound), both keyed off the same 8 bytes the client picks.
+      Verified against RFC 6229's "Key" / "Plaintext" → 0xBBF316E8...
+      reference vector.
+      `WestwoodRSA` — replaces the OpenSSL BIGNUM dance with
+      `System.Numerics.BigInteger.ModPow`. The (e, N) public key is the
+      same fixed constants from `common/include/net7/WestwoodRSA.h`
+      (e=35, N=10385578014804950221065190195736491193847541479389728420426514083771326945639729736695791225573893793119489336012297845146104637691941242485732839277543427).
+      d is included only so we can round-trip in tests; production CLI
+      client only ever calls `EncryptBlock`. Big-endian byte-order
+      conversions (`FromBigEndian`/`ToBigEndian`) mirror OpenSSL's
+      `BN_bin2bn` / `BN_bn2bin` semantics with the sign-byte trick to
+      keep BigInteger from treating the high bit as a sign indicator.
+      `RsaHandshake` — orchestrates the client side of `DoClientKeyExchange`:
+      receive 74-byte server pubkey (and ignore — pubkey is hardcoded);
+      pick 8 random bytes via `RandomNumberGenerator`; zero-fill a
+      64-byte block; write the RC4 key REVERSED at positions [63..56];
+      RSA-encrypt the block; prepend big-endian uint32 length = 64.
+      The reversed placement matches the C++ `*dest-- = *src++` loop
+      starting at `key[WWRSA_BLOCK_SIZE - 1]`.
+      `ServerPubkeyPacketSize = 74`, `ClientKeyPacketSize = 68`.
+      Tests (15 new, 31 total passing):
+      `WestwoodRC4Tests` — known-answer (RFC 6229), symmetry,
+      streaming==single-shot, empty-key guard.
+      `WestwoodRSATests` — encrypt/decrypt round-trip, output size,
+      input/output size guards, zero-block identity.
+      `RsaHandshakeTests` — wire size, BE length prefix == 64, full
+      client→server round trip extracting the same 8-byte key, random-key
+      round trip, zero-padding shape verification, wrong-key-length guard.
+      Build clean (0 warnings, 0 errors) under TreatWarningsAsErrors +
+      Nullable enable. `dotnet test`: Passed 31, Failed 0.
+      No capture-fixture validation yet — the .rar packet captures in
+      `archive/kyp-snapshot/capturedPackets/` would need extraction +
+      parsing. Deferred to Item 16 (capture replay), since the
+      round-trip test above already proves wire compatibility with the
+      server-side decrypt code we mirrored.
 
 - [ ] Item 4 — Login flow (TLS to Net7SSL, /AuthLogin POST, ticket extraction)
       Status: not started
