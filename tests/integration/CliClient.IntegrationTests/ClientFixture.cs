@@ -6,6 +6,7 @@ using N7.CliClient.Auth;
 using N7.CliClient.Net;
 using N7.CliClient.Opcodes;
 using N7.CliClient.Opcodes.Inbound;
+using N7.CliClient.Opcodes.Outbound;
 using N7.CliClient.Session;
 
 namespace N7.CliClient.IntegrationTests;
@@ -41,6 +42,9 @@ public sealed class ClientFixture
         Registry = new OpcodeRegistry();
         Registry.RegisterAllNamedOpaque();
         Registry.Register(new ServerRedirectCodec());
+        Registry.Register(new VersionResponseCodec());
+        Registry.Register(new VersionRequestCodec());
+        Registry.Register(new MasterJoinCodec());
 
         AuthLogin = new AuthLoginClient(
             _server.LoginHost,

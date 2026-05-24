@@ -199,10 +199,75 @@ xUnit `[Collection("server")]` ensures the docker stack stands up exactly once p
            to "MySQL evaluates UPPER(MD5(...)) server-side, don't
            trust this comment over the function call".
 
-- [ ] Item 4 — Opcode round-trip tests for everything Phase J/K has wired today
-      Status: not started
-      Touches: tests/integration/CliClient.IntegrationTests/Opcodes/*.cs
-      Notes: MasterJoin/0x0035, VersionRequest/0x0000, sector LOGIN/0x0002 to start. One test class per opcode; one [Fact] per scenario (happy path + edge cases). Captured Win32 bytes from archive/kyp-snapshot/capturedPackets/ become the golden references.
+- [x] Item 4 — Opcode round-trip tests for everything Phase J/K has wired today
+      Status: done (Sector LOGIN deferred — see notes)
+      Touches:
+        tools/cli-client/src/CliClient.Core/Opcodes/Outbound/VersionRequestCodec.cs (new),
+        tools/cli-client/src/CliClient.Core/Opcodes/Inbound/VersionResponseCodec.cs (new),
+        tools/cli-client/tests/CliClient.UnitTests/Opcodes/{VersionRequestCodecTests.cs, VersionResponseCodecTests.cs} (new),
+        tests/integration/CliClient.IntegrationTests/ClientFixture.cs (register new codecs),
+        tests/integration/CliClient.IntegrationTests/Opcodes/{VersionRequestTests.cs, MasterJoinTests.cs} (new)
+      Notes:
+        ▸ VersionRequestTests covers all three branches of the Linux
+           proxy's status logic in ClientToServer_linux_stubs.cpp:50-53:
+           CurrentVersion (42,0)→0, OlderClient (41,0)→1, NewerClient
+           (43,0)→2. Each test connects fresh to global (3805), sends
+           the typed VersionRequest, drains until VersionResponse
+           arrives, asserts status. ~10ms per test against the live
+           stack.
+        ▸ Wire-format gotcha worth knowing about: VersionRequest is
+           big-endian on the wire (server ntohl's the two int32s),
+           VersionResponse is little-endian (Linux stub ships the
+           int32 status as raw host bytes with no htonl). Codec
+           handles the asymmetry; documented in the VersionResponse-
+           Codec doc comment.
+        ▸ MasterJoinTests covers the 0x0035→0x0036 round-trip end-
+           to-end. Logs in as Pool[0] for a real ticket, connects to
+           master (3801), sends MasterJoin with ToSectorID=1, drains
+           for ServerRedirect. ~5s per run because in this test env
+           the proxy's HandleMasterJoin falls through the UDP
+           SendMasterLogin timeout path (no MVAS responder on UDP
+           3808) and lands in the hardcoded ServerRedirect fallback
+           at PROXY_LOCAL_TCP_PORT (3500). When Phase K completes
+           the UDP plane + adds a test MVAS responder this drops to
+           sub-second.
+        ▸ Ticket-field width mismatch documented in MasterJoinTests:
+           /AuthLogin returns a 40-char ASCII hex ticket but the
+           MasterJoin packet's ticket field is 20 bytes. The Linux
+           HandleMasterJoin doesn't validate the ticket bytes today
+           (only avatar_id_lsb + ToSectorID matter), so the test
+           passes a truncated ASCII slice as placeholder. Comment in
+           the test flags that Phase K's UDP-plane completion will
+           require shipping the hex *decoded* to 20 binary bytes,
+           not truncated as ASCII. Caught the limitation on first
+           run when AsciiTicket threw ASCIIEncoding.GetBytes
+           overflow on the 40-char input.
+        ▸ Sector LOGIN/0x0002 *deliberately deferred*: the Linux
+           stub at ClientToServer_linux_stubs.cpp:87-99 activates
+           the proxy↔server connection state and intentionally
+           does NOT send any reply (matches Win32 behaviour at
+           ClientToSectorServer.cpp:22-31 — LOGIN is fire-and-
+           forget at the TCP level, the next visible packet is
+           whatever the UDP plane pushes once the connection is
+           live). A round-trip test for LOGIN-only would be
+           tautological ("we sent, server didn't crash"). It
+           comes back in scope when Phase K wires the
+           post-LOGIN UDP push so we have something to receive.
+        ▸ New typed codecs registered in ClientFixture: Version-
+           RequestCodec, VersionResponseCodec, MasterJoinCodec (the
+           latter was already-typed-in-Core but only ServerRedirect
+           was registered in the fixture's per-test registry).
+        ▸ 11 new unit tests (5 VersionRequest, 6 VersionResponse
+           inc. one [Theory] with 3 cases). UnitTests now 186/186
+           green (was 175 pre-Item-4). Integration suite now 13/13
+           green (3 smoke + 3 TLS + 3 RSA + 3 VersionRequest + 1
+           MasterJoin) in ~6s wall-clock against the live stack.
+        ▸ Each typed codec mirrors the C++ wire struct field-for-
+           field with a doc comment citing
+           common/include/net7/PacketStructures.h line numbers and
+           the proxy handler that produces/consumes it — preserva-
+           tion-grade source pointers so any future divergence is
+           traceable.
 
 - [ ] Item 5 — Workflow tests (connect-and-login, enumerate sectors/missions/items)
       Status: not started
