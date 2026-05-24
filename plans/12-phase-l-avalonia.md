@@ -966,7 +966,13 @@ so Tier 12 is split:
       broken scaffolds. Build clean, smoke green.
 
 - [ ] **Tier 12d — Piccolo shim on Avalonia primitives**
-      Status: not started
+      Status: deferred — pivoted to Phase S (higher-leverage greenfield).
+      Sector-editor Sql/Props (the data-layer half) is complete; the
+      remaining UI port is 6500+ LOC of mechanical Avalonia/Piccolo work
+      against a tool that already runs under WINE. Phase S (headless
+      CLI client) unblocks integration testing of the actual server,
+      which is the higher-value deliverable. Resume Tier 12d after
+      Phase S/T land.
       Touches: `tools/sector-editor-avalonia/PiccoloShim/` (PCanvas,
       PLayer, PNode, PPath, PImage, PText, PInputEventArgs,
       PInputEventHandler, PDragEventHandler, PPanEventHandler, PCamera)
@@ -991,7 +997,8 @@ so Tier 12 is split:
       Sprites can then port near-1:1 against the shim.
 
 - [ ] **Tier 12e — Sprites + windows**
-      Status: not started
+      Status: deferred — depends on Tier 12d. Same rationale: pivoted
+      to Phase S for higher leverage. Resume after Phase S/T.
       Touches: `tools/sector-editor-avalonia/Sprites/` (Mob, Planet,
       Stargate, Starbase, Decoration, Harvestable, Sector,
       SectorBounds; one Sprite per type plus a paired "data" class),

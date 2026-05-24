@@ -82,4 +82,9 @@
   <Folder Name="/w3d-parser/">
     <Project Path="w3d-parser/W3d Parser.csproj" />
   </Folder>
+  <Folder Name="/cli-client/">
+    <Project Path="cli-client/src/CliClient.Core/CliClient.Core.csproj" />
+    <Project Path="cli-client/src/CliClient.App/CliClient.App.csproj" />
+    <Project Path="cli-client/tests/CliClient.UnitTests/CliClient.UnitTests.csproj" />
+  </Folder>
 </Solution>

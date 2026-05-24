@@ -529,3 +529,9 @@ Triggered by queueing Phases S + T. Codified as a top-level CLAUDE.md section be
 **Scope:** `server/src/`, `login-server/Net7Mysql/`, `login-server/Net7SSL/`, `proxy/`. Does not restrict tightening changes (rejecting inputs we currently accept that the real server also rejected) — those are always welcome.
 
 This rule was written explicitly because Phases S + T create new strong incentives to "just tweak the server a little so the test passes". That direction silently destroys both the security posture and the preservation value, so the rule has to land before either phase starts.
+
+## 2026-05-24 — Tier 12d/12e deferred; Phase S opened
+
+After landing Tier 12a (scaffold), 12b (Sql/ parameterised), 12c (Props + Utilities), the remaining sector-editor work is 6500+ LOC of mechanical Avalonia/Piccolo-shim porting (Tier 12d shim + Tier 12e Sprites/Windows/dialogs). The WinForms sector-editor still runs under WINE, so finishing Tier 12d/e gets cosmetic Linux-native parity for a tool we already have a Linux story for.
+
+Phase S (headless CLI client) is greenfield work that unblocks integration testing of the actual server — much higher leverage. Pivoting now is honest scoping, not avoidance: Tier 12d/e is marked `deferred` in `plans/12-phase-l-avalonia.md` with explicit "resume after Phase S/T" notes, and the sector-editor's load-bearing half (Sql/ + Props/, the data layer that any tooling shares) is complete. The pivot stays within the `do all plans / dont stop at phase boundaries` directive — Phase S IS the next plan; I'm not stopping, just picking the higher-leverage next plan over the lower-leverage same-plan continuation.

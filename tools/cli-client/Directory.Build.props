@@ -1,0 +1,17 @@
+<Project>
+  <!--
+    Override the parent tools/Directory.Build.props which assumes Windows-targeting
+    legacy WinForms tooling. The CLI client is Linux-first, cross-platform, no
+    WinForms / GDI+. Reset the parent's properties explicitly.
+  -->
+  <PropertyGroup>
+    <EnableWindowsTargeting>false</EnableWindowsTargeting>
+    <RuntimeIdentifiers>linux-x64;linux-arm64;win-x64;osx-x64;osx-arm64</RuntimeIdentifiers>
+
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningsNotAsErrors></WarningsNotAsErrors>
+    <DefaultItemExcludes>$(DefaultItemExcludes)</DefaultItemExcludes>
+  </PropertyGroup>
+</Project>

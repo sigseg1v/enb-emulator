@@ -104,10 +104,29 @@ CliClient.UnitTests/
 
 ## Items
 
-- [ ] Item 1 — Project scaffold (Core lib + App console + UnitTests) + slnx wiring + README
-      Status: not started
-      Touches: tools/cli-client/src/CliClient.Core/CliClient.Core.csproj, tools/cli-client/src/CliClient.App/CliClient.App.csproj, tools/cli-client/tests/CliClient.UnitTests/CliClient.UnitTests.csproj, tools/cli-client/README.md, tools/Net7Tools.slnx
-      Notes: SDK-style csprojs, all net10.0 (no -windows). Core is a classlib. App is OutputType=Exe with `<UseAppHost>true</UseAppHost>` referencing Core. UnitTests uses xunit + xunit.runner.visualstudio + Microsoft.NET.Test.Sdk; references Core. Add all three to slnx.
+- [x] Item 1 — Project scaffold (Core lib + App console + UnitTests) + slnx wiring + README
+      Status: done
+      Touches: tools/cli-client/Directory.Build.props,
+      tools/cli-client/src/CliClient.Core/{CliClient.Core.csproj,ClientInfo.cs},
+      tools/cli-client/src/CliClient.App/{CliClient.App.csproj,Program.cs},
+      tools/cli-client/tests/CliClient.UnitTests/{CliClient.UnitTests.csproj,TrinitySmokeTests.cs},
+      tools/cli-client/README.md, tools/Net7Tools.slnx
+      Notes: SDK-style csprojs, all net10.0 (no -windows). Core is a
+      classlib (RootNamespace=N7.CliClient). App is OutputType=Exe
+      `<UseAppHost>true</UseAppHost>` referencing Core, AssemblyName
+      `cli-client`. UnitTests uses xunit 2.9.2 + xunit.runner.visualstudio
+      2.8.2 + Microsoft.NET.Test.Sdk 17.11.1; references Core.
+      Per-cli-client `Directory.Build.props` resets the parent
+      `tools/Directory.Build.props` Windows-targeting properties
+      (EnableWindowsTargeting=false, RuntimeIdentifiers=linux-x64+linux-arm64+
+      win-x64+osx-x64+osx-arm64, Nullable=enable, TreatWarningsAsErrors=true)
+      so the CLI is Linux-first rather than inheriting the WinForms-era
+      tools defaults. All three projects added to Net7Tools.slnx.
+      Trinity smoke check: `--smoke` prints
+      `ok: enb-cli-client 0.1.0-dev`; `dotnet test` runs
+      `TrinitySmokeTests.CoreLibraryIsReferenced` green (Passed 1, Failed 0).
+      The hard rules from this plan file are reproduced verbatim in
+      `tools/cli-client/README.md`.
 
 - [ ] Item 2 — Packet codec + opcode registry foundation (in CliClient.Core)
       Status: not started
