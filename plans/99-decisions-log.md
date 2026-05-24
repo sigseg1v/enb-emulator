@@ -381,3 +381,22 @@ The split-process design has one real un-mitigated cost: `Net7.h`, `Opcodes.h`, 
 - **Net7.h** — structurally different per-process (server has Win32 mailslot constants, proxy has UDP plane tuning, login has SSL config). Wave 2 will extract just the port macros (GLOBAL_SERVER_PORT 3805, MASTER_SERVER_PORT, SSL_PORT, etc.) into `common/include/net7/Ports.h` and leave the per-process Net7.h files for everything else.
 
 **Headers we know are also duplicated but Wave 3+:** Globals.h, CircularBuffer.h, cmdcodes.h, Net7Types.h.
+
+## 2026-05-23 — Phase R Wave 2 done: PacketStructures + Ports.h consolidated (commit b6c43ac)
+
+**Wave 2 scope (done):** PacketStructures.h + Packing.h (new) + Ports.h (new) → `common/include/net7/`. All three subprojects build green ([163/16/8]); 8/8 live integration tests + 14/14 unit tests = 22/22 green.
+
+**Wire-format drift caught during the merge** — exactly the failure mode Phase R was opened to prevent:
+
+1. **MasterJoin layout drift.** Phase K (Phase J continuation) applied an int32_t fix to proxy's PacketStructures.h to make MasterJoin 64 bytes on Linux instead of 108 (`long` is 8 bytes on Linux x86_64 vs 4 on Win32). Server's and login's copies still had `long`. Server got away with it because nothing on the server side ever writes MasterJoin (only proxy parses it on the inbound side); login got away with it because login doesn't touch MasterJoin at all. But the un-fixed copies were latent: the next handler ported to read MasterJoin on the server side would have read zeros. Wave 2 backports the int32_t fix into the unified header so all three trees are now correct.
+
+2. **SECTOR_SERVER_PORT semantic conflict.** proxy/Net7.h defined `SECTOR_SERVER_PORT 3500`, server/Net7.h and login/Net7SSL.h defined it as 3501. Comment in the original Net7SSL.h explained: "we start from 3501 now because 3500 is used as the local TCP port in Net7Proxy". So the same macro name meant TWO DIFFERENT THINGS in two trees — proxy used it for its own local TCP bind, server/login used it for the canonical sector server port. Unifying naively would have broken one of them. Resolved by splitting: PROXY_LOCAL_TCP_PORT (3500) for the proxy's local bind, SECTOR_SERVER_PORT (3501) for sector servers. Proxy's 9 call sites of SECTOR_SERVER_PORT all rewritten to PROXY_LOCAL_TCP_PORT — that's the semantic they actually wanted (e.g. `redirect.port = SECTOR_SERVER_PORT;` in `ClientToMasterServer.cpp:157` sets the port the client is redirected to, and the client is being redirected to the proxy itself).
+
+**Mechanics:**
+- New `common/include/net7/Packing.h` carries ATTRIB_PACKED + u8/u16/.../BSTR so the unified PacketStructures.h doesn't have to pull per-process Net7.h. Each tree's Net7.h still defines these too (other code in those trees uses them); future cleanup could route through Packing.h universally.
+- `cp -a` used for the source file copy to preserve the 0xa9 © byte exactly (Read tool renders it as U+FFFD but the file on disk is correct ISO-8859-1).
+- `git rm` on the three PacketStructures.h copies; rename detection chose server/src/PacketStructures.h as the "rename source" because it was the closest match to the unified version.
+
+**Why Wave 3 is deferred (not done):** the remaining duplicated headers (Globals.h, CircularBuffer.h, cmdcodes.h, Net7Types.h) are NOT wire-format — they're utility/config. Their drift, if any, is low-stakes. Phase R's stated exit criterion was eliminating the wire-format drift, and Waves 1+2 did that. Wave 3 is moved to a backlog item on the plan.
+
+**Outstanding before Phase R close:** CLAUDE.md + docs/02-architecture.md updates to point at `common/` and document the split.

@@ -58,18 +58,25 @@ Likely additional candidates surfaced during work: `Globals.h`, `Mutex.h`, `Circ
       Status: done
       Notes: net7 [169/169], net7proxy [23/23], net7ssl [18/18] all linked successfully after Wave 1.
 
-### Wave 2 — PacketStructures + port macros (next)
+### Wave 2 — PacketStructures + port macros (done 2026-05-23, commit b6c43ac)
 
-- [ ] PacketStructures.h per-struct merge
-      Status: not started
-      Notes: server/login still use `long` in MasterJoin (Phase K only fixed proxy/). Need to apply int32_t fix to server/ + login/, verify no other struct has wire-size divergence between trees, then unify into common/include/net7/PacketStructures.h.
-- [ ] Extract port macros from Net7.h into common/include/net7/Ports.h
-      Status: not started
-      Notes: Net7.h's overall structure differs per-process (server's has Win32 mailslot constants, proxy's has UDP plane tuning, login's has SSL config), but the bare port macros (GLOBAL_SERVER_PORT, MASTER_SERVER_PORT, SSL_PORT, etc.) are wire-load-bearing and need to be unified. Extract just those; keep per-process Net7.h for everything else.
+- [x] PacketStructures.h per-struct merge
+      Status: done
+      Notes: server's copy (94 structs, full license header) chosen as merge base. Audit confirmed proxy's 10 missing structs are all server-only consumers on Linux (proxy lives consumers: only VersionRequest/MasterJoin/ServerRedirect, the handshake structs). Phase K int32_t fixes backported into the unified file. login's copy was 93/94 structs (missing InvSort only); easy fit. Extracted ATTRIB_PACKED + u8/u16/.../BSTR into `common/include/net7/Packing.h` so the unified header doesn't need to pull per-process Net7.h.
+- [x] Extract port macros from Net7.h into common/include/net7/Ports.h
+      Status: done
+      Notes: smoking gun caught — proxy/Net7.h had `SECTOR_SERVER_PORT 3500`, server+login had `SECTOR_SERVER_PORT 3501`. Comment in original Net7SSL.h explained the split: proxy binds 3500 locally and forwards to 3501+ sector servers. The same macro NAME meant two different things in two trees. Resolved by splitting into PROXY_LOCAL_TCP_PORT (3500) and SECTOR_SERVER_PORT (3501); proxy's 9 call sites rewritten to PROXY_LOCAL_TCP_PORT (it was semantically the proxy-local port, not the canonical sector port). All 3 Net7.h headers now `#include <net7/Ports.h>` instead of duplicating macros.
+- [x] Integration tests pass after Wave 2 (8/8 from running docker proxy + 14/14 unit, total 22/22 green)
+      Status: done
+      Notes: test client + running proxy interop'd cleanly (wire format intact across the Wave 2 client-side rebuild). Local docker proxy container reuse meant we couldn't validate the post-Wave-2 *proxy binary*, but the WireFormat.* tests check struct sizes/offsets at compile time via static_assert, and those passed.
 - [ ] Update CLAUDE.md + docs/02-architecture.md to point at `common/`
       Status: not started
-- [ ] Integration tests pass after Wave 2 (currently 8/8 in Phase K — must stay green)
-      Status: not started
+
+### Wave 3 — backlog (deferred — Phase R can close after Wave 2 wire-format wins, these are cleanups)
+
+- [ ] Consolidate the remaining duplicated headers: Globals.h, CircularBuffer.h, cmdcodes.h, Net7Types.h
+      Status: backlog
+      Notes: lower priority — these are NOT wire-format headers. Audit drift, classify, merge if low-effort.
 
 ## Non-goals
 
