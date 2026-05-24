@@ -418,6 +418,11 @@ unsigned long GetNet7TickCount()
     return (GetTickCount() - g_StartTick);
 }
 
+#ifdef WIN32
+// The Win32 build spawns Net7SSL.exe as a child process and uses a named
+// mutex for single-instance enforcement. On Linux Net7SSL runs as a
+// separate docker-compose service (or systemd unit) — there is no
+// in-process "launch sibling .exe" step, so these become no-ops.
 void RelaunchNet7SSL()
 {
 	TerminateNet7SSL();
@@ -452,7 +457,6 @@ void TerminateNet7SSL()
 
 	//check instance of Net7SSL isn't already running
 	strcpy(mutex_name, SSL_INSTANCE_MUTEX_NAME);
-	// Seriously, we're never going to be running this on linux ...
 	HANDLE instance_mutex = ::CreateMutex(NULL, TRUE, mutex_name);
 
 	if (::GetLastError() == ERROR_ALREADY_EXISTS)
@@ -485,6 +489,11 @@ void TerminateNet7SSL()
 	// close the mutex
 	::CloseHandle(instance_mutex);
 }
+#else
+void RelaunchNet7SSL() {}
+void LaunchNet7SSL()   {}
+void TerminateNet7SSL(){}
+#endif
 
 // Functions added for Linux port
 #ifndef WIN32
