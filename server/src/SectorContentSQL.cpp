@@ -13,7 +13,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -99,14 +99,14 @@ bool SectorContentParser::ParseSectorContent(long parse_id)
 	LoadAsteroidContentSelection(&connection);
 
 	if (parse_id != -1)
-		sprintf_s(QueryString, sizeof(QueryString), "SELECT * FROM `sectors` WHERE sector_id = %d",parse_id);
-	else
 	{
-		strcpy_s(QueryString, sizeof(QueryString), "SELECT * FROM `sectors`");
-		QueryString[sizeof(QueryString)-1] = '\0';
+		SectorTb.AddParam((long)parse_id);
 	}
+	const char *sql = (parse_id != -1)
+		? "SELECT * FROM `sectors` WHERE sector_id = ?"
+		: "SELECT * FROM `sectors`";
 
-    if ( !SectorTb.execute( QueryString ) )
+    if ( !SectorTb.execute_params( sql ) )
     {
         printf( "MySQL Login error/Database error: (User: %s Pass: %s)\n", g_MySQL_User, g_MySQL_Pass );
         return 0;
@@ -729,13 +729,11 @@ void SectorContentParser::AddMOBTypes(Object *obj, long object_id, sql_connectio
 {
     sql_query_c Mob_types( connection );
     sql_result_c result;
-    char QueryString[128];
 
-    sprintf_s(QueryString, sizeof(QueryString), "SELECT * FROM `mob_spawn_group` WHERE `spawn_group_id` = '%d'", object_id);
-
-    if ( !Mob_types.execute( QueryString ) )
+    Mob_types.AddParam(object_id);
+    if ( !Mob_types.execute_params( "SELECT * FROM `mob_spawn_group` WHERE `spawn_group_id` = ?" ) )
     {
-        printf( "MySQL Error (Reading mob_spawn_group types for spawn_group_id %d)\n", object_id );
+        printf( "MySQL Error (Reading mob_spawn_group types for spawn_group_id %ld)\n", object_id );
         return;
     }
 
@@ -790,7 +788,6 @@ void SectorContentParser::LoadSectorOreAvailability(SectorData *sector, sql_conn
 {
     sql_query_c Ore_types( connection );
     sql_result_c result;
-    char QueryString[128];
 	u32 ore_index = 0;
 
 	//first blank out all existing entries in list
@@ -803,9 +800,8 @@ void SectorContentParser::LoadSectorOreAvailability(SectorData *sector, sql_conn
 		}
 	}
 
-	sprintf_s(QueryString, sizeof(QueryString), "SELECT * FROM `base_ore_list` WHERE `sector_id` = '%d'", sector->sector_id);
-
-    if ( !Ore_types.execute( QueryString ) )
+	Ore_types.AddParam((long)sector->sector_id);
+    if ( !Ore_types.execute_params( "SELECT * FROM `base_ore_list` WHERE `sector_id` = ?" ) )
     {
 		printf( "MySQL Error (Reading base_ore_list types for sector %d)\n", sector->sector_id );
         return;

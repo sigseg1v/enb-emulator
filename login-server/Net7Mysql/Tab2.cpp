@@ -1,5 +1,13 @@
 // Tab2.cpp : implementation file
 //
+// This entire translation unit is MFC (CDialog, IDC_*, DDX_Control, MessageBox).
+// It is the Windows-only admin GUI tab for the legacy Net7Mysql tool and is not
+// built on Linux (no CMakeLists.txt under login-server/Net7Mysql/). The
+// sprintf-built SELECT/UPDATE/DELETE statements below are SQL-injection-shaped
+// (CString GetWindowText input concatenated into SQL) but are unreachable on
+// Linux. Wrapped in WIN32 pending an Avalonia rewrite of this admin tool.
+
+#ifdef WIN32
 
 #include "stdafx.h"
 #include "Net7Mysql.h"
@@ -294,3 +302,4 @@ void Tab2::AppendToServerFile(char *file, char *hostname)
 	}
 }
 
+#endif // WIN32

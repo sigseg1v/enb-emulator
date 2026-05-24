@@ -168,7 +168,6 @@ void ServerManager::RunMasterServer()
 
 	// -------------------  This logs everyone out incase of a crash -----------------
 
-	char QueryString[128];
 	sql_connection_c connection( "net7_user", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
 	sql_query_c MissionTable( &connection );
     sql_result_c result;
@@ -181,8 +180,8 @@ void ServerManager::RunMasterServer()
 	gmttime = gmtime(&rawtime);
 	strftime(timestr, sizeof(timestr), "%Y/%m/%d %H:%M:%S", gmttime);
 
-    sprintf_s(QueryString, sizeof(QueryString), "CALL net7_user.logoutOnShutdown('%s');", timestr);
-    MissionTable.execute( QueryString );
+    MissionTable.AddParam(timestr);
+    MissionTable.execute_params( "CALL net7_user.logoutOnShutdown(?);" );
 
 	// ------------------------------------
 

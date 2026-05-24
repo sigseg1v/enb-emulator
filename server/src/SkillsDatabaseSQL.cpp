@@ -13,7 +13,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -44,7 +44,6 @@ bool SkillsContent::LoadSkillsContent()
 {
     long current_skill_id;
     SkillConversion *current_skill;
-	char QueryString[1024];
 
 	if (m_updating) return false;
 
@@ -61,9 +60,7 @@ bool SkillsContent::LoadSkillsContent()
     sql_result_c result;
 	sql_result_c *skill_result = &result;
 
-    sprintf_s(QueryString, sizeof(QueryString), "SELECT * FROM `skill_levels`");
-
-    if ( !SkillsTable.execute( QueryString ) )
+    if ( !SkillsTable.execute_params( "SELECT * FROM `skill_levels`" ) )
     {
         LogMessage( "MySQL Login error/Database error: (User: %s Pass: %s)\n", g_MySQL_User, g_MySQL_Pass );
         return false;

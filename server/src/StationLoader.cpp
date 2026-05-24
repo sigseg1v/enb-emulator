@@ -13,7 +13,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -224,12 +224,11 @@ bool StationLoader::LoadStations()
 
 void StationLoader::AddRooms(StationTemplate *current_station, long station_id, sql_connection_c *connection)
 {
-    char queryString[512];
     sql_query_c stnRooms( connection );
     sql_result_c Rooms_result;
-    
-    sprintf_s(queryString, sizeof(queryString), "SELECT * FROM `starbase_rooms` WHERE `starbase_id` = '%d'", station_id);
-    if ( !stnRooms.execute( queryString ) )
+
+    stnRooms.AddParam(station_id);
+    if ( !stnRooms.execute_params( "SELECT * FROM `starbase_rooms` WHERE `starbase_id` = ?" ) )
     {
         LogMessage( "Error reading with MySQL (Rooms)\n" );
         return;
@@ -279,14 +278,12 @@ void StationLoader::AddRooms(StationTemplate *current_station, long station_id, 
 
 void StationLoader::AddTerminals(StationTemplate *current_station, long room_id, sql_connection_c *connection)
 {
-    char queryString[512];
     //now load all terminals for this room
     sql_query_c stnTerms( connection );
     sql_result_c Term_result;
-    
-    sprintf_s(queryString, sizeof(queryString), "SELECT * FROM `starbase_terminals` WHERE `room_id` = '%d'", room_id);
-    
-    if ( !stnTerms.execute( queryString ) )
+
+    stnTerms.AddParam(room_id);
+    if ( !stnTerms.execute_params( "SELECT * FROM `starbase_terminals` WHERE `room_id` = ?" ) )
     {
         LogMessage( "Error reading with MySQL (Terms)\n" );
         return;
