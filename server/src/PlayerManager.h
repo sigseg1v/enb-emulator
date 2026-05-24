@@ -13,7 +13,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -210,6 +210,7 @@ private:
 	int 		  m_NextPendingGuild;
     Mutex		  m_Mutex;
 	bool		  m_Movement_thread_running;
+	pthread_t	  m_LoginThread;
     u32			  m_GlobalPlayerList[MAX_ONLINE_PLAYERS/32 + 1];
     UDP_Connection * m_UDPConnection;
     GMemoryHandler * m_GlobMemMgr;

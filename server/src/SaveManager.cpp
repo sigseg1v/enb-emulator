@@ -16,7 +16,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -29,18 +29,10 @@
 
 enum experience_type { XP_COMBAT, XP_EXPLORE, XP_TRADE };
 
-#ifdef WIN32
-void __cdecl LaunchSaveThread(void *sm)
-#else
 void * LaunchSaveThread(void *sm)
-#endif
 {
     ((SaveManager *)sm)->RunSaveThread();
-#ifdef WIN32
-    _endthread();
-#else
     return NULL;
-#endif
 }
 
 SaveManager::SaveManager()
@@ -48,11 +40,9 @@ SaveManager::SaveManager()
 	m_SaveBuffer = new CircularBuffer(0x80000, SAVE_SLOTS);  //save buffer is only user of this queue, therefore the 'slots' should be the same in both the buffer and queue
 	m_SaveQueue = new MessageQueue("Save", m_SaveBuffer, SAVE_SLOTS, true); //check queue for any overlap corruption
 	m_SQL_Conn.connect("net7_user", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
-#ifdef WIN32
-    _beginthread(LaunchSaveThread,65536,this);
-#else
-    //pthread_create(&m_Thread (??), NULL, &LaunchSaveThread, (void *) this);
-#endif
+	m_ThreadRunning = false;
+	if (pthread_create(&m_Thread, NULL, &LaunchSaveThread, this) != 0)
+		LogMessage("SaveManager: pthread_create failed (%s)\n", strerror(errno));
 }
 
 SaveManager::~SaveManager()

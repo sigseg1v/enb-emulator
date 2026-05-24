@@ -13,7 +13,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -30,37 +30,17 @@
 #include "ServerManager.h"
 #include "StaticData.h"
 
-// This helper function is referenced by _beginthread to launch the TCP thread.
-#ifdef WIN32
-void __cdecl RunMovementThreadAPI(void *arg)
+// Entry point handed to pthread_create for the per-player login loop.
+// (RunMovementThread is a per-tick helper called from elsewhere, not a
+// standalone thread main.)
+void * RunLoginThreadAPI(void *arg)
 {
     PlayerManager::MParam * param = (PlayerManager::MParam *) arg;
     PlayerManager * mgr = param->ClassAdd;
-    //PlayerManager::Player *player = param->player;
-    delete param;
-    mgr->RunMovementThread();
-    _endthread();
-}
-void __cdecl RunLoginThreadAPI(void *arg)
-{
-    PlayerManager::MParam * param = (PlayerManager::MParam *) arg;
-    PlayerManager * mgr = param->ClassAdd;
-    //PlayerManager::Player *player = param->player;
     delete param;
     mgr->RunLoginThread();
-    _endthread();
-}
-#else // Linux
-void * RunMovementThreadAPI(void *arg)
-{
-    PlayerManager::MParam * param = (PlayerManager::MParam *) arg;
-    PlayerManager * mgr = param->ClassAdd;
-    //PlayerManager::Player *player = param->player;
-    delete param;
-    mgr->RunMovementThread();
     return NULL;
 }
-#endif
 
 PlayerManager::PlayerManager()
 {
@@ -73,22 +53,19 @@ PlayerManager::PlayerManager()
 
 	memset(m_GlobalPlayerList, 0, sizeof(m_GlobalPlayerList));
 
-	// movement thread
+	// login thread (the surrounding "movement thread" naming is legacy;
+	// what actually runs in the background is RunLoginThread()).
 	if (!m_Movement_thread_running)
 	{
-		LogMessage("Creating movement thread\n");
+		LogMessage("Creating login thread\n");
 		m_Movement_thread_running = true;
 
 		MParam *param = new MParam;
 		if (param)
 		{
 			param->ClassAdd = this;
-
-#ifdef WIN32
-			_beginthread(&RunLoginThreadAPI, 0, param);
-#else
-			//pthread_create(&player->pThread, NULL, &RunMovementThreadAPI, (void *) param);
-#endif
+			if (pthread_create(&m_LoginThread, NULL, &RunLoginThreadAPI, param) != 0)
+				LogMessage("PlayerManager: pthread_create failed (%s)\n", strerror(errno));
 		}
 	}
 }

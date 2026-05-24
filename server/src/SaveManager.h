@@ -13,7 +13,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -93,6 +93,7 @@ private:
 	char			  m_QueryStr[512];
 	CircularBuffer  * m_SaveBuffer;
 	bool m_ThreadRunning;
+	pthread_t m_Thread;
 };
 
 struct EnbSaveHeader

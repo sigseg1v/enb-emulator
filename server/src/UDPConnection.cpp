@@ -12,7 +12,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -25,19 +25,11 @@
 #include "PlayerClass.h"
 #include <net7/Opcodes.h>
 
-// This helper function is referenced by _beginthread to launch the TCP thread.
-#ifdef WIN32
-void __cdecl LaunchUDPRecvThread(void *arg)
-#else
+// Entry point handed to pthread_create.
 void * LaunchUDPRecvThread(void *arg)
-#endif
 {
     ((UDP_Connection *) arg)->RunRecvThread();
-#ifdef WIN32
-    _endthread();
-#else
     return NULL;
-#endif
 }
 
 //make a send and receive socket, and start a send and receive thread
@@ -72,11 +64,7 @@ UDP_Connection::UDP_Connection(unsigned short port, ServerManager *server_mgr, i
 	m_ThreadRunning = false;
 
 	// Launch the Receiver thread
-#ifdef WIN32
-	_beginthread(&LaunchUDPRecvThread, 0, this);
-#else
 	pthread_create(&m_Thread, NULL, &LaunchUDPRecvThread, (void *) this);
-#endif
 }
 
 UDP_Connection::~UDP_Connection()
