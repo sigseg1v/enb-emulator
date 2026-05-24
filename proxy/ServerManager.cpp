@@ -6,7 +6,7 @@
 #include "TcpListener.h"
 #include "MessageQueue.h"
 #include "Connection.h"
-#include "openssl/ssl.h"
+#include <openssl/ssl.h>
 
 // Constructor
 ServerManager::ServerManager(bool is_master_server, unsigned long ip_address, short port, short max_sectors, bool standalone, unsigned long internal_ip_address)

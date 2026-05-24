@@ -21,7 +21,7 @@
 #include "ServerManager.h"
 #include "UDPConnection.h"
 #include "MessageQueue.h"
-#include "openssl/ssl.h"
+#include <openssl/ssl.h>
 #include "SectorContentParser.h"
 #include "ItemBase.h"
 #include "StationLoader.h"

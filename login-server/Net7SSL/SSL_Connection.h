@@ -4,7 +4,7 @@
 #define _SSL_CONNECTION_H_INCLUDED_
 
 #include <net7/Mutex.h>
-#include "openssl/ssl.h"
+#include <openssl/ssl.h>
 #include <vector>
 
 // WARNING: This limits the size of images on the secure web pages.

@@ -4,7 +4,7 @@
 #define _SSL_LISTENER_H_INCLUDED_
 
 #include <net7/Mutex.h>
-#include "openssl/ssl.h"
+#include <openssl/ssl.h>
 
 #ifndef WIN32
 #include <atomic>
