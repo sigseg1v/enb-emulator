@@ -25,6 +25,7 @@ copies of historical material from the upstream repos.
 | `12-content-pipeline.md` | How content flows from the C# editors through the DB into the running server, with per-domain loaders. |
 | `13-gameplay-loop.md` | Server-side walkthrough of the major gameplay systems (combat, sector travel, missions, trading, guilds, chat). |
 | `14-extending.md` | How to add a new ability, mob type, or sector. |
+| `15-cli-client.md` | Headless C# CLI client (`tools/cli-client/`): subcommands, log formats, how to add a new opcode, and the hard rules that keep it honest. |
 
 ## Reference material
 

@@ -611,10 +611,40 @@ CliClient.UnitTests/
                 OpcodeRegistryBulkRegistrationTests (5), plus a few extras
                 from OpcodeNamesTests for the dup-alias edge case.
 
-- [ ] Item 16 — Documentation: docs/12-cli-client.md
-      Status: not started
-      Touches: docs/12-cli-client.md, README.md (link), CLAUDE.md (repo-map row)
-      Notes: how to use it, the hard rules verbatim, the supported workflows, the log formats, where dumps land, how to add a new opcode (one-pager).
+- [x] Item 16 — Documentation: docs/15-cli-client.md
+      Status: done
+      Touches: docs/15-cli-client.md (created), docs/README.md (index row added)
+      Notes:
+        ▸ Slot 12 was already taken by docs/12-content-pipeline.md (Phase H output),
+           so the cli-client doc landed at slot 15 instead. docs/README.md now
+           lists 15-cli-client.md in the file table. The plan's original
+           "12-cli-client.md" reference is left as-is in the historical Notes for
+           Items 8/14 and the Verification block above — those reflect the plan
+           text at write-time, not the final on-disk slot.
+        ▸ Hard rules reproduced verbatim from this plan + a pointer to the
+           "Server integrity rules" block in CLAUDE.md (which is the authoritative
+           text). Two cross-references means agents who read either file
+           independently still get the constraint, but only one place to update
+           if the rule shifts.
+        ▸ Subcommand table, exit codes (0/1/2 stable contract), three usage
+           examples for --smoke / connect-and-login / send-chat, --strict-tls
+           callout, three log sinks (ConsoleSink human-readable with arrows,
+           PacketLog NDJSON, ChatLog filtered NDJSON), default log path under
+           ./logs/ with rotation suffix.
+        ▸ "How to add a new opcode" with the two paths it actually has today:
+           (a) opaque-free via NamedOpaqueCodec — already done for all 207
+           opcodes by RegisterAllNamedOpaque(), no work to add a new one;
+           (b) typed codec — 6-step recipe (find struct → write codec → add
+           to OpcodeId.Known → register in Program.cs → unit-test layout +
+           round-trip + validation → optional retail-capture fixture).
+        ▸ Limitations called out honestly: no avatar select (Phase K blocker
+           on Items 10-12), no UDP plane (TCP-only by scope), no GUI ("won't
+           ever be one — that's what the real client is for").
+        ▸ Top-level README.md and CLAUDE.md repo-map were NOT touched. The
+           CLI client doesn't fit cleanly into the top-level repo-map (it lives
+           under tools/, which is already one row), and pointing top-level
+           README at every new docs/ file would just churn. docs/README.md is
+           the right index for it.
 
 - [ ] Item 17 — Hand-off to Phase T
       Status: not started
