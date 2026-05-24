@@ -13,7 +13,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -190,7 +190,14 @@ private:
 	long	GetJobCount();
 	JobNode	*GetJobNode(int ID);
 
-	static UINT WINAPI SectorManager::RunEventThreadAPI(void *Param);
+	// Per-sector event thread entry. The Win32 build hands this to
+	// _beginthreadex (returns UINT, __stdcall); the Linux build hands it to
+	// pthread_create (returns void*).
+#ifdef WIN32
+	static UINT WINAPI RunEventThreadAPI(void *Param);
+#else
+	static void *      RunEventThreadAPI(void *Param);
+#endif
 
 private:
     Mutex           m_Mutex;
@@ -236,7 +243,11 @@ private:
 	long			m_JobListID;
 	
 
+#ifdef WIN32
 	HANDLE			m_SectorThread;
+#else
+	pthread_t		m_SectorThread;
+#endif
 
 	float			m_xmin;
 	float			m_xmax;

@@ -230,7 +230,7 @@ void MailManager::SetUpSendSlot()
 #include <new>
 
 namespace {
-inline net7ipc::PosixIpc * AsIpc(HANDLE h) {
+inline net7ipc::PosixIpc * AsIpc(void *h) {
     return reinterpret_cast<net7ipc::PosixIpc *>(h);
 }
 }
@@ -278,7 +278,7 @@ MailManager::MailManager()
 
     LogMessage("MailManager: AF_UNIX recv=%s send=%s\n",
                ipc->recv_path().c_str(), ipc->send_path().c_str());
-    m_hSlot = reinterpret_cast<HANDLE>(ipc);
+    m_hSlot = static_cast<void *>(ipc);
     m_SendSlotInit = true; // PosixIpc opens the send fd lazily
 }
 

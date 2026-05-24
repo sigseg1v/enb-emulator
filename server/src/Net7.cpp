@@ -77,7 +77,9 @@ bool g_Debug = false;
 bool g_ServerShutdown = false; // Terminated the global Server
 bool g_ResetContent = false;
 
+#ifdef WIN32
 PROCESS_INFORMATION sslpi = {NULL};
+#endif
 
 unsigned long g_cumulative_mem = 0;
 

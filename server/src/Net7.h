@@ -157,10 +157,12 @@
 	#define WINAPI
 	#define CALLBACK
 
-	// Win32 opaque handle and OLE/COM string types (struct layouts only — these are
-	// not actually used through their Win32 semantics in the cross-platform server)
-	typedef void* HANDLE;
-	#define INVALID_HANDLE_VALUE ((HANDLE)-1)
+	// Win32 OLE/COM string types kept as harmless typedefs. The HANDLE family
+	// (HANDLE, INVALID_HANDLE_VALUE, CloseHandle, _OVERLAPPED, ...) was
+	// retired in Phase M — every Linux-compiled call site that used those is
+	// either rewritten over POSIX (mailslot → AF_UNIX SOCK_DGRAM, see
+	// server/compat/posix_ipc.{h,cpp}) or walled in `#ifdef WIN32` and never
+	// reached on the Linux build.
 	typedef wchar_t* BSTR;
 	typedef char* LPSTR;
 	typedef const char* LPCSTR;
@@ -235,17 +237,21 @@
 	void Sleep(unsigned long dwMilliseconds);
 	bool DeleteFile(const char *filename);
 
-	// Win32 error / handle / process / mailslot API stubs.
-	// These are not functional on Linux; they exist so the legacy code
-	// compiles. Phase B-continuation replaces the call sites with POSIX
-	// equivalents (Unix domain sockets for mailslots, etc.).
+	// Win32 GetLastError: keep as an errno passthrough. CloseHandle, the
+	// WAIT_*/ERROR_* macros for handle objects, and INFINITE were retired
+	// in Phase M — see the typedef-block comment above.
 	static inline unsigned long GetLastError() { return (unsigned long)errno; }
-	static inline int CloseHandle(HANDLE) { return 1; }
+	// SocketReady() in Connection.h uses WAIT_TIMEOUT as a default arg.
 	#define WAIT_TIMEOUT 258
-	#define WAIT_OBJECT_0 0
-	#define INFINITE 0xFFFFFFFFU
-	#define ERROR_ALREADY_EXISTS 183
-	#define ERROR_INSUFFICIENT_BUFFER 122
+
+	// The vendored OpenSSL 1.0 headers (server/src/openssl/) hard-code
+	// OPENSSL_SYSNAME_WIN32 in opensslconf.h, which makes rand.h declare
+	// RAND_event(UINT, WPARAM, LPARAM) even on Linux. Keep these typedefs so
+	// the header compiles — the actual symbol is never linked because Phase E
+	// migrated to the system OpenSSL 3.x runtime. Real fix is to stop using
+	// the vendored headers; tracked in plans/05-phase-e-openssl.md.
+	typedef long LPARAM;
+	typedef unsigned int WPARAM;
 
 	// fopen_s / memcpy_s / sscanf_s — MSVC bounds-checked variants
 	#include <stdio.h>
@@ -270,57 +276,19 @@
 	#define _TEXT(x) x
 	#define _T(x) x
 
-	// Win32 thread / process bring-up. _beginthreadex returns a HANDLE-ish.
+	// Threading: just include <pthread.h>. The Win32 _beginthreadex,
+	// TerminateProcess, CreateMutex, CreateMailslot, CreateEvent,
+	// SetEvent, ResetEvent, ResumeThread, CreateFile, ReadFile, WriteFile,
+	// PROCESS_INFORMATION, STARTUPINFO, OVERLAPPED, LPSECURITY_ATTRIBUTES,
+	// GENERIC_*/FILE_SHARE_*/OPEN_*, MAILSLOT_*, etc. stubs were all
+	// retired in Phase M — every call site is now either rewritten over
+	// POSIX (pthread_create, AF_UNIX SOCK_DGRAM, std::condition_variable)
+	// or walled in `#ifdef WIN32` and never reached on Linux.
 	#include <pthread.h>
-	struct _STARTUPINFOA { unsigned long cb; };
-	typedef struct _STARTUPINFOA STARTUPINFO;
-	typedef struct _STARTUPINFOA STARTUPINFOA;
-	typedef struct {
-		HANDLE hProcess;
-		HANDLE hThread;
-		unsigned long dwProcessId;
-		unsigned long dwThreadId;
-	} PROCESS_INFORMATION;
-	typedef struct { unsigned short wYear, wMonth, wDayOfWeek, wDay, wHour, wMinute, wSecond, wMilliseconds; } SYSTEMTIME;
-	typedef void* LPSECURITY_ATTRIBUTES;
-	#define CREATE_DEFAULT_ERROR_MODE 0
-	static inline uintptr_t _beginthreadex(void*, unsigned, unsigned (__stdcall *)(void*), void*, unsigned, unsigned*) { return 0; }
-	static inline int TerminateProcess(HANDLE, unsigned int) { return 0; }
-	static inline int WriteFile(HANDLE, const void*, unsigned long, unsigned long*, void*) { return 0; }
-	static inline HANDLE CreateMutex(LPSECURITY_ATTRIBUTES, int, const char*) { errno = 0; return INVALID_HANDLE_VALUE; }
-	static inline int CreateProcess(const char*, char*, void*, void*, int, unsigned long, void*, void*, STARTUPINFO*, PROCESS_INFORMATION*) { return 0; }
-	static inline HANDLE CreateMailslot(const char*, unsigned long, unsigned long, LPSECURITY_ATTRIBUTES) { return INVALID_HANDLE_VALUE; }
-	#define MAILSLOT_WAIT_FOREVER ((unsigned long)-1)
-	#define MAILSLOT_NO_MESSAGE ((unsigned long)-1)
-	// Quiet successful no-op: pretend the mailslot has zero queued messages so the
-	// 50ms poll in MailManager::CheckMessages doesn't spam the log. Once Net7SSL is
-	// running (Phase J continuation) this needs to be a real Unix-domain-socket peek.
-	static inline int GetMailslotInfo(HANDLE, unsigned long* /*max_msg_size*/, unsigned long *next_size, unsigned long *msg_count, unsigned long* /*read_timeout*/) {
-		if (next_size) *next_size = (unsigned long)-1;  // MAILSLOT_NO_MESSAGE
-		if (msg_count) *msg_count = 0;
-		return 1;
-	}
 
-	// File API stubs — these never actually do anything on Linux. Call sites
-	// for CreateFile/ReadFile/WriteFile are the mailslot/IPC ones that need
-	// a real POSIX replacement in Phase B-continuation.
-	#define GENERIC_READ  0x80000000U
-	#define GENERIC_WRITE 0x40000000U
-	#define FILE_SHARE_READ  0x1U
-	#define FILE_SHARE_WRITE 0x2U
-	#define FILE_ATTRIBUTE_NORMAL 0x80U
-	#define OPEN_EXISTING 3
-	#define CREATE_ALWAYS 2
-	#define CREATE_SUSPENDED 0x4U
-	struct _OVERLAPPED { unsigned long Internal, InternalHigh, Offset, OffsetHigh; HANDLE hEvent; };
-	typedef struct _OVERLAPPED OVERLAPPED;
-	typedef OVERLAPPED *LPOVERLAPPED;
-	typedef unsigned long *LPDWORD;
-	typedef long LPARAM;
-	typedef unsigned int WPARAM;
-	static inline HANDLE CreateFile(const char*, unsigned long, unsigned long, LPSECURITY_ATTRIBUTES, unsigned long, unsigned long, HANDLE) { return INVALID_HANDLE_VALUE; }
-	static inline int ReadFile(HANDLE, void*, unsigned long, unsigned long*, LPOVERLAPPED) { return 0; }
-	static inline unsigned long ResumeThread(HANDLE) { return (unsigned long)-1; }
+	// SYSTEMTIME is the only Win32 time struct still referenced
+	// unconditionally on Linux (ServerManager.cpp::OpenLogFile).
+	typedef struct { unsigned short wYear, wMonth, wDayOfWeek, wDay, wHour, wMinute, wSecond, wMilliseconds; } SYSTEMTIME;
 
 	// socket / select compat
 	#define SD_BOTH SHUT_RDWR
@@ -337,11 +305,6 @@
 	#define _mkdir(p) mkdir((p), 0755)
 	#define lstrlen strlen
 	#define _access access
-
-	// CreateEvent — no real event-object semantics on Linux; stub to invalid.
-	static inline HANDLE CreateEvent(LPSECURITY_ATTRIBUTES, int, int, const char*) { return INVALID_HANDLE_VALUE; }
-	static inline int SetEvent(HANDLE) { return 0; }
-	static inline int ResetEvent(HANDLE) { return 0; }
 
 	static inline void GetSystemTime(SYSTEMTIME *st) {
 		if (!st) return;
