@@ -283,3 +283,31 @@ MasterJoin was the real fix. Before: HandleMasterJoin read `avatar_id_lsb` at st
 **/who.cgi re-scoped to `[!]` (plan-only change in this commit batch)** — Win32 reference `login-server/Net7SSL/SSL_Connection.cpp:256-260` is a `//TODO` empty branch leaving `response = nullptr`. Server-side `m_PlayerMgr.WhoHtml(response_length)` is referenced but **never defined** — no `WhoHtml` symbol anywhere in `server/src/`. Either the Win32 build never compiles that branch or it's a runtime fault; either way there's nothing upstream to mirror. The Linux 404 in `LinuxAuth.cpp:524-526` is actually more honest than the Win32 silent fall-through. Building real `/who.cgi` belongs in a future phase that implements `PlayerManager::WhoHtml` from scratch on both platforms + an IPC channel since net7ssl can't reach server PlayerManager directly.
 
 **Phase K state**: more closed. ServerRedirect + VersionRequest + MasterJoin all migrated to int32_t (the only 3 wire structs actively consumed by Linux dispatch). Replay test promoted. /who.cgi re-scoped. Remaining items still blocked behind server-side PlayerManager + 3809 listener (multi-day server-side work) and ticket-store re-architecture (out of Phase K scope).
+
+## 2026-05-23 — Phase L: WinForms → Avalonia (POC scoped honestly)
+
+User directive mid-session: "for winforms we need it to run on linux so switch it to avalonia." Full suite migration is multi-month — 14 csproj projects flag `<UseWindowsForms>true</UseWindowsForms>`, with 64 real form designers across ~80k LOC. No automated converter exists; WinForms→Avalonia is hand-translation per form (Designer.cs code-gen vs AXAML markup vs different layout system vs different data binding).
+
+Phase L this session delivered:
+
+**Tier 0 — false WinForms flags removed (2 tools):**
+- **w3d-parser (2108e67)**: pure parser library; only System.Drawing use was `Color` (in `System.Drawing.Primitives`, cross-platform). Dropped `UseWindowsForms`, retargeted `net10.0-windows` → `net10.0`. Builds clean.
+- **ExeUpdater (2108e67)**: single `MessageBox.Show` in `Program.cs:208` swapped for `Console.WriteLine`. Retargeted to `net10.0` + `Exe`. Runs natively on Linux: `dotnet ExeUpdater.dll` prints the help text.
+
+**Tier 1 — Avalonia POCs (2 tools):**
+- **toolspatcher-avalonia (834d29f)**: first WinForms→Avalonia port. New `tools/toolspatcher-avalonia/` targeting `net10.0`. WebClient → HttpClient, Control.Invoke → Dispatcher.UIThread.Post, Thread.Abort → CancellationToken, WebBrowser → placeholder TextBox (toolspatch.net-7.org is dead), MessageBox.Show → MsBox.Avalonia. Headless smoke test via `Avalonia.Headless` (`--smoke` arg) passes: `smoke OK: window 573x363 title="E&B Tools Patcher"`. Pinned Tmds.DBus.Protocol 0.21.3 to clear advisory GHSA-xrw6-gwf8-vvr9. ~2 hours including Avalonia plumbing setup.
+- **enbpatcher-avalonia (9508413)**: second POC. `tools/enbpatcher/` had no csproj upstream and didn't build at all — listed as "deferred" in tools/README.md. Wrote the csproj directly as Avalonia, going from "unbuildable" to "runs on Linux". Same shape as toolspatcher (same upstream author wrote both). ~30 minutes — confirms per-form cost drops dramatically once template exists.
+
+**Per-form cost data:**
+- First-of-kind port (template not yet written): ~2 hours
+- Similar-shape subsequent port: ~30 minutes
+- Editor-class (DataGridView, MySQL binding, custom paint): TBD, estimated 1-5 days each
+- Sector-editor-class (custom map canvas, 16 forms): ~2-3 weeks
+
+**Net result**: 4/14 WinForms-flagged tools now run natively on Linux. 10 still need WINE (or future Avalonia ports). plans/12-phase-l-avalonia.md tracks the refined per-tool ordering for the remaining editors — `commontools` is the bottleneck for `dataimport`/`missioneditor`/`talktreeeditor` and should be next when Phase L resumes.
+
+**Alternatives considered**:
+- WINE-only: existing tools/README.md already documents this. Works but not "native". Rejected per user directive.
+- GTK# / Eto.Forms: lower quality / less active than Avalonia; rejected.
+- MAUI: requires macOS for Mac Catalyst-style workflows; weak Linux desktop story; rejected.
+- Half-migrate dataimport without commontools first: would produce a broken tool. Rejected per CLAUDE.md no-half-implementations rule.
