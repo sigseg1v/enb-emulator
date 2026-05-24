@@ -456,3 +456,24 @@ While verifying Phase O, audit found `server/src/openssl/` was still on the incl
 - Normalised the four other server-native `"openssl/..."` includes to angle form (proxy/login-server's CMakeLists never had a `-I src` analog so they were already grabbing the system header — convention update for uniformity).
 
 **Alternatives considered:** (1) Keep the vendored tree and patch it forward to OpenSSL 3.x layouts. Rejected — re-vendoring 30k LOC of crypto headers is multi-day work and pointless when the system package is one apt-install away. (2) Move the vendored tree to `server/third_party/openssl-1.0-vendored/` for posterity. Rejected — git history preserves it just fine; on-disk it's a stale landmine.
+
+## 2026-05-24 — Phase N+ Wave 2: SQL-injection audit driven to zero; multi-line detection added
+
+Wave 2 of the libpqxx rewrite drove the server-native sprintf-SQL surface from the 148-line / 11-file baseline to **0**, across both single-line and multi-line patterns. Two structural decisions worth recording:
+
+**1. `login-server/Net7Mysql/Tab2.cpp` walled under `#ifdef WIN32` rather than rewritten.** Tab2.cpp is a Windows MFC `CDialog` admin tab (password reset / character management UI). It carries 3 sprintf-built UPDATE/SELECT/DELETE sites against `username`. Three reasons this got walled instead of converted:
+- Net7Mysql has no CMakeLists.txt — it has never been part of the Linux build.
+- The kyp-era `mysqlplus` bundled inside Net7Mysql is the *old* wrapper (no `AddParam`, no parameterised path). Converting Tab2.cpp would require either porting the new libpqxx wrapper into Net7Mysql or duplicating the parameterised API in the legacy wrapper — both are sunk cost.
+- The proper fix is the Avalonia rewrite of the admin UI in Phase L, after which Net7Mysql is deleted entirely.
+The audit script documents `#ifdef WIN32` as the explicit escape for "truly dead-on-Linux code awaiting a Phase J rewrite", so this falls inside the documented exemption rather than dodging it. Header comment in Tab2.cpp explains the situation for the next agent that walks past it.
+
+**Alternatives considered:** (a) Port the new libpqxx wrapper into Net7Mysql so Tab2.cpp can use `AddParam`. Rejected — pulling libpqxx into the auth-server build to fix a Windows-only MFC tab is upside-down. (b) Delete Tab2.cpp now. Rejected — the per-folder license headers and the rest of the MFC dialog structure are reference material for the Avalonia port; deletion happens *with* the port, not before it.
+
+**2. Audit script tightened to detect cross-line sprintf SQL.** During the sweep, ~36 sites with the shape
+```
+sprintf_s(buf, sizeof(buf),
+    "SELECT ... WHERE x=%d", x);
+```
+were escaping the line-anchored audit because the function-call open and the SQL string literal sat on different physical lines. The script (commit 75a4ba4) now opens a `CROSS_LINE_WINDOW=8` lookahead when it sees an unsafe-build line with unbalanced parens *and* a trailing comma, and reports the original line when a subsequent line contains a SQL keyword inside a `"..."` string literal. The two precision constraints — unbalanced parens + trailing comma, and string-literal rather than bare identifier — were added after the naive first cut false-positived on (a) `sprintf_s(struct.field, ..., "%s", value)` followed by an unrelated `AddParam` SQL nearby, and (b) `XML_TAG_ID_FOO_UPDATE` switch cases below an unrelated sprintf. Verified with a synthetic injection: the multi-line idiom now trips the gate and exits 1.
+
+**Alternatives considered:** (a) Run a separate one-shot cross-line audit, fix the 36 sites, and leave the script line-anchored. Rejected — drift-tracking is the whole point of the ratchet; without script support a new multi-line site lands silently. (b) Convert the audit to a real C++ parser (libclang AST). Rejected — bash + awk is enough signal for this surface, libclang adds CI complexity for a ratchet that already catches the live class of bug.
