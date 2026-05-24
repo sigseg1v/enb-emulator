@@ -26,6 +26,7 @@
 #include "PacketMethods.h"
 #include "Guilds.h"
 #include <float.h>
+#include <string>
 
 enum experience_type { XP_COMBAT, XP_EXPLORE, XP_TRADE };
 
@@ -261,12 +262,14 @@ void SaveManager::HandelInfraction(long player_id, short bytes, unsigned char *d
 	char msg[256];
 	memcpy(msg, &data[8], 256);
 
-	//we need to create a new entry
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "CALL net7_user.incWarn('%d','%d','%s','%d')", account_id, player_id, msg, inc_ammount);
+	LogMessage("SQL CALL: net7_user.incWarn(account=%ld, player=%ld, msg='%s', inc=%ld)\n",
+		account_id, player_id, msg, inc_ammount);
 
-	LogMessage("SQL CALL: %s\n", m_QueryStr);
-
-	account_query.run_query(m_QueryStr);
+	account_query.AddParam(account_id);
+	account_query.AddParam(player_id);
+	account_query.AddParam(msg);
+	account_query.AddParam(inc_ammount);
+	account_query.run_query_params("CALL net7_user.incWarn(?,?,?,?)");
 }
 
 void SaveManager::HandleLogin(long player_id, short bytes, unsigned char *data)
@@ -276,12 +279,11 @@ void SaveManager::HandleLogin(long player_id, short bytes, unsigned char *data)
 
 	memcpy(timestr, &data[0], 32);
 
-	//we need to create a new entry
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "CALL net7_user.avaLogin(%d,'%s')", player_id, timestr);
+	LogMessage("SQL CALL: net7_user.avaLogin(player=%ld, time='%s')\n", player_id, timestr);
 
-	LogMessage("SQL CALL: %s\n", m_QueryStr);
-
-	account_query.run_query(m_QueryStr);
+	account_query.AddParam(player_id);
+	account_query.AddParam(timestr);
+	account_query.run_query_params("CALL net7_user.avaLogin(?,?)");
 }
 
 void SaveManager::HandleLogout(long player_id, short bytes, unsigned char *data)
@@ -291,23 +293,21 @@ void SaveManager::HandleLogout(long player_id, short bytes, unsigned char *data)
 
 	memcpy(timestr, &data[0], 32);
 
-	//we need to create a new entry
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "CALL net7_user.avaLogout(%d,'%s')", player_id, timestr);
+	LogMessage("SQL CALL: net7_user.avaLogout(player=%ld, time='%s')\n", player_id, timestr);
 
-	LogMessage("SQL CALL: %s\n", m_QueryStr);
-
-	account_query.run_query(m_QueryStr);
+	account_query.AddParam(player_id);
+	account_query.AddParam(timestr);
+	account_query.run_query_params("CALL net7_user.avaLogout(?,?)");
 
 	time_t now;
 	time( &now );
 
 	__int64 time_conv = (__int64)now;
 
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-		"UPDATE net7_user.avatar_info SET last_logout_t = '%I64d' WHERE avatar_id = '%d'",
-		time_conv, player_id);
-
-	account_query.run_query(m_QueryStr);
+	account_query.AddParam((long)time_conv);
+	account_query.AddParam(player_id);
+	account_query.run_query_params(
+		"UPDATE net7_user.avatar_info SET last_logout_t = ? WHERE avatar_id = ?");
 }
 
 void SaveManager::HandleNewRecipe(long player_id, short bytes, unsigned char *data)
@@ -328,8 +328,6 @@ void SaveManager::HandleNewRecipe(long player_id, short bytes, unsigned char *da
 	{
 		LogMessage("Could not save recipes Info for id %d, %s\n", player_id, account_query.ErrorMsg());
 	}
-
-	account_query.run_query(m_QueryStr);
 }
 
 void SaveManager::HandleManufactureAttempt(long player_id, short bytes, unsigned char *data)
@@ -340,10 +338,11 @@ void SaveManager::HandleManufactureAttempt(long player_id, short bytes, unsigned
 	long item_id = *((long *) &data[0]);
 	float quality = (*(float *) &data[4]);
 
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-		"UPDATE net7_user.avatar_recipes SET avg_quality = (avg_quality*attempts+%f)/(attempts+1), attempts=attempts+1 WHERE avatar_id = '%d' AND item_id = '%d'",
-		quality, player_id, item_id);
-	account_query.run_query(m_QueryStr);
+	account_query.AddParam((double)quality);
+	account_query.AddParam(player_id);
+	account_query.AddParam(item_id);
+	account_query.run_query_params(
+		"UPDATE net7_user.avatar_recipes SET avg_quality = (avg_quality*attempts+?)/(attempts+1), attempts=attempts+1 WHERE avatar_id = ? AND item_id = ?");
 }
 
 void SaveManager::HandleAdvanceLevel(long player_id, short bytes, unsigned char *data)
@@ -354,25 +353,28 @@ void SaveManager::HandleAdvanceLevel(long player_id, short bytes, unsigned char 
 	u8 xp_type = *((u8 *) &data[0]);
 	long new_level = *((long *) &data[1]);
 
+	const char *sql = NULL;
 	switch (xp_type)
 	{
     case XP_COMBAT:
-		sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-			"UPDATE net7_user.avatar_info SET combat = '%d' WHERE avatar_id = '%d'", new_level, player_id);
+		sql = "UPDATE net7_user.avatar_info SET combat = ? WHERE avatar_id = ?";
         break;
 
     case XP_EXPLORE:
-		sprintf_s(m_QueryStr, sizeof(m_QueryStr),
-			"UPDATE net7_user.avatar_info SET explore = '%d' WHERE avatar_id = '%d'", new_level, player_id);
+		sql = "UPDATE net7_user.avatar_info SET explore = ? WHERE avatar_id = ?";
         break;
 
     case XP_TRADE:
-		sprintf_s(m_QueryStr, sizeof(m_QueryStr),
-			"UPDATE net7_user.avatar_info SET trade = '%d' WHERE avatar_id = '%d'", new_level, player_id);
+		sql = "UPDATE net7_user.avatar_info SET trade = ? WHERE avatar_id = ?";
 		break;
 	}
 
-	account_query.run_query(m_QueryStr);
+	if (sql)
+	{
+		account_query.AddParam(new_level);
+		account_query.AddParam(player_id);
+		account_query.run_query_params(sql);
+	}
 }
 
 void SaveManager::HandleAdvanceSkill(long player_id, short bytes, unsigned char *data)
@@ -385,17 +387,19 @@ void SaveManager::HandleAdvanceSkill(long player_id, short bytes, unsigned char 
 	short new_level= *((short *) &data[2]);
 
 	//does this skill exist in the DB?  //TODO:: create this entry when the skill is awarded, then just run 'UPDATE' queries on it.
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr),
-		"SELECT * FROM net7_user.avatar_skill_levels WHERE avatar_id = '%d' AND skill_id = '%d'", player_id, skill_id);
-	account_query.execute(m_QueryStr);
+	account_query.AddParam(player_id);
+	account_query.AddParam((int)skill_id);
+	account_query.execute_params(
+		"SELECT * FROM net7_user.avatar_skill_levels WHERE avatar_id = ? AND skill_id = ?");
 	account_query.store(&result);
 
 	if (result.n_rows() != 0)
 	{
-		sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-			"UPDATE net7_user.avatar_skill_levels SET skill_level = '%d' WHERE avatar_id = '%d' AND skill_id = '%d'", 
-			new_level, player_id, skill_id);
-		account_query.run_query(m_QueryStr);
+		account_query.AddParam((int)new_level);
+		account_query.AddParam(player_id);
+		account_query.AddParam((int)skill_id);
+		account_query.run_query_params(
+			"UPDATE net7_user.avatar_skill_levels SET skill_level = ? WHERE avatar_id = ? AND skill_id = ?");
 	}
 	else
 	{
@@ -434,62 +438,50 @@ void SaveManager::HandleChangeInventory(long player_id, short bytes, unsigned ch
 	// Copy builder Name
 	memcpy(builder_name, &data[22], 64);
 
+	const char *select_sql = NULL;
+	const char *update_sql = NULL;
 	switch (inventory_type)
 	{
 	case PLAYER_INVENTORY:
-		sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-			"SELECT * FROM net7_user.avatar_inventory_items WHERE avatar_id = '%d' AND inventory_slot = '%d'", 
-			player_id, inventory_slot);
+		select_sql = "SELECT * FROM net7_user.avatar_inventory_items WHERE avatar_id = ? AND inventory_slot = ?";
+		update_sql = "UPDATE net7_user.avatar_inventory_items SET item_id = ?, stack_level = ?, trade_stack = ?,"
+			"quality = ?, cost = ?, builder_name = ?, structure = ? WHERE avatar_id = ? AND inventory_slot = ?";
 		break;
 
 	case PLAYER_VAULT:
-		sprintf_s(m_QueryStr, sizeof(m_QueryStr),
-			"SELECT * FROM net7_user.avatar_vault_items WHERE avatar_id = '%d' AND inventory_slot = '%d'", 
-			player_id, inventory_slot);
+		select_sql = "SELECT * FROM net7_user.avatar_vault_items WHERE avatar_id = ? AND inventory_slot = ?";
+		update_sql = "UPDATE net7_user.avatar_vault_items SET item_id = ?, stack_level = ?, trade_stack = ?, "
+			"quality = ?, cost = ?, builder_name = ?, structure = ? WHERE avatar_id = ? AND inventory_slot = ?";
 		break;
 
 	case PLAYER_TRADE:
-		sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-			"SELECT * FROM net7_user.avatar_trade_items WHERE avatar_id = '%d' AND inventory_slot = '%d'", 
-			player_id, inventory_slot);
+		select_sql = "SELECT * FROM net7_user.avatar_trade_items WHERE avatar_id = ? AND inventory_slot = ?";
+		update_sql = "UPDATE net7_user.avatar_trade_items SET item_id = ?, stack_level = ?, trade_stack = ?, "
+			"quality = ?, cost = ?, builder_name = ?, structure = ? WHERE avatar_id = ? AND inventory_slot = ?";
 		break;
 	}
 
+	if (!select_sql) return;
+
 	//does this item exist in the DB?
-	account_query.execute(m_QueryStr);
+	account_query.AddParam(player_id);
+	account_query.AddParam((int)inventory_slot);
+	account_query.execute_params(select_sql);
 	account_query.store(&result);
 
 	if (result.n_rows() != 0)
 	{
 		//yes, just update the item
-		switch (inventory_type)
-		{
-		case PLAYER_INVENTORY:
-			sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-				"UPDATE net7_user.avatar_inventory_items SET item_id = '%d', stack_level = '%d', trade_stack = '%d',"
-				"quality = '%f', cost = '%d', builder_name ='%s', structure = '%f' WHERE avatar_id = '%d' AND "
-				"inventory_slot = '%d'",
-				item_id, stack_level, trade_stack, quality, cost, builder_name, structure, player_id, inventory_slot);
-			break;
-
-		case PLAYER_VAULT:
-			sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-				"UPDATE net7_user.avatar_vault_items SET item_id = '%d', stack_level = '%d', trade_stack = '%d', "
-				"quality = '%f', cost = '%d', builder_name ='%s', structure = '%f' WHERE avatar_id = '%d' AND "
-				"inventory_slot = '%d'",
-				item_id, stack_level, trade_stack, quality, cost, builder_name, structure, player_id, inventory_slot);
-			break;
-
-		case PLAYER_TRADE:
-			sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-				"UPDATE net7_user.avatar_trade_items SET item_id = '%d', stack_level = '%d', trade_stack = '%d', "
-				"quality = '%f', cost = '%d', builder_name ='%s', structure = '%f' WHERE avatar_id = '%d' AND "
-				"inventory_slot = '%d'",
-				item_id, stack_level, trade_stack, quality, cost, builder_name, structure, player_id, inventory_slot);
-			break;
-		}
-
-		account_query.run_query(m_QueryStr);
+		account_query.AddParam(item_id);
+		account_query.AddParam((int)stack_level);
+		account_query.AddParam((int)trade_stack);
+		account_query.AddParam((double)quality);
+		account_query.AddParam((unsigned long)cost);
+		account_query.AddParam(builder_name);
+		account_query.AddParam((double)structure);
+		account_query.AddParam(player_id);
+		account_query.AddParam((int)inventory_slot);
+		account_query.run_query_params(update_sql);
 	}
 	else
 	{
@@ -543,23 +535,24 @@ void SaveManager::HandleChangeEquipment(long player_id, short bytes, unsigned ch
 	// Copy builder Name
 	memcpy(builder_name, &data[13], 64);
 
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-		"SELECT * FROM net7_user.avatar_equipment WHERE avatar_id = '%d' AND equipment_slot = '%d'", 
-		player_id, equipment_slot);
-
-	//does this item exist in the DB?
-	account_query.execute(m_QueryStr);
+	account_query.AddParam(player_id);
+	account_query.AddParam((int)equipment_slot);
+	account_query.execute_params(
+		"SELECT * FROM net7_user.avatar_equipment WHERE avatar_id = ? AND equipment_slot = ?");
 	account_query.store(&result);
 
 	if (result.n_rows() != 0)
 	{
 		//yes, just update the equipment slot
-		sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-			"UPDATE net7_user.avatar_equipment SET item_id = '%d', quality = '%f', builder_name = '%s', "
-			"structure = '%f' WHERE avatar_id = '%d' AND equipment_slot = '%d'",
-			item_id, quality, builder_name, structure, player_id, equipment_slot);
-
-		if (!account_query.run_query(m_QueryStr))
+		account_query.AddParam(item_id);
+		account_query.AddParam((double)quality);
+		account_query.AddParam(builder_name);
+		account_query.AddParam((double)structure);
+		account_query.AddParam(player_id);
+		account_query.AddParam((int)equipment_slot);
+		if (!account_query.run_query_params(
+			"UPDATE net7_user.avatar_equipment SET item_id = ?, quality = ?, builder_name = ?, "
+			"structure = ? WHERE avatar_id = ? AND equipment_slot = ?"))
 		{
 			LogMessage("Could not update Equip Info for id %d, %s\n", player_id, account_query.ErrorMsg());
 		}
@@ -608,22 +601,25 @@ void SaveManager::HandleChangeAmmo(long player_id, short bytes, unsigned char *d
 		LogMessage("ERROR: negative ammo_stack for %d\n", player_id );
 	}
 
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-		"SELECT * FROM net7_user.avatar_ammo WHERE avatar_id = '%d' AND equipment_slot = '%d'", player_id, equipment_slot);
-
-	//does this item exist in the DB?
-	account_query.execute(m_QueryStr);
+	account_query.AddParam(player_id);
+	account_query.AddParam((int)equipment_slot);
+	account_query.execute_params(
+		"SELECT * FROM net7_user.avatar_ammo WHERE avatar_id = ? AND equipment_slot = ?");
 	account_query.store(&result);
 
 	if (result.n_rows() != 0)
 	{
 		//yes, just update the equipment slot
-		sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-			"UPDATE net7_user.avatar_ammo SET item_id = '%d', quality = '%f', ammo_stack = '%d', structure = '%f', "
-			"builder_name = '%s' WHERE avatar_id = '%d' AND equipment_slot = '%d'",
-			item_id, quality, ammo_stack, structure, builder_name, player_id, equipment_slot);
-
-		account_query.run_query(m_QueryStr);
+		account_query.AddParam(item_id);
+		account_query.AddParam((double)quality);
+		account_query.AddParam((int)ammo_stack);
+		account_query.AddParam((double)structure);
+		account_query.AddParam(builder_name);
+		account_query.AddParam(player_id);
+		account_query.AddParam((int)equipment_slot);
+		account_query.run_query_params(
+			"UPDATE net7_user.avatar_ammo SET item_id = ?, quality = ?, ammo_stack = ?, structure = ?, "
+			"builder_name = ? WHERE avatar_id = ? AND equipment_slot = ?");
 	}
 	else
 	{
@@ -655,25 +651,28 @@ void SaveManager::HandleAwardXP(long player_id, short bytes, unsigned char *data
 	u8 xp_type = *((u8 *) &data[0]);
 	float new_level = *((float *) &data[1]);
 
+	const char *sql = NULL;
 	switch (xp_type)
 	{
     case XP_COMBAT:
-		sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-			"UPDATE net7_user.avatar_level_info SET combat_bar_level = '%f' WHERE avatar_id = '%d'", new_level, player_id);
+		sql = "UPDATE net7_user.avatar_level_info SET combat_bar_level = ? WHERE avatar_id = ?";
         break;
 
     case XP_EXPLORE:
-		sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-			"UPDATE net7_user.avatar_level_info SET explore_bar_level = '%f' WHERE avatar_id = '%d'", new_level, player_id);
+		sql = "UPDATE net7_user.avatar_level_info SET explore_bar_level = ? WHERE avatar_id = ?";
         break;
 
     case XP_TRADE:
-		sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-			"UPDATE net7_user.avatar_level_info SET trade_bar_level = '%f' WHERE avatar_id = '%d'", new_level, player_id);
+		sql = "UPDATE net7_user.avatar_level_info SET trade_bar_level = ? WHERE avatar_id = ?";
 		break;
 	}
 
-	account_query.run_query(m_QueryStr);
+	if (sql)
+	{
+		account_query.AddParam((double)new_level);
+		account_query.AddParam(player_id);
+		account_query.run_query_params(sql);
+	}
 }
 
 void SaveManager::HandleUpdateDatabase(long player_id, short bytes, unsigned char *data)
@@ -683,10 +682,10 @@ void SaveManager::HandleUpdateDatabase(long player_id, short bytes, unsigned cha
 
 	u32 sector_id = *((u32 *) &data[0]);
 
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-		"UPDATE net7_user.avatar_info SET sector = '%d' WHERE avatar_id = '%d'", sector_id, player_id);
-
-	account_query.run_query(m_QueryStr);
+	account_query.AddParam((unsigned int)sector_id);
+	account_query.AddParam(player_id);
+	account_query.run_query_params(
+		"UPDATE net7_user.avatar_info SET sector = ? WHERE avatar_id = ?");
 }
 
 void SaveManager::HandleCreditChange(long player_id, short bytes, unsigned char *data)
@@ -696,10 +695,10 @@ void SaveManager::HandleCreditChange(long player_id, short bytes, unsigned char 
 
 	u64 credits = *((u64 *) &data[0]);
 
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr),
-		"UPDATE net7_user.avatar_level_info SET credits = '%I64d' WHERE avatar_id = '%d'", credits, player_id);
-
-	account_query.run_query(m_QueryStr);
+	account_query.AddParam((long)credits);
+	account_query.AddParam(player_id);
+	account_query.run_query_params(
+		"UPDATE net7_user.avatar_level_info SET credits = ? WHERE avatar_id = ?");
 }
 
 void SaveManager::HandleStorePosition(long player_id, short bytes, unsigned char *data)
@@ -725,13 +724,18 @@ void SaveManager::HandleStorePosition(long player_id, short bytes, unsigned char
 
 	sql_query_c account_query (&m_SQL_Conn);
 
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-		"UPDATE net7_user.avatar_position SET posx = '%.2f', posy = '%.2f', posz = '%.2f', ori_w = '%f', ori_x = '%f', "
-		"ori_y = '%f', ori_z = '%f', sector_id = '%d' WHERE avatar_id = '%d'",
-		position[0], position[1], position[2], orientation[0], orientation[1], orientation[2], orientation[3], 
-		sector_id, player_id);
-
-	account_query.run_query(m_QueryStr);
+	account_query.AddParam((double)position[0]);
+	account_query.AddParam((double)position[1]);
+	account_query.AddParam((double)position[2]);
+	account_query.AddParam((double)orientation[0]);
+	account_query.AddParam((double)orientation[1]);
+	account_query.AddParam((double)orientation[2]);
+	account_query.AddParam((double)orientation[3]);
+	account_query.AddParam(sector_id);
+	account_query.AddParam(player_id);
+	account_query.run_query_params(
+		"UPDATE net7_user.avatar_position SET posx = ?, posy = ?, posz = ?, ori_w = ?, ori_x = ?, "
+		"ori_y = ?, ori_z = ?, sector_id = ? WHERE avatar_id = ?");
 }
 
 void SaveManager::HandleAdvanceMission(long player_id, short bytes, unsigned char *data)
@@ -744,23 +748,21 @@ void SaveManager::HandleAdvanceMission(long player_id, short bytes, unsigned cha
 	long	mission_id		= *((long *) &data[1]);
 	short	mission_stage	= *((short *) &data[5]);
 
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-		"SELECT * FROM net7_user.avatar_mission_progress WHERE avatar_id = '%d' AND mission_slot = '%d'", 
-		player_id, mission_slot);
-
-	//does this item exist in the DB?
-	account_query.execute(m_QueryStr);
+	account_query.AddParam(player_id);
+	account_query.AddParam((int)mission_slot);
+	account_query.execute_params(
+		"SELECT * FROM net7_user.avatar_mission_progress WHERE avatar_id = ? AND mission_slot = ?");
 	account_query.store(&result);
 
 	if (result.n_rows() != 0)
 	{
 		//yes, just update this mission and blank the mission flags
-		sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-			"UPDATE net7_user.avatar_mission_progress SET stage_num = '%d', mission_flags = '0' WHERE avatar_id = "
-			"'%d' AND mission_slot = '%d'",
-			mission_stage, player_id, mission_slot);
-
-		account_query.run_query(m_QueryStr);
+		account_query.AddParam((int)mission_stage);
+		account_query.AddParam(player_id);
+		account_query.AddParam((int)mission_slot);
+		account_query.run_query_params(
+			"UPDATE net7_user.avatar_mission_progress SET stage_num = ?, mission_flags = '0' WHERE avatar_id = "
+			"? AND mission_slot = ?");
 	}
 	else
 	{
@@ -792,11 +794,11 @@ void SaveManager::HandleAdvanceMissionFlags(long player_id, short bytes, unsigne
 	u8		mission_slot	= *((u8 *) &data[0]);
 	long	mission_flags	= *((long *) &data[1]);
 
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-		"UPDATE net7_user.avatar_mission_progress SET mission_flags = '%d' WHERE avatar_id = '%d' AND mission_slot = '%d'",
-		mission_flags, player_id, mission_slot);
-
-	account_query.run_query(m_QueryStr);
+	account_query.AddParam(mission_flags);
+	account_query.AddParam(player_id);
+	account_query.AddParam((int)mission_slot);
+	account_query.run_query_params(
+		"UPDATE net7_user.avatar_mission_progress SET mission_flags = ? WHERE avatar_id = ? AND mission_slot = ?");
 }
 
 void SaveManager::HandleHullUpgrade(long player_id, short bytes, unsigned char *data)
@@ -815,27 +817,30 @@ void SaveManager::HandleHullUpgrade(long player_id, short bytes, unsigned char *
 	u8 engine_thrust_type = *((u8 *) &data[10]);
 
 
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "SELECT * FROM net7_user.avatar_level_info WHERE avatar_id = '%d'", player_id);
-
-	//does this item exist in the DB?
-	account_query.execute(m_QueryStr);
+	account_query.AddParam(player_id);
+	account_query.execute_params(
+		"SELECT * FROM net7_user.avatar_level_info WHERE avatar_id = ?");
 	account_query.store(&result);
 
 	if (result.n_rows() != 0)
 	{
 		//yes, just update the level info row
-		sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-			"UPDATE net7_user.avatar_level_info SET player_rank_name = '%d', hull_upgrade_level = '%d', "
-			"max_hull_points = '%.2f', cargo_space = '%d', weapon_slots = '%d', device_slots = '%d' WHERE avatar_id = '%d'",
-			player_rank_name, hull_upgrade_level, max_hull_points, cargo_space, weapon_slots, device_slots, player_id);
+		account_query.AddParam((int)player_rank_name);
+		account_query.AddParam((int)hull_upgrade_level);
+		account_query.AddParam((double)max_hull_points);
+		account_query.AddParam((int)cargo_space);
+		account_query.AddParam((int)weapon_slots);
+		account_query.AddParam((int)device_slots);
+		account_query.AddParam(player_id);
+		account_query.run_query_params(
+			"UPDATE net7_user.avatar_level_info SET player_rank_name = ?, hull_upgrade_level = ?, "
+			"max_hull_points = ?, cargo_space = ?, weapon_slots = ?, device_slots = ? WHERE avatar_id = ?");
 
-		account_query.run_query(m_QueryStr);
-
-		sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-			"UPDATE net7_user.avatar_level_info SET engine_thrust_type = '%d', warp_power_level = '%d' WHERE avatar_id = '%d'",
-			engine_thrust_type, warp_power_level, player_id);
-
-		account_query.run_query(m_QueryStr);
+		account_query.AddParam((int)engine_thrust_type);
+		account_query.AddParam((int)warp_power_level);
+		account_query.AddParam(player_id);
+		account_query.run_query_params(
+			"UPDATE net7_user.avatar_level_info SET engine_thrust_type = ?, warp_power_level = ? WHERE avatar_id = ?");
 	}
 	else
 	{
@@ -875,11 +880,10 @@ void SaveManager::HandleHullLevelChange(long player_id, short bytes, unsigned ch
 
 	float hull_points = *((float *) &data[0]);
 
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-		"UPDATE net7_user.avatar_level_info SET hull_points = '%.2f' WHERE avatar_id = '%d'",
-		hull_points, player_id);
-
-	account_query.run_query(m_QueryStr);
+	account_query.AddParam((double)hull_points);
+	account_query.AddParam(player_id);
+	account_query.run_query_params(
+		"UPDATE net7_user.avatar_level_info SET hull_points = ? WHERE avatar_id = ?");
 }
 
 void SaveManager::HandleMissionRemove(long player_id, short bytes, unsigned char *data)
@@ -889,9 +893,10 @@ void SaveManager::HandleMissionRemove(long player_id, short bytes, unsigned char
 	long mission_id =  *((long *) &data[0]);
 
 	//first remove mission progress
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr),
-		"DELETE FROM net7_user.avatar_mission_progress WHERE avatar_id = '%d' AND mission_id = '%d'",player_id, mission_id);
-	account_query.run_query(m_QueryStr);
+	account_query.AddParam(player_id);
+	account_query.AddParam(mission_id);
+	account_query.run_query_params(
+		"DELETE FROM net7_user.avatar_mission_progress WHERE avatar_id = ? AND mission_id = ?");
 }
 
 void SaveManager::HandleMissionComplete(long player_id, short bytes, unsigned char *data)
@@ -904,27 +909,26 @@ void SaveManager::HandleMissionComplete(long player_id, short bytes, unsigned ch
 	u8 mission_flags = *((u8 *)   &data[4]);
 
 	//first remove mission progress
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr),
-		"DELETE FROM net7_user.avatar_mission_progress WHERE avatar_id = '%d' AND mission_id = '%d'",
-		player_id, mission_id);
-	account_query.run_query(m_QueryStr);
+	account_query.AddParam(player_id);
+	account_query.AddParam(mission_id);
+	account_query.run_query_params(
+		"DELETE FROM net7_user.avatar_mission_progress WHERE avatar_id = ? AND mission_id = ?");
 
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-		"SELECT * FROM net7_user.missions_completed WHERE avatar_id = '%d' AND mission_id = '%d'", player_id, mission_id);
-
-	//does this item exist in the DB?
-	account_query.execute(m_QueryStr);
+	account_query.AddParam(player_id);
+	account_query.AddParam(mission_id);
+	account_query.execute_params(
+		"SELECT * FROM net7_user.missions_completed WHERE avatar_id = ? AND mission_id = ?");
 	account_query.store(&result);
 
 	if (result.n_rows() != 0)
 	{
 		//yes, just update the info row
-		sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-			"UPDATE net7_user.missions_completed SET mission_completion_flags = '%d' WHERE avatar_id = '%d' "
-			"AND mission_id = '%d'",
-			mission_flags, player_id, mission_id);
-
-		account_query.run_query(m_QueryStr);
+		account_query.AddParam((int)mission_flags);
+		account_query.AddParam(player_id);
+		account_query.AddParam(mission_id);
+		account_query.run_query_params(
+			"UPDATE net7_user.missions_completed SET mission_completion_flags = ? WHERE avatar_id = ? "
+			"AND mission_id = ?");
 	}
 	else
 	{
@@ -940,49 +944,44 @@ void SaveManager::HandleMissionComplete(long player_id, short bytes, unsigned ch
 	}
 }
 
+// Run a hard-coded list of parameterised "DELETE FROM `t` WHERE `avatar_id` = ?"
+// queries, binding avatar_id as parameter 1. Table names are literal — they
+// are not spliced in via printf, so this stays out of the SQL-injection audit.
+static void delete_avatar_rows(sql_query_c &q, long avatar_id,
+		const char * const *sqls, size_t count)
+{
+	for (size_t i = 0; i < count; ++i)
+	{
+		q.AddParam(avatar_id);
+		q.run_query_params(sqls[i]);
+	}
+}
+
 //this method leaves the base character design, name and ship but resets them back to a starting condition.
 void SaveManager::HandleWipeCharacter(long player_id)
 {
 	//ok remove all records of inventory, equipment, ammo, skills, levels & rank info
 	sql_query_c account_query (&m_SQL_Conn);
 
-	//remove position info
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `avatar_position` WHERE `avatar_id` = '%d'", player_id);
-	account_query.run_query(m_QueryStr);
+	static const char * const wipe_sqls[] = {
+		"DELETE FROM `avatar_position` WHERE `avatar_id` = ?",
+		"DELETE FROM `avatar_level_info` WHERE `avatar_id` = ?",
+		"DELETE FROM `avatar_ammo` WHERE `avatar_id` = ?",
+		"DELETE FROM `avatar_inventory_items` WHERE `avatar_id` = ?",
+		"DELETE FROM `avatar_vault_items` WHERE `avatar_id` = ?",
+		"DELETE FROM `avatar_equipment` WHERE `avatar_id` = ?",
+		"DELETE FROM `avatar_mission_progress` WHERE `avatar_id` = ?",
+		"DELETE FROM `missions_completed` WHERE `avatar_id` = ?",
+		"DELETE FROM `faction_data` WHERE `avatar_id` = ?",
+		"DELETE FROM `avatar_exploration` WHERE `avatar_id` = ?",
+		"DELETE FROM `avatar_skill_levels` WHERE `avatar_id` = ?",
+	};
+	delete_avatar_rows(account_query, player_id, wipe_sqls,
+		sizeof(wipe_sqls)/sizeof(wipe_sqls[0]));
 
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `avatar_level_info` WHERE `avatar_id` = '%d'", player_id);
-	account_query.run_query(m_QueryStr);
-
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `avatar_ammo` WHERE `avatar_id` = '%d'", player_id);
-	account_query.run_query(m_QueryStr);
-
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `avatar_inventory_items` WHERE `avatar_id` = '%d'", player_id);
-	account_query.run_query(m_QueryStr);
-
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `avatar_vault_items` WHERE `avatar_id` = '%d'", player_id);
-	account_query.run_query(m_QueryStr);
-
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `avatar_equipment` WHERE `avatar_id` = '%d'", player_id);
-	account_query.run_query(m_QueryStr);
-
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `avatar_mission_progress` WHERE `avatar_id` = '%d'", player_id);
-	account_query.run_query(m_QueryStr);
-
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `missions_completed` WHERE `avatar_id` = '%d'", player_id);
-	account_query.run_query(m_QueryStr);
-	
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `faction_data` WHERE `avatar_id` = '%d'", player_id);
-	account_query.run_query(m_QueryStr);
-	
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `avatar_exploration` WHERE `avatar_id` = '%d'", player_id);
-	account_query.run_query(m_QueryStr);
-
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `avatar_skill_levels` WHERE `avatar_id` = '%d'", player_id);
-	account_query.run_query(m_QueryStr);
-
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-		"UPDATE net7_user.avatar_info SET combat = '0', explore = '0', trade = '0' WHERE avatar_id = '%d'", player_id);
-	account_query.run_query(m_QueryStr);
+	account_query.AddParam(player_id);
+	account_query.run_query_params(
+		"UPDATE net7_user.avatar_info SET combat = '0', explore = '0', trade = '0' WHERE avatar_id = ?");
 }
 
 //this method removes all trace of the avatar in the database, must be used when the avatar is deleted via the client avatar character selector.
@@ -990,65 +989,30 @@ void SaveManager::HandleFullWipeCharacter(long player_id)
 {
 	sql_query_c account_query (&m_SQL_Conn);
 
-	//Delete this character from the tables
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `ship_info` WHERE `avatar_id` = '%d'", player_id);
-	account_query.run_query(m_QueryStr);
-
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `ship_data` WHERE `avatar_id` = '%d'", player_id);
-	account_query.run_query(m_QueryStr);
-
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `avatar_data` WHERE `avatar_id` = '%d'", player_id);
-	account_query.run_query(m_QueryStr);
-
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `avatar_info` WHERE `avatar_id` = '%d'", player_id);
-	account_query.run_query(m_QueryStr);
-
-
-	//remove position info
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `avatar_position` WHERE `avatar_id` = '%d'", player_id);
-	account_query.run_query(m_QueryStr);
-
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `avatar_level_info` WHERE `avatar_id` = '%d'", player_id);
-	account_query.run_query(m_QueryStr);
-
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `avatar_ammo` WHERE `avatar_id` = '%d'", player_id);
-	account_query.run_query(m_QueryStr);
-
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `avatar_inventory_items` WHERE `avatar_id` = '%d'", player_id);
-	account_query.run_query(m_QueryStr);
-
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `avatar_vault_items` WHERE `avatar_id` = '%d'", player_id);
-	account_query.run_query(m_QueryStr);
-
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `avatar_equipment` WHERE `avatar_id` = '%d'", player_id);
-	account_query.run_query(m_QueryStr);
-
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `avatar_mission_progress` WHERE `avatar_id` = '%d'", player_id);
-	account_query.run_query(m_QueryStr);
-
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `missions_completed` WHERE `avatar_id` = '%d'", player_id);
-	account_query.run_query(m_QueryStr);
-	
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `faction_data` WHERE `avatar_id` = '%d'", player_id);
-	account_query.run_query(m_QueryStr);
-	
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `avatar_exploration` WHERE `avatar_id` = '%d'", player_id);
-	account_query.run_query(m_QueryStr);
-
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `avatar_skill_levels` WHERE `avatar_id` = '%d'", player_id);
-	account_query.run_query(m_QueryStr);
-
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `avatar_faction_level` WHERE `avatar_id` = '%d'", player_id);
-	account_query.run_query(m_QueryStr);
-
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `avatar_recipes` WHERE `avatar_id` = '%d'", player_id);
-	account_query.run_query(m_QueryStr);
-
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `ignore_lists` WHERE `avatar_id` = '%d'", player_id);
-	account_query.run_query(m_QueryStr);
-
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `friends_lists` WHERE `avatar_id` = '%d'", player_id);
-	account_query.run_query(m_QueryStr);
+	// order preserved for FK constraints
+	static const char * const wipe_sqls[] = {
+		"DELETE FROM `ship_info` WHERE `avatar_id` = ?",
+		"DELETE FROM `ship_data` WHERE `avatar_id` = ?",
+		"DELETE FROM `avatar_data` WHERE `avatar_id` = ?",
+		"DELETE FROM `avatar_info` WHERE `avatar_id` = ?",
+		"DELETE FROM `avatar_position` WHERE `avatar_id` = ?",
+		"DELETE FROM `avatar_level_info` WHERE `avatar_id` = ?",
+		"DELETE FROM `avatar_ammo` WHERE `avatar_id` = ?",
+		"DELETE FROM `avatar_inventory_items` WHERE `avatar_id` = ?",
+		"DELETE FROM `avatar_vault_items` WHERE `avatar_id` = ?",
+		"DELETE FROM `avatar_equipment` WHERE `avatar_id` = ?",
+		"DELETE FROM `avatar_mission_progress` WHERE `avatar_id` = ?",
+		"DELETE FROM `missions_completed` WHERE `avatar_id` = ?",
+		"DELETE FROM `faction_data` WHERE `avatar_id` = ?",
+		"DELETE FROM `avatar_exploration` WHERE `avatar_id` = ?",
+		"DELETE FROM `avatar_skill_levels` WHERE `avatar_id` = ?",
+		"DELETE FROM `avatar_faction_level` WHERE `avatar_id` = ?",
+		"DELETE FROM `avatar_recipes` WHERE `avatar_id` = ?",
+		"DELETE FROM `ignore_lists` WHERE `avatar_id` = ?",
+		"DELETE FROM `friends_lists` WHERE `avatar_id` = ?",
+	};
+	delete_avatar_rows(account_query, player_id, wipe_sqls,
+		sizeof(wipe_sqls)/sizeof(wipe_sqls[0]));
 }
 
 void SaveManager::HandleFullFactionWipe(long player_id, short bytes, unsigned char *data)
@@ -1088,27 +1052,30 @@ void SaveManager::HandleExploreNav(long player_id, short bytes, unsigned char *d
 
 	long object_uid =  *((long *) &data[0]);
 
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-		"SELECT * FROM net7_user.avatar_exploration WHERE avatar_id = '%d' AND object_id = '%d'", player_id, object_uid);
-
-	//does this item exist in the DB?
-	account_query.execute(m_QueryStr);
+	account_query.AddParam(player_id);
+	account_query.AddParam(object_uid);
+	account_query.execute_params(
+		"SELECT * FROM net7_user.avatar_exploration WHERE avatar_id = ? AND object_id = ?");
 	account_query.store(&result);
 
 	if (result.n_rows() == 0)
-	{  
-		sprintf_s(m_QueryStr, sizeof(m_QueryStr),   // need to add a fresh entry here
-			"INSERT INTO net7_user.avatar_exploration (avatar_id,object_id,explore_flags) VALUES ('%d','%d','%d')", 
-			player_id, object_uid, EXPLORE_NAV);
+	{
+		// need to add a fresh entry here
+		account_query.AddParam(player_id);
+		account_query.AddParam(object_uid);
+		account_query.AddParam((int)EXPLORE_NAV);
+		account_query.run_query_params(
+			"INSERT INTO net7_user.avatar_exploration (avatar_id,object_id,explore_flags) VALUES (?,?,?)");
 	}
 	else
 	{
-		sprintf_s(m_QueryStr, sizeof(m_QueryStr),   // entry exists, just update it
-			"UPDATE net7_user.avatar_exploration SET explore_flags = '%d' WHERE avatar_id = '%d' AND object_id = '%d'",
-			EXPLORE_NAV, player_id, object_uid);
+		// entry exists, just update it
+		account_query.AddParam((int)EXPLORE_NAV);
+		account_query.AddParam(player_id);
+		account_query.AddParam(object_uid);
+		account_query.run_query_params(
+			"UPDATE net7_user.avatar_exploration SET explore_flags = ? WHERE avatar_id = ? AND object_id = ?");
 	}
-
-	account_query.run_query(m_QueryStr);
 }
 
 void SaveManager::HandleSetSkillPoints(long player_id, short bytes, unsigned char *data)
@@ -1118,11 +1085,10 @@ void SaveManager::HandleSetSkillPoints(long player_id, short bytes, unsigned cha
 
 	long skill_points =  *((long *) &data[0]);
 
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-		"UPDATE net7_user.avatar_level_info SET skill_points = '%d' WHERE avatar_id = '%d'",
-		skill_points, player_id);
-
-	account_query.run_query(m_QueryStr);
+	account_query.AddParam(skill_points);
+	account_query.AddParam(player_id);
+	account_query.run_query_params(
+		"UPDATE net7_user.avatar_level_info SET skill_points = ? WHERE avatar_id = ?");
 }
 
 void SaveManager::HandleSetRegisteredStarbase(long player_id, short bytes, unsigned char *data)
@@ -1132,11 +1098,10 @@ void SaveManager::HandleSetRegisteredStarbase(long player_id, short bytes, unsig
 
 	long registered_starbase =  *((long *) &data[0]);
 
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-		"UPDATE net7_user.avatar_level_info SET registered_starbase = '%d' WHERE avatar_id = '%d'",
-		registered_starbase, player_id);
-
-	account_query.run_query(m_QueryStr);
+	account_query.AddParam(registered_starbase);
+	account_query.AddParam(player_id);
+	account_query.run_query_params(
+		"UPDATE net7_user.avatar_level_info SET registered_starbase = ? WHERE avatar_id = ?");
 }
 
 void SaveManager::HandleSaveEnergyLevels(long player_id, short bytes, unsigned char *data)
@@ -1150,11 +1115,11 @@ void SaveManager::HandleSaveEnergyLevels(long player_id, short bytes, unsigned c
 	if (_isnan(energy)) energy = 0.1f; //last ditch attempt to stop a crash.
 	if (_isnan(shield)) shield = 0.1f;
 
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr),
-		"UPDATE net7_user.avatar_level_info SET reactor_level = '%f', shield_level = '%f' WHERE avatar_id = '%d'",
-		energy, shield, player_id);
-
-	account_query.run_query(m_QueryStr);
+	account_query.AddParam((double)energy);
+	account_query.AddParam((double)shield);
+	account_query.AddParam(player_id);
+	account_query.run_query_params(
+		"UPDATE net7_user.avatar_level_info SET reactor_level = ?, shield_level = ? WHERE avatar_id = ?");
 }
 
 void SaveManager::HandleFactionUpdate(long player_id, short bytes, unsigned char *data)
@@ -1172,11 +1137,10 @@ void SaveManager::HandleFactionUpdate(long player_id, short bytes, unsigned char
 		faction_order = *((short *) &data[6]);
 	}
 
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-		"SELECT * FROM net7_user.faction_data WHERE avatar_id = '%d' AND faction_id = '%d'", player_id, faction_id);
-
-	//does this item exist in the DB?
-	account_query.execute(m_QueryStr);
+	account_query.AddParam(player_id);
+	account_query.AddParam(faction_id);
+	account_query.execute_params(
+		"SELECT * FROM net7_user.faction_data WHERE avatar_id = ? AND faction_id = ?");
 	account_query.store(&result);
 
 	if (result.n_rows() != 0)
@@ -1184,19 +1148,22 @@ void SaveManager::HandleFactionUpdate(long player_id, short bytes, unsigned char
 		//yes, just update the info row
 		if (faction_order != -1)
 		{
-			sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-				"UPDATE net7_user.faction_data SET faction_order = '%d' AND faction_value = %.2f WHERE avatar_id = "
-				"'%d' AND faction_id = '%d'",
-				faction_order, faction_value, player_id, faction_id);
+			account_query.AddParam(faction_order);
+			account_query.AddParam((double)faction_value);
+			account_query.AddParam(player_id);
+			account_query.AddParam(faction_id);
+			account_query.run_query_params(
+				"UPDATE net7_user.faction_data SET faction_order = ? AND faction_value = ? WHERE avatar_id = "
+				"? AND faction_id = ?");
 		}
 		else
 		{
-			sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-				"UPDATE net7_user.faction_data SET faction_value = %.2f WHERE avatar_id = '%d' AND faction_id = '%d'",
-				faction_value, player_id, faction_id);
+			account_query.AddParam((double)faction_value);
+			account_query.AddParam(player_id);
+			account_query.AddParam(faction_id);
+			account_query.run_query_params(
+				"UPDATE net7_user.faction_data SET faction_value = ? WHERE avatar_id = ? AND faction_id = ?");
 		}
-
-		account_query.run_query(m_QueryStr);
 	}
 	else
 	{
@@ -1224,14 +1191,22 @@ void SaveManager::HandleFriendsList(long player_id, short bytes, unsigned char *
 	sql_query_c account_query (&m_SQL_Conn);
 
 	bool add = *((bool *)&data[0]);
-	unsigned char *name = &data[1];
+	const char *name = (const char *)&data[1];
 
 	if (add)
-		sprintf_s(m_QueryStr, sizeof(m_QueryStr), "INSERT INTO friends_lists (avatar_id,name) VALUES ('%d','%s')", player_id, name);
+	{
+		account_query.AddParam(player_id);
+		account_query.AddParam(name);
+		account_query.run_query_params(
+			"INSERT INTO friends_lists (avatar_id,name) VALUES (?,?)");
+	}
 	else
-		sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM friends_lists WHERE avatar_id = '%d' AND name = '%s'", player_id, name);
-
-	account_query.run_query(m_QueryStr);
+	{
+		account_query.AddParam(player_id);
+		account_query.AddParam(name);
+		account_query.run_query_params(
+			"DELETE FROM friends_lists WHERE avatar_id = ? AND name = ?");
+	}
 }
 
 void SaveManager::HandleIgnoreList(long player_id, short bytes, unsigned char *data)
@@ -1239,21 +1214,29 @@ void SaveManager::HandleIgnoreList(long player_id, short bytes, unsigned char *d
 	sql_query_c account_query (&m_SQL_Conn);
 
 	bool add = *((bool *)&data[0]);
-	unsigned char *name = &data[1];
+	const char *name = (const char *)&data[1];
 
 	if (add)
-		sprintf_s(m_QueryStr, sizeof(m_QueryStr), "INSERT INTO ignore_lists (avatar_id,name) VALUES ('%d','%s')", player_id, name);
+	{
+		account_query.AddParam(player_id);
+		account_query.AddParam(name);
+		account_query.run_query_params(
+			"INSERT INTO ignore_lists (avatar_id,name) VALUES (?,?)");
+	}
 	else
-		sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM ignore_lists WHERE avatar_id = '%d' AND name = '%s'", player_id, name);
-
-	account_query.run_query(m_QueryStr);
+	{
+		account_query.AddParam(player_id);
+		account_query.AddParam(name);
+		account_query.run_query_params(
+			"DELETE FROM ignore_lists WHERE avatar_id = ? AND name = ?");
+	}
 }
 
 void SaveManager::HandlePetition(long player_id, short bytes, unsigned char *data)
 {
 	sql_connection_c SQL_Conn;
 	// Not sure theses pointers are safe??
-	char queryString[2048],*email="unknown",*username="unknown",*name="unknown";
+	const char *email = "unknown", *username = "unknown", *name = "unknown";
 
 	// parse packet
 	char *p = (char *)data;
@@ -1269,13 +1252,16 @@ void SaveManager::HandlePetition(long player_id, short bytes, unsigned char *dat
 
 	// get player info out the database instead
 	sql_query_c account_query (&m_SQL_Conn);
-	sql_result_c account_result;      
+	sql_result_c account_result;
 	sql_row_c account_row;
-	sprintf_s(queryString, sizeof(queryString),
-		"SELECT t1.username,t1.email,t3.first_name FROM accounts AS t1 JOIN avatar_info AS t2 ON t1.id=t2.account_id \
-		JOIN avatar_data AS t3 ON t2.avatar_id=t3.avatar_id WHERE t2.avatar_id=%d", player_id);
 
-	if (account_query.run_query(queryString) && account_query.n_rows())
+	account_query.AddParam(player_id);
+	if (account_query.run_query_params(
+			"SELECT t1.username,t1.email,t3.first_name FROM accounts AS t1 "
+			"JOIN avatar_info AS t2 ON t1.id=t2.account_id "
+			"JOIN avatar_data AS t3 ON t2.avatar_id=t3.avatar_id "
+			"WHERE t2.avatar_id=?")
+		&& account_query.n_rows())
 	{
 		account_query.store(&account_result);
 		account_result.fetch_row(&account_row);
@@ -1288,17 +1274,24 @@ void SaveManager::HandlePetition(long player_id, short bytes, unsigned char *dat
 	SQL_Conn.connect(g_Ticket_DB , g_Ticket_Host, g_Ticket_User, g_Ticket_Pass);
 	{
 		sql_query_c Ticket(&SQL_Conn);
-		// Get Escape strings to make sure we can use this data will work in the query
-		// Also no way to hack it
-		char Complaint_esc[2048], Subject_esc[2048], PlayerList_esc[2048];
 
-		mysql_escape_string(Complaint_esc, Complaint, strlen(Complaint));
-		mysql_escape_string(Subject_esc, Subject, strlen(Subject));
-		mysql_escape_string(PlayerList_esc, PlayerList, strlen(PlayerList));
+		// CALL <schema>.TicketViaServer(username, name, email, subject, complaint,
+		// playerlist, problemtype) — g_Ticket_DB is a server-side configured
+		// schema name (not user input). The placeholders below bind the rest.
+		std::string sql;
+		sql.reserve(96);
+		sql += "CALL ";
+		sql += g_Ticket_DB;
+		sql += ".TicketViaServer(?,?,?,?,?,?,?)";
 
-		sprintf_s(queryString, sizeof(queryString), "CALL %s.TicketViaServer('%s', '%s', '%s', '%s', '%s', '%s', %d)", g_Ticket_DB, username, name, email, Subject_esc, Complaint_esc, PlayerList_esc, ProblemType);
-		queryString[sizeof(queryString)-1] = 0; // Make sure we put a null after this string
-		Ticket.run_query(queryString);
+		Ticket.AddParam(username);
+		Ticket.AddParam(name);
+		Ticket.AddParam(email);
+		Ticket.AddParam(Subject);
+		Ticket.AddParam(Complaint);
+		Ticket.AddParam(PlayerList);
+		Ticket.AddParam(ProblemType);
+		Ticket.run_query_params(sql.c_str());
 	}
 	// interesting side note if sql_query_c is in scope when disconnect is called
 	// a freed heap block is written to and Windows breakpoints with a HEAP debug message in _endthread
@@ -1312,18 +1305,14 @@ void SaveManager::HandleDatabase(long avatar_id, short bytes, unsigned char *dat
 	sql_query_c account_query (&m_SQL_Conn);
 
 	//We need to completely remove the character we are saving (in this order due to foreign keys)
-
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `ship_info` WHERE `avatar_id` = '%d'", avatar_id);
-	account_query.run_query(m_QueryStr);
-
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `ship_data` WHERE `avatar_id` = '%d'", avatar_id);
-	account_query.run_query(m_QueryStr);
-
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `avatar_data` WHERE `avatar_id` = '%d'", avatar_id);
-	account_query.run_query(m_QueryStr);
-
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM `avatar_info` WHERE `avatar_id` = '%d'", avatar_id);
-	account_query.run_query(m_QueryStr);
+	static const char * const predelete_sqls[] = {
+		"DELETE FROM `ship_info` WHERE `avatar_id` = ?",
+		"DELETE FROM `ship_data` WHERE `avatar_id` = ?",
+		"DELETE FROM `avatar_data` WHERE `avatar_id` = ?",
+		"DELETE FROM `avatar_info` WHERE `avatar_id` = ?",
+	};
+	delete_avatar_rows(account_query, avatar_id, predelete_sqls,
+		sizeof(predelete_sqls)/sizeof(predelete_sqls[0]));
 
 	sql_query account_builder;
 
@@ -1518,21 +1507,18 @@ void SaveManager::HandleNewWarnLevel(long player_id, short bytes, unsigned char 
 
 	long new_level = *((long *)&data[0]);
 
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-		"SELECT * FROM net7_user.warning_levels WHERE avatar_id = '%d'", player_id);
-
-	//does this item exist in the DB?
-	account_query.execute(m_QueryStr);
+	account_query.AddParam(player_id);
+	account_query.execute_params(
+		"SELECT * FROM net7_user.warning_levels WHERE avatar_id = ?");
 	account_query.store(&result);
 
 	if (result.n_rows() != 0)
 	{
 		//yes, just update the info
-		sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-			"UPDATE net7_user.warning_levels SET sound_warning_level = '%d' WHERE avatar_id = '%d'",
-			new_level, player_id);
-
-		account_query.run_query(m_QueryStr);
+		account_query.AddParam(new_level);
+		account_query.AddParam(player_id);
+		account_query.run_query_params(
+			"UPDATE net7_user.warning_levels SET sound_warning_level = ? WHERE avatar_id = ?");
 	}
 	else
 	{
@@ -1554,9 +1540,11 @@ void SaveManager::HandleXPDebt(long player_id, short bytes, unsigned char *data)
 	u32 xp_debt = *((u32 *) &data[0]);
 	u32 last_debt = *((u32 *) &data[4]);
 
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "UPDATE avatar_level_info SET xp_debt=%d,last_debt=%d WHERE avatar_id=%d", xp_debt, last_debt, player_id);
- 
-	account_query.run_query(m_QueryStr);
+	account_query.AddParam((unsigned int)xp_debt);
+	account_query.AddParam((unsigned int)last_debt);
+	account_query.AddParam(player_id);
+	account_query.run_query_params(
+		"UPDATE avatar_level_info SET xp_debt=?,last_debt=? WHERE avatar_id=?");
 }
 
 // called from Player with minimal info (leaving or joining)
@@ -1569,8 +1557,8 @@ void SaveManager::HandleGuildId(long player_id, short bytes, unsigned char *data
 
 	if (id == -1)
 	{
-		sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM guild_members WHERE avatar_id=%d", player_id);
- 		guild_query.run_query(m_QueryStr);
+		guild_query.AddParam(player_id);
+ 		guild_query.run_query_params("DELETE FROM guild_members WHERE avatar_id=?");
 	}
 	else
 	{
@@ -1596,18 +1584,20 @@ void SaveManager::HandleGuildMember(long guild_id, short bytes, unsigned char *d
 	sql_row_c guild_row;
 
 	struct GuildMember *member = (struct GuildMember *)data;
-	
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "SELECT * FROM guild_members WHERE avatar_id=%d", member->avatar_id);
 
-	//does this item exist in the DB?
-	guild_query.execute(m_QueryStr);
+	guild_query.AddParam((long)member->avatar_id);
+	guild_query.execute_params("SELECT * FROM guild_members WHERE avatar_id=?");
 	guild_query.store(&result);
 
 	if (result.n_rows() != 0)
 	{
-		sprintf_s(m_QueryStr, sizeof(m_QueryStr), "UPDATE guild_members SET rank=%d, contribution=%d, active=%d, tag='%s' WHERE avatar_id=%d", 
-			member->Rank, member->Contribution, (int)member->Active, member->Tag, member->avatar_id);
- 		guild_query.run_query(m_QueryStr);
+		guild_query.AddParam((int)member->Rank);
+		guild_query.AddParam((int)member->Contribution);
+		guild_query.AddParam((int)member->Active);
+		guild_query.AddParam(member->Tag);
+		guild_query.AddParam((long)member->avatar_id);
+ 		guild_query.run_query_params(
+			"UPDATE guild_members SET rank=?, contribution=?, active=?, tag=? WHERE avatar_id=?");
 	}
 	else
 	{
@@ -1635,17 +1625,20 @@ void SaveManager::HandleGuildRank(long guild_id, short bytes, unsigned char *dat
 	struct GuildRank *rank = (struct GuildRank *)&data[2];
 	long id = guild_id*10+rank_num;
 
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "SELECT * FROM guild_ranks WHERE id=%d", id);
-
-	//does this item exist in the DB?
-	guild_query.execute(m_QueryStr);
+	guild_query.AddParam(id);
+	guild_query.execute_params("SELECT * FROM guild_ranks WHERE id=?");
 	guild_query.store(&result);
 
 	if (result.n_rows() != 0)
 	{
-		sprintf_s(m_QueryStr, sizeof(m_QueryStr), "UPDATE guild_ranks SET name='%s', permissions=%d, maxpromote=%d, maxremove=%d, mindemote=%d WHERE id=%d",
-			rank->Name, rank->PermissionFlags, rank->MaxPromote, rank->MaxRemove, rank->MinDemote, id);
- 		guild_query.run_query(m_QueryStr);
+		guild_query.AddParam(rank->Name);
+		guild_query.AddParam((int)rank->PermissionFlags);
+		guild_query.AddParam((int)rank->MaxPromote);
+		guild_query.AddParam((int)rank->MaxRemove);
+		guild_query.AddParam((int)rank->MinDemote);
+		guild_query.AddParam(id);
+ 		guild_query.run_query_params(
+			"UPDATE guild_ranks SET name=?, permissions=?, maxpromote=?, maxremove=?, mindemote=? WHERE id=?");
 	}
 	else
 	{
@@ -1671,17 +1664,20 @@ void SaveManager::HandleGuildInfo(long guild_id, short bytes, unsigned char *dat
 
 	struct Guild *guild = (struct Guild *)data;
 
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "SELECT * FROM guilds WHERE guild_id=%d", guild_id);
-
-	//does this item exist in the DB?
-	guild_query.execute(m_QueryStr);
+	guild_query.AddParam(guild_id);
+	guild_query.execute_params("SELECT * FROM guilds WHERE guild_id=?");
 	guild_query.store(&result);
 
 	if (result.n_rows() != 0)
 	{
-		sprintf_s(m_QueryStr, sizeof(m_QueryStr), "UPDATE guilds SET name='%s', motd='%s', points=%d, level=%d, public=%d WHERE guild_id=%d",
-			guild->Name, guild->MOTD, guild->Points, guild->Level, (int)guild->PublicStats, guild_id);
- 		guild_query.run_query(m_QueryStr);
+		guild_query.AddParam(guild->Name);
+		guild_query.AddParam(guild->MOTD);
+		guild_query.AddParam((int)guild->Points);
+		guild_query.AddParam((int)guild->Level);
+		guild_query.AddParam((int)guild->PublicStats);
+		guild_query.AddParam(guild_id);
+ 		guild_query.run_query_params(
+			"UPDATE guilds SET name=?, motd=?, points=?, level=?, public=? WHERE guild_id=?");
 	}
 	else
 	{
@@ -1704,14 +1700,15 @@ void SaveManager::HandleDeleteGuild(long guild_id)
 {
 	sql_query_c guild_query (&m_SQL_Conn);
 
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM guilds WHERE guild_id=%d", guild_id);
-	guild_query.execute(m_QueryStr);
+	guild_query.AddParam(guild_id);
+	guild_query.execute_params("DELETE FROM guilds WHERE guild_id=?");
 
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM guild_ranks WHERE id>=%d AND id <=%d", guild_id*10, guild_id*10+9);
-	guild_query.execute(m_QueryStr);
+	guild_query.AddParam((long)(guild_id*10));
+	guild_query.AddParam((long)(guild_id*10+9));
+	guild_query.execute_params("DELETE FROM guild_ranks WHERE id>=? AND id <=?");
 
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), "DELETE FROM guild_members WHERE guild_id=%d", guild_id);
-	guild_query.execute(m_QueryStr);
+	guild_query.AddParam(guild_id);
+	guild_query.execute_params("DELETE FROM guild_members WHERE guild_id=?");
 }
 
 void SaveManager::HandleChangeFieldRespawn(short bytes, unsigned char *data)
@@ -1722,21 +1719,18 @@ void SaveManager::HandleChangeFieldRespawn(short bytes, unsigned char *data)
 
 	sql_result_c result;
 
-	sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-		"SELECT * FROM server_local_field_respawn_times WHERE resource_id = '%d'", database_id);
-
-	//does this item exist in the DB?
-	FldUpdate.execute(m_QueryStr);
+	FldUpdate.AddParam(database_id);
+	FldUpdate.execute_params(
+		"SELECT * FROM server_local_field_respawn_times WHERE resource_id = ?");
 	FldUpdate.store(&result);
 
 	if (result.n_rows() != 0)
 	{
 		//yes, just update the info
-		sprintf_s(m_QueryStr, sizeof(m_QueryStr), 
-			"UPDATE server_local_field_respawn_times SET local_respawn_time = '%d' WHERE resource_id = '%d'", 
-			new_respawn, database_id);
-
-		FldUpdate.run_query(m_QueryStr);
+		FldUpdate.AddParam((int)new_respawn);
+		FldUpdate.AddParam(database_id);
+		FldUpdate.run_query_params(
+			"UPDATE server_local_field_respawn_times SET local_respawn_time = ? WHERE resource_id = ?");
 	}
 	else
 	{
