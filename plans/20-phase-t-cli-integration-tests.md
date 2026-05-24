@@ -406,10 +406,65 @@ xUnit `[Collection("server")]` ensures the docker stack stands up exactly once p
            ~10ms total with no docker dependency, so they ratchet codec
            fidelity even when the stack is down.
 
-- [ ] Item 7 — Robustness tests (HealthGuard, malformed replies, rate-limit respect)
-      Status: not started
-      Touches: tests/integration/CliClient.IntegrationTests/Robustness/*.cs
-      Notes: verify the CLI client behaves under server distress per Phase S rule 2. Uses a mocked / scripted server-side responder for the bad-server scenarios so we don't have to break the real server to test the response.
+- [x] Item 7 — Robustness tests (HealthGuard, malformed replies, rate-limit respect)
+      Status: done
+      Touches: tests/integration/CliClient.IntegrationTests/Robustness/{ScriptedServer.cs, DisconnectMidHandshakeTests.cs, MalformedReplyTests.cs, RateLimitRespectTests.cs}
+      Notes:
+        ▸ ScriptedServer is the bad-server harness — a single-shot
+           TcpListener on 127.0.0.1:0 that accepts one connection and
+           runs a caller-supplied `Func<NetworkStream, CT, Task>` on
+           the stream, then disposes. Required by Phase T's "never
+           break the real server to test client robustness" guard-rail:
+           a test that needed the real proxy to send garbage would
+           force us to violate server-integrity rule #1. ScriptedServer
+           is the standard escape hatch. Also ships
+           HandshakeAsServerAsync (drives the server side of the
+           RSA+RC4 handshake: ships a 74-byte dummy pubkey, reads the
+           68-byte client key packet, RSA-decrypts the 64-byte block,
+           extracts the 8-byte session key, returns paired RC4
+           contexts) and EncryptFrame (builds + encrypts an opcode
+           frame using a supplied outbound RC4 context).
+        ▸ DisconnectMidHandshakeTests (4 tests): server closes before
+           sending pubkey → ConnectAsync throws EndOfStreamException
+           (no exception swallowing); server sends 10 of 74 pubkey
+           bytes then closes → same outcome, message includes
+           "closed"; full handshake then server closes → ReceiveAsync
+           returns null cleanly (clean EOF), workflow notifies
+           HealthGuard via OnDisconnect, guard trips with reason
+           "disconnected", Token cancels; no-retry contract verified
+           by counting server-side accepts (must be exactly 1 for one
+           ConnectAsync call — proves no internal reconnect loop).
+        ▸ MalformedReplyTests (3 tests): hand-built encrypted frame
+           with header.Size=2 (below the 4-byte header) → Receive-
+           Async throws InvalidDataException with "desynced RC4" in
+           the message (the canonical signal that something went
+           wrong, not silent corruption); unexpected opcode arriving
+           while a BeginExpectResponse(opcode=0x0036, timeout=300ms)
+           is in flight → expectation times out, HealthGuard trips
+           with "response timeout" + the workflow label, the workflow
+           never retries the request; counter-test ships a perfectly
+           valid 64-byte payload with opcode 0x1234 (unregistered)
+           and asserts ReceiveAsync returns the full payload —
+           catches a regression where rejection becomes "any unknown
+           opcode" instead of "malformed frame".
+        ▸ RateLimitRespectTests (2 tests, the integration slice on
+           top of CliClient.UnitTests/HealthGuardTests which already
+           covers the pure logic): ServerFloodsClient runs a script
+           that ships frames as fast as the socket allows for ~250ms;
+           the client loop drains via real ReceiveAsync, feeds the
+           guard (budget=50/s), trips inbound rate threshold,
+           cancellation token fires, loop exits cleanly. Asserts
+           seen >= budget so we know the trip happened at the
+           configured threshold not earlier. ClientSelfFlood is the
+           symmetric scenario — a buggy workflow firing too many
+           SendAsync calls; the guard catches outbound flood and
+           trips before the hardCap=4×budget escape. Sanity-bounded
+           against "tripped too early" too.
+        ▸ Build clean; 9/9 Robustness tests pass in 533ms (no docker
+           dependency for any of them — ScriptedServer binds 127.0.0.1
+           on an OS-assigned port, doesn't collide with the real
+           proxy on 3500). Full integration suite now 27/27 green
+           (was 16/16 pre-Item-7) in ~7s total wall-clock.
 
 - [ ] Item 8 — CI integration
       Status: not started
