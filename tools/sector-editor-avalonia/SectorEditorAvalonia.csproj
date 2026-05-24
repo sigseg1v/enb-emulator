@@ -24,4 +24,9 @@
     <PackageReference Include="Avalonia.Headless" Version="11.2.3" />
     <PackageReference Include="Tmds.DBus.Protocol" Version="0.21.3" />
   </ItemGroup>
+  <ItemGroup>
+    <None Update="Images\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
 </Project>

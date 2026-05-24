@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: CC-BY-NC-SA-3.0
 // Part of the Earth & Beyond emulator preservation project.
-// New code; project default license (LICENSES/enb-emulator).
+// License: LICENSES/enb-emulator
 
 namespace SectorEditorAvalonia.Utilities
 {
@@ -28,5 +28,35 @@ namespace SectorEditorAvalonia.Utilities
     public sealed class NullPropertyHost : IPropertyHost
     {
         public object SelectedObject { get; set; }
+    }
+
+    /// <summary>
+    /// Abstracts the "push a name/asset_id change back into the editor's
+    /// grid view" the original sprites do via direct DataGridView access
+    /// (`_dgv.Rows[row.Index].Cells["name"].Value = ...`). Sprite code
+    /// consumes only this sink; the SectorWindow's DataGrid implementation
+    /// land in Wave 2+, the smoke harness uses a no-op sink.
+    /// </summary>
+    public interface IGridSyncSink
+    {
+        void OnCellChanged(string columnName, object newValue);
+    }
+
+    public sealed class NullGridSyncSink : IGridSyncSink
+    {
+        public void OnCellChanged(string columnName, object newValue) { }
+    }
+
+    /// <summary>
+    /// Replaces the original sector-editor's `mainFrm.selectedObjectID`
+    /// static — used by 5+ sprite/dialog call sites to share the current
+    /// selection across windows. Refactoring this into a proper service
+    /// is a Wave 3+ task that has to happen when the dialogs land
+    /// (MobGroup, HarvestableResTypes). Kept as a static for now to
+    /// preserve the cross-window behaviour with minimum diff.
+    /// </summary>
+    public static class EditorGlobals
+    {
+        public static int SelectedObjectId;
     }
 }
