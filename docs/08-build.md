@@ -25,21 +25,15 @@ written during Phase B's A4 scaffolding and iterated through B1-B3. Treat
 the above command as the desired entry point; expect failures until Phase B
 has had several commits worth of iteration.
 
-Phase B documents its progress in two files that will appear in `server/`
-as the work proceeds:
-
-- `server/compat/WIN32_INVENTORY.md` -- counts of Windows-only API usage per
-  shim category (mutexes, events, mailslots, etc.).
-- `server/BUILD_ERRORS.md` -- the running compile-error log, grouped by
-  error class, with a fix-progress count ("Phase B: build errors X -> Y").
-
-The compat shim layer (`server/compat/`) provides typedefs and thin
-wrappers for the Windows APIs the 2010 codebase depends on:
-`_beginthreadex`, `WaitForSingleObject`, `CreateMutex`, `CreateEvent`,
-`Sleep`, `_snprintf`, `stricmp`, `InterlockedIncrement`, `HANDLE`,
-`HWND`, etc. The mailslot IPC (`MailslotManager`) needs a real
-replacement (Unix domain sockets or POSIX message queues), not just a
-typedef -- this is called out separately in Phase B's plan file.
+Phase B is closed; the running progress is now tracked in `plans/00-master.md`
+and the per-phase files there. Phase M (see `plans/13-phase-m-win32-elimination.md`)
+deleted the `server/compat/`, `proxy/compat/`, and `login-server/Net7SSL/compat/`
+directories. The minimum typedef/helper set the legacy code still names
+(`SOCKET`, `HANDLE`, `DWORD`, `Sleep`, `GetTickCount`) is provided inline
+in each target's umbrella header (`server/src/Net7.h`, `proxy/Net7.h`,
+`login-server/Net7SSL/Net7SSL.h`) rather than a shared shim tree. The
+mailslot IPC was replaced with AF_UNIX SOCK_DGRAM (`net7ipc::PosixIpc`
+at `common/include/net7/PosixIpc.h`).
 
 ## Server -- Linux (legacy path, reference only)
 
@@ -66,9 +60,11 @@ This will not work as-is on a 2026 system:
   drop or replace with `march=x86-64-v3`.
 - `-I/usr/local/ssl/include` assumes a hand-built OpenSSL 1.0 in
   `/usr/local`; system OpenSSL 3 ships headers in `/usr/include/openssl/`.
-- Many source files still `#include <windows.h>` -- the shim layer in
-  `server/compat/` exists to short-circuit that, but the legacy Makefile
-  predates it.
+- Many source files still `#include <windows.h>` -- the live Linux build
+  handles this by gating the include behind `#ifdef WIN32` (Phase M) and
+  patching the vendored OpenSSL `opensslconf.h` so it stops defining
+  `OPENSSL_SYSNAME_WIN32` on non-Win32 platforms. The legacy Makefile
+  predates both.
 - `cryptopp` is now packaged as `libcrypto++` on Debian/Ubuntu (yes, with
   the plus signs).
 

@@ -862,9 +862,12 @@ a process boundary, it goes in `common/include/net7/`, never in a
 per-process header.
 
 Headers that are NOT in `common/`:
-- `Net7.h` / `Net7SSL.h` — per-process Windows compatibility blocks,
-  threading shims, mailslot-related constants. Each tree's `Net7.h` now
-  does `#include <net7/Ports.h>` to get the unified port macros.
+- `Net7.h` / `Net7SSL.h` — per-process Linux-side Win32 typedef/helper
+  inlines (`SOCKET`, `HANDLE`, `Sleep`, `GetTickCount`) plus path
+  defaults. Phase M dissolved the separate `compat/` directories that
+  used to hold these and folded the minimum needed set into each
+  umbrella header. Each tree's `Net7.h` does `#include <net7/Ports.h>`
+  to get the unified port macros.
 - `ServerManager.h`, `ConnectionManager.h`, etc. — process-local state.
 
 Deferred to Wave 3 backlog (not wire-format, lower priority):
