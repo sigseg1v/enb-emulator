@@ -12,7 +12,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -42,8 +42,9 @@ void PlayerManager::LoadGuildsFromSQL()
 		id = GuildData["guild_id"];
 		AddGuildToList(id, GuildData["name"], GuildData["motd"], GuildData["points"], GuildData["level"], (char)GuildData["public"] != 0);
 		// ranks
-		sprintf_s(QueryString, sizeof(QueryString), "SELECT * FROM guild_ranks WHERE id>=%d AND id<=%d", id*10, id*10+9);
-		GuildQuery.run_query(QueryString);
+		GuildQuery.AddParam((long)(id*10));
+		GuildQuery.AddParam((long)(id*10+9));
+		GuildQuery.run_query_params("SELECT * FROM guild_ranks WHERE id>=? AND id<=?");
 		GuildQuery.store(&result2);
 		for (int j=0;j < result2.n_rows();j++)
 		{
@@ -52,8 +53,8 @@ void PlayerManager::LoadGuildsFromSQL()
 			AddRankToGuild(id, rank, RankData["name"], RankData["permissions"], RankData["maxpromote"], RankData["maxremove"], RankData["mindemote"]);
 		}
 		// members
-		sprintf_s(QueryString, sizeof(QueryString), "SELECT * FROM guild_members JOIN avatar_data ON guild_members.avatar_id=avatar_data.avatar_id WHERE guild_id=%d", id);
-		GuildQuery.run_query(QueryString);
+		GuildQuery.AddParam((long)id);
+		GuildQuery.run_query_params("SELECT * FROM guild_members JOIN avatar_data ON guild_members.avatar_id=avatar_data.avatar_id WHERE guild_id=?");
 		GuildQuery.store(&result3);
 		for (int k=0;k < result3.n_rows();k++)
 		{

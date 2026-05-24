@@ -13,7 +13,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -38,6 +38,9 @@ public:
 #ifdef USE_MYSQL_ITEMS
 private:
 	sql_result_c * ItemBaseParser::SqlQuery(sql_connection_c *connection, char * QueryString);
+	// One-parameter overload: ? placeholder is filled with `param` via the
+	// wire protocol. Used for the ItemID-indexed lookups in LoadItemBase().
+	sql_result_c * SqlQueryP1(sql_connection_c *connection, const char *sql, long param);
 #endif
 };
 

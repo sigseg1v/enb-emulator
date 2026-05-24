@@ -13,7 +13,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -7907,9 +7907,7 @@ void Player::ForceLogout()
 
 bool Player::HandleBaseItemListCreate()
 {
-	char QueryString[256];
 	//ok we run a query on the item database, find all the ores and populate the base_ore_list table
-	snprintf(QueryString, sizeof(QueryString), "SELECT * FROM `item_base` WHERE `category` = '81'");
 	sql_connection_c connection( "net7", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
 	sql_result_c result;
 	sql_result_c *ItemList_result = &result;
@@ -7918,7 +7916,7 @@ bool Player::HandleBaseItemListCreate()
 	sql_row_c ItemList_Data;
 
 	// Execute Query
-	ItemList.execute( QueryString );
+	ItemList.execute_params( "SELECT * FROM `item_base` WHERE `category` = '81'" );
 	ItemList.store(ItemList_result);
 
 	if (!ItemList_result || !ItemList_result->n_rows())
