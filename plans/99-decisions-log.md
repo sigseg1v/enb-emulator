@@ -425,3 +425,24 @@ Phase B's "compat shim layer" (`server/compat/`, `proxy/compat/`, `login-server/
 1. Keep the compat/ tree and grow it (Phase B status quo). Rejected — see point 1 above.
 2. Strip the inlined typedefs from the umbrella headers now and rewrite all ~58 live sites in Phase M. Rejected — the rewrites land naturally in Phase K when their TUs are touched anyway; doing them in a separate sweep means re-touching the same files.
 3. Keep `compat/` as a "future Win32 cross-compile" surface. Rejected per CLAUDE.md "this is a server-native-Linux project now; Win32 builds of the server are not maintained."
+
+## 2026-05-24 — Phase N libpqxx rewrite shipped wrapper-only; parameterised API deferred to Phase N+
+
+The `mysqlplus.{cpp,h}` wrapper was reimplemented over libpqxx 7.x preserving the 7-class public API verbatim, with opaque-handle indirection (`net7_db_handle`, `net7_result_holder`) so libpqxx headers stay out of the public header. All ~25 `*SQL.cpp` DAOs compile unchanged. Server binary now links `libpqxx-7.8 + libpq.so.5` only — `libmysqlclient-dev` and `libmysqlclient21` dropped from the build and runtime images respectively. 8/8 live integration suite green against the rebuilt container; a new env-gated wrapper round-trip test (3 cases including hostile-literal escape) added under `tests/db/mysqlplus_wrapper_test.cpp`.
+
+The original Phase N plan also called for a parameterised `execute(template, args...)` overload backed by `pqxx::params`, a sweep over the 36 enumerated dynamic-SQL sites (34 in `AccountManager.cpp`, 2 in `LinuxAuth.cpp`), retirement of the `SafeUsername`/`SafePassword` band-aid, and `tools/sql_injection_audit.sh` wired to CI. **Split out** as Phase N+ because the call-site sweep is multi-day and orthogonal to the wrapper rewrite — the wrapper itself is now stable and can absorb a typed overload without breaking existing callers when N+ lands.
+
+**Alternatives considered:** (1) Bundle parameterised API into the same commit. Rejected — the wrapper rewrite is already a 7-class behavioral switch and bundling makes triage of any future regression harder. (2) Keep the original mysqlplus.cpp under `#ifdef USE_LEGACY_MYSQL`. Rejected — dead code is a liability, not a safety net; if the libpqxx port regresses we revert the commit.
+
+## 2026-05-24 — Phase O closed as already-done; plan file was stale at open
+
+The Phase O plan asserted proxy and login-server were pinned to `OPENSSL_API_COMPAT=0x10100000L` and still called `SSLv2_client_method`. Audit on 2026-05-24 found that's no longer true:
+
+- Both targets already define `OPENSSL_API_COMPAT=0x30000000L` in their CMakeLists + Dockerfile.
+- `login-server/Net7SSL/SSL_Listener.cpp` gates `SSLv23_server_method` behind a version check so OpenSSL 3.x takes the `TLS_server_method` branch.
+- Proxy's `SSL_Connection.cpp` and `ServerManager.cpp` SSLv2/v23 sites are Win32-walled (Linux short-circuits).
+- Both binaries build clean against host OpenSSL 3.0.13, link `libssl.so.3 + libcrypto.so.3` only, and 23/23 gtest pass.
+
+The migration must have landed piecemeal alongside Phase E (server-native) and Phase J (Net7SSL TCP/TLS handshake on Linux) — neither of which updated this plan file. Closing Phase O complete and filing **Phase O+** as a follow-up to delete the vendored `server/src/openssl/` 2010 OpenSSL 1.0 header tree (still on the include path; works today only because the two consumers happen to touch ABI-stable APIs or `#if 0` deadcode — silent landmine for any future call site that exercises an ABI-divergent struct).
+
+**Alternatives considered:** (1) Delete the vendored tree as part of Phase O. Rejected — it requires an audit of every `#include "openssl/..."` in server/src and a re-run of the full integration suite; orthogonal to the "drop the 1.1 compat shim" goal and deserves its own plan. (2) Reopen Phase E to absorb this. Rejected — Phase E closed with explicit scope; better to file Phase O+ than retroactively expand a closed phase.
