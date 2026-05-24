@@ -159,6 +159,24 @@ if(OpenSSL_FOUND)
         Threads::Threads
     )
     gtest_discover_tests(master_join_test)
+
+    # Phase K: VersionRequest dispatch on the global-server port (3805).
+    add_executable(version_request_test
+        client/version_request_test.cpp
+        client/handshake_driver.cpp
+        client/tcp_client.cpp
+        client/westwood/westwood_rsa.cpp
+        client/westwood/westwood_rc4.cpp
+    )
+    target_include_directories(version_request_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/client
+    )
+    target_link_libraries(version_request_test PRIVATE
+        GTest::gtest_main
+        OpenSSL::Crypto
+        Threads::Threads
+    )
+    gtest_discover_tests(version_request_test)
 else()
     message(STATUS "net7-tests: OpenSSL not found — skipping handshake_test")
 endif()

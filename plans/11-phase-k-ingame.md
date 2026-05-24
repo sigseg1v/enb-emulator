@@ -23,9 +23,11 @@ Goal: take the Phase J "TLS terminates, handshake works, opcodes are dispatched"
       Status: not started
       Touches: `proxy/ClientToMasterServer.cpp` (already WIN32-unwalled), upstream callers
 
-- [ ] Port `ProcessGlobalServerOpcode` handlers. Group by dependency on UDP plane vs. pure-TCP — port pure-TCP ones first.
-      Status: not started
-      Touches: `proxy/ClientToGlobalServer.cpp`
+- [~] Port `ProcessGlobalServerOpcode` handlers. Group by dependency on UDP plane vs. pure-TCP — port pure-TCP ones first.
+      Status: in progress — first pure-TCP handler (VersionRequest 0x0000 → VersionResponse 0x0001) ported and verified end-to-end. The five UDP-plane-dependent handlers (HandleGlobalConnect, HandleGlobalTicketRequest, HandleDeleteCharacter, HandleCreateCharacter, ProcessGlobalTicket) carry over — they all call into `g_ServerMgr->m_UDPConnection->SendTicket/DeleteCharacter/CreateCharacter/SendAvatarLogin`, which require the server-side UDP plane and the server-side AccountManager (MySQL access from the server container) to actually respond. The Linux dispatcher now lives in `proxy/ClientToServer_linux_stubs.cpp` (renamed conceptually but file kept for now); unimplemented opcodes still log + return for visibility into what real clients send.
+      Touches done: `proxy/ClientToServer_linux_stubs.cpp` (real Linux ProcessGlobalServerOpcode dispatch with VersionRequest handler), `tests/client/version_request_test.cpp` (new live test), `tests/CMakeLists.txt` (build target), `justfile` (wire into `just integration-test`).
+      Touches remaining: `proxy/ClientToGlobalServer.cpp` (still WIN32-walled — full removal needs the UDP plane).
+      Notes: integration test 7/7 green. Proxy log confirms `<client> VersionRequest major=42 minor=0 -> status=0`.
 
 - [ ] Port `ProcessSectorServerOpcode` handlers, same staging.
       Status: not started
