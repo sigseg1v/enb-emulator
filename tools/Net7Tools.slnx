@@ -70,6 +70,9 @@
   <Folder Name="/effect-editor-avalonia/">
     <Project Path="effect-editor-avalonia/EffectEditorAvalonia.csproj" />
   </Folder>
+  <Folder Name="/station-tools-avalonia/">
+    <Project Path="station-tools-avalonia/StationToolsAvalonia.csproj" />
+  </Folder>
   <Folder Name="/w3d-parser/">
     <Project Path="w3d-parser/W3d Parser.csproj" />
   </Folder>

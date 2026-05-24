@@ -1,0 +1,32 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="StationToolsAvalonia.ItemBrowseWindow"
+        Width="700" Height="500"
+        Title="Item Browse">
+  <Grid RowDefinitions="Auto,*,Auto,Auto">
+    <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto" Margin="10,10,10,4">
+      <TextBlock Grid.Column="0" VerticalAlignment="Center" Text="Name:"/>
+      <TextBox  Grid.Column="1" Name="c_NameQuery" Margin="6,0"/>
+      <TextBlock Grid.Column="2" VerticalAlignment="Center" Text="Level:" Margin="6,0,0,0"/>
+      <ComboBox  Grid.Column="3" Name="c_LevelQuery" Width="70" Margin="6,0"/>
+      <TextBlock Grid.Column="4" VerticalAlignment="Center" Text="Type:"/>
+      <ComboBox  Grid.Column="5" Name="c_TypeQuery" Width="150" Margin="6,0"/>
+      <Button    Grid.Column="6" Name="c_Search" Content="Search" Click="OnSearch"/>
+    </Grid>
+
+    <DataGrid Grid.Row="1" Name="c_ItemList" Margin="10,0"
+              AutoGenerateColumns="True" CanUserResizeColumns="True"
+              IsReadOnly="True" SelectionMode="Extended"
+              SelectionChanged="OnSelectionChanged"/>
+
+    <Grid Grid.Row="2" ColumnDefinitions="Auto,*" Margin="10,4">
+      <TextBlock Grid.Column="0" Name="c_RowCount" Text="Number of Results: 0"/>
+      <TextBlock Grid.Column="1" Name="c_ItemDescription" TextWrapping="Wrap" Margin="20,0,0,0"/>
+    </Grid>
+
+    <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="10">
+      <Button Name="c_AddSelected" Content="Add Selected" Click="OnAddSelected" Margin="0,0,8,0"/>
+      <Button Name="c_Close"       Content="Close"        Click="OnClose"/>
+    </StackPanel>
+  </Grid>
+</Window>

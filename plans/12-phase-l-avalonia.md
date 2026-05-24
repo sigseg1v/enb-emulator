@@ -19,7 +19,7 @@ The `tools/` suite has **14 csproj projects that flag `<UseWindowsForms>true</Us
 | talktreeeditor      | 5                    |  1804 | 3 | |
 | effect-editor       | 5                    |  3689 | 3 | |
 | toolslauncher       | 7                    |  4167 | 3 | |
-| station-tools       | 8                    |  7389 | 4 | |
+| station-tools       | 8                    |  7389 | 4 | ported (Tier 10) |
 | missioneditor       | 9                    |  6364 | 4 | |
 | sector-editor       | 16                   | 19386 | 4 | Largest — custom drawing, multi-pane editor |
 | **Total**           | **64 real forms**    | **79,822** | | |
@@ -656,22 +656,138 @@ The existing WinForms targets stay in the tree. They still build via `dotnet bui
 
       **12/14 tools have Linux-native paths now.**
 
-### Future tier ordering (remaining 3 tools — continuing per "do all plans" directive)
+### Tier 10 — station / room / terminal / NPC / vender editor port (complete)
+
+- [x] **station-tools-avalonia** — Avalonia port of `tools/station-tools/`,
+      the 8-form starbase editor for `starbase_objects`, `starbase_rooms`,
+      `starbase_terminals`, `starbase_npc`, `starbase_npc_avatar_templates`,
+      `starbase_vender_groups`, `starbase_vender_inventory`, and
+      `starbase_vendors`.
+      Touches: `tools/station-tools-avalonia/` (csproj, app.manifest,
+      App.axaml{,.cs}, MainWindow.axaml{,.cs} — 5-tab editor with
+      `TreeView` on the left, ItemBrowseWindow.axaml{,.cs},
+      FindObjectWindow.axaml{,.cs}, VenderTabControl.axaml{,.cs} —
+      embedded UserControl in the 5th tab, LoadAvatar.cs, Program.cs,
+      README.md) + slnx entry + `toolslauncher-avalonia` `_editors` flag
+      flipped from `false` → `true`.
+      Status: complete
+
+      **Mapping** (8 WinForms forms + helpers → 4 windows + 1 user
+      control + helpers):
+      - `Program.cs` (Config.xml + Login) → `App.axaml.cs`
+        (Login → MainWindow swap) + `Program.cs` with `--smoke`.
+      - `Main.cs` + `.Designer.cs` (~1900 LOC, 5 tab pages) →
+        `MainWindow.axaml{,.cs}`. Top toolbar (Station combo + Load /
+        New / Reload / Save All); split layout with `TreeView` on the
+        left (Station → Room → Terminals + NPC's folders → leaves) and
+        a 5-tab editor on the right (Station / Room / Terminal / NPC /
+        Venders).
+      - `VenderTab.cs` + `.Designer.cs` (~700 LOC) →
+        `VenderTabControl.axaml{,.cs}` — embedded UserControl placed
+        directly in the 5th `<TabItem>`, matching the original's
+        `tabPage2.Controls.Add` placement.
+      - `ItemBrowse.cs` + `.designer.cs` →
+        `ItemBrowseWindow.axaml{,.cs}` — name / level / type filters,
+        DataGrid bound to `DataTable.DefaultView`,
+        `SetMultiSelect(bool)` toggles selection mode for use from both
+        Browse (single-pick) and Multi-Item Add (multi-pick).
+      - `FindObject.cs` + `.designer.cs` →
+        `FindObjectWindow.axaml{,.cs}` — modal starbase picker.
+      - `LoadAvatar.cs` (binary parser, not a form) → verbatim port.
+        Byte layout preserved: offset 44 header, then `avatarType:int32`,
+        `avaterVersion:byte` (typo from original kept — it's a
+        wire-format field, renaming would break round-trip), int32
+        race/profession/gender/moodType, float[3] colour triples,
+        float[5] body weights. Round-trip-compatible with avatar files
+        captured by the original tool.
+      - `Helpers.cs` (`Utility`, `SQLData`) — `Utility` folded inline;
+        `SQLData.ConnStr` dropped (uses `LoginData.ConnStr`).
+      - `EditTalkTree.cs` + the entire embedded `TalkTreeEditor/`
+        subdirectory → dropped. The NPC tab's "Edit Talk Tree" button
+        now spawns the standalone `talktreeeditor-avalonia` project via
+        `Process.Start("dotnet", "run --project ../talktreeeditor-avalonia/")`.
+      - `StationSQL.cs` (empty stub in original) → dropped (was already
+        dead in the WinForms tree).
+      - Custom `Login.cs` + `Config.xml` → dropped; uses
+        `commontools-avalonia`'s shared `Login`.
+      - `SQLDataBase.cs` (private MySQL wrapper) → dropped. Uses
+        `DB.Instance.executeQuery/executeCommand`.
+
+      **Key mechanical changes:**
+      - **All ~40 SQL call sites parameterised** through
+        `commontools-avalonia`'s `DB.Instance`. The original built SQL
+        via string concatenation throughout `Main.cs` and
+        `VenderTab.cs`. In particular, `ItemBrowse`'s
+        `WHERE name LIKE '%" + textbox.Text + "%'` was a textbook
+        injection hole — silently closed.
+      - **`DataGridView` → `Avalonia.Controls.DataGrid`** bound to
+        `DataTable.DefaultView` with `AutoGenerateColumns=True`;
+        row access via `(DataRowView)c_ItemLists.SelectedItem`.
+      - **`System.Windows.Forms.TreeView` → `Avalonia.Controls.TreeView`**
+        with a `HierarchicalDataTemplate<TreeNodeVM>` set in code (via
+        `FuncTreeDataTemplate`). Right-click `ContextFlyout` exposes
+        Add Room / Add Terminal / Add NPC / Delete instead of the
+        original's strip-menu.
+      - **Avatar file ingress** — original used both an `OpenFileDialog`
+        and a drag-drop handler. Avalonia port uses
+        `StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { ... })`
+        from an "Add Avatar..." button. Drag-drop dropped. Avatar bytes
+        are still hex-encoded and `REPLACE INTO
+        starbase_npc_avatar_templates` exactly as the original did.
+      - **`MessageBox.Show` → `MsBox.Avalonia`** via the standard
+        `using MsBoxIcon = MsBox.Avalonia.Enums.Icon;` alias to avoid
+        collision with Avalonia `WindowIcon`.
+      - **DB-touching ctor calls wrapped in try/catch** in both
+        `MainWindow` and `VenderTabControl` so the smoke test runs
+        without MySQL.
+
+      **Preserved verbatim:**
+      - `LoadAvatar` binary layout — see Mapping above.
+      - Tree hierarchy — Station root, per-Room node, each with a
+        `"Terminals"` folder and a `"NPC's"` folder (apostrophe
+        preserved — matches original `Main.cs` `LoadStationTree`) as
+        children, then leaves inside.
+      - Vender schema usage — `starbase_vender_groups` columns
+        `SellMultiplyer` / `BuyMultiplyer` typos preserved (they're
+        actual column names in the schema dump).
+      - `OnDeleteGroup` cascade — three deletes:
+        `starbase_vender_groups` + `starbase_vender_inventory` + the
+        un-set `UPDATE starbase_vendors SET groupid = -1` the original
+        performs, in that order.
+      - `OnNewItem` default row literals — `(@g, '0', '0', '0', '0')`.
+      - `OnUnlimitedChanged` toggle — disables quantity textbox and
+        forces it to `-1` when checked, resets it to `0` when
+        unchecked.
+      - Terminal type / NPC booth-type / station type / room type combo
+        content — same string lists and orderings as `Main.Designer.cs`.
+
+      **What was dropped** (visual-only or non-functional):
+      - `DisplayStation` preview composite (renders a stylised station
+        thumbnail in the main editor). Visual-only.
+      - Runtime icon loading from `/ico/*.gif|.ico` for TreeView nodes
+        — Avalonia TreeView shows plain text labels.
+      - Drag-drop of `.bin` avatar files (file picker covers it).
+
+      Smoke: `dotnet run -- --smoke` instantiates `Login` (290×195) +
+      `MainWindow` (1240×720) + `ItemBrowseWindow` (700×500) +
+      `FindObjectWindow` (560×420). All 4 print OK, no DB required.
+
+      **13/14 tools have Linux-native paths now.**
+
+### Future tier ordering (remaining 2 tools — continuing per "do all plans" directive)
 
 Recommended order:
 
-1. **station-tools-avalonia** — 8 forms. ~4-5 days.
-
-2. **missioneditor-avalonia** — 9 forms incl. tree view. Depends on
+1. **missioneditor-avalonia** — 9 forms incl. tree view. Depends on
    commontools-avalonia. ~5 days.
 
-3. **sector-editor-avalonia** — 16 forms, custom map canvas
+2. **sector-editor-avalonia** — 16 forms, custom map canvas
    (System.Drawing.Graphics → Avalonia DrawingContext is the major
    work). ~2-3 weeks.
 
 ### Tier 2+ — deferred
 
-The remaining 3 editors (station-tools, missioneditor, sector-editor) are tracked as future Phase L sub-items. With realistic ~3-6 month total for the suite, this is its own project — but per the user directive "do all plans / dont stop at phase boundaries," subsequent invocations should keep grinding through them.
+The remaining 2 editors (missioneditor, sector-editor) are tracked as future Phase L sub-items. With realistic ~3-6 month total for the suite, this is its own project — but per the user directive "do all plans / dont stop at phase boundaries," subsequent invocations should keep grinding through them.
 
 For immediate Linux runnability of the editors: the WinForms binaries already run under WINE — `tools/README.md` documents this. That's the realistic interim story until Avalonia ports land.
 

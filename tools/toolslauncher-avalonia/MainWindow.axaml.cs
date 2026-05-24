@@ -55,7 +55,7 @@ namespace ToolsLauncherAvalonia
             ("Mission Editor",  "missioneditor-avalonia",       false),
             ("Mob Editor",      "mob-editor-avalonia",          true),
             ("Sector Editor",   "sector-editor-avalonia",       false),
-            ("Station Tools",   "station-tools-avalonia",       false),
+            ("Station Tools",   "station-tools-avalonia",       true),
             ("Faction Editor",  "faction-editor-avalonia",      true),
             ("Talk Tree",       "talktreeeditor-avalonia",      true),
         };

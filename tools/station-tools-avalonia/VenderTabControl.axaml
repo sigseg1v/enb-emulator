@@ -1,0 +1,72 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="StationToolsAvalonia.VenderTabControl">
+  <Grid ColumnDefinitions="460,*" Margin="6">
+
+    <!-- LEFT COLUMN: group + item-edit -->
+    <Grid Grid.Column="0" RowDefinitions="Auto,Auto,Auto">
+
+      <!-- Group selection -->
+      <Border Grid.Row="0" Padding="6" BorderBrush="Gray" BorderThickness="1" Margin="0,0,0,6">
+        <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,*,Auto">
+          <TextBlock Grid.Row="0" Grid.Column="0" Text="Vender Group:" VerticalAlignment="Center"/>
+          <ComboBox  Grid.Row="0" Grid.Column="1" Name="c_SelectGroup" Margin="6,2"/>
+          <StackPanel Grid.Row="0" Grid.Column="2" Orientation="Horizontal">
+            <Button Name="c_LoadGroup"   Content="Load"   Click="OnLoadGroup"   Margin="2,0"/>
+            <Button Name="c_DeleteGroup" Content="Delete" Click="OnDeleteGroup" Margin="2,0"/>
+            <Button Name="c_ReloadGroup" Content="Reload" Click="OnReloadGroup" Margin="2,0"/>
+          </StackPanel>
+        </Grid>
+      </Border>
+
+      <!-- Group editor -->
+      <Border Grid.Row="1" Padding="6" BorderBrush="Gray" BorderThickness="1" Margin="0,0,0,6">
+        <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="Auto,*,Auto">
+          <TextBlock Grid.Row="0" Grid.Column="0" Text="Group Name:"  VerticalAlignment="Center"/>
+          <TextBox   Grid.Row="0" Grid.Column="1" Name="c_GroupName" Margin="6,2"/>
+          <Button    Grid.Row="0" Grid.Column="2" Name="c_AddGroup"     Content="Create" Click="OnAddGroup"    Margin="2"/>
+          <TextBlock Grid.Row="1" Grid.Column="0" Text="Sell Multi:"  VerticalAlignment="Center"/>
+          <TextBox   Grid.Row="1" Grid.Column="1" Name="c_SellMult" Margin="6,2"/>
+          <Button    Grid.Row="1" Grid.Column="2" Name="c_UpdateName" Content="Update" Click="OnUpdateName"   Margin="2"/>
+          <TextBlock Grid.Row="2" Grid.Column="0" Text="Buy Multi:"   VerticalAlignment="Center"/>
+          <TextBox   Grid.Row="2" Grid.Column="1" Name="c_BuyMult" Margin="6,2"/>
+          <CheckBox  Grid.Row="3" Grid.Column="1" Name="c_BuyList"  Content="Only Buy List" Margin="6,2"/>
+        </Grid>
+      </Border>
+
+      <!-- Item editor -->
+      <Border Grid.Row="2" Padding="6" BorderBrush="Gray" BorderThickness="1">
+        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" ColumnDefinitions="Auto,*,Auto">
+          <TextBlock Grid.Row="0" Grid.Column="0" Text="Item ID:" VerticalAlignment="Center"/>
+          <TextBox   Grid.Row="0" Grid.Column="1" Name="c_NewItemID" TextChanged="OnItemUpdate" Margin="6,2"/>
+          <Button    Grid.Row="0" Grid.Column="2" Name="c_BrowseItems" Content="Browse" Click="OnBrowseItems" Margin="2"/>
+          <TextBlock Grid.Row="1" Grid.Column="0" Text="Sell Price:" VerticalAlignment="Center"/>
+          <TextBox   Grid.Row="1" Grid.Column="1" Name="c_SellPrice" TextChanged="OnItemUpdate" Margin="6,2"/>
+          <TextBlock Grid.Row="2" Grid.Column="0" Text="Buy Price:" VerticalAlignment="Center"/>
+          <TextBox   Grid.Row="2" Grid.Column="1" Name="c_BuyPrice" TextChanged="OnItemUpdate" Margin="6,2"/>
+          <TextBlock Grid.Row="3" Grid.Column="0" Text="Quantity:" VerticalAlignment="Center"/>
+          <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal">
+            <TextBox Name="c_Quanity" Width="100" TextChanged="OnItemUpdate" Margin="6,2"/>
+            <CheckBox Name="c_QuanityUnlimited" Content="Unlimited" IsCheckedChanged="OnUnlimitedChanged" Margin="6,2"/>
+          </StackPanel>
+          <StackPanel Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,6,0,0">
+            <Button Name="c_SaveItem" Content="Save/Update" Click="OnSaveItem"/>
+          </StackPanel>
+        </Grid>
+      </Border>
+    </Grid>
+
+    <!-- RIGHT COLUMN: items grid + actions -->
+    <Grid Grid.Column="1" RowDefinitions="*,Auto" Margin="6,0,0,0">
+      <DataGrid Grid.Row="0" Name="c_ItemLists"
+                AutoGenerateColumns="True" IsReadOnly="True"
+                SelectionMode="Extended"/>
+      <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,6,0,0">
+        <Button Name="c_EditItem" Content="Edit Item"     Click="OnEditItem"   Margin="2"/>
+        <Button Name="c_DelItem"  Content="Delete Item"   Click="OnDelItem"    Margin="2"/>
+        <Button Name="c_NewItem"  Content="New Item"      Click="OnNewItem"    Margin="2"/>
+        <Button Name="c_MultAdd"  Content="Multi-Item Add" Click="OnMultiAdd"  Margin="2"/>
+      </StackPanel>
+    </Grid>
+  </Grid>
+</UserControl>

@@ -1,0 +1,176 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:StationToolsAvalonia"
+        x:Class="StationToolsAvalonia.MainWindow"
+        Width="1240" Height="720"
+        Title="Station Tools">
+  <Grid RowDefinitions="Auto,*,Auto">
+
+    <!-- Top toolbar -->
+    <Border Grid.Row="0" Padding="6" BorderBrush="Gray" BorderThickness="0,0,0,1">
+      <StackPanel Orientation="Horizontal" Spacing="6">
+        <TextBlock Text="Station:" VerticalAlignment="Center"/>
+        <ComboBox  Name="c_StationCombo" Width="240"/>
+        <Button    Name="c_LoadStation" Content="Load"        Click="OnLoadStation"/>
+        <Button    Name="c_NewStation"  Content="New Station" Click="OnNewStation"/>
+        <Button    Name="c_Reload"      Content="Reload"      Click="OnReload"/>
+        <Button    Name="c_SaveAll"     Content="Save All"    Click="OnSaveAll"/>
+      </StackPanel>
+    </Border>
+
+    <!-- Main split: tree on left, tabs on right -->
+    <Grid Grid.Row="1" ColumnDefinitions="300,*">
+
+      <!-- Tree -->
+      <Border Grid.Column="0" BorderBrush="Gray" BorderThickness="0,0,1,0">
+        <TreeView Name="c_StationTree" SelectionChanged="OnTreeSelectionChanged">
+          <TreeView.ContextFlyout>
+            <MenuFlyout>
+              <MenuItem Header="Add Room"     Click="OnAddRoom"/>
+              <MenuItem Header="Add Terminal" Click="OnAddTerminal"/>
+              <MenuItem Header="Add NPC"      Click="OnAddNpc"/>
+              <Separator/>
+              <MenuItem Header="Delete"       Click="OnDeleteNode"/>
+            </MenuFlyout>
+          </TreeView.ContextFlyout>
+        </TreeView>
+      </Border>
+
+      <!-- Tabs -->
+      <TabControl Grid.Column="1" Name="c_Tabs">
+
+        <!-- Station tab -->
+        <TabItem Header="Station">
+          <ScrollViewer>
+            <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnDefinitions="120,*" Margin="10">
+              <TextBlock Grid.Row="0" Grid.Column="0" Text="Name:"        VerticalAlignment="Center"/>
+              <TextBox   Grid.Row="0" Grid.Column="1" Name="c_StationName" Margin="6,2"/>
+              <TextBlock Grid.Row="1" Grid.Column="0" Text="Station ID:"  VerticalAlignment="Center"/>
+              <TextBox   Grid.Row="1" Grid.Column="1" Name="c_StationID" IsReadOnly="True" Margin="6,2"/>
+              <TextBlock Grid.Row="2" Grid.Column="0" Text="Object ID:"   VerticalAlignment="Center"/>
+              <Grid      Grid.Row="2" Grid.Column="1" ColumnDefinitions="*,Auto">
+                <TextBox Grid.Column="0" Name="c_StationObjectID" Margin="6,2"/>
+                <Button  Grid.Column="1" Name="c_FindObject" Content="Find..." Click="OnFindObject" Margin="2"/>
+              </Grid>
+              <TextBlock Grid.Row="3" Grid.Column="0" Text="Sector ID:"   VerticalAlignment="Center"/>
+              <TextBox   Grid.Row="3" Grid.Column="1" Name="c_StationSectorID" Margin="6,2"/>
+              <TextBlock Grid.Row="4" Grid.Column="0" Text="Type:"        VerticalAlignment="Center"/>
+              <ComboBox  Grid.Row="4" Grid.Column="1" Name="c_StationType" Margin="6,2"/>
+              <TextBlock Grid.Row="5" Grid.Column="0" Text="Active:"      VerticalAlignment="Center"/>
+              <ComboBox  Grid.Row="5" Grid.Column="1" Name="c_StationActive" Margin="6,2"/>
+              <TextBlock Grid.Row="6" Grid.Column="0" Text="Faction:"     VerticalAlignment="Center"/>
+              <ComboBox  Grid.Row="6" Grid.Column="1" Name="c_StationFaction" Margin="6,2"/>
+              <TextBlock Grid.Row="7" Grid.Column="0" Text="Description:" VerticalAlignment="Top"/>
+              <TextBox   Grid.Row="7" Grid.Column="1" Name="c_StationDisc"    AcceptsReturn="True" Height="80" Margin="6,2"/>
+              <TextBlock Grid.Row="8" Grid.Column="0" Text="Welcome:"     VerticalAlignment="Top"/>
+              <TextBox   Grid.Row="8" Grid.Column="1" Name="c_StationWelcome" AcceptsReturn="True" Height="80" Margin="6,2"/>
+              <StackPanel Grid.Row="9" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="6">
+                <Button Content="Save Station" Click="OnSaveStation"/>
+              </StackPanel>
+            </Grid>
+          </ScrollViewer>
+        </TabItem>
+
+        <!-- Room tab -->
+        <TabItem Header="Room">
+          <ScrollViewer>
+            <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnDefinitions="120,*" Margin="10">
+              <TextBlock Grid.Row="0" Grid.Column="0" Text="Type:"        VerticalAlignment="Center"/>
+              <ComboBox  Grid.Row="0" Grid.Column="1" Name="c_RoomType" Margin="6,2"/>
+              <TextBlock Grid.Row="1" Grid.Column="0" Text="Fog Near:"    VerticalAlignment="Center"/>
+              <TextBox   Grid.Row="1" Grid.Column="1" Name="c_RoomFogNear" Margin="6,2"/>
+              <TextBlock Grid.Row="2" Grid.Column="0" Text="Fog Far:"     VerticalAlignment="Center"/>
+              <TextBox   Grid.Row="2" Grid.Column="1" Name="c_RoomFogFar" Margin="6,2"/>
+              <TextBlock Grid.Row="3" Grid.Column="0" Text="Fog R/G/B:"   VerticalAlignment="Center"/>
+              <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal">
+                <TextBox Name="c_RoomFogR" Width="60" Margin="6,2"/>
+                <TextBox Name="c_RoomFogG" Width="60" Margin="6,2"/>
+                <TextBox Name="c_RoomFogB" Width="60" Margin="6,2"/>
+              </StackPanel>
+              <TextBlock Grid.Row="4" Grid.Column="0" Text="Description:" VerticalAlignment="Top"/>
+              <TextBox   Grid.Row="4" Grid.Column="1" Name="c_RoomDiscription" AcceptsReturn="True" Height="80" Margin="6,2"/>
+              <TextBlock Grid.Row="5" Grid.Column="0" Text="Style:"       VerticalAlignment="Top"/>
+              <WrapPanel Grid.Row="5" Grid.Column="1" Margin="6,2">
+                <CheckBox Name="c_RoomDeviders"  Content="Dividers"   Margin="4,2"/>
+                <CheckBox Name="c_RoomRafters"   Content="Rafters"    Margin="4,2"/>
+                <CheckBox Name="c_RoomBar"       Content="Bar"        Margin="4,2"/>
+                <CheckBox Name="c_RoomTables"    Content="Tables"     Margin="4,2"/>
+                <CheckBox Name="c_RoomMonitors"  Content="Monitors"   Margin="4,2"/>
+                <CheckBox Name="c_RoomEyecandy"  Content="Eyecandy"   Margin="4,2"/>
+                <CheckBox Name="c_RoomSmallroom" Content="Small Room" Margin="4,2"/>
+                <CheckBox Name="c_RoomAltroom"   Content="Alt Room"   Margin="4,2"/>
+                <CheckBox Name="c_RoomFog"       Content="Fog"        Margin="4,2"/>
+              </WrapPanel>
+              <StackPanel Grid.Row="7" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="6">
+                <Button Content="Save Room" Click="OnSaveRoom"/>
+              </StackPanel>
+            </Grid>
+          </ScrollViewer>
+        </TabItem>
+
+        <!-- Terminal tab -->
+        <TabItem Header="Terminal">
+          <ScrollViewer>
+            <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto" ColumnDefinitions="120,*" Margin="10">
+              <TextBlock Grid.Row="0" Grid.Column="0" Text="Location:"    VerticalAlignment="Center"/>
+              <ComboBox  Grid.Row="0" Grid.Column="1" Name="c_TerminalLocation" Margin="6,2"/>
+              <TextBlock Grid.Row="1" Grid.Column="0" Text="Type:"        VerticalAlignment="Center"/>
+              <ComboBox  Grid.Row="1" Grid.Column="1" Name="c_TerminalType" Margin="6,2"/>
+              <TextBlock Grid.Row="2" Grid.Column="0" Text="Attribute:"   VerticalAlignment="Center"/>
+              <TextBox   Grid.Row="2" Grid.Column="1" Name="c_TerminalAttribute" Margin="6,2"/>
+              <TextBlock Grid.Row="3" Grid.Column="0" Text="Description:" VerticalAlignment="Top"/>
+              <TextBox   Grid.Row="3" Grid.Column="1" Name="c_TerminalDisc" AcceptsReturn="True" Height="120" Margin="6,2"/>
+              <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="6">
+                <Button Content="Save Terminal" Click="OnSaveTerminal"/>
+              </StackPanel>
+            </Grid>
+          </ScrollViewer>
+        </TabItem>
+
+        <!-- NPC tab -->
+        <TabItem Header="NPC">
+          <ScrollViewer>
+            <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnDefinitions="120,*" Margin="10">
+              <TextBlock Grid.Row="0"  Grid.Column="0" Text="First Name:"  VerticalAlignment="Center"/>
+              <TextBox   Grid.Row="0"  Grid.Column="1" Name="c_NPCFirstName" Margin="6,2"/>
+              <TextBlock Grid.Row="1"  Grid.Column="0" Text="Last Name:"   VerticalAlignment="Center"/>
+              <TextBox   Grid.Row="1"  Grid.Column="1" Name="c_NPCLastName" Margin="6,2"/>
+              <TextBlock Grid.Row="2"  Grid.Column="0" Text="Avatar ID:"   VerticalAlignment="Center"/>
+              <TextBox   Grid.Row="2"  Grid.Column="1" Name="c_NPCAvatarID" Margin="6,2"/>
+              <TextBlock Grid.Row="3"  Grid.Column="0" Text="Location:"    VerticalAlignment="Center"/>
+              <ComboBox  Grid.Row="3"  Grid.Column="1" Name="c_NPCLocation" Margin="6,2"/>
+              <TextBlock Grid.Row="4"  Grid.Column="0" Text="Faction:"     VerticalAlignment="Center"/>
+              <ComboBox  Grid.Row="4"  Grid.Column="1" Name="c_NPCFaction" Margin="6,2"/>
+              <TextBlock Grid.Row="5"  Grid.Column="0" Text="Level:"       VerticalAlignment="Center"/>
+              <ComboBox  Grid.Row="5"  Grid.Column="1" Name="c_NPCLevel"   Margin="6,2"/>
+              <TextBlock Grid.Row="6"  Grid.Column="0" Text="Booth Type:"  VerticalAlignment="Center"/>
+              <ComboBox  Grid.Row="6"  Grid.Column="1" Name="c_NPCBoothType" Margin="6,2"/>
+              <TextBlock Grid.Row="7"  Grid.Column="0" Text="Vender Group:" VerticalAlignment="Center"/>
+              <ComboBox  Grid.Row="7"  Grid.Column="1" Name="c_VenderGroupBox" Margin="6,2"/>
+              <TextBlock Grid.Row="8"  Grid.Column="0" Text="Description:" VerticalAlignment="Top"/>
+              <TextBox   Grid.Row="8"  Grid.Column="1" Name="c_NPCDiscription" AcceptsReturn="True" Height="80" Margin="6,2"/>
+              <StackPanel Grid.Row="9" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="6">
+                <Button Name="c_EditTalkTree" Content="Edit Talk Tree" Click="OnEditTalkTree" Margin="2"/>
+                <Button Name="c_AddAvatar"    Content="Add Avatar"     Click="OnAddAvatar"    Margin="2"/>
+              </StackPanel>
+              <StackPanel Grid.Row="10" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="6">
+                <Button Content="Save NPC" Click="OnSaveNpc"/>
+              </StackPanel>
+            </Grid>
+          </ScrollViewer>
+        </TabItem>
+
+        <!-- Vender tab -->
+        <TabItem Header="Venders">
+          <local:VenderTabControl Name="c_VenderTab"/>
+        </TabItem>
+
+      </TabControl>
+    </Grid>
+
+    <!-- Status bar -->
+    <Border Grid.Row="2" Padding="6,2" BorderBrush="Gray" BorderThickness="0,1,0,0">
+      <TextBlock Name="c_Status" Text="ready."/>
+    </Border>
+  </Grid>
+</Window>
