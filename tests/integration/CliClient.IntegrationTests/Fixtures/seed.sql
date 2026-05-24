@@ -16,7 +16,11 @@
 -- pool is the literal string "testpw" — same for all five so tests
 -- don't have to track per-account secrets.
 --
--- UPPER(MD5('testpw')) = '54AB18E61C7A5BB9C9E0FAAC79DE1B66'
+-- The hash is computed server-side at INSERT time via UPPER(MD5(...));
+-- don't hardcode the digest here. (For reference, MySQL evaluates
+-- UPPER(MD5('testpw')) to '8EEE3EFDDE1EB6CF6639A58848362BF4', but
+-- whatever MySQL produces is what gets stored — don't trust this comment
+-- over the function call.)
 --
 -- The accounts here use IDs 9000001..9000005 to stay well clear of any
 -- real account IDs the dumps might carry (AUTO_INCREMENT=15965 on the

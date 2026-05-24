@@ -162,10 +162,42 @@ xUnit `[Collection("server")]` ensures the docker stack stands up exactly once p
            test time, not integration-test time. 3/3 smoke tests
            passing.
 
-- [ ] Item 3 — Handshake tests (RSA + TLS login)
-      Status: not started
-      Touches: tests/integration/CliClient.IntegrationTests/Handshake/*.cs
-      Notes: first real assertions — proxy hands back a key; login server hands back a ticket; basic sanity.
+- [x] Item 3 — Handshake tests (RSA + TLS login)
+      Status: done
+      Touches: tests/integration/CliClient.IntegrationTests/Handshake/{TlsLoginTests.cs, RsaHandshakeTests.cs}
+      Notes:
+        ▸ TlsLoginTests has 3 [Fact]s under [Collection(ServerCollection.Name)]:
+           ValidAccount_ReturnsValidTicket (Pool[0]/testpw → Valid=true,
+           non-empty ticket, length >= 20 — LinuxAuth.cpp issues 40-char
+           hex so we assert "at least 20 hex chars" not exactly 40 to
+           avoid false positives if ticket size changes),
+           WrongPassword_ReturnsInvalid (Pool[0] + bogus password →
+           Valid=false, empty ticket — failure includes RawBody for
+           diagnosis), NonexistentAccount_ReturnsInvalid (user that's
+           not in seed → Valid=false).
+        ▸ RsaHandshakeTests has 3 [Fact]s — one per encrypted endpoint:
+           GlobalServer_AcceptsClientKeyExchange (3805),
+           MasterServer_AcceptsClientKeyExchange (3801),
+           SectorServer_AcceptsClientKeyExchange (3500). Each does
+           EncryptedTcpConnection.ConnectAsync — the connect itself
+           drives the full RSA pubkey exchange + RC4 client-key reply;
+           a hang or throw means the proxy rejected our key, hung up
+           early, or sent garbage. 15s timeout per test.
+        ▸ 6/6 passing locally in 171ms (post-build, against the live
+           stack with CLI_INTEGRATION_SKIP_COMPOSE=1 since the user's
+           docker compose was already up). Smoke tests (3) still pass
+           too. Total: 9/9 tests green.
+        ▸ Tests deliberately don't assert on key material or ticket
+           contents beyond shape — that's Phase S's job (UnitTests
+           cover the RSA/RC4 codecs in isolation). Phase T's job is
+           "the live wire round-trips" so we assert at the protocol
+           boundary, not at the byte level.
+        ▸ Verified seed.sql is reapplied cleanly via the docker compose
+           exec path even after mysql has been up 21h (DELETE BETWEEN +
+           INSERT, no UNIQUE collisions). seed.sql comment was
+           previously misleading (claimed wrong hash digest); corrected
+           to "MySQL evaluates UPPER(MD5(...)) server-side, don't
+           trust this comment over the function call".
 
 - [ ] Item 4 — Opcode round-trip tests for everything Phase J/K has wired today
       Status: not started
