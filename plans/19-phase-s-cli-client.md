@@ -343,10 +343,35 @@ CliClient.UnitTests/
 
         96 tests passing (was 70 before Item 6).
 
-- [ ] Item 7 — HealthGuard (rule 2 enforcement)
-      Status: not started
-      Touches: tools/cli-client/Session/HealthGuard.cs
-      Notes: watch for: server disconnect, repeated error opcodes, response timeouts > 5s, RX/TX rate spikes. On trip, abort current workflow with reason; don't auto-retry. Surface to console + log.
+- [x] Item 7 — HealthGuard (rule 2 enforcement)
+      Status: done
+      Touches:
+        - src/CliClient.Core/Session/HealthGuard.cs (kill-switch)
+        - src/CliClient.Core/Session/HealthGuardOptions.cs (tunables)
+        - tests/CliClient.UnitTests/Session/HealthGuardTests.cs
+      Notes:
+        Enforces hard-rule #2: "The CLI client must always respect the server."
+        Tripping is one-shot terminal — guard never re-arms. Workflows pass
+        `guard.Token` into every async call so they stop at the next await
+        when the guard fires.
+
+        Trip conditions wired:
+          - OnDisconnect("reason") — always trips
+          - OnPacketReceived with opcode in ErrorOpcodes set — trips
+          - Inbound/outbound packet rate > MaxPacketsPerSecond in any 1-second
+            sliding window (default 500/s, real EnB rarely > 200/s)
+          - BeginExpectResponse(label, timeout, opcodeFilter?) — disposable
+            handle; if neither matching inbound packet arrives nor caller
+            disposes within timeout, trips. Caller can scope to a specific
+            opcode (e.g. wait for 0x0036 ServerRedirect after MasterJoin).
+          - Trip(reason) — workflows can force-trip on protocol violations
+            the guard can't see (malformed payload, unexpected state).
+
+        What HealthGuard does NOT do: retry, reconnect, hide failure. It just
+        stops the workflow and surfaces the cause via Reason (and ConsoleSink
+        if provided). Matches rule 2's "No retry storms. No bypass attempts."
+
+        111 tests passing (was 96).
 
 - [ ] Item 8 — REPL (`connect`, `login`, `chat`, `enumerate sectors|missions|items`, `quit`)
       Status: not started
