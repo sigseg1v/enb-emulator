@@ -20,7 +20,7 @@
 #include "ItemBaseManager.h"
 #include "ItemBaseParser.h"
 #include "ItemList.h"
-#include "Opcodes.h"
+#include <net7/Opcodes.h>
 #include "PlayerClass.h"
 #include "ServerManager.h"
 #include "ResourceClass.h"

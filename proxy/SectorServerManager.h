@@ -3,7 +3,7 @@
 #ifndef _SECTOR_SERVER_MANAGER_H_INCLUDED_
 #define _SECTOR_SERVER_MANAGER_H_INCLUDED_
 
-#include "Mutex.h"
+#include <net7/Mutex.h>
 
 #define MAX_SECTOR_SERVERS			        120
 #define MAX_SECTORS					        128

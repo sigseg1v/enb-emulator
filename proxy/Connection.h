@@ -3,12 +3,12 @@
 #ifndef _TCP_CONNECTION_H_INCLUDED_
 #define _TCP_CONNECTION_H_INCLUDED_
 
-#include "Mutex.h"
+#include <net7/Mutex.h>
 #ifndef WIN32
 #include <pthread.h>
 #endif
-#include "WestwoodRSA.h"
-#include "WestwoodRC4.h"
+#include <net7/WestwoodRSA.h>
+#include <net7/WestwoodRC4.h>
 #include "PacketStructures.h"
 //#include "PlayerManager.h"
 #include "MessageQueue.h"

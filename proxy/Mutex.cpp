@@ -10,7 +10,7 @@
 // In practice a mutex is a semaphore with count 1
 
 #include "Net7.h"
-#include "Mutex.h"
+#include <net7/Mutex.h>
 
 Mutex::Mutex()
 {

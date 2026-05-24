@@ -22,7 +22,7 @@
 #include "SectorManager.h"
 #include "PlayerClass.h"
 #include "MemoryHandler.h"
-#include "Opcodes.h"
+#include <net7/Opcodes.h>
 #include <math.h>
 
 // relative positions of formation members for each formation

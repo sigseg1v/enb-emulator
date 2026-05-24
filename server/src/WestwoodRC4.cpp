@@ -1,7 +1,7 @@
 // WestwoodRC4.cpp
 
 #include "Net7.h"
-#include "WestwoodRC4.h"
+#include <net7/WestwoodRC4.h>
 
 WestwoodRC4::WestwoodRC4()
 {

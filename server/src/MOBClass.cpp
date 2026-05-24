@@ -22,7 +22,7 @@
 #include "MOBClass.h"
 #include "PlayerClass.h"
 #include "ObjectManager.h"
-#include "Opcodes.h"
+#include <net7/Opcodes.h>
 
 // Legacy admin-command MOB sentinel table. The original code declared
 // MOB_Info MobData[]; without a definition; under MSVC's relaxed rules this

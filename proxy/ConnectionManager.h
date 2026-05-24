@@ -3,7 +3,7 @@
 #ifndef _CONNECTION_MANAGER_H_INCLUDED_
 #define _CONNECTION_MANAGER_H_INCLUDED_
 
-#include "Mutex.h"
+#include <net7/Mutex.h>
 
 class Connection;
 class SSL_Connection;

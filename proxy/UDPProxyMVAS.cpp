@@ -3,7 +3,7 @@
 #include "Net7.h"
 #include "UDPClient.h"
 #include "ServerManager.h"
-#include "Opcodes.h"
+#include <net7/Opcodes.h>
 #include "Connection.h"
 
 DWORD g_addr_off = 0;

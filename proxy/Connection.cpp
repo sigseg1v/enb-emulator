@@ -12,7 +12,7 @@
 #include "Connection.h"
 #include "ServerManager.h"
 #include "PacketStructures.h"
-#include "Opcodes.h"
+#include <net7/Opcodes.h>
 #include "UDPClient.h"
 //#include "PlayerClass.h"
 
@@ -762,9 +762,9 @@ bool Connection::CheckTCPShutdownCycle()
 #include "Connection.h"
 #include "ServerManager.h"
 #include "PacketStructures.h"
-#include "Opcodes.h"
-#include "WestwoodRSA.h"
-#include "WestwoodRC4.h"
+#include <net7/Opcodes.h>
+#include <net7/WestwoodRSA.h>
+#include <net7/WestwoodRC4.h>
 
 #include <sys/socket.h>
 #include <unistd.h>

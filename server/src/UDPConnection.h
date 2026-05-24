@@ -21,7 +21,7 @@
 #define _UDP_CONNECTION_H_INCLUDED_
 
 #include <vector>
-#include "Mutex.h"
+#include <net7/Mutex.h>
 #include "MessageQueue.h"
 #include "PlayerManager.h"
 #include "PacketStructures.h"

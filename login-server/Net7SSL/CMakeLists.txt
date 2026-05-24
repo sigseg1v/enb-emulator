@@ -69,6 +69,7 @@ add_executable(net7ssl
 target_include_directories(net7ssl PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
     "${CMAKE_CURRENT_SOURCE_DIR}/compat"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../common/include"
 )
 
 target_compile_definitions(net7ssl PRIVATE

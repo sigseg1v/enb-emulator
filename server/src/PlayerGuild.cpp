@@ -18,7 +18,7 @@
 
 #include "PlayerClass.h"
 #include "PlayerManager.h"
-#include "Opcodes.h"
+#include <net7/Opcodes.h>
 #include "PacketMethods.h"
 #include "Guilds.h"
 

@@ -5,7 +5,7 @@
 #include "SectorManager.h"
 #include "ServerManager.h"
 #include "ItemList.h"
-#include "Opcodes.h"
+#include <net7/Opcodes.h>
 #include "SectorData.h"
 #if 0
 static XmlParser::XmlTagLookupTable mission_tag_lookup_table[] =

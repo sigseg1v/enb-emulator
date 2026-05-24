@@ -3,7 +3,7 @@
 // Phase J Linux port: login-server's umbrella header is Net7SSL.h, not
 // Net7.h (which lives in proxy/ and server/).
 #include "Net7SSL.h"
-#include "WestwoodRSA.h"
+#include <net7/WestwoodRSA.h>
 
 #include <openssl/ssl.h>
 #include <openssl/err.h>

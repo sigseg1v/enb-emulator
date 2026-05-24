@@ -20,7 +20,7 @@
 #include "PlayerClass.h"
 #include "ServerManager.h"
 #include "ObjectManager.h"
-#include "Opcodes.h"
+#include <net7/Opcodes.h>
 #include "PacketMethods.h"
 #include "StaticData.h"
 

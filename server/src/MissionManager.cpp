@@ -19,7 +19,7 @@
 #include "XmlTags.h"
 #include "MissionManager.h"
 #include "ItemList.h"
-#include "Opcodes.h"
+#include <net7/Opcodes.h>
 #include "SectorData.h"
 #include "ObjectManager.h"
 #include "SectorContentParser.h"

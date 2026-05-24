@@ -4,7 +4,7 @@
 #include "ItemBase.h"
 #include "AuxClasses/AuxEquipItem.h"
 #include "TimeNode.h"
-#include "Mutex.h"
+#include <net7/Mutex.h>
 
 #define MAX_EQUIP_STATS 60
 

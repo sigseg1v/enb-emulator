@@ -12,7 +12,7 @@
 #ifdef WIN32
 #include "Net7SSL.h"
 #include "Connection_B.h"
-#include "Opcodes.h"
+#include <net7/Opcodes.h>
 #include "PacketStructures.h"
 #include "PacketMethods.h"
 #include "AccountManager.h"

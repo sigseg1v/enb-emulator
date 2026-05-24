@@ -23,7 +23,7 @@
  ******************************************************/
 
 #include "Net7.h"
-#include "Opcodes.h"
+#include <net7/Opcodes.h>
 #include "ServerManager.h"
 #include "PacketStructures.h"
 

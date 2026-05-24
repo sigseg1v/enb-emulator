@@ -147,6 +147,7 @@ target_include_directories(net7 PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/compat"
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../common/include"
     ${LUA_INCLUDE_DIR}
     ${CRYPTOPP_INCLUDE_DIRS}
 )

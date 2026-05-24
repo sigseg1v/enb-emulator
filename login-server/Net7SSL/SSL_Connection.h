@@ -3,7 +3,7 @@
 #ifndef _SSL_CONNECTION_H_INCLUDED_
 #define _SSL_CONNECTION_H_INCLUDED_
 
-#include "Mutex.h"
+#include <net7/Mutex.h>
 #include "openssl/ssl.h"
 #include <vector>
 

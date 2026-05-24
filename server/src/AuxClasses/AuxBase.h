@@ -19,7 +19,7 @@
 #define _AUXBASE_H_INCLUDED_
 
 #include "../Net7.h"
-#include "../Mutex.h"
+#include <net7/Mutex.h>
 
 class AuxBase
 {

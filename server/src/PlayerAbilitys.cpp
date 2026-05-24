@@ -18,7 +18,7 @@
 #include "PlayerClass.h"
 #include "ServerManager.h"
 #include "ObjectManager.h"
-#include "Opcodes.h"
+#include <net7/Opcodes.h>
 
 void Player::HandleSkillAbility(unsigned char *data)
 {

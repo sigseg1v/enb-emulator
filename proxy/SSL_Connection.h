@@ -3,7 +3,7 @@
 #ifndef _SSL_CONNECTION_H_INCLUDED_
 #define _SSL_CONNECTION_H_INCLUDED_
 
-#include "Mutex.h"
+#include <net7/Mutex.h>
 
 // WARNING: This limits the size of images on the secure web pages.
 #define MAX_SERVER_FILE_SIZE    16384

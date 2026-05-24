@@ -20,7 +20,7 @@
 #ifndef _SECTOR_MANAGER_H_INCLUDED_
 #define _SECTOR_MANAGER_H_INCLUDED_
 
-#include "Mutex.h"
+#include <net7/Mutex.h>
 #include "PlayerManager.h"
 //#include "MemoryHandler.h"
 #include "TimeNode.h"

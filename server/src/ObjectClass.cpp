@@ -24,7 +24,7 @@
 #include "StringManager.h"
 #include "ServerManager.h"
 #include "PacketMethods.h"
-#include "Opcodes.h"
+#include <net7/Opcodes.h>
 
 Object::Object(long object_id)
 {

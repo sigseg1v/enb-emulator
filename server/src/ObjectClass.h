@@ -21,7 +21,7 @@
 #define _OBJECT_CLASS_H_INCLUDED_
 
 #include "ObjectEffects.h"
-#include "Mutex.h"
+#include <net7/Mutex.h>
 #include "SectorData.h"
 #include "SectorManager.h"
 #include <vector>

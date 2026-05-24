@@ -4,10 +4,10 @@
 #define _TCP_CONNECTION_H_INCLUDED_
 
 #include "Net7SSL.h"
-#include "WestwoodRSA.h"
-#include "WestwoodRC4.h"
+#include <net7/WestwoodRSA.h>
+#include <net7/WestwoodRC4.h>
 #include "MessageQueue.h"
-#include "Mutex.h"
+#include <net7/Mutex.h>
 
 #define RC4_KEY_SIZE		8
 #define RC4_UDP_KEY_SIZE	16

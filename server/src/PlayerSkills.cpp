@@ -21,7 +21,7 @@
 #include "ServerManager.h"
 #include "ObjectManager.h"
 #include "PacketMethods.h"
-#include "Opcodes.h"
+#include <net7/Opcodes.h>
 #include "StaticData.h"
 
 // -1's indicate that this leveling scheme does not contain this level

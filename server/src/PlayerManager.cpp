@@ -20,7 +20,7 @@
 #include "Net7.h"
 #include "PlayerManager.h"
 #include "SectorManager.h"
-#include "Opcodes.h"
+#include <net7/Opcodes.h>
 #include "PacketStructures.h"
 #include <float.h>
 #include "UDPConnection.h"

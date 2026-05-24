@@ -23,7 +23,7 @@
 #include "UDPConnection.h"
 #include "PacketStructures.h"
 #include "PlayerClass.h"
-#include "Opcodes.h"
+#include <net7/Opcodes.h>
 
 // This helper function is referenced by _beginthread to launch the TCP thread.
 #ifdef WIN32

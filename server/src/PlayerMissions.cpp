@@ -20,7 +20,7 @@
 #include "ServerManager.h"
 #include "ObjectManager.h"
 #include "MissionManager.h"
-#include "Opcodes.h"
+#include <net7/Opcodes.h>
 #include "TalkTreeParser.h"
 #include "SectorManager.h"
 

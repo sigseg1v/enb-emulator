@@ -6,7 +6,7 @@
 #define __MYSQLPLUS_H__
 
 #include "mysql.h"
-#include "../Mutex.h"
+#include <net7/Mutex.h>
 
 #define _CRT_SECURE_NO_WARNINGS 1		// Disable Warning messages about new Secure Functions in VS2008
 

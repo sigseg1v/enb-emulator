@@ -1,7 +1,7 @@
 // WestwoodRSA.cpp
 
 #include "Net7.h"
-#include "WestwoodRSA.h"
+#include <net7/WestwoodRSA.h>
 
 #include <openssl/ssl.h>
 #include <openssl/err.h>

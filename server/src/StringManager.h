@@ -21,7 +21,7 @@
 #define _STRING_MANAGER_H_INCLUDED_
 
 #include "Net7.h"
-#include "Mutex.h"
+#include <net7/Mutex.h>
 
 #define STRING_TABLE_SIZE 320000
 #define STRING_MEMORY_SIZE 20971520 //20MB: 1024 * 1024 * 20

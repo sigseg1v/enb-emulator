@@ -49,7 +49,7 @@
 
 #include "Net7SSL.h"
 #include "SSL_Connection.h"   // For *_TAG macros (USERNAME_TAG etc.)
-#include "Mutex.h"
+#include <net7/Mutex.h>
 
 #include <mysql/mysql.h>
 

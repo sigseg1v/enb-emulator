@@ -2,7 +2,7 @@
 #define _OBJECT_EFFECTS_H_INCLUDED_
 
 #include "PacketStructures.h"
-#include "Mutex.h"
+#include <net7/Mutex.h>
 #include <map>
 
 using namespace std;

@@ -20,7 +20,7 @@
 #ifndef _MESSAGE_QUEUE_H_INCLUDED_
 #define _MESSAGE_QUEUE_H_INCLUDED_
 
-#include "Mutex.h"
+#include <net7/Mutex.h>
 
 struct MessageEntry
 {

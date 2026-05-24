@@ -13,7 +13,7 @@
 // The original include "Net7.h" is replaced with "Net7SSL.h" because the
 // login-server tree's umbrella header is named differently.
 #include "Net7SSL.h"
-#include "Mutex.h"
+#include <net7/Mutex.h>
 
 Mutex::Mutex()
 {

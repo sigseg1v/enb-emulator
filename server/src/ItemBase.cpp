@@ -20,7 +20,7 @@
 //
 #include "Net7.h"
 #include "ItemBase.h"
-#include "Opcodes.h"
+#include <net7/Opcodes.h>
 #include "PlayerClass.h"
 #include "PacketMethods.h"
 #include "StringManager.h"

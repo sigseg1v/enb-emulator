@@ -29,7 +29,7 @@
 #include "SaveManager.h"
 #include "MailslotManager.h"
 #include "ObjectManager.h"
-#include "Opcodes.h"
+#include <net7/Opcodes.h>
 
 // Constructor
 ServerManager::ServerManager(bool is_master_server, unsigned long ip_address, short port, short max_sectors, bool standalone, unsigned long internal_ip_address)

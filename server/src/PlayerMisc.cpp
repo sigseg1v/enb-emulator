@@ -23,7 +23,7 @@
 #include "ServerManager.h"
 #include "ObjectClass.h"
 #include "ObjectManager.h"
-#include "Opcodes.h"
+#include <net7/Opcodes.h>
 #include "PacketMethods.h"
 #include "StaticData.h"
 #include "UDPConnection.h"

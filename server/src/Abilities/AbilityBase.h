@@ -32,7 +32,7 @@
 // now changed to use a common base between player and mobs so that mobs can use skills on players
 
 #include "Net7.h"
-#include "Mutex.h"
+#include <net7/Mutex.h>
 #include "PlayerSkills.h"
 #include "Stats.h"
 

@@ -28,7 +28,7 @@
 
 #include "Net7.h"
 #include "Connection.h"
-#include "Opcodes.h"
+#include <net7/Opcodes.h>
 #include "PacketStructures.h"
 #include "ServerManager.h"
 #include "UDPClient.h"
