@@ -1,0 +1,81 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        x:Class="LaunchNet7Avalonia.MainWindow"
+        Width="640" Height="520"
+        Title="LaunchNet7"
+        CanResize="True">
+  <Grid Margin="12" RowDefinitions="Auto,Auto,Auto,Auto,Auto,*,Auto">
+
+    <!-- Row 0: Server picker (emulator/host) -->
+    <Border Grid.Row="0" BorderBrush="Gray" BorderThickness="1" Padding="8" CornerRadius="4">
+      <Grid ColumnDefinitions="100,*,100,*" RowDefinitions="Auto,Auto,Auto">
+        <TextBlock Grid.Row="0" Grid.Column="0" Text="Emulator:" VerticalAlignment="Center" />
+        <ComboBox  Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="3" Name="c_ComboBox_Emulators"
+                   HorizontalAlignment="Stretch"
+                   SelectionChanged="OnEmulatorsChanged" />
+
+        <TextBlock Grid.Row="1" Grid.Column="0" Text="Server:" VerticalAlignment="Center" Margin="0,8,0,0" />
+        <ComboBox  Grid.Row="1" Grid.Column="1" Name="c_ComboBox_Servers"
+                   Margin="0,8,8,0" HorizontalAlignment="Stretch"
+                   SelectionChanged="OnServersChanged" />
+
+        <TextBlock Grid.Row="1" Grid.Column="2" Text="Status:" VerticalAlignment="Center" Margin="0,8,0,0" />
+        <TextBlock Grid.Row="1" Grid.Column="3" Name="c_ServerStatus"
+                   Margin="0,8,0,0" VerticalAlignment="Center" Text="" FontWeight="Bold" />
+
+        <Button    Grid.Row="2" Grid.Column="3" Name="c_Button_Check" Margin="0,8,0,0"
+                   HorizontalAlignment="Right" Content="Check" Click="OnCheckClick" />
+      </Grid>
+    </Border>
+
+    <!-- Row 1: Client path -->
+    <Border Grid.Row="1" BorderBrush="Gray" BorderThickness="1" Padding="8" CornerRadius="4" Margin="0,8,0,0">
+      <Grid ColumnDefinitions="100,*,Auto">
+        <TextBlock Grid.Column="0" Text="Client EXE:" VerticalAlignment="Center" />
+        <TextBox   Grid.Column="1" Name="c_TextBox_Client" />
+        <Button    Grid.Column="2" Margin="8,0,0,0" Content="Browse..." Click="OnBrowseClient" />
+      </Grid>
+    </Border>
+
+    <!-- Row 2: Authentication -->
+    <Border Grid.Row="2" BorderBrush="Gray" BorderThickness="1" Padding="8" CornerRadius="4" Margin="0,8,0,0">
+      <Grid ColumnDefinitions="180,*">
+        <TextBlock Grid.Column="0" Text="Authentication Port:" VerticalAlignment="Center" />
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12">
+          <TextBox  Name="c_TextBox_Port" Width="80" />
+          <CheckBox Name="c_CheckBox_SecureAuthentication" Content="Use HTTPS (Secure)" />
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- Row 3: Misc -->
+    <Border Grid.Row="3" BorderBrush="Gray" BorderThickness="1" Padding="8" CornerRadius="4" Margin="0,8,0,0">
+      <StackPanel Orientation="Horizontal" Spacing="20">
+        <CheckBox Name="c_CheckBox_ClientDetours" Content="Use Client Detours" />
+        <CheckBox Name="c_CheckBox_LocalCert"     Content="Use Local Cert" />
+      </StackPanel>
+    </Border>
+
+    <!-- Row 4: Status line -->
+    <TextBlock Grid.Row="4" Name="c_Status" Margin="0,12,0,4"
+               Text="Please select a server and hit Play." />
+
+    <!-- Row 5: Log / details pane (filler) -->
+    <Border Grid.Row="5" BorderBrush="Gray" BorderThickness="1" CornerRadius="4" Margin="0,0,0,8">
+      <TextBox Name="c_LogPane" IsReadOnly="True" AcceptsReturn="True"
+               TextWrapping="Wrap" VerticalAlignment="Stretch"
+               HorizontalAlignment="Stretch" Background="Transparent"
+               BorderThickness="0" />
+    </Border>
+
+    <!-- Row 6: Buttons -->
+    <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+      <Button Name="c_Button_Advanced" Content="Advanced..." Click="OnAdvancedClick" />
+      <Button Name="c_Button_Play"     Content="Play"        Click="OnPlayClick"     IsDefault="True" />
+      <Button Name="c_Button_Cancel"   Content="Quit"        Click="OnCancelClick"   IsCancel="True" />
+    </StackPanel>
+  </Grid>
+</Window>

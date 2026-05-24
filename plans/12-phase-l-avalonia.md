@@ -227,40 +227,116 @@ The existing WinForms targets stay in the tree. They still build via `dotnet bui
     `--smoke` headless test passes (`window 486x283 title="Data Import v1.0 Build 0.0"`).
   - **6/14 tools have Linux-native paths now.**
 
-### Future tier ordering (remaining 9 tools — deferred until session focus returns to Phase L)
+### Tier 4 — client-side launcher port (complete)
+
+- [x] **launchnet7-avalonia** — full Avalonia port of
+      `tools/launchnet7/LaunchNet7/`. Self-contained — does NOT depend
+      on commontools-avalonia (the launcher has its own config story,
+      no MySQL, no DB Search dialog).
+
+      Ported:
+      - `FormMain.cs` → `MainWindow.axaml{,.cs}` — server picker
+        (`ServerConfig` + `HostConfig` ComboBoxes), client EXE
+        path + Browse, authentication port + secure checkbox, misc
+        ClientDetours/LocalCert checkboxes, status line + log pane,
+        Advanced/Play/Quit. TCP probe of `host:3809` (proxy port)
+        for the ONLINE/OFFLINE badge runs on a `Task.Run` with
+        `Dispatcher.UIThread.InvokeAsync` for UI updates.
+      - `Configuration/*` (8 files of
+        `System.Configuration.ConfigurationSection` boilerplate) →
+        `Config/LauncherConfig.cs` + `Config/ServerConfig.cs` —
+        thin `XmlDocument` reader, POCOs.
+      - `Properties.Settings.Default` → `Config/UserSettings.cs` —
+        JSON-on-disk beside the .dll.
+      - `IniUtility.cs` (P/Invokes kernel32 `GetPrivateProfileString`
+        / `WritePrivateProfileString`) → `Patching/IniFile.cs` —
+        portable text-mode reader/writer that mirrors the kernel32
+        contract (returns null when key is absent).
+      - `Patching/AuthLoginPatcher.cs` + `AuthPatcherInfo.cs` —
+        verbatim port (0x8328 HTTPS flag, 0x82AD port, 0x8292
+        timeout). `fs.Read` upgraded to `fs.ReadExactly` (CA2022).
+      - `Launcher.cs` — orchestrates the patch sequence
+        (rg_regdata rename → rg_regdata.ini URL → Auth.ini URLs →
+        Network.ini host across the 11 known sections →
+        authlogin.dll flags → registry) and dispatches by
+        `LaunchName`: NET7SP → Net7Server then Net7Proxy after 25s
+        sleep; NET7MP → Net7Proxy; default → client.exe with
+        `-SERVER_ADDR <ip> -PROTOCOL TCP`.
+      - `LauncherUtility.GetShortPathName` (kernel32 P/Invoke) →
+        `ShortPath.cs` — Windows-only Win32 call; passthrough on
+        non-Windows.
+      - `Microsoft.Win32.Registry` direct use → `WindowsRegistryHelpers.cs`
+        gated by `#if WINDOWS_BUILD`; `Launcher.PatchRegistry()`
+        no-ops on non-Windows with a warning (WINE manages its own
+        per-prefix registry).
+      - On non-Windows, all Win32 .exe spawns are wrapped via
+        `wine "<exe>"` (`WinExe()` helper checks
+        `RuntimeInformation.IsOSPlatform(OSPlatform.Windows)`).
+
+      Dropped (documented in `tools/launchnet7-avalonia/README.md`):
+      - `Updateing/Updater.cs` + `FormUpdate.cs` — upstream patch host
+        (patch.net-7.org) is offline; resurrecting it is its own task.
+      - `ExeUpdater` (self-update subproject) — only meaningful on
+        Windows; a Linux launcher updates via the OS package manager.
+        Note: ExeUpdater was already retargeted to `net10.0` console
+        in Tier 0.
+      - `FileListCreator` subproject — only useful for publishing
+        updates to the dead patch host.
+      - `WebBrowser` patch-notes pane — no built-in WebView in
+        Avalonia, host is dead anyway.
+      - `BackgroundWorker` → `Task.Run` + `Dispatcher.UIThread.Post`.
+      - `OpenFileDialog` → `StorageProvider.OpenFilePickerAsync`.
+      - `MessageBox.Show` → MsBox.Avalonia.
+
+      Build: `dotnet build` clean (0 warn / 0 err) after fixing two
+      CA2022 inexact-read warnings in AuthLoginPatcher.
+      Test: `--smoke` headless passes:
+      ```
+      smoke OK: window 640x520 title="LaunchNet7"
+      ```
+      `LaunchNet7.cfg` is copied to output via
+      `<None CopyToOutputDirectory="PreserveNewest" />` so the smoke
+      test sees the same XML the production deployment will.
+
+      Registered in `tools/Net7Tools.slnx` under
+      `/launchnet7-avalonia/`. Whole solution still builds.
+      Touches: new `tools/launchnet7-avalonia/` (13 files +
+      `LaunchNet7.cfg` copy + slnx entry).
+      Status: complete
+
+      **7/14 tools have Linux-native paths now.**
+
+### Future tier ordering (remaining 8 tools — deferred until session focus returns to Phase L)
 
 Recommended order:
 
-1. **launchnet7-avalonia** — 4 forms (Main, Options, Patch, About). No
-   commontools dep. ~1-2 days.
-
-2. **faction-editor-avalonia** — 3 forms, MySQL. ~1-2 days (depends on
+1. **faction-editor-avalonia** — 3 forms, MySQL. ~1-2 days (depends on
    commontools-avalonia).
 
-3. **mob-editor-avalonia** — 3 forms, MySQL, larger LOC. ~2 days
+2. **mob-editor-avalonia** — 3 forms, MySQL, larger LOC. ~2 days
    (depends on commontools-avalonia).
 
-4. **talktreeeditor-avalonia** — 5 forms, depends on
+3. **talktreeeditor-avalonia** — 5 forms, depends on
    commontools-avalonia. ~2-3 days.
 
-5. **toolslauncher-avalonia** — 6 forms incl. IRC client + FTP window.
+4. **toolslauncher-avalonia** — 6 forms incl. IRC client + FTP window.
    ~3-5 days (IRC integration via Meebey.SmartIrc4Net is the wildcard).
 
-6. **effect-editor-avalonia** (SQLBind) — 5 forms, particle effects.
+5. **effect-editor-avalonia** (SQLBind) — 5 forms, particle effects.
    ~3 days.
 
-7. **station-tools-avalonia** — 8 forms. ~4-5 days.
+6. **station-tools-avalonia** — 8 forms. ~4-5 days.
 
-8. **missioneditor-avalonia** — 9 forms incl. tree view. Depends on
+7. **missioneditor-avalonia** — 9 forms incl. tree view. Depends on
    commontools-avalonia. ~5 days.
 
-9. **sector-editor-avalonia** — 16 forms, custom map canvas
+8. **sector-editor-avalonia** — 16 forms, custom map canvas
    (System.Drawing.Graphics → Avalonia DrawingContext is the major
    work). ~2-3 weeks.
 
 ### Tier 2+ — deferred
 
-The remaining 9 editors (faction-editor, mob-editor, launchnet7, talktreeeditor, effect-editor, toolslauncher, station-tools, missioneditor, sector-editor) are tracked as future Phase L sub-items. **Not in scope for this session.** With realistic ~3-6 month total for the suite, this is its own project.
+The remaining 8 editors (faction-editor, mob-editor, talktreeeditor, effect-editor, toolslauncher, station-tools, missioneditor, sector-editor) are tracked as future Phase L sub-items. With realistic ~3-6 month total for the suite, this is its own project — but per the user directive "do all plans / dont stop at phase boundaries," subsequent invocations should keep grinding through them.
 
 For immediate Linux runnability of the editors: the WinForms binaries already run under WINE — `tools/README.md` documents this. That's the realistic interim story until Avalonia ports land.
 

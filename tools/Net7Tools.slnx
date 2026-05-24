@@ -52,6 +52,9 @@
   <Folder Name="/dataimport-avalonia/">
     <Project Path="dataimport-avalonia/DataImportAvalonia.csproj" />
   </Folder>
+  <Folder Name="/launchnet7-avalonia/">
+    <Project Path="launchnet7-avalonia/LaunchNet7Avalonia.csproj" />
+  </Folder>
   <Folder Name="/w3d-parser/">
     <Project Path="w3d-parser/W3d Parser.csproj" />
   </Folder>
