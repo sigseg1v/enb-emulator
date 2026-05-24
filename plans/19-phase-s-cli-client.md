@@ -401,10 +401,36 @@ CliClient.UnitTests/
 
         127 tests passing (was 111).
 
-- [ ] Item 9 — Workflow: connect-and-login (smoke-test target)
-      Status: not started
-      Touches: tools/cli-client/Workflows/ConnectAndLogin.cs
-      Notes: end-to-end Linux integration: docker compose up; cli-client connects + logs in + idles for 5s + clean disconnect. Wire into tests/integration/.
+- [x] Item 9 — Workflow: connect-and-login (smoke-test target)
+      Status: done
+      Touches:
+        - src/CliClient.Core/Workflows/ConnectAndLogin.cs (workflow class)
+        - src/CliClient.Core/Workflows/ConnectAndLoginOptions.cs (inputs)
+        - src/CliClient.App/Program.cs (wires `cli-client connect-and-login` subcommand)
+        - tests/CliClient.UnitTests/Workflows/ConnectAndLoginTests.cs
+      Notes:
+        Workflow chain: AuthLoginClient → ticket → CliSession.ConnectGlobalAsync →
+        drain inbound packets for IdleDuration → clean dispose. Every async hop
+        is gated by guard.Token; failures trip the guard cleanly and return a
+        ConnectAndLoginResult rather than throwing.
+
+        Sends NO opcodes (no GlobalConnect 0x006D, no MasterJoin, nothing) —
+        Item 9 is "can we even connect, drain, and disconnect cleanly". In-game
+        opcode workflows are Items 10-13.
+
+        CLI subcommand: `cli-client connect-and-login --user X --pass Y
+        [--login-host h] [--login-port p] [--global-host h] [--global-port p]
+        [--idle 5] [--strict-tls]`. Default `--strict-tls` off so dev/CI work
+        against self-signed certs; pass it for prod. Smoke-tested locally: when
+        no login server is running, it trips the guard with "Connection refused"
+        and exits 1 (no crash, no retry storm).
+
+        Deep integration validation (against a live docker compose stack) is
+        the explicit deliverable of Phase T, per the original plan note. Unit
+        tests here cover constructor / argument validation and the no-server-
+        running path; the rest is Phase T.
+
+        132 tests passing (was 127).
 
 - [ ] Item 10 — Workflow: enumerate sectors (visit each sector, dump objects)
       Status: not started
