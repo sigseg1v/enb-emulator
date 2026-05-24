@@ -844,9 +844,15 @@ void Connection::TerminateConnection()         { m_ConnectionActive = false; m_T
 
 // Build [size, opcode, payload...] frame, RC4-encrypt the whole thing
 // (size field included — matches the Win32 wire format at Connection.cpp:597-626),
-// and send it. Wire layout mirrors the Win32 m_SendBuffer build: size is
-// length + sizeof(long) (4 bytes for the header) and lives at offset 0;
-// opcode at offset 2; payload follows at offset sizeof(long)=4.
+// and send it. Wire layout: size is length + sizeof(EnbTcpHeader) (4 bytes
+// for the header) and lives at offset 0; opcode at offset 2; payload
+// follows at offset sizeof(EnbTcpHeader)=4.
+//
+// Phase K bug-fix: was using sizeof(long), which is 4 on Win32 (matching
+// EnbTcpHeader) but 8 on Linux x86_64 — that put a 4-byte zero gap
+// between header and payload on the wire and made every Linux→client
+// frame off by 4. RunRecvThread reads with sizeof(EnbTcpHeader) so the
+// recv path was already correct; this aligns the send path with it.
 //
 // NB: the Win32 path enqueues into m_SendQueue and lets RunSendThread do
 // the RC4 + send. We don't have RunSendThread on Linux yet, so we encrypt
@@ -857,17 +863,17 @@ void Connection::SendResponse(short opcode, unsigned char* data,
                               size_t length, long /*sequence_num*/)
 {
     if (m_Socket == INVALID_SOCKET || !m_ConnectionActive) return;
-    if (length > MAX_BUFFER - sizeof(long)) {
+    if (length > MAX_BUFFER - sizeof(EnbTcpHeader)) {
         LogMessage("SendResponse: payload %zu too large for opcode 0x%04x\n",
                    length, (unsigned short) opcode);
         return;
     }
 
-    size_t total = length + sizeof(long);
+    size_t total = length + sizeof(EnbTcpHeader);
     *((short *) &m_SendBuffer[0]) = (short) total;
     *((short *) &m_SendBuffer[2]) = opcode;
     if (length && data) {
-        memcpy(m_SendBuffer + sizeof(long), data, length);
+        memcpy(m_SendBuffer + sizeof(EnbTcpHeader), data, length);
     }
 
     if (m_ServerType != CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY &&

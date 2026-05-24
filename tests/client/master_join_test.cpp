@@ -107,26 +107,22 @@ TEST(MasterJoin, LiveMasterJoinReturnsServerRedirect) {
 
     // Drain the payload so the connection close is clean and subsequent
     // tests don't see stale bytes on a reconnect. Size field includes the
-    // header; payload length = size - 4 (on Linux, the proxy's send path
-    // stamps size = payload + sizeof(long) = payload + 8; we tolerate
-    // either by clamping to a safe upper bound).
+    // 4-byte EnbTcpHeader; payload length = rsp_size - 4.
     int payload_len = static_cast<int>(rsp_size) - kWireHeaderSize;
     if (payload_len > 0 && payload_len < 1024) {
         std::vector<unsigned char> rsp_payload(payload_len, 0);
         ASSERT_TRUE(client.RecvExact(rsp_payload.data(), payload_len, 5000))
             << "short payload read: " << client.last_error();
         rx.Crypt(rsp_payload.data(), payload_len);
-        // ServerRedirect layout depends on platform `long` width:
-        //   Win32 (long=4):    sector_id(4) + ip_address(4) + port(2) = 10 bytes
-        //   Linux x86_64 (8):  sector_id(8) + ip_address(8) + port(2) = 18 bytes
-        // And the proxy's Linux SendResponse stamps size = length + sizeof(long),
-        // which leaves sizeof(long) - sizeof(EnbTcpHeader) bytes of header-pad
-        // before the data. So:
-        //   Linux:  4 junk + 8 sector_id + 8 ip_address + 2 port = 22 byte payload
-        //   Win32:  10 byte payload, port at offset 8
-        // Scan the likely offsets and assert one of them is 3500.
+        // ServerRedirect layout still depends on platform `long` width
+        // (PacketStructures.h struct ServerRedirect uses long for
+        // sector_id and ip_address — the long → int32_t migration is a
+        // separate Phase K item):
+        //   Win32 (long=4):    sector_id(4) + ip_address(4) + port(2) = 10 byte payload, port at offset 8
+        //   Linux x86_64 (8):  sector_id(8) + ip_address(8) + port(2) = 18 byte payload, port at offset 16
+        // Probe both — either is a pass for this test.
         bool found = false;
-        for (int probe : {8, 20}) {
+        for (int probe : {8, 16}) {
             if (probe + 2 > payload_len) continue;
             uint16_t maybe_port;
             std::memcpy(&maybe_port, &rsp_payload[probe], 2);
