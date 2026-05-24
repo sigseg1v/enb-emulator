@@ -122,7 +122,7 @@ MemoryHandler::~MemoryHandler()
 		}
 	}
 
-	Sleep(100);
+	usleep(100 * 1000);
 
 	TimeNode * BroadcastBuff = m_BroadcastQueueNodes[0];
 

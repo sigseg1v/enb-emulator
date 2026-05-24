@@ -2191,7 +2191,7 @@ void MOB::MOBBehaviour()
 			Field *field = (0);
 			if (GameID() == 100084)
 			{
-				Sleep(1);
+				usleep(1 * 1000);
 			}
 			if (m_BehaviourList.size() > 0)
 			{
@@ -2210,7 +2210,7 @@ void MOB::MOBBehaviour()
 				{
 					if (GameID() == 100084)
 					{
-						Sleep(1);
+						usleep(1 * 1000);
 					}
 					m_Destination = field->SetDestination(m_Destination);
 					TravelToObject();

@@ -161,7 +161,7 @@ void ServerManager::MainLoop()
 	while (!g_ServerShutdown)
 	{
 		// Loop 20x per second
-		Sleep(50);
+		usleep(50 * 1000);
         ServerCheck();
 	}
 
@@ -173,7 +173,7 @@ void ServerManager::MainLoop()
 
 	// TODO: Use event notification to make this safe
 	// Wait for clean shutdown
-	Sleep(5000);
+	usleep(5000 * 1000);
 }
 
 

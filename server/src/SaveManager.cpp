@@ -48,7 +48,7 @@ SaveManager::SaveManager()
 SaveManager::~SaveManager()
 {
 	while (m_ThreadRunning)
-		Sleep(100);
+		usleep(100 * 1000);
 	CheckSaves();
 	delete m_SaveQueue;
 	delete m_SaveBuffer;
@@ -79,7 +79,7 @@ void SaveManager::RunSaveThread()
 	m_ThreadRunning = true;
 	while (!g_ServerShutdown)
 	{
-		Sleep(10);
+		usleep(10 * 1000);
 		CheckSaves();
 	}
 	m_ThreadRunning = false;
@@ -112,7 +112,7 @@ void SaveManager::AddSaveMessage(short save_code, long player_id, short length, 
 		LogMessage(">>> Save Queue Full!, waiting for space <<<\n");
 		while (m_SaveQueue->Count() == SAVE_SLOTS)
 		{
-			Sleep(10);
+			usleep(10 * 1000);
 		}
 	}*/
 

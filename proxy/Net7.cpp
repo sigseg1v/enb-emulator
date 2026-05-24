@@ -322,7 +322,7 @@ int main(int argc, char* argv[])
 //     server-side Net7Proxy IS the server.
 int main(int argc, char* argv[])
 {
-    g_StartTick = GetTickCount();
+    g_StartTick = Net7TickMs();
     g_internal_addr = default_addr;
     g_server_addr  = default_addr;
 
@@ -698,7 +698,7 @@ void PatchClient()
 
 unsigned long GetNet7TickCount()
 {
-    return ((GetTickCount() - g_StartTick) & 0x7FFFFFFF);
+    return ((Net7TickMs() - g_StartTick) & 0x7FFFFFFF);
 }
 
 #ifdef WIN32
@@ -753,7 +753,7 @@ void WaitForLogin()
 	long counter = 0;
 	while (!g_LoggedIn && counter < 300 && !g_ServerShutdown)
 	{
-		Sleep(250);
+		usleep(250 * 1000);
 		counter++;
 	}
 }

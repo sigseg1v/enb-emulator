@@ -180,7 +180,7 @@ bool TalkTreeParser::ParseMissions(MissionTree *tree, char *data)
 
 	if (tree->MissionID == 500)
 	{
-		Sleep(1);
+		usleep(1 * 1000);
 	}
 
 	if (tree->Job_Category > 0)

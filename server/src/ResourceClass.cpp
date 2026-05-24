@@ -525,7 +525,7 @@ void Resource::ResetResource()
 			SectorManager * SMgr = GetSectorManager();
 			if (SMgr->GetSectorID() == 1052 && m_Resource_type == INORGANIC_HULK)
 			{
-				Sleep(1);
+				usleep(1 * 1000);
 			}
 			if (SMgr)
 			{

@@ -350,7 +350,7 @@ int UDPClient::UDP_RecvFromServer(char *buffer, int size)
     int rtn = ::recv(m_Listen_Socket, buffer, size, 0);
     if (rtn < 0)
     {
-        // 200ms backoff matches the Win32 path's Sleep(200) on -1.
+        // 200ms backoff matches the Win32 path's usleep(200 * 1000) on -1.
         usleep(200 * 1000);
     }
     return rtn;

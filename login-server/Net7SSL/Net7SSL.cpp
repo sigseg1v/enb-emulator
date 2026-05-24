@@ -190,7 +190,7 @@ int main(int argc, char **argv)
     g_receive_time            = GetNet7TickCount() + 60 * 1000;
 
     while (!g_ServerShutdown) {
-        usleep(500 * 1000); // 500ms — matches Win32 Sleep(500)
+        usleep(500 * 1000); // 500ms — matches Win32 usleep(500 * 1000)
         unsigned long current_tick = GetNet7TickCount();
 
         MailMgr->CheckMessages();

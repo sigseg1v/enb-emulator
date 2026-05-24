@@ -70,7 +70,7 @@ void Field::PopulateField(bool live, bool repopulate)
 
     if (m_FieldType == 0) //random
     {
-        m_FieldType = GetTickCount()%5 + 1;
+        m_FieldType = Net7TickMs()%5 + 1;
     }
 
     //create and populate asteroid field

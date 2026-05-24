@@ -47,7 +47,7 @@ TcpListener::~TcpListener()
     }
 
 	// Allow the listener thread to die
-	Sleep(1);
+	usleep(1 * 1000);
 }
 
 // This is the entry point for the TCP listener thread
@@ -134,7 +134,7 @@ void TcpListener::RunThread()
 			// add error handling
 		}
 
-		Sleep(10);
+		usleep(10 * 1000);
     }
 
     m_TcpListenerThreadRunning = false;

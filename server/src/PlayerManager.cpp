@@ -607,7 +607,7 @@ void PlayerManager::RunLoginThread()
 		sleep_time = (long)(100 - (GetNet7TickCount() - current_tick)); 
 		if (sleep_time < 0) sleep_time = 0;
 		if (sleep_time > 100) sleep_time = 100;
-		Sleep(sleep_time);
+		usleep(sleep_time * 1000);
 	}
 }
 

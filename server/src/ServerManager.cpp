@@ -235,7 +235,7 @@ void ServerManager::RunMasterServer()
 		for (i = 0; i < 40; i++)
 		{
 			// Loop 20x per second
-			Sleep(50);
+			usleep(50 * 1000);
 			ServerCheck();
 		}
 
@@ -307,7 +307,7 @@ void ServerManager::RunSectorServer()
         for (i = 0; i < 40; i++)
         {
             // Loop 20x per second
-            Sleep(50);
+            usleep(50 * 1000);
             ServerCheck();
         }
 
@@ -447,7 +447,7 @@ void ServerManager::MainLoop()
 		ServerCheck();
 		sleep_time = (long)(50 - (GetNet7TickCount() - check_tick)); 
 		if (sleep_time < 0) sleep_time = 0;
-		Sleep(sleep_time);
+		usleep(sleep_time * 1000);
 	}
 
 	LogMessage("Server Shutting down ...\n");
@@ -463,7 +463,7 @@ void ServerManager::MainLoop()
 	
 	// TODO: Use event notification to make this safe
 	// Wait for clean shutdown
-	Sleep(5000);
+	usleep(5000 * 1000);
 }
 
 void ServerManager::ReloadAllObjects()

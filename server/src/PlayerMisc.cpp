@@ -324,7 +324,7 @@ void Player::DebugPlayerDock(bool flag)
 		m_MyDebugPlayer->m_Oldroom = 0;
 		m_MyDebugPlayer->SetActionFlag(65);
 		m_MyDebugPlayer->SendStarbaseAvatarList();
-		Sleep(300);
+		usleep(300 * 1000);
 		if (m_MyDebugPlayer)
 		{
 			m_MyDebugPlayer->BroadcastPosition();

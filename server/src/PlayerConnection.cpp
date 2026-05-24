@@ -1345,7 +1345,7 @@ void Player::SendAdvancedPositionalUpdate(long object_id, PositionInformation * 
 	//is this to ourselves?
 	if (this->GameID() == object_id)
 	{
-		Sleep(1);
+		usleep(1 * 1000);
 	}
 }
 
@@ -7868,7 +7868,7 @@ bool Player::HandleKick(char *param)
 
 		target->SendVaMessage("You have been kicked by %s: %s", Name(), reason);
 		g_ServerMgr->m_PlayerMgr.GMMessage(Message);
-		Sleep(100);
+		usleep(100 * 1000);
 		target->ForceLogout();
 		return 1;
 	}
@@ -7885,19 +7885,19 @@ void Player::ForceLogout()
 	/*
 	while (!Active() && PlayerIndex()->GetSectorNum() < 10000 && Count < 30)
 	{
-	Sleep(1000);
+	usleep(1000 * 1000);
 	Count++;
 	}
 	*/
 
 	// Give them 5 seconds to read the kick message!
-	//Sleep(5000);
+	//usleep(5000 * 1000);
 
 	long GameIDD = GameID();
 
 	SendOpcode(ENB_OPCODE_0003_LOGOFF, (unsigned char*)&GameIDD, sizeof(GameIDD));
 	SendPacketCache();
-	Sleep(100);
+	usleep(100 * 1000);
 
 	g_ServerMgr->m_PlayerMgr.LeaveGroup(GroupID(),GameID());
 	g_ServerMgr->m_PlayerMgr.DropPlayerFromGalaxy(this);
@@ -7990,7 +7990,7 @@ bool Player::HandleAggroSetting(char *param)
 			"UPDATE `mob_base` SET `aggressiveness` = '%d' WHERE `mob_id` = '%d'", aggro_level, mob->GetMOBType());
 		MobUpdate.run_query(queryString);
 
-		Sleep(200);
+		usleep(200 * 1000);
 		ShipIndex()->CurrentStats.SetScanRange(scan_range);
 		ResetRangeLists();
 		CheckObjectRanges();
@@ -9451,7 +9451,7 @@ bool Player::HandleScaleRequest(char *param)
 					// Remove the Object
 					obj->Remove();
 					SendPacketCache();
-					Sleep(200);
+					usleep(200 * 1000);
 					// Recreate the Object
 					obj->SendObject(this);
 				}
@@ -9459,7 +9459,7 @@ bool Player::HandleScaleRequest(char *param)
 				{
 					RemoveObject(target_id);
 					SendPacketCache();
-					Sleep(200);
+					usleep(200 * 1000);
 					obj->SendObject(this);
 				}
 			}
@@ -9488,7 +9488,7 @@ bool Player::HandleSpinRequest(char *param)
 
 			RemoveObject(target_id);
 			SendPacketCache();
-			Sleep(200);
+			usleep(200 * 1000);
 			obj->SendObject(this);
 		}
 		else
@@ -9518,7 +9518,7 @@ bool Player::HandleTiltRequest(char *param)
 
 			RemoveObject(target_id);
 			SendPacketCache();
-			Sleep(200);
+			usleep(200 * 1000);
 			obj->SendObject(this);
 		}
 		else
@@ -9554,15 +9554,15 @@ bool Player::HandleBassetRequest(char *param)
 		obj->Remove();
 		//ensure remove and re-create aren't in same packet stream.
 		SendPacketCache();
-		Sleep(200);
+		usleep(200 * 1000);
 		// Recreate the Object
 		obj->SendObject(this);
 		SendPacketCache();
-		Sleep(200);
+		usleep(200 * 1000);
 		obj->Remove();
 		//ensure remove and re-create aren't in same packet stream.
 		SendPacketCache();
-		Sleep(200);
+		usleep(200 * 1000);
 		// Recreate the Object
 		obj->SendObject(this);
 	}

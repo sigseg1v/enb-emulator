@@ -50,7 +50,7 @@ SSL_Listener::~SSL_Listener()
     m_Mutex.Unlock();
 
 	// Allow the listener thread to die
-	Sleep(1);
+	usleep(1 * 1000);
 }
 
 // This is the entry point for the listener thread
@@ -130,7 +130,7 @@ void SSL_Listener::RunThread()
 			// add error handling
 		}
 
-		Sleep(10);
+		usleep(10 * 1000);
     }
 
     m_SslListenerThreadRunning = false;

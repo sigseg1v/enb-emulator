@@ -49,7 +49,7 @@ UDP_Connection::UDP_Connection(unsigned short port, ServerManager *server_mgr, i
 
 	if(m_Socket == INVALID_SOCKET)
 	{
-		LogMessage("Invalid Socket %d for UDP connection.\n", WSAGetLastError());
+		LogMessage("Invalid Socket %d for UDP connection.\n", errno);
 		return;
 	}
 
@@ -77,7 +77,7 @@ UDP_Connection::~UDP_Connection()
 	int timeout = 0; // port 3702 is not closing properly!
 	while (m_ThreadRunning && timeout < 100)
 	{
-		Sleep(1);
+		usleep(1 * 1000);
 		timeout++;
 	}
 }
@@ -241,7 +241,7 @@ void UDP_Connection::Reset_Socket()
 
 	if(m_Socket == INVALID_SOCKET)
 	{
-		LogMessage("Socket Reset: Invalid Socket %d for UDP connection.\n", WSAGetLastError());
+		LogMessage("Socket Reset: Invalid Socket %d for UDP connection.\n", errno);
 		return;
 	}
 
@@ -301,8 +301,8 @@ int UDP_Connection::UDP_RecvS(char *buffer, int size, long &source_addr, unsigne
 	{
 		if (!g_ServerShutdown)
 		{
-			//Sleep(200);
-			DWORD dwError = WSAGetLastError();
+			//usleep(200 * 1000);
+			DWORD dwError = errno;
 #ifdef WIN32
 			if (dwError == WSAENOTSOCK)
 #else

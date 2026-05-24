@@ -7,7 +7,7 @@
 // + Added SSL Context handler, which was moved from SSL_Connection
 // = Simplified listener a little, mainly for Linux compatibility
 // = General cleanup
-// + Added SocketReady() function, which replaced the Sleep() for the thread. Quicker response time and lower CPU usage.
+// + Added SocketReady() function, which replaced the usleep(() * 1000) for the thread. Quicker response time and lower CPU usage.
 // = Fixed Bug: Didn't look for g_ServerShutdown
 
 // NB: despite all these mods the SSL system in now working a lot worse than before (which may be due to an external factor to be fair).
@@ -97,7 +97,7 @@ SSL_Listener::~SSL_Listener()
 	if (m_ssl_context) SSL_CTX_free(m_ssl_context);
 
 	// Allow the listener thread to die
-	Sleep(1);
+	usleep(1 * 1000);
 }
 
 // This is the entry point for the listener thread

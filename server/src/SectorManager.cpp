@@ -884,7 +884,7 @@ void SectorManager::RunSectorEventThread()
 		sleep_time = (long)(100 - (GetNet7TickCount() - starting_tick)); 
 		if (sleep_time < 1) sleep_time = 1;
 		if (sleep_time > 100) sleep_time = 100;
-		Sleep(sleep_time);
+		usleep(sleep_time * 1000);
 	}
 }
 

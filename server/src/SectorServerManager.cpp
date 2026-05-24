@@ -195,7 +195,7 @@ bool SectorServerManager::CheckConnections()
 						//LogMessage("Assigned ID: %d out of %d\n", i, m_NumUnassignedSectors);
 					    m_SectorAssigned[i] = true;
     					m_NumUnassignedSectors--;
-                        Sleep(100); // wait 100 ms between assignments 
+                        usleep(100 * 1000); // wait 100 ms between assignments 
 						assignments_complete = false;
                         break;
                     } 
