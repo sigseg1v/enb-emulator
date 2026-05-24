@@ -15,18 +15,20 @@
 ** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
 **
 */
+#ifndef NET7_MAILSLOT_MANAGER_H_
+#define NET7_MAILSLOT_MANAGER_H_
+
 #include "Net7.h"
 #include <stdio.h>
 
-#ifdef WIN32
-extern LPTSTR g_OutputSlot;
-extern LPTSTR g_InputSlot;
-extern LPTSTR g_EventName;
-#else
+// Server-native build is Linux-only — the AF_UNIX SOCK_DGRAM IPC bus
+// replaced the Win32 mailslot transport in Phase J / M. These globals
+// are the per-app socket paths under /run/net7-ipc/.
 extern const char *g_OutputSlot;
 extern const char *g_InputSlot;
 extern const char *g_EventName;
-#endif
+
+namespace net7ipc { class PosixIpc; }
 
 class MailManager
 {
@@ -41,22 +43,11 @@ public:
 	void ResetMailSystem();
 
 private:
-	void SetUpSendSlot();
-
-#ifdef WIN32
-	HANDLE m_hSlot;
-	HANDLE m_hFile;
-	HANDLE m_hEvent;
-#else
-	// On Linux m_hSlot owns a heap-allocated net7ipc::PosixIpc*; the
-	// other two were Win32-only file/event handles and stay unused.
-	void  *m_hSlot;
-	void  *m_hFile;
-	void  *m_hEvent;
-#endif
-	bool   m_SendSlotInit;
-	unsigned char m_Buffer[1024];
+	net7ipc::PosixIpc *m_Ipc;
+	unsigned char      m_Buffer[1024];
 };
 
 #define LOCAL_PING_SSL_SERVER			0x04 //keepalive ping from ssl to server
 #define LOCAL_PING_SERVER_SSL			0x05 //keepalive ping from server to ssl
+
+#endif // NET7_MAILSLOT_MANAGER_H_

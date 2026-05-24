@@ -28,20 +28,12 @@
 #define MASTER_INSTANCE_MUTEX_NAME	"Net7 Master Server Instance Mutex"
 #define SECTOR_INSTANCE_MUTEX_NAME	"Net7 Sector Server port %d Instance Mutex"
 
-// IPC endpoint paths. On Windows these are mailslot UNC paths consumed
-// by CreateMailslot / CreateFile. On Linux they are AF_UNIX socket
-// paths (server reads from net7.sock, writes to net7SSL.sock; login
-// server is the mirror). Phase J: AF_UNIX SOCK_DGRAM replaces the
-// mailslot mechanism — see server/compat/posix_ipc.{h,cpp}.
-#ifdef WIN32
-LPTSTR g_InputSlot  = TEXT("\\\\.\\mailslot\\net7");
-LPTSTR g_OutputSlot = TEXT("\\\\.\\mailslot\\net7SSL");
-LPTSTR g_EventName  = TEXT("Net7SSLSlot");
-#else
+// IPC endpoint paths. AF_UNIX SOCK_DGRAM paths consumed by
+// net7ipc::PosixIpc (see server/compat/posix_ipc.{h,cpp}). The mailslot
+// Win32 transport is gone.
 const char *g_InputSlot  = "/run/net7-ipc/net7.sock";
 const char *g_OutputSlot = "/run/net7-ipc/net7SSL.sock";
 const char *g_EventName  = "Net7SSLSlot";
-#endif
 
 #pragma comment(lib, "wsock32.lib")
 #pragma comment(lib, "libmySQL.lib")
