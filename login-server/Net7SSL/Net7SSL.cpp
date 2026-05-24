@@ -611,6 +611,7 @@ char *GetSectorName(long sector_id)
 #include "Net7SSL.h"
 #include "SSL_Listener.h"
 #include "MailslotManager.h"
+#include <net7/SingleInstance.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -761,6 +762,15 @@ int main(int argc, char **argv)
     }
 
     LogMessage("Net7SSL (Linux Phase J) starting — bind %s:%d\n", bind_addr, SSL_PORT);
+
+    // Single-instance guard (flock on /run/enb-emulator/Net7SSL_Instance.pid).
+    // Replaces the Win32 CreateMutex(NULL, TRUE, "Net7SSL Instance") guard.
+    net7::SingleInstance instance_guard;
+    if (!instance_guard.Acquire(SSL_INSTANCE_MUTEX_NAME))
+    {
+        fprintf(stderr, "Net7SSL: another instance is already running.\n");
+        return 1;
+    }
 
     // Stand up the SSL listener. Mirrors the SSL_Listener constructor used
     // by Win32 main_prog() above. The listener spawns its own accept loop

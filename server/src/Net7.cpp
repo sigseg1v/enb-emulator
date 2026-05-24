@@ -21,6 +21,7 @@
 #include "ServerManager.h"
 #include "UDPConnection.h"
 #include "MailslotManager.h"
+#include <net7/SingleInstance.h>
 //#include "vld.h" // visual leak detector
 
 //DIMA: I don't think these are needed
@@ -368,25 +369,17 @@ int main(int argc, char* argv[])
 		return(1);
     }
 
-#ifdef WIN32
-    // First, make sure we only have one instance of the Global Server running
-    HANDLE instance_mutex = ::CreateMutex(NULL, TRUE, mutex_name);
-    if (instance_mutex == INVALID_HANDLE_VALUE)
-	{
-		::MessageBox(NULL, "Error creating instance mutex", "Net7", MB_ICONERROR);
-		return(1);
-	}
-
-    // if we did not create this mutex then .. another instance
-    // is already running
-    if (::GetLastError() == ERROR_ALREADY_EXISTS)
+    // Single-instance guard. flock on /run/enb-emulator/<name>.pid prevents
+    // a second copy of the global/sector server from coming up on the same
+    // host. Lock is held for the lifetime of `instance_guard` (i.e. main()'s
+    // scope).
+    net7::SingleInstance instance_guard;
+    if (!instance_guard.Acquire(mutex_name))
     {
-        // close the mutex
-        ::CloseHandle(instance_mutex);
-		::MessageBox(NULL, "Another instance of the Net-7 Server is already running", "Net7", MB_ICONERROR);
-		return(1);
+        fprintf(stderr, "Another instance of the Net-7 Server is already running (%s)\n",
+                mutex_name);
+        return(1);
     }
-#endif
 
     // Delete the previous log file and start a new one
 	//DeleteFile(g_LogFilename);
