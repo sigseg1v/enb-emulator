@@ -161,7 +161,7 @@
 	// (HANDLE, INVALID_HANDLE_VALUE, CloseHandle, _OVERLAPPED, ...) was
 	// retired in Phase M — every Linux-compiled call site that used those is
 	// either rewritten over POSIX (mailslot → AF_UNIX SOCK_DGRAM, see
-	// server/compat/posix_ipc.{h,cpp}) or walled in `#ifdef WIN32` and never
+	// common/include/net7/PosixIpc.h) or walled in `#ifdef WIN32` and never
 	// reached on the Linux build.
 	typedef wchar_t* BSTR;
 	typedef char* LPSTR;

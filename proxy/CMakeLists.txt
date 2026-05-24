@@ -56,7 +56,6 @@ add_executable(net7proxy
 
 target_include_directories(net7proxy PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
-    "${CMAKE_CURRENT_SOURCE_DIR}/compat"
     "${CMAKE_CURRENT_SOURCE_DIR}/../common/include"
 )
 

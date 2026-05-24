@@ -36,12 +36,10 @@
 #define SERVER_DATABASE_PATH	"..\\database\\"
 #define SERVER_USER_PATH		"..\\database\\Users\\"
 #else // Linux
-// Phase J Linux port: pull in POSIX + the compat shims so legacy Win32
-// typedefs (DWORD, HANDLE, BOOL, LPTSTR, SOCKET, INVALID_SOCKET, ...) are
-// available throughout the proxy tree without editing every translation
-// unit.
-#include "compat/win32_shim.h"
-#include "compat/threading_shim.h"
+// Phase M: the legacy code references Win32 typedefs (DWORD, HANDLE,
+// SOCKET, ...) and helpers (Sleep, GetTickCount) directly. Inline them
+// here as thin POSIX wrappers; the per-target `compat/` shim directory
+// that used to provide them was deleted in Phase M.
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -52,6 +50,9 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <pthread.h>
+#include <strings.h>
+#include <cstdint>
+#include <ctime>
 // _vsnprintf is the msvcrt name; POSIX has vsnprintf.
 #define _vsnprintf  vsnprintf
 // Win32 sockets API names that legacy code uses:
@@ -68,12 +69,78 @@ typedef unsigned int UINT;
 #ifndef SOCKADDR_IN
 #define SOCKADDR_IN struct sockaddr_in
 #endif
-typedef int LPDWORD_int_alias;  // unused; reserved
 // MAX_PATH is a Win32 idiom; default to PATH_MAX semantics.
 #include <limits.h>
 #ifndef MAX_PATH
 #define MAX_PATH 260
 #endif
+
+// Minimal Win32 typedef aliases used by both walled (#ifdef WIN32) and
+// Linux-active legacy code. Walled code never compiles these on Linux;
+// these are here so the Linux paths that reference SOCKET m_Socket
+// (etc.) typecheck. Treat as a stable shim, not a place to grow new
+// Windows-isms.
+typedef uint32_t  DWORD;
+typedef uint16_t  WORD;
+typedef uint8_t   BYTE;
+typedef int       BOOL;
+typedef int32_t   LONG;
+typedef uint32_t  ULONG;
+typedef int64_t   LONGLONG;
+typedef uint64_t  ULONGLONG;
+typedef void*       LPVOID;
+typedef const char* LPCSTR;
+typedef char*       LPSTR;
+typedef char*       LPTSTR;
+typedef const char* LPCTSTR;
+typedef void* HANDLE;
+typedef int   SOCKET;
+#ifndef INVALID_SOCKET
+#  define INVALID_SOCKET (-1)
+#endif
+#ifndef SOCKET_ERROR
+#  define SOCKET_ERROR   (-1)
+#endif
+#ifndef TRUE
+#  define TRUE  1
+#endif
+#ifndef FALSE
+#  define FALSE 0
+#endif
+#ifndef TEXT
+#  define TEXT(x) x
+#endif
+#ifndef _T
+#  define _T(x) x
+#endif
+#ifndef INVALID_HANDLE_VALUE
+#  define INVALID_HANDLE_VALUE ((HANDLE)(intptr_t)(-1))
+#endif
+#ifndef INFINITE
+#  define INFINITE       0xFFFFFFFFu
+#endif
+#ifndef WAIT_OBJECT_0
+#  define WAIT_OBJECT_0  0x00000000u
+#endif
+#ifndef WAIT_TIMEOUT
+#  define WAIT_TIMEOUT   0x00000102u
+#endif
+#ifndef WAIT_FAILED
+#  define WAIT_FAILED    0xFFFFFFFFu
+#endif
+
+// Win32 helpers used by Linux-active code.
+static inline void Sleep(DWORD ms) {
+    ::usleep(static_cast<useconds_t>(ms) * 1000u);
+}
+static inline DWORD GetTickCount() {
+    struct timespec ts;
+    ::clock_gettime(CLOCK_MONOTONIC, &ts);
+    return static_cast<DWORD>(
+        (static_cast<uint64_t>(ts.tv_sec) * 1000ull
+         + static_cast<uint64_t>(ts.tv_nsec) / 1000000ull) & 0xFFFFFFFFu);
+}
+
 // The Net7Proxy logs/database paths are unused on the server-side Linux
 // build (Net7Proxy was originally a client-side launcher). Keep the names
 // defined so any legacy reference compiles.

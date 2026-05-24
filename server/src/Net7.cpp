@@ -29,7 +29,7 @@
 #define SECTOR_INSTANCE_MUTEX_NAME	"Net7 Sector Server port %d Instance Mutex"
 
 // IPC endpoint paths. AF_UNIX SOCK_DGRAM paths consumed by
-// net7ipc::PosixIpc (see server/compat/posix_ipc.{h,cpp}). The mailslot
+// net7ipc::PosixIpc (see common/include/net7/PosixIpc.h). The mailslot
 // Win32 transport is gone.
 const char *g_InputSlot  = "/run/net7-ipc/net7.sock";
 const char *g_OutputSlot = "/run/net7-ipc/net7SSL.sock";

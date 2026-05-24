@@ -2,7 +2,10 @@
 /* WARNING: Generated automatically from opensslconf.h.in by Configure. */
 
 /* OpenSSL was configured with the following options: */
-#ifndef OPENSSL_SYSNAME_WIN32
+/* Phase M: the original generator hard-coded WIN32 here. Gate the
+ * define on _WIN32 so the vendored headers do not pull in <windows.h>
+ * when this is consumed on Linux. */
+#if defined(_WIN32) && !defined(OPENSSL_SYSNAME_WIN32)
 # define OPENSSL_SYSNAME_WIN32
 #endif
 #ifndef OPENSSL_DOING_MAKEDEPEND

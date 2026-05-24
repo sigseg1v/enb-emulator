@@ -66,15 +66,10 @@
     typedef signed char     s8;
 
 #else // LINUX
-	// Phase J Linux port — the original ad-hoc #defines below predate the
-	// shared compat shim that proxy/ and server/ use. Pull in those shims
-	// first; the remaining typedefs are kept because much of the
-	// login-server tree references them with subtly-different signatures
-	// (e.g. `unsigned long` DWORD vs. shim's `uint32_t`). The compat shim
-	// is `#ifndef`-guarded throughout so duplicate definitions are not
-	// emitted.
-	#include "compat/win32_shim.h"
-	#include "compat/threading_shim.h"
+	// Phase M: the per-target compat/ shim that used to live in
+	// login-server/Net7SSL/compat/ was deleted. The legacy code still
+	// references Win32 typedefs (DWORD, HANDLE, SOCKET, ...) and helpers
+	// (Sleep, GetTickCount) directly, so inline thin POSIX wrappers here.
 	#include <sys/types.h>
 	#include <sys/socket.h>
 	#include <sys/times.h>
@@ -87,6 +82,9 @@
 	#include <pthread.h>
 	#include <unistd.h>
 	#include <fcntl.h>
+	#include <strings.h>
+	#include <cstdint>
+	#include <ctime>
 
 	#define ATTRIB_PACKED __attribute__((packed))
 	#ifndef MAX_PATH
@@ -94,7 +92,6 @@
 	#endif
 	// Win32 socket name closesocket -> POSIX close.
 	#define closesocket(s) ::close(s)
-	#define strcasecmp strcasecmp
 	#ifndef WSAECONNRESET
 	#define WSAECONNRESET	ECONNRESET
 	#endif
@@ -105,7 +102,6 @@
 	typedef unsigned int UINT;
 	#endif
 
-	#include <stdint.h>
 	typedef uint64_t u64;
 	typedef int64_t  s64;
 	typedef uint32_t u32;
@@ -121,16 +117,10 @@
 	#define SERVER_USER_PATH        "./database/Users/"
 	#define CONFIG_FILE				"Net7Config.cfg"
 
-	// Some MSVC <-> GCC redefines
-	#define snprintf snprintf
+	// Some MSVC <-> GCC redefines kept for legacy call sites.
 	#define _vsnprintf vsnprintf
-	#define strcasecmp strcasecmp
 	#define _isnan isnan
 	#define _alloca alloca
-	#define _sleep Sleep
-	#define strcasecmp strcasecmp
-	// atoll is specific to MSVC; atoll is the POSIX equivalent.
-	#define atoll atoll
 	// MSVC-only safe-string wrappers; map to their POSIX counterparts.
 	#define strcpy_s(dst, sz, src)  strncpy((dst), (src), (sz)-1)
 	#define sprintf_s(dst, sz, ...) snprintf((dst), (sz), __VA_ARGS__)
@@ -139,6 +129,71 @@
 	#define __cdecl
 	#define SOCKADDR_IN struct sockaddr_in
 	// SOMAXCONN normally provided by <sys/socket.h> on Linux too — no-op.
+
+	// Minimal Win32 typedef aliases used by both walled (#ifdef WIN32)
+	// and Linux-active legacy code. Walled code never compiles on
+	// Linux; these are here so the Linux paths that reference
+	// SOCKET m_Socket (etc.) typecheck.
+	typedef uint32_t  DWORD;
+	typedef uint16_t  WORD;
+	typedef uint8_t   BYTE;
+	typedef int       BOOL;
+	typedef int32_t   LONG;
+	typedef uint32_t  ULONG;
+	typedef int64_t   LONGLONG;
+	typedef uint64_t  ULONGLONG;
+	typedef void*       LPVOID;
+	typedef const char* LPCSTR;
+	typedef char*       LPSTR;
+	typedef char*       LPTSTR;
+	typedef const char* LPCTSTR;
+	typedef void* HANDLE;
+	typedef int   SOCKET;
+	#ifndef INVALID_SOCKET
+	#  define INVALID_SOCKET (-1)
+	#endif
+	#ifndef SOCKET_ERROR
+	#  define SOCKET_ERROR   (-1)
+	#endif
+	#ifndef TRUE
+	#  define TRUE  1
+	#endif
+	#ifndef FALSE
+	#  define FALSE 0
+	#endif
+	#ifndef TEXT
+	#  define TEXT(x) x
+	#endif
+	#ifndef _T
+	#  define _T(x) x
+	#endif
+	#ifndef INVALID_HANDLE_VALUE
+	#  define INVALID_HANDLE_VALUE ((HANDLE)(intptr_t)(-1))
+	#endif
+	#ifndef INFINITE
+	#  define INFINITE       0xFFFFFFFFu
+	#endif
+	#ifndef WAIT_OBJECT_0
+	#  define WAIT_OBJECT_0  0x00000000u
+	#endif
+	#ifndef WAIT_TIMEOUT
+	#  define WAIT_TIMEOUT   0x00000102u
+	#endif
+	#ifndef WAIT_FAILED
+	#  define WAIT_FAILED    0xFFFFFFFFu
+	#endif
+
+	// Win32 helpers used by Linux-active code.
+	static inline void Sleep(DWORD ms) {
+	    ::usleep(static_cast<useconds_t>(ms) * 1000u);
+	}
+	static inline DWORD GetTickCount() {
+	    struct timespec ts;
+	    ::clock_gettime(CLOCK_MONOTONIC, &ts);
+	    return static_cast<DWORD>(
+	        (static_cast<uint64_t>(ts.tv_sec) * 1000ull
+	         + static_cast<uint64_t>(ts.tv_nsec) / 1000000ull) & 0xFFFFFFFFu);
+	}
 
 	unsigned long GetCurrentDirectory(unsigned long size, char *path);
 	int SetCurrentDirectory(const char *path);
