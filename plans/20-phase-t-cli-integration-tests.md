@@ -536,10 +536,56 @@ xUnit `[Collection("server")]` ensures the docker stack stands up exactly once p
            Phase S/T are now the most-asked-about additions.
         ▸ docs/README.md index gets the row 16 entry.
 
-- [ ] Item 10 — Opcode coverage push: ratchet a "tested opcodes" metric in CI
-      Status: not started
-      Touches: tests/integration/CliClient.IntegrationTests/CoverageRatchet.cs, .github/workflows/build.yml
-      Notes: a meta-test that counts how many opcodes from `common/include/net7/Opcodes.h` have at least one round-trip test; a CI ratchet enforces "never goes down". Phase T starts at single-digit coverage and ramps with Phase K.
+- [x] Item 10 — Opcode coverage push: ratchet a "tested opcodes" metric in CI
+      Status: done
+      Touches: tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs (NEW),
+               tests/integration/CliClient.IntegrationTests/Coverage/CoverageRatchetTests.cs (NEW)
+      Notes: Shipped — hand-maintained list of opcodes with round-trip coverage,
+             ratcheted by an equality (not >=) check against a constant floor.
+        ▸ Baseline floor: MinTestedCount = 4 — VERSION_REQUEST (0x0000),
+          VERSION_RESPONSE (0x0001), MASTER_JOIN (0x0035), SERVER_REDIRECT
+          (0x0036). Single-digit start as predicted; ramps with Phase K.
+        ▸ TestedOpcode is a record (Value, SymbolicName, TestCitation). The
+          citation is the contract-by-comment that makes the entry honest —
+          a reviewer can open the cited file and verify the opcode actually
+          has a round-trip test there. Citations are checked at test time
+          for non-emptiness and ".cs" presence, but the truthfulness of
+          "this test really exercises that opcode" is on PR review.
+        ▸ Equality-check rationale (CoverageRatchetTests.Ratchet_CountEqualsFloor):
+          asserting `count == MinTestedCount` not `count >= MinTestedCount`.
+          Every entry-add MUST be paired with a constant-bump → no sneak-ins
+          where someone adds a citation without thinking about whether the
+          test is honest. Every entry-delete MUST drop the constant by one
+          AND explain in the commit message what coverage went away — the
+          equality-check forces the second change to be deliberate.
+        ▸ Auxiliary asserts: (a) every entry resolves to a real opcode in
+          OpcodeNames.All (catches typos + upstream renames); (b) no
+          duplicates by opcode value; (c) sorted by opcode value for
+          stable-diff PRs (each new entry shows as a clean single-line
+          insertion at the correct sorted slot); (d) every entry has a
+          non-empty .cs-containing citation.
+        ▸ Human-readable stat: CoverageStat_IsHumanReadable emits
+          `[coverage] 4/207 opcodes have round-trip integration coverage
+          (1.9%)` to stdout — both CI logs and local runs can grep for
+          `[coverage]` to surface the current ratio without parsing the
+          test names. Not an assertion (other than the impossible-by-
+          construction sanity bound tested<=universe).
+        ▸ What is NOT counted as round-trip coverage (documented verbatim
+          in TestedOpcodes.cs class doc): (i) codec-only unit tests under
+          tools/cli-client/tests/CliClient.UnitTests/Opcodes/ — those test
+          byte layout, not "the wire round-trips this"; (ii) the 207
+          named-opaque registrations in OpcodeRegistry — opaque means "we
+          recognise the opcode" not "we decode the payload"; (iii) opcodes
+          the client sends but whose reply we never assert (e.g. sector
+          LOGIN/0x0002 today — the Linux stub acks at connection-state
+          level only, no TCP response). These get added when a reply
+          path lights up.
+        ▸ Tests: 6/6 green, ~21ms total, no docker needed (pure
+          reflection over CliClient.Core).
+        ▸ Wiring: lives in the no-docker subset → already runs via
+          `just cli-integration-fast` and via the CI cli-integration-test
+          job. No separate workflow change needed — the ratchet trips
+          whatever job runs the test assembly.
 
 ## Verification
 
@@ -550,7 +596,7 @@ Phase T is done when:
 - At least the opcodes wired in Phase K have round-trip tests + at least one capture-replay test exists
 - Robustness tests catch a deliberately broken server (kill `proxy` mid-test → client aborts cleanly, test fails with a recognisable error, not a hang)
 - The coverage ratchet is wired and shows a non-trivial number
-- `docs/13-integration-tests.md` is written
+- `docs/16-integration-tests.md` is written (slot 13 was taken by gameplay-loop; integration-tests landed at 16, matching the pattern Phase S used at slot 15)
 
 ## Out of scope (don't do these in Phase T)
 
