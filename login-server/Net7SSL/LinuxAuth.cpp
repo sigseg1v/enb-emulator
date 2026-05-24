@@ -527,7 +527,11 @@ char *HandleHttpsRequest(char *recv_buffer, size_t *out_len,
         return HandleCertificate(out_len);
     }
     if (strstr(recv_buffer, "/who.cgi")) {
-        // Win32 has a stub for this too; return 404 for now.
+        // Linux no-op by design: the upstream Win32 implementation also
+        // never had a real `who.cgi` handler — WhoHtml was declared but
+        // never defined and any production hit 404'd through the same
+        // `MakeNotFound` fall-through below. Keep the explicit branch so
+        // a future implementer has a marker to hook into.
     }
 
     return MakeNotFound(out_len);

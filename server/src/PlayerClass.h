@@ -477,12 +477,15 @@ public:
 	void		FinishAllInstalls();
 
 	// kyp-era stubs referenced from Connection.cpp / Equipable.cpp. tada-o
-	// rewired or dropped these but kyp call sites still exist; provide
-	// no-op declarations and inline empty defs so the build links.
-	void		SetTCPTerminate()				{ }
-	void		ChangeProspectSkill(float)		{ }
-	void		AddScanSkill(float)				{ }
-	void		ChangeTractorBeamSpeed(float)	{ }
+	// rewired or dropped these but kyp call sites still exist. Phase M
+	// audit: silent no-ops were masking real gameplay bugs (e.g. Sculptor
+	// devices not actually granting Prospect skill). Log loudly on hit so
+	// any production occurrence shows up in the server log; promote to
+	// real implementations in the equipable-modifiers rework.
+	void		SetTCPTerminate()				{ LogMessage("STUB: Player::SetTCPTerminate() called — kyp-era; no behavior wired"); }
+	void		ChangeProspectSkill(float v)	{ LogMessage("STUB: Player::ChangeProspectSkill(%.3f) called — kyp-era; no behavior wired", v); }
+	void		AddScanSkill(float v)			{ LogMessage("STUB: Player::AddScanSkill(%.3f) called — kyp-era; no behavior wired", v); }
+	void		ChangeTractorBeamSpeed(float v)	{ LogMessage("STUB: Player::ChangeTractorBeamSpeed(%.3f) called — kyp-era; no behavior wired", v); }
     //save/load status
 	void		LoadGMItems();
 	void		SaveWarnLvl(long WarnChar, long warn_inc, char *WMsg);

@@ -111,12 +111,9 @@ Server still builds. Existing Phase J integration tests (5/5 green at Phase J cl
 
 ### Event-loop signaling → eventfd or condvar
 
-- [ ] **Replace `CreateEvent` / `WaitForSingleObject(event, timeout)` patterns**. 12 + 8 hits but only ~3 distinct usage patterns:
-      1. "wake me when there's work" → use `pthread_cond_t` + mutex, or eventfd if cross-thread fd-poll is needed.
-      2. "wait until thread is ready" → drop with the CREATE_SUSPENDED cleanup above.
-      3. "timed wait then poll" → `pthread_cond_timedwait` or just sleep + check.
-      Audit each site; pick the simplest primitive per pattern.
-      Status: not started
+- [x] **Replace `CreateEvent` / `WaitForSingleObject(event, timeout)` patterns**. Audit (git grep -nE 'CreateEvent\b|WaitForSingleObject\b|SetEvent\b|ResetEvent\b' across server-native code, excluding vendored) returns **zero live call sites** — only one comment hit in server/src/Net7.h listing retired Win32 stubs. The 12+8 hit count from the prior estimate counted comment references and walled-out branches. All live event-loop signaling in the server is already either `pthread_cond_t` (e.g. SaveManager save-queue wake) or std::condition_variable. No work needed.
+      Status: complete
+      Touches: (audit only)
 
 ### SOCKET → int
 
@@ -145,8 +142,9 @@ Server still builds. Existing Phase J integration tests (5/5 green at Phase J cl
 - [x] **Delete `login-server/Net7SSL/compat/`** directory. Done. The minimum needed Win32 typedef set (SOCKET, HANDLE, DWORD, etc.) and helpers (Sleep, GetTickCount) was inlined into the respective `Net7.h` / `Net7SSL.h` umbrella headers instead, so legacy call sites typecheck without a separate compat tree.
       Status: complete
 
-- [ ] **Strip the Linux-side Win32 typedef block from `server/src/Net7.h`, `proxy/Net7.h`, `login-server/Net7SSL/Net7SSL.h`** (the SOCKET/HANDLE/DWORD/LPTSTR/LPVOID typedefs + Sleep/GetTickCount helpers). Pre-req: rewrite every Linux-active call site of those symbols to POSIX equivalents (~80 hits in active code; the bulk of the ~223 git-grep hits live in `#ifdef WIN32` walls and don't count).
-      Status: not started — vocabulary sweep, follows after Phase K unwalls the larger TUs
+- [~] **Strip the Linux-side Win32 typedef block from `server/src/Net7.h`, `proxy/Net7.h`, `login-server/Net7SSL/Net7SSL.h`** (the SOCKET/HANDLE/DWORD/LPTSTR/LPVOID typedefs + Sleep/GetTickCount helpers). Pre-req: rewrite every Linux-active call site of those symbols to POSIX equivalents.
+      Status: in progress — **behavioral half done.** The inlined `Sleep(DWORD)` and `GetTickCount()` helpers in all three umbrella headers are retired (commit dc5cfe4 / 2e9937b). `Net7TickMs()` lives in `common/include/net7/Ticks.h`; call sites use `usleep(ms * 1000)` and `Net7TickMs()` directly. `WSAGetLastError()` → `errno` swept in the same pass. The pure-typedef half (SOCKET, DWORD, HANDLE, MAX_PATH, INVALID_SOCKET, TRUE/FALSE, etc.) is **deferred**: the typedefs themselves are pure aliases over standard C types — removing them is cosmetic cleanup that compiles identically, and the remaining live-on-Linux call sites are split across ~30 files. Worth doing, but doesn't pay back as much as the behavioral half. Sequence after Phase K unwalls more TUs so the sweep covers them too.
+      Touches: common/include/net7/Ticks.h (new), server/src/Net7.{cpp,h}, proxy/Net7.h, login-server/Net7SSL/Net7SSL.h, and ~20 .cpp files (vocabulary sweep, commits dc5cfe4 + 2e9937b)
 
 - [x] **Strip CMakeLists.txt references**: compat globs and include paths removed from `server/CMakeLists.txt`, `proxy/CMakeLists.txt`, `login-server/Net7SSL/CMakeLists.txt`. The shared `common/PosixIpc.cpp` is now compiled directly into server and login-server (proxy doesn't need IPC).
       Status: complete
