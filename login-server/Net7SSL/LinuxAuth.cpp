@@ -193,87 +193,100 @@ bool EnsureDbConnected()
     return true;
 }
 
-// PHASE-N TODO: delete this function. It exists because the legacy
-// mysqlplus wrapper has no prepared-statement support — the only way
-// to talk to MySQL is mysql_query(const char *), so every query is
-// string-built and every dynamic value is a potential injection. The
-// right fix is parameterised statements (see plans/14-phase-n-libpqxx-
-// rewrite.md). Until that lands, this whitelist (`[A-Za-z0-9_.-]`)
-// keeps the auth path's injection surface to zero. Anyone adding a
-// new query in Linux code is expected to also call this — which is
-// exactly the brittleness Phase N gets rid of.
-bool SafeUsername(const char *in, char *out, size_t outsz)
-{
-    if (!in || outsz < 2) return false;
-    size_t i = 0;
-    for (; in[i] && i < outsz - 1; i++) {
-        char c = in[i];
-        bool ok = (c >= 'A' && c <= 'Z') ||
-                  (c >= 'a' && c <= 'z') ||
-                  (c >= '0' && c <= '9') ||
-                  c == '_' || c == '.' || c == '-';
-        if (!ok) return false;
-        out[i] = c;
-    }
-    if (i == 0) return false;
-    out[i] = 0;
-    return true;
-}
-
-// PHASE-N TODO: delete (see SafeUsername above). The fact that this
-// rejects characters which are *legal* in a password (`'`, `"`, `\`, `%`)
-// is the smoking gun that this is a SQL-shape constraint masquerading
-// as a password policy. Parameterised statements remove the rationale.
-bool SafePassword(const char *in, char *out, size_t outsz)
-{
-    if (!in || outsz < 2) return false;
-    size_t i = 0;
-    for (; in[i] && i < outsz - 1; i++) {
-        unsigned char c = (unsigned char)in[i];
-        if (c < 0x20 || c > 0x7e) return false;
-        if (c == '\'' || c == '"' || c == '\\' || c == '%') return false;
-        out[i] = (char)c;
-    }
-    if (i == 0) return false;
-    out[i] = 0;
-    return true;
-}
-
 // Returns true if (username, MD5(password)) matches a row in
 // net7_user.accounts. Matches AccountManager::ValidateAccount.
+//
+// Phase N+ Wave 2: switched to libmysqlclient prepared statements
+// (mysql_stmt_*). Parameter binding gives true SQL-injection immunity —
+// the query template and the values travel on separate channels, so
+// hostile input ("'; DROP TABLE accounts; --") rounds-trips as literal
+// data and never executes. This retired SafeUsername/SafePassword,
+// which were per-character whitelists masquerading as input policy:
+// SafePassword rejected `'`/`"`/`\`/`%` (legal password characters!)
+// purely because those were the SQL-shape escape hazards.
 bool ValidateAccountLinux(const char *username, const char *password)
 {
     if (!EnsureDbConnected()) return false;
+    if (!username || !password || !*username || !*password) return false;
 
-    char query[512];
-    snprintf(query, sizeof(query),
-             "SELECT `id` FROM `accounts` "
-             "WHERE `username` = '%s' AND `password` = UPPER(MD5('%s'))",
-             username, password);
-
-    g_DbMutex.Lock();
     bool ok = false;
     long account_id = -1;
-    if (mysql_query(g_DbConn, query) == 0) {
-        MYSQL_RES *res = mysql_store_result(g_DbConn);
-        if (res) {
-            if (mysql_num_rows(res) > 0) {
-                MYSQL_ROW row = mysql_fetch_row(res);
-                if (row && row[0]) {
-                    account_id = atol(row[0]);
-                    ok = true;
-                }
-            }
-            mysql_free_result(res);
-        }
-    } else {
-        LogMessage("LinuxAuth: ValidateAccount query failed: %s\n",
+
+    g_DbMutex.Lock();
+
+    MYSQL_STMT *stmt = mysql_stmt_init(g_DbConn);
+    if (!stmt) {
+        LogMessage("LinuxAuth: mysql_stmt_init failed: %s\n",
                    mysql_error(g_DbConn));
+        g_DbMutex.Unlock();
+        return false;
     }
+
+    static const char kSelect[] =
+        "SELECT `id` FROM `accounts` "
+        "WHERE `username` = ? AND `password` = UPPER(MD5(?))";
+
+    if (mysql_stmt_prepare(stmt, kSelect, sizeof(kSelect) - 1) != 0) {
+        LogMessage("LinuxAuth: ValidateAccount prepare failed: %s\n",
+                   mysql_stmt_error(stmt));
+        mysql_stmt_close(stmt);
+        g_DbMutex.Unlock();
+        return false;
+    }
+
+    MYSQL_BIND in_bind[2];
+    memset(in_bind, 0, sizeof(in_bind));
+    unsigned long ulen = (unsigned long)strlen(username);
+    unsigned long plen = (unsigned long)strlen(password);
+    in_bind[0].buffer_type   = MYSQL_TYPE_STRING;
+    in_bind[0].buffer        = const_cast<char *>(username);
+    in_bind[0].buffer_length = ulen;
+    in_bind[0].length        = &ulen;
+    in_bind[1].buffer_type   = MYSQL_TYPE_STRING;
+    in_bind[1].buffer        = const_cast<char *>(password);
+    in_bind[1].buffer_length = plen;
+    in_bind[1].length        = &plen;
+
+    if (mysql_stmt_bind_param(stmt, in_bind) != 0) {
+        LogMessage("LinuxAuth: bind_param failed: %s\n",
+                   mysql_stmt_error(stmt));
+        mysql_stmt_close(stmt);
+        g_DbMutex.Unlock();
+        return false;
+    }
+
+    if (mysql_stmt_execute(stmt) != 0) {
+        LogMessage("LinuxAuth: ValidateAccount execute failed: %s\n",
+                   mysql_stmt_error(stmt));
+        mysql_stmt_close(stmt);
+        g_DbMutex.Unlock();
+        return false;
+    }
+
+    MYSQL_BIND out_bind;
+    memset(&out_bind, 0, sizeof(out_bind));
+    long out_id = 0;
+    // MySQL 8.0 dropped `my_bool`; the bind struct's is_null field is `bool*`.
+    bool out_null = false;
+    out_bind.buffer_type = MYSQL_TYPE_LONG;
+    out_bind.buffer      = &out_id;
+    out_bind.is_null     = &out_null;
+    mysql_stmt_bind_result(stmt, &out_bind);
+
+    if (mysql_stmt_store_result(stmt) == 0 &&
+        mysql_stmt_num_rows(stmt) > 0 &&
+        mysql_stmt_fetch(stmt) == 0 &&
+        !out_null) {
+        account_id = out_id;
+        ok = true;
+    }
+    mysql_stmt_close(stmt);
     g_DbMutex.Unlock();
 
     if (ok) {
         // Match the Win32 UpdateLoginTime() — call accLogin stored proc.
+        // Same prepared-statement pattern. account_id is server-controlled
+        // (came from the SELECT above) but bind anyway for consistency.
         char ts[32];
         time_t now;
         time(&now);
@@ -281,22 +294,34 @@ bool ValidateAccountLinux(const char *username, const char *password)
         gmtime_r(&now, &gmt);
         strftime(ts, sizeof(ts), "%Y/%m/%d %H:%M:%S", &gmt);
 
-        char update[256];
-        snprintf(update, sizeof(update),
-                 "CALL net7_user.accLogin(%ld, '%s')", account_id, ts);
         g_DbMutex.Lock();
-        if (mysql_query(g_DbConn, update) != 0) {
-            // Non-fatal — the proc may not exist on stripped schemas.
-            LogMessage("LinuxAuth: accLogin update failed (non-fatal): %s\n",
-                       mysql_error(g_DbConn));
-        } else {
-            // Drain any result so the connection is reusable.
-            MYSQL_RES *res = mysql_store_result(g_DbConn);
-            if (res) mysql_free_result(res);
-            while (mysql_next_result(g_DbConn) == 0) {
-                MYSQL_RES *r2 = mysql_store_result(g_DbConn);
-                if (r2) mysql_free_result(r2);
+        MYSQL_STMT *upd = mysql_stmt_init(g_DbConn);
+        if (upd) {
+            static const char kCall[] = "CALL net7_user.accLogin(?, ?)";
+            if (mysql_stmt_prepare(upd, kCall, sizeof(kCall) - 1) == 0) {
+                MYSQL_BIND b[2];
+                memset(b, 0, sizeof(b));
+                unsigned long tslen = (unsigned long)strlen(ts);
+                b[0].buffer_type = MYSQL_TYPE_LONG;
+                b[0].buffer      = &account_id;
+                b[1].buffer_type = MYSQL_TYPE_STRING;
+                b[1].buffer      = ts;
+                b[1].buffer_length = tslen;
+                b[1].length      = &tslen;
+                mysql_stmt_bind_param(upd, b);
+                if (mysql_stmt_execute(upd) != 0) {
+                    // Non-fatal — the proc may not exist on stripped schemas.
+                    LogMessage("LinuxAuth: accLogin update failed (non-fatal): %s\n",
+                               mysql_stmt_error(upd));
+                } else {
+                    // Drain any result so the connection is reusable.
+                    while (mysql_stmt_next_result(upd) == 0) { /* discard */ }
+                }
+            } else {
+                LogMessage("LinuxAuth: accLogin prepare failed (non-fatal): %s\n",
+                           mysql_stmt_error(upd));
             }
+            mysql_stmt_close(upd);
         }
         g_DbMutex.Unlock();
     }
@@ -371,22 +396,19 @@ char *HandleAuthLogin(size_t *out_len, char *recv_buffer, unsigned long client_i
         LogMessage("LinuxAuth: AuthLogin '%s' from %u.%u.%u.%u\n",
                    u, ip[0], ip[1], ip[2], ip[3]);
 
-        char safe_u[64], safe_p[128];
-        if (!SafeUsername(u, safe_u, sizeof(safe_u))) {
-            LogMessage("LinuxAuth: rejecting unsafe username\n");
-        } else if (!SafePassword(p, safe_p, sizeof(safe_p))) {
-            LogMessage("LinuxAuth: rejecting unsafe password\n");
-        } else if (ValidateAccountLinux(safe_u, safe_p)) {
+        // Prepared-statement bind makes SQL injection structurally impossible;
+        // no whitelist gate needed before passing the raw fields through.
+        if (ValidateAccountLinux(u, p)) {
             g_TicketMutex.Lock();
-            const char *ticket = BuildTicketLocked(safe_u);
+            const char *ticket = BuildTicketLocked(u);
             char issued[128];
             strncpy(issued, ticket, sizeof(issued) - 1);
             issued[sizeof(issued) - 1] = 0;
             g_TicketMutex.Unlock();
             snprintf(info, sizeof(info), "Valid=TRUE\r\nTicket=%s\r\n", issued);
-            LogMessage("LinuxAuth: ticket issued for '%s'\n", safe_u);
+            LogMessage("LinuxAuth: ticket issued for '%s'\n", u);
         } else {
-            LogMessage("LinuxAuth: ValidateAccount failed for '%s'\n", safe_u);
+            LogMessage("LinuxAuth: ValidateAccount failed for '%s'\n", u);
         }
     }
 
