@@ -26,19 +26,11 @@
 #include <thread>
 #endif
 
-// This helper function is referenced by _beginthread to launch the TCP Listener thread.
-#ifdef WIN32
-void __cdecl RunSslListenerThread(void *arg)
-#else
+// Entry point handed to pthread_create.
 void * RunSslListenerThread(void *arg)
-#endif
 {
 	((SSL_Listener *) arg)->RunThread();
-#ifdef WIN32
-	_endthread();
-#else
 	return NULL;
-#endif	
 }
 
 // Constructor
@@ -94,11 +86,7 @@ SSL_Listener::SSL_Listener(unsigned long ip_address, unsigned short port)
 
 	SSL_CTX_set_mode(m_ssl_context, SSL_MODE_AUTO_RETRY); 	// Avoids the SSL_ERROR_WANT_READ / WRITE
 
-#ifdef WIN32
-	_beginthread(&RunSslListenerThread, 0, this);
-#else
 	pthread_create(&m_Thread, NULL, &RunSslListenerThread, (void *) this);
-#endif
 }
 
 // Destructor

@@ -66,26 +66,16 @@ SectorManager::SectorManager(ServerManager *server_mgr)
 	m_JobTerminalLevel = 0;
 	m_JobListID = 0;
 
-#ifdef WIN32
-	m_SectorThread = 0;
-#else
 	std::memset(&m_SectorThread, 0, sizeof(m_SectorThread));
-#endif
 }
 
 void SectorManager::BeginSectorThread()
 {
 	if (m_SectorID != -1)
 	{
-#ifdef WIN32
-		UINT uiThreadId = 0;
-		//Don't actually create the thread until we know it's needed
-		m_SectorThread = (HANDLE)_beginthreadex(NULL, 0, RunEventThreadAPI, this, 0, &uiThreadId);
-#else
-		// Phase M: pthread replacement for _beginthreadex.
+		// Don't actually create the thread until we know it's needed.
 		if (pthread_create(&m_SectorThread, NULL, RunEventThreadAPI, this) != 0)
 			LogMessage("SectorManager [%d]: pthread_create failed (%s)\n", m_SectorID, strerror(errno));
-#endif
 		//now start this sector's listener
 		// Find a port that will work!
 		while(StartListener(g_ServerMgr->GetSectorPort()) == false);
@@ -1440,23 +1430,13 @@ long SectorManager::GetOccupancy()
 	return count;
 }
 
-// This helper function is referenced by _beginthread (Win32) /
-// pthread_create (Linux) to launch the per-sector event thread.
-#ifdef WIN32
-UINT WINAPI SectorManager::RunEventThreadAPI(LPVOID Param)
-{
-	SectorManager* p_this = reinterpret_cast<SectorManager*>( Param );
-	p_this->RunSectorEventThread();
-	return 1;
-}
-#else
+// Entry point handed to pthread_create for the per-sector event thread.
 void *SectorManager::RunEventThreadAPI(void *Param)
 {
 	SectorManager* p_this = reinterpret_cast<SectorManager*>( Param );
 	p_this->RunSectorEventThread();
 	return NULL;
 }
-#endif
 
 void SectorManager::RefreshJobs()
 {

@@ -69,8 +69,9 @@ Likely additional candidates surfaced during work: `Globals.h`, `Mutex.h`, `Circ
 - [x] Integration tests pass after Wave 2 (8/8 from running docker proxy + 14/14 unit, total 22/22 green)
       Status: done
       Notes: test client + running proxy interop'd cleanly (wire format intact across the Wave 2 client-side rebuild). Local docker proxy container reuse meant we couldn't validate the post-Wave-2 *proxy binary*, but the WireFormat.* tests check struct sizes/offsets at compile time via static_assert, and those passed.
-- [ ] Update CLAUDE.md + docs/02-architecture.md to point at `common/`
-      Status: not started
+- [x] Update CLAUDE.md + docs/02-architecture.md to point at `common/`
+      Status: done
+      Notes: CLAUDE.md repo map shows common/include/net7/ subtree + new "where to put new things" row routing wire-format additions through common/. docs/02-architecture.md gets new §10 with the seven-header table, the two drift cases, and the heuristic for what goes in common/ vs. per-process headers. commit 84ec4db.
 
 ### Wave 3 — backlog (deferred — Phase R can close after Wave 2 wire-format wins, these are cleanups)
 

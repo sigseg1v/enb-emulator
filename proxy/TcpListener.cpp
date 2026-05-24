@@ -9,20 +9,12 @@
 #include "Connection.h"
 #include "ServerManager.h"
 
-// This helper function is referenced by _beginthread to launch the TCP Listener thread.
-#ifdef WIN32
-void __cdecl RunTcpListenerThread(void *arg)
-{
-    ((TcpListener *) arg)->RunThread();
-	_endthread();
-}
-#else // Linux
+// Entry point handed to pthread_create.
 void * RunTcpListenerThread(void *arg)
 {
     ((TcpListener *) arg)->RunThread();
     return NULL;
 }
-#endif
 
 // Constructor
 TcpListener::TcpListener(unsigned long ip_address, unsigned short port, ServerManager &server_mgr, int server_type)
@@ -38,11 +30,7 @@ TcpListener::TcpListener(unsigned long ip_address, unsigned short port, ServerMa
     m_TcpListenerSocket = INVALID_SOCKET;
 
     // Launch the Listener thread
-#ifdef WIN32
-    _beginthread(&RunTcpListenerThread, 0, this);
-#else
     pthread_create(&m_Thread, NULL, &RunTcpListenerThread, (void *) this);
-#endif
 }
 
 // Destructor

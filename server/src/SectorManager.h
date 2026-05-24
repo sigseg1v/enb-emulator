@@ -190,14 +190,8 @@ private:
 	long	GetJobCount();
 	JobNode	*GetJobNode(int ID);
 
-	// Per-sector event thread entry. The Win32 build hands this to
-	// _beginthreadex (returns UINT, __stdcall); the Linux build hands it to
-	// pthread_create (returns void*).
-#ifdef WIN32
-	static UINT WINAPI RunEventThreadAPI(void *Param);
-#else
+	// Per-sector event thread entry, handed to pthread_create.
 	static void *      RunEventThreadAPI(void *Param);
-#endif
 
 private:
     Mutex           m_Mutex;
@@ -243,11 +237,7 @@ private:
 	long			m_JobListID;
 	
 
-#ifdef WIN32
-	HANDLE			m_SectorThread;
-#else
 	pthread_t		m_SectorThread;
-#endif
 
 	float			m_xmin;
 	float			m_xmax;

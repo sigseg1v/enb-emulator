@@ -9,20 +9,12 @@
 #include "SSL_Connection.h"
 #include "ServerManager.h"
 
-// This helper function is referenced by _beginthread to launch the TCP Listener thread.
-#ifdef WIN32
-void __cdecl RunSslListenerThread(void *arg)
-{
-    ((SSL_Listener *) arg)->RunThread();
-	_endthread();
-}
-#else // Linux
+// Entry point handed to pthread_create.
 void * RunSslListenerThread(void *arg)
 {
     ((SSL_Listener *) arg)->RunThread();
     return NULL;
 }
-#endif
 
 // Constructor
 SSL_Listener::SSL_Listener(unsigned long ip_address, unsigned short port, ServerManager &server_mgr)
@@ -37,11 +29,7 @@ SSL_Listener::SSL_Listener(unsigned long ip_address, unsigned short port, Server
     m_ListenerSocket = INVALID_SOCKET;
 
     // Launch the Listener thread
-#ifdef WIN32
-    _beginthread(&RunSslListenerThread, 0, this);
-#else
     pthread_create(&m_Thread, NULL, &RunSslListenerThread, (void *) this);
-#endif
 }
 
 // Destructor
