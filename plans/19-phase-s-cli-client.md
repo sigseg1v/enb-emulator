@@ -128,10 +128,52 @@ CliClient.UnitTests/
       The hard rules from this plan file are reproduced verbatim in
       `tools/cli-client/README.md`.
 
-- [ ] Item 2 — Packet codec + opcode registry foundation (in CliClient.Core)
-      Status: not started
-      Touches: tools/cli-client/src/CliClient.Core/Net/PacketCodec.cs, Opcodes/OpcodeRegistry.cs
-      Notes: read length-prefixed frames; map opcode -> handler; start with the opcodes already round-tripped in Phase K integration tests (MasterJoin/0x0035, ServerRedirect, VersionRequest/0x0000, VersionResponse, sector LOGIN/0x0002). Registry is built so adding a new opcode is one file in Inbound/ or Outbound/ + one registration line — no central switch statement.
+- [x] Item 2 — Packet codec + opcode registry foundation (in CliClient.Core)
+      Status: done
+      Touches: tools/cli-client/src/CliClient.Core/Net/PacketHeader.cs,
+               tools/cli-client/src/CliClient.Core/Net/Packet.cs,
+               tools/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs,
+               tools/cli-client/src/CliClient.Core/Opcodes/IOpcodeCodec.cs,
+               tools/cli-client/src/CliClient.Core/Opcodes/OpcodeRegistry.cs,
+               tools/cli-client/tests/CliClient.UnitTests/Net/PacketCodecTests.cs,
+               tools/cli-client/tests/CliClient.UnitTests/Opcodes/OpcodeRegistryTests.cs
+      Notes: Implementation breakdown ---
+      `PacketHeader` is a `readonly record struct {ushort Size, ushort Opcode}`
+      with `WireSize = 4` and `Read`/`Write` using
+      `System.Buffers.Binary.BinaryPrimitives` for little-endian I/O. Mirrors
+      `EnbTcpHeader` from `common/include/net7/PacketStructures.h` — `size` is
+      the TOTAL frame length (header+payload), so `PayloadLength = Size - 4`.
+      `Packet` is a `sealed record (PacketHeader Header, ReadOnlyMemory<byte> Payload)`
+      with `ForOpcode(ushort, ReadOnlyMemory<byte>)` factory and
+      `ToWireBytes()` for the on-wire bytes pre-RC4.
+      `OpcodeId` is a `readonly record struct(ushort)` with
+      implicit-to-ushort / explicit-from-ushort conversions and `ToString()`
+      returning `0x####` hex. The nested `Known` class enumerates the Phase K
+      integration-test opcodes (VersionRequest/Response, Login, Logoff,
+      ClientChat, MasterJoin, ServerRedirect, ClientAvatar, ServerHandoff,
+      ClientType, GlobalConnect, GlobalTicketRequest/GlobalTicket,
+      GlobalAvatarList). Per-opcode codecs land in `Opcodes/Inbound/` and
+      `Opcodes/Outbound/` later — no central switch.
+      `IOpcodeCodec` is one interface per opcode (`Opcode`, `DecodeInbound`,
+      `EncodeOutbound`); both directions because most opcodes are
+      bidirectional. `UnknownOpcodeCodec` is the fallback the registry hands
+      back for unregistered opcodes — returns `UnknownOpcodePayload(Opcode,
+      RawPayload)` on decode, throws `NotSupportedException` on encode. This
+      keeps capture-replay tests from breaking when Phase K wires server-side
+      handlers ahead of CLI client decoders.
+      `OpcodeRegistry` is backed by
+      `ConcurrentDictionary<ushort, IOpcodeCodec>` — O(1) lock-free reads,
+      last-writer-wins on `Register`, never returns null from `Resolve`.
+      `IsRegistered` tells real codecs apart from the fallback.
+      Tests: `PacketCodecTests` covers little-endian round-trip, payload
+      length, short-buffer guards, empty payload, and `ForOpcode → ToWireBytes
+      → PacketHeader.Read` round-trip. `OpcodeRegistryTests` covers register +
+      resolve, unknown-opcode fallback, `EncodeOutbound` throw,
+      last-writer-wins, null guard, `RegisteredOpcodes` snapshot, and
+      `OpcodeId.ToString` hex format. `dotnet test` clean: Passed 16, Failed 0
+      (8 codec + 7 registry + 1 carryover trinity smoke).
+      Build clean under `<TreatWarningsAsErrors>true</TreatWarningsAsErrors>`
+      and `<Nullable>enable</Nullable>` — 0 warnings, 0 errors.
 
 - [ ] Item 3 — RC4 + RSA handshake (mirror common/include/net7/WestwoodRC4.h + WestwoodRSA.h)
       Status: not started
