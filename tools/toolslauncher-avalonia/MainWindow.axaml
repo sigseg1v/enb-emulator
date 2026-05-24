@@ -1,0 +1,30 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="260" d:DesignHeight="380"
+        x:Class="ToolsLauncherAvalonia.MainWindow"
+        Title="Net7 Tools Launch Pad" Width="260" Height="380"
+        CanResize="False"
+        WindowStartupLocation="CenterScreen">
+  <DockPanel LastChildFill="True">
+    <Menu DockPanel.Dock="Top">
+      <MenuItem Header="_File">
+        <MenuItem x:Name="c_SettingsMnu" Header="Settings..." Click="OnSettings" />
+        <Separator />
+        <MenuItem x:Name="c_QuitMnu" Header="Quit" Click="OnQuit" />
+      </MenuItem>
+    </Menu>
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Stretch" Margin="6" Spacing="6">
+      <Button x:Name="c_LaunchN7Btn" Content="Launch Net7"
+              HorizontalAlignment="Stretch" Width="120"
+              Click="OnLaunchNet7" />
+      <TextBlock x:Name="c_Status" VerticalAlignment="Center"
+                 Foreground="Gray" Text="" />
+    </StackPanel>
+
+    <StackPanel Margin="6" Spacing="6" x:Name="c_EditorStack" />
+  </DockPanel>
+</Window>

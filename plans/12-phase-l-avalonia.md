@@ -495,28 +495,100 @@ The existing WinForms targets stay in the tree. They still build via `dotnet bui
 
       **10/14 tools have Linux-native paths now.**
 
-### Future tier ordering (remaining 5 tools — deferred until session focus returns to Phase L)
+### Tier 8 — launcher port (complete)
+
+- [x] **toolslauncher-avalonia** — Avalonia port of `tools/toolslauncher/ToolsLauncher/`,
+      the "launch pad" giving one-click access to all the editors plus the
+      LaunchNet7 client launcher. Standalone (no commontools dep, no DB).
+      Touches: `tools/toolslauncher-avalonia/` (csproj, app.manifest,
+      App.axaml{,.cs}, MainWindow.axaml{,.cs}, SettingsWindow.axaml{,.cs},
+      Settings.cs, EditorLauncher.cs, Program.cs, README.md) + slnx entry.
+      Status: complete
+
+      **Subsystems dropped** (all pointed at dead infrastructure — the
+      `launchnet7-avalonia` Tier 5 precedent established that dead-endpoint
+      subsystems get dropped, not ported to no useful target):
+      - `GUI/IRCMessenger.cs` + `GUI/PrivateMessage.cs` + `GUI/Login.cs`
+        (IRC auth) + `Meebey.SmartIrc4Net` dep — hardcoded
+        `eservices.dyndns.org:6667 #test`. dyndns.org's free service shut
+        down 2014; the placeholder channel name reveals this was never
+        production-grade.
+      - `GUI/FtpWindow.cs` + `Struct Data/FtpAddy.cs` — used
+        `System.Windows.Forms.WebBrowser` (IE-based, no Avalonia analogue)
+        against hardcoded credentials for `net-7.org` FTP (dead).
+      - `Updateing/*` + `GUI/FormUpdate.cs` + `Resources/ExeUpdater.exe`
+        + `Cryptography/Crc32*.cs` — pointed at `toolspatch.net-7.org`,
+        sibling of the dead `patch.net-7.org` already dropped from
+        launchnet7-avalonia.
+      - `Helpers.cs SQLData` + `Properties/Settings.{settings,Designer.cs}`
+        — only used by Login/Updater; replaced by JSON `Settings.cs`.
+      - `AssemblyFileInfo.cs`, `WebPath.cs` — only used by Updater.
+      - System tray `NotifyIcon` — Avalonia has `TrayIcon` but it's
+        finicky under `--smoke` and requires libnotify on Linux; can be
+        added later.
+      - 6 large editor icon images — buttons use text labels.
+
+      **Key mechanical changes:**
+      - **Editor buttons spawn the Avalonia projects via
+        `dotnet run --project <csproj>`**, not `Process.Start("<editor>.exe")`.
+        `EditorLauncher.cs` resolves the editor's `.csproj` relative to
+        the launcher binary (walks up 8 dirs looking for sibling
+        `launchnet7-avalonia/` as canary) or uses the configured
+        `EditorsCheckoutRoot`. More portable than the original; works
+        on Linux without WINE.
+      - **`Ported` flag per editor.** `_editors` list in `MainWindow`
+        tags each editor with a bool; non-ported entries render as
+        `Foo Editor  (not yet ported)` with `IsEnabled=false`. Currently
+        true for: mob, faction, talktree (matching what Phase L has
+        landed). Flip flags as more Tier-7+ ports merge.
+      - **JSON-backed settings** at
+        `~/.config/Net7Tools/toolslauncher-avalonia.json` (Linux) /
+        `%APPDATA%\Net7Tools\toolslauncher-avalonia.json` (Windows)
+        replace `Properties.Settings.Default`. Two keys: `LaunchNet7Path`
+        (optional dir containing published `LaunchNet7Avalonia`) and
+        `EditorsCheckoutRoot` (optional `tools/` dir).
+      - `FolderBrowserDialog` → Avalonia `StorageProvider.OpenFolderPickerAsync`.
+      - `MessageBox.Show` status pop-ups → status `TextBlock` at the
+        bottom of `MainWindow`. Less intrusive for transient state.
+      - `ContextMenuStrip` (right-click on tray icon) → File menu only.
+
+      **No Login window** — no DB surface at all, so
+      `App.OnFrameworkInitializationCompleted` goes straight to
+      `MainWindow`.
+
+      **Avalonia Grid gotcha:** `Grid` does NOT support
+      `ColumnSpacing="N"` (unlike WPF Grid in modern XAML / unlike
+      Avalonia `StackPanel.Spacing`). Used spacer column
+      `ColumnDefinitions="*,6,Auto"` instead.
+
+      **AVLN3001 fix:** `SettingsWindow` has parameterless
+      `public SettingsWindow() : this(new Settings()) { }` delegating
+      to the real `SettingsWindow(Settings)` ctor for the XAML toolchain.
+
+      Smoke: `dotnet run -- --smoke` instantiates `MainWindow` (260×380)
+      + `SettingsWindow` (500×220). No DB, no network.
+
+      **11/14 tools have Linux-native paths now.**
+
+### Future tier ordering (remaining 4 tools — continuing per "do all plans" directive)
 
 Recommended order:
 
-1. **toolslauncher-avalonia** — 6 forms incl. IRC client + FTP window.
-   ~3-5 days (IRC integration via Meebey.SmartIrc4Net is the wildcard).
-
-2. **effect-editor-avalonia** (SQLBind) — 5 forms, particle effects.
+1. **effect-editor-avalonia** (SQLBind) — 5 forms, particle effects.
    ~3 days.
 
-3. **station-tools-avalonia** — 8 forms. ~4-5 days.
+2. **station-tools-avalonia** — 8 forms. ~4-5 days.
 
-4. **missioneditor-avalonia** — 9 forms incl. tree view. Depends on
+3. **missioneditor-avalonia** — 9 forms incl. tree view. Depends on
    commontools-avalonia. ~5 days.
 
-5. **sector-editor-avalonia** — 16 forms, custom map canvas
+4. **sector-editor-avalonia** — 16 forms, custom map canvas
    (System.Drawing.Graphics → Avalonia DrawingContext is the major
    work). ~2-3 weeks.
 
 ### Tier 2+ — deferred
 
-The remaining 5 editors (effect-editor, toolslauncher, station-tools, missioneditor, sector-editor) are tracked as future Phase L sub-items. With realistic ~3-6 month total for the suite, this is its own project — but per the user directive "do all plans / dont stop at phase boundaries," subsequent invocations should keep grinding through them.
+The remaining 4 editors (effect-editor, station-tools, missioneditor, sector-editor) are tracked as future Phase L sub-items. With realistic ~3-6 month total for the suite, this is its own project — but per the user directive "do all plans / dont stop at phase boundaries," subsequent invocations should keep grinding through them.
 
 For immediate Linux runnability of the editors: the WinForms binaries already run under WINE — `tools/README.md` documents this. That's the realistic interim story until Avalonia ports land.
 

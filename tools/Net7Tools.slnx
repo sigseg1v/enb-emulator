@@ -64,6 +64,9 @@
   <Folder Name="/talktreeeditor-avalonia/">
     <Project Path="talktreeeditor-avalonia/TalkTreeEditorAvalonia.csproj" />
   </Folder>
+  <Folder Name="/toolslauncher-avalonia/">
+    <Project Path="toolslauncher-avalonia/ToolsLauncherAvalonia.csproj" />
+  </Folder>
   <Folder Name="/w3d-parser/">
     <Project Path="w3d-parser/W3d Parser.csproj" />
   </Folder>

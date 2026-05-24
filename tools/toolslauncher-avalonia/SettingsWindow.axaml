@@ -1,0 +1,30 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="500" d:DesignHeight="220"
+        x:Class="ToolsLauncherAvalonia.SettingsWindow"
+        Title="Tools Launcher Settings" Width="500" Height="220"
+        WindowStartupLocation="CenterOwner">
+  <DockPanel Margin="12" LastChildFill="True">
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="6" Margin="0,12,0,0">
+      <Button x:Name="c_SaveBtn"   Width="80" Content="Save"   Click="OnSave"   />
+      <Button x:Name="c_CancelBtn" Width="80" Content="Cancel" Click="OnCancel" />
+    </StackPanel>
+
+    <StackPanel Spacing="8">
+      <TextBlock Text="LaunchNet7 directory (optional — leave blank to use the in-tree launchnet7-avalonia project):" />
+      <Grid ColumnDefinitions="*,6,Auto">
+        <TextBox  Grid.Column="0" x:Name="c_LaunchNet7Txt" />
+        <Button   Grid.Column="2" x:Name="c_BrowseN7Btn" Content="Browse..." Click="OnBrowseLaunchNet7" />
+      </Grid>
+
+      <TextBlock Text="Editors checkout root (optional — leave blank to auto-detect the sibling tools/ directory):" />
+      <Grid ColumnDefinitions="*,6,Auto">
+        <TextBox  Grid.Column="0" x:Name="c_EditorsRootTxt" />
+        <Button   Grid.Column="2" x:Name="c_BrowseRootBtn" Content="Browse..." Click="OnBrowseEditorsRoot" />
+      </Grid>
+    </StackPanel>
+  </DockPanel>
+</Window>
