@@ -12,7 +12,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 ///////////////////////////////////////////////////////////////////
@@ -54,12 +54,11 @@ void Player::LoadGMItems()
 {
 	// Pull down items and then dump them from the avatar_gm_items
 	sql_query_c account_query (&m_SQL_Conn);
-	sql_result_c account_result;      
+	sql_result_c account_result;
 	sql_row_c account_row;
-	char queryString[1500];
 
-	sprintf_s(queryString, sizeof(queryString), "SELECT avatar_gm_items.avatar_id,avatar_gm_items.item_id,avatar_gm_items.stack_level,avatar_gm_items.trade_stack,avatar_gm_items.quality,avatar_gm_items.cost,avatar_gm_items.builder_name,avatar_gm_items.structure FROM avatar_gm_items WHERE avatar_gm_items.avatar_id =  '%d'", this->CharacterID());
-	if (account_query.run_query(queryString) && account_query.n_rows() > 0)
+	account_query.AddParam((long)this->CharacterID());
+	if (account_query.run_query_params("SELECT avatar_gm_items.avatar_id,avatar_gm_items.item_id,avatar_gm_items.stack_level,avatar_gm_items.trade_stack,avatar_gm_items.quality,avatar_gm_items.cost,avatar_gm_items.builder_name,avatar_gm_items.structure FROM avatar_gm_items WHERE avatar_gm_items.avatar_id = ?") && account_query.n_rows() > 0)
 	{
 		account_query.store(&account_result);
 
@@ -78,7 +77,7 @@ void Player::LoadGMItems()
 		for(int r=0;r<account_query.n_rows();r++)
 		{
 			account_result.fetch_row(&account_row);
-			
+
 			_Item cItem;
 			memset(&cItem, 0, sizeof(_Item));
 			cItem.ItemTemplateID = (int)account_row["item_id"];
@@ -86,7 +85,7 @@ void Player::LoadGMItems()
 			cItem.TradeStack = (int)account_row["trade_stack"];
 			cItem.Quality = (float)account_row["quality"];
 			cItem.Structure = (float)account_row["structure"];
-			strcpy_s(cItem.BuilderName, sizeof(cItem.BuilderName), (char *)account_row["builder_name"]);												
+			strcpy_s(cItem.BuilderName, sizeof(cItem.BuilderName), (char *)account_row["builder_name"]);
 			cItem.Structure = (cItem.Structure > 1.0f)? 1.0f : cItem.Structure;
 			CargoAddItem(&cItem);
 			// Display the item
@@ -95,8 +94,8 @@ void Player::LoadGMItems()
 		}
 
 		SendAuxShip();
-		sprintf_s(queryString, sizeof(queryString), "DELETE FROM avatar_gm_items WHERE avatar_gm_items.avatar_id =  '%d'", CharacterID());
-		account_query.run_query(queryString);
+		account_query.AddParam((long)CharacterID());
+		account_query.run_query_params("DELETE FROM avatar_gm_items WHERE avatar_gm_items.avatar_id = ?");
 	}
 	else
 	{
@@ -131,11 +130,10 @@ void Player::SavePosition()
 
 void Player::CreatePositionSave()
 {
-	char query_str[300];
 	sql_query_c account_query (&m_SQL_Conn);
 
-	sprintf_s(query_str, sizeof(query_str), "DELETE FROM `avatar_position` WHERE `avatar_id` = '%d'", m_CharacterID);
-	account_query.run_query(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.run_query_params("DELETE FROM `avatar_position` WHERE `avatar_id` = ?");
 
 	sql_query PositionBuilder;
 	PositionBuilder.Clear();
@@ -167,14 +165,12 @@ bool Player::LoadPosition()
 		return false;
 	}
 
-	char query_str[256];
 	sql_query_c account_query (&m_SQL_Conn);
 	sql_result_c account_result;
     sql_row_c account_row;
 
-	sprintf_s(query_str, sizeof(query_str), "SELECT * FROM `avatar_position` WHERE `avatar_id` = '%d'", m_CharacterID);
-	
-	if (!account_query.run_query(query_str) || account_query.n_rows() == 0)
+	account_query.AddParam((long)m_CharacterID);
+	if (!account_query.run_query_params("SELECT * FROM `avatar_position` WHERE `avatar_id` = ?") || account_query.n_rows() == 0)
 	{
 		return false;
 	}
@@ -217,13 +213,11 @@ bool Player::ReadSavedData()
 
 	//see if we need to initialise or re-load
 	//try to load in the avatar_level info, if this exists, character has been initialised
-	char query_str[256];
 	sql_result_c result;
     sql_row_c account_row;
 
-	sprintf_s(query_str, sizeof(query_str), "SELECT * FROM `avatar_level_info` WHERE `avatar_id` = '%d'", m_CharacterID);
-	
-	account_query.execute(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.execute_params("SELECT * FROM `avatar_level_info` WHERE `avatar_id` = ?");
 	account_query.store(&result);
 
 	if (account_query.n_rows() == 0)
@@ -274,7 +268,6 @@ void Player::SetHullUpgrade()
 //then again, providing we keep the ptr to the database it should be ok just for reloading
 void Player::ReloadSavedData()
 {
-	char query_str[256];
 //	sql_connection_c connection( "net7_user", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
 	sql_query_c account_query (&m_SQL_Conn);
 	sql_result_c account_result;
@@ -296,8 +289,8 @@ void Player::ReloadSavedData()
 	PlayerIndex()->SetSectorNum(secNum);
 
 	// get logout time for xp debt calcs
-	sprintf_s(query_str, sizeof(query_str), "SELECT last_logout_t FROM `avatar_info` WHERE `avatar_id` = '%d'", m_CharacterID);
-	account_query.run_query(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.run_query_params("SELECT last_logout_t FROM `avatar_info` WHERE `avatar_id` = ?");
     account_query.store(&account_result);
 	account_result.fetch_row(&account_row);
 	m_LogoutTime = (time_t)(unsigned long)account_row["last_logout_t"];
@@ -308,9 +301,8 @@ void Player::ReloadSavedData()
 	}
 
 	//get credits
-	sprintf_s(query_str, sizeof(query_str), "SELECT * FROM `avatar_level_info` WHERE `avatar_id` = '%d'", m_CharacterID);
-
-	account_query.run_query(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.run_query_params("SELECT * FROM `avatar_level_info` WHERE `avatar_id` = ?");
     account_query.store(&account_result);
 	account_result.fetch_row(&account_row);
 
@@ -417,9 +409,8 @@ void Player::ReloadSavedData()
 		ShipIndex()->Inventory.CargoInv.Item[j].SetItemTemplateID(-1);
 	}
 	
-	sprintf_s(query_str, sizeof(query_str), "SELECT * FROM `avatar_inventory_items` WHERE `avatar_id` = '%d'", m_CharacterID);
-
-	account_query.run_query(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.run_query_params("SELECT * FROM `avatar_inventory_items` WHERE `avatar_id` = ?");
     account_query.store(&account_result);
 
 	for(i=0;i<account_result.n_rows();i++)
@@ -450,9 +441,8 @@ void Player::ReloadSavedData()
 	}
 
 	//now add equipment, new table.
-	sprintf_s(query_str, sizeof(query_str), "SELECT * FROM `avatar_equipment` WHERE `avatar_id` = '%d'", m_CharacterID);
-
-	account_query.run_query(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.run_query_params("SELECT * FROM `avatar_equipment` WHERE `avatar_id` = ?");
     account_query.store(&account_result);
 
 	for(i=0;i<account_result.n_rows();i++)
@@ -514,9 +504,8 @@ void Player::ReloadSavedData()
         ShipIndex()->Inventory.AmmoInv.Item[i].SetItemTemplateID(-1);
     }
 
-	sprintf_s(query_str, sizeof(query_str), "SELECT * FROM `avatar_ammo` WHERE `avatar_id` = '%d'", m_CharacterID);
-
-	account_query.run_query(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.run_query_params("SELECT * FROM `avatar_ammo` WHERE `avatar_id` = ?");
     account_query.store(&account_result);
 
 	for(i=0;i<account_result.n_rows();i++)
@@ -552,10 +541,9 @@ void Player::ReloadSavedData()
 	}
 
 	//now add vault
-	
-	sprintf_s(query_str, sizeof(query_str), "SELECT * FROM `avatar_vault_items` WHERE `avatar_id` = '%d'", m_CharacterID);
 
-	account_query.run_query(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.run_query_params("SELECT * FROM `avatar_vault_items` WHERE `avatar_id` = ?");
     account_query.store(&account_result);
 
 	for(i=0;i<account_result.n_rows();i++)
@@ -583,10 +571,9 @@ void Player::ReloadSavedData()
 	}
 
 	//now add trade window (crash recovery)
-	
-	sprintf_s(query_str, sizeof(query_str), "SELECT * FROM `avatar_trade_items` WHERE `avatar_id` = '%d'", m_CharacterID);
 
-	account_query.run_query(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.run_query_params("SELECT * FROM `avatar_trade_items` WHERE `avatar_id` = ?");
     account_query.store(&account_result);
 
 	for(i=0;i<account_result.n_rows();i++)
@@ -663,9 +650,8 @@ void Player::ReloadSavedData()
 	PlayerIndex()->RPGInfo.Skills.Skill[SKILL_REACTOR_TECH].SetLevel(1);
 	PlayerIndex()->RPGInfo.Skills.Skill[SKILL_SHIELD_TECH].SetLevel(1);
 
-	sprintf_s(query_str, sizeof(query_str), "SELECT * FROM `avatar_skill_levels` WHERE `avatar_id` = '%d'", m_CharacterID);
-
-	account_query.run_query(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.run_query_params("SELECT * FROM `avatar_skill_levels` WHERE `avatar_id` = ?");
     account_query.store(&account_result);
 
 	for(i=0;i<account_result.n_rows();i++)
@@ -699,8 +685,8 @@ void Player::ReloadSavedData()
 
 	// setup guild info
 	// fixed sending MOTD first before any other packets - was causing a lot of login issues.
-	sprintf_s(query_str, sizeof(query_str), "SELECT * FROM `guild_members` WHERE `avatar_id` = '%d'", m_CharacterID);
-	account_query.run_query(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.run_query_params("SELECT * FROM `guild_members` WHERE `avatar_id` = ?");
     account_query.store(&account_result);
 	if (account_result.n_rows())
 	{
@@ -740,9 +726,8 @@ void Player::ReloadSavedData()
 	SetHullUpgrade();
 
 	// Load all itemID's for manufacturing
-	sprintf_s(query_str, sizeof(query_str), "SELECT * FROM `avatar_recipes` WHERE `avatar_id` = '%d'", m_CharacterID);
-
-	account_query.run_query(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.run_query_params("SELECT * FROM `avatar_recipes` WHERE `avatar_id` = ?");
     account_query.store(&account_result);
 
 	for(i=0;i<account_result.n_rows();i++)
@@ -755,9 +740,8 @@ void Player::ReloadSavedData()
 	}
 
 	// load friends list
-	sprintf_s(query_str, sizeof(query_str), "SELECT * FROM `friends_lists` WHERE `avatar_id` = '%d'", m_CharacterID);
-
-	account_query.run_query(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.run_query_params("SELECT * FROM `friends_lists` WHERE `avatar_id` = ?");
     account_query.store(&account_result);
 
 	m_NumFriends = 0;
@@ -772,9 +756,8 @@ void Player::ReloadSavedData()
 	}
 
 	// load ignore list
-	sprintf_s(query_str, sizeof(query_str), "SELECT * FROM `ignore_lists` WHERE `avatar_id` = '%d'", m_CharacterID);
-
-	account_query.run_query(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.run_query_params("SELECT * FROM `ignore_lists` WHERE `avatar_id` = ?");
     account_query.store(&account_result);
 
 	m_NumIgnore = 0;
@@ -792,9 +775,8 @@ void Player::ReloadSavedData()
 	LoadMissionStatus(&account_query);
 	LoadMissionCompletions(&account_query);
 
-	sprintf_s(query_str, sizeof(query_str), "SELECT * FROM `warning_levels` WHERE `avatar_id` = '%d'", m_CharacterID);
-
-	account_query.run_query(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.run_query_params("SELECT * FROM `warning_levels` WHERE `avatar_id` = ?");
     account_query.store(&account_result);
 	account_result.fetch_row(&account_row);
 
@@ -810,13 +792,11 @@ void Player::ReloadSavedData()
 
 void Player::LoadExploredNavs(sql_query_c *query)
 {
-	char query_str[256];
 	sql_result_c account_result;
     sql_row_c account_row;
 
-	sprintf_s(query_str, sizeof(query_str), "SELECT * FROM `avatar_exploration` WHERE `avatar_id` = '%d'", m_CharacterID);
-
-	query->run_query(query_str);
+	query->AddParam((long)m_CharacterID);
+	query->run_query_params("SELECT * FROM `avatar_exploration` WHERE `avatar_id` = ?");
     query->store(&account_result);
 
 	for(int i=0;i<account_result.n_rows();i++)
@@ -843,15 +823,14 @@ void Player::LoadExploredNavs(sql_query_c *query)
 
 void Player::SetupFactions(sql_query_c *query, bool force)
 {
-	char query_str[256];
 	sql_result_c account_result;
     sql_row_c account_row;
 	int i;
 
 	if (!force)
 	{
-		sprintf_s(query_str, sizeof(query_str), "SELECT * FROM `faction_data` WHERE `avatar_id` = '%d'", m_CharacterID);
-		query->run_query(query_str);
+		query->AddParam((long)m_CharacterID);
+		query->run_query_params("SELECT * FROM `faction_data` WHERE `avatar_id` = ?");
 		query->store(&account_result);
 	}
 
@@ -913,13 +892,11 @@ void Player::SetupFactions(sql_query_c *query, bool force)
 
 void Player::LoadMissionStatus(sql_query_c *query)
 {
-	char query_str[256];
 	sql_result_c account_result;
     sql_row_c account_row;
 
-	sprintf_s(query_str, sizeof(query_str), "SELECT * FROM `avatar_mission_progress` WHERE `avatar_id` = '%d'", m_CharacterID);
-
-	query->run_query(query_str);
+	query->AddParam((long)m_CharacterID);
+	query->run_query_params("SELECT * FROM `avatar_mission_progress` WHERE `avatar_id` = ?");
     query->store(&account_result);
 
 	for(int i=0;i<account_result.n_rows();i++)
@@ -964,14 +941,11 @@ void Player::LoadMissionStatus(sql_query_c *query)
 
 void Player::LoadMissionCompletions(sql_query_c *query)
 {
-	char query_str[256];
-
 	sql_result_c account_result;
     sql_row_c account_row;
 
-	sprintf_s(query_str, sizeof(query_str), "SELECT * FROM missions_completed WHERE avatar_id = '%d'", m_CharacterID);
-
-	query->run_query(query_str);
+	query->AddParam((long)m_CharacterID);
+	query->run_query_params("SELECT * FROM missions_completed WHERE avatar_id = ?");
     query->store(&account_result);
 
 	for(int i=0;i<account_result.n_rows();i++)
@@ -1452,14 +1426,13 @@ void Player::SaveRemoveMission(long mission_id)
 
 void Player::ResetAllMissions()
 {
-	char query_str[300];
 	sql_query_c account_query (&m_SQL_Conn);
 
-	sprintf_s(query_str, sizeof(query_str), "DELETE FROM `avatar_mission_progress` WHERE `avatar_id` = '%d'", m_CharacterID);
-	account_query.run_query(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.run_query_params("DELETE FROM `avatar_mission_progress` WHERE `avatar_id` = ?");
 
-	sprintf_s(query_str, sizeof(query_str), "DELETE FROM `missions_completed` WHERE `avatar_id` = '%d'", m_CharacterID);
-	account_query.run_query(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.run_query_params("DELETE FROM `missions_completed` WHERE `avatar_id` = ?");
 
 	for (int i=0;i < MAX_MISSIONS;i++)
 		PlayerIndex()->Missions.Mission[i].Clear();
@@ -1721,53 +1694,52 @@ void Player::SaveEnergyLevels()
 
 void Player::DeleteAllAvatarRecords()
 {
-	char query_str[300];
 	sql_query_c account_query (&m_SQL_Conn);
 
-	sprintf_s(query_str, sizeof(query_str), "DELETE FROM `avatar_ammo` WHERE `avatar_id` = '%d'", m_CharacterID);
-	account_query.run_query(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.run_query_params("DELETE FROM `avatar_ammo` WHERE `avatar_id` = ?");
 
-	sprintf_s(query_str, sizeof(query_str), "DELETE FROM `avatar_equipment` WHERE `avatar_id` = '%d'", m_CharacterID);
-	account_query.run_query(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.run_query_params("DELETE FROM `avatar_equipment` WHERE `avatar_id` = ?");
 
-	sprintf_s(query_str, sizeof(query_str), "DELETE FROM `avatar_faction_level` WHERE `avatar_id` = '%d'", m_CharacterID);
-	account_query.run_query(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.run_query_params("DELETE FROM `avatar_faction_level` WHERE `avatar_id` = ?");
 
-	sprintf_s(query_str, sizeof(query_str), "DELETE FROM `avatar_inventory_items` WHERE `avatar_id` = '%d'", m_CharacterID);
-	account_query.run_query(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.run_query_params("DELETE FROM `avatar_inventory_items` WHERE `avatar_id` = ?");
 
-	sprintf_s(query_str, sizeof(query_str), "DELETE FROM `avatar_mission_progress` WHERE `avatar_id` = '%d'", m_CharacterID);
-	account_query.run_query(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.run_query_params("DELETE FROM `avatar_mission_progress` WHERE `avatar_id` = ?");
 
-	sprintf_s(query_str, sizeof(query_str), "DELETE FROM `avatar_skill_levels` WHERE `avatar_id` = '%d'", m_CharacterID);
-	account_query.run_query(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.run_query_params("DELETE FROM `avatar_skill_levels` WHERE `avatar_id` = ?");
 
-	sprintf_s(query_str, sizeof(query_str), "DELETE FROM `avatar_vault_items` WHERE `avatar_id` = '%d'", m_CharacterID);
-	account_query.run_query(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.run_query_params("DELETE FROM `avatar_vault_items` WHERE `avatar_id` = ?");
 
-	sprintf_s(query_str, sizeof(query_str), "DELETE FROM `missions_completed` WHERE `avatar_id` = '%d'", m_CharacterID);
-	account_query.run_query(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.run_query_params("DELETE FROM `missions_completed` WHERE `avatar_id` = ?");
 
-	sprintf_s(query_str, sizeof(query_str), "DELETE FROM `avatar_exploration` WHERE `avatar_id` = '%d'", m_CharacterID);
-	account_query.run_query(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.run_query_params("DELETE FROM `avatar_exploration` WHERE `avatar_id` = ?");
 
-	sprintf_s(query_str, sizeof(query_str), "DELETE FROM `faction_data` WHERE `avatar_id` = '%d'", m_CharacterID);
-	account_query.run_query(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.run_query_params("DELETE FROM `faction_data` WHERE `avatar_id` = ?");
 
-	sprintf_s(query_str, sizeof(query_str), "DELETE FROM `avatar_recipes` WHERE `avatar_id` = '%d'", m_CharacterID);
-	account_query.run_query(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.run_query_params("DELETE FROM `avatar_recipes` WHERE `avatar_id` = ?");
 
-	sprintf_s(query_str, sizeof(query_str), "DELETE FROM `friends_lists` WHERE `avatar_id` = '%d'", m_CharacterID);
-	account_query.run_query(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.run_query_params("DELETE FROM `friends_lists` WHERE `avatar_id` = ?");
 
-	sprintf_s(query_str, sizeof(query_str), "DELETE FROM `ignore_lists` WHERE `avatar_id` = '%d'", m_CharacterID);
-	account_query.run_query(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.run_query_params("DELETE FROM `ignore_lists` WHERE `avatar_id` = ?");
 
-	sprintf_s(query_str, sizeof(query_str), "DELETE FROM `guild_members` WHERE `avatar_id` = '%d'", m_CharacterID);
-	account_query.run_query(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.run_query_params("DELETE FROM `guild_members` WHERE `avatar_id` = ?");
 
-	sprintf_s(query_str, sizeof(query_str), "DELETE FROM `guild_members` WHERE `avatar_id` = '%d'", m_CharacterID);
-	account_query.run_query(query_str);
+	account_query.AddParam((long)m_CharacterID);
+	account_query.run_query_params("DELETE FROM `guild_members` WHERE `avatar_id` = ?");
 }
 
 void Player::SaveFriendsList(char *name, bool add)
