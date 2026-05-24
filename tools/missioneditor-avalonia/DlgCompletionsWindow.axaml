@@ -1,0 +1,35 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="MissionEditorAvalonia.DlgCompletionsWindow"
+        Width="540" Height="320"
+        WindowStartupLocation="CenterOwner"
+        Title="Completion">
+  <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*,Auto" ColumnDefinitions="120,*,Auto" Margin="10">
+
+    <TextBlock Grid.Row="0" Grid.Column="0" Text="Type:" VerticalAlignment="Center"/>
+    <ComboBox  Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="2" Name="c_TypeCbo" Margin="6,2"/>
+
+    <TextBlock Grid.Row="1" Grid.Column="0" Text="Value:" VerticalAlignment="Center"/>
+    <TextBox   Grid.Row="1" Grid.Column="1" Name="c_ValueTxt" Margin="6,2" IsEnabled="False"/>
+    <Button    Grid.Row="1" Grid.Column="2" Name="c_ValueSearchBtn" Content="Search..." Margin="2" IsEnabled="False" Click="OnValueSearch"/>
+
+    <TextBlock Grid.Row="2" Grid.Column="0" Text="Value desc:" VerticalAlignment="Center"/>
+    <TextBox   Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Name="c_ValueDescriptionTxt" IsReadOnly="True" Margin="6,2"/>
+
+    <TextBlock Grid.Row="3" Grid.Column="0" Text="Data:" VerticalAlignment="Center"/>
+    <TextBox   Grid.Row="3" Grid.Column="1" Name="c_DataTxt" Margin="6,2" IsEnabled="False"/>
+    <Button    Grid.Row="3" Grid.Column="2" Name="c_DataSearchBtn" Content="Search..." Margin="2" IsEnabled="False" Click="OnDataSearch"/>
+
+    <TextBlock Grid.Row="4" Grid.Column="0" Text="Data desc:" VerticalAlignment="Center"/>
+    <TextBox   Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Name="c_DataDescriptionTxt" IsReadOnly="True" Margin="6,2"/>
+
+    <TextBlock Grid.Row="5" Grid.Column="0" Text="Amount:" VerticalAlignment="Center"/>
+    <TextBox   Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Name="c_AmountTxt" Margin="6,2" IsEnabled="False"/>
+
+    <StackPanel Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="6">
+      <Button Content="OK"     Name="c_OkBtn"     Click="OnOk"/>
+      <Button Content="Cancel" Name="c_CancelBtn" Click="OnCancel"/>
+    </StackPanel>
+
+  </Grid>
+</Window>

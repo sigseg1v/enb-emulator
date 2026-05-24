@@ -20,7 +20,7 @@ The `tools/` suite has **14 csproj projects that flag `<UseWindowsForms>true</Us
 | effect-editor       | 5                    |  3689 | 3 | |
 | toolslauncher       | 7                    |  4167 | 3 | |
 | station-tools       | 8                    |  7389 | 4 | ported (Tier 10) |
-| missioneditor       | 9                    |  6364 | 4 | |
+| missioneditor       | 9                    |  6364 | 4 | ported (Tier 11) |
 | sector-editor       | 16                   | 19386 | 4 | Largest — custom drawing, multi-pane editor |
 | **Total**           | **64 real forms**    | **79,822** | | |
 
@@ -774,22 +774,145 @@ The existing WinForms targets stay in the tree. They still build via `dotnet bui
 
       **13/14 tools have Linux-native paths now.**
 
-### Future tier ordering (remaining 2 tools — continuing per "do all plans" directive)
+### Tier 11 — mission / stage / condition / completion / reward editor port (complete)
 
-Recommended order:
+- [x] **missioneditor-avalonia** — Avalonia port of `tools/missioneditor/`,
+      the 9-form editor for `missions` (XML-blob storage of mission
+      definitions, with per-stage completions, rewards, and talk-tree
+      sub-trees).
+      Touches: `tools/missioneditor-avalonia/` (csproj, app.manifest,
+      App.axaml{,.cs}, MainWindow.axaml{,.cs} — 2-tab editor,
+      DlgConditionsWindow.axaml{,.cs}, DlgStagesWindow.axaml{,.cs},
+      DlgCompletionsWindow.axaml{,.cs}, DlgRewardsWindow.axaml{,.cs},
+      DlgReportWindow.axaml{,.cs}, Nodes/{Mission,Stage,Condition,
+      Completion,Reward,TalkTree}.cs, Database/{Database,
+      DataConfiguration}.cs, Program.cs, README.md) + slnx entry +
+      `toolslauncher-avalonia` `_editors` flag flipped from `false` →
+      `true`.
+      Status: complete
 
-1. **missioneditor-avalonia** — 9 forms incl. tree view. Depends on
-   commontools-avalonia. ~5 days.
+      **Mapping** (9 WinForms forms → 6 Windows + helpers):
+      - `Program.cs` (Config.xml + Login) → `App.axaml.cs`
+        (Login → MainWindow swap) + `Program.cs` with `--smoke`.
+      - `FrmMission.cs` + `.Designer.cs` (~343 LOC parent form) +
+        `TabMission.cs` + `.Designer.cs` (~337 LOC, embedded
+        UserControl for the Mission tab) + `TabStages.cs` +
+        `.Designer.cs` (~329 LOC, embedded UserControl for the Stages
+        tab) → collapsed into single `MainWindow.axaml{,.cs}` with a
+        2-tab `TabControl`. Avalonia compiled bindings don't love
+        nested UserControl-in-TabItem patterns; collapsing simplified
+        the named-field plumbing and made `populateMissionTab` /
+        `populateStagesTab` reusable.
+      - `DlgConditions.cs` + `.Designer.cs` →
+        `DlgConditionsWindow.axaml{,.cs}` (Type/Value/Code/Search/
+        Description/Amount + OK/Cancel; switch covers Overall_Level,
+        Combat_Level, Explore_Level, Trade_Level, Hull_Level,
+        Faction_Required, Item_Required, Profession, Race,
+        Mission_Required).
+      - `DlgCompletions.cs` + `.Designer.cs` →
+        `DlgCompletionsWindow.axaml{,.cs}` (Type/Value combo+text/
+        Data combo+text/two Search buttons + OK/Cancel; full switch
+        covering all 15 `CompletionType` values).
+      - `DlgRewards.cs` + `.Designer.cs` →
+        `DlgRewardsWindow.axaml{,.cs}` (Type/Code/Search/Amount +
+        OK/Cancel; 10 `RewardType` cases).
+      - `DlgStages.cs` + `.Designer.cs` →
+        `DlgStagesWindow.axaml{,.cs}` (read-only ID + Description +
+        OK/Cancel).
+      - `DlgReport.cs` + `.Designer.cs` →
+        `DlgReportWindow.axaml{,.cs}` (read-only TextBox; HTML rendered
+        as plain text since Avalonia has no built-in `WebBrowser`).
+      - `DlgEditXml` — reused from `commontools-avalonia` (already
+        ported), invoked from the toolbar "Edit XML" button.
+      - `DlgSearch` — reused from `commontools-avalonia`, configured
+        against `Net7.Tables.missions`.
+      - `Nodes/{Mission,Stage,Condition,Completion,Reward,TalkTree}.cs`
+        — ~1300 LOC of data model + XML serialisation, ported verbatim
+        with `System.Windows.Forms.MessageBox.Show` swapped for
+        `Console.Error.WriteLine` (deep data-model code can't pop UI
+        dialogs without a parent Window reference).
+      - `Database/Database.cs` — verbatim port (~220 LOC). All SQL
+        already parameterised with `?` placeholders in the upstream;
+        only the namespace + Nodes import changed.
+      - `Database/DataConfiguration.cs` — ported with one signature
+        change: `static String search(DataType)` → `static async
+        Task<String> search(DataType, Window owner)` because Avalonia
+        `ShowDialog` is async. `getDescription()` wrapped in try/catch
+        returning the id on DB failure so the editor renders rows
+        even when DB descriptions fail to resolve.
+      - `TalkNode.cs` / `Replies.cs` — original talk-tree GUI model
+        not ported. Talk-tree editing delegated to the standalone
+        `talktreeeditor-avalonia` project via `Process.Start` (same
+        pattern as `station-tools-avalonia`).
 
-2. **sector-editor-avalonia** — 16 forms, custom map canvas
+      **Key mechanical changes:**
+      - **WinForms `ListView` with subitem columns →
+        `Avalonia.Controls.ListBox`** with a `ToString()`-formatted
+        `"Type | FormattedValue"` line on per-condition/stage/
+        completion/reward `*Row` VM wrappers. The original sortable-
+        column behaviour isn't load-bearing for these short lists.
+      - **`MessageBox.Show("...") + Yes/No`** for delete confirmation →
+        `MessageBoxManager.GetMessageBoxStandard(... ButtonEnum.YesNo,
+        MsBoxIcon.Question).ShowWindowDialogAsync(this)` returning
+        `ButtonResult.Yes`.
+      - **`AvaloniaXamlLoader.Load(this)`** in dialog ctors → fixed to
+        `InitializeComponent()`. The former is the legacy reflective
+        loader (used by `App.axaml.cs` where no fields are referenced);
+        the latter is the compiled-XAML method that wires the
+        `x:Name`'d field accessors. Caught by the smoke test: every
+        dialog crashed with `NullReferenceException` on `c_TypeCbo` at
+        first run because the field wasn't populated.
+      - **`async void` event handlers** for every handler that awaits a
+        `ShowDialog` (`OnConditionAdd`, `OnConditionEdit`,
+        `OnCompletionAdd`, etc.). Fine for UI events.
+      - **DB-touching ctor calls wrapped in try/catch** so `--smoke`
+        runs without MySQL — `DataConfiguration.init()` and
+        `DlgSearch.configure(Tables.missions)` are both guarded.
+
+      **What was dropped** (debug-leftovers or framework-incompatible):
+      - `MessageBox.Show("onConditionSelected")` /
+        `MessageBox.Show("onCompletionSelected")` /
+        `MessageBox.Show("onRewardSelected")` — three obvious
+        development-leftover debug calls in `TabMission.cs:128` and
+        `TabStages.cs:155,225`. Not ported.
+      - `Cursor = Cursors.WaitCursor` — Avalonia handles cursor
+        differently; status text already conveys progress.
+      - Embedded `TalkTreeEditor.FrmTalkTree` — replaced by
+        `Process.Start("dotnet run --project ../talktreeeditor-avalonia/")`.
+      - **`DlgReport` as HTML renderer** — rendered as plain text in a
+        read-only `TextBox` since Avalonia has no built-in
+        `WebBrowser`. Original was viewer-only, so plain-text
+        preserves the information content.
+
+      **Round-trip limitation (documented):**
+      - `talktreeeditor-avalonia` accepts XML via args[0] but does not
+        return the edited XML. Re-importing into `m_stage` needs a
+        temp-file or stdout-pipe contract that isn't designed yet.
+        Status bar surfaces this: "launched talktreeeditor-avalonia
+        (round-trip not wired)". Until then, talk-tree XML can be
+        hand-edited via the toolbar "Edit XML" on the whole mission
+        XML.
+
+      Smoke: `dotnet run -- --smoke` instantiates `Login` (290×195) +
+      `MainWindow` (900×700) + `DlgConditionsWindow` (500×260) +
+      `DlgStagesWindow` (420×200) + `DlgCompletionsWindow` (540×320) +
+      `DlgRewardsWindow` (500×260) + `DlgReportWindow` (720×600). All
+      7 print OK, no DB required.
+
+      **14/15 tools have Linux-native paths now** (only sector-editor
+      remains).
+
+### Future tier ordering (remaining 1 tool — continuing per "do all plans" directive)
+
+1. **sector-editor-avalonia** — 16 forms, custom map canvas
    (System.Drawing.Graphics → Avalonia DrawingContext is the major
    work). ~2-3 weeks.
 
 ### Tier 2+ — deferred
 
-The remaining 2 editors (missioneditor, sector-editor) are tracked as future Phase L sub-items. With realistic ~3-6 month total for the suite, this is its own project — but per the user directive "do all plans / dont stop at phase boundaries," subsequent invocations should keep grinding through them.
+The remaining 1 editor (sector-editor) is tracked as a future Phase L sub-item. With realistic ~2-3 weeks effort, this is the largest single port left in the suite — per the user directive "do all plans / dont stop at phase boundaries," subsequent invocations should keep grinding.
 
-For immediate Linux runnability of the editors: the WinForms binaries already run under WINE — `tools/README.md` documents this. That's the realistic interim story until Avalonia ports land.
+For immediate Linux runnability of the editors: the WinForms binaries already run under WINE — `tools/README.md` documents this. That's the realistic interim story until the last Avalonia port lands.
 
 ## Decisions
 

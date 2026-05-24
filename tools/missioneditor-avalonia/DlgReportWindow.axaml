@@ -1,0 +1,19 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="MissionEditorAvalonia.DlgReportWindow"
+        Width="720" Height="600"
+        WindowStartupLocation="CenterOwner"
+        Title="Mission Report">
+  <Grid RowDefinitions="*,Auto">
+    <ScrollViewer Grid.Row="0">
+      <TextBox Name="c_ReportTxt"
+               AcceptsReturn="True"
+               IsReadOnly="True"
+               TextWrapping="Wrap"
+               FontFamily="monospace"/>
+    </ScrollViewer>
+    <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="6" Margin="6">
+      <Button Content="Close" Click="OnClose"/>
+    </StackPanel>
+  </Grid>
+</Window>

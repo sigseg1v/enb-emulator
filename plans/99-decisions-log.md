@@ -477,3 +477,11 @@ sprintf_s(buf, sizeof(buf),
 were escaping the line-anchored audit because the function-call open and the SQL string literal sat on different physical lines. The script (commit 75a4ba4) now opens a `CROSS_LINE_WINDOW=8` lookahead when it sees an unsafe-build line with unbalanced parens *and* a trailing comma, and reports the original line when a subsequent line contains a SQL keyword inside a `"..."` string literal. The two precision constraints — unbalanced parens + trailing comma, and string-literal rather than bare identifier — were added after the naive first cut false-positived on (a) `sprintf_s(struct.field, ..., "%s", value)` followed by an unrelated `AddParam` SQL nearby, and (b) `XML_TAG_ID_FOO_UPDATE` switch cases below an unrelated sprintf. Verified with a synthetic injection: the multi-line idiom now trips the gate and exits 1.
 
 **Alternatives considered:** (a) Run a separate one-shot cross-line audit, fix the 36 sites, and leave the script line-anchored. Rejected — drift-tracking is the whole point of the ratchet; without script support a new multi-line site lands silently. (b) Convert the audit to a real C++ parser (libclang AST). Rejected — bash + awk is enough signal for this surface, libclang adds CI complexity for a ratchet that already catches the live class of bug.
+
+## 2026-05-24 — C++23 bump deferred pending explicit approval
+
+server/CMakeLists.txt, login-server/CMakeLists.txt, and proxy/CMakeLists.txt all set `CMAKE_CXX_STANDARD 17`. Toolchain (g++ 13.3.0) fully supports C++23. The 2010-vintage Net-7 codebase doesn't lean on any post-C++17 feature, so the bump is a forward-looking convenience for new code (compat/, common/include/net7/, libpqxx wrapper, net7ipc) — std::expected, std::print, std::ranges, designated aggregate init, std::span.
+
+**Status:** explicitly deferred per user instruction. **Do not bump autonomously.** Tracked as task #60. When the user approves: bump all three CMakeLists, run full build + 23/23 gtest + 8/8 integration; if a vendored boost TU breaks, flip that target back to 20 (or 17) rather than touch upstream.
+
+Risks: a handful of legacy implicit-conversion warnings may upgrade under stricter conformance; the vendored boost subset in `server/third_party/` predates C++23 and may need either a version bump or a per-target carve-out. No code change committed at this time.

@@ -52,7 +52,7 @@ namespace ToolsLauncherAvalonia
         {
             ("Effect Editor",   "effect-editor-avalonia",       true),
             ("Item Editor",     "item-editor-avalonia",         false),
-            ("Mission Editor",  "missioneditor-avalonia",       false),
+            ("Mission Editor",  "missioneditor-avalonia",       true),
             ("Mob Editor",      "mob-editor-avalonia",          true),
             ("Sector Editor",   "sector-editor-avalonia",       false),
             ("Station Tools",   "station-tools-avalonia",       true),

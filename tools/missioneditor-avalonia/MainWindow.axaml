@@ -1,0 +1,150 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="MissionEditorAvalonia.MainWindow"
+        Width="900" Height="700"
+        Title="Mission Editor">
+  <Grid RowDefinitions="Auto,*,Auto">
+
+    <!-- Top toolbar -->
+    <Border Grid.Row="0" Padding="6" BorderBrush="Gray" BorderThickness="0,0,0,1">
+      <StackPanel Orientation="Horizontal" Spacing="6">
+        <TextBlock Text="Mission ID:" VerticalAlignment="Center"/>
+        <TextBox   Name="c_SearchTxt" Width="100" KeyDown="OnSearchKey"/>
+        <Button    Name="c_AddBtn"    Content="Add"      Click="OnRecordAdd"/>
+        <Button    Name="c_SaveBtn"   Content="Save"     Click="OnRecordSave"/>
+        <Button    Name="c_CancelBtn" Content="Cancel"   Click="OnRecordUndo"/>
+        <Button    Name="c_DeleteBtn" Content="Delete"   Click="OnRecordDelete"/>
+        <Button    Name="c_EditBtn"   Content="Edit XML" Click="OnRecordEdit"/>
+        <Button    Name="c_SearchBtn" Content="Search"   Click="OnRecordSearch"/>
+        <Button    Name="c_ReportBtn" Content="Report"   Click="OnRecordReport"/>
+      </StackPanel>
+    </Border>
+
+    <!-- Tabs -->
+    <TabControl Grid.Row="1" Name="c_TabControl">
+
+      <!-- Mission tab -->
+      <TabItem Header="Mission">
+        <ScrollViewer>
+          <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,*,*"
+                ColumnDefinitions="120,*,Auto" Margin="10">
+
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="ID:" VerticalAlignment="Center"/>
+            <TextBox   Grid.Row="0" Grid.Column="1" Name="c_IdTxt" IsReadOnly="True" Margin="6,2"/>
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="Type:" VerticalAlignment="Center"/>
+            <ComboBox  Grid.Row="1" Grid.Column="1" Name="c_TypeCbo" Margin="6,2" HorizontalAlignment="Stretch"/>
+
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="Key:" VerticalAlignment="Center"/>
+            <TextBox   Grid.Row="2" Grid.Column="1" Name="c_KeyTxt" Margin="6,2"/>
+            <Button    Grid.Row="2" Grid.Column="2" Name="c_KeySearchBtn" Content="..." Click="OnKeySearch" Margin="2"/>
+
+            <TextBlock Grid.Row="3" Grid.Column="0" Text="Name:" VerticalAlignment="Center"/>
+            <TextBox   Grid.Row="3" Grid.Column="1" Name="c_NameTxt" Margin="6,2"/>
+
+            <TextBlock Grid.Row="4" Grid.Column="0" Text="Summary:" VerticalAlignment="Top"/>
+            <TextBox   Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Name="c_SummaryTxt"
+                       AcceptsReturn="True" Height="80" Margin="6,2" TextWrapping="Wrap"/>
+
+            <TextBlock Grid.Row="5" Grid.Column="0" Text="Time (sec):" VerticalAlignment="Center"/>
+            <TextBox   Grid.Row="5" Grid.Column="1" Name="c_TimeTxt" Margin="6,2"/>
+
+            <TextBlock Grid.Row="6" Grid.Column="0" Text="Forfeitable:" VerticalAlignment="Center"/>
+            <CheckBox  Grid.Row="6" Grid.Column="1" Name="c_ForfeitableChk" Margin="6,2"/>
+
+            <!-- Conditions -->
+            <Grid Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="3" RowDefinitions="Auto,*" Margin="0,8,0,0">
+              <TextBlock Grid.Row="0" Text="Conditions" FontWeight="Bold"/>
+              <Grid Grid.Row="1" ColumnDefinitions="*,Auto">
+                <ListBox Grid.Column="0" Name="c_ConditionsTbl" Height="120"/>
+                <StackPanel Grid.Column="1" Orientation="Vertical" Spacing="2" Margin="6,0">
+                  <Button Name="c_ConditionsAddBtn"    Content="Add"    Click="OnConditionAdd"/>
+                  <Button Name="c_ConditionsEditBtn"   Content="Edit"   Click="OnConditionEdit"/>
+                  <Button Name="c_ConditionsRemoveBtn" Content="Remove" Click="OnConditionRemove"/>
+                  <Button Name="c_ConditionUpBtn"      Content="Up"/>
+                  <Button Name="c_ConditionDownBtn"    Content="Down"/>
+                </StackPanel>
+              </Grid>
+            </Grid>
+
+            <!-- Stages -->
+            <Grid Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="3" RowDefinitions="Auto,*" Margin="0,8,0,0">
+              <TextBlock Grid.Row="0" Text="Stages" FontWeight="Bold"/>
+              <Grid Grid.Row="1" ColumnDefinitions="*,Auto">
+                <ListBox Grid.Column="0" Name="c_StagesTbl" Height="120"/>
+                <StackPanel Grid.Column="1" Orientation="Vertical" Spacing="2" Margin="6,0">
+                  <Button Name="c_StagesAddBtn"    Content="Add"    Click="OnStageAdd"/>
+                  <Button Name="c_StagesRemoveBtn" Content="Remove" Click="OnStageRemove"/>
+                  <Button Name="c_StageUpBtn"      Content="Up"/>
+                  <Button Name="c_StageDownBtn"    Content="Down"/>
+                </StackPanel>
+              </Grid>
+            </Grid>
+
+          </Grid>
+        </ScrollViewer>
+      </TabItem>
+
+      <!-- Stages tab -->
+      <TabItem Header="Stages">
+        <ScrollViewer>
+          <Grid RowDefinitions="Auto,Auto,*,*,Auto"
+                ColumnDefinitions="120,*" Margin="10">
+
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="Stage:" VerticalAlignment="Center"/>
+            <Grid      Grid.Row="0" Grid.Column="1" ColumnDefinitions="*,Auto">
+              <ComboBox Grid.Column="0" Name="c_StagesCbo" Margin="6,2" HorizontalAlignment="Stretch"
+                        SelectionChanged="OnStageSelected"/>
+              <Button   Grid.Column="1" Name="c_AddStageBtn" Content="Add Stage" Click="OnAddStage" Margin="2"/>
+            </Grid>
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="Description:" VerticalAlignment="Top"/>
+            <TextBox   Grid.Row="1" Grid.Column="1" Name="c_DescriptionTxt"
+                       AcceptsReturn="True" Height="80" Margin="6,2" TextWrapping="Wrap"/>
+
+            <!-- Completions -->
+            <Grid Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" RowDefinitions="Auto,*" Margin="0,8,0,0">
+              <TextBlock Grid.Row="0" Text="Completions" FontWeight="Bold"/>
+              <Grid Grid.Row="1" ColumnDefinitions="*,Auto">
+                <ListBox Grid.Column="0" Name="c_CompletionsTbl" Height="150"/>
+                <StackPanel Grid.Column="1" Orientation="Vertical" Spacing="2" Margin="6,0">
+                  <Button Name="c_CompletionsAddBtn"    Content="Add"    Click="OnCompletionAdd"/>
+                  <Button Name="c_CompletionsEditBtn"   Content="Edit"   Click="OnCompletionEdit"/>
+                  <Button Name="c_CompletionsRemoveBtn" Content="Remove" Click="OnCompletionRemove"/>
+                  <Button Name="c_CompletionUpBtn"      Content="Up"/>
+                  <Button Name="c_CompletionDownBtn"    Content="Down"/>
+                </StackPanel>
+              </Grid>
+            </Grid>
+
+            <!-- Rewards -->
+            <Grid Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2" RowDefinitions="Auto,*" Margin="0,8,0,0">
+              <TextBlock Grid.Row="0" Text="Rewards" FontWeight="Bold"/>
+              <Grid Grid.Row="1" ColumnDefinitions="*,Auto">
+                <ListBox Grid.Column="0" Name="c_RewardsTbl" Height="150"/>
+                <StackPanel Grid.Column="1" Orientation="Vertical" Spacing="2" Margin="6,0">
+                  <Button Name="c_RewardsAddBtn"    Content="Add"    Click="OnRewardsAdd"/>
+                  <Button Name="c_RewardsEditBtn"   Content="Edit"   Click="OnRewardEdit"/>
+                  <Button Name="c_RewardsRemoveBtn" Content="Remove" Click="OnRewardsRemove"/>
+                  <Button Name="c_RewardUpBtn"      Content="Up"/>
+                  <Button Name="c_RewardDownBtn"    Content="Down"/>
+                </StackPanel>
+              </Grid>
+            </Grid>
+
+            <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="6" Margin="0,8,0,0">
+              <Button Name="c_TalkTreeBtn" Content="Edit Talk Tree" Click="OnTalkTree"/>
+            </StackPanel>
+
+          </Grid>
+        </ScrollViewer>
+      </TabItem>
+
+    </TabControl>
+
+    <!-- Status bar -->
+    <Border Grid.Row="2" Padding="6,2" BorderBrush="Gray" BorderThickness="0,1,0,0">
+      <TextBlock Name="c_StatusLbl" Text="ready."/>
+    </Border>
+  </Grid>
+</Window>

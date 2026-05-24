@@ -1,0 +1,21 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="MissionEditorAvalonia.DlgStagesWindow"
+        Width="420" Height="200"
+        WindowStartupLocation="CenterOwner"
+        Title="Stage">
+  <Grid RowDefinitions="Auto,Auto,*,Auto" ColumnDefinitions="120,*" Margin="10">
+
+    <TextBlock Grid.Row="0" Grid.Column="0" Text="ID:" VerticalAlignment="Center"/>
+    <TextBox   Grid.Row="0" Grid.Column="1" Name="c_IdTxt" Margin="6,2" IsReadOnly="True"/>
+
+    <TextBlock Grid.Row="1" Grid.Column="0" Text="Description:" VerticalAlignment="Top"/>
+    <TextBox   Grid.Row="1" Grid.Column="1" Name="c_DescriptionTxt" AcceptsReturn="True" Height="60" Margin="6,2"/>
+
+    <StackPanel Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="6">
+      <Button Content="OK"     Name="c_OkBtn"     Click="OnOk"/>
+      <Button Content="Cancel" Name="c_CancelBtn" Click="OnCancel"/>
+    </StackPanel>
+
+  </Grid>
+</Window>
