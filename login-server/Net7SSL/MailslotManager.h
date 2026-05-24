@@ -4,9 +4,15 @@
 //#include "Net7SSL.h"
 //#include <stdio.h>
 
+#ifdef WIN32
 extern LPTSTR g_OutputSlot;
 extern LPTSTR g_InputSlot;
 extern LPTSTR g_EventName;
+#else
+extern const char *g_OutputSlot;
+extern const char *g_InputSlot;
+extern const char *g_EventName;
+#endif
 
 class MailManager
 {
@@ -23,9 +29,17 @@ public:
 private:
 	void SetUpSendSlot();
 
+#ifdef WIN32
 	HANDLE m_hSlot;
-	HANDLE m_hFile; 
+	HANDLE m_hFile;
 	HANDLE m_hEvent;
+#else
+	// On Linux m_hSlot owns a heap-allocated net7ipc::PosixIpc*; the
+	// other two were Win32-only file/event handles and stay unused.
+	void  *m_hSlot;
+	void  *m_hFile;
+	void  *m_hEvent;
+#endif
 	bool   m_SendSlotInit;
 	unsigned char m_Buffer[1024];
 };

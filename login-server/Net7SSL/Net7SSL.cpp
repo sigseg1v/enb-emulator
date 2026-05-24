@@ -625,9 +625,9 @@ char *GetSectorName(long sector_id)
 // server side (server/src/Net7.cpp) binds the inverse mapping. Both sides
 // need a writable directory at /run/net7-ipc/ — docker-compose mounts a
 // shared named volume there.
-LPTSTR g_OutputSlot = const_cast<LPTSTR>("/run/net7-ipc/net7.sock");
-LPTSTR g_InputSlot  = const_cast<LPTSTR>("/run/net7-ipc/net7SSL.sock");
-LPTSTR g_EventName  = const_cast<LPTSTR>("Net7SSLSlot");
+const char *g_OutputSlot = "/run/net7-ipc/net7.sock";
+const char *g_InputSlot  = "/run/net7-ipc/net7SSL.sock";
+const char *g_EventName  = "Net7SSLSlot";
 
 // Globals declared extern in Net7SSL.h. We define just enough here to make
 // the Linux build link. WIN32-walled translation units in this directory

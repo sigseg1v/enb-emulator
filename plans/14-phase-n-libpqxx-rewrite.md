@@ -15,11 +15,28 @@ Sequence rationale: Phase M removes `_snprintf`/`stricmp`/etc. across the codeba
 ## Definition of done
 
 - `server/src/mysqlplus/mysqlplus.{cpp,h}` reimplemented over libpqxx; same 7 classes with the same method signatures so DAOs don't change.
+- **Parameterised statements are the only execution path.** No `sprintf`/`snprintf` + raw query string. The wrapper's `execute()` must take a query template and bound parameters; the legacy single-arg `execute(char *sql)` either becomes parameter-less (no `%s`/`%d` allowed) or is deleted outright.
 - `CMakeLists.txt` swaps `find_package(MySQL)` → `find_package(libpqxx CONFIG REQUIRED)`.
 - All ~25 `*SQL.cpp` DAO files compile against the new wrapper without source changes (or with the minimal changes that the MIGRATION_PATTERN doc anticipates).
-- `tests/postgres_smoke_test` (env-gated) extends to exercise at least one full DAO round-trip end-to-end against the docker-compose Postgres.
+- **SQL-injection audit gate**: a `tools/sql_injection_audit.sh` (grep-based) reports zero call sites in server-native code that build query strings with embedded user/dynamic data via `sprintf*`/`snprintf*`/`strcat`. Walled `#ifdef WIN32` blocks are exempt (they don't run on Linux); everything else must use the parameterised wrapper. CI runs this on every PR.
+- `LinuxAuth.cpp` `SafeUsername`/`SafePassword` are **deleted** once the parameterised path is in. They exist purely because the current wrapper has no parameter binding — a defense-in-depth band-aid that becomes redundant the moment `tx.exec_params(...)` is the only way to talk to the DB.
+- `tests/postgres_smoke_test` (env-gated) extends to exercise at least one full DAO round-trip end-to-end against the docker-compose Postgres, including at least one query with a hostile-input string (`'; DROP TABLE accounts; --`) that must round-trip as literal data, not execute.
 - docker-compose `server` image links libpqxx, drops libmysqlclient.
 - `db/mysql/` keeps the original dumps as archival reference; new code targets only `db/postgres/`.
+
+## Current dynamic-SQL surface (audit done 2026-05-23)
+
+Sites that currently build queries with `sprintf`/`snprintf` + embedded values, by file:
+
+| File | Dynamic-SQL sites | Reached on Linux today? |
+|---|---|---|
+| `login-server/Net7SSL/AccountManager.cpp` | 34 | No (Phase-J-walled WIN32) — but its Linux replacement uses the same pattern |
+| `login-server/Net7SSL/LinuxAuth.cpp` | 2 (`ValidateAccountLinux`, `accLogin`) | **Yes** — gated by `SafeUsername`/`SafePassword` band-aid |
+| `server/src/ServerManager.cpp:185` | 1 (`logoutOnShutdown` with `strftime` timestamp) | Yes — not user-controlled |
+| `server/src/*SQL.cpp` (Asset/Buff/Faction/Item/Mission/MOB/Sector/Skills) | 0 dynamic; all are static `SELECT * FROM table` loaders | Yes |
+| `proxy/*` | 0 | Yes (proxy doesn't talk to DB) |
+
+The walled `AccountManager.cpp` is dormant on Linux now, but the moment Phase J finishes and unwalls it, all 34 sites become live injection vectors. Phase N must land before that.
 
 ## Anti-scope
 
@@ -31,13 +48,16 @@ Sequence rationale: Phase M removes `_snprintf`/`stricmp`/etc. across the codeba
 
 - [ ] Re-read `MIGRATION_PATTERN.md` and confirm it's still accurate.
 - [ ] Reimplement `sql_connection_c` (connect / disconnect / grabdb).
-- [ ] Reimplement `sql_query_c` (parameterized queries via libpqxx `params`).
+- [ ] Reimplement `sql_query_c` so its `execute()` signature **requires** a parameter pack (or `pqxx::params`). The legacy `execute(char *sql)` becomes a deprecated overload that asserts on `%`-characters in the string.
 - [ ] Reimplement `sql_result_c` (row iteration).
-- [ ] Reimplement `sql_param_c` (parameter binding).
+- [ ] Reimplement `sql_param_c` (parameter binding) — back it with `pqxx::params::append()`.
 - [ ] Reimplement the remaining 3 classes (`sql_field_c`, `sql_row_c`, error wrappers).
 - [ ] CMakeLists update.
 - [ ] DAO compile pass — fix the minor friction the migration doc anticipated.
-- [ ] Wire `postgres_smoke_test` to a real DAO call.
+- [ ] Convert the 36 dynamic-SQL sites listed above to parameterised form, one file at a time. After each file: re-run the audit grep, confirm count drops by N.
+- [ ] Delete `SafeUsername`/`SafePassword` from `LinuxAuth.cpp`.
+- [ ] Add `tools/sql_injection_audit.sh` and wire to CI.
+- [ ] Wire `postgres_smoke_test` to a real DAO call + hostile-input round-trip.
 - [ ] Drop libmysqlclient from server's Dockerfile.
 
 ## Decisions deferred

@@ -33,16 +33,10 @@ SSL_Connection::SSL_Connection()
 	m_LastThreadComms	= 0;
 	m_ServerShutdown	= false;
 
-#ifdef WIN32
-	UINT uiThreadId = 0;
-	m_RecvThreadHandle = (HANDLE)_beginthreadex(NULL, 1024, SSLRecvThread, this, 0, &uiThreadId);
-#else
 	pthread_mutex_init(&m_RecvThreadMtx, NULL);
 	pthread_cond_init(&m_RecvThreadCond, NULL);
-	pthread_create(&m_RecvThreadHandle, NULL, SSLRecvThread, this);
-#endif
-
-	if (!m_RecvThreadHandle) LogMessage("Unable to create a new SSL receive thread\n");
+	if (pthread_create(&m_RecvThreadHandle, NULL, SSLRecvThread, this) != 0)
+		LogMessage("Unable to create a new SSL receive thread\n");
 }
 
 SSL_Connection * SSL_Connection::ReSetSSL_Connection(SOCKET s, ServerManager *server_mgr, unsigned long *ip_addr, SSL_CTX *ssl_context)
@@ -50,14 +44,9 @@ SSL_Connection * SSL_Connection::ReSetSSL_Connection(SOCKET s, ServerManager *se
 	if (!m_RecvThreadHandle) // Just as a safeguard
 	{
 		LogMessage("!Restarting SSL Connection receive thread\n");
-#ifdef WIN32
-		UINT uiThreadId = 0;
-		m_RecvThreadHandle = (HANDLE)_beginthreadex(NULL, 1024, SSLRecvThread, this, 0, &uiThreadId);
-#else
 		pthread_mutex_init(&m_RecvThreadMtx, NULL);
 		pthread_cond_init(&m_RecvThreadCond, NULL);
 		pthread_create(&m_RecvThreadHandle, NULL, SSLRecvThread, this);
-#endif
 	}
 
 	m_Mutex.Lock();
@@ -120,12 +109,7 @@ bool SSL_Connection::IsActive()
 void SSL_Connection::WakeupThread()
 {
 	m_SslConnectionThreadRunning = true;
-
-#ifndef WIN32
 	pthread_cond_signal(&m_RecvThreadCond);
-#else
-	ResumeThread(m_RecvThreadHandle);
-#endif
 }
 
 bool SSL_Connection::OpenSSL_Link()
@@ -214,11 +198,7 @@ void SSL_Connection::SSL_ConnectionThread()
 		KillConnection();
 
 		// m_SslConnectionThreadRunning set to false. Go to sleep... Zzz...
-#ifdef WIN32
-		SuspendThread(m_RecvThreadHandle);
-#else
 		pthread_cond_wait(&m_RecvThreadCond, &m_RecvThreadMtx);
-#endif
 	}
 
 	m_SslConnectionThreadTerminated = true;
@@ -662,20 +642,12 @@ char *SSL_Connection::SectorServer(size_t *response_length, char *recv_buffer)
 	return HttpResult(response_length, info, "text/plain");
 }
 
-#ifdef WIN32
-UINT WINAPI SSL_Connection::SSLRecvThread(void *param)
-#else
 void* SSL_Connection::SSLRecvThread(void *param)
-#endif
 {
 	SSL_Connection* p_this = reinterpret_cast<SSL_Connection*>( param );
 
 	p_this->SSL_ConnectionThread();
-#ifdef WIN32
-	return 1;
-#else
 	return NULL;
-#endif
 }
 
 // Kills an active connection on the Socket, if any, and suspends the thread

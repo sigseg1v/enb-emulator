@@ -108,11 +108,7 @@ private:
 	void	ResetConnection();
 	char   *GetLogInfo();
 
-#ifdef WIN32
-	static UINT WINAPI Connection::SocketRecvThread(void *param);
-#else
 	static void* SocketRecvThread(void *param);
-#endif
 
     ////////////////////////////////
     //  Server to Server Opcodes  //

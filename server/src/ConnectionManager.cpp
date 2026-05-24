@@ -16,12 +16,13 @@ ConnectionManager::ConnectionManager()
 	m_ConnectionList = NULL;
 	m_ConnectionCount = 0;
 	m_comms_thread_running = false;
-	UINT uiThreadId = 0;
 
 	//m_ResendBuffer = new CircularBuffer(0x1000, 2048);
 	//m_ResendQueue = new MessageQueue(m_ResendBuffer);
 
-	m_CommsThread = (HANDLE)_beginthreadex(NULL, 0, OpcodeCommsThread, this, CREATE_SUSPENDED, &uiThreadId);
+	// pthread_create starts the thread running immediately; BeginOpcodeSendThread
+	// flips m_comms_thread_running which the thread loop is waiting on.
+	pthread_create(&m_CommsThread, NULL, OpcodeCommsThread, this);
 }
 
 ConnectionManager::~ConnectionManager()
@@ -215,14 +216,14 @@ void ConnectionManager::RunOpcodeSendThread()
 
 void ConnectionManager::BeginOpcodeSendThread()
 {
-	ResumeThread(m_CommsThread);
+	// pthread_create in the ctor already started the thread; nothing to resume.
 }
 
-UINT WINAPI ConnectionManager::OpcodeCommsThread(LPVOID Param)
+void *ConnectionManager::OpcodeCommsThread(void *Param)
 {
 	ConnectionManager* p_this = reinterpret_cast<ConnectionManager*>( Param );
 
 	p_this->RunOpcodeSendThread();
 
-	return 1;
+	return NULL;
 }

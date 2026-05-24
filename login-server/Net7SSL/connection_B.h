@@ -96,7 +96,11 @@ private:
 	void	ProcessTicketInfo(short bytes);
 	void	ResetConnection();
 
-	static UINT WINAPI Connection_B::SocketRecvThread(void *param);
+#ifdef WIN32
+	static unsigned int __stdcall SocketRecvThread(void *param);
+#else
+	static void *SocketRecvThread(void *param);
+#endif
 
     ////////////////////////////////
     //  Server to Server Opcodes  //
@@ -183,7 +187,11 @@ private:
 	long		m_MaxInactivityTime;		// Maximum inactivity on this connection (0 is Infinite)
 
 	bool		m_KeysExchanged;
-	HANDLE		m_RecvThreadHandle;
+#ifdef WIN32
+	void		*m_RecvThreadHandle;  // HANDLE; WIN32-walled .cpp uses this
+#else
+	pthread_t	m_RecvThreadHandle;
+#endif
 
 	long		m_IPaddr;
 

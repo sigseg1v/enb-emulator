@@ -4,6 +4,9 @@
 #define _TCP_CONNECTION_H_INCLUDED_
 
 #include "Mutex.h"
+#ifndef WIN32
+#include <pthread.h>
+#endif
 #include "WestwoodRSA.h"
 #include "WestwoodRC4.h"
 #include "PacketStructures.h"
@@ -90,7 +93,11 @@ private:
     bool    DoClientKeyExchange();
     void    Send(unsigned char *Buffer, int length);
 
-    static UINT WINAPI Connection::SocketSendThread(void *param);
+#ifdef WIN32
+    static unsigned int __stdcall SocketSendThread(void *param);
+#else
+    static void *SocketSendThread(void *param);
+#endif
 
     void    ProcessGlobalServerOpcode(short opcode, short bytes);
     void    ProcessMasterServerOpcode(short opcode, short bytes);
@@ -404,7 +411,11 @@ public:
 	// The following are for use the slash commands
 private:
     MessageQueue        m_SendQueue;
-    HANDLE              m_SendThreadHandle;
+#ifdef WIN32
+    void               *m_SendThreadHandle;  // HANDLE; only used by walled WIN32 path
+#else
+    pthread_t           m_SendThreadHandle;  // unused on Linux: Connection.cpp is WIN32-walled
+#endif
     Mutex			    m_Mutex;
 	unsigned long		m_Tilt_Sent;
 	unsigned long		m_Turn_Sent;

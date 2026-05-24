@@ -37,9 +37,9 @@ LPTSTR g_InputSlot  = TEXT("\\\\.\\mailslot\\net7");
 LPTSTR g_OutputSlot = TEXT("\\\\.\\mailslot\\net7SSL");
 LPTSTR g_EventName  = TEXT("Net7SSLSlot");
 #else
-LPTSTR g_InputSlot  = const_cast<LPTSTR>("/run/net7-ipc/net7.sock");
-LPTSTR g_OutputSlot = const_cast<LPTSTR>("/run/net7-ipc/net7SSL.sock");
-LPTSTR g_EventName  = const_cast<LPTSTR>("Net7SSLSlot");
+const char *g_InputSlot  = "/run/net7-ipc/net7.sock";
+const char *g_OutputSlot = "/run/net7-ipc/net7SSL.sock";
+const char *g_EventName  = "Net7SSLSlot";
 #endif
 
 #pragma comment(lib, "wsock32.lib")

@@ -12,15 +12,21 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 #include "Net7.h"
 #include <stdio.h>
 
+#ifdef WIN32
 extern LPTSTR g_OutputSlot;
 extern LPTSTR g_InputSlot;
 extern LPTSTR g_EventName;
+#else
+extern const char *g_OutputSlot;
+extern const char *g_InputSlot;
+extern const char *g_EventName;
+#endif
 
 class MailManager
 {
@@ -37,9 +43,17 @@ public:
 private:
 	void SetUpSendSlot();
 
+#ifdef WIN32
 	HANDLE m_hSlot;
-	HANDLE m_hFile; 
+	HANDLE m_hFile;
 	HANDLE m_hEvent;
+#else
+	// On Linux m_hSlot owns a heap-allocated net7ipc::PosixIpc*; the
+	// other two were Win32-only file/event handles and stay unused.
+	void  *m_hSlot;
+	void  *m_hFile;
+	void  *m_hEvent;
+#endif
 	bool   m_SendSlotInit;
 	unsigned char m_Buffer[1024];
 };

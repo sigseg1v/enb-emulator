@@ -4,6 +4,9 @@
 #define _CONNECTION_MANAGER_SSL_H_INCLUDED_
 
 #include "MessageQueue.h"
+#ifndef WIN32
+#include <pthread.h>
+#endif
 
 class SSL_Connection;
 class Connection_B;
@@ -39,7 +42,11 @@ private:
 		struct ConnectionEntry * next;
 	};
 
-	static UINT WINAPI ConnectionManager::OpcodeCommsThread(void *Param);
+#ifdef WIN32
+	static unsigned int __stdcall OpcodeCommsThread(void *Param);
+#else
+	static void *OpcodeCommsThread(void *Param);
+#endif
 	void	RunOpcodeSendThread();
 	void	HandleResend(long player_id, long packet_num);
 
@@ -47,7 +54,11 @@ private:
 	SslConnectionEntry * m_SslConnectionList;
 	ConnectionEntry * m_ConnectionList;
 	u32		m_ConnectionCount;
-	HANDLE				m_CommsThread;
+#ifdef WIN32
+	void				*m_CommsThread;  // HANDLE; WIN32-walled ctor uses this
+#else
+	pthread_t			m_CommsThread;
+#endif
 
 };
 

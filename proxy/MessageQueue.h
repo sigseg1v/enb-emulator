@@ -4,6 +4,7 @@
 #define _MESSAGE_QUEUE_H_INCLUDED_
 
 #include "Mutex.h"
+#include <cstdint>
 
 class Connection;
 
@@ -42,11 +43,11 @@ private:
 
 	MessageEntry *m_Queue;
 
-	DWORD m_TotalAdded;
-	DWORD m_TotalAddedToHead;
-	DWORD m_TotalAddedToTail;
-	DWORD m_TotalRemoved;
-    DWORD m_EntriesInQueue;
+	uint32_t m_TotalAdded;
+	uint32_t m_TotalAddedToHead;
+	uint32_t m_TotalAddedToTail;
+	uint32_t m_TotalRemoved;
+	uint32_t m_EntriesInQueue;
 };
 
 #endif // _MESSAGE_QUEUE_H_INCLUDED_

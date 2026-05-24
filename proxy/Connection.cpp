@@ -816,7 +816,7 @@ Connection::Connection(SOCKET s, ServerManager &server_mgr, short port,
       m_SectorID(0),
       m_PacketLoggingEnabled(false),
       m_IPaddr(0),
-      m_SendThreadHandle(nullptr),
+      m_SendThreadHandle{},  // pthread_t on Linux; field is unused on the Linux stub path
       m_Tilt_Sent(0),
       m_Turn_Sent(0)
 {

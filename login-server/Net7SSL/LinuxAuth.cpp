@@ -193,11 +193,15 @@ bool EnsureDbConnected()
     return true;
 }
 
-// Strict-by-default username escape. Reject anything that isn't
-// [A-Za-z0-9_.-]; this keeps SQL injection surface to zero without
-// reaching into mysql_real_escape_string. The 2010 schema's username
-// column is varchar(40); 63 is enough headroom for the longest legal
-// input the client sends.
+// PHASE-N TODO: delete this function. It exists because the legacy
+// mysqlplus wrapper has no prepared-statement support — the only way
+// to talk to MySQL is mysql_query(const char *), so every query is
+// string-built and every dynamic value is a potential injection. The
+// right fix is parameterised statements (see plans/14-phase-n-libpqxx-
+// rewrite.md). Until that lands, this whitelist (`[A-Za-z0-9_.-]`)
+// keeps the auth path's injection surface to zero. Anyone adding a
+// new query in Linux code is expected to also call this — which is
+// exactly the brittleness Phase N gets rid of.
 bool SafeUsername(const char *in, char *out, size_t outsz)
 {
     if (!in || outsz < 2) return false;
@@ -216,9 +220,10 @@ bool SafeUsername(const char *in, char *out, size_t outsz)
     return true;
 }
 
-// Password validation: must be non-empty and short enough; allow any
-// printable ASCII except quote/backslash/percent (which would break the
-// MD5() SQL literal). Same escape strategy as username.
+// PHASE-N TODO: delete (see SafeUsername above). The fact that this
+// rejects characters which are *legal* in a password (`'`, `"`, `\`, `%`)
+// is the smoking gun that this is a SQL-shape constraint masquerading
+// as a password policy. Parameterised statements remove the rationale.
 bool SafePassword(const char *in, char *out, size_t outsz)
 {
     if (!in || outsz < 2) return false;

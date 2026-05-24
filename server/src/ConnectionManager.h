@@ -3,6 +3,7 @@
 #ifndef _CONNECTION_MANAGER_H_INCLUDED_
 #define _CONNECTION_MANAGER_H_INCLUDED_
 
+#include <pthread.h>
 #include "Mutex.h"
 #include "MessageQueue.h"
 
@@ -40,7 +41,7 @@ private:
 		struct ConnectionEntry * next;
 	};
 
-	static UINT WINAPI ConnectionManager::OpcodeCommsThread(void *Param);
+	static void *OpcodeCommsThread(void *Param);
 	void	RunOpcodeSendThread();
 	void	HandleResend(long player_id, long packet_num);
 
@@ -49,7 +50,7 @@ private:
 	SslConnectionEntry * m_SslConnectionList;
 	ConnectionEntry * m_ConnectionList;
 	u32		m_ConnectionCount;
-	HANDLE				m_CommsThread;
+	pthread_t			m_CommsThread;
 	bool				m_comms_thread_running;
 	//unsigned char		m_PacketCache[2048];
 	//MessageQueue	  * m_ResendQueue;

@@ -13,7 +13,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -72,11 +72,7 @@ private:
 	char  *	TouchSession(size_t *response_length, char *recv_buffer);
 	char  *	SectorServer(size_t *response_length, char *recv_buffer);
 
-#ifdef WIN32
-	static UINT WINAPI SSL_Connection::SSLRecvThread(void *param);
-#else
 	static void	*SSLRecvThread(void *param);
-#endif
 
 	bool		OpenSSL_Link();
 
@@ -85,13 +81,9 @@ private:
 	SOCKET		m_Socket;
 	long		m_IpAddress;
 	ServerManager	*m_ServerMgr;
-#ifdef WIN32
-	HANDLE		m_RecvThreadHandle;
-#else
 	pthread_t	m_RecvThreadHandle;
 	pthread_cond_t	m_RecvThreadCond;
 	pthread_mutex_t	m_RecvThreadMtx;		// Note: this is NOT m_Mutex!
-#endif
 	bool		m_SslConnectionThreadRunning;
 	bool		m_SslConnectionThreadTerminated;
 	bool		m_ConnectionActive;
