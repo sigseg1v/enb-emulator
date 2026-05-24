@@ -268,10 +268,51 @@ CliClient.UnitTests/
       Live integration test against a real Net7SSL server lands in
       Item 9 (Workflow: connect-and-login smoke target) and Phase T.
 
-- [ ] Item 5 — Global → master → sector handoff (TCP redirect, server-list parse)
-      Status: not started
-      Touches: tools/cli-client/Net/GlobalConnection.cs, MasterConnection.cs, SectorConnection.cs
-      Notes: ServerRedirect opcode already in common headers; sector handoff hands off to UDP 3809. Reproduce the dance documented in docs/03-network-protocol.md §1–§4.
+- [x] Item 5 — Global → master → sector handoff (TCP redirect, server-list parse)
+      Status: done
+      Touches:
+        - src/CliClient.Core/Net/EncryptedTcpConnection.cs (RSA handshake + RC4 framed I/O wrapper)
+        - src/CliClient.Core/Opcodes/Inbound/ServerRedirectCodec.cs (10-byte payload, opcode 0x0036)
+        - src/CliClient.Core/Opcodes/Outbound/MasterJoinCodec.cs (64-byte wire format, opcode 0x0035)
+        - src/CliClient.Core/Session/SessionStage.cs (Disconnected/Authenticated/Global/Master/Sector)
+        - src/CliClient.Core/Session/CliSession.cs (single-connection-at-a-time coordinator)
+        - tests/CliClient.UnitTests/Net/EncryptedTcpConnectionTests.cs (live-socket round-trip with hand-rolled server-side RSA dance)
+        - tests/CliClient.UnitTests/Opcodes/ServerRedirectCodecTests.cs
+        - tests/CliClient.UnitTests/Opcodes/MasterJoinCodecTests.cs
+        - tests/CliClient.UnitTests/Session/CliSessionTests.cs (incl. live-socket ConnectGlobal handshake test)
+      Notes:
+        EncryptedTcpConnection wraps TcpClient + NetworkStream + two WestwoodRC4 ciphers
+        (separate in/out streams, both keyed with the same 8-byte session key, matching
+        proxy/Connection.cpp::DoKeyExchange). ConnectAsync does the full RSA handshake:
+        read 74-byte server pubkey (ignored — Westwood RSA modulus is hardcoded), generate
+        a random 8-byte RC4 key, encrypt the reversed key into a 64-byte block via
+        RsaHandshake.BuildClientKeyPacket, write 4-byte BE length + the 64-byte block.
+
+        ServerRedirect byte-order quirk reproduced and tested explicitly: sector_id and
+        ip_address are BIG-endian (server uses ntohl), port is LITTLE-endian (no htons in
+        proxy/ClientToMasterServer.cpp::SendServerRedirect — host byte order on x86).
+
+        MasterJoin: 11×BE int32 (matches server's ntohl reads in PlayerConnection.cpp:650)
+        + 20-byte ASCII ticket at offset 44, zero-padded. Wire size fixed at 64 bytes to
+        match the C++ struct on every platform (the historic Phase K Linux bug where
+        sizeof(long)=8 on Linux x86_64 vs 4 on Win32 shifted later fields — int32_t
+        throughout the codec prevents recurrence).
+
+        CliSession is a thin coordinator: holds at most one EncryptedTcpConnection at a
+        time, exposes Send/Receive that delegate to the current connection, transitions
+        Authenticated → Global via ConnectGlobalAsync, and Global → Master or Master →
+        Sector via FollowRedirectAsync (closes current connection, opens fresh one to
+        redirect endpoint, runs a brand-new RSA+RC4 handshake — no session resumption at
+        the transport layer, matching the real EnB design).
+
+        UDP 3809 sector channel deferred — Item 5 covers the TCP redirect chain that the
+        real Win32 client follows for sector handoff (Global TCP → Master TCP → Sector
+        TCP). The persistent UDP-3809 sector world stream is a separate transport that
+        gets wired up alongside the sector-entry workflow in later items.
+
+        Live integration against a real proxy/master server deferred to Item 9 + Phase T.
+        Current tests: in-process loopback TcpListener fakes that run the server side of
+        the handshake. 70 tests passing (was 63 before Item 5).
 
 - [ ] Item 6 — Packet/chat log sinks (NDJSON + readable text)
       Status: not started
