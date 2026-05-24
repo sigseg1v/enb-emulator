@@ -35,6 +35,10 @@ namespace SectorEditorAvalonia
                 var main = new Windows.MainWindow();
                 Console.WriteLine("main: " + main.GetType().Name + " ok");
 
+                int piccoloErrors = PiccoloShim.PiccoloSmoke.Run();
+                Console.WriteLine("piccolo: " + (piccoloErrors == 0 ? "ok" : "FAIL " + piccoloErrors));
+                if (piccoloErrors != 0) return 2;
+
                 return 0;
             }
             catch (Exception ex)

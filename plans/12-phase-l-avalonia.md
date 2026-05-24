@@ -965,36 +965,67 @@ so Tier 12 is split:
       shim being in place; porting them now would produce untested
       broken scaffolds. Build clean, smoke green.
 
-- [ ] **Tier 12d — Piccolo shim on Avalonia primitives**
-      Status: deferred — pivoted to Phase S (higher-leverage greenfield).
-      Sector-editor Sql/Props (the data-layer half) is complete; the
-      remaining UI port is 6500+ LOC of mechanical Avalonia/Piccolo work
-      against a tool that already runs under WINE. Phase S (headless
-      CLI client) unblocks integration testing of the actual server,
-      which is the higher-value deliverable. Resume Tier 12d after
-      Phase S/T land.
-      Touches: `tools/sector-editor-avalonia/PiccoloShim/` (PCanvas,
-      PLayer, PNode, PPath, PImage, PText, PInputEventArgs,
-      PInputEventHandler, PDragEventHandler, PPanEventHandler, PCamera)
-      Notes: minimal internal-only shim. Maps Piccolo's structured 2D
-      scene-graph API onto Avalonia primitives:
-      - `PCanvas` → Avalonia `Canvas` inside a `ScrollViewer`, with
-        a `ScaleTransform`+`TranslateTransform` for pan/zoom
-      - `PLayer` → Avalonia `Panel` (z-ordered children)
-      - `PNode` → Avalonia `Control` (renders via overridden
-        `Render(DrawingContext)`)
-      - `PPath.CreateEllipse(x,y,w,h)` → Avalonia `Ellipse` with
-        `Canvas.Left/Top`
-      - `PImage` → Avalonia `Image` with `Bitmap` source
-      - `PText` → Avalonia `TextBlock`
-      - `MouseDown/MouseDrag/MouseUp` → Avalonia `PointerPressed`/
-        `PointerMoved`/`PointerReleased` with `PInputEventArgs.Position`
-        re-derived from `e.GetPosition(canvas)`
-      - `MouseWheelZoomController` → Avalonia `PointerWheelChanged`
-        bumping the `ScaleTransform`
-      - `PDragEventHandler`/`PPanEventHandler` → captured-pointer
-        translation deltas applied to the layer's `RenderTransform`
-      Sprites can then port near-1:1 against the shim.
+- [x] **Tier 12d — Piccolo shim on Avalonia primitives**
+      Status: done (2026-05-24). Phase S/T have landed; resumed and shipped.
+      Touches: `tools/sector-editor-avalonia/PiccoloShim/` — 11 files:
+      `Graphics.cs` (Pen/Brush/SolidBrush/Brushes/DashStyle/StringAlignment
+      data types), `PNode.cs` (+ `PLayer` subclass), `PPath.cs`, `PImage.cs`,
+      `PText.cs`, `PCamera.cs`, `PCanvas.cs`, `PPanEventHandler.cs`,
+      `PDragEventHandler.cs`, `MouseWheelZoomController.cs`,
+      `PInputEventArgs.cs` (+ `PInputEventHandler` delegate),
+      `PiccoloSmoke.cs`.
+      Notes:
+      - `PCanvas` is an Avalonia `Control` (not Canvas+ScrollViewer) that
+        renders its `Layer` (a `PLayer`) into a `DrawingContext` after
+        applying `Matrix.CreateTranslation × Matrix.CreateScale` from
+        `Camera`. Pointer events pick top-down through the scene graph and
+        capture the hit node for drag.
+      - `PNode` is a plain class (not an Avalonia Control) — children
+        render recursively via `RenderTree(ctx)`. This is closer to
+        Piccolo's actual semantics than wrapping every node as a Control
+        and avoids per-node visual overhead in scenes with thousands of
+        mobs.
+      - **Critical design call:** the shim deliberately ships its own
+        `Pen` / `Brush` / `SolidBrush` / `Brushes` / `DashStyle` /
+        `StringAlignment` types in `Graphics.cs` instead of reusing
+        `System.Drawing.*`. `System.Drawing.Pen` and friends pull in
+        libgdiplus at runtime on Linux — that would push a libgdiplus
+        install dep onto every Linux user and defeat the whole point of
+        the Avalonia port. The shim types mirror the System.Drawing
+        surface the sprite code touches so the Tier 12e port stays
+        drop-in (`new Pen(Color.Red, 3.0f)`, `Brushes.White`,
+        `DashStyle.Dash`, `StringAlignment.Center` all compile unchanged).
+      - `System.Drawing.Color`, `PointF`, `RectangleF`, `Point`, `Size` are
+        pure data structs in `System.Drawing.Primitives` (part of the BCL,
+        no GDI+ dep) — those we still consume.
+      - `PImage` accepts an Avalonia `Bitmap` directly (or a path / stream)
+        instead of wrapping `System.Drawing.Image`. The Tier 12e port will
+        load sprite PNGs as `Bitmap` rather than `Image.FromFile`.
+      - `PText` uses Avalonia `FormattedText` with Inter typeface (the
+        font already shipped via `Avalonia.Fonts.Inter`).
+      - `MouseWheelZoomController` is a ctor-compat shim only — the
+        actual wheel handling lives in `PCanvas.OnPointerWheelChanged`.
+        Kept the type so original sector-editor code that does
+        `new MouseWheelZoomController(canvas.Camera)` compiles unchanged.
+      - `PiccoloSmoke.Run()` exercises every API the sprites consume:
+        builds canvas+layer+image+sub-circles+label, asserts child
+        counts/parent/GetChild/TranslateBy/PickTopDown(hit and miss)/
+        event firing/Camera Pan+ZoomBy/RemoveChild/RemoveAllChildren/
+        MouseWheelZoomController ctor/PDragEventHandler drag delta math.
+        Wired into `Program.RunSmoke()` so `--smoke` returns non-zero on
+        any failure.
+      - Type-ambiguity gotchas resolved with aliases (Avalonia.Media and
+        System.Drawing both define `Brush`, `Pen`, `Point`, `Brushes` —
+        the shim uses its own namespace's types and aliases Avalonia's
+        where needed for rendering).
+      - **Honest caveat:** the shim is verified by `PiccoloSmoke` (passes
+        green) but NOT yet exercised by real sprite code. Tier 12e port
+        may reveal API gaps that need backfilling — likely candidates:
+        bounds-rect math, hit-test on rotated nodes, picking through
+        ChildrenPickable=false containers (already implemented but
+        edge cases). Backfill happens during 12e.
+      Smoke: `dotnet run -- --smoke` → `piccolo: ok`. Build: 0 warnings,
+      0 errors.
 
 - [ ] **Tier 12e — Sprites + windows**
       Status: deferred — depends on Tier 12d. Same rationale: pivoted
