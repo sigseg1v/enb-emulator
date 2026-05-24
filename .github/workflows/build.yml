@@ -242,3 +242,67 @@ jobs:
       - name: Stop proxy
         if: always()
         run: docker rm -f net7proxy-ci || true
+
+  cli-integration-test:
+    name: cli-integration-test (xUnit / .NET 10 against full stack)
+    runs-on: ubuntu-24.04
+    # Independent of the C++ ctest pipeline — uses docker-compose stack
+    # straight from the repo definitions, drives CliClient.Core in-
+    # process, and asserts opcode-by-opcode against the running server.
+    # No `needs:` chain so this runs in parallel with cmake-build /
+    # ctest / integration-test for fast feedback.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Generate self-signed dev TLS cert (justfile gen-certs)
+        run: |
+          mkdir -p deploy/certs
+          openssl req -x509 -newkey rsa:2048 -days 365 -nodes \
+            -subj "/CN=local.net-7.org/O=Earth-and-Beyond Emulator Dev/C=US" \
+            -addext "subjectAltName=DNS:local.net-7.org,DNS:localhost,IP:127.0.0.1" \
+            -keyout deploy/certs/local.net-7.org.pem \
+            -out    deploy/certs/local.net-7.org.cer
+      - name: Bring up docker-compose stack (mysql + login + proxy + server)
+        run: |
+          docker compose up -d --wait mysql login proxy server
+          docker compose ps
+      - name: Build CliClient.IntegrationTests
+        run: |
+          dotnet build tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
+            --configuration Debug
+      - name: Run integration suite
+        env:
+          # ServerFixture owns the lifecycle when we DON'T pass this.
+          # We brought the stack up explicitly above so we DO set it —
+          # fixture skips its own `compose up`/`down -v` and reuses
+          # ours. This way the ServerFixture's `down -v` never wipes
+          # the stack mid-job; we tear it down ourselves in a final
+          # always-runs step that also collects logs.
+          CLI_INTEGRATION_SKIP_COMPOSE: "1"
+        run: |
+          dotnet test tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
+            --no-build \
+            --logger "trx;LogFileName=cli-integration.trx" \
+            --logger "console;verbosity=normal" \
+            --results-directory test-results/
+      - name: Upload TRX artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-integration-trx
+          path: test-results/**/*.trx
+          if-no-files-found: warn
+      - name: Stack logs on failure
+        if: failure()
+        run: |
+          echo "=== mysql ===";  docker compose logs mysql  || true
+          echo "=== login ===";  docker compose logs login  || true
+          echo "=== proxy ===";  docker compose logs proxy  || true
+          echo "=== server ==="; docker compose logs server || true
+      - name: Tear down docker-compose stack
+        if: always()
+        run: docker compose down -v || true

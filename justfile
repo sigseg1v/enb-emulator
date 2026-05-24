@@ -166,6 +166,35 @@ integration-test:
         docker rm -f net7proxy-local
     fi
 
+# Phase T: xUnit integration suite that drives CliClient.Core
+# (Phase S library) against the live docker-compose stack
+# (mysql + login + proxy + server). Reuses an existing
+# `just dev`/`just run-stack-bg` stack if one is up by exporting
+# CLI_INTEGRATION_SKIP_COMPOSE=1; otherwise the test fixture brings
+# its own stack up + tears it down.
+cli-integration:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if timeout 1 bash -c '</dev/tcp/127.0.0.1/4443' 2>/dev/null \
+    && timeout 1 bash -c '</dev/tcp/127.0.0.1/3801' 2>/dev/null \
+    && timeout 1 bash -c '</dev/tcp/127.0.0.1/3805' 2>/dev/null \
+    && timeout 1 bash -c '</dev/tcp/127.0.0.1/3500' 2>/dev/null; then
+        echo ">>> reusing existing stack (login/proxy/sector ports listening)"
+        export CLI_INTEGRATION_SKIP_COMPOSE=1
+    else
+        echo ">>> ServerFixture will own the docker-compose lifecycle"
+    fi
+    dotnet test tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
+        --logger "trx;LogFileName=cli-integration.trx" \
+        --logger "console;verbosity=normal"
+
+# Run ONLY the xUnit tests that don't need docker (Robustness +
+# CaptureReplay + Smoke). Fast path for laptop development.
+cli-integration-fast:
+    CLI_INTEGRATION_SKIP_COMPOSE=1 \
+    dotnet test tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
+        --filter "FullyQualifiedName~Robustness|FullyQualifiedName~Verification|FullyQualifiedName~Smoke"
+
 # ---- package / release ----
 
 # Build OCI images for server + login locally.

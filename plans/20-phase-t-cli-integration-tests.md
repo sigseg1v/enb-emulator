@@ -466,10 +466,44 @@ xUnit `[Collection("server")]` ensures the docker stack stands up exactly once p
            proxy on 3500). Full integration suite now 27/27 green
            (was 16/16 pre-Item-7) in ~7s total wall-clock.
 
-- [ ] Item 8 — CI integration
-      Status: not started
-      Touches: .github/workflows/build.yml, justfile (add `just integration` target)
-      Notes: integration suite runs after the unit-test job; failure breaks the build; TRX uploaded as artifact.
+- [x] Item 8 — CI integration
+      Status: done
+      Touches: .github/workflows/build.yml (new `cli-integration-test` job), justfile (new `cli-integration` + `cli-integration-fast` recipes)
+      Notes:
+        ▸ New CI job `cli-integration-test` on ubuntu-24.04, 20-min
+           timeout, NO `needs:` chain — runs in parallel with cmake-
+           build/ctest/integration-test so a Phase T regression
+           surfaces at the same wall-clock time as a server-side one.
+           Steps: checkout → install .NET 10 SDK → generate self-
+           signed TLS cert (same openssl invocation as `just gen-
+           certs`) → `docker compose up -d --wait mysql login proxy
+           server` → `dotnet build` the integration project → run
+           with CLI_INTEGRATION_SKIP_COMPOSE=1 so the test fixture
+           doesn't try to own the lifecycle of the compose we
+           already brought up (keeps logs collectable through the
+           final teardown step) → TRX upload as artifact → on
+           failure dump all four service logs → unconditional
+           `docker compose down -v` at the end.
+        ▸ `just cli-integration` is the laptop equivalent: probes
+           the live ports (4443/3801/3805/3500) and either reuses an
+           existing `just run-stack-bg` stack (sets SKIP_COMPOSE=1)
+           or hands the docker lifecycle to ServerFixture. `just
+           cli-integration-fast` filters to the no-docker subset
+           (Robustness/Verification/Smoke) for inner-loop work —
+           15/15 pass in 538ms with no containers running. Verified
+           both recipes locally; full suite passes 27/27 against a
+           live stack.
+        ▸ Workflow YAML validated via `python3 -c "import yaml;
+           yaml.safe_load(...)"`. TRX results land under
+           `test-results/` and get uploaded via actions/upload-
+           artifact@v4 — failed runs surface in the PR's "Test
+           summary" tab with per-test links.
+        ▸ Conscious choice NOT to gate the cmake-build/ctest jobs
+           on `cli-integration-test`: the .NET integration job has
+           a much faster failure surface (no C++ compile needed,
+           no toolchain matrix). Letting it fail-fast independently
+           of the C++ pipeline gives quicker signal on server-
+           protocol regressions during a PR's lifecycle.
 
 - [ ] Item 9 — Documentation: docs/13-integration-tests.md
       Status: not started
