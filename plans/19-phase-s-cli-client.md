@@ -646,10 +646,45 @@ CliClient.UnitTests/
            README at every new docs/ file would just churn. docs/README.md is
            the right index for it.
 
-- [ ] Item 17 — Hand-off to Phase T
-      Status: not started
-      Touches: plans/20-phase-t-cli-integration-tests.md (created when S is ~done)
-      Notes: Phase T is the real integration suite — xUnit tests that spin docker compose + drive CliClient.Core in-process. Phase S's job is to make the Core library good enough that T can be written cleanly.
+- [x] Item 17 — Hand-off to Phase T
+      Status: done
+      Touches: plans/20-phase-t-cli-integration-tests.md (populated)
+      Notes:
+        ▸ plans/20-phase-t-cli-integration-tests.md was created earlier in
+           the Phase S run and is now a concrete, actionable plan: 10 items,
+           full project structure (ServerFixture + ClientFixture + per-area
+           subdirs), CI integration block, hard-rules block (same as Phase S
+           rules 1-4 applied to the test harness), verification block, and
+           explicit out-of-scope items. No further hand-off doc work needed
+           on the Phase S side.
+        ▸ Public surface audit for in-process driveability: ConnectAndLogin,
+           SendChat, CliSession, AuthLoginClient, OpcodeRegistry,
+           HealthGuard, PacketLog, ChatLog, ConsoleSink, MasterJoinCodec,
+           ServerRedirectCodec, ClientChatCodec, NamedOpaqueCodec, OpcodeId,
+           OpcodeNames are all `public`. A Phase T test project that
+           ProjectReferences tools/cli-client/src/CliClient.Core can
+           construct any of these directly — no internal-friend hacks, no
+           reflection. Confirmed by the unit test project already doing it.
+        ▸ What Phase T blocks on (NOT a Phase S problem):
+            – Items 10-12 of this plan (GlobalConnect / GlobalTicket /
+               GlobalAvatarList / MasterJoin handoff) are [!]-blocked on
+               Phase K's in-game opcode handlers. Without them, send-chat
+               can't be driven end-to-end against a real server. Phase T's
+               Workflows/ + Capture-replay tests need those opcodes wired
+               server-side first.
+            – Sector-server connect (TCP 3812) is also Phase K territory.
+            – Anything UDP is out of scope for both S and T.
+          Phase T can start with: TLS login round-trip, RSA/RC4 handshake,
+          MasterJoin (0x0035) → ServerRedirect (0x0036), clean disconnect.
+          That's enough to get the harness, ServerFixture, ClientFixture,
+          golden-bytes assertion, and CI ratchet shipped. Opcode coverage
+          ramps with Phase K.
+        ▸ Phase S verification block at the bottom of this file references
+           "docs/12-cli-client.md" — that should read "docs/15-cli-client.md"
+           given the Item 16 slot conflict resolution. The verification
+           block is the spec, the doc landed at 15; this Note is the
+           reconciliation. Future readers: docs/15-cli-client.md is the
+           file.
 
 ## Verification
 
