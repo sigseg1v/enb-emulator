@@ -123,6 +123,87 @@ TEST(MysqlplusWrapper, ParameterisedRoundTrip) {
     EXPECT_STREQ((const char *)row[1], "beta");
 }
 
+TEST(MysqlplusWrapper, ExecuteParamsHostileLiteral) {
+    // The whole point of execute_params(): a hostile string arriving as a
+    // bound parameter must round-trip as literal data, never as SQL.
+    // If injection ever became possible, this query would try (and fail)
+    // to drop a real table; even a syntax error would still surface here
+    // as a different observation than "returned the literal back".
+    const char *raw = std::getenv("NET7_TEST_DB_DSN");
+    if (!raw || !*raw) {
+        GTEST_SKIP() << "NET7_TEST_DB_DSN not set; skipping live wrapper test";
+    }
+    Dsn dsn;
+    ASSERT_TRUE(parse_kv_dsn(raw, dsn));
+
+    sql_connection_c conn(
+        const_cast<char *>(dsn.dbname.c_str()),
+        const_cast<char *>(dsn.host.c_str()),
+        dsn.user.empty()     ? nullptr : const_cast<char *>(dsn.user.c_str()),
+        dsn.password.empty() ? nullptr : const_cast<char *>(dsn.password.c_str()));
+    ASSERT_TRUE(conn.connected());
+
+    sql_query_c q(&conn);
+    const char hostile[] = "'; DROP TABLE accounts; --";
+    q.AddParam(42);
+    q.AddParam(hostile);
+    ASSERT_NE(q.execute_params("SELECT ?::int AS id, ?::text AS name"), 0)
+        << "execute_params failed: errno=" << q.Error() << " msg=" << q.ErrorMsg();
+
+    sql_result_c result;
+    q.store(&result);
+    ASSERT_EQ(result.n_rows(), 1u);
+    ASSERT_EQ(result.n_fields(), 2u);
+
+    sql_row_c row;
+    result.fetch_row(&row);
+    EXPECT_EQ((int)row[0], 42);
+    EXPECT_STREQ((const char *)row[1], hostile);
+}
+
+TEST(MysqlplusWrapper, ExecuteParamsMixedTypesAndNull) {
+    // Exercise int / unsigned long / double / NULL via the bag, and the
+    // placeholder rewriter's ability to hand out $1..$N in order.
+    const char *raw = std::getenv("NET7_TEST_DB_DSN");
+    if (!raw || !*raw) {
+        GTEST_SKIP() << "NET7_TEST_DB_DSN not set; skipping live wrapper test";
+    }
+    Dsn dsn;
+    ASSERT_TRUE(parse_kv_dsn(raw, dsn));
+
+    sql_connection_c conn(
+        const_cast<char *>(dsn.dbname.c_str()),
+        const_cast<char *>(dsn.host.c_str()),
+        dsn.user.empty()     ? nullptr : const_cast<char *>(dsn.user.c_str()),
+        dsn.password.empty() ? nullptr : const_cast<char *>(dsn.password.c_str()));
+    ASSERT_TRUE(conn.connected());
+
+    sql_query_c q(&conn);
+    q.AddParam(7);
+    // 31-bit value — sql_var_c::operator unsigned long() is implemented
+    // on atoi() and sign-extends anything above 0x80000000 (pre-existing
+    // bug in the Wave 1 rewrite, preserved bug-for-bug from the legacy
+    // libmysqlclient wrapper). Don't trip it here; this test is about
+    // round-tripping the bound parameter, not about read-side casts.
+    q.AddParam((unsigned long)0x12345678UL);
+    q.AddParam(3.5);
+    q.AddParamNull();
+    ASSERT_NE(q.execute_params(
+        "SELECT ?::int, ?::bigint, ?::double precision, ?::text IS NULL"), 0)
+        << "execute_params failed: errno=" << q.Error() << " msg=" << q.ErrorMsg();
+
+    sql_result_c result;
+    q.store(&result);
+    ASSERT_EQ(result.n_rows(), 1u);
+
+    sql_row_c row;
+    result.fetch_row(&row);
+    EXPECT_EQ((int)row[0], 7);
+    EXPECT_EQ((unsigned long)row[1], 0x12345678UL);
+    EXPECT_DOUBLE_EQ((double)row[2], 3.5);
+    EXPECT_STREQ((const char *)row[3], "t");   // Postgres bool true → "t"
+}
+
 TEST(MysqlplusWrapper, EscapeHostileLiteral) {
     // Smoke the escape shim — hostile single quotes / backslashes must
     // round-trip as literal data.

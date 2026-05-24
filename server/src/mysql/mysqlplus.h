@@ -24,6 +24,7 @@
 // mysqlplus.cpp; callers see them as opaque pointers only.
 struct net7_db_handle;        // wraps pqxx::connection
 struct net7_result_holder;    // wraps pqxx::result
+struct sql_param_bag;         // wraps pqxx::params (parameterised execute)
 
 // my_ulonglong used to be a MySQL typedef; preserve the name for the few
 // callers that still spell it.
@@ -98,6 +99,29 @@ public:
     int execute(char *sql);
     bool run_query(char *sql);
 
+    // Parameterised execute. The wire protocol handles literal escaping,
+    // so SQL injection is structurally impossible — the bound value can
+    // never be re-parsed as SQL syntax. Placeholders in the query use
+    // `?` (translated to Postgres `$N` numbered placeholders internally).
+    //
+    // Usage:
+    //     sql_query_c q(&conn);
+    //     q.AddParam(account_id);
+    //     q.AddParam(username);            // const char *
+    //     q.execute_params("SELECT * FROM accounts WHERE id=? AND name=?");
+    //
+    // Parameter state is cleared on success/failure. To clear without
+    // executing, call ClearParams().
+    void AddParam(int v);
+    void AddParam(long v);
+    void AddParam(unsigned int v);
+    void AddParam(unsigned long v);
+    void AddParam(double v);
+    void AddParam(const char *v);
+    void AddParamNull();
+    void ClearParams();
+    int execute_params(const char *sql);
+
     void store(sql_result_c *result);
 
     unsigned int Error();
@@ -107,6 +131,7 @@ public:
 
 private:
     void free_result();
+    sql_param_bag *ensure_params();
 
 private:
     net7_result_holder *res;       // owned; replaces MYSQL_RES*
@@ -115,6 +140,7 @@ private:
     unsigned int last_errno;
     char last_errmsg[256];
     my_ulonglong last_affected;
+    sql_param_bag *params;         // owned; lazily allocated by AddParam*
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////

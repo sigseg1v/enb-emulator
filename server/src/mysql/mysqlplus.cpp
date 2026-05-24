@@ -40,7 +40,49 @@ struct net7_result_holder {
     my_ulonglong      affected_rows;   // for INSERT/UPDATE/DELETE
 };
 
+// Accumulator for parameterised execute_params(). Hides pqxx::params from
+// the public header so callers do not need libpqxx on their include path.
+struct sql_param_bag {
+    pqxx::params p;
+};
+
 namespace {
+
+// Translate caller-facing `?` placeholders to Postgres `$N` numbered
+// placeholders. `?` inside single- or double-quoted SQL literals is left
+// alone — though parameterised callers shouldn't be writing literals
+// anyway, this keeps the translation accidentally-safe if they do.
+std::string translate_placeholders(const char *sql, std::size_t &out_n)
+{
+    out_n = 0;
+    if (!sql) return {};
+    std::string out;
+    out.reserve(strlen(sql) + 16);
+    char in_str = 0;        // 0, '\'' or '"' depending on which literal we are inside
+    for (const char *p = sql; *p; ++p) {
+        char c = *p;
+        if (in_str) {
+            out.push_back(c);
+            if (c == in_str) {
+                // Postgres SQL: doubled quote escapes; peek ahead.
+                if (*(p + 1) == in_str) { out.push_back(*(++p)); }
+                else                     { in_str = 0; }
+            }
+        } else if (c == '\'' || c == '"') {
+            in_str = c;
+            out.push_back(c);
+        } else if (c == '?') {
+            ++out_n;
+            out.push_back('$');
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), "%zu", out_n);
+            out.append(buf);
+        } else {
+            out.push_back(c);
+        }
+    }
+    return out;
+}
 
 // Translate a MySQL-flavoured query string into one Postgres can parse.
 // Limited to: backtick identifiers -> double-quoted identifiers. The
@@ -281,11 +323,13 @@ sql_query_c::sql_query_c(sql_connection_c *__sql_connection)
     last_errno = 0;
     last_errmsg[0] = '\0';
     last_affected = 0;
+    params = 0;
 }
 
 sql_query_c::~sql_query_c()
 {
     free_result();
+    if (params) { delete params; params = 0; }
     if (odb) sql_connection->freedb(odb);
 }
 
@@ -343,6 +387,89 @@ bool sql_query_c::run_query(char *sql)
         return false;
     }
     return true;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////
+// Parameterised execute. Wire-bound values — injection-immune.
+
+sql_param_bag *sql_query_c::ensure_params()
+{
+    if (!params) params = new sql_param_bag;
+    return params;
+}
+
+void sql_query_c::AddParam(int v)            { ensure_params()->p.append(v); }
+void sql_query_c::AddParam(long v)           { ensure_params()->p.append(v); }
+void sql_query_c::AddParam(unsigned int v)   { ensure_params()->p.append(v); }
+void sql_query_c::AddParam(unsigned long v)  { ensure_params()->p.append(v); }
+void sql_query_c::AddParam(double v)         { ensure_params()->p.append(v); }
+void sql_query_c::AddParam(const char *v)
+{
+    // pqxx::params::append(std::string_view) — copy into the bag so the
+    // caller can free their buffer immediately after AddParam returns.
+    ensure_params()->p.append(std::string(v ? v : ""));
+}
+void sql_query_c::AddParamNull()
+{
+    ensure_params()->p.append();   // pqxx no-arg overload = NULL
+}
+
+void sql_query_c::ClearParams()
+{
+    if (params) { delete params; params = 0; }
+}
+
+int sql_query_c::execute_params(const char *sql)
+{
+    free_result();
+    last_errno = 0;
+    last_errmsg[0] = '\0';
+    last_affected = 0;
+
+    if (!odb || !odb->db || !odb->db->conn) {
+        last_errno = 1000;
+        strcpy_s(last_errmsg, sizeof(last_errmsg), "no open connection");
+        ClearParams();
+        return 0;
+    }
+
+    std::size_t n_placeholders = 0;
+    std::string translated_q = translate_placeholders(sql, n_placeholders);
+    std::string translated   = translate_dialect(translated_q.c_str());
+
+    try {
+        pqxx::work tx(*odb->db->conn);
+        // pqxx::exec_params(zview, Args&&...) builds a fresh pqxx::params
+        // pack from each variadic arg; pqxx::params has an append(params)
+        // overload, so passing our accumulator flattens it correctly.
+        pqxx::result r = params
+            ? tx.exec_params(translated, params->p)
+            : tx.exec(translated);
+        tx.commit();
+
+        net7_result_holder *holder = new net7_result_holder;
+        holder->affected_rows = r.affected_rows();
+        holder->result = std::move(r);
+        res = holder;
+        last_affected = holder->affected_rows;
+        ClearParams();
+        return 1;
+    } catch (const pqxx::sql_error &e) {
+        last_errno = 1;
+        snprintf(last_errmsg, sizeof(last_errmsg), "%s", e.what());
+        ClearParams();
+        return 0;
+    } catch (const pqxx::failure &e) {
+        last_errno = 2;
+        snprintf(last_errmsg, sizeof(last_errmsg), "%s", e.what());
+        ClearParams();
+        return 0;
+    } catch (const std::exception &e) {
+        last_errno = 3;
+        snprintf(last_errmsg, sizeof(last_errmsg), "%s", e.what());
+        ClearParams();
+        return 0;
+    }
 }
 
 my_ulonglong sql_query_c::n_rows()

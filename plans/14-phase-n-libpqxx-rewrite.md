@@ -69,17 +69,22 @@ The walled `AccountManager.cpp` is dormant on Linux now, but the moment Phase J 
       Notes: 3 env-gated cases: SELECT 1, multi-row VALUES table, hostile-literal escape round-trip. Self-skips when `NET7_TEST_DB_DSN` unset; verified locally (3/3 SKIPPED).
 - [x] Live integration suite (the 8 tests behind `tests/it/`) still green against rebuilt container.
 
-### Wave 2 — parameterised API + DAO migration (DEFERRED to Phase N+)
+### Wave 2 — parameterised API + DAO migration (PARTIAL — Phase N+ continues)
 
-These were originally lumped into Phase N but are wide-scope (touches every DAO call site) and belong in their own phase. Tracked here for handoff:
-
-- [ ] Add typed `execute(template, args...)` overload backed by `pqxx::params`.
-      Why: only way to retire the `sprintf`+raw-SQL injection surface for good.
-      How to apply: extend `sql_query_c` with a variadic template that builds `pqxx::params` and calls `tx.exec_params`. Keep the single-arg `execute(char *)` as a transitional overload that asserts on `%`-characters once Wave 3 lands.
-- [ ] Convert the 36 dynamic-SQL sites enumerated above (34 in `AccountManager.cpp`, 2 in `LinuxAuth.cpp`) to parameterised form.
-- [ ] Delete `SafeUsername`/`SafePassword` from `LinuxAuth.cpp` once `tx.exec_params` is the only path.
-- [ ] Add `tools/sql_injection_audit.sh` and wire to CI (greps for `sprintf.*FROM|INSERT|UPDATE|DELETE` outside `#ifdef WIN32`).
+- [x] **Add parameterised execute API to the wrapper.** (commit pending — Wave-2 first landing 2026-05-24)
+      Notes: `sql_query_c` gains `AddParam(int/long/uint/ulong/double/const char*)`, `AddParamNull()`, `ClearParams()`, and `execute_params(const char *sql)`. Placeholders are `?`; translated to Postgres `$N` internally (with string-literal awareness). Internal `sql_param_bag` keeps `pqxx::params` out of the public header. Param state cleared on success or failure.
+- [x] **Audit script landed.** `tools/sql_injection_audit.sh` (commit 7c54053) walks tracked sources in `server/`, `login-server/`, `proxy/`, flags lines that combine `SELECT|INSERT|UPDATE|DELETE|REPLACE|CALL` with `sprintf|snprintf|strcat|strncat|stpcpy`. Tracks `#if WIN32` nesting to exempt walled blocks; excludes vendored/archived trees; LC_ALL=C to handle Latin-1 © glyphs.
+      Notes: current baseline is **148 lines across 11 files**, NOT the 36 the original Phase N audit claimed. The Phase N audit table at the top of this file is stale — AccountManager.cpp's 34 sites are *not* walled (they use `sprintf_s` which Net7.h shims via vsnprintf on Linux), so they're live on Linux today. Real surface includes server/src/AccountManager.cpp (20), PlayerSaves.cpp (~24), PlayerConnection.cpp (1), GuildManager.cpp (2), ItemBaseSQL.cpp (4), plus the rest of *SQL.cpp. login-server/Net7Mysql/Tab2.cpp adds 3.
+- [x] **LinuxAuth.cpp now uses prepared statements directly.** (commit 7c54053) `ValidateAccountLinux` rewritten on libmysqlclient `mysql_stmt_*` API with `?` placeholders for both the SELECT and the accLogin CALL. `SafeUsername`/`SafePassword` deleted — they were SQL-shape constraints masquerading as input policy and were rejecting valid passwords (`'`/`"`/`\`/`%`).
+- [x] **Wrapper round-trip tests for parameterised path.** (commit pending — same as API landing) `tests/db/mysqlplus_wrapper_test.cpp` gets `ExecuteParamsHostileLiteral` (binds `'; DROP TABLE accounts; --` as a parameter and asserts it round-trips as data, not SQL) and `ExecuteParamsMixedTypesAndNull` (int/unsigned long/double/NULL plus `?`→`$N` placeholder rewrite). Both pass live against postgres:16.
+- [ ] **Per-DAO call-site sweep — server/src/* (148 sites).** Each site needs to be rewritten from `sprintf(query, "... '%s' ...", value); q.execute(query);` to `q.AddParam(value); q.execute_params("... ? ...");`. Multi-week scope; no shortcuts. The audit script is the ratchet that keeps new injection sites from landing.
+- [ ] **login-server/Net7Mysql/Tab2.cpp (3 sites)**. Same treatment but uses the Net7Mysql wrapper, not the libpqxx-backed one. Lower priority — Tab2.cpp is the admin password management UI, less exposed.
 - [ ] Extend `postgres_smoke_test` to a real DAO round-trip + hostile-input case (currently only the wrapper test exercises this; the DAO test still uses raw libpq).
+- [ ] Wire `tools/sql_injection_audit.sh` to CI as a non-zero-exit gate (it runs today as a manual probe; CI integration once the baseline is at zero).
+
+### Pre-existing bug to fix opportunistically
+
+`sql_var_c::operator unsigned long()` is implemented as `(unsigned long)atoi(value)` — atoi truncates to int32, so any value ≥ 0x80000000 sign-extends. Caught by `ExecuteParamsMixedTypesAndNull` test (test now uses 0x12345678 to dodge it; pre-existing bug noted in the test comment). Fix is one-liner (`(unsigned long)strtoul(value, nullptr, 10)`) but deferred until the DAO sweep so it lands with read-side coverage.
 
 ### Wave 3 — dialect cleanup (DEFERRED)
 
