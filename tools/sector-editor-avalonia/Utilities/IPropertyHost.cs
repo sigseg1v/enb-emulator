@@ -48,15 +48,35 @@ namespace SectorEditorAvalonia.Utilities
     }
 
     /// <summary>
-    /// Replaces the original sector-editor's `mainFrm.selectedObjectID`
-    /// static — used by 5+ sprite/dialog call sites to share the current
-    /// selection across windows. Refactoring this into a proper service
-    /// is a Wave 3+ task that has to happen when the dialogs land
-    /// (MobGroup, HarvestableResTypes). Kept as a static for now to
-    /// preserve the cross-window behaviour with minimum diff.
+    /// Faction-id↔name lookup the original sprite code reaches through
+    /// <c>mainFrm.factions</c>. Decoupled here so a sprite under test
+    /// can install a stub. The MainWindow installs the real DAO-backed
+    /// implementation at startup; the smoke harness leaves the null one.
+    /// </summary>
+    public interface IFactionLookup
+    {
+        string FindNameById(int id);
+        int FindIdByName(string name);
+    }
+
+    public sealed class NullFactionLookup : IFactionLookup
+    {
+        public string FindNameById(int id) => "";
+        public int FindIdByName(string name) => -1;
+    }
+
+    /// <summary>
+    /// Replaces the original sector-editor's <c>mainFrm.selectedObjectID</c>
+    /// static + the <c>mainFrm.factions</c> reach-through — used by 5+
+    /// sprite/dialog call sites to share state across windows.
+    /// Refactoring into a proper service is a Wave 3+ task that lands
+    /// when the dialogs land (MobGroup, HarvestableResTypes). Kept as
+    /// static fields for now to preserve cross-window behaviour with
+    /// minimum diff.
     /// </summary>
     public static class EditorGlobals
     {
         public static int SelectedObjectId;
+        public static IFactionLookup Factions = new NullFactionLookup();
     }
 }
