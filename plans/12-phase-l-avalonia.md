@@ -1027,8 +1027,15 @@ so Tier 12 is split:
       Smoke: `dotnet run -- --smoke` → `piccolo: ok`. Build: 0 warnings,
       0 errors.
 
-- [~] **Tier 12e — Sprites + windows**
-      Status: Wave 1 in tree. SystemWindow + 5 simple sprites
+- [x] **Tier 12e — Sprites + windows**
+      Status: DONE. Waves 1–3+ all landed (commits cfc3b0e + 1379d6c).
+      sector-editor-avalonia builds clean and boots end-to-end —
+      DAOs, TreeView, SectorWindow/SystemWindow on PCanvas, real
+      reflection-driven property panel, DataGrid-backed Objects tab,
+      DAO-backed faction lookup, MsBox-backed error popups, full
+      New-* dialog flow. mainFrm static-globals refactor accepted as-
+      is behind `EditorGlobals`.
+      Status (history): Wave 1 in tree. SystemWindow + 5 simple sprites
       (Sector, SectorBounds, SectorBoundsSprite, SectorSprite,
       SystemSprite) ported and exercised by PiccoloSmoke against a
       fixture DataTable. Build clean, smoke green.
