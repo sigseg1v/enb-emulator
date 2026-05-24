@@ -566,10 +566,50 @@ CliClient.UnitTests/
                 unaffected (no MasterJoinRequest constructor in src/ outside the codec).
              ▸ 155 tests passing (was 151 after the codec API change; 148 before Item 14).
 
-- [ ] Item 15 — Opcode coverage push: register decoders for every opcode in Opcodes.h
-      Status: not started
-      Touches: tools/cli-client/src/CliClient.Core/Opcodes/Inbound/*, Outbound/*
-      Notes: scrape `common/include/net7/Opcodes.h` for every enum value; emit a stub Inbound/Outbound class per opcode that decodes/encodes the matching PacketStructures.h struct (where one exists) or treats the payload as opaque bytes (logged) where it doesn't. Goal: zero "unknown opcode" warnings in the packet log for any well-formed server traffic. As Phase K wires the server side of more opcodes, the stubs get fleshed out — no big-bang rewrite.
+- [x] Item 15 — Opcode coverage push: register decoders for every opcode in Opcodes.h
+      Status: done
+      Touches: tools/cli-client/scripts/generate-opcode-names.sh (new),
+               tools/cli-client/src/CliClient.Core/Opcodes/OpcodeNames.Generated.cs (new, generated),
+               tools/cli-client/src/CliClient.Core/Opcodes/IOpcodeCodec.cs (NamedOpaqueCodec + NamedOpaquePayload),
+               tools/cli-client/src/CliClient.Core/Opcodes/OpcodeRegistry.cs (RegisterAllNamedOpaque),
+               tools/cli-client/src/CliClient.Core/Logging/OpcodeNameLookup.cs (overlay Known on top of OpcodeNames.All),
+               tools/cli-client/src/CliClient.App/Program.cs (call RegisterAllNamedOpaque on startup),
+               tools/cli-client/tests/CliClient.UnitTests/Opcodes/OpcodeNamesTests.cs (new — 20 tests)
+      Notes: ▸ Deliberately chose data-table + bulk-registrar over "209 stub codec
+                classes" — same coverage, zero per-opcode boilerplate, and Phase K
+                can light up typed codecs one at a time without churning a sea of
+                empty placeholder files. The plan's "no big-bang rewrite" disclaimer
+                rules out the per-class approach.
+             ▸ Generator (scripts/generate-opcode-names.sh, awk + bash) scrapes
+                209 `#define ENB_OPCODE_xxxx_NAME 0xxxxx` lines from
+                common/include/net7/Opcodes.h and emits OpcodeNames.Generated.cs —
+                a FrozenDictionary<ushort, string> with 207 entries (two pairs
+                share a hex value: 0x2010 SET_GLOBAL_LOGIN_LINK/DATA_FILE and
+                0x2011 SET_PROXY_SECTOR_LINK/GALAXY_MAP_CACHE; collapsed to
+                NAME_A_OR_NAME_B). Rerun the script if Opcodes.h changes;
+                output is committed so production builds need no codegen step.
+             ▸ NamedOpaqueCodec mirrors UnknownOpcodeCodec but carries the
+                upstream symbolic name → packet log shows "0x00CE GUILD_REQUEST_CHANGE:
+                12 bytes" instead of "0x00CE UNKNOWN". Decode emits a defensive
+                copy (test: payload alias mutation doesn't leak through).
+                Encode throws — opaque codecs are decode-only by design.
+             ▸ OpcodeRegistry.RegisterAllNamedOpaque uses TryAdd so it never
+                clobbers a previously-registered typed codec. Order of calls
+                doesn't matter — typed codecs always win. Idempotent: a second
+                call adds zero entries. Verified by test.
+             ▸ OpcodeNameLookup now seeds from OpcodeNames.All (207 SCREAMING
+                _SNAKE) then overlays OpcodeId.Known (14 PascalCase). Net
+                effect: typed-codec opcodes log with the friendly C# name
+                ("MasterJoin"), the rest log with the upstream C header name
+                ("GUILD_SIMPLE_SECTOR_CLIENT"). All 14 existing OpcodeNameLookup
+                tests still pass.
+             ▸ Program.cs's connect-and-login and send-chat subcommands both
+                call RegisterAllNamedOpaque() right after creating the registry,
+                so every CLI run has full name coverage out of the box.
+             ▸ 175 tests passing (was 155 after Item 14). 20 new tests:
+                OpcodeNamesTests (6), NamedOpaqueCodecTests (4),
+                OpcodeRegistryBulkRegistrationTests (5), plus a few extras
+                from OpcodeNamesTests for the dup-alias edge case.
 
 - [ ] Item 16 — Documentation: docs/12-cli-client.md
       Status: not started

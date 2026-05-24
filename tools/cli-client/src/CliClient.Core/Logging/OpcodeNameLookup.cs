@@ -30,7 +30,14 @@ public static class OpcodeNameLookup
 
     private static IReadOnlyDictionary<ushort, string> BuildIndex()
     {
-        var dict = new Dictionary<ushort, string>();
+        // Seed with every opcode declared in Opcodes.h (~207 of them,
+        // generated into OpcodeNames.All). These use the upstream
+        // SCREAMING_SNAKE_CASE form (e.g. "CLIENT_CHAT").
+        var dict = new Dictionary<ushort, string>(OpcodeNames.All);
+
+        // Overlay with PascalCase names from OpcodeId.Known so opcodes
+        // that have a typed codec render with the friendlier C# name
+        // ("ClientChat", "MasterJoin") rather than the SCREAMING form.
         foreach (var field in typeof(OpcodeId.Known).GetFields(
             BindingFlags.Public | BindingFlags.Static))
         {

@@ -90,6 +90,7 @@ static async Task<int> RunConnectAndLoginAsync(string[] argv)
     }
 
     var registry = new OpcodeRegistry();
+    registry.RegisterAllNamedOpaque();
     registry.Register(new ServerRedirectCodec());
 
     var options = new ConnectAndLoginOptions
@@ -174,6 +175,7 @@ static async Task<int> RunSendChatAsync(string[] argv)
     }
 
     var registry = new OpcodeRegistry();
+    registry.RegisterAllNamedOpaque();
     registry.Register(new ServerRedirectCodec());
 
     var console = new N7.CliClient.Logging.ConsoleSink();

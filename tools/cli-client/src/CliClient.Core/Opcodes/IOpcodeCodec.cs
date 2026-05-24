@@ -63,3 +63,38 @@ public sealed class UnknownOpcodeCodec : IOpcodeCodec
 
 /// <summary>Result of <see cref="UnknownOpcodeCodec.DecodeInbound"/>.</summary>
 public sealed record UnknownOpcodePayload(OpcodeId Opcode, byte[] RawPayload);
+
+/// <summary>
+/// A codec for an opcode we KNOW exists (it's in Opcodes.h) but
+/// haven't written a typed decoder for yet. Same behaviour as
+/// <see cref="UnknownOpcodeCodec"/> — emits raw payload bytes — but
+/// carries the upstream symbolic name so the packet log can render
+/// "0x00CE GUILD_GROUP_REQUEST_CHANGE: 12 bytes" instead of "UNKNOWN".
+///
+/// Used by <see cref="OpcodeRegistry.RegisterAllNamedOpaque"/> to
+/// pre-populate the registry with one entry per opcode in Opcodes.h.
+/// Real typed codecs (ClientChatCodec, MasterJoinCodec, ...) replace
+/// these via the registry's last-writer-wins semantics.
+/// </summary>
+public sealed class NamedOpaqueCodec : IOpcodeCodec
+{
+    public OpcodeId Opcode { get; }
+    public string Name { get; }
+
+    public NamedOpaqueCodec(OpcodeId opcode, string name)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(name);
+        Opcode = opcode;
+        Name = name;
+    }
+
+    public object DecodeInbound(ReadOnlySpan<byte> payload)
+        => new NamedOpaquePayload(Opcode, Name, payload.ToArray());
+
+    public byte[] EncodeOutbound(object message)
+        => throw new NotSupportedException(
+            $"opcode {Opcode} ({Name}) has no typed encoder — only a name-tagged opaque codec is registered");
+}
+
+/// <summary>Result of <see cref="NamedOpaqueCodec.DecodeInbound"/>.</summary>
+public sealed record NamedOpaquePayload(OpcodeId Opcode, string Name, byte[] RawPayload);

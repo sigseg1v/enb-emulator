@@ -60,4 +60,29 @@ public sealed class OpcodeRegistry
     /// <summary>Every registered opcode (snapshot; safe to iterate).</summary>
     public IReadOnlyCollection<OpcodeId> RegisteredOpcodes
         => _codecs.Keys.Select(v => new OpcodeId(v)).ToArray();
+
+    /// <summary>
+    /// Pre-populate the registry with a <see cref="NamedOpaqueCodec"/>
+    /// for every opcode in <see cref="OpcodeNames.All"/>. Existing
+    /// registrations are NOT overwritten — so call this before *or*
+    /// after registering typed codecs and the typed ones always win.
+    /// </summary>
+    /// <returns>Number of opaque codecs newly added.</returns>
+    /// <remarks>
+    /// Phase S Item 15 deliverable: after one call to this method, every
+    /// opcode in Opcodes.h has a codec, the packet log carries names for
+    /// every frame, and the UnknownOpcodeCodec fallback only fires for
+    /// opcodes outside Opcodes.h (which the real client never emits).
+    /// </remarks>
+    public int RegisterAllNamedOpaque()
+    {
+        int added = 0;
+        foreach (var (value, name) in OpcodeNames.All)
+        {
+            var id = new OpcodeId(value);
+            if (_codecs.TryAdd(value, new NamedOpaqueCodec(id, name)))
+                added++;
+        }
+        return added;
+    }
 }
