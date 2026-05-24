@@ -730,7 +730,7 @@ bool GetProcessHandle()
 // Linux: client-process functions are no-ops server-side.
 bool GetProcessHandle() { return true; }
 bool engine_open_process(char * /*processwindowtitle*/) { return false; }
-bool engine_read_process(LPVOID, LPVOID, DWORD) { return false; }
+bool engine_read_process(void*, void*, uint32_t) { return false; }
 void PatchClient() { /* no client to patch server-side */ }
 bool ClientStillRunning() { return true; }
 bool ShutdownClient() { return true; }

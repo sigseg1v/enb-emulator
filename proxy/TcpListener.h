@@ -3,6 +3,7 @@
 #ifndef _TCP_LISTENER_H_INCLUDED_
 #define _TCP_LISTENER_H_INCLUDED_
 
+#include <cstdint>
 #include <net7/Mutex.h>
 
 class ServerManager;
@@ -19,7 +20,7 @@ public:
 
 private:
     unsigned long m_IpAddress;
-    WORD    m_TcpPort;
+    uint16_t m_TcpPort;
 	ServerManager &m_ServerMgr;
 	int		m_ServerType;
     SOCKET  m_TcpListenerSocket;

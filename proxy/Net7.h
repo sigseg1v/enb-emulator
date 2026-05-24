@@ -63,70 +63,27 @@
 #ifndef WINAPI
 #define WINAPI
 #endif
-#ifndef UINT
-typedef unsigned int UINT;
-#endif
-#ifndef SOCKADDR_IN
-#define SOCKADDR_IN struct sockaddr_in
-#endif
 // MAX_PATH is a Win32 idiom; default to PATH_MAX semantics.
 #include <limits.h>
 #ifndef MAX_PATH
 #define MAX_PATH 260
 #endif
 
-// Minimal Win32 typedef aliases used by both walled (#ifdef WIN32) and
-// Linux-active legacy code. Walled code never compiles these on Linux;
-// these are here so the Linux paths that reference SOCKET m_Socket
-// (etc.) typecheck. Treat as a stable shim, not a place to grow new
-// Windows-isms.
-typedef uint32_t  DWORD;
-typedef uint16_t  WORD;
-typedef uint8_t   BYTE;
-typedef int       BOOL;
-typedef int32_t   LONG;
-typedef uint32_t  ULONG;
-typedef int64_t   LONGLONG;
-typedef uint64_t  ULONGLONG;
-typedef void*       LPVOID;
-typedef const char* LPCSTR;
-typedef char*       LPSTR;
-typedef char*       LPTSTR;
-typedef const char* LPCTSTR;
-typedef void* HANDLE;
-typedef int   SOCKET;
+// Phase M Wave 3: the proxy used to ship a ~25-symbol Win32 typedef shim
+// here (DWORD/HANDLE/LPVOID/LPTSTR/INVALID_HANDLE_VALUE/INFINITE/WAIT_*/
+// /BYTE/BOOL/WORD/LONG/LONGLONG/ULONGLONG/ULONG/UINT/SOCKADDR_IN/TRUE/
+// FALSE/TEXT/_T/...). Every typedef that had zero Linux-active call
+// sites was deleted. The five that remain — SOCKET (60+ Linux-active
+// sites across the listener/connection layer), INVALID_SOCKET,
+// SOCKET_ERROR (sentinel idioms in the same files), and the closesocket
+// / WSAGetLastError macros above — kept because rewriting them would
+// touch every accept/listen/recv site without changing behaviour.
+typedef int SOCKET;
 #ifndef INVALID_SOCKET
 #  define INVALID_SOCKET (-1)
 #endif
 #ifndef SOCKET_ERROR
 #  define SOCKET_ERROR   (-1)
-#endif
-#ifndef TRUE
-#  define TRUE  1
-#endif
-#ifndef FALSE
-#  define FALSE 0
-#endif
-#ifndef TEXT
-#  define TEXT(x) x
-#endif
-#ifndef _T
-#  define _T(x) x
-#endif
-#ifndef INVALID_HANDLE_VALUE
-#  define INVALID_HANDLE_VALUE ((HANDLE)(intptr_t)(-1))
-#endif
-#ifndef INFINITE
-#  define INFINITE       0xFFFFFFFFu
-#endif
-#ifndef WAIT_OBJECT_0
-#  define WAIT_OBJECT_0  0x00000000u
-#endif
-#ifndef WAIT_TIMEOUT
-#  define WAIT_TIMEOUT   0x00000102u
-#endif
-#ifndef WAIT_FAILED
-#  define WAIT_FAILED    0xFFFFFFFFu
 #endif
 
 // Phase M: Sleep() and GetTickCount() were inlined Win32-name shims here;
@@ -229,7 +186,11 @@ void LogChatMsg(char *format, ...);
 void DumpBuffer(unsigned char *buffer, int length);
 void DumpBufferToFile(unsigned char *buffer, int length, char *filename, bool rawData);
 bool engine_open_process(char * processwindowtitle);
+#ifdef WIN32
 bool engine_read_process(LPVOID lpBaseAddress, LPVOID lpBuffer, DWORD nSize);
+#else
+bool engine_read_process(void* lpBaseAddress, void* lpBuffer, uint32_t nSize);
+#endif
 bool GetProcessHandle();
 bool StartENBClient();
 void PatchClient();

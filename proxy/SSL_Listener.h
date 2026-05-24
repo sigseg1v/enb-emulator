@@ -3,6 +3,7 @@
 #ifndef _SSL_LISTENER_H_INCLUDED_
 #define _SSL_LISTENER_H_INCLUDED_
 
+#include <cstdint>
 #include <net7/Mutex.h>
 
 class ServerManager;
@@ -18,8 +19,8 @@ public:
 	void Shutdown();
 
 private:
-    Mutex   m_Mutex;
-    WORD    m_TcpPort;
+    Mutex    m_Mutex;
+    uint16_t m_TcpPort;
     unsigned long m_IpAddress;
 	ServerManager &m_ServerMgr;
     SOCKET  m_ListenerSocket;

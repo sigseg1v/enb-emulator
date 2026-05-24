@@ -104,8 +104,8 @@ void TcpListener::RunThread()
 
         if (s != INVALID_SOCKET)
 	    {
-            BOOL bOptVal = TRUE;
-            if (setsockopt(s, SOL_SOCKET, SO_KEEPALIVE, (char*)&bOptVal, sizeof(BOOL)) != 0)
+            int bOptVal = 1;
+            if (setsockopt(s, SOL_SOCKET, SO_KEEPALIVE, (char*)&bOptVal, sizeof(int)) != 0)
             {
                 printf("Set SO_KEEPALIVE failed\n");
             }

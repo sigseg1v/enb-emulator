@@ -143,7 +143,7 @@ private:
 	long m_Start_ID;
     bool m_recv_thread_running;
     SOCKET m_Listen_Socket;
-    SOCKADDR_IN m_SockAddr;
+    struct sockaddr_in m_SockAddr;
     short m_ConnectionType;
     unsigned char m_RecvBuffer[MAX_UDPC_BUFFER];
     unsigned char m_SendBuffer[MAX_UDPC_BUFFER];
