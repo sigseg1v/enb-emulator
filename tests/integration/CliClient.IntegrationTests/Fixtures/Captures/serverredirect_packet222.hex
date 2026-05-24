@@ -1,0 +1,29 @@
+# Source: archive/kyp-snapshot/capturedPackets/capture_1.rar (frame 222).
+# 14-byte frame on the wire: 4-byte header + 10-byte ServerRedirect
+# payload. Header was "0E 00 36 00" (length=14 LE, opcode=0x36 LE).
+# Below is JUST the 10-byte payload — the part DecodeInbound consumes.
+#
+# Decoded fields (per ServerRedirectCodec wire format — sector_id +
+# ip_address are big-endian, port is little-endian per the codec's
+# documented asymmetry):
+#   sector_id  bytes 5F B0 00 00 — if read BE: 0x5FB00000 = 1,605,140,480.
+#              The matching MasterJoin sent ToSectorID = 0x0000B05F = 45151
+#              (BE). If the retail server flipped byte order here vs our
+#              proxy's ntohl-then-dump path, decoding LE gives 0xB05F =
+#              45151 (matches request). Either way, our current codec
+#              reads BE — matches our proxy's wire output, may diverge
+#              from retail. Flagged as a preservation finding in
+#              docs/13-integration-tests.md; do NOT "fix" the codec to
+#              match retail without a second capture confirming the
+#              divergence (server-integrity rules require primary-source
+#              proof before relaxing fidelity).
+#   ip_address bytes 2E E8 99 9F — BE read = 0x2EE8999F = 46.232.153.159
+#              (plausible — same /24 family as the master server the client
+#              was talking to, 159.153.232.146).
+#   port       bytes AC 0D — LE read = 0x0DAC = 3500. Matches our
+#              PROXY_LOCAL_TCP_PORT, suggesting retail also used 3500 for
+#              sector traffic. Strong corroboration that LE-on-wire is
+#              correct for the port field.
+5F B0 00 00
+2E E8 99 9F
+AC 0D

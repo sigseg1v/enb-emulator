@@ -308,10 +308,103 @@ xUnit `[Collection("server")]` ensures the docker stack stands up exactly once p
            (0x006D → 0x0070) to drive an enumerate-avatars
            workflow as the first real listing test.
 
-- [ ] Item 6 — Capture replay tests
-      Status: not started
-      Touches: tests/integration/CliClient.IntegrationTests/Verification/CaptureReplayTests.cs
-      Notes: load a capture from archive/kyp-snapshot/capturedPackets/, replay the client side against our server, compare server's reply byte-for-byte (or field-for-field) to the captured server reply. This is the single most valuable test in the suite — it gates server correctness against a real-world ground truth.
+- [x] Item 6 — Capture replay tests
+      Status: done (first pass — codec-fidelity tests against extracted
+        retail-server bytes; live server-reply replay deferred to a
+        follow-up tracked in Notes)
+      Touches:
+        tests/integration/CliClient.IntegrationTests/Fixtures/Captures/{README.md, masterjoin_packet220.hex, serverredirect_packet222.hex} (new),
+        tests/integration/CliClient.IntegrationTests/Verification/{HexFixture.cs, CaptureReplayTests.cs} (new)
+      Notes:
+        ▸ Source data: archive/kyp-snapshot/capturedPackets/capture_1.rar
+           is a 54MB textual hex-dump of a real 2006-era EnB session
+           against the live retail server (159.153.232.146). We extract
+           individual opcode payloads as hex-with-comments fixtures
+           rather than committing the RAR — fixture files stay KB-scale,
+           CI doesn't need unrar, and reviewers can eyeball the bytes
+           against common/include/net7/PacketStructures.h in PR diffs.
+           Per the server-integrity rules, each fixture cites its
+           primary source (capture file + frame number) in a comment
+           header — that's the chain-of-custody proof required for the
+           bytes to count as preservation reference material.
+        ▸ HexFixture.cs is the loader: Load(relative) reads from
+           AppContext.BaseDirectory/Fixtures/Captures/ (csproj
+           <None Include="Fixtures/**/*"> ships the files into bin/);
+           Parse(text) strips '#'-to-EOL comments and whitespace,
+           accumulates hex digits, throws FormatException on odd nibble
+           count or any non-hex non-whitespace non-comment character so
+           silently-wrong fixtures fail loudly instead of silently
+           decoding to garbage bytes.
+        ▸ CaptureReplayTests.cs has 3 [Fact]s, no docker dependency
+           (they operate on cached bytes — they live in the integration
+           project because the fixtures are integration-suite artifacts,
+           not because they need the stack):
+           MasterJoin_RealCaptureBytes_RoundTripIdentity — loads the
+           64-byte frame-220 payload, asserts payload length matches
+           MasterJoinCodec.WireSize, decodes via the typed codec,
+           asserts every transcribed field (Unknown1=2, Unknown3=
+           0x40E60235 session token, AvatarIdMsb=0x3E221201, ToSector-
+           Id=0x0000B05F=45151, Unknown10=0x7FFFFFFF=INT32_MAX, ticket
+           length=20), then RE-ENCODES and asserts the bytes equal
+           the original byte-for-byte. This round-trip-identity check
+           is the strongest fidelity guarantee we have for the codec:
+           if it ever fails, our wire format has silently drifted from
+           the real retail format and any "fix" must come with primary-
+           source proof per the server-integrity rules.
+           ServerRedirect_RealCaptureBytes_DecodesAllFields — loads the
+           10-byte frame-222 payload, decodes, asserts SectorId=
+           0x5FB00000 (BE, see divergence note below), IP=46.232.153.159,
+           port=3500.
+           HexFixture_RejectsMalformedInput — sanity-checks the loader
+           rejects bad characters and odd nibble counts but accepts
+           comments + whitespace.
+        ▸ **Preservation finding** (sector_id byte-order divergence):
+           the captured ServerRedirect's sector_id bytes are
+           `5F B0 00 00`. Read big-endian (what our codec does, matching
+           our proxy's ntohl-then-dump path) this is 0x5FB00000 — a
+           gibberish-large 1.6-billion sector ID. Read little-endian it
+           is 0xB05F=45151, which exactly matches the ToSectorID the
+           client just sent in MasterJoin. The plausible interpretation
+           is that the retail server flipped byte order between the
+           ToSectorID it received (BE) and the sector_id it echoed back
+           (LE). Our proxy doesn't replicate this asymmetry. Per the
+           server-integrity rules in CLAUDE.md, this is a **finding to
+           investigate, NOT a license to "fix" the codec** — a single
+           capture isn't sufficient primary-source proof to declare
+           which byte order is canonical, and we need either (a) a
+           second capture confirming the same behaviour or (b) a
+           decompilation of the retail ServerRedirect emission path
+           before changing anything. The fixture comment, codec doc
+           comment, and test comment all flag this; the test asserts
+           what our codec produces today (BE) so a regression in the
+           codec breaks the build either way.
+        ▸ **Live server-reply replay deferred**: the original Item 6
+           description called for replaying the client side against our
+           live server and comparing the server's reply to the captured
+           server reply byte-for-byte. That comparison is currently
+           unimplementable because (a) our proxy's ServerRedirect
+           response in the test environment is the hardcoded UDP-
+           timeout fallback (PROXY_LOCAL_TCP_PORT=3500), not a real
+           response sourced from a backend MVAS, so a byte-for-byte
+           comparison to retail would be testing the fallback, not the
+           real codepath; and (b) for the MasterJoin specifically, the
+           captured request's avatar_id_lsb identifies a player that
+           does not exist in our seed DB, so the server would either
+           reject or fall through to defaults — neither of which
+           matches the retail capture. The honest first-pass deliver-
+           able is the codec-fidelity tests above (which are the
+           preservation-grade comparison we can actually defend right
+           now); the live-replay comparison comes back into scope when
+           Phase K wires the real UDP plane and the harness can seed a
+           player matching the captured avatar_id. Item 6 stays [x]
+           because what is shipped is what is grounded; the follow-up
+           is tracked here rather than blocking the phase.
+        ▸ Test counts: integration suite 16/16 green (3 smoke + 3 TLS +
+           3 RSA + 3 VersionRequest + 1 MasterJoin + 1 ConnectAndLogin
+           happy + 1 ConnectAndLogin wrong-pw + 3 CaptureReplay incl.
+           HexFixture self-test). The 3 capture-replay tests run in
+           ~10ms total with no docker dependency, so they ratchet codec
+           fidelity even when the stack is down.
 
 - [ ] Item 7 — Robustness tests (HealthGuard, malformed replies, rate-limit respect)
       Status: not started

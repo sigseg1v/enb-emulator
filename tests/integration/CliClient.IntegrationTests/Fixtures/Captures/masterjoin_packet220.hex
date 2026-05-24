@@ -1,0 +1,34 @@
+# Source: archive/kyp-snapshot/capturedPackets/capture_1.rar (frame 220).
+# 89-byte frame on the wire: 4-byte header + 64-byte MasterJoin payload
+# + 21 trailing bytes belong to a separate frame the capture text
+# concatenated. Header was "44 00 35 00" (length=68 LE, opcode=0x35 LE).
+# Below is JUST the 64-byte payload — the part DecodeInbound consumes.
+#
+# Decoded fields (per common/include/net7/PacketStructures.h:262-282,
+# all int32 big-endian, ticket = 20 raw bytes):
+#   Unknown1     = 2
+#   Unknown2     = 2
+#   Unknown3     = 0x40E60235  (looks like a session/cookie token)
+#   AvatarIdMsb  = 0x3E221201
+#   AvatarIdLsb  = 0xF7645CC0
+#   ToSectorID   = 0x0000B05F  = 45151   (real EnB used larger IDs than our 1..200 schema)
+#   FromSectorID = 0
+#   PlayerLevel  = 0
+#   Unknown8     = 1
+#   Unknown9     = 1
+#   Unknown10    = 0x7FFFFFFF  = INT32_MAX
+#   Ticket[20]   = 4E803A080B7526553​1C123C30E22D2CCF6E90F3C  (20 binary bytes;
+#                  retail tickets were opaque non-ASCII unlike Net-7's
+#                  ASCII hex format)
+00 00 00 02
+00 00 00 02
+40 E6 02 35
+3E 22 12 01
+F7 64 5C C0
+00 00 B0 5F
+00 00 00 00
+00 00 00 00
+00 00 00 01
+00 00 00 01
+7F FF FF FF
+4E 80 3A 08 0B 75 26 55 31 C1 23 C3 0E 22 D2 CC F6 E9 0F 3C
