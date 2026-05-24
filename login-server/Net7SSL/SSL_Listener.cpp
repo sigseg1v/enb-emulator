@@ -22,6 +22,8 @@
 #include "SSL_Connection.h"
 #include "ServerManager.h"
 #include "ConnectionManager.h"
+#else
+#include <thread>
 #endif
 
 // This helper function is referenced by _beginthread to launch the TCP Listener thread.
@@ -194,69 +196,43 @@ void SSL_Listener::RunThread()
 				LogMessage("Refused connection to %d.%d.%d.%d : On the SSL shitlist.\n", ip[0], ip[1], ip[2], ip[3]);
 			}
 #else
-			// Phase J Linux: drive SSL_accept inline, then read one HTTP
-			// request, dispatch via HandleHttpsRequest() (LinuxAuth.cpp),
-			// write the response, and close. No threading, no connection
-			// pooling — for the auth flow each TLS session is one round
-			// trip. The heavy SSL_Connection class (per-connection thread,
-			// state machine, ConnectionManager wiring) stays WIN32-walled.
-			extern char *HandleHttpsRequest(char *recv_buffer, size_t *out_len,
-											unsigned long client_ip);
-
+			// Phase K Linux: hand each accepted SSL session off to a
+			// detached worker thread. Each thread runs SSL_accept +
+			// SSL_read + HandleHttpsRequest + SSL_write + SSL_shutdown
+			// + close, then exits. Lets multiple slow handshakes proceed
+			// in parallel instead of head-of-line blocking the listener.
+			//
+			// Bound: m_ActiveWorkers <= kMaxWorkers. New connections over
+			// the cap are refused (close immediately) so a flood can't
+			// fork-bomb the process. The cap is intentionally generous;
+			// each worker is short-lived (one HTTP request).
+			//
+			// Thread safety:
+			//  - m_ssl_context: OpenSSL 1.1+ is thread-safe by default; no
+			//    per-thread init needed.
+			//  - HandleHttpsRequest: serialises MySQL access via its own
+			//    Mutex and ticket table via g_TicketMutex.
 			LogMessage("Accepted SSL connection from %d.%d.%d.%d\n",
 				ip[0], ip[1], ip[2], ip[3]);
-			SSL *ssl = SSL_new(m_ssl_context);
-			if (ssl)
+
+			constexpr int kMaxWorkers = 64;
+			if (m_ActiveWorkers.load(std::memory_order_relaxed) >= kMaxWorkers)
 			{
-				SSL_set_fd(ssl, (int)s);
-				int hs = SSL_accept(ssl);
-				if (hs <= 0)
-				{
-					int err = SSL_get_error(ssl, hs);
-					LogMessage("  SSL_accept failed (err=%d). Likely missing/invalid cert.\n", err);
-				}
-				else
-				{
-					LogMessage("  SSL handshake OK (%s)\n", SSL_get_version(ssl));
-
-					// One read is sufficient for the GET-with-query-string
-					// requests the client sends. Buffer is sized to match
-					// SSL_RECV_BUFFER from SSL_Connection.h.
-					constexpr size_t kRecvSize = 2048;
-					char recv_buf[kRecvSize + 1];
-					int n = SSL_read(ssl, recv_buf, (int)kRecvSize);
-					if (n > 0)
-					{
-						recv_buf[n] = 0;
-						// Log just the first request line so debug output
-						// doesn't drown in the rest of the HTTP headers.
-						const char *eol = strpbrk(recv_buf, "\r\n");
-						int first_len = eol ? (int)(eol - recv_buf) : n;
-						LogMessage("  HTTP: %.*s\n", first_len, recv_buf);
-
-						size_t resp_len = 0;
-						char *resp = HandleHttpsRequest(recv_buf, &resp_len, addr);
-						if (resp && resp_len > 0)
-						{
-							int wrote = SSL_write(ssl, resp, (int)resp_len);
-							if (wrote <= 0)
-							{
-								int werr = SSL_get_error(ssl, wrote);
-								LogMessage("  SSL_write failed (err=%d)\n", werr);
-							}
-						}
-						if (resp) delete [] resp;
-					}
-					else if (n < 0)
-					{
-						int rerr = SSL_get_error(ssl, n);
-						LogMessage("  SSL_read failed (err=%d)\n", rerr);
-					}
-					SSL_shutdown(ssl);
-				}
-				SSL_free(ssl);
+				LogMessage("  refusing connection: %d worker threads already active (cap=%d)\n",
+					m_ActiveWorkers.load(), kMaxWorkers);
+				::close((int)s);
 			}
-			::close((int)s);
+			else
+			{
+				m_ActiveWorkers.fetch_add(1, std::memory_order_relaxed);
+				SSL_CTX *ctx = m_ssl_context;
+				SOCKET sock = s;
+				unsigned long client_ip = addr;
+				std::thread([this, ctx, sock, client_ip]() {
+					HandleAcceptedConnection(ctx, sock, client_ip);
+					m_ActiveWorkers.fetch_sub(1, std::memory_order_relaxed);
+				}).detach();
+			}
 #endif
 		}
 		else
@@ -271,6 +247,70 @@ void SSL_Listener::RunThread()
 
 	Shutdown();
 }
+
+#ifndef WIN32
+// Phase K: per-connection worker. Mirrors what the inline Phase J path
+// used to do, just running on a detached thread so the listener can
+// proceed straight back to accept(). Owns the SSL* and the socket for
+// its lifetime; both are torn down on exit.
+void SSL_Listener::HandleAcceptedConnection(SSL_CTX *ctx, SOCKET sock, unsigned long client_ip)
+{
+	extern char *HandleHttpsRequest(char *recv_buffer, size_t *out_len,
+									unsigned long client_ip);
+
+	SSL *ssl = SSL_new(ctx);
+	if (!ssl)
+	{
+		LogMessage("  SSL_new failed for connection from 0x%08lx\n", client_ip);
+		::close((int)sock);
+		return;
+	}
+
+	SSL_set_fd(ssl, (int)sock);
+	int hs = SSL_accept(ssl);
+	if (hs <= 0)
+	{
+		int err = SSL_get_error(ssl, hs);
+		LogMessage("  SSL_accept failed (err=%d). Likely missing/invalid cert.\n", err);
+	}
+	else
+	{
+		LogMessage("  SSL handshake OK (%s)\n", SSL_get_version(ssl));
+
+		constexpr size_t kRecvSize = 2048;
+		char recv_buf[kRecvSize + 1];
+		int n = SSL_read(ssl, recv_buf, (int)kRecvSize);
+		if (n > 0)
+		{
+			recv_buf[n] = 0;
+			const char *eol = strpbrk(recv_buf, "\r\n");
+			int first_len = eol ? (int)(eol - recv_buf) : n;
+			LogMessage("  HTTP: %.*s\n", first_len, recv_buf);
+
+			size_t resp_len = 0;
+			char *resp = HandleHttpsRequest(recv_buf, &resp_len, client_ip);
+			if (resp && resp_len > 0)
+			{
+				int wrote = SSL_write(ssl, resp, (int)resp_len);
+				if (wrote <= 0)
+				{
+					int werr = SSL_get_error(ssl, wrote);
+					LogMessage("  SSL_write failed (err=%d)\n", werr);
+				}
+			}
+			if (resp) delete [] resp;
+		}
+		else if (n < 0)
+		{
+			int rerr = SSL_get_error(ssl, n);
+			LogMessage("  SSL_read failed (err=%d)\n", rerr);
+		}
+		SSL_shutdown(ssl);
+	}
+	SSL_free(ssl);
+	::close((int)sock);
+}
+#endif
 
 bool SSL_Listener::SocketReady(int ttimeout)
 {

@@ -57,9 +57,10 @@ Goal: take the Phase J "TLS terminates, handshake works, opcodes are dispatched"
       Status: not started
       Touches: `proxy/PacketStructures.h`, `proxy/Connection.cpp` (SendResponse `length + sizeof(long)` → `length + sizeof(EnbTcpHeader)`), and any handler that memcpy's into these structs.
 
-- [ ] Per-connection threading in net7ssl (Linux) — port `SSL_Connection`'s recv-thread model so multiple concurrent logins work.
-      Status: not started
-      Touches: `login-server/Net7SSL/LinuxAuth.cpp`, `login-server/Net7SSL/SSL_Listener.cpp`
+- [x] Per-connection threading in net7ssl (Linux) — detached worker thread per accepted SSL session so a slow handshake doesn't head-of-line block other connects.
+      Status: done — `SSL_Listener::HandleAcceptedConnection` runs SSL_accept + read + dispatch + write + close on a detached `std::thread`. Capped at 64 concurrent workers (std::atomic counter); over-cap connections are refused with a log line so a flood can't fork-bomb. Lighter than the Win32 `SSL_Connection` model (no connection pool, no persistent thread per client) but matches the request shape — each TLS session is one round trip.
+      Touches: `login-server/Net7SSL/SSL_Listener.h` (+13 LOC: atomic counter, HandleAcceptedConnection decl, <atomic> include), `login-server/Net7SSL/SSL_Listener.cpp` (-50/+65 LOC: inline accept body moves into HandleAcceptedConnection, listener launches detached thread).
+      Notes: Verified end-to-end — fired 5 concurrent `curl https://.../AuthLogin` and the proxy log shows 5 interleaved "Accepted SSL connection" / "SSL handshake OK" / "HTTP: GET /AuthLogin" lines instead of strict serial ordering. `just integration-test` 6/6 still green.
 
 - [ ] `/who.cgi` HTML output — depends on PlayerManager being reachable from net7ssl (currently it isn't).
       Status: not started
