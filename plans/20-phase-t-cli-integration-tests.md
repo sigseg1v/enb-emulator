@@ -269,10 +269,44 @@ xUnit `[Collection("server")]` ensures the docker stack stands up exactly once p
            tion-grade source pointers so any future divergence is
            traceable.
 
-- [ ] Item 5 — Workflow tests (connect-and-login, enumerate sectors/missions/items)
-      Status: not started
-      Touches: tests/integration/CliClient.IntegrationTests/Workflows/*.cs
-      Notes: each workflow runs end-to-end and asserts the dump file matches a golden JSON (with a controlled set of fields — timestamps, UUIDs are normalised before compare).
+- [~] Item 5 — Workflow tests (connect-and-login done; enumerate-* deferred behind Phase K)
+      Status: partially done — ConnectAndLoginTests landed; the
+        enumerate-sectors / enumerate-missions / enumerate-items
+        workflows blocked on Phase K wiring the listing opcodes
+        on the server side.
+      Touches: tests/integration/CliClient.IntegrationTests/Workflows/ConnectAndLoginTests.cs
+      Notes:
+        ▸ ConnectAndLoginTests has 2 [Fact]s:
+           ValidAccount_LandsInGlobalStage_NoHealthTrip — runs the
+           full ConnectAndLogin workflow against Pool[0]/testpw with
+           a 2s IdleDuration, asserts LoginValid=true, Stage==Global,
+           guard not tripped, Aborted==null. Drain count asserted
+           >=0 not ==0 so Phase K's future "server says hello on
+           connect" doesn't false-break it.
+           WrongPassword_AbortsWithLoginRejection — runs the same
+           workflow with a bogus password, asserts LoginValid=false,
+           Stage==Disconnected, Aborted contains "Valid=False"
+           (i.e. the workflow correctly surfaces login rejection
+           without tripping the health guard or attempting the
+           global connect).
+        ▸ Both pass against the live stack: happy path ~2s (mostly
+           the IdleDuration), wrong-password path ~140ms (login
+           rejected fast). Drives ConnectAndLogin + HealthGuard
+           together end-to-end, which is the most realistic
+           Phase-S-as-a-library smoke test we can write today.
+        ▸ EnumerateSectorsTests / EnumerateMissionsTests /
+           EnumerateItemsTests *deferred*: the underlying workflows
+           don't exist yet in CliClient.Core (only ConnectAndLogin
+           and SendChat are shipped today). Building them requires
+           (a) wiring typed codecs for the listing opcode trios
+           server-side (Phase K work; currently Linux dispatch
+           only has 0x0000 VersionRequest + 0x0002 Sector LOGIN),
+           and (b) building a workflow that paginates through the
+           listing and writes a golden dump. Both halves come back
+           in scope once Phase K wires e.g. HandleGlobalConnect on
+           Linux so we have the GlobalAvatarList round-trip
+           (0x006D → 0x0070) to drive an enumerate-avatars
+           workflow as the first real listing test.
 
 - [ ] Item 6 — Capture replay tests
       Status: not started
