@@ -3391,3 +3391,143 @@ any server check. Zero permissiveness added.
   tests' `finally` blocks before character delete — the
   4-occurrence threshold of the ACCOUNT_IN_USE-after-isolation
   pattern argues for this as a separate Phase T item.
+
+---
+
+## 2026-05-25 — Phase K Wave 26: 0x0058 SKILL_ABILITY direct-reply round-trip; ISO-8859 encoding gotcha; SendOpcode-bypasses-login-stage-race pattern
+
+Wave 26 lands `SectorSkillAbilityTests.SkillAbility_OnUnknownAbilityIndex_ReceivesPriorityMessageNotYetWorking`
+— green in isolation (1/1, 7s) and against the full integration
+suite (57/57 in 5m18s from `docker compose down -v && up -d`).
+Zero server changes. Coverage 37/207 → **39/207** — second +2
+ratchet in Phase K (request 0x0058 + reply 0x0020 both get
+coverage entries, like Wave 19/20's REQUEST_TARGET + SET_TARGET
+pair).
+
+### The opcode
+
+`Player::HandleSkillAbility` (server/src/PlayerAbilitys.cpp:23)
+bounds-checks `Action->AbilityIndex` against `MAX_ABILITY_IDS=138`
+(server/src/PlayerSkills.h:275). Any index outside [0, 138) OR an
+in-range index whose `m_AbilityList[index]` slot is null falls
+into the else-branch at PlayerAbilitys.cpp:71 which unconditionally
+emits `SendPriorityMessageString("Error: This ability is not yet
+working. Try later!", "MessageLine", 1000, 4)`. The mandatory
+reply makes this a direct-reply test rather than a survival probe
+— same shape as Wave 24 ITEM_STATE.
+
+Test sends 12B SkillUse `{GameID=0, Action=0, AbilityIndex=200}`
+host-LE. AbilityIndex=200 picks the deterministic out-of-range
+path (the in-range/null-slot path depends on which abilities the
+fresh Terran Warrior populates, which is character-state-
+dependent).
+
+### The structural advantage over Wave 25's SendToSector path
+
+Wave 25's emote test had to send in a 30-attempt × 2s retry loop
+because `SendToSector` walked the sector-player bitmap, which is
+empty until login stage 10 fires — a multi-second window post-
+START during which any 0x005E emit fans out to nobody and is
+silently dropped.
+
+`SendPriorityMessageString` routes through `SendOpcode`
+(per-client UDP queue, server/src/PlayerConnection.cpp:127) NOT
+SendToSector. The originator's UDP queue is set up at session
+creation, not at stage 10. So there's no login-stage race — a
+plain drain-loop pattern (modelled on Wave 24's ITEM_STATE)
+suffices. Same direct-reply assertion strength, simpler test.
+
+This argues for a future heuristic when picking direct-reply
+candidates: handlers that emit via `SendOpcode` (per-client) are
+strictly easier than handlers that emit via `SendToSector`
+(sector-fan-out). Worth recording on the Phase K candidate-
+selection notes for future waves.
+
+### The ISO-8859 encoding gotcha (recurring trap)
+
+Initial searches for `MAX_ABILITY_IDS` and `m_AbilityList` via
+plain `grep` returned EMPTY for header files. Yet the binary built
+successfully, and disassembling `MOB::UseSkill` in the running
+container showed `cmpl $0x89` (137) — clearly compiled against a
+real declaration.
+
+Root cause: `file server/src/PlayerSkills.h` reported `ISO-8859
+text, with CRLF line terminators`. Grep treats files marked as
+binary by encoding detection as binary by default and silently
+skips them. The fix:
+
+```
+grep --binary-files=text -rn MAX_ABILITY_IDS server/src/
+```
+
+— immediately found the `#define MAX_ABILITY_IDS    138` at
+server/src/PlayerSkills.h:275.
+
+This trap will recur. The codebase has many ISO-8859 files from
+the original 2010 Windows-encoded source. **Heuristic for future
+agents**: when `grep` returns empty for symbols you KNOW exist
+(because the binary built or disassembly references them), check
+encoding with `file` and re-run with `--binary-files=text`.
+Alternative: feed source through `cpp -dD` to find macro
+definitions regardless of encoding.
+
+Out of scope for this wave but worth flagging on the Phase F /
+warnings docket: a future utf-8 normalisation pass would close
+this trap permanently (and incidentally make IDE editing less
+hazardous — most editors silently mojibake ISO-8859 chars when
+saving as UTF-8).
+
+### ConvertAbilityToBaseSkill safety
+
+Before the bounds check, HandleSkillAbility calls
+`ConvertAbilityToBaseSkill(level, AbilityIndex=200)` which chains
+into `GetSkillLevel(skill_id=-1)` at
+server/src/SkillsDatabaseSQL.cpp:107. That function does
+`m_SkillConvList[skill_id]` with no -1 guard.
+
+Initially worried about a null-deref or signed-overflow. Verified
+safe:
+
+* `SkillConversionList` is `std::map<unsigned long, SkillConversion*>`
+  (SkillsDatabase.h:30). Casting `-1` to `unsigned long` yields
+  `UINT64_MAX`, not a negative index.
+* `operator[]` on an absent key inserts a default-constructed
+  nullptr value and returns the reference. The function returns
+  `entry->level` only inside an `if (entry != nullptr)` guard.
+* The inner `GetBaseSkillID` has the explicit `if (skill_id != -1
+  && m_SkillConvList[skill_id])` guard.
+
+So AbilityIndex=200 is safe to drive through this path. No
+defensive guards needed in the test.
+
+### Per CLAUDE.md server-integrity
+
+The 12B SKILL_ABILITY wire shape with AbilityIndex=200 is what
+the retail Win32 client would emit when the user activates an
+ability the server doesn't recognise (e.g. a stale toolbar
+binding pointing at an ability that was removed in a patch the
+client doesn't have yet). The "not yet working" priority-message
+reply is the verbatim retail-server error string at
+PlayerAbilitys.cpp:72 — preservation-grade fidelity, not a
+fabrication. No server changes; no security posture loosened; no
+inputs accepted that retail wouldn't accept.
+
+### Next-Phase-K targets
+
+* **0x0027 INVENTORY_MOVE** — heaviest remaining inventory
+  opcode; needs seeded inventory rows for the slot-manipulation
+  branch. Still the natural next candidate after Wave 24/26 proved
+  the direct-reply pattern.
+* **0x002F INVENTORY_SWAP / 0x0030 INVENTORY_DELETE** — other
+  inventory-tier opcodes; same seed-row requirement.
+* **0x004F STARBASE_RESPONSE** — paired with Wave 16's
+  STARBASE_REQUEST.
+* **Inverse sweep** for further direct-reply opportunities in the
+  0x0030-0x0050 range now that SKILL_ABILITY proved the
+  SendOpcode-bypasses-login-stage-race pattern (strictly simpler
+  than Wave 25's SendToSector retry-loop pattern).
+* **Test-infra hardening** (still out-of-band): explicit LOGOFF
+  in tests' `finally` blocks — Wave 26 didn't trigger the
+  ACCOUNT_IN_USE-after-isolation pattern this time (clean docker
+  recycle worked), but the threshold is still 4 prior occurrences
+  argues for the hardening as a separate Phase T item.
