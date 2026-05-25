@@ -12,15 +12,15 @@ copies of historical material from the upstream repos.
 | File | Purpose |
 |---|---|
 | `01-overview.md` | What this project is, upstream sources, status, license, how to get started. |
-| `02-architecture.md` | Server architecture: login flow, sector servers, managers. Derived from the Net-7 architecture RTF plus a code read of `Net7.cpp`, `ServerManager`, and `ConnectionManager`. |
+| `02-architecture.md` | Server architecture: login flow, sector servers, managers. Derived from the Net-7 architecture RTF plus a code read of `Net7.cpp` and `ServerManager` (the kyp-era `ConnectionManager` cluster was deleted in Phase Q — the proxy and login-server still own the equivalent TCP plumbing). |
 | `03-network-protocol.md` | Ports, the client to login to sector handoff, packet framing notes. |
 | `04-server-modules.md` | One section per top-level manager class, with `file:line` references into `server/src/`. |
 | `05-abilities.md` | Full ability list, marking which were added by the tada-o fork. |
 | `06-database-schema.md` | Per-table summary of all 71 tables in `db/mysql/net7.sql`, grouped thematically, with cross-references to the C# editor that owns each. |
-| `07-tools-toolchain.md` | One paragraph per C# editor / utility under `tools/`, plus the content pipeline and the .NET 10 build status. |
+| `07-tools-toolchain.md` | One paragraph per C# editor / utility under `tools/`, plus the content pipeline and the Phase L Avalonia status. |
 | `08-build.md` | How to build the server (Linux + Windows), the C# tool suite, and the Linux client installer. |
 | `09-running-locally.md` | How to bring up the dev stack with `docker compose`, apply the schema, create a test account, and point a client at it. |
-| `10-modernization-roadmap.md` | Summary of Phases B through I (from `plans/*.md`) with effort estimates, risks, and an explicit list of things deliberately skipped. |
+| `10-modernization-roadmap.md` | Retrospective on Phases A through T (from `plans/*.md`), what remains, and an explicit list of things deliberately skipped. |
 | `11-gm-commands.md` | GM and admin slash commands, reformatted from `reference/gm-commands-original.txt`. |
 | `12-content-pipeline.md` | How content flows from the C# editors through the DB into the running server, with per-domain loaders. |
 | `13-gameplay-loop.md` | Server-side walkthrough of the major gameplay systems (combat, sector travel, missions, trading, guilds, chat). |
@@ -45,8 +45,8 @@ synthesis.
 
 - All numbered docs are CommonMark, ASCII only, no emojis.
 - File paths in prose are absolute from the repo root (e.g. `server/src/Net7.cpp`).
-- "TODO" markers indicate content that depends on Phase B/C/D output and will be
-  filled in as those phases complete.
+- "TODO" markers indicate content that depends on the remaining Phase K
+  work (in-game UDP opcode plane) and will be filled in as it completes.
 - "Unknown" means exactly that. We do not guess.
 
 ## See also

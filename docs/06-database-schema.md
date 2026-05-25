@@ -6,8 +6,15 @@ Source-of-truth dump: `db/mysql/net7.sql` (71 tables, world/content data) and
 Both dumps are mysqldump output from the tada-o snapshot (2010). They use
 MySQL idioms (`int(N) unsigned`, `AUTO_INCREMENT`, backticked identifiers,
 `ENGINE=InnoDB`, mixed `latin1`/`utf8` charsets) that do not parse cleanly in
-Postgres. Phase C of the modernization plan converts them; see
-`plans/03-phase-c-postgres.md` and (when produced) `db/postgres/schema.sql`.
+Postgres. Phase C converted them via `db/postgres/convert.sh`; the
+converted artefacts are committed at `db/postgres/schema.sql` and
+`db/postgres/seed.sql`, and `db/postgres/README.md` lists the residual
+manual fixes. Note: at runtime the server still talks to MySQL on
+`localhost:3307` via the dev-stack `docker-compose.yml`; the Postgres
+conversion is staged and verified separately. The C++ DAO migration to
+libpqxx happened in Phase N — see `mysqlplus.cpp` and the per-DAO sweep
+in `plans/14-phase-n-libpqxx.md`. A handful of DAOs still use the MySQL
+path; Wave 3 of Phase N tracks the remainder.
 
 This document covers the 71 tables in `net7.sql`. The 42 tables in
 `net7_user.sql` are summarised at the end.
@@ -23,7 +30,12 @@ This document covers the 71 tables in `net7.sql`. The 42 tables in
   effective in-game value is `column * (quality / 100.0)`.
 - "Editor" cross-references the C# tool under `tools/` that primarily edits
   the table. "(none)" means it is read-only seed data with no dedicated
-  editor.
+  editor. Editor paths below use the legacy `tools/<name>/` directory for
+  brevity; the recommended Avalonia ports live alongside as
+  `tools/<name>-avalonia/` and run natively on Linux (see `tools/README.md`
+  and the cross-reference table in `docs/07-tools-toolchain.md`).
+  `tools/itemeditor/` is the only un-ported editor — it never had a csproj
+  in the upstream snapshot.
 
 ## Group: world geometry
 
@@ -956,5 +968,5 @@ Known oddities to watch for:
   precision/scale specifiers are ignored.
 - `float(N,M)` columns: becomes `real`; precision specifier ignored.
 
-See `db/postgres/README.md` (created during Phase C) for the residual
-manual-fix list.
+See `db/postgres/README.md` for the residual manual-fix list and the
+exact transformations `db/postgres/convert.sh` applies.

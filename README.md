@@ -30,24 +30,27 @@ client/linux-installer/install-enb-linux.sh
 
 Installs WINE + the Earth & Beyond client + the Net-7 launcher. See `client/linux-installer/README.md` for prerequisites and supported distros.
 
-### Server (Phase B in progress)
+### Server (runs natively on Linux today)
 
 ```
-just dev          # docker-compose up postgres + server + login
-just build        # cmake build server, dotnet build tools
+just init         # first-run: bring up mysql:8.0 on :3307 and load both dumps
+just dev          # docker-compose up server + proxy + login (in the background)
+just build        # cmake build server + proxy + login, dotnet build tools
 just test         # ctest + dotnet test
 just package      # build OCI image of the server
 ```
 
-Today `just dev` brings up Postgres and *attempts* to build/run the server. Build is not yet clean on Linux - that's Phase B. See `server/BUILD_ERRORS.md` (after Phase B has been worked on) for the running error list.
+`server`, `proxy`, and `login-server` all build clean against system OpenSSL 3.x and libpqxx 7.x, and pass the gtest suite plus the CLI-driven integration tests (33/33). See `docs/09-running-locally.md` for the walkthrough.
 
 ### C# content tools
 
 ```
-dotnet build tools/Net7Tools.sln
+dotnet build tools/Net7Tools.slnx
+just launch                   # central Avalonia tool launcher (recommended)
+just launch-sector-editor     # or jump straight to a specific editor
 ```
 
-Build is cross-platform after Phase D. Runtime is Windows-only (WinForms). On Linux, run them under Wine + `dotnet` (Wine + `wine dotnet ...`) or in a Windows VM.
+The Phase L Avalonia ports (`tools/<name>-avalonia/`) run natively on Linux — no WINE. The legacy WinForms ports (`tools/<name>/`) still cross-compile but only run on Windows / WINE. `tools/itemeditor/` is the only un-ported editor (no upstream csproj). See `tools/README.md` for the per-tool table.
 
 ## Repo layout
 

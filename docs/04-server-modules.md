@@ -17,7 +17,6 @@ Conventions:
 
 1. [Process-level managers](#1-process-level-managers)
    - [ServerManager](#11-servermanager)
-   - [ConnectionManager](#12-connectionmanager)
    - [SectorServerManager](#13-sectorservermanager)
    - [MailManager](#14-mailmanager)
    - [SaveManager](#15-savemanager)
@@ -25,7 +24,6 @@ Conventions:
 2. [Sector-level managers](#2-sector-level-managers)
    - [SectorManager](#21-sectormanager)
    - [ObjectManager](#22-objectmanager)
-   - [EffectManager](#23-effectmanager)
 3. [Players, mobs and combat](#3-players-mobs-and-combat)
    - [PlayerManager](#31-playermanager)
    - [Player and the PlayerXxx files](#32-player-and-the-playerxxx-files)
@@ -46,8 +44,16 @@ Conventions:
    - [Other content loaders](#66-other-content-loaders)
 7. [Network](#7-network)
    - [UDP_Connection](#71-udp_connection)
-   - [Connection (TCP)](#72-connection-tcp)
-   - [SSL_Listener / SSL_Connection](#73-ssl_listener--ssl_connection)
+   - [Deleted in Phase Q (TCP cluster + EffectManager)](#72-deleted-in-phase-q-tcp-cluster--effectmanager)
+
+> **Phase Q deletions** (2026-05-23). The TCP cluster
+> (`Connection`, `ConnectionManager`, `TcpListener`,
+> `SSL_Listener`, `SSL_Connection`, `ClientTo{Master,Global,Sector}Server`),
+> `EffectManager`, and `JobManager_DEP_` were removed from
+> `server/src/`. The previous §1.2 ConnectionManager, §2.3
+> EffectManager, §7.2 Connection (TCP), and §7.3 SSL_Listener /
+> SSL_Connection sections were deleted from this doc to match. See
+> `plans/17-phase-q-kyp-cluster-deletion.md` for the rationale.
 
 ---
 
@@ -102,36 +108,6 @@ Members of note (`ServerManager.h:121-181`):
 Threading: most members are touched from many threads. `m_Mutex`
 guards the file-timer fields. Per-manager mutexes guard the rest.
 
-### 1.2. ConnectionManager
-
-**Header**: `server/src/ConnectionManager.h:12-57`
-**Implementation**: `server/src/ConnectionManager.cpp`
-
-A small bookkeeping class. Keeps two linked lists, one for active
-`SSL_Connection`s and one for active `Connection`s (TCP), and runs a
-single "opcode comms" thread (`OpcodeCommsThread`) that walks both
-lists and pumps queued sends.
-
-Public surface (`ConnectionManager.h:18-25`):
-
-```c
-void AddSslConnection(SSL_Connection *ssl_connection);
-void AddConnection(Connection *tcp_connection);
-void CheckConnections();
-void CheckSslConnections();
-u32  GetConnectionCount();
-bool CheckAccountInUse(char *accountname, Connection *c = 0);
-void BeginOpcodeSendThread();
-```
-
-`CheckAccountInUse` walks the connection list to detect duplicate
-logins from the same account. This is the choke point for "is this
-person already online over TCP?". The UDP path has its own check on
-`PlayerManager::CheckAccountInUse`.
-
-The class is currently used mainly by the legacy TCP path. In the
-modern UDP-only deployment its connection list is sparse.
-
 ### 1.3. SectorServerManager
 
 **Header**: `server/src/SectorServerManager.h`
@@ -153,15 +129,19 @@ In standalone mode, the lookup resolves to the same process so the
 "redirect" is effectively a NOP and the client just keeps talking
 on the same UDP socket.
 
-### 1.4. MailManager
+### 1.4. MailManager (AF_UNIX IPC)
 
 **Header**: `server/src/MailslotManager.h:25-46`
 **Implementation**: `server/src/MailslotManager.cpp` (211 lines)
 **Global**: `g_MailMgr` (`server/src/Net7.h:268`)
 
-Windows-mailslot IPC layer. The only producer is Net7SSL, the only
-consumer is Net7. Allocated in `RunMasterServer` at
-`server/src/ServerManager.cpp:163`.
+Local IPC layer between the server and the login process. The class
+keeps its historical name for source-history continuity; the
+transport, post-Phase M (2026-05-23), is an **AF_UNIX SOCK_DGRAM**
+socket pair under `/run/net7-ipc/`. The wrapper is
+`net7ipc::PosixIpc` in `common/include/net7/PosixIpc.h`.
+
+Allocated in `RunMasterServer` at `server/src/ServerManager.cpp:163`.
 
 Public surface (`MailslotManager.h:31-35`):
 
@@ -175,21 +155,12 @@ void ResetMailSystem();
 
 The opcode set is two values, both declared in `MailslotManager.h:47-48`:
 
-- `LOCAL_PING_SSL_SERVER  0x04` (SSL -> Net7 liveness)
-- `LOCAL_PING_SERVER_SSL  0x05` (Net7 -> SSL liveness)
-
-The slot names live in three globals - `g_OutputSlot`, `g_InputSlot`,
-`g_EventName` - declared at `MailslotManager.h:21-23` and set
-elsewhere to `\\\\.\\mailslot\\net7...` paths.
+- `LOCAL_PING_SSL_SERVER  0x04` (login -> server liveness)
+- `LOCAL_PING_SERVER_SSL  0x05` (server -> login liveness)
 
 `CheckMessages` is polled from `ServerManager::ServerCheck` every
 50ms. Liveness gap > 60s triggers `RelaunchNet7SSL` at
 `server/src/ServerManager.cpp:366-374`.
-
-**Linux portability**: Mailslots are Windows-only. Replacement design:
-Unix domain `SOCK_DGRAM` sockets. The current opcode set is so small
-that the full mailslot envelope (opcode/slot/bytes prefix) can be
-dropped for a single-byte ping payload.
 
 ### 1.5. SaveManager
 
@@ -202,10 +173,10 @@ objects to MySQL. Constructed in `ServerManager`'s ctor; destroyed
 first in the dtor (`ServerManager.cpp:108`) so saves drain before
 the rest of the process tears down.
 
-The save thread is the reason for the 5-second `Sleep` at the end of
+The save thread is the reason for the 5-second `usleep` at the end of
 `MainLoop` (`ServerManager.cpp:467`) - that's the "let the save
 thread finish" path that the in-source TODO calls out as needing real
-event-based shutdown.
+event-based shutdown. (Phase M replaced the original `Sleep` call.)
 
 ### 1.6. StringManager / GMemoryHandler
 
@@ -322,31 +293,15 @@ The two `_DEFAULT_TEMP_OBJLIST_SIZE = 200_` slot count
 (`ObjectManager.h:44`) is the per-sector reserve of temporary object
 slots, used for things like loot containers that come and go.
 
-### 2.3. EffectManager
+### 2.3. EffectManager (deleted in Phase Q)
 
-**Header**: `server/src/EffectManager.h:12-56`
-**Implementation**: `server/src/EffectManager.cpp`
-
-Maintains a list of currently-active visual effects so they can be
-re-sent to players who arrive while an effect is mid-cast. Two linked
-lists: per-player connection entries and per-object effect entries.
-
-Public surface (`EffectManager.h:20-25`):
-
-```c
-void AddPlayer(Connection *, int PlayerID);
-void RemovePlayer(int PlayerID);
-int  AddObjectEffect(int PlayerID, ObjectEffect *object_effect);
-void RemoveObjectEffect(int EffectID);
-void RemoveEffectsByPlayer(int PlayerID);
-void RemoveEffectToEveryone(int EffectID);
-```
-
-This class predates the per-sector model and is implemented assuming a
-single global effect list. In practice an effect is broadcast inside a
-sector via the per-`Object` and per-`Player` visibility lists, and
-this class is more about the bookkeeping of pending sends than about
-ownership of the effect itself.
+Originally lived at `server/src/EffectManager.{h,cpp}` and maintained
+a global list of in-flight visual effects keyed by a `Connection*`
+pointer. The class never made the cut to the per-sector model and was
+TCP-bound through that `Connection*` pointer; once Phase Q removed the
+TCP cluster it had nothing left to point at. Deleted 2026-05-23 along
+with the rest of the cluster. Visual-effect bookkeeping today happens
+inside `ObjectManager` via per-object and per-player visibility lists.
 
 ---
 
@@ -917,9 +872,11 @@ ship template id, behaviour, stats, loot table id). MOB instances
 - **MissionHandler** (`m_Missions`, `MissionManager.h`,
   `MissionParser.cpp`, `MissionDatabaseSQL.cpp`) - missions.
   Loaded at `ServerManager.cpp:212`.
-- **JobManager** (`m_JobMgr`, `JobManager_DEP_.h/.cpp`) - the
-  `_DEP_` suffix indicates this is deprecated. Crafting jobs.
-  Initialised at `ServerManager.cpp:215`.
+- **JobManager** — Originally `m_JobMgr` / `JobManager_DEP_.h/.cpp`,
+  the `_DEP_` suffix flagging it as deprecated. **Deleted in Phase Q
+  (2026-05-23)** along with the rest of the dead kyp-era cluster.
+  `ServerManager` no longer holds the field; the `InitialiseJobs`
+  call at the old `ServerManager.cpp:215` is gone.
 
 ---
 
@@ -982,99 +939,35 @@ void SendPlayerCount();
 
 See `docs/03-network-protocol.md` for the protocol semantics.
 
-### 7.2. Connection (TCP)
+### 7.2. Deleted in Phase Q (TCP cluster + EffectManager)
 
-**Header**: `server/src/Connection.h:33-212`
-**Implementation**: `server/src/Connection.cpp` (596 lines)
+Phase Q (2026-05-23) removed 15 files from `server/src/` that were
+dead-on-Linux:
 
-The legacy TCP client connection. Holds the Westwood RSA + RC4
-handshake state and dispatches the opcode set per server type.
+| File(s) | What it was |
+|---|---|
+| `Connection.{cpp,h}` | Per-client TCP connection with the Westwood RSA+RC4 handshake and ~25 opcode handlers (`HandleVersionRequest`, `HandleLogin`, `HandleMasterJoin`, `HandleGlobalConnect`, `HandleGlobalTicketRequest`, `HandleCreateCharacter`, `HandleDeleteCharacter`, …). |
+| `ConnectionManager.{cpp,h}` | Linked-list bookkeeping over active `Connection`s + `SSL_Connection`s + the `OpcodeCommsThread` that pumped queued sends. |
+| `TcpListener.h` | `accept()`-loop wrapper used by `RunMasterServer` (the call sites were already commented out). |
+| `SSL_Listener.{cpp,h}` / `SSL_Connection.{cpp,h}` | OpenSSL TCP listener for port 443 + per-client TLS connection. Its role moved to the sidecar `login` process years ago; the in-server classes were never reachable in the Linux build. |
+| `ClientToMasterServer.{cpp,h}` / `ClientToGlobalServer.{cpp,h}` / `ClientToSectorServer.{cpp,h}` | Per-server-type TCP opcode handlers (`ProcessMasterServerOpcode` etc) that hung off `Connection`. |
+| `EffectManager.{cpp,h}` | Global visual-effect bookkeeping keyed by `Connection*`. See §2.3. |
+| `JobManager_DEP_.{cpp,h}` | Crafting-jobs manager already marked `_DEP_` upstream. |
 
-Per-connection state (`Connection.h:171-211`):
+`ServerManager.h` lost the `m_ConnectionMgr` field, the
+`GetSSLConnection` declaration, and a small set of Phase-P loud-abort
+stubs that pointed into the dead cluster. The Westwood RSA+RC4
+handshake itself was preserved: the proxy reimplements it in
+`proxy/Connection.cpp` and shares the wire-format constants via
+`common/include/net7/WestwoodRC4.h` / `WestwoodRSA.h`.
 
-```c
-WestwoodRC4  m_CryptIn;   // RC4 decryption for inbound
-WestwoodRC4  m_CryptOut;  // RC4 encryption for outbound
-WestwoodRSA  m_WestwoodRSA;
-SOCKET       m_Socket;
-bool         m_ConnectionActive;
-bool         m_TcpThreadRunning;
-bool         m_KeysExchanged;
-bool         m_TerminateAfterSend;
-char         m_RunCount;
-unsigned char m_RecvBuffer[MAX_TCP_BUFFER];   // 8192
-unsigned char m_SendBuffer[MAX_TCP_BUFFER];
-unsigned char m_SendBuffer2[SEND_BUFFER_SIZE]; // 10240
-char         m_loginfo[256];
-MessageQueue *m_SendQueue;
-int          m_ServerType;
-u32          m_LastActivity;
-short        m_ReceivedSoFar;
-unsigned short m_DelayedOpcodeSize;
-short        m_DelayedOpcode;
-short        m_TcpPort;
-long         m_IPaddr;
-char        *m_AccountUsername;
-char        *m_LastOwner;
-long         m_AvatarID;
-Mutex        m_Mutex;
-```
+`PlayerConnection.cpp` was **kept** despite its misleading name —
+it is the live UDP send layer for `Player::Send*` calls, not a TCP
+connection.
 
-Per-server-type opcode handlers (`Connection.h:93-100`):
-
-- `ProcessGlobalServerOpcode`
-- `ProcessMasterServerOpcode`
-- `ProcessSectorServerOpcode`
-- `ProcessMasterServerToSectorServerOpcode`
-- `ProcessSectorServerToSectorServerOpcode`
-- `ProcessProxyClientOpcode`
-- `ProcessProxyGlobalOpcode`
-- `ProxyClientOpcode`
-
-Per-opcode handlers (`Connection.h:118-145`):
-
-- `HandleSectorServerAssignment` (0x8701)
-- `HandleRequestCharacterData` (0x8702)
-- `SendCharacterData` / `HandleCharacterData` (0x8802)
-- `HandleVersionRequest` (0x00)
-- `HandleLogin` (0x02)
-- `HandleMasterJoin` (0x35)
-- `HandleGlobalConnect` (0x6D)
-- `HandleGlobalTicketRequest` (0x6E)
-- `HandleDeleteCharacter` (0x71)
-- `HandleCreateCharacter` (0x72)
-- `ValidateLoginLink` (0x3002)
-- `ShutdownLoginLink` (0x3003)
-- `CommenceNavSend` (0x3004)
-- `HandleLoginFailed` (0x3006)
-- `HandleStarbaseLoginComplete` (0x3008)
-- `HandleMasterHandoff`
-
-Most of these are unreachable in the current UDP-only deployment, but
-the class is needed for the proxy <-> server TCP link and the
-SSL <-> server handoff.
-
-### 7.3. SSL_Listener / SSL_Connection
-
-**Headers**: `server/src/SSL_Listener.h`, `server/src/SSL_Connection.h`
-**Implementations**: `server/src/SSL_Listener.cpp`,
-                     `server/src/SSL_Connection.cpp`
-
-`SSL_Listener` accepts TLS connections on `SSL_PORT` (443) using
-OpenSSL. Each accepted connection becomes a per-client
-`SSL_Connection`. The dev cert and key (`local.net-7.org.cer` /
-`.pem`) ship with the source tree for local testing.
-
-In the current architecture this listener lives in `Net7SSL.exe`, not
-in `Net7.exe`. The `SSL_Listener` instantiation in
-`ServerManager::RunMasterServer` is commented out
-(`server/src/ServerManager.cpp:140-143`) because that role moved to
-the sidecar process. The classes remain compiled so that the auth
-helper can be linked against them.
-
-The OpenSSL version pinned to in-tree at `server/src/openssl/` is 1.0.x
-(vestigial — Phase E migrated the build to system OpenSSL 3.x; the
-in-tree headers are no longer on the include path).
+If you need the pre-deletion source it is in git history; see
+`plans/17-phase-q-kyp-cluster-deletion.md` for the audit that found
+the cluster dead.
 
 ---
 
@@ -1118,11 +1011,16 @@ sequenceDiagram
     end
 ```
 
-Key code: `Connection.cpp:32` (`ReSetConnection`), `Connection.cpp:150`
-(`DoKeyExchange`), `ClientToGlobalServer.cpp:122` (`HandleGlobalConnect`),
-`AccountManager.cpp:1001` (`IssueTicket`), `AccountManager.cpp:101`
-(`GetAccountStatus`), `ClientToGlobalServer.cpp:218` (`SendAvatarList`),
-`AccountManager.cpp:1243` (`BuildAvatarList`).
+Phase Q deleted the TCP-cluster duplicates that previously lived in
+`server/src/`; this flow now executes entirely inside the **login-server**
+process. Key code lives under `login-server/Net7SSL/`:
+`Connection.cpp:45` (`ReSetConnection`), `Connection.cpp:147`
+(`DoKeyExchange`), `ClientToGlobalServer.cpp:128` (`HandleGlobalConnect`),
+`AccountManager.cpp:839` (`GetUsernameFromTicket`),
+`ClientToGlobalServer.cpp:218` (`SendAvatarList`),
+`AccountManager.cpp:972` (`BuildAvatarList`). The Westwood RSA/RC4 key
+exchange uses the shared headers in `common/include/net7/WestwoodRsa.h`
+and `WestwoodRC4.h`.
 
 ### 8.2 Character select → sector handoff
 
@@ -1162,13 +1060,21 @@ sequenceDiagram
     Client->>Client: reconnect to SectorServer
 ```
 
-Key code: `ClientToGlobalServer.cpp:227` (`HandleGlobalTicketRequest`),
-`ClientToGlobalServer.cpp:305` (`ProcessGlobalTicket`),
-`AccountManager.cpp:511` (`ReadDatabase`), `ClientToGlobalServer.cpp:271`
-(`SendGlobalTicket`), `ClientToMasterServer.cpp:30` (`HandleMasterJoin`),
-`ClientToMasterServer.cpp:43` (`SendServerRedirect`).
+All handlers live in the login-server under `login-server/Net7SSL/`:
+`ClientToGlobalServer.cpp:226` (`HandleGlobalTicketRequest`),
+`ClientToGlobalServer.cpp:306` (`ProcessGlobalTicket`),
+`ClientToGlobalServer.cpp:272` (`SendGlobalTicket`),
+`connection_B.h:122` (`HandleMasterJoin`), `connection_B.h:144`
+(`SendServerRedirect`). The handoff from login-server to the actual
+sector-running server process uses the AF_UNIX SOCK_DGRAM mailbus
+(formerly Win32 mailslots) — see §4.1 MailManager.
 
 ### 8.3 Packet receive → opcode dispatch → response
+
+This flow now lives in two places — the **login-server** owns the
+client-facing TCP/RSA/RC4 path that authenticates and hands the client
+off, and the **proxy** owns the same path for the live session. The
+server-native binary speaks UDP only (see `UDP_*.cpp`).
 
 `ConnectionManager::CheckConnections` polls every Connection's socket.
 When data is available, `ProcessRecvInputs` reads the 4-byte
@@ -1203,12 +1109,17 @@ sequenceDiagram
     Sock->>Client: TCP response
 ```
 
-Key code: `ConnectionManager.cpp:63` (`CheckConnections`),
-`Connection.cpp:338` (`ProcessRecvInputs` — recv + decrypt loop),
-`Connection.cpp:257` (`RunKeyExchange`), `Connection.cpp:428`
-(`m_ServerType` dispatch switch), `Connection.cpp:285` (`SendResponse`),
-`Connection.cpp:116` (`Send` → MessageQueue), `Connection.cpp:563`
-(`PulseConnectionOutput`), `MessageQueue.cpp:99` (`Add`).
+Key code in **login-server** (`login-server/Net7SSL/`):
+`ConnectionManager.cpp:96` (`PulseConnectionOutput` drain pump),
+`Connection.cpp:45` (`ReSetConnection`), `Connection.cpp:147`
+(`DoKeyExchange`). Key code in **proxy** (`proxy/`):
+`Connection.cpp:135` (`DoKeyExchange` — primary copy used at runtime),
+`Connection.cpp:597` (`SendResponse`), `Connection.cpp:895`
+(`DoKeyExchange` — Linux mirror with RSA + RC4 over POSIX sockets).
+The headless reference client (Phase S) ports the same handshake to C#
+in `tools/cli-client/CliClient.Core/Wire/EncryptedTcpConnection.cs` —
+useful when you need a byte-by-byte trace of the protocol without
+launching the Win32 client.
 
 ---
 

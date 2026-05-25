@@ -1,37 +1,45 @@
 # Content pipeline — editor → DB → server
 
-How sectors, mobs, missions, and items get from a designer's
-WinForms editor into the running server. Phase H doc.
+How sectors, mobs, missions, and items get from a designer's editor into
+the running server.
 
 ## Overview
 
 ```
 ┌────────────────┐    SQL    ┌────────────┐  startup load   ┌──────────────┐
-│ C# editor      │ ────────► │ Postgres / │ ───────────────►│ C++ server   │
-│ (WinForms,     │           │ MySQL      │   (per-Manager  │ (managers in │
-│  tools/*)      │           │ schema     │    Load* call)  │  global mem) │
+│ C# editor      │ ────────► │  MySQL     │ ───────────────►│ C++ server   │
+│ (Avalonia or   │           │  (3307 in  │   (per-Manager  │ (managers in │
+│  WinForms,     │           │   dev)     │    Load* call)  │  global mem) │
+│  tools/*)      │           │            │                 │              │
 └────────────────┘           └────────────┘                 └──────────────┘
 ```
 
-The server is **read-mostly** at content boundaries: editors write
-the DB, the server reads it. Live reloads exist for sector
-content (see §4) but are the exception.
+The server is **read-mostly** at content boundaries: editors write the
+DB, the server reads it. Live reloads exist for sector content (see §4)
+but are the exception. The Postgres schema is staged at
+`db/postgres/schema.sql` but the runtime is still MySQL pending Phase N
+Wave 3.
 
 ## 1. The editors and the tables they touch
 
-| Editor | Path | Primary tables |
-|---|---|---|
-| `sectoreditor` | `tools/sector-editor/` | `sectors`, `systems`, `sector_objects`, `factions` |
-| `mobeditor` | `tools/mob-editor/` | `mob_base`, `mob_items`, `mob_type`, `mob_spawn_group` |
-| `itemeditor` | `tools/itemeditor/` (no csproj yet — Phase D continuation) | `item_base` (+ category sub-tables) |
-| `missioneditor` | `tools/missioneditor/` | `missions` (mission XML lives in a column) |
-| `factioneditor` | `tools/faction-editor/` | `factions`, `faction_matrix` |
-| `effecteditor` | `tools/effect-editor/` | `item_effect_base`, `item_effects`, `item_effect_stats`, `item_effect_container`, `buffs` |
-| `talktreeeditor` | `tools/talktreeeditor/` | mission dialogue trees (XML-based; minimal direct SQL) |
-| `stationtools` | `tools/station-tools/` | `starbases`, `starbase_vender_groups`, `starbase_vender_inventory`, `sector_objects_starbases` |
+The recommended Avalonia ports run natively on Linux; the legacy
+WinForms ports are kept alongside for diff reference and Windows / WINE
+use.
 
-Per-table source of truth is `db/mysql/net7.sql` (and the
-converted `db/postgres/schema.sql`). Editor table refs:
+| Editor | Avalonia path (recommended) | Legacy WinForms path | Primary tables |
+|---|---|---|---|
+| Sector | `tools/sector-editor-avalonia/` | `tools/sector-editor/` | `sectors`, `systems`, `sector_objects`, `factions` |
+| Mob | `tools/mob-editor-avalonia/` | `tools/mob-editor/` | `mob_base`, `mob_items`, `mob_type`, `mob_spawn_group` |
+| Item | — (no upstream csproj) | `tools/itemeditor/` | `item_base` (+ category sub-tables) |
+| Mission | `tools/missioneditor-avalonia/` | `tools/missioneditor/` | `missions` (mission XML lives in a column) |
+| Faction | `tools/faction-editor-avalonia/` | `tools/faction-editor/` | `factions`, `faction_matrix` |
+| Effect | `tools/effect-editor-avalonia/` | `tools/effect-editor/` | `item_effect_base`, `item_effects`, `item_effect_stats`, `item_effect_container`, `buffs` |
+| TalkTree | `tools/talktreeeditor-avalonia/` | `tools/talktreeeditor/` | mission dialogue trees (XML-based; minimal direct SQL) |
+| Station | `tools/station-tools-avalonia/` | `tools/station-tools/` | `starbases`, `starbase_vender_groups`, `starbase_vender_inventory`, `sector_objects_starbases` |
+
+Per-table source of truth is `db/mysql/net7.sql` (and the converted
+`db/postgres/schema.sql`). Editor table refs (legacy paths still hold
+the original SQL templates the Avalonia ports inherit):
 `tools/sector-editor/SectorsSql.cs:15`,
 `tools/mob-editor/MobsSQL.cs:15`,
 `tools/itemeditor/TableIO.cs:75`.
@@ -105,10 +113,10 @@ place it. Player kills, loot pickups, etc. write to
 - After editing content in a tool, **restart the server**
   (or `/reloadsector` if the change is sector-scoped) — there's
   no live-edit feedback loop.
-- The C# tools and the server both need to agree on schema. If
-  Phase C (Postgres migration) renames or retypes a column,
-  both sides break. Cross-check `db/postgres/schema.sql`
-  against the editors' SQL constants before shipping schema
-  changes.
+- The C# tools and the server both need to agree on schema. The
+  eventual Postgres cutover (whenever Phase N Wave 3 completes the
+  DAO migration) renames or retypes columns in places; cross-check
+  `db/postgres/schema.sql` against the editors' SQL constants before
+  shipping any schema change.
 - Mission XML lives in a DB column, not the filesystem.
   Re-importing missions means rewriting `missions.mission_XML`.

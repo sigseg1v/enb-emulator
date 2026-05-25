@@ -1,6 +1,18 @@
-# tools/ build status (Phase D — .NET 10 SDK migration)
+# tools/ build status
 
-Run `dotnet build <project>` from the repo root.
+Two parallel sets of projects live under `tools/`:
+
+- **Phase L — Avalonia ports** (`tools/<name>-avalonia/`, `net10.0`).
+  Recommended. Run natively on Linux. Tracked in
+  `plans/12-phase-l-avalonia.md`. Status table in `tools/README.md`.
+- **Phase D — legacy WinForms ports** (`tools/<name>/`,
+  `net10.0-windows`). Cross-compile; runtime is Windows / WINE only.
+  Build status below.
+
+Run `dotnet build <project>` from the repo root, or
+`dotnet build tools/Net7Tools.slnx` for the full solution.
+
+## Phase D — legacy WinForms (still build clean)
 
 | Project | Build | Warnings |
 |---|---|---|
@@ -20,3 +32,7 @@ Run `dotnet build <project>` from the repo root.
 | `tools/toolslauncher/ToolsLauncher/ToolsLauncher.csproj` | builds | 196 |
 | `tools/toolspatcher/ToolsPatcher.csproj` | builds | 0 |
 | `tools/w3d-parser/W3d Parser.csproj` | builds | 0 |
+
+`tools/itemeditor/` has no `.csproj` in the upstream snapshot, so it is
+in neither matrix. Phase L did not produce an Avalonia port for the same
+reason.

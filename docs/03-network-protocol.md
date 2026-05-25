@@ -33,12 +33,12 @@ There are five distinct transports in the code base:
 
 | Transport | Where | Speakers | Status |
 |---|---|---|---|
-| HTTPS (TLS over TCP) | port 443 | EnB client (via Net7Proxy) <-> Net7SSL | Active |
-| TCP (Westwood RSA+RC4) | ports 3801, 3805, 3501+ | Legacy direct client connection | Compiled, not used |
+| HTTPS (TLS over TCP) | port 443 | EnB client (via Net7Proxy) <-> login | Active |
+| TCP (Westwood RSA+RC4) | ports 3801, 3805, 3501+ | Legacy direct client connection | Deleted (Phase Q) — handshake moved into the proxy |
 | TCP | port 3500 (Net7Proxy local) | EnB client <-> Net7Proxy | Active |
-| UDP | ports 3806, 3808, 3809, sector dynamic | Net7Proxy <-> Net7 | Active (game) |
-| UDP loopback | between Net7 and Net7SSL | Net7 <-> Net7SSL | Active (auth handoff) |
-| Windows mailslot | local | Net7 <-> Net7SSL | Active (liveness pings) |
+| UDP | ports 3806, 3808, 3809, sector dynamic | Net7Proxy <-> server | Active (game) |
+| UDP loopback | between server and login | server <-> login | Active (auth handoff) |
+| AF_UNIX SOCK_DGRAM | `/run/net7-ipc/` | server <-> login | Active (liveness pings, post-Phase M) |
 
 The EnB game client itself only knows TCP and HTTPS. Net7Proxy
 intercepts the TCP and translates to UDP. The reason for the rewrite
@@ -53,7 +53,8 @@ holding hundreds of open TCP sockets on the server.
 ### 2.1. TCP framing (legacy + auth)
 
 The legacy TCP header is `EnbTcpHeader`. Defined at
-`server/src/PacketStructures.h:25-29`:
+`common/include/net7/PacketStructures.h:25-29` (Phase R moved this out
+of `server/src/`):
 
 ```c
 struct EnbTcpHeader
@@ -67,15 +68,17 @@ That's it. Four bytes, little-endian. `size` includes the header
 itself. `opcode` is one of the `ENB_OPCODE_*` constants. Payload
 immediately follows.
 
-The TCP receive code in `Connection::RunRecvThread`
-(`server/src/Connection.cpp`) reads at least `sizeof(EnbTcpHeader)`,
-inspects `size`, then reads `size - sizeof(EnbTcpHeader)` more bytes.
-Standard length-prefixed framing.
+The TCP receive code that used this framing lived in
+`server/src/Connection.cpp::RunRecvThread` and was deleted in Phase Q
+(2026-05-23) once the handshake moved into the proxy. The proxy now
+implements the same length-prefixed read in `proxy/Connection.cpp`,
+and the CLI client (Phase S) reimplements it in C# inside
+`tools/cli-client/CliClient.Core/Wire/EncryptedTcpConnection.cs`.
 
 ### 2.2. UDP framing
 
 The UDP header is `EnbUdpHeader`. Defined at
-`server/src/PacketStructures.h:39-45`:
+`common/include/net7/PacketStructures.h:39-45` (Phase R relocation):
 
 ```c
 struct EnbUdpHeader
@@ -137,30 +140,27 @@ sequence space is `long`. Wraparound has not been observed.
 
 ### 3.1. TCP (Westwood) handshake
 
-Direct TCP connections do a Westwood-style RSA + RC4 handshake. The
-implementation is in:
+The client-facing TCP connection (now terminated by the proxy) does a
+Westwood-style RSA + RC4 handshake. The implementation lives in three
+places that all agree:
 
-- `server/src/WestwoodRSA.cpp` / `.h` - 512-bit RSA modulus
-- `server/src/WestwoodRC4.cpp` / `.h` - 64-bit-key RC4 (and a 128-bit
-  variant for some channels)
-- `server/src/Connection.cpp::DoKeyExchange` and `DoClientKeyExchange`
+- `common/include/net7/WestwoodRSA.h` + impl in `proxy/WestwoodRSA.cpp`
+  — 512-bit RSA modulus.
+- `common/include/net7/WestwoodRC4.h` + impl in `proxy/WestwoodRC4.cpp`
+  — 64-bit-key RC4 (and a 128-bit variant for some channels).
+- `proxy/Connection.cpp::DoKeyExchange` and `DoClientKeyExchange`.
+- C# port for the CLI client / integration tests:
+  `tools/cli-client/CliClient.Core/Wire/WestwoodRsa.cs` +
+  `WestwoodRc4.cs` (Phase S).
 
-Constants in `server/src/Connection.h:15-23`:
-
-```c
-#define RC4_KEY_SIZE      8
-#define RC4_UDP_KEY_SIZE  16
-#define TCP_BUFFER_SIZE   (128 * 1024)
-#define SEND_BUFFER_SIZE  10240
-#define CONNECTION_TIMEOUT 3
-#define MAX_RETRIES       5
-#define MAX_TCP_BUFFER    8192
-```
-
-Two RC4 streams are kept per `Connection`: `m_CryptIn` and
+Two RC4 streams are kept per proxy connection: `m_CryptIn` and
 `m_CryptOut`. After the RSA exchange, RC4 takes over and the rest of
-the connection is RC4-encrypted, opcode by opcode. See
-`server/src/Connection.h:171-172`.
+the connection is RC4-encrypted, opcode by opcode.
+
+The original constants block (`RC4_KEY_SIZE`, `RC4_UDP_KEY_SIZE`,
+`TCP_BUFFER_SIZE`, `SEND_BUFFER_SIZE`, `CONNECTION_TIMEOUT`,
+`MAX_RETRIES`, `MAX_TCP_BUFFER`) survived the Phase Q deletion only on
+the proxy side — see `proxy/Connection.h`.
 
 The RSA modulus and the Westwood key derivation are reverse-engineered
 from the original *Earth & Beyond* binary. They are not standards; do
@@ -173,8 +173,8 @@ UDP frames in the modern client/proxy path are *not* RC4-encrypted at
 the UDP level. The encryption that used to happen on TCP between the
 client and the server now happens on TCP between the client and
 Net7Proxy (locally on the client host). The UDP between Net7Proxy and
-Net7 is cleartext. `RC4_UDP_KEY_SIZE` (16 bytes) exists in
-`Connection.h` but is for a path that is not currently used in
+server is cleartext. `RC4_UDP_KEY_SIZE` (16 bytes) exists in
+`proxy/Connection.h` but is for a path that is not currently used in
 production.
 
 For sniffing: a tcpdump of UDP between client host and server host
@@ -182,17 +182,20 @@ will show readable opcodes and structure data.
 
 ### 3.3. HTTPS (auth)
 
-Net7SSL uses OpenSSL. Cert files live in `server/src/local.net-7.org.cer`
-and `server/src/local.net-7.org.pem` (these are dev certs; production
-deployments need a real cert chain for `*.net-7.org` or whatever
-domain the operator uses). The OpenSSL version pinned by the source
-is 1.0 (see `server/src/openssl/`). Phase E will migrate to 3.x.
+The login process uses OpenSSL. Dev cert files are generated by
+`just gen-certs` into `deploy/certs/` and mounted into the container
+at runtime. The server links against **system OpenSSL 3.x**
+(`OPENSSL_API_COMPAT=0x30000000L`); the 73-file vendored 2010
+OpenSSL 1.0 header tree that used to live at `server/src/openssl/`
+was deleted in Phase O+ (2026-05-24) once the include order was
+fixed to prefer the system headers.
 
 ---
 
 ## 4. Port assignments
 
-From `server/src/Net7.h:179-189`:
+From `common/include/net7/Ports.h` (Phase R Wave 2 — was triplicated
+across the three trees):
 
 | Port | Macro | Transport | Speakers |
 |---|---|---|---|
@@ -346,7 +349,7 @@ loop).
 
 ## 6. Opcode ranges
 
-The full opcode list is in `server/src/Opcodes.h`. They are grouped
+The full opcode list is in `common/include/net7/Opcodes.h`. They are grouped
 by numeric range. Each range is dispatched by a different handler in
 the source.
 
@@ -363,7 +366,7 @@ the source.
 ### 6.1. Selected client opcodes (range 0x00xx-0x00FF)
 
 This is the bulk of the actual game traffic. From
-`server/src/Opcodes.h:23-180`. Not exhaustive; see the header for
+`common/include/net7/Opcodes.h:23-180`. Not exhaustive; see the header for
 the full set.
 
 | Opcode | Name | Direction | Used for |
@@ -429,7 +432,7 @@ MVAS = MoVement ASsist. These are spoken between the MVASlaunch
 launcher (which doubles as the per-client UDP origin) and the Net7
 server.
 
-`server/src/Opcodes.h:195-203`:
+`common/include/net7/Opcodes.h:195-203`:
 
 | Opcode | Name | Direction |
 |---|---|---|
@@ -450,7 +453,7 @@ Handlers are in `server/src/UDP_MVAS.cpp`. The
 ### 6.3. Proxy/Server control opcodes (range 0x20xx)
 
 These are the auth / handoff opcodes covered in section 5. From
-`server/src/Opcodes.h:206-237`:
+`common/include/net7/Opcodes.h:206-237`:
 
 | Opcode | Name | Direction | Section |
 |---|---|---|---|
@@ -490,7 +493,7 @@ is being talked to). This is a known wart.
 
 ### 6.4. Net7Proxy TCP-link opcodes (range 0x30xx)
 
-`server/src/Opcodes.h:240-248`. These coordinate the legacy TCP login
+`common/include/net7/Opcodes.h:240-248`. These coordinate the legacy TCP login
 link that Net7Proxy still maintains in parallel with the UDP path.
 
 | Opcode | Name | Notes |
@@ -507,11 +510,11 @@ link that Net7Proxy still maintains in parallel with the UDP path.
 
 ### 6.5. SSL channel (range 0x40xx)
 
-`server/src/Opcodes.h:251-255`. Already covered in section 5.1.
+`common/include/net7/Opcodes.h:251-255`. Already covered in section 5.1.
 
 ### 6.6. Tracking / status feed (range 0x50xx)
 
-`server/src/Opcodes.h:258-259`. Plain "how many players are on"
+`common/include/net7/Opcodes.h:258-259`. Plain "how many players are on"
 feed. Used by external dashboards. Handler:
 `UDP_Connection::HandlePlayerCountRQ` at
 `server/src/UDP_SSLcomms.cpp:88-104`.
@@ -520,11 +523,12 @@ feed. Used by external dashboards. Handler:
 
 ## 7. Server-to-server opcodes
 
-These are sent over TCP between distinct Net7 processes when running
-in distributed mode. They are the same wire format
-(`EnbTcpHeader` + payload, RC4-encrypted) as legacy client-server TCP.
+These were sent over TCP between distinct Net7 processes when running
+in distributed mode. They use the same wire format
+(`EnbTcpHeader` + payload, RC4-encrypted) as the legacy client-server
+TCP path.
 
-`server/src/Opcodes.h:182-189`:
+`common/include/net7/Opcodes.h:182-189`:
 
 | Opcode | Name | Direction |
 |---|---|---|
@@ -536,10 +540,13 @@ in distributed mode. They are the same wire format
 | `0x7902` | CHARACTER_DATA | Master -> Sector |
 | `0x7905` | PLAYER_LOCATION | Master -> Sector |
 
-In standalone mode none of these are sent on the wire; the calls are
-in-process. The handlers still exist
-(`Connection::HandleSectorServerAssignment` at
-`server/src/Connection.h:118`, etc).
+The handlers (`Connection::HandleSectorServerAssignment` etc) lived in
+`server/src/Connection.h` and were **deleted in Phase Q (2026-05-23)**
+along with the rest of the TCP cluster. The opcode constants are
+preserved in `common/include/net7/Opcodes.h` for reference and for the
+proxy's framing, but no live server code consumes them. In standalone
+mode all sectors share the same process and the equivalent calls are
+in-process direct invocations on `SectorManager`.
 
 ---
 
@@ -654,7 +661,7 @@ grep -hE "Opcode 0x[0-9A-Fa-f]+ =" capture_*.txt \
 ```
 
 If you are working on a new opcode handler, the captures plus
-`server/src/Opcodes.h` plus the producer/consumer pair in the C++
+`common/include/net7/Opcodes.h` plus the producer/consumer pair in the C++
 source are jointly the authoritative reference for what the client
 expects.
 
@@ -666,7 +673,7 @@ The following details are deliberately omitted because they are not
 recoverable from code reading alone:
 
 - **Per-opcode payload schemas.** Many of the C struct definitions
-  in `server/src/PacketStructures.h` (`AvatarData`, `ShipData`,
+  in `common/include/net7/PacketStructures.h` (`AvatarData`, `ShipData`,
   `ServerRedirect`, `MasterJoin`, `GlobalTicket`, etc.) are
   documented inline with field-by-field byte offsets and comments,
   and those serve as the reference for the opcodes that use them.

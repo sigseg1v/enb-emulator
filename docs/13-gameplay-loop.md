@@ -37,19 +37,19 @@ prospecting (line 50).
 Two distinct mechanisms — impulse warp and stargate jump.
 
 **Impulse warp** (within or between adjacent sectors):
-`Connection::HandleWarp()` (ClientToSectorServer.cpp:1836)
-walks the nav chain via `Player::SetupWarpNavs()` (1848),
-then `PrepareForWarp()` / `StartWarp()` /
-`TerminateWarp()` (PlayerClass.h:391-394). Aborts on player
-action or arrival (ClientToSectorServer.cpp:2726).
+`Player::HandleWarp()` (PlayerConnection.cpp:1825) walks the nav
+chain via `Player::SetupWarpNavs()`, then `PrepareForWarp()` /
+`StartWarp()` / `TerminateWarp()` (PlayerClass.h:391-394). Aborts on
+player action or arrival.
 
-**Stargate jump** (cross-system):
-`Connection::OpenStargate_1()`
-(ClientToSectorServer.cpp:6192) → render-state change →
-`Connection::GateSequenceEnd()` (line 6185) →
-`SectorManager::GateJump()` transfers the player to the
-target sector. Stargate objects are typed `OT_STARGATE`
-(StarGateClass.h).
+**Stargate jump** (cross-system): `Player::OpenStargate()`
+(PlayerConnection.cpp:9365) opens the gate → render-state change →
+`SectorManager::GateJump()` (SectorManager.h:107) transfers the
+player to the target sector. Stargate objects are typed
+`OT_STARGATE` (StarGateClass.h). Phase Q deleted the kyp-era
+`ClientToSectorServer.cpp` that previously held these handlers —
+the proxy still owns a TCP-facing copy at
+`proxy/ClientToSectorServer.cpp` for the legacy connect path.
 
 Sector handoff is documented in `docs/04-server-modules.md`
 §8.2 — the actual entry into the new sector goes through
@@ -78,13 +78,11 @@ form is `MissionTree` graphs in
 Player-to-player and player-to-vendor share infrastructure
 but enter through different opcodes.
 
-**Player-to-player.** `Connection::TradeAction()`
-(ClientToSectorServer.cpp:3352) tracks window state (open,
-close, confirm, accept) and routes through
-`Player::TradeAction()` (PlayerClass.h:1012). Items in flight
-live in `ShipIndex()->Inventory.TradeInv`
-(PlayerInventory.cpp:33). Capacity gating via
-`Player::CargoFreeSpace()` (PlayerInventory.cpp:48) and
+**Player-to-player.** `Player::TradeAction()`
+(PlayerConnection.cpp:3607) tracks window state (open, close,
+confirm, accept). Items in flight live in
+`ShipIndex()->Inventory.TradeInv` (PlayerInventory.cpp:33). Capacity
+gating via `Player::CargoFreeSpace()` (PlayerInventory.cpp:48) and
 `TradeSpaceUsed()` (line 38).
 
 **Vendor / NPC trade.** `Player::NPCTradeItems()`
@@ -110,13 +108,12 @@ message-of-the-day, etc.) are in Guilds.h.
 
 ## 6. Chat and social
 
-All chat goes through the connection handler:
-`Connection::HandleClientChat()` (ClientToSectorServer.cpp:4073)
-for in-world chat;
-`Connection::HandleClientChatRequest()` (line 1701) for
-channel ops and private messages.
+All chat goes through the player handler:
+`Player::HandleClientChat()` (PlayerConnection.cpp:4515) for
+in-world chat; `Player::HandleClientChatRequest()`
+(PlayerConnection.cpp:1602) for channel ops and private messages.
 
-Chat-type constants (ClientToSectorServer.cpp:4097):
+Chat-type constants (PlayerConnection.cpp, near HandleClientChat):
 - `0` channel
 - `1` group
 - `2` guild

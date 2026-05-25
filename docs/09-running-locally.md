@@ -1,12 +1,9 @@
 # 09 - Running locally
 
-How to bring up the dev stack and talk to it. This document is partly
-aspirational -- the server does not yet build cleanly on Linux as of
-Phase A. Sections marked **(Phase B)**, **(Phase C)**, etc. describe the
-intended workflow once the corresponding phase lands.
+How to bring up the dev stack and talk to it.
 
 If you want to play the game and not run a server, you do not need any of
-this -- the Linux client installer connects to the public Net-7 server.
+this — the Linux client installer connects to the public Net-7 server.
 See `08-build.md` "Linux client (game client, not server)".
 
 ## Prerequisites
@@ -14,103 +11,94 @@ See `08-build.md` "Linux client (game client, not server)".
 - Docker and the Docker Compose v2 plugin.
 - `just` (task runner).
 - The dependencies in `08-build.md` if you also want host-side builds.
-- ~2 GB free disk for the Postgres data volume.
+- ~2 GB free disk for the MySQL data volume.
 
 ## Dev stack at a glance
 
-`docker-compose.yml` (written in Phase A4 scaffolding) brings up three
-services:
+`docker-compose.yml` brings up four services by default and a few opt-in
+profiles. The default topology:
 
-| Service | Image | Purpose | Port (host) |
+| Service | Image | Purpose | Host port |
 |---|---|---|---|
-| `postgres` | `postgres:16` | Game database. Auto-loads `db/postgres/schema.sql` and `db/postgres/seed.sql` on first start. | 5432 |
-| `login` | built from `login-server/Dockerfile` | Auth and login flow. | TODO -- pending Phase B |
-| `server` | built from `server/Dockerfile` | Sector / world server. | TODO -- pending Phase B |
+| `mysql` | `mysql:8.0` | Holds `net7` (content) and `net7_user` (accounts). Auto-loads both dumps from `db/mysql/` on first start. | 3307 → 3306 |
+| `proxy` | built from `proxy/Dockerfile` | Net7Proxy. Binds `MASTER_SERVER_PORT` (3801), `GLOBAL_SERVER_PORT` (3805), and `SECTOR_SERVER_PORT` (3500) for the Westwood RSA + RC4 client handshake and downstream dispatch. | 3801, 3805, 3500 |
+| `login` | built from `login-server/Dockerfile` | Net7SSL. Binds `SSL_PORT` (443 internally, remapped to host **4443** so rootless docker accepts publishing it). Talks to MySQL for auth. | 4443 → 443 |
+| `server` | built from `server/Dockerfile` | The C++ Net-7 game server. Owns the dynamic sector-server TCP range (3501-3550 published) plus 3808/UDP (master ↔ proxy). | 3501-3550, 3808/udp |
 
-The "TODO" ports are intentional: the original Net-7 server used
-non-standard ports configured by `Config.ini`/SQL. Documenting the
-canonical defaults requires a server build and a `--help`-able binary,
-which is Phase B work. Once Phase B documents the port layout, this
-table gets updated.
+The four services share an AF_UNIX SOCK_DGRAM IPC volume mounted at
+`/run/net7-ipc/` (the Phase M replacement for the Win32 mailslot pair).
+The login container's entrypoint chmod's the directory to `0777` so the
+server container (running as `net7:net7`, uid 999) can also bind a
+datagram socket there. Same-host trust model — see
+`common/include/net7/PosixIpc.h`.
+
+Opt-in profiles:
+
+- `--profile postgres`: brings up `postgres` (Postgres 16) and a
+  `schema-init` one-shot that applies `db/postgres/schema.sql` and
+  `seed.sql`. Staging for the eventual cutover; not the runtime DB.
+- `--profile dev-tools`: phpMyAdmin against the mysql container on
+  `:8081`.
+- `--profile dev-tools-postgres`: pgAdmin against the postgres container
+  on `:8080`.
 
 ## Bring up the stack
 
 ```sh
-just dev
+just init     # first-time-only — boots mysql and waits for the dumps to load
+just dev      # = just run-stack-bg — server + proxy + login in the background
 ```
 
-Equivalent to:
+`just dev` is equivalent to `docker compose up --build -d`. Tear down with
+`just down` (or `docker compose down`). Add `-v` if you also want to drop
+the volumes (`mysqldata`, `net7-ipc`, `pgdata`).
+
+The CLI-driven integration test suite verifies the running stack:
 
 ```sh
-docker compose up --build
+just test-integration         # runs the Phase T xUnit suite end-to-end (33/33)
 ```
 
-What you should see, in order:
-
-1. **postgres** comes up, runs the entrypoint, applies `schema.sql` and
-   `seed.sql` from `db/postgres/`. Wait for `database system is ready to
-   accept connections`.
-2. **login** builds (slow the first time) and starts. **(Phase B)**
-3. **server** builds and starts. Currently expected to fail during build
-   until Phase B is far enough along; check `server/BUILD_ERRORS.md` for
-   the current failure mode. **(Phase B)**
-
-Tear down with `just down` (or `docker compose down`). Add `-v` if you
-also want to drop the Postgres data volume.
+See `docs/16-integration-tests.md` for the test architecture.
 
 ## Apply / refresh the schema manually
 
-If you want to re-apply the schema without restarting:
+The MySQL dumps are auto-loaded on first stack boot; to re-apply them
+manually:
 
 ```sh
-# Connect:
-just psql                 # opens psql shell against the dev DB
-# Or directly:
-docker compose exec postgres psql -U net7 -d net7
-
-# From inside psql:
-\i /db/schema.sql
-\i /db/seed.sql
+docker compose exec -T mysql mysql -unet7 -pnet7 net7 < db/mysql/net7.sql
+docker compose exec -T mysql mysql -unet7 -pnet7 net7_user < db/mysql/net7_user.sql
 ```
 
-Or from the host:
+For the staged Postgres conversion (opt-in profile):
 
 ```sh
+docker compose --profile postgres up postgres schema-init
+# Or against the host:
 psql -h localhost -U net7 -d net7 -f db/postgres/schema.sql
 psql -h localhost -U net7 -d net7 -f db/postgres/seed.sql
 ```
 
-The Postgres conversion lives at `db/postgres/schema.sql` (produced by
-`db/postgres/convert.sh` from `db/mysql/net7.sql` during Phase C). Until
-Phase C lands, the MySQL dump in `db/mysql/` is the only schema source
-and Postgres compatibility is documented in `06-database-schema.md`,
-"Postgres migration notes".
+`db/postgres/convert.sh` is the script that produced `schema.sql` and
+`seed.sql` from `db/mysql/net7.sql`. The C++ DAO migration to libpqxx
+happened in Phase N — see `mysqlplus.cpp`. A handful of DAOs still use
+the MySQL path; Phase N Wave 3 tracks the rest.
 
 ## Create a test account
 
-Account creation is normally done by the in-game flow plus the
-`//adduser` GM command (see `11-gm-commands.md`). For local dev, the
-fastest path is direct DB insert.
+The fastest path for local dev is a direct DB insert against the live
+MySQL container. The exact column layout is in
+`docs/06-database-schema.md` ("`net7_user.sql` group"); the password hash
+format is whatever Net-7's login flow expects. Reuse the existing
+Net7Mysql / Net7SSL hashing logic — do not invent a new format.
 
-**(Phase C)** After Postgres migration the table layout matches
-`net7_user.sql`. Insert into `accounts`:
-
-```sql
--- TODO: confirm exact column list against migrated net7_user.sql
-INSERT INTO accounts (username, password_hash, access_level, ...)
-VALUES ('dev', '<hash>', 100, ...);
+```sh
+docker compose exec mysql mysql -unet7 -pnet7 net7_user
 ```
 
-The password hash format is whatever Net-7's login flow expects. The
-original code computes it inside Net7Mysql; reuse that logic, do not
-invent a new format. Reference: `login-server/Net7Mysql/`.
-
-Once the server provides a `//adduser` command at the running console
-(per `11-gm-commands.md`), use that instead:
-
-```
-//adduser dev devpassword 100
-```
+Or use the CLI client (Phase S) to drive the registered account-creation
+flow — see `docs/15-cli-client.md`.
 
 ## Connect a client
 
@@ -121,69 +109,60 @@ Once the server provides a `//adduser` command at the running console
    client/linux-installer/install-enb-linux.sh
    ```
 2. The launcher configuration ships pointing at the public Net-7 server.
-   To redirect to localhost, edit the launcher's INI. The exact file
-   path depends on WINE prefix layout; check
-   `client/linux-installer/README.md` for the post-install layout.
-3. Replace the login-server host and port with the values from the
-   compose stack (see the ports table above; **TODO** until Phase B
-   documents canonical ports).
-4. Start the launcher under Wine; it should connect to your local
+   Redirect to localhost by editing the launcher's INI inside the WINE
+   prefix — exact path is documented in `client/linux-installer/README.md`.
+3. Replace the login-server host with `127.0.0.1` and the SSL port with
+   `4443` (the host-side remap of the container's port 443). The proxy
+   ports (3801, 3805, 3500) are published as-is.
+4. Start the launcher under WINE; it should connect to the local
    login-server, advance to character select, then sector select.
 
 ### Windows client pointed at local server
 
-Same idea: edit the launcher INI or `Config.xml` to point at the
-local host and ports. Native Windows client; no WINE involved.
+Same idea: edit the launcher INI or `Config.xml` to point at the local
+host. Native Windows client; no WINE involved.
 
-## Expected behaviour by phase
+### Headless / scripted client
 
-| Phase complete | What works |
-|---|---|
-| A (now) | Repo merged, docs in place. Nothing builds yet on Linux. Windows server build via `Net7.sln` should work as it did upstream. |
-| B | Server compiles on Linux (with errors progressively removed). It may not link or run; build artifacts and shim coverage tracked in `server/compat/` and `server/BUILD_ERRORS.md`. |
-| C | Postgres schema applies cleanly. One representative call site migrated end-to-end (`server/db/MIGRATION_PATTERN.md`); rest is hand-off work. |
-| D | `dotnet build tools/Net7Tools.sln` succeeds on Linux and Windows. Editor runtime still Windows-only. |
-| E | Server builds against OpenSSL 3 without deprecation warnings on the migrated callsites. |
-| F | `-Wall -Wextra` baseline established; top warning categories fixed. |
-| G | `ctest` runs at least one passing test. DB smoke test connects to compose Postgres. |
-| H | Docs deepened: protocol packet table, sequence diagrams, ability internals. |
-| I | OCI images publish to GHCR; CI matrix covers Ubuntu 22.04 and 24.04. |
+The Phase S CLI client (`tools/cli-client/`) drives the same wire
+protocol from a C# command-line binary — useful for scripted reproduction
+of bug reports, integration tests, and packet-level traces without a
+graphical client. See `docs/15-cli-client.md`.
 
 ## Troubleshooting
 
-**`docker compose up` complains about port 5432 already in use** -- you
-have a host Postgres running. Either stop it (`sudo systemctl stop
-postgresql`) or remap the port in `docker-compose.yml`
-(`5433:5432` and use `-p 5433` for psql).
+**`docker compose up` complains about port 3307 already in use** — you
+have a host MySQL running. Either stop it or remap the port in
+`docker-compose.yml` (`3308:3306` and update your DB clients).
 
-**Postgres logs "permission denied" on schema files** -- the volume mount
-maps `db/postgres/` to `/db/` inside the container; check the file
-permissions and that `*.sql` is readable by anyone (`chmod a+r
-db/postgres/*.sql`).
+**`docker compose up` complains about port 4443 already in use** — same
+idea, change the host side of the mapping in the `login` service.
 
-**Server container builds but exits immediately** -- check
-`docker compose logs server`. The most likely cause pre-Phase-C is the
-server trying to connect to a `mysql://` URL that does not exist (compose
-ships Postgres, not MySQL). Phase C migrates the connection logic.
+**MySQL logs "permission denied" on dump files** — the volume mount maps
+`db/mysql/` to `/dumps/` and `db/mysql/init/` to
+`/docker-entrypoint-initdb.d/` inside the container; check the file
+permissions (`chmod a+r db/mysql/*.sql db/mysql/init/*.sql`).
 
-**Client cannot find login server** -- the client connects to the
-hostname embedded in the launcher INI, not to "localhost" by default.
-Edit the INI to point at `127.0.0.1` (Linux client running on the same
-host as the compose stack) or your local network IP.
+**Server container exits immediately** — check `docker compose logs server`.
+Most common causes: missing certs in `deploy/certs/` (run `just gen-certs`),
+or the login container hasn't chmod'd `/run/net7-ipc/` yet (server
+depends_on login, so a slow login start can race the first attempt —
+`docker compose restart server` usually fixes it).
 
-**No idea what ports to use** -- this is Phase B work. Until the server
-exposes a config or `--help` we cannot document them with confidence.
-The original tada-o snapshot used 3500 (login), 4500 (proxy), and 5050
-(sector) historically, but those values are unverified against the
-current code. Do not treat them as canonical until Phase B does.
+**Client cannot find login server** — the client connects to the hostname
+embedded in the launcher INI, not to "localhost" by default. Edit the INI
+to point at `127.0.0.1` (client running on the same host as the compose
+stack) or your local network IP. The dev stack remaps
+`local.net-7.org` → `127.0.0.1` via `extra_hosts:` so a launcher INI
+pointing at `local.net-7.org` works inside the compose network.
 
 ## What is intentionally not here
 
-- Production deployment guidance. The project is non-commercial; we do not
-  ship operator runbooks.
+- Production deployment guidance. The project is non-commercial; we do
+  not ship operator runbooks.
 - A "demo account" with a public password. Set up your own.
-- A polished web admin panel. The C# editors are the admin tool; see
-  `07-tools-toolchain.md`.
+- A polished web admin panel. The Avalonia editors are the admin tool;
+  see `07-tools-toolchain.md`.
 - Scaling guidance. The original architecture sharded sector servers but
   the practical limit on modern hardware is "a handful of concurrent
   testers". Anything beyond that is unverified.

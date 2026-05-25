@@ -36,45 +36,49 @@ A running deployment has between three and five distinct processes:
 
 ```
 +----------------------+        +----------------------+
-|     Net7Proxy        |  UDP   |       Net7.exe       |
+|     Net7Proxy        |  UDP   |     server (Net7)    |
 | (per-client cleartext|<------>| Master/Global/Sector |
 |  bridge; receives    |        | runtime, MySQL client|
 |  TCP from the EnB    |        +----------+-----------+
 |  client, sends UDP   |                   |
-|  to Net7 + Net7SSL)  |        Windows mailslot
+|  to server + login)  |        AF_UNIX SOCK_DGRAM
 |                      |        + UDP loopback
 |                      |                   |
 |                      |        +----------+-----------+
-|                      |        |     Net7SSL.exe      |
+|                      |        |   login (Net7SSL)    |
 |                      |  HTTPS | OpenSSL TCP listener |
 |                      |<------>| on :443; brokers     |
 |                      |        | login / serves AVATAR|
 +----------------------+        | INFO via UDP back to |
-                                | Net7                 |
+                                | server               |
                                 +----------------------+
         ^                                 ^
         |                                 |
         +-----------+         +-----------+
                     |         |
                 +---+---------+----+
-                |     MySQL 5.x    |
+                |     MySQL 8.0    |
                 |   (net7,         |
                 |    net7_user     |
                 |    schemas)      |
                 +------------------+
 ```
 
-`Net7.exe` is the C++ binary built from `server/src/`. `Net7SSL.exe` is
-built from `login-server/Net7SSL/`. `Net7Proxy` is built from `proxy/`
-and runs on the client side - it is what the Earth & Beyond game client
-actually talks to, because the client expects a TCP connection to a
-local address and this fork moved most of the traffic to UDP. Net7Proxy
-translates between the two.
+The `server` binary is built from `server/src/`. The `login` binary
+(historically `Net7SSL.exe`) is built from `login-server/Net7SSL/`. The
+`proxy` binary is built from `proxy/` and runs on the client side — it
+is what the Earth & Beyond game client actually talks to, because the
+client expects a TCP connection to a local address and this fork moved
+most of the traffic to UDP. The proxy translates between the two.
 
-In the historical (pre-Net7Proxy) layout there were also separate
-`GlobalServer`, `MasterServer` and per-`SectorServer` processes
-communicating over TCP. That code path still exists, commented out, in
-`server/src/ServerManager.cpp:147-159`. The current code path is UDP-only.
+All three binaries are first-class Linux executables. There is no WINE
+involved on the server side. The legacy TCP cluster
+(`Connection.cpp`, `ConnectionManager.cpp`, `ClientToGlobalServer.cpp`,
+`ClientToMasterServer.cpp`, `ClientToSectorServer.cpp`,
+`TcpListener.h`, `SSL_Listener.cpp`, `SSL_Connection.cpp`) was deleted
+in Phase Q (15 files, 2026-05-23) once it was confirmed dead on Linux.
+Everything that actually goes anywhere is UDP, dispatched through
+`server/src/UDP_*.cpp`.
 
 ### Three roles, one binary
 
@@ -95,22 +99,24 @@ many.
 
 ### Why two binaries
 
-`Net7SSL.exe` exists because OpenSSL is statically linked and the
-authentication TCP listener on port 443 needs to live in its own
-address space so a crash in the auth path does not take down the whole
-galaxy. `Net7` keeps a handle to the `Net7SSL` process, monitors it
-with mailslot pings, and relaunches it if it goes silent for 60
-seconds. See `server/src/ServerManager.cpp:366-374` for the watchdog
-and `server/src/Net7.cpp:416-433` for the launch.
+The login process exists because the authentication TCP listener on
+port 443 needs to live in its own address space so a crash in the auth
+path does not take down the whole galaxy. The server keeps the login
+process under a watchdog: it monitors liveness via the local IPC bus
+and relaunches login if it goes silent for 60 seconds. See
+`server/src/ServerManager.cpp:366-374` for the watchdog and
+`server/src/Net7.cpp:416-433` for the launch.
 
-The mailslot ping protocol is two opcodes:
+The liveness ping protocol is two opcodes:
 
 | Opcode | Direction | Meaning | Source |
 |---|---|---|---|
-| `0x04` LOCAL_PING_SSL_SERVER | SSL -> Net7 | Liveness | `server/src/MailslotManager.h:47` |
-| `0x05` LOCAL_PING_SERVER_SSL | Net7 -> SSL | Liveness | `server/src/MailslotManager.h:48` |
+| `0x04` LOCAL_PING_SSL_SERVER | login -> server | Liveness | `server/src/MailslotManager.h:47` |
+| `0x05` LOCAL_PING_SERVER_SSL | server -> login | Liveness | `server/src/MailslotManager.h:48` |
 
-On Linux there are no mailslots; the watchdog needs to be ported. See
+The class name is historical; on Linux the underlying transport is an
+AF_UNIX `SOCK_DGRAM` pair (`net7ipc::PosixIpc` in
+`common/include/net7/PosixIpc.h`), not a Windows mailslot. See
 section 4.
 
 ---
@@ -127,24 +133,24 @@ sequenceDiagram
     participant OS
     participant main as main() (Net7.cpp)
     participant cfg as Net7Config.cfg
-    participant Mutex as Win32 mutex
+    participant Lock as flock pidfile
     participant SM as ServerManager
-    participant SSL as Net7SSL.exe
+    participant SSL as login (Net7SSL)
     participant MySQL as MySQL
     participant SecMgrs as SectorManager[]
 
     OS->>main: argc/argv
-    main->>cfg: fopen_s("Net7Config.cfg")
+    main->>cfg: fopen("Net7Config.cfg")
     cfg-->>main: domain, mysql_*, ticket_*, galaxy_name, beta_mode
     main->>main: parse argv (/MASTER, /PORT, /MAX_SECTORS, ...)
     main->>main: gethostbyname(g_DomainName)
-    main->>Mutex: CreateMutex(MASTER_INSTANCE_MUTEX_NAME)
-    Mutex-->>main: handle (or ERROR_ALREADY_EXISTS -> exit)
+    main->>Lock: net7ipc::SingleInstance::acquire("net7-master")
+    Lock-->>main: lock held (or EWOULDBLOCK -> exit)
     main->>SM: new ServerManager(...)
     main->>SM: SetPlayerMgrGlobalMemoryHandler()
     main->>SM: SetUDPConnection(MVASauth)
     main->>SM: RunServer()
-    SM->>SSL: LaunchNet7SSL() (CreateProcess)
+    SM->>SSL: LaunchNet7SSL() (fork+execv)
     SM->>MySQL: sql_connection_c(...)
     MySQL-->>SM: connected
     SM->>MySQL: CALL net7_user.logoutOnShutdown(now)
@@ -184,25 +190,27 @@ with placeholder credentials and refuses to read it back (see the
 `else` branch at `server/src/Net7.cpp:210-221`). The first run is
 expected to fail and the operator is expected to edit the file.
 
-There is no environment-variable equivalent. Phase B will need to add
-one or the Postgres migration will be operationally awkward.
+There is no environment-variable equivalent.
 
 ### Phase 2: process singleton
 
 Only one Master and only one Sector-listener-on-a-given-port can
-exist at a time. The lock is a named Windows kernel mutex created at
-`server/src/Net7.cpp:360`. Mutex names:
+exist at a time. On Linux the lock is a `flock(LOCK_EX | LOCK_NB)`
+on a pidfile under `/run/net7-ipc/`, wrapped by
+`net7ipc::SingleInstance` (`common/include/net7/SingleInstance.h`).
+The class names mirror the original Win32 mutex names so the lookups
+stay readable:
 
-| Constant | Defined in | Value |
+| Constant | Defined in | Pidfile / lock-name |
 |---|---|---|
-| `MASTER_INSTANCE_MUTEX_NAME` | `server/src/ServerManager.h` (indirect) | "Net7 Master Server Instance Mutex" |
-| `SECTOR_INSTANCE_MUTEX_NAME` | (indirect) | "Net7 Sector Server Instance Mutex on port %d" |
-| `"Net7 Standalone Server Instance Mutex"` | `server/src/Net7.cpp:106` | literal |
-| `SSL_INSTANCE_MUTEX_NAME` | `server/src/Net7.cpp:435` | "Net7SSL Instance" |
+| `MASTER_INSTANCE_MUTEX_NAME` | `server/src/ServerManager.h` (indirect) | "net7-master-server" |
+| `SECTOR_INSTANCE_MUTEX_NAME` | (indirect) | "net7-sector-server-port-%d" |
+| `"Net7 Standalone Server Instance Mutex"` | `server/src/Net7.cpp:106` | "net7-standalone-server" |
+| `SSL_INSTANCE_MUTEX_NAME` | `server/src/Net7.cpp:435` | "net7-ssl" |
 
-On Linux these have no direct equivalent. A flock on a pidfile or an
-abstract Unix socket is the obvious shim and will need to land in
-Phase B.
+If another instance already holds the flock the acquire returns
+`EWOULDBLOCK` and the new process exits. Phase M replaced the
+original `CreateMutex` calls with this in 2026-05-23.
 
 ### Phase 3: ServerManager construction
 
@@ -239,9 +247,9 @@ modes need:
   `CONNECTION_TYPE_MASTER_SERVER_TO_PROXY`.
   Constructed at `server/src/ServerManager.cpp:160`.
 
-Each `UDP_Connection` spawns its own receiver thread in its constructor.
-Windows uses `_beginthread`; Linux uses `pthread_create`. See
-`server/src/UDPConnection.cpp:74-79`.
+Each `UDP_Connection` spawns its own receiver thread in its constructor
+via `pthread_create`. (The original Win32 `_beginthreadex` site was
+replaced in Phase M.) See `server/src/UDPConnection.cpp:74-79`.
 
 ### Phase 5: content load
 
@@ -328,10 +336,13 @@ collapsed. The role names survive as `Connection_Type` constants in
 #define CONNECTION_TYPE_GLOBAL_PROXY_TO_SERVER          10
 ```
 
-Types 1-5 are the legacy TCP types and are still referenced by
-`Connection.cpp` (`server/src/Connection.cpp` has dedicated handlers
-for each). Types 6-10 are the UDP-via-Net7Proxy types and are dispatched
-in `UDP_Connection::RunRecvThread` at
+Types 1-5 are the legacy TCP types. The TCP cluster that consumed them
+(`Connection.cpp`, `ConnectionManager.cpp`, `ClientTo*Server.cpp`,
+`TcpListener.h`, `SSL_Listener.cpp`, `SSL_Connection.cpp`) was deleted
+wholesale in Phase Q (2026-05-23). The constants are still in the enum
+because the proxy ↔ server UDP framing reuses them as type tags. Types
+6-10 are the UDP-via-Net7Proxy types and are dispatched in
+`UDP_Connection::RunRecvThread` at
 `server/src/UDPConnection.cpp:205-226`.
 
 ### Port assignments
@@ -399,7 +410,11 @@ port, opcodes `0x4001`-`0x4004` and `0x5001`
 There are three IPC mechanisms in active use plus one that is
 deprecated:
 
-### 4.1. Windows mailslots (Net7 <-> Net7SSL on the same host)
+### 4.1. AF_UNIX SOCK_DGRAM (server ↔ login on the same host)
+
+The class is still called `MailManager` for source-history continuity
+but its implementation, post-Phase M, is an `AF_UNIX SOCK_DGRAM`
+socket pair under `/run/net7-ipc/`.
 
 `server/src/MailslotManager.h:25-46`:
 
@@ -407,7 +422,7 @@ deprecated:
 class MailManager
 {
 public:
-    MailManager(); // set up receive slot
+    MailManager(); // set up receive socket
     ~MailManager();
 
     bool WriteMessage(char *message);
@@ -419,44 +434,29 @@ public:
 private:
     void SetUpSendSlot();
 
-    HANDLE m_hSlot;
-    HANDLE m_hFile;
-    HANDLE m_hEvent;
+    int    m_Recv;          // AF_UNIX SOCK_DGRAM receive fd
+    int    m_Send;          // AF_UNIX SOCK_DGRAM send fd
     bool   m_SendSlotInit;
     unsigned char m_Buffer[1024];
 };
 ```
 
-The send slot is created lazily by `SetUpSendSlot`, which calls
-`CreateFile(g_OutputSlot, GENERIC_WRITE, ...)` at
-`server/src/MailslotManager.cpp:195-211`. The receive slot is
-created by `CreateMailslot(g_InputSlot, ...)` at
-`server/src/MailslotManager.cpp:133`.
-
-The slot names live in globals declared at the top of
-`server/src/MailslotManager.h:21-23`:
-
-```c
-extern LPTSTR g_OutputSlot;
-extern LPTSTR g_InputSlot;
-extern LPTSTR g_EventName;
-```
-
-These are set in `Net7.cpp` to `\\\\.\\mailslot\\net7` (and
-`...net7SSL`) and an event named `Net7Event` or similar.
+The send fd is created lazily by `SetUpSendSlot`, the receive fd
+on construction. Both call into `net7ipc::PosixIpc` (declared in
+`common/include/net7/PosixIpc.h`) which owns the socket-name
+convention. The class-internal globals previously named `g_OutputSlot`
+/ `g_InputSlot` / `g_EventName` are gone — Phase M deleted them
+because there is nothing Win32-shaped left to name.
 
 `CheckMessages` is polled from `ServerCheck` every 50ms
-(`server/src/ServerManager.cpp:343`). When the SSL ping goes silent
-for >60 seconds, the Master logs an error and restarts the SSL
-process (`server/src/ServerManager.cpp:366-374`).
+(`server/src/ServerManager.cpp:343`). When the login ping goes
+silent for >60 seconds, the Master logs an error and restarts the
+login process (`server/src/ServerManager.cpp:366-374`).
 
-**Linux porting**: Mailslots are Windows-only. The mechanically
-simplest replacement is a Unix domain socket pair. The behaviour
-needed is: write a small variable-length message; poll on read; have
-the receiver block until a message arrives or a deadline elapses.
-Both `SOCK_DGRAM` Unix sockets and named pipes (FIFOs) work. The
-opcode set is tiny (two opcodes) so the IPC payload doesn't need
-much structure.
+The IPC volume is shared with the login container via the
+docker-compose `volumes:` mount; the login container's entrypoint
+chmods `/run/net7-ipc/` to 0777 so the server (running as net7:net7
+uid 999) can bind there.
 
 ### 4.2. UDP loopback (Net7 <-> Net7SSL)
 
@@ -501,30 +501,29 @@ case CONNECTION_TYPE_MASTER_SERVER_TO_PROXY:
 }
 ```
 
-### 4.4. TCP (legacy, deprecated but compiled)
+### 4.4. TCP (deleted in Phase Q)
 
 Pre-tada-o the server also accepted direct TCP connections from
-clients on 3801 / 3805 / 3501+. `Connection.cpp` still has the full
-handler set:
+clients on 3801 / 3805 / 3501+. The Phase J runnable target moved the
+RSA + RC4 handshake into the proxy. Phase Q (2026-05-23) deleted 15
+dead-on-Linux files:
 
-```
-ProcessGlobalServerOpcode
-ProcessMasterServerOpcode
-ProcessSectorServerOpcode
-ProcessMasterServerToSectorServerOpcode
-ProcessSectorServerToSectorServerOpcode
-```
+- `server/src/Connection.{cpp,h}`
+- `server/src/ConnectionManager.{cpp,h}`
+- `server/src/TcpListener.h`
+- `server/src/SSL_Listener.{cpp,h}` and `SSL_Connection.{cpp,h}`
+- `server/src/ClientTo{Master,Global,Sector}Server.{cpp,h}`
+- `server/src/EffectManager.{cpp,h}` (TCP-bound; never wired)
+- `server/src/JobManager_DEP_.{cpp,h}` (marked `_DEP_` years ago)
 
-These are declared at `server/src/Connection.h:93-99`. The
-`TcpListener` class (`server/src/TcpListener.h`) still exists but
-the listener instantiations in `RunMasterServer` are commented out
-(`server/src/ServerManager.cpp:147-159`).
+`ServerManager::ServerManager` no longer holds an `m_ConnectionMgr`
+field. The RC4 / RSA handshake itself was moved into the proxy and
+shares its implementation with the CLI client (Phase S) via
+`common/include/net7/WestwoodRC4.h` and
+`common/include/net7/WestwoodRSA.h`.
 
-The TCP path stays in the build because the proxy-to-server fallback
-and the legacy server-to-server handoffs reuse the same `Connection`
-infrastructure for the RC4 / RSA key exchange. See `Connection.h:171`
-for `m_CryptIn`/`m_CryptOut` (RC4 streams) and `Connection.h:181` for
-`m_WestwoodRSA`.
+If you need the pre-deletion source, it is preserved in git history
+(see commit log for "Phase Q").
 
 ---
 
@@ -543,19 +542,24 @@ void ServerManager::MainLoop()
     long sleep_time;
     while (!g_ServerShutdown)
     {
-        check_tick = GetNet7TickCount();
+        check_tick = Net7TickMs();
         ServerCheck();
-        sleep_time = (long)(50 - (GetNet7TickCount() - check_tick));
+        sleep_time = (long)(50 - (Net7TickMs() - check_tick));
         if (sleep_time < 0) sleep_time = 0;
-        Sleep(sleep_time);
+        usleep(sleep_time * 1000);
     }
     // ... shutdown
 }
 ```
 
+(`Net7TickMs()` is the Phase M replacement for `GetTickCount()`;
+the implementation lives in `common/include/net7/Ticks.h` and uses
+`CLOCK_MONOTONIC`. `usleep` replaced the Win32 `Sleep` call site at
+the same time.)
+
 `ServerCheck` (`server/src/ServerManager.cpp:339`) does:
 
-1. Polls Windows mailslots for SSL pings.
+1. Polls the AF_UNIX IPC pair for login pings.
 2. Runs `PlayerManager::RunMovementThread` on every other tick (so ~10
    Hz movement, ~20 Hz everything else). The throttle is the
    `m_SectorUpdateSelect` toggle.
@@ -563,9 +567,9 @@ void ServerManager::MainLoop()
    `m_SectorServerMgr.CheckConnections()`. When that returns true,
    spawns one thread per sector via
    `m_SectorMgrList[i]->BeginSectorThread()`.
-4. Watches the SSL liveness timestamp; restarts SSL if it has been
-   silent for 60 seconds.
-5. Every 5 seconds, sends a `0x4002 SSL_PLAYERCOUNT` to SSL.
+4. Watches the login liveness timestamp; restarts login if it has
+   been silent for 60 seconds.
+5. Every 5 seconds, sends a `0x4002 SSL_PLAYERCOUNT` to login.
 
 ### Thread inventory
 
@@ -575,24 +579,22 @@ The runtime spawns the following threads:
 |---|---|---|---|
 | Main / MainLoop | `main()` | 1 | The only non-thread-local code path |
 | UDP receivers | `UDP_Connection` constructor | 1 per UDP_Connection | MVAS, master, possibly more |
-| TCP receivers | `Connection::ReSetConnection` | 1 per active TCP connection | Legacy, mostly idle |
 | Sector workers | `SectorManager::BeginSectorThread` | 1 per loaded sector | The real game tick |
 | Save thread | `SaveManager` | 1 | Persists dirty Player and other dirty objects to MySQL |
 
-Synchronisation is via a mix of `Mutex` (a wrapper around `CRITICAL_SECTION`
-or `pthread_mutex_t`; see `server/src/Mutex.h`) and atomic primitives.
-`PlayerManager` holds its own mutex (`m_Mutex` at
+Synchronisation is via a mix of `Mutex` (a `pthread_mutex_t` wrapper;
+see `common/include/net7/Mutex.h`, consolidated in Phase R) and atomic
+primitives. `PlayerManager` holds its own mutex (`m_Mutex` at
 `server/src/PlayerManager.h:211`) for the player list. `Equipable`
 holds its own mutex for per-equipped-item changes
-(`server/src/CMobEquippable.h:154`). `Connection` holds one for
-its TCP send queue.
+(`server/src/CMobEquippable.h:154`).
 
 ### Shutdown
 
 `g_ServerShutdown` is a global bool (declared at
 `server/src/Net7.h:271`). It is set by:
 
-- a console window control-C handler in `Net7.cpp` (`SetConsoleCtrlHandler`)
+- a POSIX signal handler for SIGINT / SIGTERM installed in `Net7.cpp`
 - the GM command `!shutdown`
 
 Once set, `MainLoop` exits and the process drains. There is a 5-second
@@ -681,7 +683,6 @@ top-level subsystems. Each gets its own section in
 
 | Manager | Member of ServerManager | Header | Responsibility |
 |---|---|---|---|
-| `ConnectionManager` | (not a SM member, but referenced) | `server/src/ConnectionManager.h` | TCP/SSL connection list |
 | `AccountManager*` | `m_AccountMgr` | `server/src/AccountManager.h` | Accounts, tickets, character slots |
 | `SectorServerManager` | `m_SectorServerMgr` | `server/src/SectorServerManager.h` | Sector-to-port routing |
 | `PlayerManager` | `m_PlayerMgr` | `server/src/PlayerManager.h` | All online players + groups + guilds |
@@ -697,10 +698,13 @@ top-level subsystems. Each gets its own section in
 | `GMemoryHandler*` | `m_GlobMemMgr` | `server/src/MemoryHandler.h` | Player slot pool (500 slots) |
 | `StringManager*` | `m_StringMgr` | `server/src/StringManager.h` | String interning |
 | `SaveManager*` | `m_SaveMgr` | `server/src/SaveManager.h` | Async character save thread |
-| `JobManager*` | `m_JobMgr` | (`JobManager_DEP_` marked deprecated) | Crafting jobs |
 | `BuffContent` | `m_BuffData` | `server/src/BuffDatabaseSQL.h` | Buff effect definitions |
 | `StationLoader` | `m_StationMgr` | `server/src/StationLoader.h` | Stations / docks |
-| `MailManager*` | `g_MailMgr` (global) | `server/src/MailslotManager.h` | SSL mailslot IPC |
+| `MailManager*` | `g_MailMgr` (global) | `server/src/MailslotManager.h` | AF_UNIX IPC pair to login |
+
+(Phase Q removed `ConnectionManager` and the long-deprecated
+`JobManager_DEP_`; their fields and includes are gone from
+`ServerManager`.)
 
 Per-sector state is held by `SectorManager` (one per sector) which
 in turn owns an `ObjectManager` (one per sector). See section 8.
@@ -792,10 +796,11 @@ it onto the source, the following are the gotchas:
   same process. The 0x6D `GLOBAL_CONNECT` and 0x70 `AVATARLIST`
   opcodes still implement that pattern, but everything resolves to
   one host.
-- **Mailslots, not message queues**. The doc generally refers to
+- **AF_UNIX, not message queues**. The doc generally refers to
   "messaging" between processes. In reality the only inter-process
-  message bus in the code is the Windows mailslot pair between Net7
-  and Net7SSL.
+  message bus in the code is the AF_UNIX SOCK_DGRAM pair between the
+  server and the login process (`net7ipc::PosixIpc`). The original
+  Windows-mailslot implementation was replaced in Phase M.
 - **The "Web Server" is gone**. The doc shows a third process
   serving HTML status pages. The code retains a `WhoHtml()` method
   on `PlayerManager` (`server/src/PlayerManager.h:130`) that
@@ -862,13 +867,18 @@ a process boundary, it goes in `common/include/net7/`, never in a
 per-process header.
 
 Headers that are NOT in `common/`:
-- `Net7.h` / `Net7SSL.h` — per-process Linux-side Win32 typedef/helper
-  inlines (`SOCKET`, `HANDLE`, `Sleep`, `GetTickCount`) plus path
-  defaults. Phase M dissolved the separate `compat/` directories that
-  used to hold these and folded the minimum needed set into each
-  umbrella header. Each tree's `Net7.h` does `#include <net7/Ports.h>`
-  to get the unified port macros.
-- `ServerManager.h`, `ConnectionManager.h`, etc. — process-local state.
+- `Net7.h` / `Net7SSL.h` — per-process umbrella headers. Phase M
+  dissolved the separate `compat/` directories that used to hold the
+  Win32-to-POSIX shims. What remains is the minimum the legacy code
+  still names: `SOCKET` (typedef'd to `int`), `INVALID_SOCKET`,
+  `SOCKET_ERROR`, and the canonical socket macros
+  (`closesocket → ::close`, `WSAGetLastError → errno`, etc.). Every
+  Win32 typedef and helper that was unused in Linux-active code paths
+  (`HANDLE`, `DWORD`, `LPTSTR`, `Sleep`, `GetTickCount`, …) has been
+  stripped from the umbrella. Each tree's `Net7.h` does
+  `#include <net7/Ports.h>` to get the unified port macros.
+- `ServerManager.h` and the rest of `server/src/` — process-local
+  state.
 
 Deferred to Wave 3 backlog (not wire-format, lower priority):
 `Globals.h`, `CircularBuffer.h`, `cmdcodes.h`, `Net7Types.h`.

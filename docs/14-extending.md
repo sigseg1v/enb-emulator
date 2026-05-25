@@ -49,15 +49,18 @@ AbilityEnvironmentShield(Player *me) : AbilityBase(me, STAT_SKILL_ENVIRONMENT_SH
    enum-as-defines).
 3. **Stat skill name** — add `STAT_SKILL_FOO` to the same
    file (line 109 shows `STAT_SKILL_ENVIRONMENT_SHIELD`).
-4. **Dispatcher wiring** — partially gated. The dispatcher
-   `Connection::HandleSkillAbility()` is defined at
-   `ClientToSectorServer.cpp:925` and called from the opcode
-   handler at `ClientToSectorServer.cpp:772`, but the inner
-   `m_Player->HandleSkillAbility(Ability)` is commented out at
-   line 928 — so the dispatcher fires but the per-ability
-   delegation to `Player` is stubbed. Restoring that line (and
-   wiring whatever `Player::HandleSkillAbility(int)` signature
-   tada-o expects) is what makes a new ability fire end-to-end.
+4. **Dispatcher wiring** — partially gated. The kyp-era
+   `Connection::HandleSkillAbility()` and the
+   `ClientToSectorServer.cpp` it lived in were deleted in Phase Q.
+   The TCP-facing copy survives at
+   `proxy/ClientToSectorServer.cpp` for the legacy connect path; the
+   server-native UDP plane reaches `Player::HandleSkillAbility` (or
+   the active equivalent for the ability ID you're adding) through
+   `PlayerConnection.cpp`. Restoring the per-ability delegation —
+   wiring whatever `Player::HandleSkillAbility(int)` signature the
+   ability needs — is what makes a new ability fire end-to-end. The
+   in-game UDP opcode plane is still being completed under Phase K
+   (`plans/11-phase-k-opcodes.md`).
 
 ### DB row?
 
@@ -85,10 +88,11 @@ type, only DB rows.
 
 ### Tool
 
-Use **MobEditor** (`tools/mob-editor/`) — fills out the rows
-above through a UI. The `mob_base.ai` column holds an AI
-script reference; `skill0..skill9` reference `PlayerSkills.h`
-ability IDs.
+Use **MobEditor** — Avalonia port: `tools/mob-editor-avalonia/`
+(launch via `just launch-mob-editor`); legacy WinForms at
+`tools/mob-editor/`. Fills out the rows above through a UI. The
+`mob_base.ai` column holds an AI script reference;
+`skill0..skill9` reference `PlayerSkills.h` ability IDs.
 
 ### Server side
 
@@ -119,10 +123,11 @@ Also data-driven. Two layers: define the sector, populate it.
 
 ### Tool
 
-**SectorEditor** (`tools/sector-editor/`) does the visual
-layout and writes all of the above. Hand-editing the SQL is
-possible but tedious — coords matter and the editor at least
-gives you a visual sanity check.
+**SectorEditor** — Avalonia port: `tools/sector-editor-avalonia/`
+(launch via `just launch-sector-editor`); legacy WinForms at
+`tools/sector-editor/`. Does the visual layout and writes all of
+the above. Hand-editing the SQL is possible but tedious — coords
+matter and the editor at least gives you a visual sanity check.
 
 ### Server side
 
@@ -144,13 +149,20 @@ startup. Per-sector reload at runtime via the GM
 ## Other extensions
 
 - **New C# tool** — see `docs/07-tools-toolchain.md` and
-  `tools/README.md`. Drop into `tools/<kebab-name>/` with an
-  SDK-style csproj.
-- **New POSIX shim** — `server/compat/`. New code should not
-  reintroduce Win32 APIs (CLAUDE.md coding rules).
-- **New documentation page** — `docs/<NN-topic>.md`, then
-  link from `docs/README.md`.
+  `tools/README.md`. Drop into `tools/<kebab-name>-avalonia/`
+  with an SDK-style csproj targeting `net10.0` + Avalonia 11;
+  add a `just launch-<name>` recipe to the root `justfile`.
+- **New cross-process header** — `common/include/net7/` (opcodes,
+  packet structures, port numbers, RSA/RC4, IPC primitives). The
+  `server/compat/`, `proxy/compat/`, and
+  `login-server/Net7SSL/compat/` Win32-shim trees were deleted in
+  Phase M; new code uses POSIX directly or the helpers in
+  `common/include/net7/PosixIpc.h` / `SingleInstance.h` / `Ticks.h`.
+- **New documentation page** — `docs/<NN-topic>.md`, then link
+  from `docs/README.md`.
 - **New test** — `tests/<area>/`, then add an
   `add_executable` + `gtest_discover_tests` block in
   `tests/CMakeLists.txt`. See `tests/README.md` for the
-  pattern.
+  pattern. CLI-client-driven integration tests live in
+  `tests/integration/CliClient.IntegrationTests/` (xUnit, .NET) —
+  see `docs/16-integration-tests.md`.

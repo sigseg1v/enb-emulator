@@ -60,9 +60,10 @@ stack the defaults are:
 | Password | `net7` |
 | Database | `net7` (or `net7_user` for the accounts schema) |
 
-## Editor status (Phase L)
+## Editor status (Phase L — complete)
 
-Phase L tracks per-tool ports under `plans/12-phase-l-avalonia.md`. Current state:
+Phase L closed with 13 editor ports landed; per-tool status:
+`plans/12-phase-l-avalonia.md`. Current state:
 
 | Tool                  | Avalonia? | Talks to DB? | Notes |
 |---|:-:|:-:|---|

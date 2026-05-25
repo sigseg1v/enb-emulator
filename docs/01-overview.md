@@ -43,27 +43,37 @@ load-bearing facts are:
 ## Current status
 
 The work is broken into phases tracked in `plans/`. Live status is in
-`plans/00-master.md`. As of the most recent doc generation:
+`plans/00-master.md`. As of 2026-05-26:
 
 | Phase | What it does | Status |
 |---|---|---|
-| A | Repo merge, docs, scaffolding | in progress |
-| B | Best-effort Linux server build via CMake + Win32-to-POSIX shims | not started |
-| C | MySQL to Postgres migration (schema + start of C++ call sites) | not started |
-| D | C# tools to .NET 10 (`net10.0-windows` + WinForms) | not started |
-| E | OpenSSL 1.0 to 3.x migration | not started |
-| F | Compiler warning cleanup (`-Wall -Wextra` baseline + top-N fixes) | not started |
-| G | Test scaffolding (GoogleTest + a few smoke tests) | not started |
-| H | Deepen docs (protocol RE, sequence diagrams, ability internals) | not started |
-| I | Dev env polish (justfile, docker-compose, OCI images, CI matrix) | not started |
+| A | Repo merge, docs, scaffolding | complete |
+| B | Best-effort Linux server build via CMake | complete |
+| C | MySQL to Postgres scaffolding (schema conversion) | complete (scaffold only) |
+| D | C# tools to .NET 10 SDK-style csproj | complete |
+| E | OpenSSL 1.0 to 3.x for the server target | complete |
+| F | Compiler warning cleanup | complete (baseline + 2 categories) |
+| G | Test scaffolding (GoogleTest + smoke tests) | complete |
+| H | Deepen docs (protocol RE, sequence diagrams, ability internals) | complete |
+| I | Dev env polish (justfile, docker-compose, OCI images, CI matrix) | complete |
+| J | End-to-end runnable: server + proxy + login on Linux, integration tests green | complete |
+| K | In-game opcode handlers + UDP plane | in progress |
+| L | C# tools to Avalonia (Linux-native UI; no WINE) | complete |
+| M | Eliminate Win32 from server-native code (mailslot → AF_UNIX, etc.) | complete |
+| N | `mysqlplus.cpp` → libpqxx rewrite (Phase C continuation) | complete |
+| O | OpenSSL 3.x for proxy + login-server | complete |
+| P | Stub-debt audit | complete |
+| Q | Delete dead kyp-era TCP cluster | complete |
+| R | Extract `common/include/net7/` for shared protocol headers | complete |
+| S | Headless CLI client (C# / .NET 10) | complete (14/17 items; 3 blocked on Phase K) |
+| T | CLI-driven integration test suite (xUnit) | complete (9/10 items; enumerate blocked on Phase K) |
 
-Phase A is what produced this document, plus the rest of `docs/` and the
-top-level `README.md`. Phases B-I are the modernization work.
-
-The server **does not yet build on Linux**. Expect Phase B to land it in a
-"configure succeeds, build emits an honest error log we can iterate on" state.
-Until then, treat the server as "Windows + Visual Studio only" for
-build purposes.
+The server **runs natively on Linux** today: server + proxy + login-server
+build clean, link against system OpenSSL 3.x and libpqxx, and pass the gtest
+suite plus the CLI-driven integration tests (33/33). The legacy `compat/`
+shim directories are gone; all three umbrella `Net7.h` files now expose only
+SOCKET typedefs + the canonical socket macros. See `plans/00-master.md` for
+the per-phase breakdown.
 
 ## License summary
 
@@ -110,32 +120,43 @@ locally.
 
 ### "I want to run my own server"
 
-Not yet. The server does not currently build on Linux. After Phase B is far
-enough along you will be able to:
+The server runs on Linux today. Two paths:
 
-1. Bring up the dev stack: `just dev` (docker-compose up postgres + server +
-   login). See `08-build.md` and `09-running-locally.md`.
-2. Build manually: `cmake -S server -B build/server -G Ninja && cmake --build
-   build/server`. Expect failures until Phase B completes.
+1. Dev stack via docker-compose: `just init` to start MySQL and load the
+   dumps, then `just dev` (= `just run-stack-bg`) to bring up
+   server + proxy + login. See `08-build.md` and `09-running-locally.md`.
+2. Build the server binary by hand:
+   `cmake -S server -B build/server -G Ninja && cmake --build build/server`.
+   Same for `proxy/` and `login-server/`. All three build clean against
+   system OpenSSL 3.x, libpqxx 7.x, and libmysqlclient (only required
+   for the few DAOs still on the MySQL path while Phase N's per-DAO Wave 3
+   is open).
 
-If you want to build on Windows today, open `server/src/Net7.sln` in Visual
-Studio. The legacy `server/Makefile.legacy` (vintage 2010, g++ 4.x style)
-exists for reference but is not the supported path.
+The legacy `server/Makefile.legacy` (vintage 2010, g++ 4.x style) is kept
+for reference only; it does not match the current source tree.
 
 ### "I want to edit game content (sectors, mobs, missions, items)"
 
-The C# editors live in `tools/`. They are WinForms applications. After Phase
-D upgrades them to .NET 10:
+The C# editors live in `tools/`. Phase L re-ported every user-facing editor
+to **Avalonia 11 / .NET 10**, so they run **natively on Linux** — no WINE
+required. The fastest way to discover them:
 
 ```
-dotnet build tools/Net7Tools.sln
+just launch                 # central GUI launcher (toolslauncher-avalonia)
+just launch-mob-editor      # or jump straight to one
+just launch-sector-editor
+just --list                 # shows every launch-* recipe
 ```
 
-The build step is cross-platform. The **runtime is still Windows-only**:
-WinForms does not run on Linux or macOS. To use the editors on Linux you
-need either Wine + a Windows .NET runtime, or a Windows VM.
+The legacy WinForms projects under `tools/<name>/` (without `-avalonia`)
+still build cross-platform via `dotnet build tools/Net7Tools.slnx`, but
+their runtime is Windows / WINE only. They are kept for diff reference.
 
-Per-tool documentation is in `07-tools-toolchain.md`.
+`item-editor` is the only editor that has NOT been ported — the original
+`tools/itemeditor/` never had a `.csproj` in the upstream snapshot.
+
+Per-tool documentation is in `07-tools-toolchain.md`; the
+`tools/README.md` has the quickstart-with-credentials cheat sheet.
 
 ### "I want to understand the code"
 
@@ -149,8 +170,11 @@ Read in this order:
 5. `05-abilities.md` -- ability implementations, with notes on which are new
    in the tada-o fork.
 
-For the network protocol, `03-network-protocol.md` is the starting point;
-Phase H will deepen it after a packet capture analysis pass.
+For the network protocol, `03-network-protocol.md` is the starting point.
+The shared wire-format structs, opcode tables, port numbers, RC4/RSA
+helpers and the Mutex wrapper live under `common/include/net7/` (added in
+Phase R); the server, proxy, and login-server all include from there so
+there is one canonical copy of every cross-process struct.
 
 ### "I want to contribute"
 
