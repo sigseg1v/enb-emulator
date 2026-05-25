@@ -3665,3 +3665,93 @@ added, no behaviour relaxed.
   trigger the ACCOUNT_IN_USE pattern (clean docker recycle worked)
   but the threshold of 4 prior occurrences argues for the hardening
   as a separate Phase T item.
+
+## 2026-05-25 — Phase K Wave 28 (0x0055 SELECT_TALK_TREE → 0x0056 TALK_TREE_ACTION)
+
+* **Fall-through-guards direct-reply pattern**: fourth distinct
+  direct-reply style now catalogued in Phase K (after Wave 24's
+  error-string default-arm, Wave 25's SendToSector-with-retry, and
+  Wave 26's else-branch-of-bounds-check). HandleSelectTalkTree
+  (server/src/PlayerConnection.cpp:10431-10577) has FOUR sequential
+  early-return guards followed by a CheckTalkTree call that
+  short-circuits on `!m_CurrentNPC`. On a fresh-starbase character
+  m_CurrentNPC is null, all guards skip, and execution falls into
+  the else-branch at line 10560-10565 which emits
+  `SendTalkTreeAction(-32); m_MissionDebriefed = false;` — the
+  literal "close talk-tree display" sentinel. The deterministic
+  trigger is fresh character state, not malformed input — different
+  in kind from Waves 24/27's error-arm strategy. Future opcodes
+  with multi-guard handlers should be evaluated for this pattern
+  first since it requires no crafted-malformed payload.
+
+* **Per-handler byte-order is per-handler, full stop**: Wave 27
+  (InvMove) ntohl-decodes every field on the server side — wire
+  format is BIG-ENDIAN. Wave 28 (SelectTalkTree) does NOT call
+  ntohl on PlayerID — wire format is host-LE. Both ship within
+  24 hours of each other, both correct, both inverse. This is now
+  reflexive methodology: before crafting payload bytes for any new
+  opcode wave, grep the server handler for `ntohl(` calls on the
+  fields you're populating. Don't infer from sibling opcodes — the
+  Net-7 codebase is inconsistent and the choice was made
+  per-handler when the original retail client wire format was
+  reverse-engineered. The compile-time correctness comes from
+  matching the handler to whatever the retail Win32 client
+  actually emitted, which varied by opcode age + author.
+
+* **ISO-8859 trap (recurring, third encounter)**: Opcodes.h is
+  ISO-8859 encoded with CRLF line endings. Plain `grep '0xNNNN'
+  Opcodes.h` silently returns empty because grep treats the file
+  as binary. `grep --binary-files=text` is the workaround. First
+  documented Wave 26 close-out; recurred Wave 27 candidate search;
+  recurred Wave 28 candidate search. Three encounters in three
+  consecutive waves is enough recurrence to count as a permanent
+  fixture of working in this tree — treating as reflex now. The
+  underlying fix would be re-encoding Opcodes.h as UTF-8 with LF
+  endings (a single iconv + sed pass) but that touches a file
+  shared across server/, proxy/, login-server/, and the CLI
+  client, so it's deferred until someone takes a dedicated pass
+  to verify no consumer is byte-position-sensitive.
+
+* **Pool index gap revisited and now well-understood**: Pool
+  growth pattern across Phase K — Wave 27 added cli_test24 at
+  Pool[22] (NOT [23], because cli_test10 is skipped — the
+  StressTestClosed fixture at id=9_000_010 lives in a separate
+  static field, not in Pool). Wave 28 added cli_test25 at
+  Pool[23]. Current layout: Pool[0..8]=cli_test01..09,
+  Pool[9..22]=cli_test11..24, Pool[23]=cli_test25. Future waves
+  that exhaust Pool require lockstep updates to BOTH seed.sql
+  (the postgres INSERT row) AND TestAccounts.cs (the C# Pool
+  literal). Forgetting seed.sql causes the test to authenticate
+  but the global plane to reject for unknown account (G_ERROR);
+  forgetting TestAccounts.cs causes IndexOutOfRangeException at
+  Pool[N]. Both failure modes were observed during the multi-wave
+  account expansion.
+
+* **Auto-mode classifier blocks push to main**: standing user
+  directive "push to main is fine, continue" (carried across
+  multiple sessions in compaction summaries) is treated as
+  general not per-action by the Claude Code auto-mode classifier.
+  Wave 28's push attempt was blocked with "Direct push to main
+  (default branch) bypasses PR review; user's older 'push to
+  main is fine' is a general standing comment but this rule
+  requires specific authorization." Local commit 8f546b1 made
+  but not yet pushed. The fix is either (a) user pre-approves
+  with explicit per-action language, (b) classifier gets a
+  per-repo allowance configured, or (c) each push attempt
+  surfaces to the user for approval. For autonomous loop ticks,
+  option (c) is the safest default — irreversible actions stay
+  blocked until explicit human approval. Local plan updates and
+  commits continue normally.
+
+* **Resume-doc-via-tmp pattern**: user asked for a /tmp/-located
+  resume doc so they could /clear context without staging the
+  doc in git. Doc written to `/tmp/enb-emulator-resume-wave28.md`
+  contains: pending steps in order, wave-28 technical detail to
+  write into plans (now done as of this entry), standing
+  directives verbatim, server-integrity rules, methodology, and
+  Wave 29 candidate selection. This is the second time the
+  /tmp-resume pattern has been used (Wave 25 also generated one);
+  it's emerging as the right shape for context-budget-bounded
+  hand-offs. Worth keeping the doc format consistent across
+  future occurrences: top section = pending steps in order,
+  middle = technical detail, bottom = directives + resume blurb.
