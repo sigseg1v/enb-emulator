@@ -3531,3 +3531,137 @@ inputs accepted that retail wouldn't accept.
   ACCOUNT_IN_USE-after-isolation pattern this time (clean docker
   recycle worked), but the threshold is still 4 prior occurrences
   argues for the hardening as a separate Phase T item.
+
+---
+
+## 2026-05-25 — Phase K Wave 27: 0x0027 INVENTORY_MOVE default-arm direct-reply
+
+Third direct-reply wave in a row (24/26/27) — all three use the
+same `SendVaMessage` → `SendMessageString` → `SendOpcode(0x001D)`
+per-client UDP queue path that bypasses Wave 25's SendToSector
+login-stage race. Pattern is now firmly established as the
+preferred direct-reply shape for any handler with an unrecognised-
+input default arm.
+
+INVENTORY_MOVE was specifically deferred during Wave 24's
+candidate triage with the note "heavy handler with slot
+manipulation + SaveInventoryChange DB writes that needs seeded
+inventory rows" — Wave 27 reaches it but only targets the **default
+arm**, which is the one branch that takes no inputs from inventory
+state (FromInv=99 doesn't match any valid case so the switch falls
+through immediately, no DB read, no slot deref). The slot-
+manipulation branches stay out of scope until a future wave seeds
+inventory rows; the default-arm cover is preservation-meaningful
+because it pins the verbatim retail "UNRECOGNISED INVENTORY MOVE!"
+error string and the handler's 24B canonical wire layout.
+
+### The Pool[22]-not-Pool[23] trap
+
+`TestAccounts.Pool` skips index for cli_test10 because cli_test10
+is the out-of-pool `StressTestClosed` fixture (status=0) with its
+own static field `TestAccounts.StressTestClosed`. Concretely:
+
+* Pool[0..8]   = cli_test01..09
+* Pool[9..22]  = cli_test11..24
+
+So `cli_test24` lives at `Pool[22]`, NOT `Pool[23]`. First draft
+of SectorInventoryMoveTests used `Pool[23]` and crashed
+`ArgumentOutOfRangeException` at SZArrayHelper.get_Item.
+
+The diagnosis path is documented because it'll recur. Initially I
+suspected build-cache staleness (because `dotnet build
+--no-incremental` reported no rebuild). Verified dll freshness by:
+
+```
+strings -el tests/integration/CliClient.IntegrationTests/bin/Debug/net10.0/CliClient.IntegrationTests.dll | grep cli_test24
+```
+
+— note `strings -el`, not the default `strings`. C# string
+literals are encoded UTF-16LE in .NET assemblies; the 8-bit
+default `strings` (or even `-e l` for 16-bit little-endian word
+size) doesn't find them. The `-e l` flag (32-bit little-endian) is
+required. After confirming the dll DID contain "cli_test24" the
+miscount became the obvious culprit and a recount of Pool entries
+revealed Pool[22].
+
+**Heuristic for future agents**: any test that wants the highest
+cli_test* account in Pool needs to know about the cli_test10 gap.
+Either iterate `TestAccounts.Pool` and `.Last()`, or hard-code the
+index after counting. If you add a 25th-and-beyond cli_test*
+account, this offset shifts again — add the row to seed.sql AND
+TestAccounts.cs Pool in parallel and update every test that uses
+the new tail index. **Do NOT** ever add cli_test10 to Pool without
+auditing every Pool[N] reference in tests/integration/ first.
+
+### Byte-order distinction: InvMove BIG-ENDIAN vs SkillUse HOST-LE
+
+Wave 26's SkillUse handler (0x0058 SKILL_ABILITY) reads its 12B
+payload host-LE (no ntohl calls — Wave 26's payload used
+`BinaryPrimitives.WriteInt32LittleEndian`).
+
+Wave 27's InvMove handler reads its 24B payload BIG-ENDIAN — every
+field is ntohl-decoded at server/src/PlayerConnection.cpp:2493-
+2498. The test must use `BinaryPrimitives.WriteInt32BigEndian` for
+ALL 6 fields.
+
+The drift hazard: sending host-LE FromInv=99 would land bytes
+`0x63 0x00 0x00 0x00` and after the handler ntohl swap become
+0x63000000 = 1660944384, which is also unrecognised, so the
+default arm STILL fires and the test STILL passes — but by luck,
+not by deliberate input. Future test maintainers reading the
+payload would see FromInv=99 and assume LE, then a refactor that
+"fixes" the byte order would silently flip to BE and the test
+would still pass (by coincidence). The test xmldoc explicitly
+calls out the BE requirement and rules out LE as "right answer for
+the wrong reason" so this doesn't drift.
+
+The broader observation: there's no universal rule for opcode
+wire-format byte order — each handler is its own decision. The
+Phase R wire-format consolidation (common/include/net7/
+PacketStructures.h) only specifies field types and sizes; byte
+order is per-handler. **Future test design**: when adding a new
+opcode test, read the handler's first ~20 lines for ntohl/ntohs
+calls and use them as the byte-order source of truth.
+
+### CLAUDE.md server-integrity rules compliance
+
+The handler's default arm has been in the codebase since 2010 (it
+was already in the tada-o Net7 source we forked from). The
+"UNRECOGNISED INVENTORY MOVE!\nPlease submit a bug report\n" string
+is verbatim from the retail Net-7 server. The wire shape (24B InvMove
+with FromInv=99 being unrecognised) is exactly the kind of input
+the retail Win32 client never deliberately emits but the real
+server explicitly handles by returning the error reply.
+
+Zero server-side changes in this wave. The test adapts to existing
+documented retail behaviour. Per CLAUDE.md server-integrity rules
+this is the right shape: the tool (CLI client) drives the server
+through inputs it would naturally receive in retail; the server's
+documented response is asserted byte-for-byte; no permissiveness
+added, no behaviour relaxed.
+
+### Next-Phase-K targets
+
+* **0x002F INVENTORY_SWAP / 0x0030 INVENTORY_DELETE** — same
+  inventory tier; likely same default-arm pattern (verify each
+  handler).
+* **0x002A ENABLE_ITEMS / 0x002B DEACTIVATE_ITEM** — item-state
+  sibling of Wave 24, likely same per-client UDP queue reply path.
+* **0x004F STARBASE_RESPONSE** — paired with Wave 16's
+  STARBASE_REQUEST; covers the read-paired half of the Job Terminal
+  open/close handshake.
+* **Inverse sweep** for further direct-reply opportunities in the
+  0x0030-0x0050 range. Filter heuristic: handler has a `default:`
+  arm that calls SendVaMessage/SendMessageString/SendPriorityMessage
+  → guaranteed-deterministic direct-reply candidate. Handler emits
+  via SendToSector → falls back to Wave 25's retry-loop pattern.
+* **Inventory seed harness** — once 4-5 inventory-tier waves have
+  hit the default-arm pattern, building a seeded inventory fixture
+  is the natural next step to start covering the 9 valid InvMove
+  cases (1/2/3/4/6/12/14/16/18). Each branch has its own SQL
+  write path so the cover is meaningful.
+* **Test-infra hardening** (still out-of-band, 4+ occurrences now):
+  explicit LOGOFF in tests' `finally` blocks. Wave 27 didn't
+  trigger the ACCOUNT_IN_USE pattern (clean docker recycle worked)
+  but the threshold of 4 prior occurrences argues for the hardening
+  as a separate Phase T item.
