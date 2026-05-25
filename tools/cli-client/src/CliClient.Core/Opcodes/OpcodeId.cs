@@ -41,6 +41,7 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId Debug                  = new(0x001A);
         public static readonly OpcodeId MessageString          = new(0x001D);
         public static readonly OpcodeId PriorityMessage        = new(0x0020);
+        public static readonly OpcodeId InventoryMove          = new(0x0027);
         public static readonly OpcodeId ItemState              = new(0x0029);
         public static readonly OpcodeId Action                 = new(0x002C);
         public static readonly OpcodeId Action2                = new(0x002D);
