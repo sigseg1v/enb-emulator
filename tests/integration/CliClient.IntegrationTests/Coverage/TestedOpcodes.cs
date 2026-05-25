@@ -68,7 +68,7 @@ public static class TestedOpcodes
     /// <see cref="Opcodes"/>. NEVER decrease without a commit message
     /// explaining what deleted coverage and why it was OK to delete.
     /// </summary>
-    public const int MinTestedCount = 17;
+    public const int MinTestedCount = 19;
 
     /// <summary>
     /// Every opcode with round-trip coverage in this suite, with an
@@ -89,10 +89,14 @@ public static class TestedOpcodes
             "Opcodes/SectorChatTests.cs GroupChat_WhenUngrouped_ReceivesNotInGroupErrorString — received on TCP 3500 as the server's reply to a Group-channel 0x0033 sent by an ungrouped player. The frame rides the full server→client UDP fan-out path: Player::SendMessageString (PlayerConnection.cpp:10918) → SendOpcode(0x001D) (PlayerConnection.cpp:127, the Phase K sizeof(int32_t) header fix) → m_UDPQueue → SendPacketCache → 0x2016 PACKET_SEQUENCE on UDP → proxy UDPClient::SendClientPacketSequence (proxy/UDPProxyToClient_linux.cpp:531) → SendResponse over TCP. Test decodes the [u16 length][u8 color][string\\0] payload and asserts the body contains the literal substring \"not in a group\"."),
         new TestedOpcode(0x0033, "CLIENT_CHAT",
             "Opcodes/SectorChatTests.cs GroupChat_WhenUngrouped_ReceivesNotInGroupErrorString — client sends a Type=Group ClientChatMessage with non-slash content; server's Player::HandleClientChat (PlayerConnection.cpp:4544) dispatches the chat->Type==1 branch, sees GroupID()==-1, and routes to SendVaMessage with the literal \"Error: You are not in a group!\" — the simplest server-state-independent CLIENT_CHAT branch that produces a deterministic single-frame reply."),
+        new TestedOpcode(0x0034, "CLIENT_SET_TIME",
+            "Opcodes/SectorRequestTimeTests.cs RequestTime_RoundTripsClientSentTickAndReturnsServerTimes — server emits the 12-byte ClientSetTime struct {ClientSent, ServerReceived, ServerSent} (all int32_t LE per common/include/net7/PacketStructures.h:563) in reply to 0x0044 REQUEST_TIME. Test asserts (a) payload size is exactly 12B (would be 24B if anyone reverted the Phase R PacketStructures long→int32_t migration on this struct), (b) ClientSent equals the unique tick we sent (catches HandleRequestTime sizeof(long) over-reads — pre-Wave-9 it read 8B from a 4B wire slot and echoed garbage), (c) ServerSent >= ServerReceived (catches field-order or byte-order regressions)."),
         new TestedOpcode(0x0035, "MASTER_JOIN",
             "Opcodes/MasterJoinTests.cs — live send into proxy on 3801, ServerRedirect reply asserted; AND Verification/CaptureReplayTests.cs — retail capture_1 frame 220 decoded + codec round-trip identity."),
         new TestedOpcode(0x0036, "SERVER_REDIRECT",
             "Opcodes/MasterJoinTests.cs — received as the reply to MASTER_JOIN; AND Verification/CaptureReplayTests.cs — retail capture_1 frame 222 decoded with field-by-field assertions."),
+        new TestedOpcode(0x0044, "REQUEST_TIME",
+            "Opcodes/SectorRequestTimeTests.cs RequestTime_RoundTripsClientSentTickAndReturnsServerTimes — client sends a 4-byte int32_t LE tick on the sector connection after STAGE handshake completes. Server Player::HandleRequestTime (server/src/PlayerConnection.cpp:1619) reads the tick and calls SendClientSetTime which replies with 0x0034 carrying the echoed tick + two server-side ticks. Pre-Wave-9 the handler read `*((long *) data)` = 8 bytes on Linux from a 4-byte wire slot; the Wave 9 fix casts to `int32_t*` so the round-trip echoes the exact value we sent."),
         new TestedOpcode(0x006D, "GLOBAL_CONNECT",
             "Opcodes/GlobalConnectTests.cs — client sends GlobalConnect with a real Net7SSL-issued ticket; round-trip drives the Phase K proxy↔server global UDP plane (UDP 3810)."),
         new TestedOpcode(0x006E, "GLOBAL_TICKET_REQUEST",

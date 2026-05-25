@@ -1621,3 +1621,107 @@ looking at the bytes instead of trusting the log message.
   movement / chat at sector scope), not handshake depth — the
   proxy plumbing is now finished and any new opcode is "write the
   test, watch where it breaks".
+
+## 2026-05-25 — Phase K Wave 8 + Wave 9: first two post-START sector opcode round-trips
+
+### Wave 8 (CLIENT_CHAT, commit fa72037)
+
+Added `SectorChatTests.GroupChat_WhenUngrouped_ReceivesNotInGroupErrorString`: client sends 0x0033
+CLIENT_CHAT with Type==1 (Group) while ungrouped; server's `Player::HandleClientChat`
+(server/src/PlayerConnection.cpp:4544) Group branch checks `GroupID()==-1`, sends literal error
+string via `SendVaMessage("Error: You are not in a group!")` →
+`SendMessageString(color=5)` → `SendOpcode(0x001D MESSAGE_STRING)` → m_UDPQueue →
+SendPacketCache → 0x2016 PACKET_SEQUENCE UDP → proxy `SendClientPacketSequence`
+(proxy/UDPProxyToClient_linux.cpp:531) → 0x001D on sector TCP 3500.
+
+Picked because it is the **simplest server-state-independent** branch that produces a
+deterministic single-frame reply: slash-commands need GM permissions, broadcast needs another
+receiver, target/local/guild need extra state. "Not in a group" rides only the default
+`GroupID()==-1`.
+
+No server changes needed — the chat path was already wire-correct end-to-end thanks to the Wave
+7 SendOpcode `int32_t` header fix. The first post-START opcode is a Sender-state-independent
+*server-to-client* path, so Wave 8 was almost entirely test infrastructure:
+
+* `SectorHandshake.cs` extracted (~330 LOC) — every subsequent in-sector opcode test calls
+  `SectorHandshake.EstablishAsync` to get a `Session{Global,Sector,GameId,StartId,Slot}` instead
+  of re-implementing auth → GlobalConnect → CreateCharacter → GlobalTicketRequest → MasterJoin
+  → sector LOGIN → drain-to-START.
+* SectorLoginTests refactored from ~445 LOC → ~95 LOC orchestration over the helper.
+
+### Wave 9 (REQUEST_TIME + sizeof(long) wire-size fix, this turn)
+
+Added `SectorRequestTimeTests.RequestTime_RoundTripsClientSentTickAndReturnsServerTimes`: client
+sends 0x0044 REQUEST_TIME with a unique-per-run tick sentinel `(int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF)`;
+server's `Player::HandleRequestTime` (server/src/PlayerConnection.cpp:1619) replies with 0x0034
+CLIENT_SET_TIME `{int32 ClientSent, int32 ServerReceived, int32 ServerSent}` (12B). Asserts the
+echoed `ClientSent` matches the sent tick exactly + server fields non-zero + ServerSent >= ServerReceived.
+
+Server fix: `*((long *) data)` → `*((int32_t *) data)` in HandleRequestTime. Same class as the
+Wave 7 sweep. Win32 wire payload is 4 bytes (a single `long` = 4 on Win32); the unmigrated Linux
+server read 8 bytes — 4 of payload + 4 of whatever followed in the recv buffer — and echoed that
+garbage back to the client as its own `ClientSent` tick. Test would have failed on
+`Assert.Equal(clientTick, echoedClientSent)`.
+
+Sentinel choice matters: a *unique-per-run* value (low 31 bits of UTC ticks) makes the
+"leaked-recv-buffer regression accidentally echoes a matching value" failure mode statistically
+impossible. A fixed sentinel like `0xDEADBEEF` would be vulnerable to a regression that always
+happened to leak the same 4 trailing bytes.
+
+The `ClientSetTime` reply struct itself (`common/include/net7/PacketStructures.h:563`) was
+already migrated to `int32_t` in Wave 7, so the reply wire size (12B) was correct — only the
+request-side read needed fixing.
+
+### Wave 9 also surfaced and fixed a latent `AuxBase::m_Max_Buffer` uninit bug
+
+SectorRequestTimeTests passed in isolation but failed in the 3-test sequence
+(SectorLogin → SectorChat → SectorRequestTime). Server log captured via the test's
+diagnostic compose-log dump showed thousands of `Error: Bufferoverflow in Aux!` printf bursts
+and zero `Received RequestTime` entries.
+
+Root cause: only 4 of 57 `AuxBase` subclasses (`AuxHulkIndex=1000`, `AuxShipIndex=10000`,
+`AuxMobIndex=2000`, `AuxHarvestable=2000`) explicitly initialise `m_Max_Buffer`. The other 53
+leave it uninitialised. On Win32 the heap garbage happened to be large enough that
+`AddData()`'s `sizeof(T)+index < m_Max_Buffer` guard passed through; on Linux x86_64 the
+garbage is often small, so every `AddData()` call hits the printf branch. With 3+ players in
+the same sector, the per-player serialisation flood saturates stdout and stalls the sector
+tick — REQUEST_TIME never reaches `HandleRequestTime`, and the test times out at 90s.
+
+Fix: `AuxBase::AuxBase()` now sets `m_Max_Buffer = (unsigned long)-1` (ULONG_MAX). Subclasses
+that know a tighter cap keep their explicit assignments.
+
+Per CLAUDE.md server-integrity rules this is preservation-aligned: it restores 15+ years of
+upstream behaviour (Win32 happened to have large garbage in this uninitialised member). The
+load-bearing safety mechanism for AddData is the caller-side buffer sizing (every BuildPacket
+is handed a fixed buffer it must fit into); `m_Max_Buffer` is an opportunistic secondary
+check, never the load-bearing one. The fix does not relax any real bound — it just stops the
+spurious flood that comes from comparing against heap garbage.
+
+### Test fixture pool grew Pool[3]/[4]/[5] (cli_test04/05/06)
+
+Convention emerged from Wave 7-9: one Pool account per post-handshake test, since each test
+does Create + Delete of an avatar and the IsUsernameUnique constraint would collide if two tests
+serialised against the same account simultaneously. Pool currently has 6 entries:
+
+* Pool[0..2] — reserved/free for shorter pre-handshake tests.
+* Pool[3] cli_test04 — SectorLoginTests.
+* Pool[4] cli_test05 — SectorChatTests.
+* Pool[5] cli_test06 — SectorRequestTimeTests.
+
+`HarnessSmokeTest.SeedSql_IsCopiedToOutput_AndMentionsEveryPooledAccount` iterates Pool
+dynamically so new accounts are picked up without test code changes — but `Fixtures/seed.sql`
+must be kept in sync (this turn: added a row for cli_test06 + updated comments
+"9000005"→"9000006" and "all five"→"all six").
+
+### Coverage ratchet
+
+* Pre-Wave-8: 15/207 (7.2%).
+* Post-Wave-8: 17/207 (8.2%) — +0x001D MESSAGE_STRING, +0x0033 CLIENT_CHAT.
+* Post-Wave-9: 19/207 (9.2%) — +0x0034 CLIENT_SET_TIME, +0x0044 REQUEST_TIME.
+
+### Next-Phase-K targets
+
+* 0x0006 START_ACK closure — `SetActive(true)` gates Active() checks for movement/inventory.
+* 0x0012 TURN, 0x0013 TILT — simplest movement opcodes; first server-side *fan-out across
+  sector players* path (vs the single-player echo paths in Waves 8-9).
+* 0x002C ACTION — combat trigger.

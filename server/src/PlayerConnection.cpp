@@ -1620,8 +1620,12 @@ void Player::HandleRequestTime(unsigned char *data)
 {
 	LogDebug("Received RequestTime packet\n");
 
-	// Set the client time
-	SendClientSetTime(*((long *) data));
+	// Phase K Wave 9: wire field is 4 bytes (Win32 sizeof(long)==4); reading
+	// `*((long *) data)` on Linux pulls 8 bytes — 4 of payload + 4 of whatever
+	// follows in the recv buffer — which then echoes garbage back to the client
+	// as its own "ClientSent" tick. Same class of fix as the Wave 7 sweep across
+	// PlayerConnection/PlayerClass/PlayerManager.
+	SendClientSetTime(*((int32_t *) data));
 }
 
 

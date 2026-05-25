@@ -15,7 +15,7 @@
 -- Password hash matches login-server/Net7SSL/LinuxAuth.cpp which
 -- validates by comparing UPPER(MD5(plaintext)) against the stored
 -- column. The plaintext for every account in this pool is the literal
--- string "testpw" — same for all five so tests don't have to track
+-- string "testpw" — same for all six so tests don't have to track
 -- per-account secrets.
 --
 -- The hash is computed server-side at INSERT time via UPPER(MD5(...));
@@ -23,7 +23,7 @@
 -- evaluates to '8eee3efdde1eb6cf6639a58848362bf4', upper-cased before
 -- insert — but trust the function call over this comment.)
 --
--- The accounts here use IDs 9000001..9000005 to stay well clear of any
+-- The accounts here use IDs 9000001..9000006 to stay well clear of any
 -- real account IDs the dumps might carry (AUTO_INCREMENT=15965 on the
 -- accounts table per net7_user.sql), so seed and dump never collide.
 --
@@ -57,6 +57,7 @@ VALUES
   (9000003, 'cli_test03',         UPPER(encode(digest('testpw', 'md5'), 'hex')), 100, 'cli_test03_form',     'cli_test03@net-7.test',         0),
   (9000004, 'cli_test04',         UPPER(encode(digest('testpw', 'md5'), 'hex')), 100, 'cli_test04_form',     'cli_test04@net-7.test',         0),
   (9000005, 'cli_test05',         UPPER(encode(digest('testpw', 'md5'), 'hex')), 100, 'cli_test05_form',     'cli_test05@net-7.test',         0),
+  (9000006, 'cli_test06',         UPPER(encode(digest('testpw', 'md5'), 'hex')), 100, 'cli_test06_form',     'cli_test06@net-7.test',         0),
   -- Status=0 fixture used by GlobalConnectTests.StressTestClosedAccount_*.
   -- LinuxAuth doesn't check status so login succeeds and the ticket is
   -- issued normally; ProcessTicketInfo on the server side rejects with

@@ -34,11 +34,13 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId StartAck               = new(0x0006);
         public static readonly OpcodeId MessageString          = new(0x001D);
         public static readonly OpcodeId ClientChat             = new(0x0033);
+        public static readonly OpcodeId ClientSetTime          = new(0x0034);
         public static readonly OpcodeId MasterJoin             = new(0x0035);
         public static readonly OpcodeId ServerRedirect         = new(0x0036);
         public static readonly OpcodeId ClientAvatar           = new(0x0037);
         public static readonly OpcodeId ServerHandoff          = new(0x003A);
         public static readonly OpcodeId ClientType             = new(0x003C);
+        public static readonly OpcodeId RequestTime            = new(0x0044);
         public static readonly OpcodeId GlobalConnect          = new(0x006D);
         public static readonly OpcodeId GlobalTicketRequest    = new(0x006E);
         public static readonly OpcodeId GlobalTicket           = new(0x006F);

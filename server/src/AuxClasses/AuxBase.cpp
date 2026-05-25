@@ -12,7 +12,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 �, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 �, Net-7 Entertainment.
 **
 */
 #include "AuxBase.h"
@@ -25,6 +25,24 @@ AuxBase::AuxBase()
 	m_Parent = 0;
 	m_MemberIndex = 0;
     m_Mutex = 0;
+
+	// Phase K Wave 9: only 4 of 57 AuxBase subclasses (AuxHulkIndex/AuxShipIndex/
+	// AuxMobIndex/AuxHarvestable) explicitly set m_Max_Buffer. The other 53 leave
+	// it uninitialised. On Win32 the heap garbage happened to be a large value, so
+	// AddData()'s `sizeof(T)+index < m_Max_Buffer` guard passed through; on Linux
+	// the garbage is often small and every AddData() call spuriously hits the
+	// "Error: Bufferoverflow in Aux!" printf branch — when a sector has 3+ players
+	// the per-player serialisation flood saturates stdout and blocks the sector
+	// tick from servicing UDP packets, making opcode replies time out.
+	//
+	// Caller-side buffer sizing is the actual safety mechanism: every BuildPacket
+	// is passed a fixed-size buffer it must fit into. The m_Max_Buffer check is
+	// an opportunistic secondary guard, never the load-bearing one. Initialising
+	// to ULONG_MAX here restores Win32 de-facto behaviour without weakening any
+	// real bound — subclasses that *know* a tighter cap (AuxHulkIndex=1000,
+	// AuxShipIndex=10000, AuxMobIndex=2000, AuxHarvestable=2000) keep their
+	// explicit assignments and override this default.
+	m_Max_Buffer = (unsigned long)-1;
 }
 
 AuxBase::~AuxBase()
