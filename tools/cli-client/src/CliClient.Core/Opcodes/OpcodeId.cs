@@ -40,6 +40,7 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId SetTarget              = new(0x0019);
         public static readonly OpcodeId Debug                  = new(0x001A);
         public static readonly OpcodeId MessageString          = new(0x001D);
+        public static readonly OpcodeId PriorityMessage        = new(0x0020);
         public static readonly OpcodeId ItemState              = new(0x0029);
         public static readonly OpcodeId Action                 = new(0x002C);
         public static readonly OpcodeId Action2                = new(0x002D);
@@ -54,6 +55,7 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId RequestTime            = new(0x0044);
         public static readonly OpcodeId StarbaseRequest        = new(0x004E);
         public static readonly OpcodeId SkillUp                = new(0x0057);
+        public static readonly OpcodeId SkillAbility           = new(0x0058);
         public static readonly OpcodeId VerbRequest            = new(0x005A);
         public static readonly OpcodeId AvatarEmote            = new(0x005E);
         public static readonly OpcodeId AvatarEmoteResponse    = new(0x005F);
