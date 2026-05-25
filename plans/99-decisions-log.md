@@ -3117,3 +3117,277 @@ emit sites, single coverage entry.
   the 0x002F-0x0050 range — direct-reply assertions are
   strictly stronger than survival probes and should be
   preferred where the handler emits a deterministic reply.
+
+## 2026-05-25 — Phase K Wave 25: 0x005E AVATAR_EMOTE → 0x005F AVATAR_EMOTE_RESPONSE direct-reply round-trip + login-stage race discovery
+
+### What landed
+
+`SectorAvatarEmoteTests.AvatarEmote_EmoteTrigger_ReceivesAvatarEmoteResponseWithEchoedSentinel`
+passes in isolation (1/1, 8s) AND when the full integration
+suite is run against a freshly-recycled stack (**56/56 in
+2m26s**, all 4 containers at restarts=0). Second direct-reply
+assertion in a row (after Wave 24's ITEM_STATE), exercising
+the chat-stream emote branch and the `SectorClass::SendToSector`
+"dumb fan-out" path with originator inclusion.
+
+**Zero-server-change wave.** Phase R already had ChatStream
+canonical (4× int32_t + 2× short + variable-length message[]);
+AVATAR_EMOTE (0x005E) is not explicitly listed in
+proxy/ClientToServer_linux_stubs.cpp so it hits the `default:`
+arm and falls through to bottom-of-switch ForwardClientOpcode.
+
+Phase K coverage 35/207 → **37/207 (17.9%)** — second +2
+ratchet in Phase K (request + reply both get coverage entries,
+like Wave 19's REQUEST_TARGET + SET_TARGET pair).
+
+### Why direct-reply rather than survival probe
+
+Server-side `Player::HandleChatStream`'s emote branch
+(server/src/PlayerConnection.cpp:10217-10258, gated on
+`if (Chat->message[0] == 0x02)`) constructs a reply buffer
+`[short ChatSize][byte 0x01][int32 GameID][byte[] message]`
+and fires `SendToSector(GameID(), ENB_OPCODE_005F_AVATAR_EMOTE_RESPONSE, buf, len)`.
+
+The **critical Net-7-design detail**: `Player::SendToSector`
+(server/src/PlayerClass.cpp:3361) is "dumb fan-out" — it
+walks `GetSectorPlayerList` bitmap with **NO**
+`if (p->GameID() != GameID())` guard, so the originator is
+ALWAYS in the fan-out set. That makes 0x005F a **positive
+direct-reply assertion target even in a single-player test**:
+send the emote, receive 0x005F back at the sender. Strictly
+stronger than a survival probe (correlates handler output to
+handler input, not just "pipeline alive").
+
+### 11B canonical payload
+
+`[int32 GameID=0x12345678 LE][byte Unknown1=0x01][short ChatSize=4 LE][byte[4] message={0x02, 0xAB, 0xCD, 0xEF}]`
+
+* **message[0]=0x02** — the literal sentinel that drives the
+  emote branch. HandleChatStream defaults to the chat-broadcast
+  branch for any other first byte.
+* **0xABCDEF tail** — recognisable sentinel bytes that
+  round-trip verbatim through the handler's
+  `memcpy(buf+7, Chat->message, Chat->ChatSize)`.
+* **GameID=0x12345678** sentinel proves the int32 field gets
+  echoed correctly through the AddData/memcpy machinery.
+
+0x005F reply wire layout (mirror of the handler's buffer build):
+`[short ChatSize=4 LE][byte 0x01][int32 GameID=0x12345678 LE][byte[4] message={0x02,0xAB,0xCD,0xEF}]`
+
+Test asserts: payload length == 7+ChatSize (11B), short echo,
+the literal 0x01 byte, GameID echo, full message byte-for-byte
+equality.
+
+### Login-stage race — why the test retries the send
+
+`SectorHandshake.EstablishAsync` returns when 0x0005 START
+arrives (sent from login stage 7 by StationLogin2 at
+server/src/SectorManager.cpp:526), but `AddPlayerToSectorList`
+only runs in **login stage 10**'s `HandleLoginStage3`
+(server/src/SectorManager.cpp:307-322 + 390-405) — and
+stage 10 fires after the proxy auto-ACKs three 0x2020
+LoginStageConfirm frames the server emits in stages 2/5/8
+(proxy/UDPProxyToClient_linux.cpp:593-616 intercepts these,
+sends 0x2021 back with the 4-byte int32_t stage, and does
+NOT forward to the client).
+
+Empirically the start-to-stage-10 gap is multiple seconds.
+
+**The race**: `Player::PulsePlayerInput`
+(server/src/PlayerConnection.cpp:87) runs every tick
+regardless of login stage, so an early 0x005E IS dispatched
+into HandleChatStream's emote branch — but `SendToSector`
+walks an all-zeros bitmap (pre-stage-10) and the reply fans
+out to nobody. Silently dropped.
+
+**There is no observable positive signal for stage-10 completion**:
+
+* `AddPlayerToSectorList` is silent (just flips a bitmap bit).
+* `CompleteLogin` (server/src/PlayerClass.cpp:431-446) is
+  silent on the wire.
+* `HandleStartAck`'s SendLoginCamera path
+  (server/src/PlayerConnection.cpp:1616) is gated on
+  `sector < MAX_SECTOR_ID` (=9999 per server/src/Net7.h:363)
+  which **excludes station sectors like 10151**.
+
+So the test sends 0x005E in a retry loop: each attempt sends
+once, waits up to 2s for 0x005F, and if nothing arrives, sends
+again. Once stage 10 fires, the next emote produces the reply.
+Outer bound: 90s CTS, 30 attempts × 2s each.
+
+### CLAUDE.md compliance — why retry, not server-side change
+
+The alternative ways to "fix" this race would be:
+
+1. **Add a positive "I'm on the sector list now" signal to
+   the server.** Inventing a new wire emission that the retail
+   server doesn't emit → server-integrity rule violation
+   (NEVER make the server emit behaviour the real server did
+   not emit; preservation value evaporates).
+
+2. **Relax `SendToSector`'s silent-drop behaviour so it
+   buffers and replays once the player is registered.**
+   Changes semantics — retail fan-out is fire-and-forget. Tool
+   convenience justification not acceptable.
+
+3. **Lift the `sector < 9999` gate on SendLoginCamera so it
+   fires for stations too.** Would emit a CAMERA_CONTROL to
+   the client where retail doesn't → wire divergence.
+
+All three are flatly forbidden by CLAUDE.md:
+> "NEVER weaken, relax, or loosen the server's security
+> posture to satisfy a tooling consumer."
+> "NEVER make the server accept inputs or behaviour the real
+> server did not."
+> "If a tool needs something the server doesn't expose, the
+> tool is wrong, not the server."
+
+The retry loop is a **pure test-side adaptation**. The server
+runs unchanged. The test models the real client's pattern of
+repeated user input during login (a real player firing emote
+keys before fully zoned-in would see the same silent-drop
+behaviour, then succeed once stage 10 fires).
+
+### Discovery during candidate triage
+
+Initial draft sent the emote and drained 400 frames once, then
+asserted. That worked in isolation **by coincidence** (the 7s
+session window happened to span stage 10 for that one run) but
+was flaky across attempts.
+
+**Diagnosis**: the very first 0x005F WAS hitting the reply
+path but `SendToSector`'s bitmap was empty for the originator
+pre-stage-10. Confirmed by reading PlayerManager.cpp's
+13-stage state machine (lines 540-604) — stages 1/4/7/10 are
+work-doers, 2/5/8/11 send LoginStageConfirm, 3/6/9/12 wait
+for ack via WaitForLoginAck, stage 13 = CompleteLogin.
+
+The cadence (WaitForLoginAck 10s timeout with resend every
+~2s, counter only increments on `m_UDPQueue->Count()==0`)
+means the start-to-stage-10 wall time is "as fast as the
+proxy auto-ACKs round-trip, × 3" — which on a contended
+docker host with realistic kernel scheduling can stretch to
+several seconds.
+
+Retry-loop fix matches reality without changing the server.
+
+### 6 regression classes covered
+
+(a) **ChatStream long-revert in PacketStructures.h** —
+long-widening of GameID would shift `Unknown1` past the
+wire-payload byte; the dispatcher would mis-decode and the
+emote branch would fire on the wrong byte (catches as
+missing 0x005F entirely or wrong sentinel echo).
+
+(b) **SectorClass::SendToSector originator-exclusion
+regression** — if anyone adds
+`if (p->GameID() != GameID()) continue` to the fan-out
+loop "for correctness," the single-player test stops
+receiving its own emote (catches the regression). The
+hand-rolled SendToSector at server/src/PlayerClass.cpp:3361
+with no originator guard is the **specific Net-7-vs-retail
+design choice** that this wave depends on, and the test
+pins it.
+
+(c) **HandleChatStream emote-branch byte-test regression** —
+changing `Chat->message[0] == 0x02` would silently route the
+test payload to the chat-broadcast branch instead, which
+doesn't fire 0x005F.
+
+(d) **AddData<long> template specialisation regression
+(Wave 12)** — reverting would emit 8B GameID into the reply
+buffer, shifting the message[] offsets past the wire-payload
+end on Linux, breaking the byte-for-byte sentinel equality.
+
+(e) **proxy 0x005F server→client forwarding regression** —
+`SendClientPacketSequence` walks inner `[size,opcode,data]`
+tuples (proxy/UDPProxyToClient_linux.cpp Wave 6) and
+dispatches one TCP frame per opcode; if it dropped 0x005F
+(e.g. mis-classed as a launcher opcode), the test catches
+via timeout.
+
+(f) **Login-stage state-machine breakage** — if stage 10
+never fires (e.g. WaitForLoginAck deadlock or proxy 0x2020
+interception broken), the test exhausts all 30 attempts over
+60s and fails with a descriptive error citing the suspected
+failure modes. The retry loop is not just a workaround for
+the race; it's also a load-bearing assertion that the
+state machine eventually advances.
+
+### Full-suite gotcha — fourth occurrence of the ACCOUNT_IN_USE pattern
+
+Running this test in isolation first, then re-running the
+full suite against the SAME running stack, fails with
+`G_ERROR_ACCOUNT_IN_USE` (code=13) on the new GlobalConnect.
+The prior isolation run left cli_test22 marked Active on the
+global server's PlayerManager
+(server/src/PlayerManager.cpp:396 `CheckAccountInUse`
+returns true when an Active player session exists; the
+ForceLogout side-effect runs but the function still returns
+true to surface the duplicate-login attempt to the client).
+
+**This is now the fourth wave to hit this pattern**:
+
+* Wave 18 (VERB_REQUEST, cli_test15)
+* Wave 19 (REQUEST_TARGET, cli_test16)
+* Wave 20 (REQUEST_TARGETS_TARGET, cli_test17)
+* Wave 25 (AVATAR_EMOTE, cli_test22)
+
+Mitigation: `docker compose down -v && docker compose up -d --wait`
+between runs cleans global session state. The future hardening
+(explicit LOGOFF in tests' `finally` blocks before the
+character delete pass) is becoming **strongly attractive** at
+four occurrences, but stays out of scope here — it's a Phase T
+test-infrastructure tweak, not a Phase K opcode wave.
+
+### Files touched
+
+* `tests/integration/CliClient.IntegrationTests/Opcodes/SectorAvatarEmoteTests.cs`
+  (new — uses Pool[20] cli_test22 dedicated to avoid colliding
+  with Pool[3..19]; 90s budget; 30-attempt × 2s retry loop on
+  send; xmldoc covers the login-stage race with full
+  primary-source citations + the CLAUDE.md compliance argument
+  for why the retry loop is the right answer rather than a
+  server-side change; 6 regression classes documented)
+* `tests/integration/CliClient.IntegrationTests/TestAccounts.cs`
+  (Pool gains cli_test22 entry — 9_000_022)
+* `tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql`
+  (cli_test22 INSERT row, status=100)
+* `tools/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs`
+  (+0x005E AvatarEmote and +0x005F AvatarEmoteResponse in
+  sorted positions between 0x005A VerbRequest and 0x006D
+  GlobalConnect)
+* `tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs`
+  (MinTestedCount 35→37; sorted-position entries for 0x005E
+  AVATAR_EMOTE and 0x005F AVATAR_EMOTE_RESPONSE with full
+  primary-source citations to PlayerConnection.cpp:10217 and
+  PlayerClass.cpp:3361)
+
+### Server-integrity note (per CLAUDE.md)
+
+The 11B AVATAR_EMOTE wire shape with message[0]=0x02 is
+exactly what the retail Win32 client emits when a player
+triggers an in-game emote. The SendToSector
+originator-inclusion behaviour is the existing Net-7
+retail-faithful design (no `if (p->GameID() != GameID())`
+guard). The test retry loop is a **tool-side adaptation to
+the server's real login-stage cadence**, NOT a relaxation of
+any server check. Zero permissiveness added.
+
+### Next-Phase-K targets
+
+* **0x0027 INVENTORY_MOVE** — heaviest remaining inventory
+  opcode; needs seeded inventory rows for the slot-manipulation
+  branch.
+* **0x002F INVENTORY_SWAP / 0x0030 INVENTORY_DELETE** — other
+  inventory-tier opcodes.
+* **0x004F STARBASE_RESPONSE** — paired with Wave 16's
+  STARBASE_REQUEST.
+* **0x0058 SKILL_ABILITY_USE** — cousin of Wave 17's SKILL_UP.
+* **Inverse sweep** for further direct-reply opportunities in
+  the 0x0030-0x0050 range now that AVATAR_EMOTE proved the
+  multi-attempt-with-stage-race-tolerance pattern.
+* **Test-infra hardening** (out-of-band): explicit LOGOFF in
+  tests' `finally` blocks before character delete — the
+  4-occurrence threshold of the ACCOUNT_IN_USE-after-isolation
+  pattern argues for this as a separate Phase T item.
