@@ -1130,3 +1130,97 @@ by all the avatar-management opcodes) so regressing any one of the
 underlying fixes will trip multiple tests at once.
 
 38/38 cli-integration green.
+
+---
+
+## 2026-05-24 — Phase K Wave 5: Linux sector dispatch parity + Task #70 closed as redundant
+
+Wave 5 brought the Linux sector dispatch in `proxy/ClientToServer_linux_stubs.cpp`
+to full parity with Win32 `ClientToSectorServer.cpp:15-110`. Two pieces:
+
+### Piece 1 — UDPClient::ForwardClientOpcode added to Linux
+
+The Win32 sector dispatch ends with an unconditional
+`g_ServerMgr->m_UDPConnection->ForwardClientOpcode(opcode, bytes,
+m_RecvBuffer)` (Win32 line 108). That function was defined exclusively
+in WIN32-walled `proxy/UDPProxyToClient.cpp:19-26`:
+
+```cpp
+void UDPClient::ForwardClientOpcode(short opcode, short bytes, char *packet)
+{
+    if (m_PlayerID != 0 && m_ConnectionActive)
+    {
+        SendResponse(m_ClientPort, opcode, (unsigned char*)packet, bytes);
+    }
+}
+```
+
+Reproduced verbatim into `proxy/UDPClient_linux.cpp` (5 lines, same
+gate, same SendResponse call). `m_ClientPort` is already populated on
+Linux by the existing HandleMasterJoin → SendMasterLogin → 0x2009
+confirm path (verified live by `MasterJoin.LiveMasterJoinReturnsServerRedirect`
+back in Phase J / earlier Phase K). `SendResponse(port, opcode, ...)`
+already exists in `UDPClient_linux.cpp:418`.
+
+### Piece 2 — Sector dispatch rewritten to mirror Win32
+
+`Connection::ProcessSectorServerOpcode` in `ClientToServer_linux_stubs.cpp`
+now mirrors Win32 case-by-case. The 5 previously-stubbed handlers
+(LOGIN/MOVE/STARBASE_ROOM_CHANGE/LOGOFF_REQUEST/SERVER_HANDOFF)
+gained a bottom-of-switch forward, matching Win32 — those opcodes
+need to reach the server even though the proxy's own work on them
+is a no-op. The 5 new handlers (START_ACK/TURN/TILT/ACTION/WARP)
+match Win32 line-for-line:
+
+- START_ACK 0x0006: forward + send 0x3008 STARBASE_LOGIN_COMPLETE
+  (SectorID > 9999 = starbase) OR 0x3004 PLAYER_SHIP_SENT (in-space),
+  mark LoginComplete on both UDPClient + UDPConnection. KillTCPConnection
+  in the PLAYER_SHIP_SENT branch is WIN32-walled; the equivalent close
+  happens naturally as the server tears connection state.
+
+- TURN 0x0012 / TILT 0x0013: rate-limited 1 per 250ms via existing
+  `m_Turn_Sent` / `m_Tilt_Sent` fields on Connection.
+
+- ACTION 0x002C: explicit forward + ProcessAction_Linux helper. All
+  6 Win32 sub-cases (Action 7/8/18/19/28/29) have //commented-out log
+  bodies — mirrored as no-op.
+
+- WARP 0x009B: HandleWarp_Linux helper (pre-warp SendPositionIfChanged
+  is WIN32-walled in UDPProxyMVAS.cpp — skipped on Linux as documented
+  carry-over; rubber-band UX nit, not correctness), set
+  `m_SectorTCPRequest=false`, fall through to bottom forward.
+
+Coverage unchanged at 11/207 — Wave 5 is wire-correctness/transport
+parity, not new round-trip test coverage. 38/38 cli-integration green.
+
+### Task #70 (capture-replay for global plane) closed as redundant
+
+The original framing assumed the kyp packet captures could provide
+ground-truth byte sequences for GlobalConnect/GlobalTicketRequest/
+CreateCharacter — opcodes that landed on Linux in earlier Phase K
+work. Investigation via `capture_1.txt` opcode histogram showed
+**none** of 0x6D / 0x6E / 0x6F / 0x70 / 0x71 / 0x72 appear in the
+retail captures. Reason: those opcodes are Net-7-specific additions
+on top of EA's retail Master_Join (0x35)/Account_Validate flow.
+The retail server did avatar lifecycle through different opcodes
+that Net-7 chose not to preserve.
+
+What IS in the captures: sector-plane opcodes 0x02/0x05/0x06/0x12/
+0x13/0x14/0x2C/0x9B/0x9F/0xB9 at meaningful frequencies (TURN=95,
+TILT=77, MOVE=434, ACTION=404, WARP=152). These become a usable
+replay corpus once the bidirectional UDPProxyToClient.cpp port lands
+and server→client replay testing becomes possible. Until then there's
+no point manufacturing fake "global plane" captures.
+
+Task #70 deleted; task #72 added/completed (the Wave 5 work above).
+
+### What's NOT in this wave
+
+The reverse direction of the UDP plane — `UDPProxyToClient.cpp`
+(~754 LOC, WIN32-walled) — is the next major piece. Without it,
+the server can push UDP frames toward the proxy but the proxy has
+no fan-out to translate them back into TCP frames for the client.
+That gates any test that needs server-pushed state (mob spawns,
+chat from others, ship updates, etc.). Task #69 (sector LOGIN →
+START round-trip) is part of that larger port — START is a
+server→client TCP push triggered by server-side handoff state.
