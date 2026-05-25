@@ -926,3 +926,207 @@ in incrementally — the wire decode is no longer the missing
 piece.
 
 35/35 cli-integration green after migration + codec landing.
+
+## 2026-05-24 — Phase K: sql_query SQL builder UB on Linux + CreateCharacter/DeleteCharacter round-trips
+
+This session caught four independent Linux-port bugs while wiring up
+the 0x0071 GLOBAL_DELETE_CHARACTER and 0x0072 GLOBAL_CREATE_CHARACTER
+integration tests. They're documented together because they all
+surfaced from the same root activity (exercising the global UDP plane
+on round-trips that the kyp-era Win32 build never had to validate
+against a non-Win32 toolchain) and because future maintainers debugging
+"CreateCharacter silently succeeds but no row appears" will hit them
+as a cluster.
+
+### Bug 1: `PacketMethods.h` ExtractLong cast widens 4B wire field to 8B read
+
+`server/src/PacketMethods.h:ExtractLong` reads a wire field via
+`*(long *) buf`. On Win32 `long` is 4B, matching the wire; on Linux
+x86_64 `long` is 8B. The cast over-reads by 4 bytes and consumes the
+first 4 bytes of the *next* wire field (typically the LP-string
+length prefix). The server's GetAvatarID then rejects the bogus slot
+index and the DELETE silently no-ops, the proxy waits on
+WaitForResponse for the 0x2003 refresh that never comes (~5s timeout),
+and the test fails with a generic "no response" symptom rather than
+anything pointing at the cast.
+
+Fix: cast `(int32_t *)` then widen to `long` on return (matching the
+function signature for back-compat). Two-line change. Validated
+against capture replay: the same 12-byte 0x200D wire payload from the
+in-test fixtures now decodes slot=0 instead of slot=GARBAGE.
+
+### Bug 2: PacketStructures.h ColorInfo / ShipData / GlobalCreateCharacter still `long`
+
+The e74f07c Phase R commit migrated MasterJoin/EnbUdpHeader/etc., and
+the 2026-05-24 commit migrated AvatarData/AvatarInfo/Galaxy. Three
+holdouts remained: `ColorInfo` (4× `long metal`), `ShipData` (mixed),
+and the outer `GlobalCreateCharacter` itself.
+
+  ColorInfo:           17B Win32 → 21B Linux (+1 long × 4)
+  ShipData:           207B Win32 → 226B Linux (compounded by ColorInfo)
+  GlobalCreateCharacter: 539B Win32 → 571B Linux
+
+A real Win32 client building a 539B 0x0072 payload would have its
+fields land in random server-struct positions on Linux. The
+in-process integration test caught this only because the test
+synthesises the payload to canonical 539B bytes and the server's
+decode crashed on size mismatch.
+
+Fix: convert every `long` in ColorInfo/ShipData/GlobalCreateCharacter
+to `int32_t`. ATTRIB_PACKED guards no-padding. Per-struct comments
+added documenting the migration so a future contributor doesn't
+"helpfully" change them back to `long` for "consistency". Behavioural
+change at build sites: zero — every assignment was already widening
+an int into the long anyway.
+
+### Bug 3: GlobalAvatarListCodec AvatarData offsets off by 2
+
+The 2026-05-24 codec landed `race=48`, `profession=52`, `gender=56`,
+`mood_type=60`. Those offsets assumed 2-byte alignment padding
+between the `filler1+avatar_version` block and the int-typed
+race/profession/gender/mood fields — which is what a non-packed
+struct would produce.
+
+But the wire struct is `__attribute__((packed))`. There is no
+implicit padding. The correct offsets, verified by `offsetof()`
+against the runtime build, are 46/50/54/58. The CreateCharacter
+integration test caught it because the test inserts a Terran Warrior
+(race=0, profession=0) and the codec was decoding 0 from offset 48
+which happened to also be zero in the filler — the test "passed"
+accidentally. Adding a non-zero race=2/profession=9 unit test (which
+landed alongside the fix) is what surfaced the drift.
+
+Fix: race=46, profession=50, gender=54, mood_type=58. Unit-test
+coverage in `GlobalAvatarListCodecTests` now asserts each offset
+independently, with the comment block documenting the
+ATTRIB_PACKED-eliminates-implicit-padding gotcha so this drift can't
+recur silently.
+
+### Bug 4: `sql_query` SQL builder UB on Linux (the real story)
+
+This is the only one of the four that's a portability landmine rather
+than a Phase K Linux-port omission, and the one most likely to bite
+other DAOs even after Phase N.
+
+`server/src/mysql/mysqlplus.cpp` (the legacy `sql_query` builder,
+preserved verbatim from upstream as part of Phase N's compatibility
+surface) builds INSERT statements one field at a time via:
+
+```cpp
+void sql_query::AddData(char *Field, int Value) {
+    if (m_FieldsCount == 0)
+        sprintf_s(m_Fields, sizeof(m_Fields), "\"%s\"", Field);
+    else
+        sprintf_s(m_Fields, sizeof(m_Fields), "%s, \"%s\"", m_Fields, Field);
+    // ...same pattern for m_Values...
+}
+```
+
+The `sprintf_s(buf, sz, "%s, ...", buf, ...)` pattern is **undefined
+behaviour**: the destination pointer is also passed as a `%s` source
+argument. The C standard's "no aliasing between destination and
+arguments" rule (`fprintf`/`sprintf`/`vsprintf`/`vsnprintf`) applies.
+
+On MSVC, the runtime tolerates this — its `sprintf_s` reads the
+source through a temporary copy before writing the destination, or
+the buffering shape doesn't expose the aliasing. The Win32 server
+builds and ships with this pattern relied on for ~15 years.
+
+On Linux, `server/src/Net7.h:165-170` implements a `sprintf_s` shim
+that forwards to glibc `vsnprintf` (see Phase B compat work).
+**glibc's `vsnprintf` does NOT tolerate self-aliasing destinations**
+— it walks the format string and clobbers the destination as it
+goes. The result: every multi-field INSERT silently truncates to
+only its last column. The SaveDatabase 4-INSERT chain
+(avatar_info, avatar_data, ship_info, ship_data) emitted single-column
+INSERTs like `INSERT INTO "avatar_info" ("trade") VALUES ('0')` —
+Postgres rejected on the `avatar_id` NOT-NULL constraint and the row
+never landed, but the proxy's WaitForResponse only sees the 0x2003
+refresh come back with the *unchanged* avatar list (the server's
+SendAvatarList runs regardless of whether the INSERT succeeded — it
+reads from the table that the failed INSERT didn't update). The
+client sees the same empty avatar list it sent the CREATE for and
+the test fails with "create response did not include new character"
+— pointing nowhere near the actual SQL builder.
+
+This bug is the kind that lurks indefinitely because the upstream
+Win32 build never trips it and integration tests against Postgres
+were not landing rows for *any* multi-field INSERT — but the only
+multi-field INSERTs being run were inside CreateCharacter and a
+handful of other rare flows nothing was exercising.
+
+Fix landed in `server/src/mysql/mysqlplus.cpp`:
+
+  1. Added a non-aliasing helper:
+
+     ```cpp
+     static void AppendValue(char *dst, size_t dst_size,
+                             const char *fmt, ...) {
+         char scratch[256];
+         va_list ap; va_start(ap, fmt);
+         vsnprintf(scratch, sizeof(scratch), fmt, ap);
+         va_end(ap);
+         size_t cur = strlen(dst);
+         if (cur + strlen(scratch) >= dst_size) return;
+         strcat(dst + cur, scratch);
+     }
+     ```
+
+  2. Rewrote `AddData(int/unsigned int/unsigned short/unsigned long/
+     long/float/double/char)` to call `AppendValue(m_Values,
+     sizeof(m_Values), ", '%d'", Value)` etc. instead of the
+     self-aliasing `sprintf_s`.
+
+  3. Rewrote `AddData(char *, char *)` (string variant) to bypass
+     `AppendValue`'s 256B scratch cap — string values can be arbitrary
+     length, so we offset-track and `memcpy` straight into `m_Values`:
+
+     ```cpp
+     size_t cur = strlen(m_Values);
+     size_t need = 4 + esc.size();      // ", '...'"
+     if (cur + need < sizeof(m_Values)) {
+         m_Values[cur++] = ','; m_Values[cur++] = ' ';
+         m_Values[cur++] = '\'';
+         memcpy(m_Values + cur, esc.data(), esc.size());
+         cur += esc.size();
+         m_Values[cur++] = '\''; m_Values[cur] = '\0';
+     }
+     ```
+
+  4. Same rewrite for `AddDataNQ` and `AddField`.
+
+Behavioural change on Linux: every multi-field INSERT now emits
+every column it was supposed to. Validated end-to-end: the
+CreateCharacter integration test that was failing with "create
+response did not include new character" now passes (900ms), and the
+full 38/38 cli-integration suite is green from a fresh `docker
+compose down -v`.
+
+**Server-integrity check**: this is a pure Linux-port compile-shim
+bugfix. It does not weaken any check the real server enforced. It
+restores behaviour the real server (on MSVC) always had — the SQL
+builder on Win32 was emitting full multi-field INSERTs already; only
+the Linux build was silently truncating. No CLAUDE.md escape hatch
+needed; this is the "fixing divergence from real-server behaviour"
+direction the integrity rules explicitly welcome.
+
+**Why this isn't fully solved by Phase N**: Phase N rewrote
+`mysqlplus.cpp` over libpqxx (Wave 1) and added the parameterised
+`execute()` path (Wave 2), but the legacy `sql_query` AddData /
+AddField surface was kept verbatim for binary compatibility with the
+~150 call sites that used it pre-Phase-N. The Wave 2 sweep migrated
+the call sites that were SQL-injection-prone (every sprintf-SQL); it
+did not touch the AddData chain because that chain wasn't an
+injection surface (the builder escapes inside `AddData(char*, char*)`
+via `mysql_escape_string`). The UB was in the builder's own internal
+string-concat, not in user-data handling.
+
+Coverage ratchet: 0x006E GLOBAL_TICKET_REQUEST + 0x006F GLOBAL_TICKET
++ 0x0071 GLOBAL_DELETE_CHARACTER + 0x0072 GLOBAL_CREATE_CHARACTER
+added to `TestedOpcodes.cs`, `MinTestedCount` 7→11. The four tests
+form a graph (CreateCharacter → uses DeleteCharacter for cleanup;
+GlobalTicketRequest exercises the no-avatars failure branch shared
+by all the avatar-management opcodes) so regressing any one of the
+underlying fixes will trip multiple tests at once.
+
+38/38 cli-integration green.
