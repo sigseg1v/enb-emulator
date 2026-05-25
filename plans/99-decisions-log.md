@@ -1807,6 +1807,113 @@ sector-stubs port (Wave 3). The test simply lights up an existing-but-untested p
   on `HandleTurn`/`HandleTilt` payloads — same class as the Wave 7 sweep.
 * 0x002C ACTION — combat/dock/tractor trigger.
 
+## 2026-05-25 — Phase K Wave 12: kill the `sizeof(long)` bug class at the AddData<T> template root
+
+### What landed
+
+After Wave 11 committed its first wire-relevant `long` sweep (~30 sites), a re-grep found ~34
+more `*((long *) ...)` casts I'd missed across `server/src/`, `proxy/`, and `login-server/`.
+Fixing them individually was viable but failed the brutally-honest test: every one of those
+sites would silently come back the next time someone added a new wire packet, because the
+**underlying template** in `server/src/PacketMethods.h:23` — `AddData<T>(packet, mydata, index)` —
+emits `sizeof(T)` bytes. Every `AddData(pptr, obj->GameID(), index)` call (and there are 586+
+of those across the server tree) where the second argument is `long`-typed silently writes 8
+bytes on Linux vs the wire's 4. The grep for `*((long *) ...)` doesn't surface those because
+they're parameterised template calls, not direct casts.
+
+The fix is one specialisation per file:
+* `server/src/PacketMethods.h:23` — added explicit `template <> AddData<long>` and `AddData<unsigned long>`
+  specialisations that cast through `int32_t` / `uint32_t` and advance the index by 4.
+* `server/src/AuxClasses/AuxBase.h:32` — same fix for the member-function template in `AuxBase`
+  (used by every AuxPlayer / AuxShip / etc. packet builder).
+* AccountManager.cpp / mysqlplus's `AddData(field, value)` is a different member-function
+  overload on a SQL builder class and is unaffected — verified by signature inspection.
+
+On Win32 `sizeof(long)==4`, so the specialisation is a no-op semantic change. On Linux it
+restores the canonical 4B wire shape on every AddData<long>(...) caller in one stroke —
+hundreds of latent sites fixed without a per-site touch.
+
+I also finished the manual sweep for the direct `*((long *) ...)` casts (~34 sites listed below)
+to leave the codebase clean of the pattern entirely.
+
+### Manual sweep — sites fixed (direct casts the template fix doesn't reach)
+
+* `server/src/PlayerConnection.cpp` — 14 sites: 838 (SendDataFileToClient avatar_id);
+  1055-1056 (SendPointEffect point_data); 1945+1948 (Contrails aux_data); 1958 (SendResourceName);
+  2167 (SendAuxNameSignature); 2192 (SendAuxNameResource); 2289+2290+2298 (SetResourceDrainLevel);
+  2326 (SetHuskDrainLevel AddData caller switched int32_t(0)); 2328 (SetHuskDrainLevel overwrite);
+  2370 (SendProspectAUX case 0); 2422 (SendProspectAUX case 3); 3613+3614 (SendAttackerUpdates —
+  4B+1B+4B buffer where 8B write at offset 5 would have run off the 9B end); 4359+4361
+  (SendResourceContentsAUX aux_data). Sites at 4429/4430/4436/4437 are inside `/* ... */`-commented
+  `SendResourceContentsAUXForHulk` — dead code, left as-is.
+* `server/src/SaveManager.cpp` — 2 sites in HandlePetition (1271, 1273): inbound petition packet
+  GameID + ProblemType.
+* `server/src/PlayerSaves.cpp:126` — pos_data sector-num (32B buffer, slot at offset 28 is the
+  last 4B field; 8B write would have overflowed).
+* `server/src/PlayerClass.cpp` — line 1028 (subparts overwrite); line 3332 (SendToRangeList
+  weapon-fire inbound GameID read — must be 4B to match the equality compare against this->GameID()).
+* `server/src/ServerManager.cpp:875`, `server/src/UDPConnection.cpp:106` — `*((unsigned long *)
+  host->h_addr_list[0])` was reading 8B from a 4B in_addr; fixed to uint32_t*.
+* `proxy/ServerManager.cpp:432` — h_addr_list parity fix.
+* `proxy/UDPProxyMVAS.cpp:71+182` — TerminateClient player_id read (the equality compare
+  `if (player_id == m_PlayerID)` would have silently never matched on Linux until both write-side
+  and read-side were 4B); ToggleSendFrequency g_thread_speed.
+* `proxy/ClientToSectorServer.cpp` — 7 sites: QueueAuxNameSignature (424); QueueNavigation
+  (449+452); QueueResourceName (465); QueueContrails (528+531); QueueProspectAUX case 0 (621);
+  QueueProspectAUX case 3 (665).
+* `proxy/UDPClient.cpp:326` — SignalWrongVersion. Inside a Win32-only block (calls ::MessageBox)
+  so it's not compiled on Linux, but fixed for parity.
+* `login-server/Net7SSL/UDPClient.cpp:159+164` — g_MaxPlayerCount + g_PlayerCount from inbound
+  SSL register/playercount payloads.
+
+### Why not further
+
+Sites left intentionally unchanged (same rationale as Wave 11):
+* **Internal counters / time deltas / loop indices** — never touch the wire; Linux's 64-bit `long`
+  is wider not narrower than Win32's, so narrowing would risk overflow bugs without preservation
+  benefit.
+* **`CheckQueue(... long size, long *player_id)` queue API** — the local `long player_id;` vars in
+  `PulsePlayerInput` / `SendPacketCache` must stay `long` to match the queue's pointer type.
+  Narrowing would force the queue API change or introduce a cast-through-`int32_t*` aliasing trap.
+* **`server/src/mysql/my_global.h` and `server/src/mysql/config-win.h`** — `sint4korr` / `int4store`
+  / etc. are MySQL/MariaDB upstream code. Per CLAUDE.md "server/third_party/** and vendored deps
+  ... we consume these libraries; we don't rewrite them." These headers aren't actively used in
+  the libpqxx-based Linux build but are kept for the Win32 build.
+
+### Verification
+
+`docker compose build server proxy login` clean. Fresh `docker compose down -v && docker compose
+up -d`. Server reached `BeginSectorThread sector_id=10151` cleanly (the test pre-check). Full
+integration suite 43/43 green in 2.3 minutes — every prior test still passes including the SSL
+register handshake (which exercises the `g_MaxPlayerCount` fix at login startup), the master
+join flow (exercises proxy UDP plane fixes), the chat / request-time / start-ack /
+turn-tilt rounds (exercise server-side aux_data writes through the now-specialised AddData<long>),
+and the global avatar-list round-trip (exercises GameID writes via SendOpcode through the chain).
+
+### Server-integrity compliance
+
+Per CLAUDE.md "NEVER weaken the server's security posture" and "NEVER make the server accept
+inputs the real server did not": every change here is **strictly preservation-aligned**. The
+template specialisation makes Linux's `AddData<long>(...)` behave **exactly** like Win32's
+(`sizeof(long)==4` on Win32, now `sizeof(int32_t)==4` on Linux for the same template call).
+Wire shape is restored to retail. No input validation loosened; no rate limit widened; no
+malformed-packet acceptance added. Every direct cast fix replaces a 4-extra-byte over-read
+or over-write with the 4-byte truth.
+
+### Coverage ratchet
+
+Phase K coverage ratchet unchanged at 22/207 (10.6%) — this wave is bug-class elimination, not
+opcode coverage. Wave 12 unblocks Wave 13+ (next opcodes) by establishing that the wire-format
+foundation is sound; if a future opcode round-trip fails, it's now extremely unlikely to be a
+`sizeof(long)` issue.
+
+### Next targets
+
+* 0x002C ACTION — combat/dock/tractor trigger. Player::HandleAction dispatch table.
+* 0x009B WARP — HandleWarp. Linux helper exists in proxy/ClientToServer_linux_stubs.cpp:HandleWarp_Linux;
+  server-side reply path not yet exercised in tests.
+* 0x0014 MOVE — translation input; closes the basic-movement triad with TURN+TILT.
+
 ## 2026-05-25 — Phase K Wave 11: 0x0012 TURN + 0x0013 TILT survival + wire-relevant `long` sweep
 
 ### What landed

@@ -429,7 +429,8 @@ bool ServerManager::RegisterSectorServer(short first_port, short max_sectors)
            LogMessage("Unable to resolve IP address for %s\n", g_DomainName);
             return false;
 	    }
-        ip_address = *((unsigned long *) host->h_addr_list[0]);
+        // Phase K Wave 12: h_addr_list[0] is 4B IPv4.
+        ip_address = *((uint32_t *) host->h_addr_list[0]);
     //}
 
 	struct sockaddr_in address;

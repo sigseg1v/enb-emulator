@@ -123,7 +123,9 @@ void Player::SavePosition()
     *((float *) &pos_data[20]) = ori[2];
 	*((float *) &pos_data[24]) = ori[3];
 
-	*((long *) &pos_data[28]) = PlayerIndex()->GetSectorNum();
+	// Phase K Wave 12: pos_data is 32B (7 floats + 4B sector-num). The slot at
+	// offset 28 is exactly 4B; an 8B `long` write would overflow the buffer.
+	*((int32_t *) &pos_data[28]) = PlayerIndex()->GetSectorNum();
 
 	g_SaveMgr->AddSaveMessage(SAVE_CODE_STORE_POSITION, m_CharacterID, 32, pos_data);
 }

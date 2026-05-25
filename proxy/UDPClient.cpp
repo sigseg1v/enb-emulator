@@ -323,7 +323,8 @@ int UDPClient::UDP_RecvFromServer(char *buffer, int size)
 
 void UDPClient::SignalWrongVersion(char *msg)
 {
-    float version = (float)*((long *) &msg[0]);
+    // Phase K Wave 12: 4B wire version number.
+    float version = (float)*((int32_t *) &msg[0]);
 
     version = version*0.01f;
     char msg2[256];

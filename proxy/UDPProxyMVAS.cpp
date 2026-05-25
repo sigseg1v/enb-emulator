@@ -68,7 +68,9 @@ void UDPClient::MVASThread()
 
 void UDPClient::TerminateClient(char *msg)
 {
-    long player_id = *((long *) &msg[0]);
+    // Phase K Wave 12: player_id is 4B wire — m_PlayerID is too (set by an
+    // earlier 4B wire read), so equality only matches if both reads are 4B.
+    long player_id = *((int32_t *) &msg[0]);
 
     if (player_id == m_PlayerID)
     {
@@ -177,7 +179,8 @@ void UDPClient::SendPositionIfChanged()
 
 void UDPClient::ToggleSendFrequency(char *msg)
 {
-	g_thread_speed = *((long *) &msg[0]);
+	// Phase K Wave 12: 4B wire frequency value.
+	g_thread_speed = *((int32_t *) &msg[0]);
 	if (g_thread_speed < 1 || g_thread_speed > 20)
 	{
 		LogMessage("Warning: Bad frequency received: %d\n", g_thread_speed);

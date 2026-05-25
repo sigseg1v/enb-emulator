@@ -421,7 +421,9 @@ void Connection::QueueAuxPacket(u8* packet, short &index, long game_id, char *na
 	}
 
 	short length = strlen(name);
-	*((long *) aux_data) = game_id;
+	// Phase K Wave 12: 4B GameID at offset 0 — Linux `long*` would push the
+	// next short header from offset 4 to offset 8 and corrupt the packet.
+	*((int32_t *) aux_data) = game_id;
 	*((short *) &aux_data[4]) = length + addon;
 	*((u8 *) &aux_data[6]) = 0x01;
 	*((u8 *) &aux_data[7]) = packet1;
@@ -446,10 +448,12 @@ void Connection::QueueAuxPacket(u8* packet, short &index, long game_id, char *na
 		char has_visited = (sig_flags & HAS_VISITED) ? 1 : 0;
 		char is_huge = (sig_flags & IS_HUGE) ? 1 : 0;
 
-		*((long *) &aux_data[0]) = game_id;
+		// Phase K Wave 12: NAVIGATION packet — 14B layout (4+4+1+4+1). All
+		// `long*` slots are 4B wire.
+		*((int32_t *) &aux_data[0]) = game_id;
 		*((float *) &aux_data[4]) = sig;
 		*((char *) &aux_data[8]) = has_visited;
-		*((long *) &aux_data[9]) = (sig_flags & 0x0F);
+		*((int32_t *) &aux_data[9]) = (sig_flags & 0x0F);
 		*((char *) &aux_data[13]) = is_huge;
 
 		QueueResponse(packet, index, ENB_OPCODE_0099_NAVIGATION, (unsigned char *) &aux_data, 14);
@@ -462,7 +466,8 @@ void Connection::QueueResourceName(u8* packet, short &index, long resourceID, ch
 	unsigned char aux_data[128]; 
 	memset(aux_data, 0, 128);
 	short length = strlen(resource_name);
-	*((long *) aux_data) = resourceID;
+	// Phase K Wave 12: 4B resourceID at offset 0.
+	*((int32_t *) aux_data) = resourceID;
 	*((short *) &aux_data[4]) = length + 4;
 	*((short *) &aux_data[6]) = 0x1201;
 	*((short *) &aux_data[8]) = length;
@@ -525,10 +530,12 @@ void Connection::QueueContrails(u8* packet, short &index, long player_id, bool c
 
 	if (contrails == true)
 	{
-		*((long*) &aux_data[15]) = 1;
+		// Phase K Wave 12: aux_data is 19B (4B GameID + 6B header + 4B + 4B + 4B);
+		// slot at offset 15 is the last 4B field, slot at offset 0 is GameID.
+		*((int32_t*) &aux_data[15]) = 1;
 	}
 
-	*((long *) aux_data) = player_id;
+	*((int32_t *) aux_data) = player_id;
 
 	QueueResponse(packet, index, ENB_OPCODE_001B_AUX_DATA, aux_data, sizeof(aux_data));
 }
@@ -611,7 +618,8 @@ void Connection::QueueProspectAUX(u8* packet, short &index, long value, int type
 				0x00, 0x00, 0x00, 0x00
 			};
 
-			*((long *) &aux_data[15]) = value;
+			// Phase K Wave 12: 4B wire slot inside 27B aux_data.
+			*((int32_t *) &aux_data[15]) = value;
 
 			QueueResponse(packet, index, ENB_OPCODE_001B_AUX_DATA, aux_data, sizeof(aux_data));
 		}
@@ -655,7 +663,8 @@ void Connection::QueueProspectAUX(u8* packet, short &index, long value, int type
 				0x02, 0x00, 0x01,								//equipitem flags
 				0x10, 0x20, 0x00, 0x00							//itemstats
 			};
-			*((long *) aux_data) = value;
+			// Phase K Wave 12: 4B GameID at offset 0.
+			*((int32_t *) aux_data) = value;
 			QueueResponse(packet, index, ENB_OPCODE_001B_AUX_DATA, aux_data, sizeof(aux_data));
 		}
 		break;

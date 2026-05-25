@@ -27,6 +27,27 @@ static void AddData(unsigned char *packet, T mydata, int &index)
 	index += sizeof(T);
 }
 
+/* Phase K Wave 12: Win32 `long` is 4B, Linux `long` is 8B, wire is always 4B.
+** Every AddData<long>(...) call (e.g. AddData(pptr, obj->GameID(), index) where
+** GameID returns long) would otherwise emit 8 bytes on Linux, corrupting every
+** wire offset downstream. Force 4-byte emission via int32_t cast. Same applies
+** to unsigned long. AccountManager / mysqlplus AddData(field, value) is a
+** different (member-function) overload and is unaffected.
+*/
+template <>
+inline void AddData<long>(unsigned char *packet, long mydata, int &index)
+{
+	*((int32_t *) &packet[index]) = (int32_t) mydata;
+	index += 4;
+}
+
+template <>
+inline void AddData<unsigned long>(unsigned char *packet, unsigned long mydata, int &index)
+{
+	*((uint32_t *) &packet[index]) = (uint32_t) mydata;
+	index += 4;
+}
+
 /* Adds the string only */
 static void AddDataS(unsigned char *packet, char *mydata, int &index)
 {

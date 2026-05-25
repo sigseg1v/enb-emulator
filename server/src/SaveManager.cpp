@@ -1267,10 +1267,13 @@ void SaveManager::HandlePetition(long player_id, short bytes, unsigned char *dat
 	const char *email = "unknown", *username = "unknown", *name = "unknown";
 
 	// parse packet
+	// Phase K Wave 12: inbound petition packet — GameID and ProblemType are
+	// each 4B wire slots; reading via `long*` on Linux pulls 8B and corrupts
+	// the next field.
 	char *p = (char *)data;
-	long GameID = *((long *) p);
+	long GameID = *((int32_t *) p);
 	p += 4;
-	long ProblemType = *((long *) p);
+	long ProblemType = *((int32_t *) p);
 	p += 4;
 	char *Subject = p;
 	p += strlen(p) + 1;

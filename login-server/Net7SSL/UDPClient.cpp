@@ -156,12 +156,15 @@ void UDPClient::RecvThread()
 				switch (opcode)
 				{
 				case ENB_OPCODE_4001_SSL_REGISTER_S_SSL:
-					g_MaxPlayerCount = *((long *) &msg[0]);
+					// Phase K Wave 12: inbound SSL register payload — count is
+					// a 4B wire value, not Linux's 8B `long`.
+					g_MaxPlayerCount = *((int32_t *) &msg[0]);
                     g_LoggedIn = true;
 					break;
 
 				case ENB_OPCODE_4002_SSL_PLAYERCOUNT:
-					g_PlayerCount = *((long *) &msg[0]);
+					// Phase K Wave 12: same as above.
+					g_PlayerCount = *((int32_t *) &msg[0]);
 					break;
 
 				case ENB_OPCODE_4004_SSL_AVATARCONFIRM_S_SSL:

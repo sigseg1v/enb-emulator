@@ -103,7 +103,9 @@ unsigned long GetLocalAddr()
 		if (hp != NULL)	
 		{
 			strcpy_s(localname, sizeof(localname), hp->h_name);
-			addr = *((unsigned long *) hp->h_addr_list[0]);
+			// Phase K Wave 12: h_addr_list[0] is 4B IPv4 — `unsigned long*` reads
+			// 8B on Linux which corrupts addr.
+			addr = *((uint32_t *) hp->h_addr_list[0]);
 		}
 	}
 

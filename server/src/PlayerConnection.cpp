@@ -835,7 +835,8 @@ void Player::SendDataFileToClient(char *filename, long avatar_id)
 			fread(buffer, 1, length, f);
 			if (avatar_id)
 			{
-				*((long *) &buffer[4]) = avatar_id;
+				// Phase K Wave 12: 4B wire avatar-id slot at file offset 4.
+				*((int32_t *) &buffer[4]) = avatar_id;
 			}
 			if(m_LoginConnection)
 			{
@@ -1052,8 +1053,11 @@ void Player::PointEffect(float *position, short effect_id, float scale)
 		0x00, 0x00, 0x00, 0x00
 	};  
 
-	*((long *) &point_data[0]) = sm->GetSectorNextObjID();
-	*((long *) &point_data[4]) = GetNet7TickCount() + 200;
+	// Phase K Wave 12: wire fields are 4B; see comment block near SendOpcode
+	// (line ~792) for the sizeof(long) regression class. point_data[] layout
+	// comments confirm 4-byte slots at offsets 0/4/8/12/16.
+	*((int32_t *) &point_data[0]) = sm->GetSectorNextObjID();
+	*((int32_t *) &point_data[4]) = GetNet7TickCount() + 200;
 	*((float *) &point_data[8]) = position[0];
 	*((float *) &point_data[12]) = position[1];
 	*((float *) &point_data[16]) = position[2];
@@ -1942,20 +1946,25 @@ void Player::Contrails(long player_id, bool contrails)
 
 	if (contrails == true)
 	{
-		*((long*) &aux_data[15]) = 1;
+		// Phase K Wave 12: aux_data[15..19] is a 4B wire slot (see initialiser).
+		*((int32_t*) &aux_data[15]) = 1;
 	}
 
-	*((long *) aux_data) = player_id;
+	// Phase K Wave 12: player_id is wire-emitted as 4B (GameID slot at offset 0).
+	*((int32_t *) aux_data) = player_id;
 
 	SendOpcode(ENB_OPCODE_001B_AUX_DATA, aux_data, sizeof(aux_data));
 }
 
 void Player::SendResourceName(long resourceID, char *resource_name)
 {
-	unsigned char aux_data[64]; 
+	unsigned char aux_data[64];
 	memset(aux_data, 0, 64);
 	short length = strlen(resource_name);
-	*((long *) aux_data) = resourceID;
+	// Phase K Wave 12: resourceID is a 4B GameID slot at offset 0 (length+4
+	// header at offset 4 confirms — 8B GameID on Linux would push the header
+	// to the wrong offset).
+	*((int32_t *) aux_data) = resourceID;
 	*((short *) &aux_data[4]) = length + 4;
 	*((short *) &aux_data[6]) = 0x1201;
 	*((short *) &aux_data[8]) = length;
@@ -2154,7 +2163,9 @@ void Player::SendAuxNameSignature(Object *obj)
 
 	int length = strlen(name);
 	char *packet = (char*)_alloca(length + 15);
-	*((long *) packet) = obj->GameID();
+	// Phase K Wave 12: GameID is 4B wire slot at offset 0 — the (length+9)
+	// inline-length at offset 4 confirms the slot is exactly 4B wide.
+	*((int32_t *) packet) = obj->GameID();
 	*((short *) &packet[4]) = length + 9;
 	packet[6] = 0x01;
 	packet[7] = 0x72;
@@ -2164,7 +2175,7 @@ void Player::SendAuxNameSignature(Object *obj)
 	packet[i++] = nav;
 	*((float *) &packet[i]) = sig;
 
-	SendOpcode(ENB_OPCODE_001B_AUX_DATA, (unsigned char *) packet, length+15);    
+	SendOpcode(ENB_OPCODE_001B_AUX_DATA, (unsigned char *) packet, length+15);
 }
 
 void Player::SendAuxNameResource(Object *obj)
@@ -2179,7 +2190,9 @@ void Player::SendAuxNameResource(Object *obj)
 		length = obj->NameLen();
 	}
 
-	*((long *)  &packet[0]) = obj->GameID();
+	// Phase K Wave 12: GameID is 4B wire slot at offset 0 — the (length+5)
+	// inline-length at offset 4 confirms the slot is exactly 4B wide.
+	*((int32_t *) &packet[0]) = obj->GameID();
 	*((short *) &packet[4]) = length + 5;
 	packet[6] = 0x01;
 	packet[7] = 0x16;
@@ -2276,8 +2289,10 @@ void Player::SetResourceDrainLevel(Object *obj, long slot)
 		0x00, 0x00, 0x00, 0x00  // amount of colour left in resource - 0 is collapse
 	};
 
-	*((long *) aux_data) = obj->GameID();
-	*((long *) &aux_data[8]) = slot_index;
+	// Phase K Wave 12: aux_data is the 28-byte initializer above; all slots
+	// at offsets 0/8/16 are 4B wire slots (GameID, slot_index, stack count).
+	*((int32_t *) aux_data) = obj->GameID();
+	*((int32_t *) &aux_data[8]) = slot_index;
 	*((float *) &aux_data[24]) = obj->ResourceRemains();
 
 	if (obj->GetStack(slot) > 0)
@@ -2285,8 +2300,8 @@ void Player::SetResourceDrainLevel(Object *obj, long slot)
 		length = 24;
 		*((char *) &aux_data[4]) = 0x12;  //new size
 		*((char *) &aux_data[14]) = 0x22; //indicates partial removal
-		*((long *) &aux_data[16]) = obj->GetStack(slot) ; //resource remaining in this slot
-		*((float *) &aux_data[20]) = obj->ResourceRemains(); 
+		*((int32_t *) &aux_data[16]) = obj->GetStack(slot) ; //resource remaining in this slot
+		*((float *) &aux_data[20]) = obj->ResourceRemains();
 	}
 
 	SendOpcode(ENB_OPCODE_001B_AUX_DATA, aux_data, length); //this seems to initiate resource collapse or drains the resource according to last float val
@@ -2309,9 +2324,12 @@ void Player::SetHuskDrainLevel(Object *obj, long slot)
 	AddData(pptr, short(0), index);
 	AddBuffer(pptr, aux_data, 11, index);
 	AddData(pptr, 0xFFFFFFFE, index);
-	AddData(pptr, long(0), index);
+	// Phase K Wave 12: trailing zero is a 4B wire slot — AddData(long) emits
+	// 8B on Linux which would push the offset for the slot_index overwrite
+	// below off by 4. Use int32_t to match the wire shape.
+	AddData(pptr, int32_t(0), index);
 
-	*((long *) &pptr[9]) = slot_index;
+	*((int32_t *) &pptr[9]) = slot_index;
 	*((short *) &pptr[4]) = (index - 6); //set info length
 
 	SendOpcode(ENB_OPCODE_001B_AUX_DATA, pptr, index);
@@ -2350,7 +2368,8 @@ void Player::SendProspectAUX(long value, int type)
 				0x00, 0x00, 0x00, 0x00
 			};
 
-			*((long *) &aux_data[15]) = value;
+			// Phase K Wave 12: 4B wire slot inside the 27B aux_data initializer.
+			*((int32_t *) &aux_data[15]) = value;
 
 			SendOpcode(ENB_OPCODE_001B_AUX_DATA, aux_data, sizeof(aux_data));
 		}
@@ -2402,7 +2421,8 @@ void Player::SendProspectAUX(long value, int type)
 				0x02, 0x00, 0x01,								//equipitem flags
 				0x10, 0x20, 0x00, 0x00							//itemstats
 			};
-			*((long *) aux_data) = value;
+			// Phase K Wave 12: 4B GameID wire slot at offset 0.
+			*((int32_t *) aux_data) = value;
 			SendOpcode(ENB_OPCODE_001B_AUX_DATA, aux_data, sizeof(aux_data));
 		}
 		break;
@@ -3590,8 +3610,11 @@ void Player::SendAttackerUpdates(long mob_id, long update)
 		0x00, 0x00, 0x00, 0x00 //[5]
 	};
 
-	*((long *) &attacker_data[0]) = update;
-	*((long *) &attacker_data[5]) = mob_id;
+	// Phase K Wave 12: attacker_data is a 9-byte buffer (4B update + 1B + 4B
+	// mob_id). The original wrote 8B at offset 5 which would have run off the
+	// end on Linux; pin both slots to 4B.
+	*((int32_t *) &attacker_data[0]) = update;
+	*((int32_t *) &attacker_data[5]) = mob_id;
 
 	SendOpcode(ENB_OPCODE_008B_ATTACKER_UPDATES, attacker_data, sizeof(attacker_data));
 }
@@ -4333,9 +4356,11 @@ void Player::SendResourceLevel(long target_id)
 			0x00, 0x00,	0x00, 0x00
 		};
 
-		*((long *) aux_data) = target_id;
+		// Phase K Wave 12: aux_data is the 18-byte initializer above; GameID
+		// at offset 0, float at offset 10, level at offset 14 — all 4B wire.
+		*((int32_t *) aux_data) = target_id;
 		*((float *) &aux_data[10]) = resource_remains;
-		*((long *) &aux_data[14]) = obj->Level();
+		*((int32_t *) &aux_data[14]) = obj->Level();
 
 		SendOpcode(ENB_OPCODE_001B_AUX_DATA, aux_data, sizeof(aux_data));
 	}

@@ -43,6 +43,38 @@ protected:
 		}
 	}
 
+	/* Phase K Wave 12: same fix as PacketMethods.h AddData<long>. Win32 long
+	** is 4B, Linux long is 8B, wire is 4B. Force 4-byte emission for long /
+	** unsigned long via explicit specialisation so AuxBase::AddData(buf, x, i)
+	** where x is a `long`-returning expression (GameID, etc.) emits the
+	** correct 4-byte wire shape on Linux instead of 8 bytes.
+	*/
+	void AddData(unsigned char *buffer, long data, long &index)
+	{
+		if (sizeof(int32_t) + index < m_Max_Buffer)
+		{
+			*((int32_t *) &buffer[index]) = (int32_t) data;
+			index += 4;
+		}
+		else
+		{
+			printf("Error: Bufferoverflow in Aux!");
+		}
+	}
+
+	void AddData(unsigned char *buffer, unsigned long data, long &index)
+	{
+		if (sizeof(uint32_t) + index < m_Max_Buffer)
+		{
+			*((uint32_t *) &buffer[index]) = (uint32_t) data;
+			index += 4;
+		}
+		else
+		{
+			printf("Error: Bufferoverflow in Aux!");
+		}
+	}
+
 	void AddString(unsigned char *, char *, long &);
 	void AddFlags(unsigned char *, unsigned int, unsigned char *, long &);
 

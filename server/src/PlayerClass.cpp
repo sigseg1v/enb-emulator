@@ -1025,7 +1025,9 @@ void Player::SendSubparts(Player *player_to_send_to)
 			AddData(subparts, ntohl(m_Database.ship_info.engine), index);
 			if (Profession() == PROFESSION_TRADER && Race() == RACE_TERRAN && PlayerIndex()->RPGInfo.GetHullUpgradeLevel() >= 5)
 			{
-				*((long*) &subparts[4]) = ntohl(6);
+				// Phase K Wave 12: 4B wire slot inside the subparts packet
+				// buffer — overwriting the slot AddData put there at offset 4.
+				*((int32_t*) &subparts[4]) = ntohl(6);
 				AddDataS(subparts,"~02/~03_03", index);
 				index++;
 				AddData(subparts, ntohl(m_Database.ship_info.engine), index);
@@ -3327,7 +3329,10 @@ void Player::SendToRangeList(short opcode, unsigned char *data, size_t length, b
 	{
 		if (weapon_fire)
 		{
-			long player_id = *((long*) &data[2]);
+			// Phase K Wave 12: data is a wire packet; the GameID slot at
+			// offset 2 is 4B (matches the comparison against this->GameID()
+			// which is a 4B wire GameID).
+			long player_id = *((int32_t*) &data[2]);
 			if (m_WeaponsPerTick < MAX_WEAPON_FIRE_PER_TICK || player_id == this->GameID()) //always ensure player's own weapons are shown
 			{
 				p->SendOpcode(opcode, data, length);
