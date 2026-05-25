@@ -1,4 +1,9 @@
 // Net7.h
+//
+// Phase M: server-native-Linux only. The Win32 build of net7proxy is
+// not maintained — the proxy is the TCP entry point for the Westwood
+// RSA+RC4 handshake on port 3801, not a client launcher. Win32 branches
+// were stripped to remove cross-platform parity that nothing exercises.
 
 #ifndef _NET_7_H_INCLUDED_
 #define _NET_7_H_INCLUDED_
@@ -17,29 +22,6 @@
 #include <math.h>
 #include <ctype.h>
 
-#ifdef WIN32
-#include <crtdbg.h>
-#pragma warning(disable:4996)
-
-
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN		// Exclude rarely-used stuff from Windows headers
-#endif
-
-#include <windows.h>
-#include <winsock2.h>
-#include <objbase.h>
-#include <process.h>
-#include <malloc.h>
-#define SERVER_LOGS_PATH        "..\\logs\\"
-#define SERVER_HTML_PATH        "..\\html\\"
-#define SERVER_DATABASE_PATH	"..\\database\\"
-#define SERVER_USER_PATH		"..\\database\\Users\\"
-#else // Linux
-// Phase M: the legacy code references Win32 typedefs (DWORD, HANDLE,
-// SOCKET, ...) and helpers (Sleep, GetTickCount) directly. Inline them
-// here as thin POSIX wrappers; the per-target `compat/` shim directory
-// that used to provide them was deleted in Phase M.
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -53,31 +35,27 @@
 #include <strings.h>
 #include <cstdint>
 #include <ctime>
-// _vsnprintf is the msvcrt name; POSIX has vsnprintf.
+#include <limits.h>
+
+// MSVC names that legacy code uses; map to their POSIX equivalents.
 #define _vsnprintf  vsnprintf
-// Win32 sockets API names that legacy code uses:
 #define closesocket(s) ::close(s)
 #define WSAGetLastError() errno
-// MSVC-only directives the compiler doesn't understand on gcc:
+
+// MSVC-only directives gcc doesn't understand.
 #define __cdecl
 #ifndef WINAPI
 #define WINAPI
 #endif
-// MAX_PATH is a Win32 idiom; default to PATH_MAX semantics.
-#include <limits.h>
+
 #ifndef MAX_PATH
 #define MAX_PATH 260
 #endif
 
-// Phase M Wave 3: the proxy used to ship a ~25-symbol Win32 typedef shim
-// here (DWORD/HANDLE/LPVOID/LPTSTR/INVALID_HANDLE_VALUE/INFINITE/WAIT_*/
-// /BYTE/BOOL/WORD/LONG/LONGLONG/ULONGLONG/ULONG/UINT/SOCKADDR_IN/TRUE/
-// FALSE/TEXT/_T/...). Every typedef that had zero Linux-active call
-// sites was deleted. The five that remain — SOCKET (60+ Linux-active
-// sites across the listener/connection layer), INVALID_SOCKET,
-// SOCKET_ERROR (sentinel idioms in the same files), and the closesocket
-// / WSAGetLastError macros above — kept because rewriting them would
-// touch every accept/listen/recv site without changing behaviour.
+// Phase M Wave 3: the proxy's ~25-symbol Win32 typedef shim was retired.
+// Only SOCKET / INVALID_SOCKET / SOCKET_ERROR are kept — 60+ Linux-active
+// call sites across the listener/connection layer use them as canonical
+// socket idioms, and rewriting them is cosmetic.
 typedef int SOCKET;
 #ifndef INVALID_SOCKET
 #  define INVALID_SOCKET (-1)
@@ -86,41 +64,25 @@ typedef int SOCKET;
 #  define SOCKET_ERROR   (-1)
 #endif
 
-// Phase M: Sleep() and GetTickCount() were inlined Win32-name shims here;
-// they've been retired. Live call sites use ::usleep(ms * 1000) and
-// Net7TickMs() (declared in <net7/Ticks.h>, included below) directly.
-
 // The Net7Proxy logs/database paths are unused on the server-side Linux
 // build (Net7Proxy was originally a client-side launcher). Keep the names
 // defined so any legacy reference compiles.
 #define SERVER_LOGS_PATH        "./logs/"
 #define SERVER_HTML_PATH        "./html/"
 #define SERVER_DATABASE_PATH	"./database/"
-#define SERVER_USER_PATH		"./database/Users/"
-#endif
+#define SERVER_USER_PATH        "./database/Users/"
 
-#define CONFIG_FILE				"Net7Config.cfg"
-#ifdef WIN32
-#pragma pack(1)
-#define ATTRIB_PACKED
-#else
+#define CONFIG_FILE             "Net7Config.cfg"
+
 // gcc equivalent of MSVC's #pragma pack(1) / __declspec(packed).
 // Applied per-struct via the ATTRIB_PACKED suffix (see PacketStructures.h).
 #define ATTRIB_PACKED __attribute__((packed))
-#endif
 
-#ifdef WIN32
-typedef unsigned __int64 u64;
-typedef signed __int64  s64;
-typedef unsigned __int32 u32;
-typedef signed __int32  s32;
-#else
 #include <stdint.h>
 typedef uint64_t u64;
 typedef int64_t  s64;
 typedef uint32_t u32;
 typedef int32_t  s32;
-#endif
 typedef unsigned short  u16;
 typedef signed short    s16;
 typedef unsigned char   u8;
@@ -185,12 +147,11 @@ void LogDebug(char *format, ...);
 void LogChatMsg(char *format, ...);
 void DumpBuffer(unsigned char *buffer, int length);
 void DumpBufferToFile(unsigned char *buffer, int length, char *filename, bool rawData);
+// engine_* + ClientStillRunning + PatchClient + ShutdownClient are no-op
+// stubs on Linux (server-native build). They remain declared because
+// WIN32-walled translation units name them in their declarations.
 bool engine_open_process(char * processwindowtitle);
-#ifdef WIN32
-bool engine_read_process(LPVOID lpBaseAddress, LPVOID lpBuffer, DWORD nSize);
-#else
 bool engine_read_process(void* lpBaseAddress, void* lpBuffer, uint32_t nSize);
-#endif
 bool GetProcessHandle();
 bool StartENBClient();
 void PatchClient();
@@ -221,11 +182,10 @@ extern bool g_OpcodeDebugging;
 extern bool g_Packet_Opt_requested;
 extern bool g_Debug_Launch;
 
+// _CrtCheckMemory was MSVC-only; on Linux this is a no-op so legacy
+// call sites in the proxy compile cleanly.
 static inline void check_memory ()
 {
-#ifdef WIN32
-    _ASSERTE (_CrtCheckMemory ());
-#endif
 }
 
 #endif // _NET_7_H_INCLUDED_
