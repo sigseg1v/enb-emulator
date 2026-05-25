@@ -1473,3 +1473,151 @@ are now in place: TCP 3500 listener (Wave 0), sector dispatch parity
 UDP listeners (Wave 7). Remaining gaps for Task #69 are purely
 proxy-side: (a) third UDPClient MVAS plane, (b) MasterJoinTests.cs:94
 AvatarIdLsb fix, (c) write SectorLoginTests.cs.
+
+---
+
+## 2026-05-25 — Phase K sector LOGIN round-trip GREEN
+
+The full sector-login handshake (Auth → GlobalConnect →
+GlobalTicketRequest → MasterJoin → sector TCP LOGIN 0x0002 → server
+0x2020 stages → server 0x0005 START) now passes end-to-end against
+the live docker-compose stack. Test
+`SectorLoginTests.FullSectorLogin_ReceivesStart` passes in 7s; the
+full 39-test integration suite passes in 2m33s.
+
+Commits: d8bfa44 (proxy Linux UDP), 7e15637 (server wire-size sweep),
+82d955f (Phase N stored-proc inlining), ea6d695 (ServerManager
+fflush + logoutOnShutdown), 3ecc04a (integration test + fixture probe
++ ticket-format fix).
+
+### Three independent root causes
+
+**(1) Proxy SendPacketSequence calling convention.** This was the
+session's hardest bug. The Linux `UDPClient::RecvThread` was calling
+`SendPacketSequence(msg, header, false)` for both `0x2016
+PACKET_SEQUENCE` and `0x201A PACKET_C_SEQUENCE`, where `msg` pointed
+at the payload (m_RecvBuffer + sizeof(EnbUdpHeader)). But
+`SendPacketSequence` stores `header->size` bytes from its first arg
+and later re-casts that buffer back to `EnbUdpHeader` inside
+`SendClientPacketSequence`. So the 12-byte payload prefix was being
+interpreted as a bogus header and skipped, dropping the first inner
+[length][opcode] tuple in every multi-opcode 0x2016 frame. Produced
+the canonical "bad opcode through to proxy: 0x0000 len 0x0" symptom
+that masked progress across two sessions. Win32
+`UDPClient.cpp:256/260` passes the whole packet
+(`m_RecvBuffer`) — the Linux divergence was an accidental
+restructuring during the original port. Fix: one line per case,
+pass `(char *) m_RecvBuffer`.
+
+Diagnosed via a temporary hex dump at the "bad opcode" log site that
+showed payload starting with the double "Loginus [ADMIN]"
+length-prefixed strings (15 chars each, 0x0F 00 4C 6F 67 69 6E 75 73
+20 5B 41 44 4D 49 4E 5D), proving the proxy was reading the right
+*bytes* but at the wrong *offset*.
+
+**(2) Proxy global plane unconnected.** Originally the Phase K plan
+called for a third UDPClient on the MVAS plane (connect()'d to
+server:3806). On investigation, the server's reality is different:
+`UDP_Global.cpp:227` captures `player->m_Player_Port` from the
+*source* port of the AVATARLOGIN packet (the proxy's global-plane
+source), and from then on `player->m_UDPConnection->SendResponse(...)`
+— which is the MVASauth socket on the server — writes to
+(proxy_ip, that_port). So in-game UDP arrives at the proxy's
+*global-plane source port* but from `server:3806` instead of the
+expected `server:3810`. A connected SOCK_DGRAM filters recv() by
+single peer port and silently drops the 3806 frames.
+
+Fix: switch the global plane to unconnected mode. Added
+`m_Unconnected` ctor flag to `UDPClient` (default false; Win32
+ignores), gated the connect() in `OpenFixedPort` on `!m_Unconnected`,
+branched `UDP_RecvFromServer` to `recvfrom` + source-IP whitelist when
+unconnected, branched `UDP_Send` port==0 to `sendto` against the
+default peer in `m_SockAddr` when unconnected. `Net7.cpp` constructs
+`udp_to_global` with `unconnected=true`. Same socket now handles
+both 0x2003/0x2005/0x200C/0x200E control replies from 3810 and
+0x2010/0x2016/0x201A in-game frames from 3806.
+
+Additionally, `ClientToServer_linux_stubs.cpp` needed to flip
+`m_UDPGlobalClient->SetConnectionActive(true)` on master-handoff
+confirm (the global plane's `SendPacketSequence` early-returns on
+`!m_ConnectionActive`, which would have gated the entire in-game
+fan-out path) and `SetLoginComplete(true)` on START_ACK.
+
+**(3) `sizeof(long)` wire-size sweep.** Linux x86_64 has
+`sizeof(long) == 8`; the original Net-7 server was written for
+Win32 where `sizeof(long) == 4`. Every wire-bound call site that
+passed `sizeof(long)` for what is canonically a 4-byte field was
+silently shifting subsequent inner opcodes in the UDP packet by 4
+bytes. Fixed in: `PlayerConnection.cpp` (SendOpcode,
+SendLoginStageConfirm, HandleLoginAckReturn, SendStart, admin
+Terminate, SendTalkTreeAction, LOOT_HULK_PERMISSION),
+`PlayerClass.cpp` (SendShipDataToSelf + SendShipData self-branch),
+`PlayerManager.cpp` (force-terminate), `UDP_Master.cpp`
+(ProcessHandoff). Each site now declares `int32_t foo_wire = (int32_t)
+foo;` and passes `sizeof(foo_wire)` + `&foo_wire`. Same wire-size
+class as the earlier MasterJoin / GlobalTicket / ExtractLong fixes
+from prior sessions.
+
+Also: `SectorData.h` `IS_PLAYER(x)` had a bogus `(x & 0xFFFFFFF) <
+0xFFFFF` upper bound that assumed avatar_index < 1M (node-based
+GameIDs only). Server-generated char-based GameIDs are computed as
+`account_id * 5 + slot + 1`, which routinely exceeds 1M for real
+accounts — e.g. test account 9000001 slot 0 produces CharID
+45000006. The macro was silently rejecting every server-generated
+char-based player. Dropped the upper bound; `PLAYER_TAG` bit alone is
+the canonical check, matching the macro's name.
+
+Companion fix: `PlayerManager::GetPlayer` had `long key = GameID &
+0x00FFFFFF` (capping at 24 bits). Widened to `~(PLAYER_TAG |
+MANU_TAG)` so it preserves the actual avatar_id bits unchanged.
+
+### Bonus fixes that surfaced during this work
+
+* **Phase N stored-proc inlining.** Five MySQL DELIMITER-block
+  procedures (`accLogin`, `avaLogin`, `avaLogout`, `incWarn`,
+  `logoutOnShutdown`) were silent no-ops since libpqxx can't load
+  MySQL procedures. Inlined per `db/postgres/seed.sql` bodies into
+  `SaveManager.cpp`, `AccountManager.cpp`, `ServerManager.cpp`.
+  Stripped the `net7_user.` schema qualifier from all UPDATEs — it's
+  a MySQL cross-DB construct, Postgres uses search_path.
+
+* **fflush(stdout) in LogMessage / LogMySQLMsg.** Stdout is fully
+  block-buffered without a TTY (i.e. under `docker compose logs
+  server`); every Phase K debugging round was waiting tens of seconds
+  for the buffer to fill before seeing log output. With explicit
+  flush, debugging cadence went from ~30s/iteration to ~3s.
+
+* **TlsLoginTests.ValidAccount_ReturnsValidTicket flaky assertion.**
+  The test asserted `response.Ticket.Length >= 20` with a comment
+  claiming "LinuxAuth.cpp issues a 40-character hex ticket". In
+  reality `LinuxAuth.cpp::BuildTicketLocked` emits `"%s-%d"`
+  (username + rand()). For cli_test01 (10 chars), a rand() value
+  under 100M (~4.6% of calls) produces a 19-char ticket and the
+  assertion flaked. Previous "all 39 green" runs were lucky.
+  Replaced with a format check: starts with `username + "-"` and
+  the suffix is all digits.
+
+### Why this took two sessions
+
+Three independent classes of bug compounded on the same packet path,
+each one masking the next:
+- The `sizeof(long)` bugs shifted opcodes, producing nonsensical
+  reads downstream.
+- The unconnected-socket bug meant we never even *saw* the in-game
+  frames most of the time, so the long-bugs were intermittent.
+- The SendPacketSequence calling-convention bug, once we did see
+  frames, dropped the first inner opcode silently — the diagnostic
+  "bad opcode 0x0000 len 0x0" pointed at the *symptom* (a zero
+  length tuple at offset 12, which is where the bogus skipped
+  header started) not the cause (frame parsing offset by 12 bytes).
+A hex dump at the diagnostic site was what cracked it — actually
+looking at the bytes instead of trusting the log message.
+
+### What this unblocks
+
+* Task #69 closes complete.
+* Task #74 closes complete.
+* Next Phase K work is breadth (sector enumerate / inventory /
+  movement / chat at sector scope), not handshake depth — the
+  proxy plumbing is now finished and any new opcode is "write the
+  test, watch where it breaks".
