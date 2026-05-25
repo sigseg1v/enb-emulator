@@ -131,17 +131,28 @@ void Player::SendOpcode(short opcode, unsigned char *data, long length, bool iss
 		return; //start choking packets if we're sending too many
 	}
 
-	int bytes = length + sizeof(long);
+	// Phase K (2026-05-25): inner-opcode header is [u16 length][u16 opcode]
+	// — 4 bytes total on the wire, exactly what the proxy reads in
+	// UDPProxyToClient_linux.cpp::SendClientPacketSequence. The original
+	// kyp/tada-o code used sizeof(long), which silently meant 4 on Win32
+	// (long == int32) and 8 on Linux x86_64. On Linux that shifted every
+	// payload 4 bytes past where the proxy expected it, and tagged the
+	// inner length 4 too high — the proxy then read 4 bytes of garbage as
+	// the next [length][opcode] tuple ("bad opcode through to proxy:
+	// 0x0000 len 0x0"). Use sizeof(int32_t) to lock the on-wire layout
+	// regardless of host word size. AddMessage (PulsePlayerInput's queue
+	// producer) already uses sizeof(short)*2 = 4, so it was unaffected.
+	int bytes = length + sizeof(int32_t);
 
 	//grab some buffer space from the queue. Scratch buffer is just dummy data here.
 	//this doesn't work because the buffers are circular!
 	//TODO: write an 'AddOpcode' variant of Add
 	//unsigned char * buffer = m_UDPQueue->Add(m_ScratchBuffer, bytes, GameID());
 
-	*((short *) &m_OpcodeFormingBuffer[0]) = (short) length + sizeof(long);
+	*((short *) &m_OpcodeFormingBuffer[0]) = (short)(length + sizeof(int32_t));
 	*((short *) &m_OpcodeFormingBuffer[2]) = opcode;
 
-	memcpy(m_OpcodeFormingBuffer + sizeof(long), data, length);
+	memcpy(m_OpcodeFormingBuffer + sizeof(int32_t), data, length);
 
 	m_UDPQueue->Add(m_OpcodeFormingBuffer, bytes, GameID());
 
@@ -393,9 +404,15 @@ bool Player::WaitForLoginAck(long stage)
 
 void Player::SendLoginStageConfirm(long stage)
 {
-	//send opcode to client, but don't advance the packetnum.
-	//this is so we don't flood the user with packets. Under normal conditions we should never need to use 'advance'
-	SendOpcode(ENB_OPCODE_2020_LOGIN_STAGE_S_C, (unsigned char*) &stage, sizeof(stage));
+	// Phase K: stage is 4 bytes on the wire. Retail Win32 server used
+	// `long` = 4 bytes; Linux `long` = 8 bytes would send 4 valid bytes
+	// + 4 of high-32 garbage, which a Win32 client (4-byte read) would
+	// have accepted (low 4 only) but which corrupts our own proxy ↔
+	// server stream because the Linux server reads HandleLoginAckReturn
+	// as `long` (8 bytes) too — every following opcode shifts by 4.
+	// Same class of fix as the MasterJoin / GlobalTicket migrations.
+	int32_t stage_wire = (int32_t) stage;
+	SendOpcode(ENB_OPCODE_2020_LOGIN_STAGE_S_C, (unsigned char*) &stage_wire, sizeof(stage_wire));
 }
 
 void Player::HandleClientOpcode(short opcode, short bytes, unsigned char *data)
@@ -644,7 +661,12 @@ void Player::HandleLoginStage3()
 
 void Player::HandleLoginAckReturn(unsigned char *data)
 {
-	long stage = *((long*) &data[0]);
+	// Phase K: stage is 4 bytes on the wire (see SendLoginStageConfirm
+	// comment for the long-vs-int32 history). Reading as `long` on
+	// Linux pulled 8 bytes — the 4-byte stage plus 4 bytes from the
+	// next opcode header, scrambling both the stage value and packet
+	// alignment for everything after.
+	long stage = (long) *((int32_t*) &data[0]);
 	//LogMessage("Received login stage ack %d for %s\n", stage, Name());
 	SetLoginAck(stage);
 }
@@ -1046,7 +1068,12 @@ void Player::SendStart(long start_id)
 {
 	m_SentStart = true;
 	//LogMessage("Sending Start packet %d\n", start_id);
-	SendOpcode(ENB_OPCODE_0005_START, (unsigned char *) &start_id, sizeof(start_id));
+	// Phase K: start_id is 4 bytes on the wire (matches Win32 `long`).
+	// Sending sizeof(long)=8 on Linux would push 4 garbage bytes after,
+	// corrupting the next opcode in the UDP packet sequence the proxy
+	// hands to the client. Same class of fix as MasterJoin/GlobalTicket.
+	int32_t start_id_wire = (int32_t) start_id;
+	SendOpcode(ENB_OPCODE_0005_START, (unsigned char *) &start_id_wire, sizeof(start_id_wire));
 }
 
 void Player::SendSetBBox(float xmin, float ymin, float xmax, float ymax)
@@ -1548,8 +1575,10 @@ void Player::HandleSkillStringRequest(unsigned char *data)
 		else
 		{
 loot_as_normal:
-			long id = ntohl(obj->GameID());
-			SendOpcode(ENB_OPCODE_008C_LOOT_HULK_PERMISSION, (unsigned char *)&id, sizeof(long));
+			// Phase K: wire field is 4-byte game id. sizeof(long)=8 on Linux
+			// trails 4 bytes of garbage into the UDP frame; fix via int32_t.
+			int32_t id = (int32_t) ntohl(obj->GameID());
+			SendOpcode(ENB_OPCODE_008C_LOOT_HULK_PERMISSION, (unsigned char *)&id, sizeof(id));
 			//see if there are any credits
 			AwardCreditsToGroup(obj->GetCreditLoot());
 			obj->SetCreditLoot(0);
@@ -7431,9 +7460,11 @@ void Player::HandleSlashCommands(char *Msg)
 				//send terminate to net7 proxy
 				if (p && AdminLevel() >= DEV)
 				{
-					long player_id = p->GameID();
+					// Phase K: wire field is 4-byte player id; sizeof(long)=8 on
+					// Linux x86_64 over-runs the frame.
+					int32_t player_id = (int32_t) p->GameID();
 					SendVaMessage("Terminate player %s [%d]", p->Name(), p->GameID());
-					p->SendOpcode(ENB_OPCODE_100A_MVAS_TERMINATE_S_C, (unsigned char *) &player_id, sizeof(long));
+					p->SendOpcode(ENB_OPCODE_100A_MVAS_TERMINATE_S_C, (unsigned char *) &player_id, sizeof(player_id));
 				}
 			}
 
@@ -7681,7 +7712,10 @@ void Player::SendLogoffConfirmation()
 void Player::SendTalkTreeAction(long action)
 {
 	//LogMessage("Sending TalkTreeAction packet\n");
-	SendOpcode(ENB_OPCODE_0056_TALK_TREE_ACTION, (unsigned char *) &action, sizeof(long));
+	// Phase K: wire field is 4-byte action id (values 0–8 per comments
+	// above). sizeof(long)=8 on Linux trails 4 bytes of garbage.
+	int32_t action_wire = (int32_t) action;
+	SendOpcode(ENB_OPCODE_0056_TALK_TREE_ACTION, (unsigned char *) &action_wire, sizeof(action_wire));
 }
 
 bool Player::HandleRangeRequest()

@@ -871,16 +871,21 @@ void Player::SendLoginShipData()
     SendSubparts(this);
     SendShipColorization(this, 8);    // send the ship color scheme
     
-    SendOpcode(ENB_OPCODE_0037_CLIENT_AVATAR, (unsigned char *) &m_CreateInfo.GameID, sizeof(long));
-    SendOpcode(ENB_OPCODE_0047_CLIENT_SHIP, (unsigned char *) &m_CreateInfo.GameID, sizeof(long));
-    
+    // Phase K: wire field is 4-byte GameID. m_CreateInfo.GameID is `long`
+    // (8 bytes on Linux); passing &it + sizeof(long) writes 4 bytes of high-
+    // half garbage and the client's PACKET_SEQUENCE parser walks off the
+    // inner [len][opcode] tuple. Marshal through a 4-byte temporary.
+    int32_t game_id_wire = (int32_t) m_CreateInfo.GameID;
+    SendOpcode(ENB_OPCODE_0037_CLIENT_AVATAR, (unsigned char *) &game_id_wire, sizeof(game_id_wire));
+    SendOpcode(ENB_OPCODE_0047_CLIENT_SHIP, (unsigned char *) &game_id_wire, sizeof(game_id_wire));
+
     AvatarDescription avatar;
     memset(&avatar, 0, sizeof(avatar));
-    avatar.AvatarID = GameID();  
+    avatar.AvatarID = GameID();
     memcpy(&avatar.avatar_data, &m_Database.avatar, sizeof(avatar.avatar_data));
     avatar.unknown3 = 1.0;
     avatar.unknown4 = 1.0;
-        
+
     SendOpcode(ENB_OPCODE_0061_AVATAR_DESCRIPTION, (unsigned char *) &avatar, sizeof(avatar));
     
     SendDecal(GameID(), m_Database.ship_data.decal, 2);
@@ -917,8 +922,11 @@ void Player::SendShipData(Player *player, bool is_group_member)
 
         if (this == player)
         {
-            SendOpcode(ENB_OPCODE_0037_CLIENT_AVATAR, (unsigned char *) &m_CreateInfo.GameID, sizeof(long));
-	        SendOpcode(ENB_OPCODE_0047_CLIENT_SHIP, (unsigned char *) &m_CreateInfo.GameID, sizeof(long));
+            // Phase K: see SendShipDataToSelf — sizeof(long)=8 on Linux
+            // corrupts the wire frame for this 4-byte GameID field.
+            int32_t game_id_wire = (int32_t) m_CreateInfo.GameID;
+            SendOpcode(ENB_OPCODE_0037_CLIENT_AVATAR, (unsigned char *) &game_id_wire, sizeof(game_id_wire));
+	        SendOpcode(ENB_OPCODE_0047_CLIENT_SHIP, (unsigned char *) &game_id_wire, sizeof(game_id_wire));
         }
         
         AvatarDescription avatar;

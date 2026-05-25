@@ -67,8 +67,12 @@ void UDP_Connection::ProcessHandoff(char *msg, EnbUdpHeader *hdr, const long sou
             //build response, ip addr of sector and sector port
             AddData(data, redirect.ip_address, index);
             AddData(data, redirect.port, index);
-			long game_id = player->GameID();
-			AddData(data, game_id, index);
+			// Phase K: wire payload tail is a 4-byte game id. `long` is 8
+			// bytes on Linux x86_64 so `AddData<long>` writes 8 — the proxy
+			// reads the trailing 4 as garbage and any subsequent field
+			// shifts. Cast through int32_t to lock the on-wire size.
+			int32_t game_id_wire = (int32_t) player->GameID();
+			AddData(data, game_id_wire, index);
             SendOpcode(ENB_OPCODE_2009_MASTER_HANDOFF_CONFIRM, player, data, index, source_addr, source_port);
             player->SetUDPConnection(g_ServerMgr->m_UDPConnection);
             player->SetHandoffReceived(true);

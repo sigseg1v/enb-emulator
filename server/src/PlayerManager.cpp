@@ -96,7 +96,7 @@ bool PlayerManager::SetupPlayer(Player *player, long IPaddr)
     player->SetMVASIndex(player->GameID());
 
     LogMessage("Confirmed MVAS connection for [%x]: MVAS node index %x\n", player->GameID(), player->MVASIndex());
-    return true;    
+    return true;
 }
 
 void PlayerManager::DropPlayerFromSector(Player *p)
@@ -208,7 +208,13 @@ void PlayerManager::SendPlayerWithoutConnection(long player_id)
 // Finally this is OK because all the player info is protected
 Player * PlayerManager::GetPlayer(long GameID, bool sector_login)
 {
-	long lookup_id = m_PlayerLookup[GameID & 0x00FFFFFF];
+	// Strip PLAYER_TAG/MANU_TAG (top 2 bits) to recover the CharacterID
+	// that SetupPlayer keyed m_PlayerLookup on. The original mask was
+	// 0x00FFFFFF (24 bits), which truncates any CharacterID >= 16M —
+	// AccountManager generates avatar_id = account_id*5+slot+1, which
+	// routinely exceeds that. 0x3FFFFFFF keeps the full 30-bit ID.
+	long key = GameID & ~(PLAYER_TAG | MANU_TAG);
+	long lookup_id = m_PlayerLookup[key];
 	return (m_GlobMemMgr->GetPlayerA(lookup_id, sector_login));
 }
 
@@ -436,8 +442,10 @@ void PlayerManager::TerminateAllPlayers()
 		if (p)
 		{
 			DropPlayerFromGalaxy(p);
-			long player_id = p->GameID();
-			p->SendOpcode(ENB_OPCODE_100A_MVAS_TERMINATE_S_C, (unsigned char *) &player_id, sizeof(long)); //force terminate Client & Proxy.
+			// Phase K: wire field is 4-byte player id; sizeof(long)=8 on
+			// Linux x86_64 would overrun the frame.
+			int32_t player_id = (int32_t) p->GameID();
+			p->SendOpcode(ENB_OPCODE_100A_MVAS_TERMINATE_S_C, (unsigned char *) &player_id, sizeof(player_id)); //force terminate Client & Proxy.
 			p->SendPacketCache();
 		}
 	}

@@ -28,7 +28,13 @@
 
 #define PLAYER_TAG (1<<30)
 #define MANU_TAG (1<<31)
-#define IS_PLAYER(x) (x & PLAYER_TAG && ((x & 0xFFFFFFF) < 0xFFFFF))
+// The original macro added `&& ((x & 0xFFFFFFF) < 0xFFFFF)` as a sanity
+// bound. That assumed avatar_index < 1M (node-based GameIDs only) and
+// silently rejected char-based GameIDs the server itself generates
+// (CharacterID = account_id*5+slot+1 routinely exceeds 1M — e.g.
+// account 9000001 slot 0 → CharID 45000006). The PLAYER_TAG bit alone
+// is the canonical "is this a player?" check.
+#define IS_PLAYER(x) (((x) & PLAYER_TAG) != 0)
 
 #define ASTEROID_FIELD ((char(0xFF))
  
