@@ -621,3 +621,63 @@ Linux dispatch works; that's exactly the kind of false-green CI signal
 that would let a UDP-plane regression land silently. The fix preserves
 the test's existence (still catches handshake/reply regressions) while
 removing the overclaim and restoring it under conditions where it's true.
+
+## 2026-05-24 — Phase K steady state: deferred items genuinely require multi-day infrastructure
+
+A continuation-session sweep landed `EnbUdpHeader long → int32_t` +
+two related wire bugs in `UDP_Master::ProcessHandoff` (commits e74f07c +
+76c7cae). Verifying what was left, I mapped the remaining `[~]` items
+end-to-end and confirmed the deferral is real, not a documentation
+artifact.
+
+**What I corrected.** An earlier session note claimed
+`UDP_Connection::HandleMVASOpcode` / `HandleGlobalOpcode` /
+`HandleClientOpcode` were declared but never defined and proposed
+shipping logging stubs. That was wrong — they're defined in
+`server/src/UDP_MVAS.cpp` / `UDP_Global.cpp` / `UDP_Client.cpp`
+respectively (verified via `nm net7`), the server already dispatches all
+four UDP types, and the `CONNECTION_TYPE_MASTER_SERVER_TO_PROXY` path
+goes green in CI today. The server side is structurally complete; the
+gap is exclusively wiring and upstream callers.
+
+**What's actually blocking the four `[~]` Phase K items.** The proxy →
+server global path the Win32 build used was TCP via
+`SSL_LOCALCERT_LOGIN_PORT` (3807), driven by `m_ServerTCP->SendResponse`
+on a `Connection*` from the kyp-era TCP cluster. **Phase Q deleted that
+cluster from server/src/** (15 files, see `plans/17-phase-q-...md`).
+So today: server-side handlers exist (`UDP_Connection::VerifyAccountInfo`
+/ `ProcessTicketInfo` / `HandleGlobalTicketRequest` / etc, all of which
+create `Player` and read `AccountManager` correctly) but there is no
+wire endpoint they're bound to — `ServerManager::RunMasterServer`
+explicitly comments out `udp_global_server_listener` (server/src/
+ServerManager.cpp:137) and the TCP listener it would otherwise use was
+deleted. Proxy side likewise has no surviving `Connection*` to
+`SendResponse(0x2002_TICKET, ...)` against.
+
+**Two acceptable shapes for the unblock.** (a) Resurrect a TCP listener
+on the server (essentially a slim Phase Q reversal), or (b) bind
+`UDP_GLOBAL_SERVER_PORT` on the server (the dispatcher already routes
+`CONNECTION_TYPE_GLOBAL_SERVER_TO_PROXY` to `HandleGlobalOpcode`) and
+have the proxy talk UDP to it. Either way the proxy needs a Linux port
+of `UDPProxyToGlobal.cpp` (~500 LOC, currently all WIN32-walled). This
+is multi-day work; not splitting smaller doesn't help — half-shipping it
+gives no test signal because `cli-integration` would need a new
+GlobalConnect → AvatarList scenario to validate either half. The CLI
+client surface for that path is already wired (Phase S `[!]`-blocked
+items 10–12 in `plans/19-phase-s-cli-client.md`) and the integration
+suite has a placeholder (`plans/20-phase-t-cli-integration-tests.md`
+item 5 enumerate-* `[!]`-blocked) waiting on this exact unblock.
+
+**Decision.** Leave Phase K in the current steady state. Plan-file
+items stay `[~]` with accurate notes about what remains. Do not
+half-ship scaffold code (e.g. binding a server-side UDP port with no
+proxy-side caller) — that would ship untested infrastructure and
+confuse future readers. The next session should commit to landing
+either (a) or (b) end-to-end with a `cli-integration` scenario for at
+least `GlobalConnect → AvatarList` before declaring partial progress.
+
+**Why this matters.** The `plans/` files are load-bearing across
+sessions. Marking items more done than they are, or shipping
+"infrastructure" with no caller, makes the next agent waste a session
+re-discovering what's true. The honest steady-state note is the
+better artifact.
