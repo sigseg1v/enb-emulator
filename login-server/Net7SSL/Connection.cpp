@@ -161,7 +161,12 @@ bool Connection_B::DoKeyExchange()
 		return false;		
 	}
 
-	long key_length = (long) ntohl((*((unsigned long *) buffer)));
+	// Phase K Wave 11: wire field is 4B big-endian (Win32 sizeof(long)==4).
+	// `unsigned long *` on Linux x86_64 reads 8B — OOB by 4B into the 4-byte
+	// recv buffer. Works by accident (ntohl truncates to uint32_t, the OOB
+	// high bytes are zero from buffer memset) but is UB and asymmetric with
+	// the canonical wire spec (cli-client RsaHandshake.cs:101).
+	long key_length = (long) ntohl(*((uint32_t *) buffer));
 	if ( (key_length <  WWRSA_BLOCK_SIZE) || (key_length > (WWRSA_BLOCK_SIZE + 1)) )
 	{
 		LogMessage("[%d] ERROR: DoKeyExchange key_length = %d\n", m_RecvThreadHandle, key_length);
@@ -228,12 +233,14 @@ bool Connection_B::DoClientKeyExchange()
 		return false;
 	}
 
+	// Phase K Wave 11: wire prefix is 4B (Win32 sizeof(long)==4); see
+	// notes in DoKeyExchange above.
 	// Clear the buffer
-	memset(buffer, 0, WWRSA_BLOCK_SIZE - RC4_KEY_SIZE + sizeof(long));
+	memset(buffer, 0, WWRSA_BLOCK_SIZE - RC4_KEY_SIZE + sizeof(uint32_t));
 
 	// Put the length in front of the buffer
-	unsigned char *key = buffer + sizeof(long);
-	*((unsigned long *) buffer) = ntohl(WWRSA_BLOCK_SIZE);
+	unsigned char *key = buffer + sizeof(uint32_t);
+	*((uint32_t *) buffer) = ntohl(WWRSA_BLOCK_SIZE);
 
 	// Copy the RC4 key to the bottom of the buffer
 	unsigned char *dest = &key[WWRSA_BLOCK_SIZE - 1];
@@ -244,7 +251,7 @@ bool Connection_B::DoClientKeyExchange()
 	m_WestwoodRSA.Encrypt(key, WWRSA_BLOCK_SIZE, key);
 
 	// Send the encrypted RC4 key to the server
-	int length = WWRSA_BLOCK_SIZE + sizeof(long);
+	int length = WWRSA_BLOCK_SIZE + sizeof(uint32_t);  // Phase K Wave 11: wire prefix is 4B
 
 	// Returns true if not socket error or timeout and buffer was completely sent
 	return bool( SocketReady() && (send(m_Socket, (char *) buffer, length, 0) == length) );

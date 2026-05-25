@@ -32,6 +32,8 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId Logoff                 = new(0x0003);
         public static readonly OpcodeId Start                  = new(0x0005);
         public static readonly OpcodeId StartAck               = new(0x0006);
+        public static readonly OpcodeId Turn                   = new(0x0012);
+        public static readonly OpcodeId Tilt                   = new(0x0013);
         public static readonly OpcodeId MessageString          = new(0x001D);
         public static readonly OpcodeId ClientChat             = new(0x0033);
         public static readonly OpcodeId ClientSetTime          = new(0x0034);

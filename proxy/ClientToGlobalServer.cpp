@@ -140,7 +140,9 @@ void Connection::HandleGlobalConnect()
 
 void Connection::HandleDeleteCharacter()
 {
-    long character_slot = ntohl(*(long *) m_RecvBuffer);
+    // Phase K Wave 11: wire field is 4B big-endian; see login-server/Net7SSL/
+    // ClientToGlobalServer.cpp HandleDeleteCharacter for the full rationale.
+    long character_slot = ntohl(*(uint32_t *) m_RecvBuffer);
     char *avatar_list = g_ServerMgr->m_UDPConnection->DeleteCharacter(character_slot);
     
     if (avatar_list)
@@ -180,7 +182,8 @@ void Connection::SendAvatarList(long account_id)
 void Connection::HandleGlobalTicketRequest()
 {
     // The player selected a character
-    long char_slot = ntohl(*(long *) m_RecvBuffer);
+    // Phase K Wave 11: wire field is 4B; see HandleDeleteCharacter above.
+    long char_slot = ntohl(*(uint32_t *) m_RecvBuffer);
     //OK, broadcast ticket request, get back player ID (from the UDP header), and the avatar_id
     long avatar_id = g_ServerMgr->m_UDPConnection->SendAvatarLogin(char_slot);
 

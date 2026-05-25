@@ -47,7 +47,9 @@ void Connection::ProcessSectorServerOpcode(short opcode, short bytes)
 			g_ServerMgr->m_UDPClient->SetLoginComplete(true);
 			g_ServerMgr->m_UDPConnection->SetLoginComplete(true);
 		}
-		LogMessage("Sending StartAck to Server %d\n", *((long *) &m_RecvBuffer[0]) );
+		// Phase K Wave 11: wire field is 4B; cast through int32_t to keep
+		// the log value consistent with what the server actually read.
+		LogMessage("Sending StartAck to Server %d\n", *((int32_t *) &m_RecvBuffer[0]) );
 		m_SectorTCPRequest = false;
 		return;
 		break;
@@ -152,9 +154,12 @@ void Connection::ProcessProxyServerOpcode(short opcode, short bytes)
 
 		if (opcode == ENB_OPCODE_0005_START)
 		{
-			LogMessage("Received start packet. Start ID was %d\n", *((long *) &m_RecvBuffer[0]) );
+			// Phase K Wave 11: wire field is 4B (Win32 sizeof(long)==4).
+			// Reading 8B via `long *` on Linux pulls 4B of payload + 4B of
+			// adjacent buffer — Start ID would then be garbage.
+			LogMessage("Received start packet. Start ID was %d\n", *((int32_t *) &m_RecvBuffer[0]) );
 			g_ServerMgr->m_UDPClient->SetStartReceived();
-			g_ServerMgr->m_UDPClient->SetStartID(*((long *) &m_RecvBuffer[0]));
+			g_ServerMgr->m_UDPClient->SetStartID(*((int32_t *) &m_RecvBuffer[0]));
 			//set_start = false;
 		}
 		if (!HandleCustomOpcode(opcode, bytes))
@@ -196,7 +201,8 @@ void Connection::SendDataFileToClient(char *filename, long avatar_id)
 			fread(buffer, 1, length, f);
 			if (avatar_id)
 			{
-				*((long *) &buffer[4]) = avatar_id;
+				// Phase K Wave 11: wire field is 4B; on Linux `long *` writes 8B.
+				*((int32_t *) &buffer[4]) = avatar_id;
 			}
 			//m_CryptOut.RC4(buffer, length);
 			Send(buffer, length);

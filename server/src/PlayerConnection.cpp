@@ -789,11 +789,14 @@ void Player::SendDataFileToClient(char *filename, long avatar_id)
 
 			*((short*) &buffer[0]) = (short)length;
 			*((short*) &buffer[2]) = ENB_OPCODE_2010_DATA_FILE;
-			*((long *) &buffer[4]) = GameID();
+			// Phase K Wave 11: wire fields are 4B (Win32 sizeof(long)==4); on
+			// Linux x86_64 `*((long *) ...)` writes 8B and corrupts the next
+			// 4B of buffer. Cast through int32_t.
+			*((int32_t *) &buffer[4]) = GameID();
 
 			if (avatar_id)
 			{
-				*((long *) &buffer[12]) = avatar_id;
+				*((int32_t *) &buffer[12]) = avatar_id;
 			}
 
 			//DumpBuffer((unsigned char*)buffer, length);
@@ -870,7 +873,10 @@ void Player::SendConfirmedActionOffer()
 
 void Player::HandleActionResponse(unsigned char *data)
 {
-	long player_id = ntohl(*((long *) &data[0]));
+	// Phase K Wave 11: wire field is 4B; ntohl returns uint32_t. Reading
+	// 8B via `long *` cast on Linux pulls 4B of payload + 4B of the next
+	// field — then byte-swapping yields garbage.
+	long player_id = ntohl(*((int32_t *) &data[0]));
 	if (player_id == GameID())
 	{
 		m_ActionResponseReceived = true;
@@ -1307,7 +1313,10 @@ void Player::SendAdvancedPositionalUpdate(long object_id, PositionInformation * 
 	char packet[sizeof(AdvancedPositionalUpdate)];
 	memset(packet, 0, sizeof(packet));
 	short *pBitmask = (short *) &packet[0];
-	long *pLong = (long *) &packet[2];
+	// Phase K Wave 11: wire slots are 4B each (length is computed as
+	// `2 + 4 * index` below). `long *` on Linux strides by 8B, which
+	// double-writes/overlaps every slot. int32_t locks the stride to 4B.
+	int32_t *pLong = (int32_t *) &packet[2];
 	float *pFloat = (float *) &packet[2];
 	short bitmask = position_info->Bitmask;
 	int index = 0;
@@ -1676,7 +1685,7 @@ void Player::HandleClientChatRequest(unsigned char *data)
 		string3[length3] = 0;
 		p += length3;
 	}
-	long data_size = *((long *) p);
+	long data_size = *((int32_t *) p);  // Phase K Wave 11: wire field is 4B
 
 	// Friends Request
 	switch(request->type)
@@ -1792,8 +1801,12 @@ void Player::HandleClientChatRequest(unsigned char *data)
 
 void Player::HandleTurn(unsigned char *data)
 {
+	// Phase K Wave 11: wire layout is {int32 GameID; float Intensity} = 8B
+	// (Win32 sizeof(long)==4). With `long GameID` on Linux x86_64 this struct
+	// becomes 12B and Intensity reads from offset 8 — past the wire payload —
+	// so the float is garbage. Same class of fix as the Wave 7/9 sweeps.
 	struct PacketTurn {
-		long GameID;
+		int32_t GameID;
 		float Intensity;
 	} ATTRIB_PACKED;
 
@@ -1808,8 +1821,9 @@ void Player::HandleTurn(unsigned char *data)
 
 void Player::HandleTilt(unsigned char *data)
 {
+	// Phase K Wave 11: same wire-shape fix as HandleTurn above.
 	struct PacketTurn {
-		long GameID;
+		int32_t GameID;
 		float Intensity;
 	} ATTRIB_PACKED;
 
@@ -3641,7 +3655,10 @@ void Player::TradeAction(long GameID, int Action)
 {
 	unsigned char buffer[5];
 
-	*((long *) &buffer[0]) = GameID;
+	// Phase K Wave 11: wire layout is [int32 GameID][u8 Action] = 5B (matches
+	// the `buffer[5]` declaration). On Linux `long *` writes 8B and runs off
+	// the end of the buffer. Cast through int32_t.
+	*((int32_t *) &buffer[0]) = GameID;
 	*((char *) &buffer[4]) = (char) Action;
 
 	SendOpcode(ENB_OPCODE_001F_TRADE, buffer, 5);
@@ -10178,12 +10195,15 @@ void Player::HandleChatStream(unsigned char *data)
 	{
 		//LogMessage("Received AvatarTriggerEmote packet -- GameID=%d\n", chat_stream->GameID);
 
-		buffer = new unsigned char[chat_stream->ChatSize + 7];		// 7 = (long GameID, short ChatSize, char type)
+		buffer = new unsigned char[chat_stream->ChatSize + 7];		// 7 = (int32 GameID, short ChatSize, char type)
 		memset(buffer, 0, chat_stream->ChatSize + 7);
 
 		*((short *) &buffer[0]) = chat_stream->ChatSize;
 		buffer[2] = 0x01;
-		*((long *) &buffer[3]) = chat_stream->GameID;
+		// Phase K Wave 11: wire field is 4B (header sums to 2+1+4=7); on
+		// Linux `long *` writes 8B and overflows the buffer + corrupts the
+		// memcpy'd chat message that follows. Cast through int32_t.
+		*((int32_t *) &buffer[3]) = chat_stream->GameID;
 		p = (unsigned char *)chat_stream;
 		p+=7;
 		memcpy(&buffer[7],p,chat_stream->ChatSize);
@@ -10659,13 +10679,16 @@ void Player::HandleGalaxyMapRequest()
 
 void Player::SendGalaxyMap(char *system, char *sector, char *station)
 {
+	// Phase K Wave 11: wire fields are 4B each (Win32 sizeof(long)==4).
+	// Win32 struct = 4+4+4+64+4 = 80B; Linux x86_64 with `long` was 96B
+	// and shifted every field 4B past its wire offset.
 	struct GalaxyMap
 	{
-		long    Type;
-		long    Size;
-		long    PlayerID;
+		int32_t Type;
+		int32_t Size;
+		int32_t PlayerID;
 		char    Variable[64];
-		long    unknown;
+		int32_t unknown;
 	};
 
 	GalaxyMap galaxy_map;
@@ -10698,7 +10721,7 @@ void Player::SendGalaxyMap(char *system, char *sector, char *station)
 	p += string_length;
 	offset += string_length;
 
-	*((long *) p) = 375;    // unknown = 375
+	*((int32_t *) p) = 375;    // unknown = 375 (Phase K Wave 11: wire field is 4B)
 	galaxy_map.Size = size;
 
 	//LogMessage("Sending GalaxyMap packet\n");

@@ -257,8 +257,11 @@ void SaveManager::HandelInfraction(long player_id, short bytes, unsigned char *d
 {
 	sql_query_c account_query (&m_SQL_Conn);
 
-	long account_id  = *((long *) &data[0]);
-	long inc_ammount = *((long *) &data[4]);
+	// Phase K Wave 11: wire fields are 4 bytes (Win32 sizeof(long)==4); cast
+	// through int32_t so Linux x86_64 reads exactly 4 bytes (not 8) and
+	// widens to long via the assignment. Same class of fix as Wave 7/9.
+	long account_id  = *((int32_t *) &data[0]);
+	long inc_ammount = *((int32_t *) &data[4]);
 	char msg[256];
 	memcpy(msg, &data[8], 256);
 
@@ -338,7 +341,7 @@ void SaveManager::HandleNewRecipe(long player_id, short bytes, unsigned char *da
 	// player learnt a new recipe
 	sql_query_c account_query (&m_SQL_Conn);
 
-	long item_id = *((long *) &data[0]);
+	long item_id = *((int32_t *) &data[0]);  // Phase K Wave 11: wire field is 4B
 
 	//we need to create a new entry
 	sql_query SkillBuilder;
@@ -358,7 +361,7 @@ void SaveManager::HandleManufactureAttempt(long player_id, short bytes, unsigned
 	// player manufactured an item
 	sql_query_c account_query (&m_SQL_Conn);
 
-	long item_id = *((long *) &data[0]);
+	long item_id = *((int32_t *) &data[0]);  // Phase K Wave 11: wire field is 4B
 	float quality = (*(float *) &data[4]);
 
 	account_query.AddParam((double)quality);
@@ -374,7 +377,7 @@ void SaveManager::HandleAdvanceLevel(long player_id, short bytes, unsigned char 
 	sql_query_c account_query (&m_SQL_Conn);
 
 	u8 xp_type = *((u8 *) &data[0]);
-	long new_level = *((long *) &data[1]);
+	long new_level = *((int32_t *) &data[1]);  // Phase K Wave 11: wire field is 4B
 
 	const char *sql = NULL;
 	switch (xp_type)
@@ -453,8 +456,10 @@ void SaveManager::HandleChangeInventory(long player_id, short bytes, unsigned ch
 	short stack_level	 = *((short *) &data[2]);
 	short trade_stack	 = *((short *) &data[4]);
 	float quality		 = *((float *) &data[6]);
-	long  item_id		 = *((long *)  &data[10]);
-	unsigned long cost	 = *((unsigned long *)   &data[14]);
+	// Phase K Wave 11: wire fields are 4B (Win32 sizeof(long)==4); cast
+	// through int32_t / uint32_t so Linux x86_64 reads exactly 4 bytes.
+	long  item_id		 = *((int32_t *)  &data[10]);
+	unsigned long cost	 = *((uint32_t *) &data[14]);
 	float structure		 = *((float *) &data[18]);
 	char builder_name[64];
 
@@ -553,7 +558,7 @@ void SaveManager::HandleChangeEquipment(long player_id, short bytes, unsigned ch
 
 	u8 equipment_slot = *((u8 *) &data[0]);
 	float quality		 = *((float *) &data[1]);
-	long  item_id		 = *((long *)  &data[5]);
+	long  item_id		 = *((int32_t *) &data[5]);  // Phase K Wave 11: wire field is 4B
 	float structure		 = *((float *)  &data[9]);
 	// Copy builder Name
 	memcpy(builder_name, &data[13], 64);
@@ -612,7 +617,7 @@ void SaveManager::HandleChangeAmmo(long player_id, short bytes, unsigned char *d
 	u8 equipment_slot = *((u8 *) &data[0]);
 	short ammo_stack	 = *((short *) &data[1]);
 	float quality		 = *((float *) &data[3]);
-	long  item_id		 = *((long *)  &data[7]);
+	long  item_id		 = *((int32_t *) &data[7]);  // Phase K Wave 11: wire field is 4B
 	float structure      = *((float *) &data[11]);
 	// Copy builder Name
 	memcpy(builder_name, &data[15], 64);
@@ -741,7 +746,7 @@ void SaveManager::HandleStorePosition(long player_id, short bytes, unsigned char
 	orientation[2] = *((float *) &data[20]);
 	orientation[3] = *((float *) &data[24]);
 
-	sector_id = *((long *) &data[28]);
+	sector_id = *((int32_t *) &data[28]);  // Phase K Wave 11: wire field is 4B
 
 	//now store data into DB
 
@@ -768,7 +773,7 @@ void SaveManager::HandleAdvanceMission(long player_id, short bytes, unsigned cha
 	sql_result_c result;
 
 	u8		mission_slot	= *((u8 *) &data[0]);
-	long	mission_id		= *((long *) &data[1]);
+	long	mission_id		= *((int32_t *) &data[1]);  // Phase K Wave 11: wire field is 4B
 	short	mission_stage	= *((short *) &data[5]);
 
 	account_query.AddParam(player_id);
@@ -815,7 +820,7 @@ void SaveManager::HandleAdvanceMissionFlags(long player_id, short bytes, unsigne
 	sql_result_c result;
 
 	u8		mission_slot	= *((u8 *) &data[0]);
-	long	mission_flags	= *((long *) &data[1]);
+	long	mission_flags	= *((int32_t *) &data[1]);  // Phase K Wave 11: wire field is 4B
 
 	account_query.AddParam(mission_flags);
 	account_query.AddParam(player_id);
@@ -913,7 +918,7 @@ void SaveManager::HandleMissionRemove(long player_id, short bytes, unsigned char
 {
 	sql_query_c account_query (&m_SQL_Conn);
 
-	long mission_id =  *((long *) &data[0]);
+	long mission_id =  *((int32_t *) &data[0]);  // Phase K Wave 11: wire field is 4B
 
 	//first remove mission progress
 	account_query.AddParam(player_id);
@@ -928,7 +933,7 @@ void SaveManager::HandleMissionComplete(long player_id, short bytes, unsigned ch
 	sql_query_c account_query (&m_SQL_Conn);
 	sql_result_c result;
 
-	long mission_id =  *((long *) &data[0]);
+	long mission_id =  *((int32_t *) &data[0]);  // Phase K Wave 11: wire field is 4B
 	u8 mission_flags = *((u8 *)   &data[4]);
 
 	//first remove mission progress
@@ -1054,7 +1059,7 @@ void SaveManager::HandleDiscoverNav(long player_id, short bytes, unsigned char *
 	//player has just discovered a nav, make a record
 	sql_query_c account_query (&m_SQL_Conn);
 
-	long object_uid =  *((long *) &data[0]);
+	long object_uid =  *((int32_t *) &data[0]);  // Phase K Wave 11: wire field is 4B
 
 	sql_query ExploreBuilder;
 	ExploreBuilder.Clear();
@@ -1073,7 +1078,7 @@ void SaveManager::HandleExploreNav(long player_id, short bytes, unsigned char *d
 	sql_query_c account_query (&m_SQL_Conn);
 	sql_result_c result;
 
-	long object_uid =  *((long *) &data[0]);
+	long object_uid =  *((int32_t *) &data[0]);  // Phase K Wave 11: wire field is 4B
 
 	account_query.AddParam(player_id);
 	account_query.AddParam(object_uid);
@@ -1106,7 +1111,7 @@ void SaveManager::HandleSetSkillPoints(long player_id, short bytes, unsigned cha
 	//set skill points
 	sql_query_c account_query (&m_SQL_Conn);
 
-	long skill_points =  *((long *) &data[0]);
+	long skill_points =  *((int32_t *) &data[0]);  // Phase K Wave 11: wire field is 4B
 
 	account_query.AddParam(skill_points);
 	account_query.AddParam(player_id);
@@ -1119,7 +1124,7 @@ void SaveManager::HandleSetRegisteredStarbase(long player_id, short bytes, unsig
 	//set skill points
 	sql_query_c account_query (&m_SQL_Conn);
 
-	long registered_starbase =  *((long *) &data[0]);
+	long registered_starbase =  *((int32_t *) &data[0]);  // Phase K Wave 11: wire field is 4B
 
 	account_query.AddParam(registered_starbase);
 	account_query.AddParam(player_id);
@@ -1528,7 +1533,7 @@ void SaveManager::HandleNewWarnLevel(long player_id, short bytes, unsigned char 
 	sql_query_c account_query (&m_SQL_Conn);
 	sql_result_c result;
 
-	long new_level = *((long *)&data[0]);
+	long new_level = *((int32_t *) &data[0]);  // Phase K Wave 11: wire field is 4B
 
 	account_query.AddParam(player_id);
 	account_query.execute_params(
@@ -1738,7 +1743,7 @@ void SaveManager::HandleChangeFieldRespawn(short bytes, unsigned char *data)
 {
 	sql_query_c FldUpdate(&m_SQL_Conn);
 	u16 new_respawn = *((u16 *) &data[0]);
-	long database_id = *((long *) &data[2]);
+	long database_id = *((int32_t *) &data[2]);  // Phase K Wave 11: wire field is 4B
 
 	sql_result_c result;
 

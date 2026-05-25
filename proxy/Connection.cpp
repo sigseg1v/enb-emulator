@@ -160,7 +160,12 @@ bool Connection::DoKeyExchange()
         return false;
 	}
 
-    long key_length = (long) ntohl((*((unsigned long *) buffer)));
+    // Phase K Wave 11: wire field is 4B big-endian. `unsigned long *` on
+    // Linux reads 8B (OOB by 4B into the 4-byte recv buffer) — works by
+    // accident because ntohl truncates to uint32_t and the OOB high bytes
+    // happen to be zero, but it's UB and asymmetric with the real Win32
+    // client (which sends exactly 4B per RsaHandshake.cs:101).
+    long key_length = (long) ntohl(*((uint32_t *) buffer));
 	if (key_length < 64)
 	{
 		LogMessage("!!!!!!!!!!!!!!! I would have terminated here\n");
@@ -249,12 +254,15 @@ bool Connection::DoClientKeyExchange()
 
     // Ignore whatever public key packet we receive
 
+	// Phase K Wave 11: wire prefix is 4B (Win32 sizeof(long)==4). On Linux
+	// sizeof(long)==8 inflated every offset and sent 4 extra zero bytes —
+	// Linux-to-Linux worked by accident, Linux-to-Win32 would not.
 	// Clear the buffer
-	memset(buffer, 0, WWRSA_BLOCK_SIZE - RC4_KEY_SIZE + sizeof(long));
+	memset(buffer, 0, WWRSA_BLOCK_SIZE - RC4_KEY_SIZE + sizeof(uint32_t));
 
 	// Put the length in front of the buffer
-	unsigned char *key = buffer + sizeof(long);
-	*((unsigned long *) buffer) = ntohl(WWRSA_BLOCK_SIZE);
+	unsigned char *key = buffer + sizeof(uint32_t);
+	*((uint32_t *) buffer) = ntohl(WWRSA_BLOCK_SIZE);
 
 	// Copy the RC4 key to the bottom of the buffer
 	unsigned char *dest = &key[WWRSA_BLOCK_SIZE - 1];
@@ -269,7 +277,8 @@ bool Connection::DoClientKeyExchange()
 
 	//LogMessage("Sending encrypted RC4 session key...\n");
 	// Send the encrypted RC4 key to the server
-    int length = WWRSA_BLOCK_SIZE + sizeof(long);
+    // Phase K Wave 11: wire shape = 4B length + WWRSA_BLOCK_SIZE block.
+    int length = WWRSA_BLOCK_SIZE + sizeof(uint32_t);
     send(m_Socket, (char *) buffer, length, 0);
 
     LogMessage("Client Key exchange complete\n");
@@ -923,7 +932,8 @@ bool Connection::DoKeyExchange()
         LogMessage("DoKeyExchange: failed to read 4-byte key length\n");
         return false;
     }
-    long key_length = (long) ntohl(*((unsigned long *) buffer));
+    // Phase K Wave 11: see notes at top DoKeyExchange — wire field is 4B.
+    long key_length = (long) ntohl(*((uint32_t *) buffer));
     if ((key_length < WWRSA_BLOCK_SIZE) || (key_length > (WWRSA_BLOCK_SIZE + 1))) {
         LogMessage("DoKeyExchange: bad key_length = %ld\n", key_length);
         return false;

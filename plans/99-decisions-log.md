@@ -1806,3 +1806,137 @@ sector-stubs port (Wave 3). The test simply lights up an existing-but-untested p
   (movement broadcasts to other observers in the same sector). Expected sizeof(long) review
   on `HandleTurn`/`HandleTilt` payloads — same class as the Wave 7 sweep.
 * 0x002C ACTION — combat/dock/tractor trigger.
+
+## 2026-05-25 — Phase K Wave 11: 0x0012 TURN + 0x0013 TILT survival + wire-relevant `long` sweep
+
+### What landed
+
+* **`SectorTurnTiltTests.TurnAndTilt_DoNotBreakConnection_RequestTimeStillRoundTrips`** —
+  the next post-START opcode pair after Wave 10's START_ACK. Sends a canonical 8-byte
+  TURN payload (`{int32 GameID; float Intensity}` with GameID=0, intensity=0.5f), then
+  a TILT payload (intensity=-0.25f), then 0x0044 REQUEST_TIME with a sentinel tick, and
+  asserts the 0x0034 CLIENT_SET_TIME reply echoes that tick. Survival-probe shape, same
+  rationale as Wave 10: TURN and TILT are pure state mutators on `Moveable::m_Turn_Intensity`
+  / `m_Tilt_Intensity`, and their fan-out happens later via `SendPositionalUpdate` on a
+  sector tick — sent to OTHER observers in the visibility list, never back to the
+  originator. With a single-player integration test there is no other observer to receive
+  the fan-out, so direct reply assertion is fundamentally unreachable. CLAUDE.md
+  server-integrity rules forbid fabricating a synthetic reply, so survival probe is the
+  conservative shape.
+
+* **Server fix 1** — `server/src/PlayerConnection.cpp:1793-1827` local `PacketTurn`
+  struct in `HandleTurn` and `HandleTilt`: `{ long GameID; float Intensity }` →
+  `{ int32_t GameID; float Intensity }`. On Win32 `sizeof(long)==4` so the struct was 8B
+  matching the wire payload exactly; on Linux x86_64 `sizeof(long)==8` so the struct
+  became 12B and `Intensity` read from offset 8 — past the end of the 8-byte wire
+  payload, into undefined memory `data[8..]`. The garbage float would then go to
+  `Moveable::Turn(intensity)` / `Moveable::Tilt(intensity)` and propagate through the
+  physics tick on the next move, potentially as NaN.
+
+* **Wire-relevant `long` sweep across server-native code** — the user message that
+  triggered this wave: *"can you just fix all longs? Like its obvious they are all 100%
+  incorrect just switch them everywhere in the codebase to int32_t right?"*. I pushed
+  back on the literal interpretation (per the brutally-honest directive) — a global
+  `s/long/int32_t/` is wrong because internal counters (loop indices, time deltas,
+  queue API parameters like `CheckQueue(... long size, long *player_id)`) should stay
+  64-bit on Linux; silently narrowing them risks overflow bugs. Committed to the
+  substantively-correct version: sweep every `long` that touches the wire — local packet
+  struct definitions, `*((long *) data)` / `*((long *) &buffer[N])` reads/writes of
+  inbound/outbound wire bytes, and ATTRIB_PACKED struct fields — leaving internal scratch
+  alone.
+
+### Sites swept this wave
+
+* `server/src/SaveManager.cpp` ~14 sites — every `long X = *((long *) &data[N])`
+  inbound wire read in the post-handshake save-state opcodes (HandelInfraction at
+  260-261, HandleNewRecipe 341, HandleManufactureAttempt 361, HandleAdvanceLevel 377,
+  HandleChangeInventory 456-457, HandleChangeEquipment 556, HandleChangeAmmo 615,
+  HandleStorePosition 744, HandleAdvanceMission 771, HandleAdvanceMissionFlags 818,
+  HandleMissionRemove 916, HandleMissionComplete 931, HandleDiscoverNav 1057,
+  HandleExploreNav 1076, HandleSetSkillPoints 1109, HandleSetRegisteredStarbase 1122,
+  HandleNewWarnLevel 1531, HandleChangeFieldRespawn 1741). All were 8B over-reads from
+  4B wire slots.
+
+* `server/src/PlayerConnection.cpp` ~9 sites beyond the Wave 11 `PacketTurn` fix —
+  `SendOpcode` wire writes at 792/796 (`*((long *) &buffer[4]) = GameID()` was
+  writing 8B over a 4B slot, corrupting the next 4B); wire read at 873; line 1310
+  `long *pLong = (long *) &packet[2]` for AdvancedPositionalUpdate (slot stride must be
+  4B — confirmed by `length = 2 + 4 * index;` immediately below); 1679 size header;
+  3649 TradeAction GameID into a 5B buffer where the long-write overflowed; 10191
+  chat-stream GameID (header sums to 2+1+4=7 per the inline comment).
+
+* `server/src/PlayerConnection.cpp` GalaxyMap struct (10669-10674) — was
+  `{ long Type; long Size; long PlayerID; char Variable[64]; long unknown; }` (96B on
+  Linux) → all `int32_t` (80B matching the Win32 wire shape 4+4+4+64+4). Trailing
+  `unknown` write at 10706 also flipped for symmetry.
+
+* `proxy/ClientToSectorServer.cpp` 4 sites at lines 50, 155, 157, 199 — all
+  `*((long *) &m_RecvBuffer[0])` / `*((long *) &buffer[4])` over-reads on inbound wire.
+
+* `proxy/Connection.cpp` 5 sites in the RC4 key-exchange handshake — line 163 inbound
+  length prefix `ntohl(*((unsigned long *) buffer))` → `(uint32_t *)`; line 257 outbound
+  length prefix; 253/256/272 `sizeof(long)` → `sizeof(uint32_t)` arithmetic. Canonical
+  wire spec is 4B big-endian length + WWRSA_BLOCK_SIZE-byte encrypted block (matches
+  CLI client `RsaHandshake.cs:101`). Linux↔Linux worked by accident before — `ntohl`
+  truncates and the LE zero-init of the high bytes made the 8B read+write effectively
+  a 4B read+write.
+
+* `login-server/Net7SSL/Connection.cpp` 5 sites — mirror of `proxy/Connection.cpp`
+  RC4 fixes (lines 164, 232, 235, 236, 247). Phase Q deleted the kyp-era TCP cluster
+  but Net7SSL retains its own RC4 handshake for legacy callers; this side needed
+  harmonisation to the same 4B canonical wire shape.
+
+* `login-server/Net7SSL/ClientToGlobalServer.cpp` + `proxy/ClientToGlobalServer.cpp`
+  (each 2 sites) — HandleDeleteCharacter + HandleGlobalTicketRequest
+  `long X = ntohl(*(long *) m_RecvBuffer)` → `(uint32_t *)`. Same class as the Wave 5
+  `PacketMethods.h::ExtractLong` fix that landed alongside the 0x0071 round-trip —
+  just other call sites with the same pattern.
+
+### Why we did NOT sweep further
+
+* Internal counters and time deltas in the same files (`for (long i = 0; i < count; i++)`,
+  `long delta_ms = ...`) — these are scratch values that never see the wire. `long` on
+  Linux is 64-bit which is wider not narrower than Win32, so they are never the cause
+  of wire-format drift. Narrowing them could introduce overflow bugs.
+
+* `CheckQueue` queue API: `bool CheckQueue(unsigned char *pMessage, int *length,
+  long size, long *player_id)`. The local `long player_id;` vars in `PulsePlayerInput`
+  and `SendPacketCache` must stay `long` to match the queue's pointer type. Narrowing
+  them would force the queue API change or introduce a cast-through-`int32_t*` aliasing
+  trap.
+
+### CLAUDE.md server-integrity compliance
+
+* The local `PacketTurn` struct fix is preservation-aligned: restores Win32 8B wire
+  shape — the Linux 12B was the divergence from retail. No input check was loosened.
+
+* The wider `long` sweep is preservation-aligned for the same reason: every site is
+  restoring a Win32 4B wire width that Linux was over-reading or over-writing by 4B.
+  No server permissiveness was added.
+
+* The intensity values used in the test (0.5f and -0.25f) are well within the retail
+  client's normal stick range (`[-1.0, 1.0]`). No assumption of server permissiveness
+  is required.
+
+### Coverage ratchet
+
+* Pre-Wave-11: 20/207 (9.7%).
+* Post-Wave-11: 22/207 (10.6%) — +0x0012 TURN, +0x0013 TILT.
+
+### Account pool extended
+
+* `cli_test08` (id 9000008) added to `seed.sql` and `TestAccounts.Pool[7]`. Dedicated
+  to SectorTurnTiltTests so its Create/Delete cycle doesn't collide with Pool[3..6]
+  owned by SectorLogin / SectorChat / SectorRequestTime / SectorStartAck.
+
+### Next-Phase-K targets
+
+* 0x002C ACTION — combat/dock/tractor trigger. `Player::HandleAction` dispatches via a
+  sub-opcode table; complex enough that the survival-probe shape may not be the right
+  fit. Check for a sub-opcode whose handler is a pure mutator (so we can repeat the
+  Wave 11 shape) versus one that emits a direct reply.
+* 0x009B WARP — `HandleWarp_Linux` already exists in
+  `proxy/ClientToServer_linux_stubs.cpp`; server-side reply path not yet exercised by
+  any integration test.
+* 0x0014 MOVE — translation input. Closes the basic-movement triad with TURN+TILT.
+  Same fan-out-only-to-others profile, same survival-probe shape.

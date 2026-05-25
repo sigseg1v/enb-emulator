@@ -187,7 +187,11 @@ void Connection_B::HandleGlobalConnect()
 
 void Connection_B::HandleDeleteCharacter()
 {
-    long character_slot = ntohl(*(long *) m_RecvBuffer);
+    // Phase K Wave 11: wire field is 4B big-endian (Win32 sizeof(long)==4).
+    // `long *` on Linux x86_64 reads 8B; ntohl truncates to uint32_t so it
+    // works by accident on little-endian, but is asymmetric with the
+    // canonical wire spec.
+    long character_slot = ntohl(*(uint32_t *) m_RecvBuffer);
 	long avatar_id = g_AccountMgr->GetAvatarID(m_AccountUsername, character_slot);
 
 	LogMessage("Delete character %d\n", avatar_id);
@@ -226,7 +230,8 @@ void Connection_B::SendAvatarList(long account_id)
 void Connection_B::HandleGlobalTicketRequest()
 {
     // The player selected a character
-    long char_slot = ntohl(*(long *) m_RecvBuffer);
+    // Phase K Wave 11: wire field is 4B; see HandleDeleteCharacter.
+    long char_slot = ntohl(*(uint32_t *) m_RecvBuffer);
     long avatar_id = g_AccountMgr->GetAvatarID(m_AccountUsername, char_slot);
 
 	m_Mutex.Lock();
