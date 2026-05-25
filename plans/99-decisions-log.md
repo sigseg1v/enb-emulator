@@ -2813,3 +2813,133 @@ Phase K coverage: 32/207 → **33/207 (15.9%)**.
   may be a fast survival probe.
 * **0x003C CLIENT_TYPE** — already in opcode table; likely a
   one-shot client-type-identification frame.
+
+## 2026-05-25 — Phase K Wave 23: 0x001A DEBUG zero-payload survival round-trip (smallest wave in Phase K)
+
+### What landed
+
+Phase K Wave 23 — `SectorDebugTests.Debug_EmptyPayload_DoesNotBreakConnection_RequestTimeStillRoundTrips`:
+zero-payload survival probe. Test sends 0x001A DEBUG with an empty
+payload and asserts survival by round-tripping `0x0044 REQUEST_TIME →
+0x0034 CLIENT_SET_TIME` with a randomised sentinel tick.
+
+Zero server changes — the wave is pure test coverage of an already-
+correct no-op path. This is the **smallest wave in Phase K** by every
+dimension: no struct, no payload, no parsing, no I/O, no state, no
+reply.
+
+### Why this is the smallest wave
+
+Server-side `Player::HandleDebug` (server/src/PlayerConnection.cpp:10760)
+is literally one line:
+
+    void Player::HandleDebug(unsigned char *data)
+    {
+        LogDebug("Received Debug packet\n");
+    }
+
+`data` is unused. The handler never reads from it.
+
+The LogDebug callee at `server/src/ServerManager.cpp:745` has TWO
+short-circuits — only the second one is interesting:
+
+    void LogDebug(char *format, ...)
+    {
+        if (!g_Debug) return;
+        return; //no logdebugs for now, crashes the server
+        ...
+    }
+
+The hard-coded `return` at line 749 suppresses the log even when
+`g_Debug` is enabled at runtime. The inline comment "crashes the
+server" is a load-bearing piece of historical context — removing
+the short-circuit corrupts state per the prior author's
+observation.
+
+So `HandleDebug` is a true no-op: no payload parse, no I/O, no
+DB write, no state mutation, no reply. Retail emits no reply
+either, so survival probe via REQUEST_TIME → CLIENT_SET_TIME is
+the only assertable post-condition.
+
+### Why empty payload
+
+The handler ignores `data` entirely, so any number of bytes
+(zero through receive-buffer-cap) is equally valid. Empty is the
+smallest wire footprint and the most likely retail emission for
+opcode-only debug signals — the retail Win32 client emits DEBUG
+with no structured payload, the opcode itself is the entire
+signal.
+
+Empty also stresses any future refactor that adds payload parsing
+without a length guard: a regression that wrote
+`SomeStruct *s = (SomeStruct *)data;` would crash on the first
+field deref against the zero-byte buffer. Technically the
+caller's receive-buffer pointer exists so the deref hits buffer
+slack rather than a null page, but the field would read into
+unrelated buffer content — far less obvious to debug than a
+clean null-deref. Sending non-empty bytes would still hit the
+same no-op branch but would test only the receive-buffer discard
+path, not anything the handler does.
+
+### Proxy path
+
+0x001A DEBUG is **not** explicitly listed in
+`proxy/ClientToServer_linux_stubs.cpp` so it hits the `default:`
+arm and falls through to bottom-of-switch `ForwardClientOpcode(...)`
+— same path as ~150 of the 207 opcodes. Zero proxy work needed.
+
+### Regression coverage
+
+1. **Dispatcher mis-route at `server/src/PlayerConnection.cpp:451`.**
+   The case label sits between 0x0019 SET_TARGET (the
+   `HandleRequestTarget` reply emitter, which is not a
+   dispatched-to case at this point in the switch — SET_TARGET
+   only comes IN as a server→client frame) and 0x001D
+   MESSAGE_STRING in the same ~200-entry hand-maintained switch.
+   A copy-paste swap with any nearby struct-reading handler
+   would crash on first field deref against the zero-byte
+   payload — most adjacent handlers expect at least 4-12 bytes.
+
+2. **Proxy default-case `ForwardClientOpcode` regression.** A
+   regression dropping this opcode would surface as a timeout
+   waiting for CLIENT_SET_TIME.
+
+3. **HandleDebug body regression that adds payload parsing
+   without a length guard.** Any future refactor that promotes
+   HandleDebug to do real work (e.g. take a debug-command
+   string) must include a length check on the receive frame
+   size; absent that, the zero-byte payload this test sends
+   will crash the handler on first field deref.
+
+4. **LogDebug early-return removal regression.** If either of
+   the two short-circuits in `ServerManager.cpp:745-749` is
+   removed, the `vsprintf_s + ostringstream + LogMessage` path
+   runs with `g_Debug==false` in our docker stack and (per the
+   inline comment "//no logdebugs for now, crashes the server")
+   corrupts state or crashes. The test would surface that as a
+   CLIENT_SET_TIME timeout.
+
+### Server-integrity note (per CLAUDE.md)
+
+0x001A DEBUG is a debug-channel opcode the retail Win32 client
+sometimes emits when the user issues a /debug command. The
+retail server's HandleDebug is the same no-op — accepts the
+opcode, writes nothing back. We are not making the server accept
+any new input shape; we are not fabricating any reply. Zero-byte
+payload is the canonical retail emission for opcode-only debug
+signals.
+
+### Coverage ratchet
+
+`Coverage/TestedOpcodes.cs` MinTestedCount bumped 33 → 34 (+1).
+Phase K coverage: 33/207 → **34/207 (16.4%)**.
+
+### Next-Phase-K targets
+
+* **0x0027 INVENTORY_MOVE** — first inventory-state-mutator wave;
+  needs seeded inventory rows in seed.sql.
+* **0x0029 ITEM_STATE** — item-state-flip cousin of INVENTORY_MOVE.
+* **0x003C CLIENT_TYPE** — already in opcode table; likely a
+  one-shot client-type-identification frame.
+* **Inverse sweep** for further opcodes with no direct reply on
+  uninitialised state.

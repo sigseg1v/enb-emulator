@@ -38,6 +38,7 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId RequestTarget          = new(0x0017);
         public static readonly OpcodeId RequestTargetsTarget   = new(0x0018);
         public static readonly OpcodeId SetTarget              = new(0x0019);
+        public static readonly OpcodeId Debug                  = new(0x001A);
         public static readonly OpcodeId MessageString          = new(0x001D);
         public static readonly OpcodeId Action                 = new(0x002C);
         public static readonly OpcodeId Action2                = new(0x002D);
