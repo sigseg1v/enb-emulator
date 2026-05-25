@@ -2278,3 +2278,166 @@ mix isolated + full-suite invocations against the same stack).
   vendor so the handler trips its "no such item" early-return.
 * 0x0017 STOP_MOVE — opposite-pole of MOVE; engine-off flips the same path
   in reverse. Worth pairing with Wave 14 for symmetric coverage.
+
+## 2026-05-25 — Phase K Wave 19: 0x0017 REQUEST_TARGET direct-reply round-trip
+
+### What landed
+
+`tests/integration/CliClient.IntegrationTests/Opcodes/SectorRequestTargetTests.cs`
+(new) — `RequestTarget_OnNullTarget_ReceivesSetTargetWithSentinelTargetIdMinusOne`.
+Test sends the 8-byte 0x0017 REQUEST_TARGET frame
+(`{int32_t GameID=0; int32_t TargetID=0}`) after the standard sector
+handshake on cli_test16 (Pool[14], sector 10151, slot 0), drains
+sector-port frames looking for 0x0019 SET_TARGET, and asserts:
+
+* payload length == 8B (catches struct widening to long);
+* `replyGameID == 0` (mirrored from `request->TargetID` per
+  `SendSetTarget(request->TargetID, -1)` at
+  server/src/PlayerConnection.cpp:3501);
+* `replyTargetID == -1` (the hard-coded sentinel from
+  `Player::SendSetTarget` itself at server/src/PlayerConnection.cpp:3663).
+
+Passes in isolation (1/1, 7s) **and** in the full integration suite
+against a freshly-recycled stack (50/50, 2m25s).
+
+Touches: test file (new), `TestAccounts.cs` (+cli_test16 row),
+`Fixtures/seed.sql` (+cli_test16 INSERT), `OpcodeId.cs` (+RequestTarget
+0x0017 and +SetTarget 0x0019 in sorted positions), `TestedOpcodes.cs`
+(MinTestedCount 28→30 with both entries in sorted position between
+MOVE and MESSAGE_STRING).
+
+### Why direct-reply rather than survival probe
+
+Waves 10/11/13/14/15/16/17/18 were all survival probes because their
+handlers either no-op'd, fanned out only to OTHER players, or guarded
+on player state we couldn't satisfy from a freshly-handed-off character.
+Wave 19 is the **first post-Wave-9 direct-reply correlation** in
+Phase K. The signal strength is qualitatively higher:
+
+* **Survival probe**: "REQUEST_TIME still echoes" proves the handler
+  didn't crash and the UDP plane survived. Says nothing about the
+  handler's logic.
+* **Direct reply with a known sentinel + known mirror + known size**:
+  three positive-correlation signals in one test. A regression that
+  swapped SetTarget GameID/TargetID field order would silently break
+  (the literal -1 would appear in the GameID slot). A regression that
+  widened either field to `long` would balloon the reply to 12B/16B
+  (length assertion fails immediately). A regression in the
+  server→client UDP fan-out path that affected only this opcode on a
+  sub-branch of `SendClientPacketSequence` framing logic
+  (proxy/UDPProxyToClient_linux.cpp:531) would surface as a timeout
+  here even though Wave 8's MESSAGE_STRING still passed.
+
+The choice was driven by `Player::HandleRequestTarget`
+(server/src/PlayerConnection.cpp:3390) being **unconditional** —
+regardless of whether the requested target exists, the handler always
+calls `SendSetTarget(request->TargetID, -1)`. For TargetID=0:
+`GetObjectFromID(0)` returns null for both newtarget and oldtarget;
+`m_ProspectWindow` is false on a fresh starbase character so the
+OpenInterface branch is skipped; SendSetTarget fires; `BlankVerbs()`
+(server/src/PlayerClass.cpp:3467, a safe memset) runs; the threat-rank
+logic is gated on `newtarget != null` so it's skipped. The mandatory
+reply is the assertable post-condition.
+
+### CLAUDE.md server-integrity compliance
+
+Zero permissiveness added. The REQUEST_TARGET payload sent here is the
+exact wire shape the retail Win32 client emits when the user clicks an
+in-world object to make it the active target: 4B GameID + 4B TargetID.
+TargetID=0 is the value the retail client sends to **clear** the active
+target (click on empty space). The retail server's *unconditional*
+SetTarget reply with TargetID=-1 is the faithful behaviour — the -1
+sentinel means "no rank/threat info yet, client should re-request via
+0x0018 REQUEST_TARGETS_TARGET". We are not making the server accept any
+new input shape, and we don't fabricate a reply — the 0x0019 emit is
+what retail did.
+
+### Regression coverage
+
+* **RequestTarget long-revert.** Currently 2× int32_t = 8B canonical.
+  If GameID is widened to `long`, the struct grows to 12B on Linux
+  x86_64; TargetID reads from byte 8 (past the end of the 8B wire
+  payload) into undefined memory. A non-zero garbage TargetID would
+  walk the threat-rank path on a stale newtarget pointer — could crash
+  or echo garbage.
+* **SetTarget reply long-revert.** Currently 2× int32_t = 8B canonical.
+  If GameID or TargetID is widened to `long`, the reply grows to
+  12B/16B. Test asserts payload length is exactly 8 — would catch this
+  immediately.
+* **Reply field-order swap.** If the SetTarget struct fields are
+  reordered (GameID/TargetID swap), our assert that `TargetID == -1`
+  fails — the literal -1 would appear in the GameID slot instead.
+* **Proxy default-case `ForwardClientOpcode` regression.** REQUEST_TARGET
+  is not explicitly listed in `proxy/ClientToServer_linux_stubs.cpp`, so
+  it hits the `default:` arm at line 514 and falls through to the
+  bottom-of-switch `ForwardClientOpcode`. A regression that `return`ed
+  early or added an empty hand-coded case that returned would silently
+  drop the opcode — we'd time out waiting for SET_TARGET instead of
+  failing on a content assert.
+* **Server→client UDP fan-out regression.** The reply rides
+  `Player::SendOpcode` → `SendPacketCache` → `0x2016 PACKET_SEQUENCE` on
+  UDP → `UDPClient::SendClientPacketSequence`
+  (proxy/UDPProxyToClient_linux.cpp:531) → `SendResponse` over TCP. Same
+  path as Wave 8's MESSAGE_STRING — a regression in
+  `SendClientPacketSequence` that affected only this opcode (e.g. on a
+  different sub-branch of the framing logic) would surface as a timeout
+  here even though Wave 8 still passed.
+* **Dispatch mis-route.** The case label at
+  `server/src/PlayerConnection.cpp:443` is hand-maintained in a
+  ~200-entry switch; a copy-paste error could route 0x0017 to a
+  different handler that crashes on the 8-byte payload or emits a
+  different opcode in reply.
+
+### Full-suite re-run gotcha — RECURRENCE
+
+This is the **second wave** to hit the ACCOUNT_IN_USE-after-isolated-run
+pattern (Wave 18 was the first). Running `SectorRequestTargetTests` in
+isolation passes; re-running the full suite without recycling the docker
+stack produces `G_ERROR_ACCOUNT_IN_USE (code=13)` from cli_test16 at
+SectorHandshake.cs:89 — the prior isolated invocation left cli_test16
+marked active on the global server. Fix: `docker compose down -v &&
+docker compose up -d` between runs.
+
+The pattern is now consistent enough across waves to warrant a future
+hardening sweep:
+
+* Best place to fix: the test's `finally` block could send an explicit
+  `0x0003 LOGOFF` (or equivalent global-plane logoff sequence) before
+  calling `DeleteCreatedCharacterAsync`, instead of relying on session
+  expiry. The test currently does best-effort delete only.
+* Alternative: `SectorHandshake.EstablishAsync` could call a teardown
+  helper from `IAsyncDisposable.DisposeAsync` that walks the global
+  plane logoff sequence.
+* Tracked as a Phase K follow-up; out of scope for Wave 19 because the
+  fix needs to be carefully tested against the global-plane state
+  machine and shouldn't get bundled into a wave that ships an opcode
+  test.
+
+### Test-account pool
+
+* `cli_test16` (id 9_000_016) — Pool[14]. Dedicated to SectorRequestTarget
+  so its Create/Delete cycle doesn't collide with Pool[3..13].
+
+### Coverage ratchet
+
+* Pre-Wave-19: 28/207 (13.5%).
+* Post-Wave-19: 30/207 (14.5%) — +0x0017 REQUEST_TARGET +0x0019 SET_TARGET.
+  First **+2** ratchet in Phase K — every prior wave covered only one
+  opcode (the request side; the reply side was either absent, indirect,
+  or covered by Wave 7's broad sweep). Direct-reply waves like this one
+  naturally cover both halves of a request/reply pair.
+
+### Next-Phase-K targets
+
+* **0x0018 REQUEST_TARGETS_TARGET** — natural follow-on to REQUEST_TARGET.
+  The -1 sentinel in our SET_TARGET reply tells the client to re-request
+  the target's rank/threat info via 0x0018; a 0x0017→0x0018 chain test
+  would exercise both halves of the target-info handshake.
+* **0x002D ACTION2** — simpler-payload sibling of Wave 13's ACTION
+  (0x002C). Likely a survival probe shape but worth checking the
+  dispatcher path.
+* **0x0027 INVENTORY_MOVE** — first inventory-state-mutator wave. Will
+  need a seeded inventory row to drive past the early-return guards.
+* **0x0034 inverse sweep** — there are several opcodes the proxy lists
+  explicitly but we haven't tested yet; worth doing a fast inventory
+  to identify the next batch of survival-probe candidates.
