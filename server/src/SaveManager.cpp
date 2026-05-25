@@ -262,14 +262,25 @@ void SaveManager::HandelInfraction(long player_id, short bytes, unsigned char *d
 	char msg[256];
 	memcpy(msg, &data[8], 256);
 
-	LogMessage("SQL CALL: net7_user.incWarn(account=%ld, player=%ld, msg='%s', inc=%ld)\n",
+	LogMessage("SQL CALL: incWarn(account=%ld, player=%ld, msg='%s', inc=%ld)\n",
 		account_id, player_id, msg, inc_ammount);
+
+	// Phase N: the original `CALL net7_user.incWarn(accID, adminID, infrac,
+	// incAmount)` MySQL stored procedure body is one UPDATE bumping
+	// accounts.warn_level + an INSERT into account_infractions
+	// (db/postgres/seed.sql:741). Postgres has no equivalent procedure (the
+	// MySQL DELIMITER block doesn't load), so we inline both statements.
+	account_query.AddParam(inc_ammount);
+	account_query.AddParam(account_id);
+	account_query.run_query_params("UPDATE accounts SET warn_level = warn_level + ? WHERE id = ?");
 
 	account_query.AddParam(account_id);
 	account_query.AddParam(player_id);
 	account_query.AddParam(msg);
 	account_query.AddParam(inc_ammount);
-	account_query.run_query_params("CALL net7_user.incWarn(?,?,?,?)");
+	account_query.run_query_params(
+		"INSERT INTO account_infractions (\"account_ID\", infraction_date, \"admin_ID\", infraction, warn_level_increment) "
+		"VALUES (?, NOW(), ?, ?, ?)");
 }
 
 void SaveManager::HandleLogin(long player_id, short bytes, unsigned char *data)
@@ -279,11 +290,14 @@ void SaveManager::HandleLogin(long player_id, short bytes, unsigned char *data)
 
 	memcpy(timestr, &data[0], 32);
 
-	LogMessage("SQL CALL: net7_user.avaLogin(player=%ld, time='%s')\n", player_id, timestr);
+	LogMessage("SQL CALL: avaLogin(player=%ld, time='%s')\n", player_id, timestr);
 
-	account_query.AddParam(player_id);
+	// Phase N: `CALL net7_user.avaLogin(avaID, theTime)` body is
+	// `UPDATE avatar_info SET last_login = theTime WHERE avatar_id = avaID`
+	// (db/postgres/seed.sql:717). Inlined for Postgres.
 	account_query.AddParam(timestr);
-	account_query.run_query_params("CALL net7_user.avaLogin(?,?)");
+	account_query.AddParam(player_id);
+	account_query.run_query_params("UPDATE avatar_info SET last_login = ? WHERE avatar_id = ?");
 }
 
 void SaveManager::HandleLogout(long player_id, short bytes, unsigned char *data)
@@ -293,11 +307,20 @@ void SaveManager::HandleLogout(long player_id, short bytes, unsigned char *data)
 
 	memcpy(timestr, &data[0], 32);
 
-	LogMessage("SQL CALL: net7_user.avaLogout(player=%ld, time='%s')\n", player_id, timestr);
+	LogMessage("SQL CALL: avaLogout(player=%ld, time='%s')\n", player_id, timestr);
 
-	account_query.AddParam(player_id);
+	// Phase N: `CALL net7_user.avaLogout(avaID, theTime)` body is
+	// `UPDATE avatar_info SET last_logout = theTime, time_played = time_played
+	// + (now() - last_login) WHERE avatar_id = avaID` (db/postgres/seed.sql:730).
+	// time_played is bigint (seconds); subtract two timestamps then EXTRACT
+	// the epoch difference to keep the same semantics under Postgres.
 	account_query.AddParam(timestr);
-	account_query.run_query_params("CALL net7_user.avaLogout(?,?)");
+	account_query.AddParam(player_id);
+	account_query.run_query_params(
+		"UPDATE avatar_info "
+		"SET last_logout = ?, "
+		"    time_played = time_played + EXTRACT(EPOCH FROM (NOW() - last_login))::bigint "
+		"WHERE avatar_id = ?");
 
 	time_t now;
 	time( &now );
@@ -307,7 +330,7 @@ void SaveManager::HandleLogout(long player_id, short bytes, unsigned char *data)
 	account_query.AddParam((long)time_conv);
 	account_query.AddParam(player_id);
 	account_query.run_query_params(
-		"UPDATE net7_user.avatar_info SET last_logout_t = ? WHERE avatar_id = ?");
+		"UPDATE avatar_info SET last_logout_t = ? WHERE avatar_id = ?");
 }
 
 void SaveManager::HandleNewRecipe(long player_id, short bytes, unsigned char *data)
@@ -342,7 +365,7 @@ void SaveManager::HandleManufactureAttempt(long player_id, short bytes, unsigned
 	account_query.AddParam(player_id);
 	account_query.AddParam(item_id);
 	account_query.run_query_params(
-		"UPDATE net7_user.avatar_recipes SET avg_quality = (avg_quality*attempts+?)/(attempts+1), attempts=attempts+1 WHERE avatar_id = ? AND item_id = ?");
+		"UPDATE avatar_recipes SET avg_quality = (avg_quality*attempts+?)/(attempts+1), attempts=attempts+1 WHERE avatar_id = ? AND item_id = ?");
 }
 
 void SaveManager::HandleAdvanceLevel(long player_id, short bytes, unsigned char *data)
@@ -357,15 +380,15 @@ void SaveManager::HandleAdvanceLevel(long player_id, short bytes, unsigned char 
 	switch (xp_type)
 	{
     case XP_COMBAT:
-		sql = "UPDATE net7_user.avatar_info SET combat = ? WHERE avatar_id = ?";
+		sql = "UPDATE avatar_info SET combat = ? WHERE avatar_id = ?";
         break;
 
     case XP_EXPLORE:
-		sql = "UPDATE net7_user.avatar_info SET explore = ? WHERE avatar_id = ?";
+		sql = "UPDATE avatar_info SET explore = ? WHERE avatar_id = ?";
         break;
 
     case XP_TRADE:
-		sql = "UPDATE net7_user.avatar_info SET trade = ? WHERE avatar_id = ?";
+		sql = "UPDATE avatar_info SET trade = ? WHERE avatar_id = ?";
 		break;
 	}
 
@@ -390,7 +413,7 @@ void SaveManager::HandleAdvanceSkill(long player_id, short bytes, unsigned char 
 	account_query.AddParam(player_id);
 	account_query.AddParam((int)skill_id);
 	account_query.execute_params(
-		"SELECT * FROM net7_user.avatar_skill_levels WHERE avatar_id = ? AND skill_id = ?");
+		"SELECT * FROM avatar_skill_levels WHERE avatar_id = ? AND skill_id = ?");
 	account_query.store(&result);
 
 	if (result.n_rows() != 0)
@@ -399,7 +422,7 @@ void SaveManager::HandleAdvanceSkill(long player_id, short bytes, unsigned char 
 		account_query.AddParam(player_id);
 		account_query.AddParam((int)skill_id);
 		account_query.run_query_params(
-			"UPDATE net7_user.avatar_skill_levels SET skill_level = ? WHERE avatar_id = ? AND skill_id = ?");
+			"UPDATE avatar_skill_levels SET skill_level = ? WHERE avatar_id = ? AND skill_id = ?");
 	}
 	else
 	{
@@ -443,20 +466,20 @@ void SaveManager::HandleChangeInventory(long player_id, short bytes, unsigned ch
 	switch (inventory_type)
 	{
 	case PLAYER_INVENTORY:
-		select_sql = "SELECT * FROM net7_user.avatar_inventory_items WHERE avatar_id = ? AND inventory_slot = ?";
-		update_sql = "UPDATE net7_user.avatar_inventory_items SET item_id = ?, stack_level = ?, trade_stack = ?,"
+		select_sql = "SELECT * FROM avatar_inventory_items WHERE avatar_id = ? AND inventory_slot = ?";
+		update_sql = "UPDATE avatar_inventory_items SET item_id = ?, stack_level = ?, trade_stack = ?,"
 			"quality = ?, cost = ?, builder_name = ?, structure = ? WHERE avatar_id = ? AND inventory_slot = ?";
 		break;
 
 	case PLAYER_VAULT:
-		select_sql = "SELECT * FROM net7_user.avatar_vault_items WHERE avatar_id = ? AND inventory_slot = ?";
-		update_sql = "UPDATE net7_user.avatar_vault_items SET item_id = ?, stack_level = ?, trade_stack = ?, "
+		select_sql = "SELECT * FROM avatar_vault_items WHERE avatar_id = ? AND inventory_slot = ?";
+		update_sql = "UPDATE avatar_vault_items SET item_id = ?, stack_level = ?, trade_stack = ?, "
 			"quality = ?, cost = ?, builder_name = ?, structure = ? WHERE avatar_id = ? AND inventory_slot = ?";
 		break;
 
 	case PLAYER_TRADE:
-		select_sql = "SELECT * FROM net7_user.avatar_trade_items WHERE avatar_id = ? AND inventory_slot = ?";
-		update_sql = "UPDATE net7_user.avatar_trade_items SET item_id = ?, stack_level = ?, trade_stack = ?, "
+		select_sql = "SELECT * FROM avatar_trade_items WHERE avatar_id = ? AND inventory_slot = ?";
+		update_sql = "UPDATE avatar_trade_items SET item_id = ?, stack_level = ?, trade_stack = ?, "
 			"quality = ?, cost = ?, builder_name = ?, structure = ? WHERE avatar_id = ? AND inventory_slot = ?";
 		break;
 	}
@@ -538,7 +561,7 @@ void SaveManager::HandleChangeEquipment(long player_id, short bytes, unsigned ch
 	account_query.AddParam(player_id);
 	account_query.AddParam((int)equipment_slot);
 	account_query.execute_params(
-		"SELECT * FROM net7_user.avatar_equipment WHERE avatar_id = ? AND equipment_slot = ?");
+		"SELECT * FROM avatar_equipment WHERE avatar_id = ? AND equipment_slot = ?");
 	account_query.store(&result);
 
 	if (result.n_rows() != 0)
@@ -551,7 +574,7 @@ void SaveManager::HandleChangeEquipment(long player_id, short bytes, unsigned ch
 		account_query.AddParam(player_id);
 		account_query.AddParam((int)equipment_slot);
 		if (!account_query.run_query_params(
-			"UPDATE net7_user.avatar_equipment SET item_id = ?, quality = ?, builder_name = ?, "
+			"UPDATE avatar_equipment SET item_id = ?, quality = ?, builder_name = ?, "
 			"structure = ? WHERE avatar_id = ? AND equipment_slot = ?"))
 		{
 			LogMessage("Could not update Equip Info for id %d, %s\n", player_id, account_query.ErrorMsg());
@@ -604,7 +627,7 @@ void SaveManager::HandleChangeAmmo(long player_id, short bytes, unsigned char *d
 	account_query.AddParam(player_id);
 	account_query.AddParam((int)equipment_slot);
 	account_query.execute_params(
-		"SELECT * FROM net7_user.avatar_ammo WHERE avatar_id = ? AND equipment_slot = ?");
+		"SELECT * FROM avatar_ammo WHERE avatar_id = ? AND equipment_slot = ?");
 	account_query.store(&result);
 
 	if (result.n_rows() != 0)
@@ -618,7 +641,7 @@ void SaveManager::HandleChangeAmmo(long player_id, short bytes, unsigned char *d
 		account_query.AddParam(player_id);
 		account_query.AddParam((int)equipment_slot);
 		account_query.run_query_params(
-			"UPDATE net7_user.avatar_ammo SET item_id = ?, quality = ?, ammo_stack = ?, structure = ?, "
+			"UPDATE avatar_ammo SET item_id = ?, quality = ?, ammo_stack = ?, structure = ?, "
 			"builder_name = ? WHERE avatar_id = ? AND equipment_slot = ?");
 	}
 	else
@@ -655,15 +678,15 @@ void SaveManager::HandleAwardXP(long player_id, short bytes, unsigned char *data
 	switch (xp_type)
 	{
     case XP_COMBAT:
-		sql = "UPDATE net7_user.avatar_level_info SET combat_bar_level = ? WHERE avatar_id = ?";
+		sql = "UPDATE avatar_level_info SET combat_bar_level = ? WHERE avatar_id = ?";
         break;
 
     case XP_EXPLORE:
-		sql = "UPDATE net7_user.avatar_level_info SET explore_bar_level = ? WHERE avatar_id = ?";
+		sql = "UPDATE avatar_level_info SET explore_bar_level = ? WHERE avatar_id = ?";
         break;
 
     case XP_TRADE:
-		sql = "UPDATE net7_user.avatar_level_info SET trade_bar_level = ? WHERE avatar_id = ?";
+		sql = "UPDATE avatar_level_info SET trade_bar_level = ? WHERE avatar_id = ?";
 		break;
 	}
 
@@ -685,7 +708,7 @@ void SaveManager::HandleUpdateDatabase(long player_id, short bytes, unsigned cha
 	account_query.AddParam((unsigned int)sector_id);
 	account_query.AddParam(player_id);
 	account_query.run_query_params(
-		"UPDATE net7_user.avatar_info SET sector = ? WHERE avatar_id = ?");
+		"UPDATE avatar_info SET sector = ? WHERE avatar_id = ?");
 }
 
 void SaveManager::HandleCreditChange(long player_id, short bytes, unsigned char *data)
@@ -698,7 +721,7 @@ void SaveManager::HandleCreditChange(long player_id, short bytes, unsigned char 
 	account_query.AddParam((long)credits);
 	account_query.AddParam(player_id);
 	account_query.run_query_params(
-		"UPDATE net7_user.avatar_level_info SET credits = ? WHERE avatar_id = ?");
+		"UPDATE avatar_level_info SET credits = ? WHERE avatar_id = ?");
 }
 
 void SaveManager::HandleStorePosition(long player_id, short bytes, unsigned char *data)
@@ -734,7 +757,7 @@ void SaveManager::HandleStorePosition(long player_id, short bytes, unsigned char
 	account_query.AddParam(sector_id);
 	account_query.AddParam(player_id);
 	account_query.run_query_params(
-		"UPDATE net7_user.avatar_position SET posx = ?, posy = ?, posz = ?, ori_w = ?, ori_x = ?, "
+		"UPDATE avatar_position SET posx = ?, posy = ?, posz = ?, ori_w = ?, ori_x = ?, "
 		"ori_y = ?, ori_z = ?, sector_id = ? WHERE avatar_id = ?");
 }
 
@@ -751,7 +774,7 @@ void SaveManager::HandleAdvanceMission(long player_id, short bytes, unsigned cha
 	account_query.AddParam(player_id);
 	account_query.AddParam((int)mission_slot);
 	account_query.execute_params(
-		"SELECT * FROM net7_user.avatar_mission_progress WHERE avatar_id = ? AND mission_slot = ?");
+		"SELECT * FROM avatar_mission_progress WHERE avatar_id = ? AND mission_slot = ?");
 	account_query.store(&result);
 
 	if (result.n_rows() != 0)
@@ -761,7 +784,7 @@ void SaveManager::HandleAdvanceMission(long player_id, short bytes, unsigned cha
 		account_query.AddParam(player_id);
 		account_query.AddParam((int)mission_slot);
 		account_query.run_query_params(
-			"UPDATE net7_user.avatar_mission_progress SET stage_num = ?, mission_flags = '0' WHERE avatar_id = "
+			"UPDATE avatar_mission_progress SET stage_num = ?, mission_flags = '0' WHERE avatar_id = "
 			"? AND mission_slot = ?");
 	}
 	else
@@ -798,7 +821,7 @@ void SaveManager::HandleAdvanceMissionFlags(long player_id, short bytes, unsigne
 	account_query.AddParam(player_id);
 	account_query.AddParam((int)mission_slot);
 	account_query.run_query_params(
-		"UPDATE net7_user.avatar_mission_progress SET mission_flags = ? WHERE avatar_id = ? AND mission_slot = ?");
+		"UPDATE avatar_mission_progress SET mission_flags = ? WHERE avatar_id = ? AND mission_slot = ?");
 }
 
 void SaveManager::HandleHullUpgrade(long player_id, short bytes, unsigned char *data)
@@ -819,7 +842,7 @@ void SaveManager::HandleHullUpgrade(long player_id, short bytes, unsigned char *
 
 	account_query.AddParam(player_id);
 	account_query.execute_params(
-		"SELECT * FROM net7_user.avatar_level_info WHERE avatar_id = ?");
+		"SELECT * FROM avatar_level_info WHERE avatar_id = ?");
 	account_query.store(&result);
 
 	if (result.n_rows() != 0)
@@ -833,14 +856,14 @@ void SaveManager::HandleHullUpgrade(long player_id, short bytes, unsigned char *
 		account_query.AddParam((int)device_slots);
 		account_query.AddParam(player_id);
 		account_query.run_query_params(
-			"UPDATE net7_user.avatar_level_info SET player_rank_name = ?, hull_upgrade_level = ?, "
+			"UPDATE avatar_level_info SET player_rank_name = ?, hull_upgrade_level = ?, "
 			"max_hull_points = ?, cargo_space = ?, weapon_slots = ?, device_slots = ? WHERE avatar_id = ?");
 
 		account_query.AddParam((int)engine_thrust_type);
 		account_query.AddParam((int)warp_power_level);
 		account_query.AddParam(player_id);
 		account_query.run_query_params(
-			"UPDATE net7_user.avatar_level_info SET engine_thrust_type = ?, warp_power_level = ? WHERE avatar_id = ?");
+			"UPDATE avatar_level_info SET engine_thrust_type = ?, warp_power_level = ? WHERE avatar_id = ?");
 	}
 	else
 	{
@@ -883,7 +906,7 @@ void SaveManager::HandleHullLevelChange(long player_id, short bytes, unsigned ch
 	account_query.AddParam((double)hull_points);
 	account_query.AddParam(player_id);
 	account_query.run_query_params(
-		"UPDATE net7_user.avatar_level_info SET hull_points = ? WHERE avatar_id = ?");
+		"UPDATE avatar_level_info SET hull_points = ? WHERE avatar_id = ?");
 }
 
 void SaveManager::HandleMissionRemove(long player_id, short bytes, unsigned char *data)
@@ -896,7 +919,7 @@ void SaveManager::HandleMissionRemove(long player_id, short bytes, unsigned char
 	account_query.AddParam(player_id);
 	account_query.AddParam(mission_id);
 	account_query.run_query_params(
-		"DELETE FROM net7_user.avatar_mission_progress WHERE avatar_id = ? AND mission_id = ?");
+		"DELETE FROM avatar_mission_progress WHERE avatar_id = ? AND mission_id = ?");
 }
 
 void SaveManager::HandleMissionComplete(long player_id, short bytes, unsigned char *data)
@@ -912,12 +935,12 @@ void SaveManager::HandleMissionComplete(long player_id, short bytes, unsigned ch
 	account_query.AddParam(player_id);
 	account_query.AddParam(mission_id);
 	account_query.run_query_params(
-		"DELETE FROM net7_user.avatar_mission_progress WHERE avatar_id = ? AND mission_id = ?");
+		"DELETE FROM avatar_mission_progress WHERE avatar_id = ? AND mission_id = ?");
 
 	account_query.AddParam(player_id);
 	account_query.AddParam(mission_id);
 	account_query.execute_params(
-		"SELECT * FROM net7_user.missions_completed WHERE avatar_id = ? AND mission_id = ?");
+		"SELECT * FROM missions_completed WHERE avatar_id = ? AND mission_id = ?");
 	account_query.store(&result);
 
 	if (result.n_rows() != 0)
@@ -927,7 +950,7 @@ void SaveManager::HandleMissionComplete(long player_id, short bytes, unsigned ch
 		account_query.AddParam(player_id);
 		account_query.AddParam(mission_id);
 		account_query.run_query_params(
-			"UPDATE net7_user.missions_completed SET mission_completion_flags = ? WHERE avatar_id = ? "
+			"UPDATE missions_completed SET mission_completion_flags = ? WHERE avatar_id = ? "
 			"AND mission_id = ?");
 	}
 	else
@@ -981,7 +1004,7 @@ void SaveManager::HandleWipeCharacter(long player_id)
 
 	account_query.AddParam(player_id);
 	account_query.run_query_params(
-		"UPDATE net7_user.avatar_info SET combat = '0', explore = '0', trade = '0' WHERE avatar_id = ?");
+		"UPDATE avatar_info SET combat = '0', explore = '0', trade = '0' WHERE avatar_id = ?");
 }
 
 //this method removes all trace of the avatar in the database, must be used when the avatar is deleted via the client avatar character selector.
@@ -1055,7 +1078,7 @@ void SaveManager::HandleExploreNav(long player_id, short bytes, unsigned char *d
 	account_query.AddParam(player_id);
 	account_query.AddParam(object_uid);
 	account_query.execute_params(
-		"SELECT * FROM net7_user.avatar_exploration WHERE avatar_id = ? AND object_id = ?");
+		"SELECT * FROM avatar_exploration WHERE avatar_id = ? AND object_id = ?");
 	account_query.store(&result);
 
 	if (result.n_rows() == 0)
@@ -1065,7 +1088,7 @@ void SaveManager::HandleExploreNav(long player_id, short bytes, unsigned char *d
 		account_query.AddParam(object_uid);
 		account_query.AddParam((int)EXPLORE_NAV);
 		account_query.run_query_params(
-			"INSERT INTO net7_user.avatar_exploration (avatar_id,object_id,explore_flags) VALUES (?,?,?)");
+			"INSERT INTO avatar_exploration (avatar_id,object_id,explore_flags) VALUES (?,?,?)");
 	}
 	else
 	{
@@ -1074,7 +1097,7 @@ void SaveManager::HandleExploreNav(long player_id, short bytes, unsigned char *d
 		account_query.AddParam(player_id);
 		account_query.AddParam(object_uid);
 		account_query.run_query_params(
-			"UPDATE net7_user.avatar_exploration SET explore_flags = ? WHERE avatar_id = ? AND object_id = ?");
+			"UPDATE avatar_exploration SET explore_flags = ? WHERE avatar_id = ? AND object_id = ?");
 	}
 }
 
@@ -1088,7 +1111,7 @@ void SaveManager::HandleSetSkillPoints(long player_id, short bytes, unsigned cha
 	account_query.AddParam(skill_points);
 	account_query.AddParam(player_id);
 	account_query.run_query_params(
-		"UPDATE net7_user.avatar_level_info SET skill_points = ? WHERE avatar_id = ?");
+		"UPDATE avatar_level_info SET skill_points = ? WHERE avatar_id = ?");
 }
 
 void SaveManager::HandleSetRegisteredStarbase(long player_id, short bytes, unsigned char *data)
@@ -1101,7 +1124,7 @@ void SaveManager::HandleSetRegisteredStarbase(long player_id, short bytes, unsig
 	account_query.AddParam(registered_starbase);
 	account_query.AddParam(player_id);
 	account_query.run_query_params(
-		"UPDATE net7_user.avatar_level_info SET registered_starbase = ? WHERE avatar_id = ?");
+		"UPDATE avatar_level_info SET registered_starbase = ? WHERE avatar_id = ?");
 }
 
 void SaveManager::HandleSaveEnergyLevels(long player_id, short bytes, unsigned char *data)
@@ -1119,7 +1142,7 @@ void SaveManager::HandleSaveEnergyLevels(long player_id, short bytes, unsigned c
 	account_query.AddParam((double)shield);
 	account_query.AddParam(player_id);
 	account_query.run_query_params(
-		"UPDATE net7_user.avatar_level_info SET reactor_level = ?, shield_level = ? WHERE avatar_id = ?");
+		"UPDATE avatar_level_info SET reactor_level = ?, shield_level = ? WHERE avatar_id = ?");
 }
 
 void SaveManager::HandleFactionUpdate(long player_id, short bytes, unsigned char *data)
@@ -1140,7 +1163,7 @@ void SaveManager::HandleFactionUpdate(long player_id, short bytes, unsigned char
 	account_query.AddParam(player_id);
 	account_query.AddParam(faction_id);
 	account_query.execute_params(
-		"SELECT * FROM net7_user.faction_data WHERE avatar_id = ? AND faction_id = ?");
+		"SELECT * FROM faction_data WHERE avatar_id = ? AND faction_id = ?");
 	account_query.store(&result);
 
 	if (result.n_rows() != 0)
@@ -1153,7 +1176,7 @@ void SaveManager::HandleFactionUpdate(long player_id, short bytes, unsigned char
 			account_query.AddParam(player_id);
 			account_query.AddParam(faction_id);
 			account_query.run_query_params(
-				"UPDATE net7_user.faction_data SET faction_order = ? AND faction_value = ? WHERE avatar_id = "
+				"UPDATE faction_data SET faction_order = ? AND faction_value = ? WHERE avatar_id = "
 				"? AND faction_id = ?");
 		}
 		else
@@ -1162,7 +1185,7 @@ void SaveManager::HandleFactionUpdate(long player_id, short bytes, unsigned char
 			account_query.AddParam(player_id);
 			account_query.AddParam(faction_id);
 			account_query.run_query_params(
-				"UPDATE net7_user.faction_data SET faction_value = ? WHERE avatar_id = ? AND faction_id = ?");
+				"UPDATE faction_data SET faction_value = ? WHERE avatar_id = ? AND faction_id = ?");
 		}
 	}
 	else
@@ -1509,7 +1532,7 @@ void SaveManager::HandleNewWarnLevel(long player_id, short bytes, unsigned char 
 
 	account_query.AddParam(player_id);
 	account_query.execute_params(
-		"SELECT * FROM net7_user.warning_levels WHERE avatar_id = ?");
+		"SELECT * FROM warning_levels WHERE avatar_id = ?");
 	account_query.store(&result);
 
 	if (result.n_rows() != 0)
@@ -1518,7 +1541,7 @@ void SaveManager::HandleNewWarnLevel(long player_id, short bytes, unsigned char 
 		account_query.AddParam(new_level);
 		account_query.AddParam(player_id);
 		account_query.run_query_params(
-			"UPDATE net7_user.warning_levels SET sound_warning_level = ? WHERE avatar_id = ?");
+			"UPDATE warning_levels SET sound_warning_level = ? WHERE avatar_id = ?");
 	}
 	else
 	{

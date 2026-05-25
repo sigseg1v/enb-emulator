@@ -239,7 +239,7 @@ bool SectorContentParser::ParseSectorContent(long parse_id)
             " on sector_objects.sector_object_id = sector_objects_mob.mob_id"
 			" left join `sector_objects_turrets`"
             " on sector_objects.sector_object_id = sector_objects_turrets.turret_id"
-			//" left join `net7_user.server_local_field_respawn_times`"
+			//" left join `server_local_field_respawn_times`"
 			//" left join `server_local_field_respawn_times`"
 			//" on sector_object.sector_object_id = server_local_field_respawn_times.resource_id"
             " where sector_objects.sector_id=?";
@@ -393,7 +393,7 @@ bool SectorContentParser::ParseSectorContent(long parse_id)
 
 					FldUpdate.AddParam((long)object_uid);
 					FldUpdate.execute_params(
-						"SELECT * FROM net7_user.server_local_field_respawn_times WHERE resource_id = ?");
+						"SELECT * FROM server_local_field_respawn_times WHERE resource_id = ?");
 					FldUpdate.store(&FldResult);
 					long local_respawn = 0;
 					

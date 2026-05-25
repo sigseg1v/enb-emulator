@@ -93,9 +93,15 @@ void AccountManager::SetupTickets()
 		gmtime_s(&gmttime, &rawtime);
 		strftime(timestr, sizeof(timestr), "%Y/%m/%d %H:%M:%S", &gmttime);
 
-	    TimeUpdate.AddParam((long)account_id);
+	    // Phase N: the original MySQL `CALL net7_user.accLogin(accID, theTime)`
+	    // stored procedure body is `UPDATE net7_user.accounts SET last_login =
+	    // theTime WHERE id = accID;` (db/postgres/seed.sql:691). Postgres has
+	    // no equivalent procedure (MySQL's DELIMITER block doesn't load), so
+	    // we inline the UPDATE here. Account `id` is the second placeholder,
+	    // timestr is the first — AddParam order swapped accordingly.
 	    TimeUpdate.AddParam(timestr);
-	    TimeUpdate.run_query_params("CALL net7_user.accLogin(?, ?)");
+	    TimeUpdate.AddParam((long)account_id);
+	    TimeUpdate.run_query_params("UPDATE accounts SET last_login = ? WHERE id = ?");
     }
 
     long AccountManager::GetAccountStatus(char *username)
