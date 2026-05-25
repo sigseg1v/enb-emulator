@@ -68,7 +68,7 @@ public static class TestedOpcodes
     /// <see cref="Opcodes"/>. NEVER decrease without a commit message
     /// explaining what deleted coverage and why it was OK to delete.
     /// </summary>
-    public const int MinTestedCount = 7;
+    public const int MinTestedCount = 9;
 
     /// <summary>
     /// Every opcode with round-trip coverage in this suite, with an
@@ -87,6 +87,10 @@ public static class TestedOpcodes
             "Opcodes/MasterJoinTests.cs — received as the reply to MASTER_JOIN; AND Verification/CaptureReplayTests.cs — retail capture_1 frame 222 decoded with field-by-field assertions."),
         new TestedOpcode(0x006D, "GLOBAL_CONNECT",
             "Opcodes/GlobalConnectTests.cs — client sends GlobalConnect with a real Net7SSL-issued ticket; round-trip drives the Phase K proxy↔server global UDP plane (UDP 3810)."),
+        new TestedOpcode(0x006E, "GLOBAL_TICKET_REQUEST",
+            "Opcodes/GlobalTicketRequestTests.cs — client sends GlobalTicketRequest with slot=0 against a seeded account that has no avatars; exercises HandleGlobalTicketRequest's wire-size fix (server/src/UDP_Global.cpp:200,237) — without those fixes the slot index decoded into the username's length prefix and the AVATARLOGIN_CONFIRM reply was 8B instead of 4B."),
+        new TestedOpcode(0x006F, "GLOBAL_TICKET",
+            "Opcodes/GlobalTicketRequestTests.cs — received as the proxy's failure-path reply (response_code=1002 galaxy full) after SendAvatarLogin's WaitForResponse times out; decoded via GlobalTicketCodec which verifies the Phase K 68B canonical Win32 size (was 72B on Linux pre-int32_t migration)."),
         new TestedOpcode(0x0070, "GLOBAL_AVATAR_LIST",
             "Opcodes/GlobalConnectTests.cs — received as the reply to GlobalConnect after the proxy's SendTicket UDP round-trip to the server's HandleGlobalOpcode dispatcher and back."),
         new TestedOpcode(0x0075, "GLOBAL_ERROR",
