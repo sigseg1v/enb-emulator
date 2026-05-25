@@ -54,6 +54,7 @@ public static class TestAccounts
         new(9_000_022, "cli_test22", SharedPassword),
         new(9_000_023, "cli_test23", SharedPassword),
         new(9_000_024, "cli_test24", SharedPassword),
+        new(9_000_025, "cli_test25", SharedPassword),
     };
 
     /// <summary>

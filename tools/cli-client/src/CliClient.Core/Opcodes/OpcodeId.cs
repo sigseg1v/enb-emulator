@@ -55,6 +55,8 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId ClientType             = new(0x003C);
         public static readonly OpcodeId RequestTime            = new(0x0044);
         public static readonly OpcodeId StarbaseRequest        = new(0x004E);
+        public static readonly OpcodeId SelectTalkTree         = new(0x0055);
+        public static readonly OpcodeId TalkTreeAction         = new(0x0056);
         public static readonly OpcodeId SkillUp                = new(0x0057);
         public static readonly OpcodeId SkillAbility           = new(0x0058);
         public static readonly OpcodeId VerbRequest            = new(0x005A);
