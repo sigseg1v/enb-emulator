@@ -3755,3 +3755,128 @@ added, no behaviour relaxed.
   hand-offs. Worth keeping the doc format consistent across
   future occurrences: top section = pending steps in order,
   middle = technical detail, bottom = directives + resume blurb.
+
+## 2026-05-25 — Phase K Wave 29 (0x0088 PETITION_STUCK survival probe; 0x008D INCAPACITANCE_REQUEST abandoned)
+
+* **First abandoned target in Phase K — server-integrity rule
+  triumphs over candidate selection**: 0x008D INCAPACITANCE_REQUEST
+  was the first-pick Wave 29 target, chosen because the handler at
+  server/src/PlayerConnection.cpp:11053 emits a 0x0054 TALK_TREE
+  direct reply on the first call (gated by `m_IncapAvatarSent`
+  flag). The emit happens BEFORE any side effects in the read of
+  the handler — so a glance at the first ~10 lines made it look
+  like a clean direct-reply candidate matching the Wave 25/28
+  pattern. The test was written, the dispatcher case verified at
+  server/src/PlayerConnection.cpp:567, the 0x0054 codec wired,
+  expectations set. Then the server crashed deterministically when
+  the test fired. Root cause: the first-time branch (lines
+  11069-11104) continues past the 0x0054 emit and mutates SHARED
+  NPC template state via `NPCs->Avatar.shirt_primary_color[0] +=
+  0.1f` (and similar lines for skin/hair/etc colors), then emits
+  0x0061 AVATAR_DESCRIPTION. The NPCs pointer is the global NPC
+  template registry; mutating its color fields from a player-side
+  handler is a SEGV trigger under integration-test conditions
+  (NPCs is uninitialized or the template the test character is
+  routed to has a null-deref-trigger layout in the test seed).
+  Per CLAUDE.md server-integrity rules the choice is binary: the
+  TEST adapts to the server, or the server stays as-is. There is
+  no third option. No patch, no workaround, no `#ifdef DEV` flag.
+  Target abandoned, swap to next candidate. This is the first
+  Phase K target abandoned for server-side reasons — Waves 24
+  through 28 all landed first-pick.
+
+* **Methodology refinement: read handler past first SendOpcode
+  before committing to candidate**: the lesson from the 0x008D
+  abandonment is that the Wave 25 heuristic ("handler emits a
+  SendXxx call deterministically on first entry → direct-reply
+  candidate") is necessary but not sufficient. Sufficiency
+  requires the handler to either (a) return after the emit, or
+  (b) only perform read-only / per-connection-state work after
+  the emit. If the handler mutates shared/global state, touches
+  pointers it didn't validate, or emits subsequent opcodes that
+  could fan out to non-existent observers (e.g. an empty sector
+  player list), it is NOT safe under integration-test conditions
+  even though it might be safe under retail conditions. Added
+  reflex: before picking a Wave target, read the handler all the
+  way to its `return` (or the end of its function body) and
+  classify post-emit work — read-only, mutate-self-state, or
+  mutate-global-state. Only the first two qualify. The 0x008D
+  case is now the canonical counterexample: the 0x0054 emit at
+  line 11066 is real and immediate, but the `NPCs->Avatar.*`
+  mutation at lines 11078-11091 is what kills the server.
+
+* **0x0088 PETITION_STUCK as cleanest survival-probe replacement**:
+  searching for "queue-and-return" handlers in the 0x0080-0x00B0
+  range turned up PETITION_STUCK as the simplest possible safe
+  path: HandlePetitionStuck (server/src/PlayerConnection.cpp:11048)
+  is literally a one-liner that calls SavePetition; SavePetition
+  (server/src/PlayerSaves.cpp:1222) is a one-liner that calls
+  g_SaveMgr->AddSaveMessage(SAVE_CODE_PETITION, m_CharacterID,
+  bytes, data). No SendOpcode anywhere, no mutation of player
+  state, no fan-out, no DB write inline (the save-manager thread
+  handles persistence asynchronously). This is the same safe
+  shape as Wave 19's STARBASE_ROOM_CHANGE survival probe but
+  even simpler (StarbaseRoomChange at least mutated m_Room /
+  m_Oldroom under m_Mutex). PetitionStuck is the "purest"
+  survival-probe shape available — the wire shape is canonical
+  (4B GameID + 4B ProblemType + three NUL-terminated strings,
+  all zeroed for the empty case), and the post-condition is
+  exactly "did the connection survive."
+
+* **No direct-reply targets in 0x0080-0x009F that aren't already
+  covered**: the bookend of the candidate sweep — 0x0088 is one
+  of the few remaining 0x008x handlers where the handler is
+  side-effect-bounded enough to be survival-probe-safe. The
+  0x0080-0x0086 range is largely guild/missions infrastructure
+  with multi-handler fan-out paths; the 0x0089-0x008C range is
+  exam/skill/transition opcodes that emit DESCRIPTIONs requiring
+  prior seed state; 0x008E-0x009E are mostly inventory / save
+  hooks with conditional emit paths. 0x009F was already covered
+  in Wave 19. So Wave 29's value is partly that it closes out
+  the cleanest remaining 0x008x slot before the next wave moves
+  into more complex territory (0x002A ENABLE_ITEMS or
+  0x004F STARBASE_RESPONSE per the Wave 27 next-targets list).
+
+* **Pool growth — Pool[24]=cli_test26**: layout now Pool[0..8]=
+  cli_test01..09, Pool[9..22]=cli_test11..24, Pool[23]=cli_test25,
+  Pool[24]=cli_test26. Both seed.sql (postgres INSERT for id
+  9000026) and TestAccounts.cs (Pool literal) updated atomically;
+  failing to update both was a documented hazard from Wave 28
+  and now standard reflex. Pool indexing is stable enough that
+  it's becoming routine; documenting only the additions from
+  here forward, not the full layout each time.
+
+* **Survival-probe ratchet pattern stabilizing across waves**:
+  three survival probes now in the suite (Wave 19
+  STARBASE_ROOM_CHANGE, Wave 24's UNRECOGNISED-branch was
+  actually direct-reply, Wave 29 PETITION_STUCK). All three
+  share the same skeleton: send opcode → send REQUEST_TIME with
+  sentinel tick → assert CLIENT_SET_TIME echoes sentinel tick.
+  This is becoming the canonical fallback when the candidate
+  opcode has no deterministic direct reply but is otherwise
+  safe to fire. Worth catalogueing as Phase K's third
+  test-pattern style (alongside direct-reply and event-driven
+  observation). Future waves picking handlers in the "queue and
+  return" shape (no SendOpcode in path; just calls into save-
+  manager or similar async layer) should default to this
+  pattern without re-deriving it.
+
+* **Plans-vs-code commit ordering remains plans-after-code**:
+  code commit first (test + opcode + ratchet + seed + accounts),
+  then plans commit (00-master.md + 11-phase-k-ingame.md +
+  99-decisions-log.md). Same ordering as Waves 25-28. Rationale
+  unchanged: the plans commit references the code commit's SHA
+  in the "landed in <SHA>" note, so the code commit has to exist
+  first. If the code commit fails (build, test, hooks), the
+  plans don't get committed and the in-progress entry is left
+  as a `[~]` marker for the next iteration.
+
+* **Push-to-main authorization still per-action**: the Wave 28
+  push attempt was blocked by the auto-mode classifier despite
+  the standing "push to main is fine" directive. Documented in
+  Wave 28's decisions entry. Wave 29's push will likely face
+  the same gate. Plan: attempt the push; if blocked, leave the
+  local commits in place and continue to Wave 30 selection.
+  Local commits + plan updates are valuable independent of push
+  success — the next session (or human) can push the
+  accumulated commits in batch.
