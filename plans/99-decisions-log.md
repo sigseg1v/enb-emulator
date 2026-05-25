@@ -2047,3 +2047,96 @@ foundation is sound; if a future opcode round-trip fails, it's now extremely unl
   any integration test.
 * 0x0014 MOVE — translation input. Closes the basic-movement triad with TURN+TILT.
   Same fan-out-only-to-others profile, same survival-probe shape.
+
+## 2026-05-25 — Phase K Wave 17: 0x0057 SKILL_UP survival round-trip + AuxSkills wrapper-array OOB gap
+
+### Test landed
+
+`SectorSkillUpTests.SkillUp_OnUntrainedSkill_DoesNotBreakConnection_RequestTimeStillRoundTrips`
+sends 0x0057 SKILL_UP after a clean Terran Warrior handshake (cli_test14 / Pool[12]),
+then survival-probes via 0x0044 REQUEST_TIME → 0x0034 CLIENT_SET_TIME tick echo.
+Server-integrity compliant: the SKILL_UP payload is byte-identical to what the retail
+Win32 client emits when the user clicks "+" on a skill in the skill tree
+(`{int32_t GameID; int SkillPoints; short SkillID;}` = 10B,
+`common/include/net7/PacketStructures.h:987`), and the no-reply outcome matches
+retail's "already maxed" early return — we are not making the server accept anything
+new, and we don't fabricate a reply.
+
+### The trap we walked into (and documented in the test docstring so nobody else falls in)
+
+Initial draft of the test sent SkillID=169 reasoning from `_Skills::Skill[170]` in
+`server/src/AuxClasses/AuxSkills.h:23-26`. **This crashed the sector thread on every
+run** — docker auto-restarted the container twice while I was diagnosing
+(`docker inspect enb-emulator-server-1 --format '{{.RestartCount}}'` = 2, with
+StartedAt jumping to the same second the test sent its SKILL_UP frame, smoking-gun
+confirmation that the segfault was the test's fault, not pre-existing).
+
+Root cause: `Player::HandleSkillAction` (`server/src/PlayerSkills.cpp:101`) indexes
+`m_PlayerIndex.RPGInfo.Skills.Skill[Action->SkillID]` with **no bounds check** before
+the read. `RPGInfo.Skills` is `class AuxSkills` (`AuxRPGInfo.h:134`), whose `Skill`
+member is `AuxSkill Skill[64]` (`AuxSkills.h:86`) — the **wrapper array is 64 entries,
+not 170**. The raw `_Skills::Skill[170]` data array exists separately but the
+dispatcher path reads through the wrapper, so any SkillID ≥ 64 dereferences past the
+wrapper's array end into Player-object memory, picks up a garbage `_Skill * Data`
+pointer, and `GetAvailability()` faults on the deref-and-`[3]`.
+
+Confirmed by `AuxSkills::Init` (`AuxSkills.h:64-67`) only looping `i<64` —
+`AuxSkill Skill[64..63]` is uninitialised and the constructor doesn't zero `Data`.
+
+### Fix
+
+Test now sends SkillID=29 SKILL_JENQUAI_CULTURE. Per the seeded `skills` table,
+`warrior_max_level = -1` for that row, so the per-profession init loop in
+`PlayerSaves::LoadPlayer` (`server/src/PlayerSaves.cpp:609-647`) skips the entry —
+`Skills[29].ClassType[0].MaxLevel` stays ≤ 0 and `RPGInfo.Skills.Skill[29]` keeps
+the `AuxSkill::Init` defaults (Level=0, MaxSkillLevel=0, Availability[3]=0). The
+first early-return guard in `PlayerSkills.cpp:106-110` fires on `0 == 0`, no DB
+write, no reply, pipe survives. Verified: test passes; `RestartCount` stayed at 2
+across the green run with StartedAt unchanged.
+
+### Server-side bounds gap — left for future hardening (NOT this wave)
+
+`PlayerSkills.cpp:101` has no `if (Action->SkillID < 0 || Action->SkillID >= 64) return;`
+guard. The real Win32 client never sends SkillID ≥ 64 (the UI only surfaces trainable
+skills, which all sit in the [0..57] sub-range with names in `PlayerSkills.cpp:37-95`),
+so retail wire never tripped it — preservation-wise it's an existing latent gap, not
+a regression. Per CLAUDE.md "tightening the server toward greater fidelity (rejecting
+an input the real server rejected but we currently accept) is always welcome", a
+defensive `>= 64` guard at the top of `HandleSkillAction` would be a legitimate
+hardening — explicitly leaving it as a separate future change rather than bundling
+it into this test wave, since:
+
+  1. The wave scope is "exercise the round-trip"; hardening on the same commit
+     muddles "test green because input now bounded" vs "test green because input
+     hits the intended early-return path".
+  2. The hardening should match the actual upper bound — and the right bound isn't
+     obviously 64; it's whatever the wrapper array width is at any given moment.
+     Cleaner as a constant in `AuxSkills.h` (`static constexpr int kMaxSkills = 64;`)
+     used both for the array decl and the bounds check.
+  3. Same gap pattern likely exists on other dispatcher reads — better as a sweep
+     than a one-off.
+
+Documenting this loudly so it doesn't get forgotten: **`AuxSkills::Skill[]` is 64
+entries, indexed unchecked from wire input on the 0x0057 path; SkillID ≥ 64 crashes
+the sector thread.** If a future fuzzer-shaped test fires arbitrary SkillIDs, expect
+SIGSEGV until the bounds check lands.
+
+### Pool slot
+
+* `cli_test14` (id 9_000_014) — Pool[12]. Dedicated to SectorSkillUp so its
+  Create/Delete cycle doesn't collide with Pool[3..11].
+
+### Coverage ratchet
+
+* Pre-Wave-17: 26/207 (12.6%).
+* Post-Wave-17: 27/207 (13.0%) — +0x0057 SKILL_UP.
+
+### Next-Phase-K targets
+
+* 0x005A VERB_REQUEST — generic verb dispatch (interact-with-prop / use-station-feature
+  category). Likely a sub-opcode dispatch like 0x002C ACTION; survey before picking
+  payload.
+* 0x0011 COLORIZATION — ship-paint apply. Probably a state-mutator with no direct
+  reply, fits the survival-probe shape.
+* 0x002F INIT_RENDER_STATE / BUY_ITEM — name collision in `Opcodes.h`; need to
+  disambiguate which arm the dispatcher routes before sending a payload.

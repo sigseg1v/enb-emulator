@@ -43,6 +43,7 @@ public static class TestAccounts
         new(9_000_011, "cli_test11", SharedPassword),
         new(9_000_012, "cli_test12", SharedPassword),
         new(9_000_013, "cli_test13", SharedPassword),
+        new(9_000_014, "cli_test14", SharedPassword),
     };
 
     /// <summary>
