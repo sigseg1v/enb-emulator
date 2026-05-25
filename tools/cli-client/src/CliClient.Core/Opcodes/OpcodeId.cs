@@ -55,6 +55,8 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId StarbaseRequest        = new(0x004E);
         public static readonly OpcodeId SkillUp                = new(0x0057);
         public static readonly OpcodeId VerbRequest            = new(0x005A);
+        public static readonly OpcodeId AvatarEmote            = new(0x005E);
+        public static readonly OpcodeId AvatarEmoteResponse    = new(0x005F);
         public static readonly OpcodeId GlobalConnect          = new(0x006D);
         public static readonly OpcodeId GlobalTicketRequest    = new(0x006E);
         public static readonly OpcodeId GlobalTicket           = new(0x006F);
