@@ -3880,3 +3880,126 @@ added, no behaviour relaxed.
   Local commits + plan updates are valuable independent of push
   success — the next session (or human) can push the
   accumulated commits in batch.
+
+## 2026-05-25 — Phase K Wave 30 (0x0086 MISSION_FORFEIT direct-reply; Wave-29 over-cautious rejection reversed)
+
+Context: Wave 29 closed the cleanest survival-probe slot (0x0088
+PETITION_STUCK). Wave 29's candidate-rejection list cautiously
+ruled out 0x0086 MISSION_FORFEIT, citing "fresh-char mission
+array deref — could SEGV via RemoveMission". Re-reading
+HandleMissionForfeit + MissionDismiss carefully under the Wave 29
+methodology ("read past first SendOpcode") — but applied at finer
+grain ("read past every CALL, not just past every SendOpcode") —
+showed the rejection was wrong. The else-branch of MissionDismiss
+emits a direct 0x001D MESSAGE_STRING reply ("This mission is non
+forfeitable.") for the exact zero-initialised-mission-slot case
+Wave 29 was worried about, and RemoveMission is NEVER called on
+that path. Wave 30 lands the test on the false-branch of
+`MissionDismiss(0, true)`.
+
+Key decisions logged:
+
+* **0x0086 MISSION_FORFEIT direct-reply path verified safe**:
+  HandleMissionForfeit at server/src/PlayerConnection.cpp:11009
+  ntohl-decodes both 4B fields then calls MissionDismiss(MissionID,
+  true) inside the `[0..12)` guard. MissionDismiss at
+  server/src/PlayerMissions.cpp:1616 accesses
+  `m_PlayerIndex.Missions.Mission[mission_slot]` (which is a
+  packed 12-element array; address-of into slot 0 is always
+  valid) and checks `GetIsForfeitable()`. For a fresh starbase
+  character the AuxMission slot was zero-initialised by
+  AuxMission::Init (AuxMission.h:85 `Data->IsForfeitable = 0`)
+  so GetIsForfeitable returns false. With `forfeit_pressed=true`
+  the boolean reduces to `(!true || false) = false` and the
+  else-branch at PlayerMissions.cpp:1630 fires
+  `SendVaMessageC(17, "This mission is non forfeitable.")`.
+  SendVaMessageC → SendMessageString → SendOpcode(0x001D)
+  per-client UDP queue. RemoveMission is NOT called on this
+  path. The "fresh-char mission array deref" worry Wave 29
+  raised was real if `forfeit_pressed=false` (the
+  MISSION_DISMISSAL sibling at 0x0087) but not for
+  MISSION_FORFEIT.
+
+* **Methodology refinement — "read past every CALL"**: Wave 29
+  established "read past the first SendOpcode" as the bar for
+  qualifying a candidate. Wave 30 sharpens that: every CALL the
+  handler makes after the first emit must also be classified
+  as read-only or self-state-mutating, including across the
+  branch the wire payload selects. For 0x0086 the relevant
+  branch is the else of `if (!forfeit_pressed || GetIsForfeitable())`,
+  and the call inside that branch is SendVaMessageC — a leaf
+  emit, identical to the safe pattern in Wave 27. The Wave 29
+  rejection list ruled out 0x0086 by reading only the if-branch
+  (RemoveMission, which IS unsafe) without checking which
+  branch the test's payload would actually select. Practical
+  reflex: when a handler has an if/else under the entry guard,
+  identify which branch the wire payload selects and read that
+  branch — not the whole handler — to qualify the candidate.
+  Both branches need a verdict; the test only selects one.
+
+* **Why MISSION_FORFEIT not MISSION_DISMISSAL (0x0087)**:
+  MISSION_DISMISSAL calls `MissionDismiss(MissionID, false)`.
+  With `forfeit_pressed=false` the if-condition `(!false ||
+  GetIsForfeitable())` reduces to `(true || ...) = true`
+  unconditionally — the false-branch is never taken regardless
+  of IsForfeitable. The if-branch fires `RemoveMission(0)`
+  which on an empty mission slot has wider side-effect
+  surface (may touch m_AssignedMissions / emit mission-update
+  auxes / trigger AuxPlayer refresh downstream). MISSION_FORFEIT
+  is the strictly cleaner direct-reply candidate because
+  `forfeit_pressed=true` lets us select the SendVaMessageC
+  branch.
+
+* **Wave 29 rejection list re-evaluation**: applying the
+  "read past every call" refinement to Wave 29's other
+  rejections — 0x009B WARP (HandleWarp at
+  PlayerConnection.cpp:1876 may have a docked-character
+  early-return guard; worth verifying), 0x005D EQUIP_USE
+  (HandleEquipUse derefs `m_Equip[myUse->InvSlot]` only after
+  a bounds check; if InvSlot is out-of-range the handler
+  could early-return safely), 0x0079/0x007A MANUFACTURE
+  opcodes (need to check the SendAuxManu path for fresh-char
+  early-returns). Wave 29's rejection list was conservative;
+  several entries may have a safe-branch shape under the
+  refined methodology. These are Wave 31+ candidates.
+
+* **Pool growth — Pool[25] = cli_test27**: layout now
+  Pool[0..8] = cli_test01..09, Pool[9..22] = cli_test11..24,
+  Pool[23] = cli_test25, Pool[24] = cli_test26 (Wave 29),
+  Pool[25] = cli_test27 (Wave 30). Routine update; both
+  seed.sql and TestAccounts.cs updated atomically.
+
+* **First direct-reply wave in 0x0080+ range**: Waves 24, 26,
+  27, 28, 30 are the direct-reply (defensive-error-string)
+  pattern. Waves 19, 21, 22, 23, 29 are survival-probe.
+  Direct-reply waves before Wave 30 were all in 0x0020-0x005F.
+  Wave 30 is the first direct-reply wave in 0x0080+; the
+  pattern generalises across the dispatcher table cleanly.
+  Note for future selection: handlers in the 0x0080-0x00BF
+  range tend to have multi-branch shape (guild / mission /
+  petition infrastructure with conditional emits), so the
+  "read past every call AND identify which branch the payload
+  selects" methodology applies more strongly here than in the
+  earlier ranges where handlers were often single-shot emits.
+
+* **Direct-reply pattern count: 5/30 waves**: Waves 24, 26,
+  27, 28, 30 establish the defensive-error-string-as-direct-reply
+  pattern as a stable, repeatable test shape. Five samples
+  across four different opcode subranges (0x0029, 0x0058,
+  0x0027, 0x0055→0x0056, 0x0086). All five share the same
+  shape: handler emits an opcode-defensive 0x001D MESSAGE_STRING
+  (or 0x0020 PRIORITY_MESSAGE) on the error path the test
+  forces; test asserts the reply body contains a stable
+  substring. This is becoming the dominant Phase K test
+  pattern — easier to write than survival-probe (single
+  assertion on the actual reply payload, no sentinel-tick
+  dance) and more diagnostic (the assertion failure tells
+  you which error path didn't fire).
+
+* **Push-to-main authorization remains per-action**: Wave 29's
+  push attempt was blocked again. Wave 30 will likely face
+  the same gate. Plan: commit locally; if push works great,
+  otherwise continue to Wave 31. Three accumulating local
+  commits ahead of origin (Wave 29 code + plans + Wave 30
+  code+plans pair) is fine — the next session or human can
+  push the batch.
