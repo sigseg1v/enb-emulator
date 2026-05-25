@@ -843,3 +843,86 @@ also extended to assert seed.sql carries the out-of-pool fixture
 the GlobalConnect test).
 
 35/35 cli-integration green.
+
+## 2026-05-24 — Phase R wave 3 / Phase K: GlobalAvatarList family migrated to int32_t + codec landed
+
+After landing the proxy↔server UDP global plane end-to-end and the
+STRESS_TEST_CLOSED error-path test, the next bottleneck on Phase K
+was that the **GlobalAvatarList family of structs in
+common/include/net7/PacketStructures.h was still `long`-based** —
+a hold-over the e74f07c Phase R commit didn't touch because only
+the structs actively consumed by Linux Phase J/K code paths got
+migrated then. On Linux x86_64 `long` is 8 bytes, so the structs
+ballooned relative to the Win32 4-byte-long wire format:
+
+  AvatarData:        241 bytes Win32 → 277 bytes Linux (+9 longs × 4)
+  AvatarInfo:        133 bytes Win32 → 185 bytes Linux (+13 longs × 4)
+  Galaxy:             84 bytes Win32 → 100 bytes Linux (+4 longs × 4)
+  GlobalAvatarList: 2042 bytes Win32 → 2518 bytes Linux
+
+The struct is sent on the wire as a single `memcpy(buf, &list,
+sizeof(GlobalAvatarList))` (see
+`server/src/AccountManager.cpp:BuildAvatarList` → proxy's
+`SendResponse(0x0070, ..., sizeof(GlobalAvatarList))`). A real
+Win32 client decoding by reverse-memcpy onto a 2042-byte struct
+would read random bytes from random fields. End-to-end testing
+between *our* Linux server and *our* Linux proxy worked because
+both built the same broken struct, but the wire format was not
+preservation-faithful.
+
+Fix: convert all `long` in AvatarData/AvatarInfo/Galaxy/
+GlobalAvatarList::num_galaxies to `int32_t`. Comments preserved;
+`ATTRIB_PACKED` still guards the no-padding invariant.
+Per-struct notes added to explain the migration. No behavioural
+change at the build sites — `ntohl()` returns `uint32_t` which
+into a (now 4-byte) `int32_t` is bit-identical to the silent
+widening conversion it was doing into the old `long`.
+
+Server/proxy/login-server rebuilt cleanly. The
+`ValidTicket_RoundTrips...` test (which previously asserted only
+"payload non-empty") now sees a 2042-byte payload — confirming
+the migration took on the actual wire output.
+
+To turn that into real coverage I added
+`tools/cli-client/src/CliClient.Core/Opcodes/Inbound/
+GlobalAvatarListCodec.cs` — a strongly-typed decoder for the
+struct that walks every field, returns immutable records
+(`GlobalAvatarList` / `AvatarSlot` / `AvatarInfo` / `AvatarData` /
+`Galaxy`), and handles the per-field byte-order quirks:
+
+  - AvatarInfo: all 13 ints big-endian (server's `ReadDatabase`
+    stores via `ntohl()`); decoded back to host order.
+  - AvatarData: ints are little-endian (host order at the build
+    site — no `ntohl` wrapper). avatar_type / race / profession /
+    gender / mood_type decoded; appearance blob (floats + char
+    blobs + 4 metals) kept raw — no consumer yet.
+  - Galaxy: GalaxyID/NumPlayers/MaxPlayers host order;
+    IP_Address/Port big-endian (server passes through
+    `ntohl(inet_addr(...))` / `ntohs(MASTER_SERVER_PORT)`).
+  - num_galaxies: deliberately defensive — tries big-endian first
+    (the host comment says `ntohl(1)` which on LE writes 0x01000000),
+    falls back to little-endian. In practice today this is `1`.
+
+The happy-path test promoted from "non-empty" to:
+  - WireSize == 2042 (size invariant)
+  - 5 avatar slots present, all zero-filled (matches seeded
+    `avatars` table which is empty for `cli_test01`)
+  - galaxy[0].Name non-empty
+  - galaxy[0].GalaxyId == 1
+  - galaxy[0].MaxPlayers > 0 (MAX_ONLINE_PLAYERS = 500)
+
+Each assertion carries an inline citation explaining what
+specifically would fail to come back if the migration or codec
+drifts — so a future regression fails *loudly* at the offending
+field, not silently in a "test still passes but reads garbage"
+mode.
+
+What this unblocks: Phase T's Items 10-12 (enumerate sectors /
+missions / items) are still gated on more downstream work
+(SendAvatarLogin → server-side BuildPlayer → server-side
+EnterSector), but the avatar-list step is now decode-capable
+end-to-end. A future "list-avatars" CLI subcommand can be wired
+in incrementally — the wire decode is no longer the missing
+piece.
+
+35/35 cli-integration green after migration + codec landing.

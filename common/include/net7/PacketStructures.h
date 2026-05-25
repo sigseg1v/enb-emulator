@@ -94,17 +94,24 @@ struct EnbUdpHeader
 
 struct AvatarData
 {
+    // Phase K: int32_t (was `long`). On Win32 `long` is 4 bytes so the
+    // original wire size is 241 bytes; on Linux x86_64 `long` is 8 bytes,
+    // which bloats the struct to 277 bytes (+9 longs × 4 bytes). The Win32
+    // client decodes by memcpy onto a 241-byte buffer, so the Linux build
+    // must serialise 4-byte fields too. Mirrors the e74f07c migration for
+    // ServerRedirect/VersionRequest/MasterJoin. ATTRIB_PACKED still guards
+    // the no-padding invariant.
     char    avatar_first_name[20];      // 14   d4  20
     char    avatar_last_name[20];       // 28   e8  20
-    long    avatar_type;                // 04   08  4
+    int32_t avatar_type;                // 04   08  4
     char    filler1;                    //      0c  -
     char    avatar_version;             // 09   0d  1
                                         //      0e
                                         //      0f
-    long    race;                       // 0c   10  4
-    long    profession;                 // 10   14  4
-    long    gender;                     // 14   18  4
-    long    mood_type;                  // 18   1c  4
+    int32_t race;                       // 0c   10  4
+    int32_t profession;                 // 10   14  4
+    int32_t gender;                     // 14   18  4
+    int32_t mood_type;                  // 18   1c  4
 
     char    personality;                // 1c   20  1
     char    nlp;                        // 1d   21  1
@@ -133,10 +140,10 @@ struct AvatarData
     float   pants_primary_color[3];     // 80   84  12
     float   pants_secondary_color[3];   // 8c   90  12
 
-    long    shirt_primary_metal;        // 98   9c  4
-    long    shirt_secondary_metal;      // 9c   a0  4
-    long    pants_primary_metal;        // a0   a4  4
-    long    pants_secondary_metal;      // a4   a8  4
+    int32_t shirt_primary_metal;        // 98   9c  4
+    int32_t shirt_secondary_metal;      // 9c   a0  4
+    int32_t pants_primary_metal;        // a0   a4  4
+    int32_t pants_secondary_metal;      // a4   a8  4
 
     char    filler2;                    //          1?
 
@@ -146,20 +153,25 @@ struct AvatarData
 
 struct AvatarInfo
 {
+    // Phase K: int32_t (was `long`). Win32 packed = 13×4 + 81 = 133 bytes;
+    // Linux x86_64 with 8-byte long = 13×8 + 81 = 185 bytes — wire-format
+    // divergence. Migrated to int32_t for parity with the Win32 client and
+    // ntohl-compatibility (ntohl returns uint32_t; into a `long` field this
+    // was previously a silent widening conversion).
     // NOTE: All fields are in Big Endian format -- use ntohl to convert!
-    long    avatar_slot;        // 0 to 4 = 0
-    long    sector_id;          // 1071
-    long    galaxy_id;          // 1
-    long    count;              // 5
-    long    avatar_id_msb;      // 0
-    long    avatar_id_lsb;      // 1
-    long    account_id_msb;     // 0
-    long    account_id_lsb;     // 2
-    long    admin_level;        // 0
-    long    gm_flag;            // 1
-    long    combat_level;       // 0
-    long    explore_level;      // 0
-    long    trade_level;        // 0
+    int32_t avatar_slot;        // 0 to 4 = 0
+    int32_t sector_id;          // 1071
+    int32_t galaxy_id;          // 1
+    int32_t count;              // 5
+    int32_t avatar_id_msb;      // 0
+    int32_t avatar_id_lsb;      // 1
+    int32_t account_id_msb;     // 0
+    int32_t account_id_lsb;     // 2
+    int32_t admin_level;        // 0
+    int32_t gm_flag;            // 1
+    int32_t combat_level;       // 0
+    int32_t explore_level;      // 0
+    int32_t trade_level;        // 0
     char    location[81];       // "Saturn"
 } ATTRIB_PACKED;  // 133 bytes
 
@@ -193,12 +205,15 @@ struct ShipData
 
 struct Galaxy
 {
+    // Phase K: int32_t (was `long`). Win32 packed = 64 + 4×4 + 2 + 2 = 84
+    // bytes; Linux with 8-byte long = 64 + 4×8 + 2 + 2 = 100 bytes. The
+    // wire format is 84 — fix the local representation to match.
     char    Name[64];
-    long    GalaxyID;
-    long    IP_Address;
+    int32_t GalaxyID;
+    int32_t IP_Address;
     short   port;
-    long    NumPlayers;
-    long    MaxPlayers;
+    int32_t NumPlayers;
+    int32_t MaxPlayers;
     short   unknown2;
 } ATTRIB_PACKED;  // 84 bytes
 
@@ -246,8 +261,13 @@ struct AvatarListItem
 
 struct GlobalAvatarList
 {
+    // Phase K: total wire size with int32_t-migrated members and 2 galaxies =
+    // 5×374 + 4 + 2×84 = 2042 bytes. With unmigrated 8-byte longs on Linux,
+    // the struct ballooned to 5×(185+277) + 8 + 2×100 = 2518 bytes — the
+    // bytes a Win32 client would memcpy into a 2042-byte buffer would have
+    // come from random fields. Migration restores Win32 parity.
     AvatarListItem  avatar[5];      // 5 * 374 bytes
-    long            num_galaxies;   // 4 bytes -- 1 to 6 currently hard-coded to 1!
+    int32_t         num_galaxies;   // 4 bytes -- 1 to 6 currently hard-coded to 1!
     Galaxy          galaxy[2];      // support only one galaxy!
     // Galaxy           galaxy[4];  // 4 * 84 bytes -- variable length array of galaxies
 } ATTRIB_PACKED;

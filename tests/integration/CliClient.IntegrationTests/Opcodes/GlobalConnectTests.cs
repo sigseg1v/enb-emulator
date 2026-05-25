@@ -7,6 +7,7 @@ using System.Text;
 using N7.CliClient.Auth;
 using N7.CliClient.Net;
 using N7.CliClient.Opcodes;
+using N7.CliClient.Opcodes.Inbound;
 using Xunit;
 
 namespace N7.CliClient.IntegrationTests.Opcodes;
@@ -136,18 +137,54 @@ public sealed class GlobalConnectTests
             // packets on the happy path, but a future Phase-K hello may.
         }
 
-        // The reply is a complete GlobalAvatarList struct. We don't decode
-        // it here (no codec wired up yet); receiving the opcode at all
-        // means the UDP global plane round-trip worked end-to-end:
+        // The reply is a complete GlobalAvatarList struct. Receiving the
+        // opcode proves the UDP global plane round-trip worked end-to-end:
         //   client → proxy(TCP 3805)
         //   proxy → server(UDP 3810, opcode 0x2002 TICKET)
         //   server → proxy(UDP 3810, opcode 0x2003 AVATARLIST)
         //   proxy → client(TCP 3805, opcode 0x0070 GlobalAvatarList)
         Assert.NotNull(reply);
-        Assert.True(reply!.Payload.Length > 0,
-            "GlobalAvatarList payload must be non-empty (struct GlobalAvatarList " +
-            "is fixed-size and is always memcpy'd whole — empty means the proxy " +
-            "shipped a bogus frame).");
+
+        // Phase K post-migration: GlobalAvatarList wire size is fixed
+        // 2042 bytes (5 × 374 AvatarListItem + 4 num_galaxies + 2 × 84
+        // Galaxy). Anything smaller means PacketStructures.h has drifted.
+        Assert.Equal(GlobalAvatarListCodec.WireSize, reply!.Payload.Length);
+
+        var decoded = (GlobalAvatarList)new GlobalAvatarListCodec()
+            .DecodeInbound(reply.Payload.Span);
+
+        // Five fixed slots — even when the account has no avatars the
+        // slots are zeroed but present.
+        Assert.Equal(5, decoded.Avatars.Length);
+
+        // The seeded test account `cli_test01` has no rows in the
+        // `avatars` table, so all five slots should be zero-filled.
+        // We assert *that specific shape* — if a future seed change
+        // adds avatars this test will fail loudly and force a refresh
+        // of the assertion (rather than silently passing on wrong
+        // bytes). Account-id/slot are big-endian on the wire so a
+        // mis-decoded int would surface as a wildly large value.
+        foreach (var slot in decoded.Avatars)
+        {
+            Assert.Equal(0, slot.Info.AccountIdLsb);
+            Assert.Equal(string.Empty, slot.Data.FirstName);
+            Assert.Equal(string.Empty, slot.Data.LastName);
+        }
+
+        // Galaxy table: BuildAvatarList hard-codes one galaxy entry.
+        Assert.True(decoded.Galaxies.Length >= 1,
+            "GlobalAvatarList should carry at least one galaxy entry " +
+            "(server's AccountManager::BuildAvatarList hard-codes galaxy[0]).");
+        var galaxy = decoded.Galaxies[0];
+        Assert.False(string.IsNullOrEmpty(galaxy.Name),
+            "Galaxy name should be populated from g_Galaxy_Name " +
+            "(server-side global, set from config; empty means the wire " +
+            "decode walked off into a NUL field).");
+        Assert.Equal(1, galaxy.GalaxyId);
+        Assert.True(galaxy.MaxPlayers > 0,
+            $"MaxPlayers={galaxy.MaxPlayers} — server's MAX_ONLINE_PLAYERS " +
+            "is 500; a zero or negative value means the int32_t migration " +
+            "didn't take or the field is being read at the wrong offset.");
     }
 
     /// <summary>
