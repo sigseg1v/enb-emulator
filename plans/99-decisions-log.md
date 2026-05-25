@@ -2688,3 +2688,128 @@ N+1 hardening (explicit LOGOFF in test `finally` blocks).
   survival probe candidate.
 * **0x001A DEBUG** — debug-mode opcode; guarded on admin status, may
   be a fast survival probe.
+
+## 2026-05-25 — Phase K Wave 22: 0x002E OPTION survival round-trip (zero server change)
+
+### What landed
+
+Phase K Wave 22 — `SectorOptionTests.Option_UnhandledOptionType_DoesNotBreakConnection_RequestTimeStillRoundTrips`:
+unhandled-OptionType fall-through wave. Test sends a canonical 9-byte
+OptionPacket `{int32 GameID=0; int32 OptionType=2; byte OptionVar=0}`
+(host-endian — handler does NOT ntohl-swap, confirmed by direct
+inspection of HandleOption body) and asserts survival by round-
+tripping `0x0044 REQUEST_TIME → 0x0034 CLIENT_SET_TIME` with a
+randomised sentinel tick.
+
+Zero server changes — the wave is pure test coverage of an already-
+correct path.
+
+### Why OptionType=2 specifically
+
+The retail dispatch table has 5 published values: 0=LookingForGroup,
+1=AllowGroupInvite, 3=AutoSplit (group-leader only), 4=MasterLooter
+(group-leader only), 5=FreeForAll (group-leader only). Value 2 is the
+published gap.
+
+Sending OptionType=2 against a fresh ungrouped starbase character
+takes the cleanest possible path through `HandleOption` (server/src/
+PlayerConnection.cpp:10389):
+
+  1. `if (OptionType == 0)` — false, skipped.
+  2. `else if (OptionType == 1)` — false, skipped.
+  3. `else if (myGroup && myGroup->Member[0].GameID == GameID()
+              && GroupID() != -1)` — short-circuits on `myGroup`
+     being null. `GetGroupFromID(GroupID() = -1)` returns NULL
+     immediately via the early-return guard at
+     server/src/GroupManager.cpp:43-46.
+  4. LogMessage + DumpBuffer.
+  5. Returns.
+
+No DB write, no AuxPlayer fan-out, no reply opcode. Retail server's
+HandleOption is the same code path (Net-7 source = retail source
+here), so retail emits nothing on OptionType=2 either. Per CLAUDE.md
+server-integrity rule we cannot fabricate a reply → survival probe is
+the only assertable post-condition.
+
+### Why ungrouped (GroupID()==-1) is the right precondition
+
+The else-if branch dereferences `myGroup->Member[0].GameID`. With a
+non-null myGroup this is safe. With a null myGroup the && short-
+circuit prevents the deref. `GetGroupFromID(-1)` returns NULL via the
+explicit early-return guard — a regression that removed that guard
+would either crash on the m_Mutex.Lock thread-state path or (with no
+groups in m_GroupList) walk the empty list fine. This wave exercises
+the safe path on every run, documenting the assumption for future
+waves.
+
+### Why GameID=0 is fine
+
+The handler ignores the wire-side GameID field entirely — it derives
+the player from the connection context via the `GameID()` method on
+Player, not from the wire byte. Real Win32 clients populate GameID
+with their own ID; we don't, because (a) it's unused, and (b) hard-
+coding 0 keeps the test decoupled from the SaveManager GameID
+allocation (`account_id*5 + slot + 1`).
+
+### Why no ntohl in the handler
+
+`HandleOption` reads `myOption->OptionType == 0` directly, no
+byte-order swap. This is unusual within Phase K — most sector
+handlers ntohl-swap their integer fields (ACTION, ACTION2,
+REQUEST_TARGET, etc.). HandleOption being host-endian appears to be
+a Net-7 design choice, not a bug — retail probably also emitted
+host-endian (same machine architecture as the server). A future
+refactor that "fixes" this by adding ntohl would silently break
+retail Win32 clients that send OptionType=1 (host-LE `01 00 00 00`
+ntohl-swapped becomes 0x01000000 ≠ 1, fails the LFG/AllowInvite
+branches). The test documents the assumption with an inline xmldoc
+note.
+
+### Regression coverage (5 classes)
+
+1. OptionPacket struct layout in `common/include/net7/
+   PacketStructures.h:601` (long-widening of GameID or OptionType
+   would shift OptionVar offset past wire-payload end).
+2. Proxy default-case ForwardClientOpcode dropping 0x002E (not
+   explicitly listed in `proxy/ClientToServer_linux_stubs.cpp`).
+3. Dispatcher mis-route at `server/src/PlayerConnection.cpp:475` —
+   case label sits between 0x002D ACTION2 and 0x0033 CLIENT_CHAT;
+   a copy-paste swap to HandleAction2 would mis-interpret 9B
+   OptionPacket as 14B ActionPacket2, reading 5 bytes past payload
+   end.
+4. GetGroupFromID(-1) null-safety regression (removing the early-
+   return guard at GroupManager.cpp:43-46).
+5. OptionType byte-order assumption regression (handler reads
+   host-endian — a refactor adding ntohl would break retail
+   OptionType=1 traffic silently).
+
+### Why this isn't a "tightening" wave
+
+Unlike Wave 21, this wave fixes nothing in the server. The path is
+already correct; we're just adding test coverage. The dispatcher
+case, the proxy default-case forward, the struct layout, the early-
+return guard — all in place. The OptionType=2 fall-through behaviour
+matches retail. This is pure preservation: documenting that the
+server tolerates the input the way retail did, and pinning the
+behaviour against future regression.
+
+### Test-account pool
+
+Pool[17] cli_test19 dedicated. Continues the 9_000_001..9_000_019
+allocation (skipping 9_000_010 which is StressTestClosed out-of-pool
+fixture).
+
+### Coverage ratchet
+
+`Coverage/TestedOpcodes.cs` MinTestedCount bumped 32 → 33 (+1).
+Phase K coverage: 32/207 → **33/207 (15.9%)**.
+
+### Next-Phase-K targets
+
+* **0x0027 INVENTORY_MOVE** — first inventory-state-mutator wave;
+  needs seeded inventory.
+* **0x0029 ITEM_STATE** — item-state-flip cousin of INVENTORY_MOVE.
+* **0x001A DEBUG** — debug-mode opcode; guarded on admin status,
+  may be a fast survival probe.
+* **0x003C CLIENT_TYPE** — already in opcode table; likely a
+  one-shot client-type-identification frame.
