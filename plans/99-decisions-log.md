@@ -2943,3 +2943,177 @@ Phase K coverage: 33/207 → **34/207 (16.4%)**.
   one-shot client-type-identification frame.
 * **Inverse sweep** for further opcodes with no direct reply on
   uninitialised state.
+
+---
+
+## 2026-05-25 — Phase K Wave 24: 0x0029 ITEM_STATE UNRECOGNISED-branch direct-reply round-trip
+
+### Wave summary
+
+Sends an 11-byte 0x0029 ITEM_STATE payload with `Inventory=0`
+(any value != 2) to drive `Player::HandleItemState`'s else-branch
+(`server/src/PlayerConnection.cpp:3381`) which emits a 0x001D
+MESSAGE_STRING via `SendVaMessage` with the literal body
+`"UNRECOGNISED ITEM STATE!\nPlease submit a bug report\n"`. Test
+asserts the substring "UNRECOGNISED ITEM STATE" in the inbound
+MESSAGE_STRING body — first **direct-reply** assertion since
+Waves 19/20 (Waves 21/22/23 were all survival probes).
+
+Zero server changes — Phase R already had ItemState canonical
+at 11B in `common/include/net7/PacketStructures.h:263`
+(`{int32_t GameID; int32_t BitMask; char Enable; char Inventory;
+char ItemNum;}` ATTRIB_PACKED). 0x0029 is not explicitly listed
+in `proxy/ClientToServer_linux_stubs.cpp` so hits `default:` and
+falls through to bottom-of-switch `ForwardClientOpcode(...)`.
+
+### Test
+
+`tests/integration/CliClient.IntegrationTests/Opcodes/SectorItemStateTests.cs`
+— `ItemState_UnrecognisedInventoryByte_ReceivesUnrecognisedErrorString`.
+Passes in isolation (1/1, 7s); full integration suite **55/55
+in 2m17s** from a freshly-recycled stack with all four containers
+at restarts=0.
+
+### Why direct-reply rather than survival probe
+
+HandleItemState's else-branch emits a mandatory 0x001D
+MESSAGE_STRING with a deterministic literal body, so we can
+positively correlate the reply to the request rather than
+falling back on a follow-up REQUEST_TIME survival probe. Same
+direct-reply pattern Wave 8 used for CLIENT_CHAT's "not in a
+group" error and Waves 19/20 used for SET_TARGET replies.
+
+Survival probes are strictly weaker — they can only prove the
+pipeline survived, not that the specific handler ran. Where a
+direct reply exists (and isn't fabricated, which CLAUDE.md
+forbids), it should be preferred.
+
+### Why Inventory=0 specifically
+
+2 is the only accepted value for Inventory (it indexes
+`EquipInv.EquipItem[]` on the mutation branch); any other byte
+value drives the else-branch. 0 is:
+
+* The smallest deviation from the gate-value (one bit different).
+* The most likely retail garbage / probe pattern — a
+  freshly-zeroed packet buffer with the opcode written in.
+* A stable byte pattern, so the `LogMessage` + `DumpBuffer`
+  server-side side-effects are reproducible run-to-run.
+
+`ItemNum=0` is safe on the else-branch because only the
+`Inventory==2` mutation branch dereferences
+`EquipItem[Data->ItemNum]` — the else-branch ignores ItemNum
+entirely.
+
+### Discovery during candidate triage
+
+Three observations that shaped the Wave 24 candidate decision
+and are worth keeping for future waves:
+
+1. **Opcode-naming gotcha**: `ENB_OPCODE_0027_INVENTORY_SORT`
+   is misleadingly named — its actual value is `0x0028`.
+   `ENB_OPCODE_0027_INVENTORY_MOVE` is `0x0027`. The "0027"
+   suffix on the SORT symbol is wrong (presumably from
+   copy-paste during the upstream Net-7 opcode-table maintenance);
+   the symbol value is the authority.
+
+2. **0x003C CLIENT_TYPE is not dispatcher-receivable**:
+   only used as a server→client emit at
+   `server/src/PlayerConnection.cpp:1074` inside `SendStart`.
+   Not in the `Player::ProcessOpcode` dispatcher switch — so
+   no opportunity to drive it from the client side. Skipped
+   as a Wave 24 candidate.
+
+3. **0x0027 INVENTORY_MOVE is heavy**:
+   `Player::HandleInventoryMove` (server/src/PlayerConnection.cpp:2474)
+   does slot manipulation, equip/unequip, SendAuxShip fan-out,
+   and SaveInventoryChange DB writes. Needs seeded inventory
+   rows in seed.sql before a meaningful test can land. Deferred.
+
+### Regression coverage
+
+1. **ItemState long-revert in PacketStructures.h:263.** Currently
+   `2× int32_t + 3× char = 11B` canonical. If anyone widens
+   GameID or BitMask to `long`, the struct grows on Linux
+   x86_64 (sizeof(long)==8) and Inventory/ItemNum bytes read
+   from beyond the 11B wire payload. The most interesting
+   failure mode: the over-read could accidentally land Inventory
+   on a `0x02` byte in receive-buffer slack and enter the
+   mutation branch — then `EquipItem[garbage_ItemNum]` would
+   dereference well outside the EquipInv array. Substring
+   assert ("UNRECOGNISED ITEM STATE") catches this because the
+   mutation branch never emits MESSAGE_STRING.
+
+2. **Dispatcher mis-route at server/src/PlayerConnection.cpp:463.**
+   Case label sits between `0x0027 INVENTORY_SORT` (actual
+   value 0x0028 per gotcha above) and `0x002C ACTION` in the
+   hand-maintained ~200-entry switch. A copy-paste swap with
+   `HandleInventorySort` would re-interpret the 11B ItemState
+   as a larger InventorySort struct (16B+) — reading past wire
+   payload and producing garbage sort parameters rather than
+   the expected MESSAGE_STRING reply.
+
+3. **Proxy default-case `ForwardClientOpcode` regression.**
+   0x0029 is not explicitly listed in
+   `proxy/ClientToServer_linux_stubs.cpp` so it falls through
+   to the bottom-of-switch forward. A regression dropping this
+   opcode would surface as a MESSAGE_STRING timeout.
+
+4. **SendVaMessage / SendMessageString format-string regression.**
+   A refactor that escapes `\n` or strips the literal
+   "UNRECOGNISED ITEM STATE" body would break the substring
+   assert. SendVaMessage routes through `vsprintf_s` then
+   `SendMessageString` (`server/src/PlayerClass.cpp:3415`); the
+   `[u16 len][u8 colour][string\0]` framing is shared with
+   Wave 8's chat error path.
+
+5. **Server→client 0x001D fan-out path regression.** The reply
+   rides `SendOpcode → m_UDPQueue → SendPacketCache → 0x2016
+   PACKET_SEQUENCE wrapper → proxy SendClientPacketSequence →
+   TCP`. Every Phase K survival probe exercises this path
+   indirectly (CLIENT_SET_TIME rides it); Wave 24 exercises it
+   as the primary assertion against a different opcode (0x001D
+   vs 0x0034).
+
+### Server-integrity note (per CLAUDE.md)
+
+0x0029 ITEM_STATE is what the retail Win32 client emits when
+the user toggles ship-equipment state (e.g. enabling a buff
+item). The retail server's HandleItemState behaves identically:
+Inventory==2 → mutation + AuxShip fan-out, any other value →
+verbatim UNRECOGNISED-error reply. The "UNRECOGNISED ITEM
+STATE!\nPlease submit a bug report\n" literal is the verbatim
+retail error message (preserved from the Net-7 source which
+mirrored retail's response format). We are not making the
+server accept any new input shape, not fabricating any reply;
+we drive the existing else-branch with the minimum non-2
+Inventory byte value.
+
+### Coverage ratchet
+
+`Coverage/TestedOpcodes.cs` MinTestedCount bumped 34 → 35 (+1).
+Phase K coverage: 34/207 → **35/207 (16.9%)**.
+
+The 0x001D MESSAGE_STRING citation expanded to credit both Wave 8
+(CLIENT_CHAT not-in-group path) and Wave 24 (ITEM_STATE
+UNRECOGNISED path) — same opcode, two distinct server-side
+emit sites, single coverage entry.
+
+### Next-Phase-K targets
+
+* **0x0027 INVENTORY_MOVE** — now that ITEM_STATE proved the
+  inventory-edge-case pattern, the heavier inventory-mutation
+  opcode is the natural next wave. Needs seeded inventory rows
+  in seed.sql.
+* **0x002F INVENTORY_SWAP / 0x0030 INVENTORY_DELETE** — other
+  inventory-tier opcodes that may have lean error-paths similar
+  to ITEM_STATE's else-branch.
+* **0x004F STARBASE_RESPONSE** — paired with Wave 16's
+  STARBASE_REQUEST (the test sent the request; the server
+  expects this back from the client after presenting starbase
+  options).
+* **0x0058 SKILL_ABILITY_USE** — cousin of Wave 17's SKILL_UP.
+* **Inverse sweep** for further direct-reply opportunities in
+  the 0x002F-0x0050 range — direct-reply assertions are
+  strictly stronger than survival probes and should be
+  preferred where the handler emits a deterministic reply.
