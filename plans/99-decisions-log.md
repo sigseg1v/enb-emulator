@@ -1224,3 +1224,125 @@ That gates any test that needs server-pushed state (mob spawns,
 chat from others, ship updates, etc.). Task #69 (sector LOGIN →
 START round-trip) is part of that larger port — START is a
 server→client TCP push triggered by server-side handoff state.
+
+## 2026-05-24 — Phase K Wave 6: server→client UDP fan-out (UDPProxyToClient.cpp Linux port)
+
+Closes the loop opened by Wave 5. Wave 5 ported `UDPClient::ForwardClientOpcode`
+(client→server fan-in) and the 10-case sector dispatch; the server can now
+*receive* sector traffic from the proxy. Wave 6 ports the reverse
+direction so the proxy can actually deliver the server's replies back to
+the client. Until this commit the server could write to the UDP plane all
+it wanted; the proxy's UDP RecvThread had no handlers for any opcode the
+server emits, so every reply was silently dropped.
+
+### What landed
+
+`proxy/UDPProxyToClient_linux.cpp` (~370 LOC, new file). Fresh re-implementation
+against `proxy/UDPClient.h` rather than a textual port of the Win32 file —
+the Win32 source pulls in MFC/ATL globals, launcher-side Queue\* helpers,
+and the WIN32-only client-launcher main, none of which exist on Linux.
+
+Methods implemented:
+
+- `ProcessClientOpcode` — direct passthrough. Stamps the EnbTcpHeader and
+  hands off via `m_SectorConnection->SendResponse(opcode, msg, bytes,
+  header->packet_sequence)`. This is the workhorse: anything the server
+  sends that isn't a meta-frame (DATA_FILE / PACKET_SEQUENCE) goes through
+  here.
+- `IncommingOpcodePreProcessing` — pre-dispatch state hook for opcodes
+  that change proxy state regardless of what we forward (LOGOFF /
+  SERVER_HANDOFF / START transitions).
+- `SendClientDataFile` — 0x2010 DATA_FILE forward verbatim. Galaxy-map
+  cache opcode (0x0097) is logged-no-op on Linux because its source path
+  (`SendDataFileToClient` / `SendDataFile`) lives in WIN32-walled
+  ClientToSectorServer.cpp — the cache path isn't ported, but the absence
+  is benign (game keeps working, just no map cache reuse).
+- `SendPacketSequence(msg, header, continuation_flag)` — full reliable-
+  delivery walker. Mirrors Win32 UDPProxyToClient.cpp:138-351 line-for-line:
+  re-request handling, out-of-order buffering into `m_SplitPacketBuffer`,
+  PACKET_BLANK / PACKET_DONE / PACKET_RE_REQUESTED sentinel handling, split-
+  packet reassembly. The only substitutions are usleep(1000) for
+  `Sleep(1)` and the Net7.h-aliased `check_memory()` no-op for
+  `_CrtCheckMemory()`. Header sizing follows the Win32 logic
+  (`header_size = g_Packet_Opt_requested ? 1400 : 512`).
+- `SendLoginPacketSequence` — same shape, used for the pre-START login
+  packet stream.
+- `SendClientPacketSequence(buffer, length)` — walks the inner
+  `[size, opcode, data]` tuples in a re-assembled packet. Win32 batches
+  them through Queue\* helpers + SendQueuedPacket (one TCP frame per
+  flush); Linux uses one SendResponse per inner opcode. Slightly more
+  TCP frames over the wire, but functionally identical — the client
+  reads framed [size, opcode, data] one-at-a-time either way.
+- `HandleCustomOpcode` — minimal Linux subset. 0x2020 LOGIN_STAGE_S_C →
+  `HandleStageConfirm` (which sends 0x2021 ACK back to server). 0x100A
+  MVAS_TERMINATE_S_C → sets g_ShuttingDown so the packet-sequence walker
+  exits cleanly. Launcher-side opcodes (0x2011 / 0x2012 / 0x2013 / 0x2014
+  / 0x2018 / 0x2019) return false so the outer `SendClientPacketSequence`
+  raw-forwards them via SendResponse instead.
+- `SendCommsAlive`, `RecordLastHandoff`, `KillTCPConnection` — no-op or
+  minimal-state stubs to satisfy the UDPClient.h signature.
+
+### Concurrency hazard fixed in the same commit
+
+Pre-Wave-6, only the TCP RecvThread called `Connection::SendResponse` on
+the Linux side. Wave 6 introduces a second producer: the UDP RecvThread
+calls SendResponse via `ProcessClientOpcode`. That races on
+`m_CryptOut` (the RC4 outbound stream cipher) and `m_SendBuffer`. Two
+concurrent writes from different threads would interleave RC4 state and
+produce ciphertext the client can't decrypt.
+
+Fixed by taking `m_Mutex` (existing field, unused on Linux until now)
+around `m_CryptOut.RC4(...)` + the SendAll call. Lock scope is minimal —
+the EnbTcpHeader stamp and memcpy stay inside the lock because they
+write into the same shared `m_SendBuffer`; only the syscall-blocking
+SendAll is technically outside the cipher's invariant, but holding the
+lock through SendAll is cheaper than building a per-call scratch buffer
+and matches what Win32 already does via `Lock` macros.
+
+### What this does NOT do
+
+- **No `SendDataFile` cache path.** Galaxy-map cache (0x0097) is logged
+  and dropped. Galaxy map loads every time; no client-side regression
+  beyond a slight first-load latency. Porting requires extracting
+  `SendDataFile` and `GalaxyMap` cache from WIN32-walled
+  ClientToSectorServer.cpp — separate piece of work.
+- **No launcher Queue\* batching.** Win32 batches multiple inner opcodes
+  into a single TCP frame via Queue\*+SendQueuedPacket. Linux sends one
+  TCP frame per inner opcode. Wire-format is equivalent — client reads
+  the same `[size, opcode, data]` tuples — but TCP frame count goes up.
+  Not worth the port given the launcher Queue\* helpers are MFC-flavored
+  globals that would need a from-scratch redesign on Linux.
+- **No client-launcher `_beginthread`-on-terminate.** Win32's MVAS_TERMINATE
+  path spawns a thread that calls ShutdownClient (a launcher-only
+  callback). On Linux there's no client launcher — the proxy is server-
+  side infrastructure. Set g_ShuttingDown=true so the packet walker
+  exits cleanly; client teardown is the client's job, not ours.
+
+### File-scope globals introduced
+
+`bool g_ShuttingDown = false;` and `uint32_t time_debug = 0;` are
+defined at file scope in the new TU. Both have Win32 origins that are
+WIN32-walled (`g_ShuttingDown` in the original UDPProxyToClient.cpp;
+`time_debug` in ClientToSectorServer.cpp). Defining them here keeps the
+Linux build's symbol resolution clean without needing yet another
+"unbreak Linux" stub TU.
+
+### Verification
+
+- Clean build of the proxy target. Only #pragma warning(disable:4786)
+  noise (benign — MSVC-specific).
+- `docker compose up -d --build --wait` brings the full stack up healthy.
+- `dotnet test tests/integration/CliClient.IntegrationTests/...` — 38/38
+  cli-integration tests green (no regression).
+
+### What this unblocks
+
+Task #69 (sector LOGIN 0x0002 → START round-trip). Before Wave 6 the
+server could process a sector login but its 0x0006 START reply would
+hit the proxy's UDP RecvThread, find no handler, and be dropped.
+Wave 6's `ProcessClientOpcode` passthrough now delivers START (and
+every other server→client opcode) back to the TCP socket via the
+RC4-mutex-protected SendResponse path. The Task #69 implementation is
+now purely "wire up a sector-login integration test and iterate on any
+server-side stubs it surfaces" — the proxy plumbing is no longer the
+limiting factor.
