@@ -68,7 +68,7 @@ public static class TestedOpcodes
     /// <see cref="Opcodes"/>. NEVER decrease without a commit message
     /// explaining what deleted coverage and why it was OK to delete.
     /// </summary>
-    public const int MinTestedCount = 15;
+    public const int MinTestedCount = 17;
 
     /// <summary>
     /// Every opcode with round-trip coverage in this suite, with an
@@ -85,6 +85,10 @@ public static class TestedOpcodes
             "Opcodes/SectorLoginTests.cs FullSectorLogin_ReceivesStart — client sends the 14-byte sector LOGIN payload over TCP 3500 after MasterJoin handoff; observed by the server reaching login stage 1 (PlayerManager.cpp:534) and emitting the first 0x2020 LOGIN_STAGE_S_C frame in reply."),
         new TestedOpcode(0x0005, "START",
             "Opcodes/SectorLoginTests.cs FullSectorLogin_ReceivesStart — received on TCP 3500 as the server's final emit after all 13 login stages complete (PlayerManager::CompleteLogin → SendStart, PlayerConnection.cpp:1068). Test asserts the start_id field comes through as a non-zero int32_t — the wire form that was off-by-4-bytes before the sizeof(long)→int32_t sweep."),
+        new TestedOpcode(0x001D, "MESSAGE_STRING",
+            "Opcodes/SectorChatTests.cs GroupChat_WhenUngrouped_ReceivesNotInGroupErrorString — received on TCP 3500 as the server's reply to a Group-channel 0x0033 sent by an ungrouped player. The frame rides the full server→client UDP fan-out path: Player::SendMessageString (PlayerConnection.cpp:10918) → SendOpcode(0x001D) (PlayerConnection.cpp:127, the Phase K sizeof(int32_t) header fix) → m_UDPQueue → SendPacketCache → 0x2016 PACKET_SEQUENCE on UDP → proxy UDPClient::SendClientPacketSequence (proxy/UDPProxyToClient_linux.cpp:531) → SendResponse over TCP. Test decodes the [u16 length][u8 color][string\\0] payload and asserts the body contains the literal substring \"not in a group\"."),
+        new TestedOpcode(0x0033, "CLIENT_CHAT",
+            "Opcodes/SectorChatTests.cs GroupChat_WhenUngrouped_ReceivesNotInGroupErrorString — client sends a Type=Group ClientChatMessage with non-slash content; server's Player::HandleClientChat (PlayerConnection.cpp:4544) dispatches the chat->Type==1 branch, sees GroupID()==-1, and routes to SendVaMessage with the literal \"Error: You are not in a group!\" — the simplest server-state-independent CLIENT_CHAT branch that produces a deterministic single-frame reply."),
         new TestedOpcode(0x0035, "MASTER_JOIN",
             "Opcodes/MasterJoinTests.cs — live send into proxy on 3801, ServerRedirect reply asserted; AND Verification/CaptureReplayTests.cs — retail capture_1 frame 220 decoded + codec round-trip identity."),
         new TestedOpcode(0x0036, "SERVER_REDIRECT",
