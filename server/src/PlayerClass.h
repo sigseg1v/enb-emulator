@@ -388,7 +388,7 @@ public:
     Object     *GetNearestNav()                 { return (m_NearestNav); }
 
     //warp methods
-    void        SetupWarpNavs(short navs, long *target_id);
+    void        SetupWarpNavs(short navs, int32_t *target_id);
     void        PrepareForWarp();
     void        StartWarp();
     void        TerminateWarp(bool player_forced = false);

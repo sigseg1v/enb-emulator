@@ -235,35 +235,35 @@ struct Galaxy
 
 struct WarpPacket
 {
-    long GameID;
+    int32_t GameID;
     short Navs;
-    long TargetID[20];
+    int32_t TargetID[20];
 } ATTRIB_PACKED;
 
 struct InvMove
 {
-    long GameID;
-    long FromInv;
-    long FromSlot;
-    long ToInv;
-    long ToSlot;
-    long Num;
+    int32_t GameID;
+    int32_t FromInv;
+    int32_t FromSlot;
+    int32_t ToInv;
+    int32_t ToSlot;
+    int32_t Num;
 } ATTRIB_PACKED;
 
 struct InvSort
 {
-	long ID;
-	long TargetInv;
-	long Sort1;
-	long Sort2;
-	long Sort3;
+	int32_t ID;
+	int32_t TargetInv;
+	int32_t Sort1;
+	int32_t Sort2;
+	int32_t Sort3;
 	char Reverse;
 } ATTRIB_PACKED;
 
 struct ItemState
 {
-    long GameID;
-    long BitMask;
+    int32_t GameID;
+    int32_t BitMask;
     char Enable;
     char Inventory;
     char ItemNum;
@@ -357,15 +357,15 @@ struct ServerRedirect
 
 struct ChangeBaseAsset
 {
-	long	GameID;			// buff[12] 4 bytes
-	long	BaseAsset;		// buff[16] 4 bytes
+	int32_t	GameID;			// buff[12] 4 bytes
+	int32_t	BaseAsset;		// buff[16] 4 bytes
 	float	Scale;			// buff[20] 4 bytes
 	float	HSV[3];			// buff[24] 12 bytes
 } ATTRIB_PACKED;
 
 struct Create
 {
-    long    GameID;                 // this[12] 4 bytes
+    int32_t    GameID;                 // this[12] 4 bytes
     float   Scale;                  // this[16] 4 bytes
     short   BaseAsset;              // this[20] 2 bytes
     char    Type;                   // this[22] 1 byte
@@ -382,7 +382,7 @@ struct ServerParameters
     float   YMax;                   // this[32] 4 bytes
     float   FogNear;                // this[36] 4 bytes
     float   FogFar;                 // this[40] 4 bytes
-    long    DebrisMode;             // this[44] 4 bytes
+    int32_t    DebrisMode;             // this[44] 4 bytes
     char    LightBackdrop;          // this[48] 1 byte (boolean 1=true 0=false)
     char    FogBackdrop;            // this[49] 1 byte (boolean 1=true 0=false)
     char    SwapBackdrop;           // this[50] 1 byte (boolean 1=true 0=false)
@@ -394,7 +394,7 @@ struct ServerParameters
     float   DecayVelocity;          // this[72] 4 bytes
     float   DecaySpin;              // this[76] 4 bytes
     short   BackdropBaseAsset;      // this[80] 2 bytes
-    unsigned long SectorNum;        // this[84] 4 bytes
+    uint32_t SectorNum;        // this[84] 4 bytes
 } ATTRIB_PACKED;
 
 struct LoginData
@@ -407,9 +407,9 @@ struct LoginData
 struct Login
 {
     MasterJoin  join_data;      // this[16] 64 bytes
-    long        TimeSent;       // this[88] 4 bytes
+    int32_t        TimeSent;       // this[88] 4 bytes
     LoginData   login_data;     // this[96] 65 bytes
-    long        TimeReceived;   // this[164] 4 bytes
+    int32_t        TimeReceived;   // this[164] 4 bytes
 } ATTRIB_PACKED;
 
 struct SetBBox
@@ -428,24 +428,24 @@ struct SetZBand
 
 struct Navigation
 {
-    long    GameID;
+    int32_t    GameID;
     float   Signature;
     char    PlayerHasVisited;
-    long    NavType;
+    int32_t    NavType;
     char    IsHuge;
 } ATTRIB_PACKED;
 
 struct CreateAttachment
 {
-    long    Parent_ID;
-    long    Child_ID;
-    long    Slot;
+    int32_t    Parent_ID;
+    int32_t    Child_ID;
+    int32_t    Slot;
 } ATTRIB_PACKED;
 
 struct DecalItem
 {
-    long    Index;
-    long    decal_id;
+    int32_t    Index;
+    int32_t    decal_id;
     float   HSV[3];
     float   opacity;
 } ATTRIB_PACKED;
@@ -454,21 +454,21 @@ struct DecalItem
 
 struct Decal
 {
-    long    GameID;
+    int32_t    GameID;
     short   DecalCount;
     DecalItem Item[MAX_DECALS];
 } ATTRIB_PACKED;
 
 struct NameDecal
 {
-    long    GameID;
+    int32_t    GameID;
     char    Name[32];
     float   RGB[3];
 } ATTRIB_PACKED;
 
 struct ColorizationItem
 {
-    long    metal;
+    int32_t    metal;
     float   HSV[3];
 } ATTRIB_PACKED;
 
@@ -476,7 +476,7 @@ struct ColorizationItem
 
 struct Colorization
 {
-    long    GameID;
+    int32_t    GameID;
     short   ItemCount;
     ColorizationItem item[MAX_COLORIZATION_ITEMS];
 } ATTRIB_PACKED;
@@ -489,9 +489,9 @@ struct CharacterCreatorAvatarDataFile
 
 struct AvatarDescription // opcode 0x61
 {
-    unsigned long AvatarID;
+    uint32_t AvatarID;
     AvatarData  avatar_data;
-	long		unknown1;
+	int32_t		unknown1;
     u8          unknown2[3];
     float       unknown3;
     float       unknown4;
@@ -499,121 +499,121 @@ struct AvatarDescription // opcode 0x61
 
 struct Subparts // opcode 0xb4
 {
-    long    GameID;
-    long    NumSubParts;
+    int32_t    GameID;
+    int32_t    NumSubParts;
     char    BoneProfession[4];
-    long    BassetProfession;
+    int32_t    BassetProfession;
     char    BoneEngine1[11];
-    long    BassetEngine1;
+    int32_t    BassetEngine1;
     char    BoneEngine2[11];
-    long    BassetEngine2;
+    int32_t    BassetEngine2;
     char    BoneWing[4];
-    long    BassetWing;
+    int32_t    BassetWing;
 } ATTRIB_PACKED;
 
 struct ConstantPositionalUpdate
 {
-    long    GameID;             // this[12] 4 bytes
+    int32_t    GameID;             // this[12] 4 bytes
     float   Position[3];        // this[16] 12 bytes
     float   Orientation[4];     // this[28] 16 bytes
 } ATTRIB_PACKED;
 
 struct FormationPositionalUpdate
 {
-    long	TargetID;			// this[16] 4 bytes
-    long    LeaderID;           // this[12] 4 bytes
+    int32_t	TargetID;			// this[16] 4 bytes
+    int32_t    LeaderID;           // this[12] 4 bytes
     float   Position[3];        // this[20] 12 bytes
 } ATTRIB_PACKED;
 
 struct RequestTarget
 {
-    long    GameID;             // this[12] 4 bytes
-    long    TargetID;           // this[16] 4 bytes
+    int32_t    GameID;             // this[12] 4 bytes
+    int32_t    TargetID;           // this[16] 4 bytes
 } ATTRIB_PACKED;
 
 struct SetInterface
 {
-	long UIChange;
-	long UIType;
+	int32_t UIChange;
+	int32_t UIType;
 } ATTRIB_PACKED;
 
 struct SetTarget
 {
-    long    GameID;             // this[12] 4 bytes
-    long    TargetID;           // this[16] 4 bytes
+    int32_t    GameID;             // this[12] 4 bytes
+    int32_t    TargetID;           // this[16] 4 bytes
 } ATTRIB_PACKED;
 
 struct ActionPacket
 {
-    long    GameID;             // this[12] 4 bytes
-    long    Action;             // this[16] 4 bytes
-    long    Target;             // this[20] 4 bytes
-    long    OptionalVar;        // this[24] 4 bytes
+    int32_t    GameID;             // this[12] 4 bytes
+    int32_t    Action;             // this[16] 4 bytes
+    int32_t    Target;             // this[20] 4 bytes
+    int32_t    OptionalVar;        // this[24] 4 bytes
 } ATTRIB_PACKED;
 
 struct ActionPacket2
 {
-    long    GameID;             // reversed bytes
-    long    Action;             // reversed bytes
+    int32_t    GameID;             // reversed bytes
+    int32_t    Action;             // reversed bytes
     short   string_len;         // BSTR
     char    string[1];			// ...
-	long	_OptionalVar;		// reversed bytes
+	int32_t	_OptionalVar;		// reversed bytes
 } ATTRIB_PACKED;
 
 struct ClientSetTime
 {
-    long    ClientSent;
-    long    ServerReceived;
-    long    ServerSent;
+    int32_t    ClientSent;
+    int32_t    ServerReceived;
+    int32_t    ServerSent;
 } ATTRIB_PACKED;
 
 struct VerbRequest
 {
-    long    SubjectID;
-    long    ObjectID;
-    long    Action;
+    int32_t    SubjectID;
+    int32_t    ObjectID;
+    int32_t    Action;
 } ATTRIB_PACKED;
 
 struct CameraControl
 {
-    long    Message;
-    long    GameID;
+    int32_t    Message;
+    int32_t    GameID;
 } ATTRIB_PACKED;
 
 struct LogoffRequest
 {
-    long    PlayerID;           // this[12] 4 bytes
-	long	LogOutType;
+    int32_t    PlayerID;           // this[12] 4 bytes
+	int32_t	LogOutType;
 } ATTRIB_PACKED;
 
 struct TriggerEmote
 {
-    long    GameID;
-    long    Emote;
+    int32_t    GameID;
+    int32_t    Emote;
 } ATTRIB_PACKED;
 
 struct NotifyEmote
 {
-    long    GameID;
-    long    Emote;
+    int32_t    GameID;
+    int32_t    Emote;
 } ATTRIB_PACKED;
 
 struct OptionPacket
 {
-    long    GameID;             // this[12] 4 bytes
-    long    OptionType;         // this[16] 4 bytes
+    int32_t    GameID;             // this[12] 4 bytes
+    int32_t    OptionType;         // this[16] 4 bytes
     unsigned char OptionVar;    // this[20] 1 byte
 } ATTRIB_PACKED;
 
 struct SelectTalkTree
 {
-    long    PlayerID;
+    int32_t    PlayerID;
     unsigned char Selection;
 } ATTRIB_PACKED;
 
 struct ChatStream
 {
-	long	GameID;
+	int32_t	GameID;
 	char	Unknown1;			// I can't tell what this does (It's always 0x01.  Maybe for byte-alignment?)
 	short	ChatSize;			// The size of the rest of the packet + 2 additional bytes (Target as mentioned below?)
 	char	message[1];			// Variable length string
@@ -623,7 +623,7 @@ struct ChatStream
 
 struct ClientChat
 {
-    long    GameID;             // this[12] 4 bytes
+    int32_t    GameID;             // this[12] 4 bytes
     char    Type;               // this[22] 1 byte
     short   Size;               // this[20] 2 bytes = strlen(String) + 1
     char    String[1];          // variable length string
@@ -668,15 +668,15 @@ struct ClientChat
 
 struct ClientChatRequest
 {
-    long    PlayerID;
-    long    type;				// type of request
+    int32_t    PlayerID;
+    int32_t    type;				// type of request
     short   string_length1;
 	char	string1[1];			// string of length1 bytes
 	short	_string_length2;	// do not access from here on, reference only
 	char	_string2[1];		// string of length2 bytes
 	short	_string_length3;
 	char	_string3[1];		// string of length3 bytes
-	long	_data_size;			// size of following block
+	int32_t	_data_size;			// size of following block
 	char	_unknown_data[1];	// optional block of data of data_size length
 } ATTRIB_PACKED;
 
@@ -687,11 +687,11 @@ struct ClientChatRequest
 #define CHAT_LIST_CURRENT_CHANNELS	4
 struct ClientChatList
 {
-	long ListType;				// list id
+	int32_t ListType;				// list id
 	char unknown_string[2];		// string, empty is 2 bytes (unicode?)
-	long count1;				// size of following array
+	int32_t count1;				// size of following array
 	BSTR _players[1];			// array of players
-	long _count2;				// size of following array
+	int32_t _count2;				// size of following array
 	BSTR _list2[1];				// array of matching info
 } ATTRIB_PACKED;
 
@@ -718,8 +718,8 @@ struct ClientChatList
 
 struct ClientChatError
 {
-	long reason;
-	long type;
+	int32_t reason;
+	int32_t type;
 	short string_length1;
 	char player[1];
 	short _string_length2;
@@ -760,8 +760,8 @@ struct ClientChatError
 
 struct ClientChatEvent
 {
-	long type;				// type of event
-	long unknown;			// dont know yet, only used for some types
+	int32_t type;				// type of event
+	int32_t unknown;			// dont know yet, only used for some types
 	short string_length1;
 	char firstname[1];		// rank?
 	short string_length2;
@@ -774,45 +774,45 @@ struct ClientChatEvent
 	char message[1];		// message
 	short string_length6;
 	char unknown_string[1];	// not referenced
-	long customcount;		// used for private messages in some way
+	int32_t customcount;		// used for private messages in some way
 	char custombytes[1];
 } ATTRIB_PACKED;
 
 struct ClientSkillsRequest
 {
-	long PlayerID;
-	long unknown1;
+	int32_t PlayerID;
+	int32_t unknown1;
 } ATTRIB_PACKED;
 
 struct StarbaseAvatarChange
 {
-    long    AvatarID;
-    long    RoomType;
+    int32_t    AvatarID;
+    int32_t    RoomType;
     float   Orient;
     float   Position[3];
-    long    ActionFlag;
+    int32_t    ActionFlag;
 } ATTRIB_PACKED;
 
 struct StarbaseAvatarChange_S2C
 {
-    long    AvatarID;
+    int32_t    AvatarID;
     float   Orient;
     float   Position[3];
-    long    ActionFlag;
-    long    Room;
+    int32_t    ActionFlag;
+    int32_t    Room;
 } ATTRIB_PACKED;
 
 struct StarbaseRoomChange
 {
-    long    AvatarID;
-    long    NewRoom;
-    long    OldRoom;
+    int32_t    AvatarID;
+    int32_t    NewRoom;
+    int32_t    OldRoom;
 } ATTRIB_PACKED;
 
 struct StarbaseRequest
 {
-    long    PlayerID;
-    long    StarbaseID;
+    int32_t    PlayerID;
+    int32_t    StarbaseID;
     char    Action;
 } ATTRIB_PACKED;
 
@@ -823,18 +823,18 @@ struct StarbaseRequest
 
 struct Relationship
 {
-    long    ObjectID;
-    long    Reaction;
+    int32_t    ObjectID;
+    int32_t    Reaction;
     char    IsAttacking;
 } ATTRIB_PACKED;
 
 struct ObjectEffect             // opcode 0x09
 {
     char    Bitmask;            // bitfield of flags
-    long    GameID;
+    int32_t    GameID;
     short   EffectDescID;
-    long    EffectID;           // bit 0
-    unsigned long TimeStamp;    // bit 1
+    int32_t    EffectID;           // bit 0
+    uint32_t TimeStamp;    // bit 1
     short   Duration;           // bit 2
     float   Scale;              // bit 3
     float   HSVShift[3];        // bit 4,5,6
@@ -843,13 +843,13 @@ struct ObjectEffect             // opcode 0x09
 struct ObjectToObjectEffect             // opcode 0x0B
 {
     u16		Bitmask;            // 4 flags for condional fields
-    long    GameID;
-	long	TargetID;
+    int32_t    GameID;
+	int32_t	TargetID;
     u16		EffectDescID;
 	char	*Message;
     // the following fields are not always present, inclusion depends on bitmask
-    long    EffectID;           // bit 0 mask 0x0001
-    unsigned long TimeStamp;    // bit 1 mask 0x0002
+    int32_t    EffectID;           // bit 0 mask 0x0001
+    uint32_t TimeStamp;    // bit 1 mask 0x0002
 	u16		Duration;			// bitmask[2] 2 bytes (time is in milli seconds)
 	float	TargetOffset[3];	// bitmask[3] 12 bytes
 	u16		OutsideTargetRadius;// bitmask[4] 2 bytes
@@ -861,20 +861,20 @@ struct ObjectToObjectEffect             // opcode 0x0B
 
 struct InitRenderState			// opcode 0x2f
 {
-	long	GameID;
-	unsigned long RenderStateID;
+	int32_t	GameID;
+	uint32_t RenderStateID;
 } ATTRIB_PACKED;
 
 struct ActivateRenderState      // opcode 0x30
 {
-    long    GameID;                 // this[12] 4 bytes
-    unsigned long RenderStateID;    // this[20] 4 bytes
+    int32_t    GameID;                 // this[12] 4 bytes
+    uint32_t RenderStateID;    // this[20] 4 bytes
 } ATTRIB_PACKED;
 
 struct SimplePositionalUpdate
 {
-    long    GameID;                 // this[12] 4 bytes
-    unsigned long TimeStamp;        // this[16] 4 bytes
+    int32_t    GameID;                 // this[12] 4 bytes
+    uint32_t TimeStamp;        // this[16] 4 bytes
     float   Position[3];            // this[20] 12 bytes
     float   Orientation[4];         // this[32] 16 bytes
     float   Velocity[3];            // this[48] 12 bytes
@@ -882,10 +882,10 @@ struct SimplePositionalUpdate
 
 struct PlanetPositionalUpdate
 {
-    long    GameID;                 // this[12] 4 bytes
-    unsigned long TimeStamp;        // this[16] 4 bytes
+    int32_t    GameID;                 // this[12] 4 bytes
+    uint32_t TimeStamp;        // this[16] 4 bytes
     float   Position[3];            // this[20] 12 bytes
-    long    OrbitID;                // this[32] 4 bytes
+    int32_t    OrbitID;                // this[32] 4 bytes
     float   OrbitDist;              // this[36] 4 bytes
     float   OrbitAngle;             // this[40] 4 bytes
     float   OrbitRate;              // this[44] 4 bytes
@@ -899,18 +899,18 @@ struct ComponentPositionalUpdate
     struct  SimplePositionalUpdate simple;  // this[12] 48 bytes
     float   ImpartedDecay;                  // this[68] 4 bytes
     float   TractorSpeed;                   // this[72] 4 bytes
-    long    TractorID;                      // this[76] 4 bytes
-    long    TractorEffectID;                // this[80] 4 bytes
+    int32_t    TractorID;                      // this[76] 4 bytes
+    int32_t    TractorEffectID;                // this[80] 4 bytes
 } ATTRIB_PACKED;
 
 struct AdvancedPositionalUpdate
 {
     short   Bitmask;                // flags for condional fields
-    long    GameID;                 // this[12] 4 bytes
-    unsigned long TimeStamp;        // this[16] 4 bytes
+    int32_t    GameID;                 // this[12] 4 bytes
+    uint32_t TimeStamp;        // this[16] 4 bytes
     float   Position[3];            // this[20] 12 bytes
     float   Orientation[4];         // this[32] 16 bytes
-    unsigned long MovementID;       // this[100] 4 bytes
+    uint32_t MovementID;       // this[100] 4 bytes
     // the following fields are not always present, inclusion depends on bitmask
     float   CurrentSpeed;           // this[48] 4 bytes     bit 0  0x0001
     float   SetSpeed;               // this[52] 4 bytes     bit 1  0x0002
@@ -923,26 +923,26 @@ struct AdvancedPositionalUpdate
     float   ImpartedSpin;           // this[88] 4 bytes     bit 7  0x0080
     float   ImpartedRoll;           // this[92] 4 bytes     bit 7  0x0080
     float   ImpartedPitch;          // this[96] 4 bytes     bit 7  0x0080
-    unsigned long UpdatePeriod;     // this[104] 4 bytes    bit 8  0x0100
+    uint32_t UpdatePeriod;     // this[104] 4 bytes    bit 8  0x0100
 } ATTRIB_PACKED;
 
 struct EquipUse
 {
-    long    GameID;      // 4 bytes
+    int32_t    GameID;      // 4 bytes
     char	InvNum;      // 1 bytes
 	char	InvSlot;     // 1 bytes
 } ATTRIB_PACKED;
 
 struct AbilityUse
 {
-    long    GameID;      // 4 bytes
-    long	UnKnown;     // 4 bytes
-	long	Ability;     // 4 bytes
+    int32_t    GameID;      // 4 bytes
+    int32_t	UnKnown;     // 4 bytes
+	int32_t	Ability;     // 4 bytes
 } ATTRIB_PACKED;
 
 struct StarbaseSet
 {
-    long    StarbaseID;
+    int32_t    StarbaseID;
     char    Action;
     char    ExitMode;
 } ATTRIB_PACKED;
@@ -955,10 +955,10 @@ struct ServerHandoff
 
 struct ShipInfo
 {
-    long    hull;
-    long    profession;
-    long    engine;
-    long    wing;
+    int32_t    hull;
+    int32_t    profession;
+    int32_t    engine;
+    int32_t    wing;
     float   Position[3];
     float   Orientation[4];
 } ATTRIB_PACKED;
@@ -973,41 +973,41 @@ struct CharacterDatabase
 
 struct CTARequest
 {
-	long SourceID;
-	long TargetID;
-	long Action;
+	int32_t SourceID;
+	int32_t TargetID;
+	int32_t Action;
 } ATTRIB_PACKED;
 
 struct MovePacket
 {
-    long GameID;
+    int32_t GameID;
     char type;
 } ATTRIB_PACKED;
 
 struct SkillAction
 {
-	long	GameID;
+	int32_t	GameID;
 	int		SkillPoints;
 	short	SkillID;
 } ATTRIB_PACKED;
 
 struct SkillUse // Opcode 0x58
 {
-    long GameID;
-    long Action;
-    long AbilityIndex;
+    int32_t GameID;
+    int32_t Action;
+    int32_t AbilityIndex;
 } ATTRIB_PACKED;
 
 struct MissionDismissal
 {
-	long PlayerID;
-	long MissionID;					// Could be 2 or 4 bytes, the 1st 2 bytes are always 0 from my observations
+	int32_t PlayerID;
+	int32_t MissionID;					// Could be 2 or 4 bytes, the 1st 2 bytes are always 0 from my observations
 } ATTRIB_PACKED;
 
 struct MVASHandoff
 {
-	long	player_id;
-	long	port;
+	int32_t	player_id;
+	int32_t	port;
 } ATTRIB_PACKED;
 
 
@@ -1061,47 +1061,47 @@ struct StationLounge {
 
 struct ManufactureData
 {
-	long GameID;
-	long Data;
+	int32_t GameID;
+	int32_t Data;
 } ATTRIB_PACKED;
 
 struct ManufactureTechLevelFilter
 {
-    long GameID;
+    int32_t GameID;
     char Enable;
-    long BitField;
+    int32_t BitField;
 } ATTRIB_PACKED;
 
 struct FindMember
 {
-	long count;
+	int32_t count;
 	struct fm_item
 	{
-		long GameID;		// reverse bytes
-		long Level;			// reverse bytes
-		long Race;			// reverse bytes
-		long Profession;	// reverse bytes
+		int32_t GameID;		// reverse bytes
+		int32_t Level;			// reverse bytes
+		int32_t Race;			// reverse bytes
+		int32_t Profession;	// reverse bytes
 	} list[1];			// array of count * 16 byte structures
 } ATTRIB_PACKED;
 
 struct RecustomizeAvatarStart
 {
-	long costs[14];
-	long playerid;
+	int32_t costs[14];
+	int32_t playerid;
 } ATTRIB_PACKED;
 
 struct RecustomizeShipStart
 {
 	struct ShipData ship;
-	long costs[12];
-	long playerid;
-	long unknown[4];
+	int32_t costs[12];
+	int32_t playerid;
+	int32_t unknown[4];
 } ATTRIB_PACKED;
 
 struct RecustomizeShipDone
 {
 	struct ShipData ship;
-	long playerid;
+	int32_t playerid;
 	bool unknown;
 	char _unknown[11];
 } ATTRIB_PACKED;
@@ -1109,7 +1109,7 @@ struct RecustomizeShipDone
 struct RecustomizeAvatarDone
 {
 	struct AvatarData avatar;
-	long playerid;
+	int32_t playerid;
 	bool unknown;
 	char _unknown[11];
 } ATTRIB_PACKED;

@@ -13,7 +13,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -2161,7 +2161,7 @@ void Player::BlankWarpNavs()
     m_WarpNavCount = 0;
 }
 
-void Player::SetupWarpNavs(short navs, long *target_id)
+void Player::SetupWarpNavs(short navs, int32_t *target_id)
 {
     BlankWarpNavs();
 
