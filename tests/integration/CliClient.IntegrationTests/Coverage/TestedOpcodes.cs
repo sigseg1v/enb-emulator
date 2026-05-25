@@ -68,7 +68,7 @@ public static class TestedOpcodes
     /// <see cref="Opcodes"/>. NEVER decrease without a commit message
     /// explaining what deleted coverage and why it was OK to delete.
     /// </summary>
-    public const int MinTestedCount = 22;
+    public const int MinTestedCount = 23;
 
     /// <summary>
     /// Every opcode with round-trip coverage in this suite, with an
@@ -93,6 +93,8 @@ public static class TestedOpcodes
             "Opcodes/SectorTurnTiltTests.cs TurnAndTilt_DoNotBreakConnection_RequestTimeStillRoundTrips — client sends a canonical 8-byte TILT payload {int32 GameID; float Intensity} on the sector connection after TURN. Server Player::HandleTilt (server/src/PlayerConnection.cpp:1815) reads the local PacketTurn struct and calls Moveable::Tilt(intensity). Same Wave 11 sizeof(long) regression as 0x0012 TURN — the same local struct definition was shared by both handlers. Same survival-probe shape and rationale as TURN."),
         new TestedOpcode(0x001D, "MESSAGE_STRING",
             "Opcodes/SectorChatTests.cs GroupChat_WhenUngrouped_ReceivesNotInGroupErrorString — received on TCP 3500 as the server's reply to a Group-channel 0x0033 sent by an ungrouped player. The frame rides the full server→client UDP fan-out path: Player::SendMessageString (PlayerConnection.cpp:10918) → SendOpcode(0x001D) (PlayerConnection.cpp:127, the Phase K sizeof(int32_t) header fix) → m_UDPQueue → SendPacketCache → 0x2016 PACKET_SEQUENCE on UDP → proxy UDPClient::SendClientPacketSequence (proxy/UDPProxyToClient_linux.cpp:531) → SendResponse over TCP. Test decodes the [u16 length][u8 color][string\\0] payload and asserts the body contains the literal substring \"not in a group\"."),
+        new TestedOpcode(0x002C, "ACTION",
+            "Opcodes/SectorActionTests.cs Action_NoOpSubAction_DoesNotBreakConnection_RequestTimeStillRoundTrips — client sends a canonical 16-byte ActionPacket payload {int32 GameID; int32 Action=23; int32 Target=0; int32 OptionalVar=0} on the sector connection after STAGE handshake completes. Server Player::HandleAction (server/src/PlayerConnection.cpp:3708) dispatches on Action through a 30-ish entry switch; sub-action 23 (\"keep trading???\") is a literal commented-out no-op (line 4104). No reply emitted — the retail server doesn't emit one on this branch either, and CLAUDE.md forbids fabricating one. Test is a survival probe: send ACTION, send REQUEST_TIME, assert CLIENT_SET_TIME echoes our sentinel tick. Catches: (a) PacketStructures.h ActionPacket long→int32_t regression (would make Action read from offset 8 instead of 4, miss case 23, hit default UNRECOGNIZED ACTION printf); (b) proxy ProcessSectorServerOpcode for ACTION (proxy/ClientToServer_linux_stubs.cpp:471-477) dropping or double-forwarding; (c) HandleAction's pre-switch GetObjectFromID(Target=0) null-deref."),
         new TestedOpcode(0x0033, "CLIENT_CHAT",
             "Opcodes/SectorChatTests.cs GroupChat_WhenUngrouped_ReceivesNotInGroupErrorString — client sends a Type=Group ClientChatMessage with non-slash content; server's Player::HandleClientChat (PlayerConnection.cpp:4544) dispatches the chat->Type==1 branch, sees GroupID()==-1, and routes to SendVaMessage with the literal \"Error: You are not in a group!\" — the simplest server-state-independent CLIENT_CHAT branch that produces a deterministic single-frame reply."),
         new TestedOpcode(0x0034, "CLIENT_SET_TIME",

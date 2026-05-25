@@ -35,6 +35,7 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId Turn                   = new(0x0012);
         public static readonly OpcodeId Tilt                   = new(0x0013);
         public static readonly OpcodeId MessageString          = new(0x001D);
+        public static readonly OpcodeId Action                 = new(0x002C);
         public static readonly OpcodeId ClientChat             = new(0x0033);
         public static readonly OpcodeId ClientSetTime          = new(0x0034);
         public static readonly OpcodeId MasterJoin             = new(0x0035);
