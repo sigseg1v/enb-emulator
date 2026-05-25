@@ -68,7 +68,7 @@ public static class TestedOpcodes
     /// <see cref="Opcodes"/>. NEVER decrease without a commit message
     /// explaining what deleted coverage and why it was OK to delete.
     /// </summary>
-    public const int MinTestedCount = 11;
+    public const int MinTestedCount = 15;
 
     /// <summary>
     /// Every opcode with round-trip coverage in this suite, with an
@@ -81,6 +81,10 @@ public static class TestedOpcodes
             "Opcodes/VersionRequestTests.cs — client sends VersionRequest, asserts on the typed-decoded VersionResponse status."),
         new TestedOpcode(0x0001, "VERSION_RESPONSE",
             "Opcodes/VersionRequestTests.cs — server reply decoded via VersionResponseCodec, status field asserted for all three branches (current/old/new)."),
+        new TestedOpcode(0x0002, "LOGIN",
+            "Opcodes/SectorLoginTests.cs FullSectorLogin_ReceivesStart — client sends the 14-byte sector LOGIN payload over TCP 3500 after MasterJoin handoff; observed by the server reaching login stage 1 (PlayerManager.cpp:534) and emitting the first 0x2020 LOGIN_STAGE_S_C frame in reply."),
+        new TestedOpcode(0x0005, "START",
+            "Opcodes/SectorLoginTests.cs FullSectorLogin_ReceivesStart — received on TCP 3500 as the server's final emit after all 13 login stages complete (PlayerManager::CompleteLogin → SendStart, PlayerConnection.cpp:1068). Test asserts the start_id field comes through as a non-zero int32_t — the wire form that was off-by-4-bytes before the sizeof(long)→int32_t sweep."),
         new TestedOpcode(0x0035, "MASTER_JOIN",
             "Opcodes/MasterJoinTests.cs — live send into proxy on 3801, ServerRedirect reply asserted; AND Verification/CaptureReplayTests.cs — retail capture_1 frame 220 decoded + codec round-trip identity."),
         new TestedOpcode(0x0036, "SERVER_REDIRECT",
@@ -99,6 +103,10 @@ public static class TestedOpcodes
             "Opcodes/GlobalCreateCharacterTests.cs — client sends a 539-byte canonical Win32 GlobalCreateCharacter payload (Terran Warrior, slot 0, 'Testavus' / 'TestShip') against the seeded cli_test03 account; the proxy forwards as 0x200B CREATE_AVATAR over UDP 3810 and the test asserts the refreshed GlobalAvatarList carries the new character (race=0, profession=0, sector=10151 Luna, account_id=9000003). Failure detector for the Phase K ColorInfo wire-size fix (`long metal` → `int32_t metal` — pre-fix ColorInfo was 21B, ShipData 226B, GlobalCreateCharacter 571B vs canonical 539B), and for the GlobalAvatarListCodec AvatarData offset fix (race/profession/gender/mood at 46/50/54/58, not 48/52/56/60 — the struct is __attribute__((packed)) and has no implicit padding after filler1+avatar_version)."),
         new TestedOpcode(0x0075, "GLOBAL_ERROR",
             "Opcodes/GlobalConnectTests.cs — StressTestClosedAccount_GlobalConnect_ReturnsGlobalErrorCode12 sends GlobalConnect for a status=0 (STRESS_TEST_CLOSED) seed account; the server emits 0x2004 GLOBAL_ERROR err=12 on UDP 3810, the proxy forwards it as 0x0075, and the test asserts both the error code (12) and that the message text from the proxy's g_GlobalErrorMsg[12] table comes through (validates the table wasn't truncated at 11 entries)."),
+        new TestedOpcode(0x2020, "LOGIN_STAGE_S_C",
+            "Opcodes/SectorLoginTests.cs FullSectorLogin_ReceivesStart — emitted by the server inside 0x2016 PACKET_SEQUENCE wrappers as the login state machine advances (PlayerManager.cpp:540-609). The proxy's HandleStageConfirm consumes them (UDPProxyToClient_linux.cpp:HandleStageConfirm) and auto-replies 0x2021 ACKs on the client's behalf; the test observes the round-trip indirectly by seeing the server progress to SendStart (0x0005) within the test deadline."),
+        new TestedOpcode(0x2021, "LOGIN_STAGE_ACK_C_S",
+            "Opcodes/SectorLoginTests.cs FullSectorLogin_ReceivesStart — auto-emitted by the proxy after each 0x2020 LOGIN_STAGE_S_C; consumed by the server's HandleLoginAckReturn (PlayerConnection.cpp:661) which uses the 4-byte int32_t stage_id (was 8-byte sizeof(long) pre-fix). Test observes correct round-trip via the server reaching CompleteLogin within the deadline — wire-size regression would stall the stage progression."),
     };
 }
 
