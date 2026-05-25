@@ -68,7 +68,7 @@ public static class TestedOpcodes
     /// <see cref="Opcodes"/>. NEVER decrease without a commit message
     /// explaining what deleted coverage and why it was OK to delete.
     /// </summary>
-    public const int MinTestedCount = 19;
+    public const int MinTestedCount = 20;
 
     /// <summary>
     /// Every opcode with round-trip coverage in this suite, with an
@@ -85,6 +85,8 @@ public static class TestedOpcodes
             "Opcodes/SectorLoginTests.cs FullSectorLogin_ReceivesStart — client sends the 14-byte sector LOGIN payload over TCP 3500 after MasterJoin handoff; observed by the server reaching login stage 1 (PlayerManager.cpp:534) and emitting the first 0x2020 LOGIN_STAGE_S_C frame in reply."),
         new TestedOpcode(0x0005, "START",
             "Opcodes/SectorLoginTests.cs FullSectorLogin_ReceivesStart — received on TCP 3500 as the server's final emit after all 13 login stages complete (PlayerManager::CompleteLogin → SendStart, PlayerConnection.cpp:1068). Test asserts the start_id field comes through as a non-zero int32_t — the wire form that was off-by-4-bytes before the sizeof(long)→int32_t sweep."),
+        new TestedOpcode(0x0006, "START_ACK",
+            "Opcodes/SectorStartAckTests.cs StartAck_DoesNotBreakConnection_RequestTimeStillRoundTrips — client sends an empty-payload 0x0006 on the sector connection after receiving 0x0005 START. Server Player::HandleStartAck (server/src/PlayerConnection.cpp:1603) calls SetActive(true) and runs the MAX_SECTOR_ID-gated SendLoginCamera call; proxy ClientToServer_linux_stubs.cpp:413-449 forwards START_ACK and synthesises a 0x3008 STARBASE_LOGIN_COMPLETE (sector>9999) or 0x3004 PLAYER_SHIP_SENT (sector<9999) follow-up to the server. There is no direct reply for a freshly-created starbase character (every StartSector[] entry in StaticData.h:63-74 is >9999, so SendLoginCamera's CAMERA_CONTROL emit is skipped — the retail server explicitly does this and CLAUDE.md forbids fabricating a reply). Test instead asserts pipe survival: send START_ACK, send REQUEST_TIME, observe CLIENT_SET_TIME with our echoed sentinel tick. Times out (rather than asserting) if the server crashes on HandleStartAck, the proxy crashes on the synthesised 0x3008 follow-up, or the proxy tears down the UDP plane on the SetLoginComplete(true) transition."),
         new TestedOpcode(0x001D, "MESSAGE_STRING",
             "Opcodes/SectorChatTests.cs GroupChat_WhenUngrouped_ReceivesNotInGroupErrorString — received on TCP 3500 as the server's reply to a Group-channel 0x0033 sent by an ungrouped player. The frame rides the full server→client UDP fan-out path: Player::SendMessageString (PlayerConnection.cpp:10918) → SendOpcode(0x001D) (PlayerConnection.cpp:127, the Phase K sizeof(int32_t) header fix) → m_UDPQueue → SendPacketCache → 0x2016 PACKET_SEQUENCE on UDP → proxy UDPClient::SendClientPacketSequence (proxy/UDPProxyToClient_linux.cpp:531) → SendResponse over TCP. Test decodes the [u16 length][u8 color][string\\0] payload and asserts the body contains the literal substring \"not in a group\"."),
         new TestedOpcode(0x0033, "CLIENT_CHAT",

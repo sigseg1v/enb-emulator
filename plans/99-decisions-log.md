@@ -1725,3 +1725,84 @@ must be kept in sync (this turn: added a row for cli_test06 + updated comments
 * 0x0012 TURN, 0x0013 TILT — simplest movement opcodes; first server-side *fan-out across
   sector players* path (vs the single-player echo paths in Waves 8-9).
 * 0x002C ACTION — combat trigger.
+
+## 2026-05-25 — Phase K Wave 10: 0x0006 START_ACK survival round-trip + design pivot
+
+### What landed
+
+`SectorStartAckTests.StartAck_DoesNotBreakConnection_RequestTimeStillRoundTrips` — sends
+0x0006 START_ACK (empty payload, per retail), then sends 0x0044 REQUEST_TIME and asserts the
+0x0034 CLIENT_SET_TIME reply round-trips with our sentinel echoed back. Pool[6] cli_test07
+(seed.sql updated). 7s per-test wall time. Coverage 19/207 → 20/207 (9.7%).
+
+### The pivot (the part that matters in the log)
+
+The original Wave 10 plan was START_ACK → 0x0092 CAMERA_CONTROL as a direct reply assertion.
+That path is **fundamentally unreachable** for any freshly-created character. The chain:
+
+* `Player::HandleStartAck` (`server/src/PlayerConnection.cpp:1603`) only calls
+  `SendLoginCamera()` when `PlayerIndex()->GetSectorNum() < MAX_SECTOR_ID`.
+* `MAX_SECTOR_ID` = 9999 (`server/src/Net7.h:363`). In-space sectors are <9999; starbases >9999.
+* Every entry in `StartSector[]` for all classes (`server/src/StaticData.h:63-74`) is a
+  starbase in 10151..10551 (Terran Warrior=10151 Luna; Jenquai Explorer=10151; Progen Warrior
+  =10151 Mars; etc.). There is no in-space starting sector.
+* Therefore `SendLoginCamera` never runs for a Wave-10-shaped test, and `SendCameraControl` is
+  never emitted.
+
+CLAUDE.md server-integrity rule applies here as written: "NEVER make the server accept inputs
+or behaviour the real server did not." Dropping the `MAX_SECTOR_ID` guard or fabricating a
+CAMERA_CONTROL emit for the starbase branch would be divergence from retail — the retail
+server explicitly does not fire CAMERA_CONTROL when the player spawns at a starbase. The
+retail client renders the starbase 3D scene from local data after START_ACK; no opcodes flow
+back from the server in that branch.
+
+So the test pivoted to an indirect "survival probe": send START_ACK, let the proxy fire its
+synthesised 0x3008 STARBASE_LOGIN_COMPLETE follow-up (`proxy/ClientToServer_linux_stubs.cpp:413-449`),
+then send REQUEST_TIME and assert the CLIENT_SET_TIME reply comes back with our echoed
+sentinel tick. Pipe survival proves both opcodes were processed without crashing the server
+or the proxy and without tearing the UDP plane during the proxy's `SetLoginComplete(true)`
+triple-flip on three separate state machines.
+
+### What CAMERA_CONTROL coverage now requires
+
+It is not removed from the project — just deferred. Re-enabling it as a real reply assertion
+needs a test scenario that legitimately puts a player in an in-space sector. Two paths:
+
+1. **Gate traversal from starbase.** Spawn at starbase as today, run the proper "leave dock"
+   sequence (warps to a stargate, traverses, ends up in space). When `HandleStartAck` next
+   runs (post-gate the player re-enters from a sector <9999), SendLoginCamera fires.
+2. **In-space spawn path.** Engineer the seed character or the create flow to land in space
+   directly. This would require a content/data change rather than a code change; whether the
+   real game ever did this for any non-debug scenario is undetermined.
+
+Path 1 is the correct preservation-aligned approach when we get to gate-traversal coverage.
+The `OpcodeId.Known.CameraControl` enum entry was reverted (no test or producer references it
+today, and the Known list is documented as the integration-tested subset — adding it back
+when path 1 lands keeps the list honest).
+
+### Touches
+
+* `tests/integration/CliClient.IntegrationTests/Opcodes/SectorStartAckTests.cs` (new)
+* `tests/integration/CliClient.IntegrationTests/TestAccounts.cs` (Pool gains cli_test07)
+* `tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql` (cli_test07 INSERT row;
+  comments 9000006→9000007, "all six"→"all seven")
+* `tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs` (MinTestedCount
+  19→20; +0x0006 START_ACK; CAMERA_CONTROL entry NOT added)
+
+### What did NOT change
+
+No server changes. No proxy changes. Both paths (`HandleStartAck` + proxy's 0x3008 synthesis)
+were already wire-correct from Wave 7's sizeof(long) sweep and from the existing 5-opcode
+sector-stubs port (Wave 3). The test simply lights up an existing-but-untested path.
+
+### Coverage ratchet
+
+* Pre-Wave-10: 19/207 (9.2%).
+* Post-Wave-10: 20/207 (9.7%) — +0x0006 START_ACK.
+
+### Next-Phase-K targets
+
+* 0x0012 TURN, 0x0013 TILT — first server-side *fan-out across sector players* path
+  (movement broadcasts to other observers in the same sector). Expected sizeof(long) review
+  on `HandleTurn`/`HandleTilt` payloads — same class as the Wave 7 sweep.
+* 0x002C ACTION — combat/dock/tractor trigger.
