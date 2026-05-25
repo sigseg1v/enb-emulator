@@ -2441,3 +2441,137 @@ hardening sweep:
 * **0x0034 inverse sweep** — there are several opcodes the proxy lists
   explicitly but we haven't tested yet; worth doing a fast inventory
   to identify the next batch of survival-probe candidates.
+
+## 2026-05-25 — Phase K Wave 20: 0x0018 REQUEST_TARGETS_TARGET direct-reply round-trip + first dispatcher-misroute differentiator
+
+### What landed
+
+`SectorRequestTargetsTargetTests.RequestTargetsTarget_OnUnknownPlayer_ReceivesSetTargetWithLiteralZeroGameId`
+— a second direct-reply correlation test in Phase K, exercising
+`Player::HandleRequestTargetsTarget`
+(`server/src/PlayerConnection.cpp:3494`). The client sends an 8-byte
+`{int32 GameID=0; int32 TargetID=0x12345678}` after STAGE handshake
+completes; the server's `PlayerManager::GetPlayer(0x12345678)` lookup
+returns null (no seeded player has that ID — SaveManager assigns
+`account_id*5+slot+1`, so cli_test17's CharacterID is 45_000_086, far
+below 305_419_896); the else-branch unconditionally fires
+`SendSetTarget(0, -1)` → `ShipIndex()->SetTargetGameID(-1)` →
+`SendAuxShip()` (no-op when `HasDiff()` is false, the case for a
+freshly-handed-off character). The test drains for 0x0019 SET_TARGET
+and asserts payload length 8B + reply GameID=0 + reply TargetID=-1.
+
+Passes in isolation (1/1, 7s) AND when the full integration suite is
+run against a freshly-recycled stack (51/51, 1m47s).
+
+Zero-server-change wave — Phase R already had RequestTarget and
+SetTarget canonical at 8B (shared struct, `PacketStructures.h:528,540`).
+
+### Why this is a stronger assertion than Wave 19
+
+Wave 19's REQUEST_TARGET reply was `SendSetTarget(request->TargetID, -1)`
+with `request->TargetID=0`, so reply GameID=0. A hypothetical
+0x0017↔0x0018 dispatcher mis-route would also produce GameID=0 from
+this handler's else-branch — Wave 19 therefore could not catch a
+mis-route in either direction.
+
+Wave 20 sends `TargetID=0x12345678` (a recognisable hex pattern,
+comfortably above any seeded CharacterID space):
+
+* **Correct 0x0018 path**: else-branch produces literal
+  `SendSetTarget(0, -1)` → reply GameID=**0**.
+* **0x0018→0x0017 mis-route**: HandleRequestTarget would produce
+  `SendSetTarget(0x12345678, -1)` → reply GameID=**0x12345678**.
+
+The assertion `replyGameID == 0` is the differentiator. This is the
+**first cross-handler dispatcher-misroute differentiator** in Phase K.
+
+### Why TargetID=0x12345678 specifically
+
+* Recognisable hex pattern — easy to spot in packet dumps.
+* Comfortably above the seeded CharacterID space — accounts seed
+  9_000_001..9_000_017, all charcters allocated at most slot 5 → max
+  CharacterID 45_000_090; 0x12345678 = 305_419_896 ≫ that.
+* Non-zero, so it would be visible if mirrored back.
+* Not aligned to any known sentinel value (not -1, not 0, not
+  `INT_MAX`, not any `IS_PLAYER` boundary).
+
+### Regression coverage
+
+1. **PacketStructures.h RequestTarget long-revert** — shared struct
+   for both 0x0017 and 0x0018, so an 8B canonical revert would
+   surface on either wave.
+2. **PacketStructures.h SetTarget reply long-revert** — payload-length-8
+   assert.
+3. **0x0018↔0x0017 dispatcher mis-route** at
+   `server/src/PlayerConnection.cpp:447` — the differentiator the
+   Wave-19 test could not catch.
+4. **PlayerManager::GetPlayer hash-map regression** — if a refactor
+   accidentally returns a stale pointer instead of null on unknown
+   IDs, the if-branch fires, overwrites `data[4..7]` with the stale
+   player's targeted GameID, then chains into HandleRequestTarget
+   with a now-non-zero TargetID → reply GameID becomes the stale
+   target's ID and the assertion fails.
+5. **Proxy default-case ForwardClientOpcode** — 0x0018 is not
+   explicitly listed in `proxy/ClientToServer_linux_stubs.cpp` so it
+   hits the `default:` arm at line 514.
+6. **SendAuxShip HasDiff() default-flip** — would produce an extra
+   unexpected 0x001B AUX_DATA in the drain loop (diagnostic, not
+   assertion failure; the drain loop simply iterates past
+   non-SetTarget frames until either SetTarget arrives or the
+   400-frame cap trips).
+7. **ShipIndex()->SetTargetGameID(-1) null-deref hazard** — would
+   crash the sector thread; surfaces as test timeout.
+
+### CLAUDE.md compliance
+
+The wire shape and the literal `SendSetTarget(0, -1)` reply on
+unknown-player lookup are exactly what retail emits — the same
+handler is invoked by the real Win32 client after every SET_TARGET
+reply with TargetID=-1, and the else-branch fires whenever the
+targeted player has logged off or doesn't exist on the server. We're
+not making the server accept any new input shape, and we don't
+fabricate a reply — the SET_TARGET emit is what retail did. Zero
+permissiveness added.
+
+### Full-suite re-run gotcha recurrence
+
+This is now the **third wave** (after 18 and 19) to hit the
+ACCOUNT_IN_USE-on-re-run pattern: running the new wave's test in
+isolation, then re-running the full suite without recycling the docker
+stack returns `G_ERROR_ACCOUNT_IN_USE (code=13)` for the wave's
+dedicated account. Fix: `docker compose down -v && docker compose up -d`
+between runs.
+
+The wave-N+1 hardening opportunity (explicit `0x0003 LOGOFF` in test
+`finally` blocks before `DeleteCreatedCharacterAsync`, instead of
+relying on session expiry) is becoming increasingly attractive but
+stays out of scope here. Filed for a future dedicated hardening wave.
+
+### Test-account pool
+
+Pool[15] cli_test17 is dedicated to this test. The 9_000_001..9_000_017
+allocation pattern continues (Pool[8] = cli_test09, then Pool[9..15]
+= cli_test11..cli_test17 because 9_000_010 is reserved for the
+StressTestClosed out-of-pool fixture).
+
+### Coverage ratchet
+
+`Coverage/TestedOpcodes.cs` MinTestedCount bumped 30 → 31 (+1).
+Phase K coverage: 30/207 → **31/207 (15.0%)**.
+
+Updated 0x0019 SET_TARGET citation to credit both Wave 19 and Wave 20
+(the same SendSetTarget emit path is now exercised by two
+complementary tests — Wave 19 asserts the mirrored-GameID case, Wave
+20 asserts the literal-0-GameID case).
+
+### Next-Phase-K targets
+
+* **0x002D ACTION2** — simpler-payload sibling of Wave 13's ACTION.
+* **0x0027 INVENTORY_MOVE** — first inventory-state-mutator wave.
+  Will need a seeded inventory row to drive past the early-return
+  guards.
+* **0x0029 ITEM_STATE** — item-state-flip cousin of INVENTORY_MOVE.
+* **0x002E OPTION** — client-side option toggle; likely a pure-no-op
+  survival probe candidate.
+* **0x001A DEBUG** — debug-mode opcode; guarded on admin status, may
+  be a fast survival probe.
