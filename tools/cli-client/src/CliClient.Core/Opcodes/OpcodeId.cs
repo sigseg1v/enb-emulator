@@ -30,6 +30,7 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId VersionResponse        = new(0x0001);
         public static readonly OpcodeId Login                  = new(0x0002);
         public static readonly OpcodeId Logoff                 = new(0x0003);
+        public static readonly OpcodeId Start                  = new(0x0005);
         public static readonly OpcodeId ClientChat             = new(0x0033);
         public static readonly OpcodeId MasterJoin             = new(0x0035);
         public static readonly OpcodeId ServerRedirect         = new(0x0036);
@@ -43,5 +44,7 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId GlobalDeleteCharacter  = new(0x0071);
         public static readonly OpcodeId GlobalCreateCharacter  = new(0x0072);
         public static readonly OpcodeId GlobalError            = new(0x0075);
+        public static readonly OpcodeId LoginStage             = new(0x2020);
+        public static readonly OpcodeId LoginStageAck          = new(0x2021);
     }
 }

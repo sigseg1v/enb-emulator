@@ -38,12 +38,16 @@ public sealed class TlsLoginTests
             $"login should have succeeded for '{account.Username}' — raw body: {response.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(response.Ticket),
             "Ticket should be non-empty on success");
-        // LinuxAuth.cpp issues a 40-character hex ticket (20 binary
-        // bytes → 40 hex chars). Don't pin to exactly 40; assert
-        // "looks like a hex string with at least 20 chars" so changes
-        // to ticket size don't false-positive.
-        Assert.True(response.Ticket.Length >= 20,
-            $"Ticket looks too short: '{response.Ticket}'");
+        // LinuxAuth.cpp BuildTicketLocked emits "%s-%d" (username +
+        // hyphen + rand()), so the ticket starts with the username
+        // and contains a '-' before a decimal number. Asserting on
+        // the format keeps us honest if the format changes; pinning
+        // to a min length used to flake (rand() under 100M gave us
+        // a 19-char ticket for a 10-char username).
+        Assert.StartsWith(account.Username + "-", response.Ticket);
+        var suffix = response.Ticket[(account.Username.Length + 1)..];
+        Assert.True(suffix.Length >= 1 && suffix.All(char.IsDigit),
+            $"Ticket suffix should be digits: '{response.Ticket}'");
     }
 
     [Fact]

@@ -69,7 +69,64 @@ public sealed class ServerFixture : IAsyncLifetime
         await WaitForPortAsync(MasterHost, MasterPort, ReadyTimeout);
         await WaitForPortAsync(SectorHost, SectorPort, ReadyTimeout);
 
+        // The proxy's TCP listeners come up in seconds, but the server's
+        // sector subsystem takes ~30–60s to load all ~200 sectors from
+        // postgres. Until the sector the test wants to enter has logged
+        // "BeginSectorThread sector_id=<id>" the MasterHandoff path will
+        // fail with "Unable to locate sector server" and the proxy times
+        // out the MasterLogin retry loop (5 attempts × 1s).
+        //
+        // We poll for sector 10151 (Luna Station) because every current
+        // sector-login test enters via the warrior starting station. If
+        // a future test enters a different sector first, add its id to
+        // the list — or generalise this to per-test parameters.
+        await WaitForServerSectorAsync(10151, TimeSpan.FromMinutes(3));
+
         await SeedFixtureAccountsAsync(TimeSpan.FromMinutes(1));
+    }
+
+    private static async Task WaitForServerSectorAsync(int sectorId, TimeSpan timeout)
+    {
+        var marker = $"BeginSectorThread sector_id={sectorId}";
+        var deadline = DateTime.UtcNow + timeout;
+        string lastTail = "";
+        while (DateTime.UtcNow < deadline)
+        {
+            var (exit, stdout, stderr) = await RunCaptureAsync(
+                "docker", "compose logs --no-color --no-log-prefix server",
+                TimeSpan.FromSeconds(15));
+            if (exit == 0 && stdout.Contains(marker))
+                return;
+            lastTail = (stdout.Length > 0 ? stdout : stderr);
+            await Task.Delay(TimeSpan.FromSeconds(2));
+        }
+        throw new TimeoutException(
+            $"Server did not log '{marker}' within {timeout.TotalSeconds:F0}s. " +
+            $"Last logs tail:\n{lastTail[Math.Max(0, lastTail.Length - 2000)..]}");
+    }
+
+    private static async Task<(int ExitCode, string Stdout, string Stderr)> RunCaptureAsync(
+        string fileName, string arguments, TimeSpan timeout)
+    {
+        var psi = new ProcessStartInfo(fileName, arguments)
+        {
+            WorkingDirectory = RepoRoot.Path,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        using var p = Process.Start(psi)
+            ?? throw new InvalidOperationException($"Failed to launch '{fileName} {arguments}'.");
+        var stdoutTask = p.StandardOutput.ReadToEndAsync();
+        var stderrTask = p.StandardError.ReadToEndAsync();
+        using var cts = new CancellationTokenSource(timeout);
+        try { await p.WaitForExitAsync(cts.Token); }
+        catch (OperationCanceledException)
+        {
+            try { p.Kill(entireProcessTree: true); } catch { /* best effort */ }
+            return (-1, "", $"'{fileName} {arguments}' exceeded {timeout.TotalSeconds:F0}s.");
+        }
+        return (p.ExitCode, await stdoutTask, await stderrTask);
     }
 
     public async Task DisposeAsync()
