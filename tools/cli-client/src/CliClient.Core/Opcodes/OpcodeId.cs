@@ -45,6 +45,7 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId ServerHandoff          = new(0x003A);
         public static readonly OpcodeId ClientType             = new(0x003C);
         public static readonly OpcodeId RequestTime            = new(0x0044);
+        public static readonly OpcodeId StarbaseRequest        = new(0x004E);
         public static readonly OpcodeId GlobalConnect          = new(0x006D);
         public static readonly OpcodeId GlobalTicketRequest    = new(0x006E);
         public static readonly OpcodeId GlobalTicket           = new(0x006F);

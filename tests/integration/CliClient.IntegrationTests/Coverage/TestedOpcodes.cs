@@ -68,7 +68,7 @@ public static class TestedOpcodes
     /// <see cref="Opcodes"/>. NEVER decrease without a commit message
     /// explaining what deleted coverage and why it was OK to delete.
     /// </summary>
-    public const int MinTestedCount = 25;
+    public const int MinTestedCount = 26;
 
     /// <summary>
     /// Every opcode with round-trip coverage in this suite, with an
@@ -107,6 +107,8 @@ public static class TestedOpcodes
             "Opcodes/MasterJoinTests.cs — received as the reply to MASTER_JOIN; AND Verification/CaptureReplayTests.cs — retail capture_1 frame 222 decoded with field-by-field assertions."),
         new TestedOpcode(0x0044, "REQUEST_TIME",
             "Opcodes/SectorRequestTimeTests.cs RequestTime_RoundTripsClientSentTickAndReturnsServerTimes — client sends a 4-byte int32_t LE tick on the sector connection after STAGE handshake completes. Server Player::HandleRequestTime (server/src/PlayerConnection.cpp:1619) reads the tick and calls SendClientSetTime which replies with 0x0034 carrying the echoed tick + two server-side ticks. Pre-Wave-9 the handler read `*((long *) data)` = 8 bytes on Linux from a 4-byte wire slot; the Wave 9 fix casts to `int32_t*` so the round-trip echoes the exact value we sent."),
+        new TestedOpcode(0x004E, "STARBASE_REQUEST",
+            "Opcodes/SectorStarbaseRequestTests.cs JobTerminal_DoesNotBreakConnection_RequestTimeStillRoundTrips — client sends a canonical 9-byte StarbaseRequest payload {int32 PlayerID=0; int32 StarbaseID=0; byte Action=6} on the sector connection after STAGE handshake completes. Action=6 selects the Job-Terminal-open branch (server/src/PlayerConnection.cpp:9928), the leanest read-only sub-action; the handler calls SectorManager::GetJobList and conditionally emits 0x0093 JOB_LIST when jobs exist. Sector 10151's seed has no job rows so the handler silently returns — no direct reply, per CLAUDE.md we don't fabricate one. Test is a survival probe: send STARBASE_REQUEST, send REQUEST_TIME, assert CLIENT_SET_TIME echoes our sentinel tick. Catches: (a) PacketStructures.h StarbaseRequest long→int32_t regression (would grow struct to 17B; Action would read from offset 16 instead of 8, past end of 9B payload into garbage — random action routes risk LaunchIntoSpace on a docked character); (b) proxy default-case ForwardClientOpcode dropping the opcode (0x004E is not explicitly listed in proxy/ClientToServer_linux_stubs.cpp); (c) SectorManager::GetJobList null-deref or buffer overrun; (d) dispatcher mis-route to a different handler. Per CLAUDE.md server-integrity: the wire shape is exactly what retail Win32 client emits when user clicks the Job Terminal NPC."),
         new TestedOpcode(0x006D, "GLOBAL_CONNECT",
             "Opcodes/GlobalConnectTests.cs — client sends GlobalConnect with a real Net7SSL-issued ticket; round-trip drives the Phase K proxy↔server global UDP plane (UDP 3810)."),
         new TestedOpcode(0x006E, "GLOBAL_TICKET_REQUEST",
