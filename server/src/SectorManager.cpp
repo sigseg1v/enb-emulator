@@ -65,6 +65,9 @@ SectorManager::SectorManager(ServerManager *server_mgr)
 
 	m_JobTerminalLevel = 0;
 	m_JobListID = 0;
+	// Uninitialized garbage iteration crashed RefreshJobs() for sectors
+	// (and JTLevel==0 stations) that never set this. Hidden by docker restart.
+	m_JobListCount = 0;
 
 	std::memset(&m_SectorThread, 0, sizeof(m_SectorThread));
 }
@@ -79,8 +82,7 @@ void SectorManager::BeginSectorThread()
 		//now start this sector's listener
 		// Find a port that will work!
 		while(StartListener(g_ServerMgr->GetSectorPort()) == false);
-		//LogMessage("Starting %s\n", m_SectorName);
-		//ResumeThread(m_SectorThread);
+		LogMessage("BeginSectorThread sector_id=%d bound UDP port %d\n", m_SectorID, m_Port);
 	}
 }
 

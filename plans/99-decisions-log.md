@@ -1346,3 +1346,130 @@ RC4-mutex-protected SendResponse path. The Task #69 implementation is
 now purely "wire up a sector-login integration test and iterate on any
 server-side stubs it surfaces" — the proxy plumbing is no longer the
 limiting factor.
+
+---
+
+## 2026-05-25 — Phase K Wave 7: SectorManager constructor uninit m_JobListCount segfault (hidden by docker restart)
+
+### What was broken
+
+Every sector pthread launched by `SectorManager::BeginSectorThread`
+(server/src/SectorManager.cpp:75) crashed in `RefreshJobs`
+(SectorManager.cpp:1475: `JobNode *jn = m_JobList[i];`) before its UDP
+listener could be observed. Result: even though the master server log
+showed `Registering sector server: port=3501, max_sectors=300` and
+proceeded to assign 174 sectors, only the master plane (3808), global
+plane (3810), and MVAS auth plane (3806) ever showed up in
+`/proc/net/udp` — no per-sector ports (3501+) were bound.
+
+### Root cause
+
+`SectorManager.h:236` declares `long m_JobListCount;` without an
+in-class initializer. The constructor at `SectorManager.cpp:42`
+initializes `m_JobTerminalLevel = 0` and `m_JobListID = 0` but skipped
+`m_JobListCount`. `SetupSectorServer` (SectorManager.cpp:170) only
+sets it inside the `if (m_SectorID > 9999 && m_JobTerminalLevel > 0)`
+branch (stations with a job-terminal level). For every non-station
+sector — and stations with JTLevel == 0 — `m_JobListCount` held
+whatever bytes happened to be on the heap.
+
+`RunSectorEventThread` (SectorManager.cpp:780) calls `RefreshJobs`
+unconditionally as the first thing it does. Inside RefreshJobs:
+
+```cpp
+for (i = 0; i < m_JobListCount; i++) {
+    JobNode *jn = m_JobList[i];   // <-- segfaults on empty m_JobList
+    ...
+}
+```
+
+With garbage like `0x7fff…` for the loop bound and an empty `m_JobList`
+vector, this is a guaranteed out-of-bounds read of a `vector<JobNode*>`
+internal buffer that doesn't exist.
+
+### Why the crash was invisible
+
+`docker-compose.yml` declares `restart: unless-stopped` for the server
+container. When the child server process took SIGSEGV, the container
+init/wrapper exited 0 (clean) and docker re-launched it within ~1s.
+`docker inspect`'s `RestartCount` climbed, but logs looked normal
+(every restart re-emitted the startup banner including
+`Registering sector server: port=3501, max_sectors=300` — which we'd
+been treating as evidence that *one* startup got to the registration
+point, when actually *every* restart was getting to that point and
+dying immediately after).
+
+### Diagnosis path
+
+1. Observed mismatch: server log says "174 sectors assigned" but
+   `ss -ulnp` from host shows only 3 UDP ports bound.
+2. Checked `docker inspect <server>` → `RestartCount: 247` over a few
+   minutes. That was the smoking gun.
+3. `dmesg | grep net7` → `net7[N]: segfault at 0 ip 0x7f… error 4 in
+   net7[0x… +0x13a4b5]` — error code 4 = user-mode read of
+   non-present page.
+4. Recopied the latest debug binary out of the container,
+   `addr2line -e net7 0x1654b5` (using coredump's resolved offset, not
+   dmesg's — different ASLR base for the same binary build) →
+   `SectorManager.cpp:1475 RefreshJobs`.
+5. Read the function backwards: `m_JobList[i]` with `i` bounded by
+   `m_JobListCount`. Grepped initialization of `m_JobListCount`:
+   only `SetupSectorServer` writes it, and only under a narrow
+   condition. Constructor was missing it.
+
+### Fix
+
+`server/src/SectorManager.cpp` constructor:
+
+```cpp
+m_JobTerminalLevel = 0;
+m_JobListID = 0;
+// Uninitialized garbage iteration crashed RefreshJobs() for sectors
+// (and JTLevel==0 stations) that never set this. Hidden by docker restart.
+m_JobListCount = 0;
+```
+
+Also tidied `BeginSectorThread` while in the area: added a
+`pthread_create` error log (we were ignoring its return value), added
+a "bound UDP port N" success log so this class of mystery is easier to
+spot next time, dropped two dead comment lines.
+
+### Verification
+
+- Container `RestartCount: 0` after rebuild, stable across 60+ seconds.
+- All 174 sectors emit `BeginSectorThread sector_id=N bound UDP port P`
+  in the log.
+- `/proc/net/udp` inside the container shows 197 entries (174 sector
+  ports + master + global + MVAS auth + a handful of ephemeral
+  sender-side sockets from UDPClient connect()s).
+- `just integration-test` 38/38 still green (no regression).
+
+### Lessons / followups
+
+1. **`restart: unless-stopped` is dangerous for development.** It
+   converts a hard crash loop into a soft, silent one. Consider
+   changing to `restart: on-failure:3` or `no` in the dev compose so
+   crashes surface immediately.
+2. **Header default-init for plain `long` fields is a footgun in this
+   codebase.** SectorManager.h has 14 other `long`/`int` members
+   without in-class initializers — most are set by `SetSectorMap` /
+   `SetupSectorServer` / `LoadFromGetSector`, but the assumption
+   "constructor wipes everything" is wrong (the constructor explicitly
+   sets ~25 fields and skips ~14). Worth a follow-up pass to either
+   give the header in-class `= 0` initializers throughout, or to
+   `memset(this, 0, sizeof(*this))` at the top of the ctor (carefully —
+   it has `Mutex`, `vecJobList`, etc. as members and can't be POD-zeroed
+   safely; in-class `= 0` is the right answer).
+3. **Adding `pthread_create` error logs paid for itself.** The two-line
+   addition would have made the original "no sector listeners" bug
+   visible immediately. Add similar logs to other detached-thread launch
+   sites (`UDPClient_linux.cpp`, `SSL_Listener.cpp`, etc.).
+
+### What this unblocks
+
+Task #69 (sector LOGIN 0x0002 → START round-trip). All prerequisites
+are now in place: TCP 3500 listener (Wave 0), sector dispatch parity
+(Wave 3), server→client UDP fan-out (Wave 6), and now actual sector
+UDP listeners (Wave 7). Remaining gaps for Task #69 are purely
+proxy-side: (a) third UDPClient MVAS plane, (b) MasterJoinTests.cs:94
+AvatarIdLsb fix, (c) write SectorLoginTests.cs.
