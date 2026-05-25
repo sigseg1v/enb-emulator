@@ -324,8 +324,66 @@ void Connection::SendAvatarList(long /*account_id*/)
     // so the symbol resolves on Linux.
 }
 
+// ===========================================================================
+// ProcessSectorServerOpcode — Linux mirror of ClientToSectorServer.cpp:15-110
+// ===========================================================================
+//
+// Phase K (2026-05-24): now that UDPClient::ForwardClientOpcode is wired on
+// Linux (UDPClient_linux.cpp), the proxy can finally relay client TCP frames
+// onto the sector server's UDP port. The bottom-of-switch ForwardClientOpcode
+// call below mirrors Win32 line 108 — every opcode that doesn't `return`
+// early gets pushed to the server, including the LOGIN/MOVE/LOGOFF/HANDOFF
+// "no-op" cases (Win32 also forwards those — the proxy doesn't act on them
+// locally but the server does).
+//
+// Per-opcode helpers match Win32:
+//   - ProcessAction:       all 6 Action sub-cases (7/8/18/19/28/29) are
+//                          empty bodies in Win32; ours matches.
+//   - HandleStarbaseRoomChange: Win32 body has the entire interesting block
+//                               commented out — a single `if (NewRoom==-1)`
+//                               with a `//LogMessage` inside. No-op on Linux.
+//   - HandleWarp:          Win32 calls m_UDPClient->SendPositionIfChanged();
+//                          that helper is WIN32-walled (UDPProxyMVAS.cpp).
+//                          On Linux we skip the position pre-send — the server
+//                          will handle the absence the same way it would after
+//                          a missed UDP packet. Documented carry-over for the
+//                          eventual full UDPProxyMVAS port.
+
+namespace {
+
+void ProcessAction_Linux(Connection * /*conn*/, ActionPacket * /*action*/)
+{
+    // Win32 (ClientToSectorServer.cpp:706-740) is a switch on action->Action
+    // with all six cases (7/8/18/19/28/29) having commented-out
+    // //LogMessage bodies. Mirror as a no-op.
+}
+
+void HandleStarbaseRoomChange_Linux(Connection * /*conn*/,
+                                    StarbaseRoomChange * /*change*/)
+{
+    // Win32 (ClientToSectorServer.cpp:742-750) has only a
+    // `if (change->NewRoom == -1) { //LogMessage("Leaving starbase?\n"); }`
+    // with the log line commented out — net no-op. Mirror.
+}
+
+void HandleWarp_Linux(Connection * /*conn*/)
+{
+    // Win32 (ClientToSectorServer.cpp:752-756) calls
+    //     g_ServerMgr->m_UDPClient->SendPositionIfChanged();
+    // to flush a positional update before warp so the client doesn't
+    // rubber-band. SendPositionIfChanged lives in UDPProxyMVAS.cpp which
+    // is WIN32-walled — porting it is part of the larger UDPProxyMVAS
+    // port. Skipping the pre-send means the server may briefly see the
+    // client at its pre-warp position; that's a UX nit, not a correctness
+    // issue (the WARP opcode itself still forwards below).
+}
+
+} // namespace
+
 void Connection::ProcessSectorServerOpcode(short opcode, short bytes)
 {
+    unsigned long tick = GetNet7TickCount();
+
     switch ((unsigned short) opcode) {
     case ENB_OPCODE_0002_LOGIN:
         // Matches Win32 ClientToSectorServer.cpp:22-31. Activates the proxy↔
@@ -341,37 +399,118 @@ void Connection::ProcessSectorServerOpcode(short opcode, short bytes)
         m_SectorTCPRequest = false;
         break;
 
+    case ENB_OPCODE_0006_START_ACK: {
+        // Win32 ClientToSectorServer.cpp:33-53. Forward START_ACK to the
+        // server, then send 0x3008 STARBASE_LOGIN_COMPLETE (if SectorID
+        // > 9999 = starbase) or 0x3004 PLAYER_SHIP_SENT (in-space) so
+        // the server knows the client finished its load. Both branches
+        // mark the connection LoginComplete; KillTCPConnection() in the
+        // ship branch closes the temporary auth socket (no-op on Linux —
+        // KillTCPConnection lives in UDPProxyToClient.cpp which is
+        // WIN32-walled; the equivalent close happens naturally as the
+        // server tears the connection state on its side).
+        if (!g_ServerMgr || !g_ServerMgr->m_UDPConnection ||
+            !g_ServerMgr->m_UDPClient) break;
+
+        g_ServerMgr->m_UDPConnection->ForwardClientOpcode(
+            opcode, bytes, (char *) m_RecvBuffer);
+
+        long player_id = g_ServerMgr->m_UDPClient->PlayerID();
+        if (g_ServerMgr->m_UDPClient->GetSectorID() > 9999) {
+            g_ServerMgr->m_UDPConnection->ForwardClientOpcode(
+                ENB_OPCODE_3008_STARBASE_LOGIN_COMPLETE,
+                sizeof(player_id), (char *) &player_id);
+        } else {
+            g_ServerMgr->m_UDPConnection->ForwardClientOpcode(
+                ENB_OPCODE_3004_PLAYER_SHIP_SENT,
+                sizeof(player_id), (char *) &player_id);
+            // Win32 also KillTCPConnection() here — see note above.
+        }
+        g_ServerMgr->m_UDPClient->SetLoginComplete(true);
+        g_ServerMgr->m_UDPConnection->SetLoginComplete(true);
+
+        LogMessage("<client> START_ACK -> server (player_id=%ld start_id=%ld)\n",
+                   (long) player_id, (long) *((int32_t *) &m_RecvBuffer[0]));
+        m_SectorTCPRequest = false;
+        return; // do NOT fall through to bottom forward (we already forwarded)
+    }
+
+    case ENB_OPCODE_0012_TURN:
+        // Win32 ClientToSectorServer.cpp:58-66. Rate-limited to 1 per 250ms
+        // per connection (m_Turn_Sent is a Connection field set by the
+        // existing Win32 dispatch — also exists on Linux).
+        if (tick > (m_Turn_Sent + 250)) {
+            g_ServerMgr->m_UDPConnection->ForwardClientOpcode(
+                opcode, bytes, (char *) m_RecvBuffer);
+            m_Turn_Sent = tick;
+        }
+        return; // do NOT fall through
+
+    case ENB_OPCODE_0013_TILT:
+        // Win32 ClientToSectorServer.cpp:68-76. Same 250ms cadence as TURN.
+        if (tick > (m_Tilt_Sent + 250)) {
+            g_ServerMgr->m_UDPConnection->ForwardClientOpcode(
+                opcode, bytes, (char *) m_RecvBuffer);
+            m_Tilt_Sent = tick;
+        }
+        return; // do NOT fall through
+
+    case ENB_OPCODE_002C_ACTION:
+        // Win32 ClientToSectorServer.cpp:88-92. Forward explicitly, then
+        // call ProcessAction (all sub-cases are //commented-out logs).
+        g_ServerMgr->m_UDPConnection->ForwardClientOpcode(
+            opcode, bytes, (char *) m_RecvBuffer);
+        ProcessAction_Linux(this, (ActionPacket *) m_RecvBuffer);
+        return; // do NOT fall through (we already forwarded explicitly)
+
+    case ENB_OPCODE_009B_WARP:
+        // Win32 ClientToSectorServer.cpp:98-101. HandleWarp pre-sends a
+        // positional update (skipped on Linux — see helper note), then
+        // falls to the bottom forward.
+        HandleWarp_Linux(this);
+        m_SectorTCPRequest = false;
+        break; // fall through to bottom forward
+
     case ENB_OPCODE_0014_MOVE:
-        // Win32 body is `break;` — the work happens in the bottom-of-switch
-        // ForwardClientOpcode call, which doesn't exist on Linux. Silently
-        // consume the frame; the proxy has nowhere to forward it without
-        // the UDP plane.
+        // Win32 body is `break;` (line 55-56) — falls to bottom forward.
         break;
 
     case ENB_OPCODE_009F_STARBASE_ROOM_CHANGE:
-        // Win32 calls HandleStarbaseRoomChange (ClientToSectorServer.cpp:742),
-        // whose body is entirely commented out — it's a no-op even on Win32.
+        // Win32 calls HandleStarbaseRoomChange (ClientToSectorServer.cpp:94-96),
+        // whose body is entirely commented out — net no-op. Falls through.
+        HandleStarbaseRoomChange_Linux(this,
+            (StarbaseRoomChange *) m_RecvBuffer);
         break;
 
     case ENB_OPCODE_00B9_LOGOFF_REQUEST:
         // Matches Win32 ClientToSectorServer.cpp:78-86. Win32 sets
         // g_LoggedIn=true on logoff (counter-intuitive; g_LoggedIn is a
         // connection-active sentinel polled by Net7.cpp:754, not a
-        // logged-in/logged-out flag) then drops through to SERVER_HANDOFF,
-        // whose body is fully commented out.
+        // logged-in/logged-out flag) then drops through to SERVER_HANDOFF.
+        // Both fall through to the bottom forward — the server needs the
+        // opcode to clean up its side of the connection.
         g_LoggedIn = true;
         LogMessage("<client> SectorServer LOGOFF_REQUEST\n");
         break;
 
     case ENB_OPCODE_003A_SERVER_HANDOFF:
         // Win32 body is `//DumpBuffer(...) //LogMessage(...) //SetConnectionActive(false)`
-        // — all commented out. Silent no-op preserves parity.
+        // — all commented out. Falls through to bottom forward.
         break;
 
     default:
-        LogMessage("Linux stub: ProcessSectorServerOpcode 0x%04x (%d bytes) — not yet implemented\n",
-                   (unsigned short) opcode, (int) bytes);
+        LogVMessage("Linux: ProcessSectorServerOpcode 0x%04x (%d bytes) — forwarding to server\n",
+                    (unsigned short) opcode, (int) bytes);
         break;
+    }
+
+    // Bottom-of-switch forward — Win32 line 108. Every opcode that
+    // doesn't `return` early above ends up here. The server is the
+    // authority on whether the opcode is meaningful in this connection
+    // state; the proxy's job is just to relay.
+    if (g_ServerMgr && g_ServerMgr->m_UDPConnection) {
+        g_ServerMgr->m_UDPConnection->ForwardClientOpcode(
+            opcode, bytes, (char *) m_RecvBuffer);
     }
 }
 

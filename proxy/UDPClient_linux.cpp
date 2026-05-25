@@ -445,6 +445,25 @@ void UDPClient::SendResponse(long player_id, short port, short opcode,
     UDP_Send(port, (char *) m_SendBuffer, bytes);
 }
 
+// ---------------------------------------------------------------------------
+// ForwardClientOpcode — proxy's plain copy-and-relay of client TCP frames
+// onto the sector server's UDP port (m_ClientPort, set by HandleMasterJoin
+// via SendMasterLogin's reply). Mirrors Win32 UDPProxyToClient.cpp:19-26
+// exactly; same m_PlayerID/m_ConnectionActive gating, same SendResponse call.
+// Phase K (2026-05-24): factored out of the WIN32-only UDPProxyToClient.cpp
+// so the Linux sector dispatch in ClientToServer_linux_stubs.cpp can route
+// in-game opcodes (TURN/TILT/MOVE/ACTION/WARP/...) through to the server.
+// ---------------------------------------------------------------------------
+void UDPClient::ForwardClientOpcode(short opcode, short bytes, char *packet)
+{
+    if (m_PlayerID != 0 && m_ConnectionActive)
+    {
+        SendResponse(m_ClientPort, opcode, (unsigned char *) packet, bytes);
+        LogVMessage("UDPClient(Linux): forward [0x%04x] %d bytes -> port %d\n",
+                    (unsigned short) opcode, (int) bytes, (int) m_ClientPort);
+    }
+}
+
 void UDPClient::UDP_Send(short port, const char *buffer, int bufferLen)
 {
     if (m_Listen_Socket < 0) return;
