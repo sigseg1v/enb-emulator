@@ -856,9 +856,18 @@ void Connection::TerminateConnection()         { m_ConnectionActive = false; m_T
 //
 // NB: the Win32 path enqueues into m_SendQueue and lets RunSendThread do
 // the RC4 + send. We don't have RunSendThread on Linux yet, so we encrypt
-// + send inline. The connection is single-writer (RunRecvThread dispatches
-// synchronously) so this is safe for now; if/when we add async producers
-// (UDP plane, timer threads) we'll need a Mutex around m_CryptOut.
+// + send inline.
+//
+// Phase K Wave 6: this is now multi-producer — the TCP recv thread
+// (RunRecvThread) and the UDP recv thread (UDPClient::RecvThread, which
+// dispatches into UDPProxyToClient_linux.cpp::ProcessClientOpcode /
+// SendPacketSequence / SendClientDataFile) both call SendResponse on
+// the proxy↔client connection. m_Mutex protects m_CryptOut (the RC4
+// keystream state must advance contiguously over the wire) and
+// m_SendBuffer (single shared scratch buffer). The mutex is also held
+// across SendAll so the encrypted bytes leave the socket as a
+// contiguous frame — interleaving partial sends from two threads would
+// produce a frame the client cannot decrypt.
 void Connection::SendResponse(short opcode, unsigned char* data,
                               size_t length, long /*sequence_num*/)
 {
@@ -868,6 +877,8 @@ void Connection::SendResponse(short opcode, unsigned char* data,
                    length, (unsigned short) opcode);
         return;
     }
+
+    m_Mutex.Lock();
 
     size_t total = length + sizeof(EnbTcpHeader);
     *((short *) &m_SendBuffer[0]) = (short) total;
@@ -881,7 +892,11 @@ void Connection::SendResponse(short opcode, unsigned char* data,
         m_CryptOut.RC4(m_SendBuffer, (int) total);
     }
 
-    if (!SendAll((int) m_Socket, m_SendBuffer, (int) total)) {
+    bool ok = SendAll((int) m_Socket, m_SendBuffer, (int) total);
+
+    m_Mutex.Unlock();
+
+    if (!ok) {
         LogMessage("SendResponse: send failed on port %d (errno=%d)\n",
                    m_TcpPort, errno);
         m_TcpThreadRunning = false;

@@ -23,11 +23,20 @@
 // m_ServerTCP obtained from EstablishTCPConnection(SSL_LOCALCERT_LOGIN_PORT)).
 // Phase Q deleted the server-side TCP cluster that backed that endpoint,
 // so on Linux the global plane is UDP — symmetric with the master plane.
-// The Win32 client-launcher code (read ENB.exe memory, MVAS keep-alives,
-// packet-sequence replay, data-file streaming, etc.) remains WIN32-walled
-// at file level in UDPClient.cpp / UDPProxyMVAS.cpp / UDPProxyToClient.cpp /
-// UDPProxyToGlobal.cpp and is not ported here — that's launcher-side
-// concern, irrelevant to a server-side proxy.
+//
+// Phase K Wave 6 update: this file also covers the master-plane recv
+// dispatch for in-game sector traffic. The server sends three classes
+// of opcode at the master-plane UDPClient:
+//
+//   * 0x2010 DATA_FILE        -> SendClientDataFile        (UDPProxyToClient_linux.cpp)
+//   * 0x2016 PACKET_SEQUENCE  -> SendPacketSequence(false) (UDPProxyToClient_linux.cpp)
+//   * 0x201A PACKET_C_SEQUENCE-> SendPacketSequence(true)  (UDPProxyToClient_linux.cpp)
+//   * default                  -> ProcessClientOpcode      (UDPProxyToClient_linux.cpp)
+//
+// The Win32 client-launcher code (read ENB.exe memory, MVAS keep-alives)
+// remains WIN32-walled at file level in UDPProxyMVAS.cpp and is not
+// ported — that's launcher-side concern, irrelevant to a server-side
+// proxy.
 //
 // What this file defines
 // ----------------------
@@ -387,9 +396,33 @@ void UDPClient::RecvThread()
             ProcessGlobalError(msg, header);
             break;
 
+        // ----- In-game sector traffic (Phase K Wave 6) -----
+        // 0x2010 DATA_FILE: server pushes a TCP-framed payload directly
+        // at the client. See UDPProxyToClient_linux.cpp::SendClientDataFile.
+        case ENB_OPCODE_2010_DATA_FILE:
+            SendClientDataFile(msg, header);
+            break;
+
+        // 0x2016 PACKET_SEQUENCE: server's batched in-order TCP frames
+        // wrapped in a single UDP packet (with reliable-delivery /
+        // resend semantics). Reassembled by SendPacketSequence and
+        // forwarded opcode-at-a-time via the proxy↔client TCP socket.
+        case ENB_OPCODE_2016_PACKET_SEQUENCE:
+            SendPacketSequence(msg, header, false);
+            break;
+
+        // 0x201A PACKET_C_SEQUENCE: continuation chunk of an oversized
+        // 0x2016 packet that exceeded the UDP MTU. Same reassembler with
+        // continuation=true.
+        case ENB_OPCODE_201A_PACKET_C_SEQUENCE:
+            SendPacketSequence(msg, header, true);
+            break;
+
         default:
-            LogVMessage("UDPClient(Linux): RX opcode 0x%04x %u bytes (not handled on Linux)\n",
-                        (unsigned short) opcode, bytes);
+            // Anything else from the server on the master plane is treated
+            // as a direct opcode passthrough: strip the EnbUdpHeader and
+            // ship the opcode out over the proxy↔client TCP socket.
+            ProcessClientOpcode(msg, header);
             break;
         }
     }
