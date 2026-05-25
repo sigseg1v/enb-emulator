@@ -149,4 +149,120 @@ public sealed class GlobalConnectTests
             "is fixed-size and is always memcpy'd whole — empty means the proxy " +
             "shipped a bogus frame).");
     }
+
+    /// <summary>
+    /// Negative-path counterpart to the happy-path test above. The
+    /// <c>cli_test_status0</c> seed account has <c>status = 0</c>
+    /// (STRESS_TEST_CLOSED). LinuxAuth issues a ticket regardless
+    /// (it doesn't inspect status), so the global UDP plane is what
+    /// rejects: <c>server/src/UDP_Global.cpp:ProcessTicketInfo</c>
+    /// emits a 0x2004 GLOBAL_ERROR with code 12 back to the proxy,
+    /// which forwards it to the client as a 0x0075 GLOBAL_ERROR frame.
+    ///
+    /// <para>
+    /// This test exercises the full error path:
+    /// <code>
+    ///   client → proxy(TCP 3805)  [0x006D GlobalConnect]
+    ///   proxy → server(UDP 3810)  [0x2002 TICKET]
+    ///   server → proxy(UDP 3810)  [0x2004 GLOBAL_ERROR err=12]
+    ///   proxy → client(TCP 3805)  [0x0075 GLOBAL_ERROR err=12]
+    /// </code>
+    /// and validates the proxy's <c>g_GlobalErrorMsg[]</c> table is
+    /// wide enough (it was previously truncated at 11 entries and
+    /// silently dropped codes 12-14 — see
+    /// <c>proxy/ClientToServer_linux_stubs.cpp</c>).
+    /// </para>
+    ///
+    /// <para>
+    /// Wire layout of the 0x0075 payload (per
+    /// <c>ClientToServer_linux_stubs.cpp:GlobalError</c>):
+    /// <code>
+    ///   [u32 msg_len_le][u32 be32(err + 7)][char msg[msg_len]]
+    /// </code>
+    /// The +7 offset is a quirk of the kyp wire protocol preserved
+    /// verbatim by the Linux port; the client subtracts it back out.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task StressTestClosedAccount_GlobalConnect_ReturnsGlobalErrorCode12()
+    {
+        var account = TestAccounts.StressTestClosed;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        // LinuxAuth doesn't read accounts.status so login succeeds
+        // even though the account is STRESS_TEST_CLOSED. The rejection
+        // happens later, on the global UDP plane.
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password),
+            cts.Token);
+        Assert.True(login.Valid,
+            $"login should succeed (LinuxAuth ignores status): {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var conn = await EncryptedTcpConnection.ConnectAsync(
+            _server.GlobalHost, _server.GlobalPort, cts.Token);
+
+        byte[] ticketBytes = Encoding.ASCII.GetBytes(login.Ticket!);
+        byte[] payload = new byte[4 + ticketBytes.Length + 1];
+        BinaryPrimitives.WriteUInt32BigEndian(payload.AsSpan(0, 4), (uint)ticketBytes.Length);
+        ticketBytes.CopyTo(payload, 4);
+        payload[^1] = 0;
+
+        var packet = Packet.ForOpcode(
+            OpcodeId.Known.GlobalConnect.Value,
+            payload);
+
+        await conn.SendAsync(packet, cts.Token);
+
+        // Drain until we get the 0x0075 GlobalError. If the server
+        // mistakenly serves an AvatarList for a status=0 account the
+        // assertion below fails loudly — that would mean someone
+        // weakened the server's status check (a CLAUDE.md violation).
+        Packet? errReply = null;
+        while (true)
+        {
+            var p = await conn.ReceiveAsync(cts.Token);
+            Assert.NotNull(p);
+
+            if (p!.Header.Opcode == 0x0075)
+            {
+                errReply = p;
+                break;
+            }
+
+            if (p.Header.Opcode == OpcodeId.Known.GlobalAvatarList.Value)
+            {
+                throw new Xunit.Sdk.XunitException(
+                    "server returned GlobalAvatarList for a STRESS_TEST_CLOSED " +
+                    "(status=0) account — the server's status check has been " +
+                    "weakened. Restore the check at server/src/UDP_Global.cpp " +
+                    "ProcessTicketInfo and verify against a real-server capture " +
+                    "before reverting this test.");
+            }
+        }
+
+        Assert.NotNull(errReply);
+        var span = errReply!.Payload.Span;
+        Assert.True(span.Length >= 8,
+            $"GlobalError payload too short ({span.Length} bytes); expected at " +
+            "least [u32 msg_len][u32 be(err+7)] = 8 bytes of header.");
+
+        uint msgLen = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(0, 4));
+        int errCode = BinaryPrimitives.ReadInt32BigEndian(span.Slice(4, 4)) - 7;
+
+        Assert.Equal(12, errCode); // G_ERROR_STRESS_TEST_CLOSED
+        Assert.True(msgLen > 0, "GlobalError msg_len must be > 0 (msg follows the header).");
+        Assert.True(span.Length >= 8 + msgLen,
+            $"GlobalError payload truncated: header says msg_len={msgLen} but only " +
+            $"{span.Length - 8} message bytes followed.");
+
+        // Sanity-check the message text matches what the proxy's
+        // g_GlobalErrorMsg[12] table holds. If the proxy table was
+        // still truncated this assertion would fail because index 12
+        // would either be garbage or the connection would have stalled
+        // entirely.
+        string msg = Encoding.ASCII.GetString(span.Slice(8, (int)msgLen)).TrimEnd('\0');
+        Assert.Contains("not currently accepting new logins", msg);
+    }
 }

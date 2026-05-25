@@ -52,8 +52,15 @@ DELETE FROM accounts WHERE id BETWEEN 9000001 AND 9000099;
 
 INSERT INTO accounts (id, username, password, status, formname, email, warn_level)
 VALUES
-  (9000001, 'cli_test01', UPPER(encode(digest('testpw', 'md5'), 'hex')), 100, 'cli_test01_form', 'cli_test01@net-7.test', 0),
-  (9000002, 'cli_test02', UPPER(encode(digest('testpw', 'md5'), 'hex')), 100, 'cli_test02_form', 'cli_test02@net-7.test', 0),
-  (9000003, 'cli_test03', UPPER(encode(digest('testpw', 'md5'), 'hex')), 100, 'cli_test03_form', 'cli_test03@net-7.test', 0),
-  (9000004, 'cli_test04', UPPER(encode(digest('testpw', 'md5'), 'hex')), 100, 'cli_test04_form', 'cli_test04@net-7.test', 0),
-  (9000005, 'cli_test05', UPPER(encode(digest('testpw', 'md5'), 'hex')), 100, 'cli_test05_form', 'cli_test05@net-7.test', 0);
+  (9000001, 'cli_test01',         UPPER(encode(digest('testpw', 'md5'), 'hex')), 100, 'cli_test01_form',     'cli_test01@net-7.test',         0),
+  (9000002, 'cli_test02',         UPPER(encode(digest('testpw', 'md5'), 'hex')), 100, 'cli_test02_form',     'cli_test02@net-7.test',         0),
+  (9000003, 'cli_test03',         UPPER(encode(digest('testpw', 'md5'), 'hex')), 100, 'cli_test03_form',     'cli_test03@net-7.test',         0),
+  (9000004, 'cli_test04',         UPPER(encode(digest('testpw', 'md5'), 'hex')), 100, 'cli_test04_form',     'cli_test04@net-7.test',         0),
+  (9000005, 'cli_test05',         UPPER(encode(digest('testpw', 'md5'), 'hex')), 100, 'cli_test05_form',     'cli_test05@net-7.test',         0),
+  -- Status=0 fixture used by GlobalConnectTests.StressTestClosedAccount_*.
+  -- LinuxAuth doesn't check status so login succeeds and the ticket is
+  -- issued normally; ProcessTicketInfo on the server side rejects with
+  -- G_ERROR_STRESS_TEST_CLOSED (12) which the proxy then forwards as a
+  -- 0x0075 GLOBAL_ERROR frame. Validates the full UDP error path:
+  -- client -> proxy -> server -> proxy -> client.
+  (9000010, 'cli_test_status0',   UPPER(encode(digest('testpw', 'md5'), 'hex')),   0, 'cli_test_status0_f',  'cli_test_status0@net-7.test',   0);

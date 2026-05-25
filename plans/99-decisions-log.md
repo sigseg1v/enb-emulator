@@ -779,3 +779,67 @@ After this landed, login flow (TLS terminate → /AuthLogin → ticket
 issue → DB validation) is fully Postgres-native, the dev-stack has
 no MySQL dependency anywhere, and all 33 prior + 1 new cli-
 integration tests pass (34/34).
+
+## 2026-05-24 — Phase K global UDP plane: added STRESS_TEST_CLOSED error-path test (35/35 cli-integration)
+
+Follow-on to the same-day "Phase K global UDP plane lit up" entry
+above. The first commit on the plane (77abe09) shipped only the
+happy-path test — `ValidTicket_RoundTripsThroughUdpGlobalPlane_-
+ReturnsAvatarList`. That's half the story: the proxy↔server UDP
+plane has two reply opcodes (0x2003 AVATARLIST and 0x2004
+GLOBAL_ERROR) and only one was being exercised end-to-end.
+
+This commit adds `StressTestClosedAccount_GlobalConnect_Returns-
+GlobalErrorCode12` — the explicit inverse path:
+
+  1. Add 6th seed account `cli_test_status0` (id 9000010, status=0).
+     Kept OUT of `TestAccounts.Pool` deliberately — the smoke test's
+     `SeedSql_IsCopiedToOutput_AndMentionsEveryPooledAccount` checks
+     iterate Pool and would force every test that picks `Pool[N]` to
+     account for it. Out-of-pool means tests have to opt in via the
+     dedicated `TestAccounts.StressTestClosed` accessor.
+
+  2. LinuxAuth does NOT inspect `accounts.status` (verified at
+     login-server/Net7SSL/LinuxAuth.cpp:215-263 — only the
+     username+password tuple is checked), so login succeeds and a
+     ticket is issued.
+
+  3. Client opens an encrypted TCP connection to the global port
+     (3805) and sends 0x006D GlobalConnect with the issued ticket.
+
+  4. Server-side `ProcessTicketInfo` (server/src/UDP_Global.cpp:138-
+     143) reads the account from net7_user, sees status=0, and emits
+     a 0x2004 GLOBAL_ERROR with code 12 (G_ERROR_STRESS_TEST_CLOSED)
+     back to the proxy on UDP 3810.
+
+  5. Proxy's `Connection::GlobalError` (proxy/ClientToServer_linux_-
+     stubs.cpp) consults `g_GlobalErrorMsg[12]` and forwards as a
+     0x0075 GlobalError TCP frame: `[u32 msg_len_le][u32 be(err+7)]
+     [char msg[msg_len]]`. The +7 offset is a kyp wire quirk we
+     preserve verbatim.
+
+  6. Test asserts: opcode == 0x0075, decoded err == 12, msg_len > 0,
+     and the message contains "not currently accepting new logins"
+     (validates the proxy's table fix from the prior commit — if
+     someone trimmed `g_GlobalErrorMsg[]` back to 12 entries this
+     would either return garbage or the connection would have
+     stalled entirely).
+
+Why this matters beyond coverage: the test is a server-integrity
+tripwire. If anyone weakens `ProcessTicketInfo`'s status check (to
+"make the test easier" or similar), it fails with a CLAUDE.md
+citation in the failure message ("the server's status check has
+been weakened ... verify against a real-server capture before
+reverting this test"). This is the kind of negative-path test the
+server-integrity rules in CLAUDE.md asks for — proving that
+specific rejections happen, not just that specific acceptances
+happen.
+
+Coverage ratchet: 0x0075 GLOBAL_ERROR added to TestedOpcodes.cs,
+`MinTestedCount` 6→7. The HarnessSmokeTest seed-content check was
+also extended to assert seed.sql carries the out-of-pool fixture
+(so any future drift between `TestAccounts.StressTestClosed` and
+`seed.sql` fails fast instead of mysteriously timing out inside
+the GlobalConnect test).
+
+35/35 cli-integration green.

@@ -68,7 +68,7 @@ public static class TestedOpcodes
     /// <see cref="Opcodes"/>. NEVER decrease without a commit message
     /// explaining what deleted coverage and why it was OK to delete.
     /// </summary>
-    public const int MinTestedCount = 6;
+    public const int MinTestedCount = 7;
 
     /// <summary>
     /// Every opcode with round-trip coverage in this suite, with an
@@ -89,6 +89,8 @@ public static class TestedOpcodes
             "Opcodes/GlobalConnectTests.cs — client sends GlobalConnect with a real Net7SSL-issued ticket; round-trip drives the Phase K proxy↔server global UDP plane (UDP 3810)."),
         new TestedOpcode(0x0070, "GLOBAL_AVATAR_LIST",
             "Opcodes/GlobalConnectTests.cs — received as the reply to GlobalConnect after the proxy's SendTicket UDP round-trip to the server's HandleGlobalOpcode dispatcher and back."),
+        new TestedOpcode(0x0075, "GLOBAL_ERROR",
+            "Opcodes/GlobalConnectTests.cs — StressTestClosedAccount_GlobalConnect_ReturnsGlobalErrorCode12 sends GlobalConnect for a status=0 (STRESS_TEST_CLOSED) seed account; the server emits 0x2004 GLOBAL_ERROR err=12 on UDP 3810, the proxy forwards it as 0x0075, and the test asserts both the error code (12) and that the message text from the proxy's g_GlobalErrorMsg[12] table comes through (validates the table wasn't truncated at 11 entries)."),
     };
 }
 

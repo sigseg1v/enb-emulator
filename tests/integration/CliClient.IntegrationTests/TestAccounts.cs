@@ -37,4 +37,18 @@ public static class TestAccounts
         new(9_000_004, "cli_test04", SharedPassword),
         new(9_000_005, "cli_test05", SharedPassword),
     };
+
+    /// <summary>
+    /// Out-of-pool fixture for the STRESS_TEST_CLOSED path:
+    /// <c>accounts.status = 0</c> in <c>seed.sql</c>. LinuxAuth
+    /// (<c>login-server/Net7SSL/LinuxAuth.cpp</c>) does NOT inspect
+    /// status, so login succeeds and a ticket is issued; the global
+    /// UDP server (<c>server/src/UDP_Global.cpp:ProcessTicketInfo</c>)
+    /// is what rejects with G_ERROR_STRESS_TEST_CLOSED (12), which the
+    /// proxy then forwards to the client as a 0x0075 GLOBAL_ERROR.
+    /// Kept out of <see cref="Pool"/> so the harness smoke-test's
+    /// per-account checks don't have to special-case it.
+    /// </summary>
+    public static TestAccount StressTestClosed { get; } =
+        new(9_000_010, "cli_test_status0", SharedPassword);
 }

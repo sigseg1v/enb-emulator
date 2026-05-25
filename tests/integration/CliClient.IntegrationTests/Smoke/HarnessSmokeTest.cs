@@ -52,6 +52,11 @@ public sealed class HarnessSmokeTest
             Assert.Contains(account.Username, seed);
             Assert.Contains(account.Id.ToString(), seed);
         }
+        // The out-of-pool STRESS_TEST_CLOSED fixture must also be
+        // present — GlobalConnectTests.StressTestClosedAccount_* fails
+        // mysteriously (LinuxAuth refuses the login) if seed.sql drifts.
+        Assert.Contains(TestAccounts.StressTestClosed.Username, seed);
+        Assert.Contains(TestAccounts.StressTestClosed.Id.ToString(), seed);
         // Phase N: was UPPER(MD5('testpw')) under MySQL; Postgres uses
         // pgcrypto digest() since MySQL's MD5() was dropped with the
         // libpqxx migration.
