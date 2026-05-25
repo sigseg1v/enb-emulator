@@ -23,6 +23,7 @@ public:
 	bool	IsSectorServerReady(short port);
 	void	SetSectorServerReady(short port, bool ready);
 	void	SetUDPConnections(UDPClient *connection, UDPClient *send);
+	void	SetGlobalUDPClient(UDPClient *global) { m_UDPGlobalClient = global; }
     void    SetPlayerMgrGlobalMemoryHandler();
 
     void    ResetChatFileTimer();
@@ -46,8 +47,15 @@ public:
 
 	// Applies only to Sector Server
 	SectorManager	  * m_SectorMgrList[MAX_SECTORS];
-	UDPClient	      * m_UDPConnection;  // used for sending to different ports	
+	UDPClient	      * m_UDPConnection;  // used for sending to different ports
     UDPClient         * m_UDPClient;   // used for receiving from the server
+    // Phase K: dedicated UDPClient for the proxy<->server "global" plane
+    // (peer = UDP_GLOBAL_SERVER_PORT 3810). Connected SOCK_DGRAM filters
+    // by peer port on Linux, so the master plane (m_UDPConnection /
+    // m_UDPClient -> UDP_MASTER_SERVER_PORT 3808) and the global plane
+    // cannot share a socket here. See proxy/UDPClient_linux.cpp header
+    // for the request/reply sequences.
+    UDPClient         * m_UDPGlobalClient;
 	SectorServerManager	m_SectorServerMgr;
 	short				m_Port;
     short               m_MaxSectors;

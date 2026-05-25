@@ -51,7 +51,7 @@ public sealed class ServerFixture : IAsyncLifetime
     public int    MasterPort { get; } = 3801;   // proxy MASTER_SERVER_PORT
     public string SectorHost { get; } = "127.0.0.1";
     public int    SectorPort { get; } = 3500;   // proxy SECTOR_SERVER_PORT
-    public int    MysqlPort  { get; } = 3307;   // host-side remap of 3306
+    public int    PostgresPort  { get; } = 5434;   // host-side remap of 5432
 
     private bool _ownsCompose;
 
@@ -76,17 +76,22 @@ public sealed class ServerFixture : IAsyncLifetime
     {
         if (_ownsCompose)
         {
-            // -v wipes the named volumes (mysqldata, net7-ipc). Faster
+            // -v wipes the named volumes (pgdata, net7-ipc). Faster
             // than tearing down without; per-test-run isolation.
             await RunComposeAsync("down -v", TimeSpan.FromMinutes(2));
         }
     }
 
     /// <summary>
-    /// Apply <c>Fixtures/seed.sql</c> against the mysql container via
-    /// <c>docker compose exec -T mysql mysql ...</c>. Idempotent
+    /// Apply <c>Fixtures/seed.sql</c> against the postgres container via
+    /// <c>docker compose exec -T postgres psql ...</c>. Idempotent
     /// (seed.sql does DELETE + INSERT on a fixed ID range, so a re-run
     /// inside the same compose lifetime resets the seed pool cleanly).
+    ///
+    /// Phase N: switched from <c>mysql</c> to <c>postgres</c> (libpqxx
+    /// migration). The seed file itself was ported from MySQL syntax
+    /// (USE / backticks / MD5()) to Postgres (no USE, no backticks,
+    /// pgcrypto digest()) at the same time.
     /// </summary>
     private async Task SeedFixtureAccountsAsync(TimeSpan timeout)
     {
@@ -98,7 +103,7 @@ public sealed class ServerFixture : IAsyncLifetime
                 seedPath);
 
         var psi = new ProcessStartInfo("docker",
-            "compose exec -T mysql mysql -unet7 -pnet7 net7_user")
+            "compose exec -T -e PGPASSWORD=net7 postgres psql -U net7 -d net7_user -v ON_ERROR_STOP=1")
         {
             WorkingDirectory = RepoRoot.Path,
             RedirectStandardInput = true,
@@ -108,7 +113,7 @@ public sealed class ServerFixture : IAsyncLifetime
         };
 
         using var p = Process.Start(psi) ?? throw new InvalidOperationException(
-            "Failed to launch 'docker compose exec mysql' for seed.");
+            "Failed to launch 'docker compose exec postgres' for seed.");
 
         var seedSql = await File.ReadAllTextAsync(seedPath);
         await p.StandardInput.WriteAsync(seedSql);

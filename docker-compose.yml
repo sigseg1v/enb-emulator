@@ -18,6 +18,13 @@ services:
     # mysql:8.0 is the closest LTS to what the 2010 codebase was written
     # against. Strict-mode is loosened via command flags so 2010-vintage
     # INSERTs don't fail on default values / implicit conversions.
+    #
+    # Phase N (libpqxx) made Postgres the canonical backend, so MySQL is
+    # behind a profile now. Bring it up with:
+    #   docker compose --profile mysql-legacy up mysql
+    # Use phpMyAdmin (also profile-gated) to inspect the 2010 schema as
+    # a reference for ongoing Postgres-side conversion work.
+    profiles: ["mysql-legacy"]
     image: mysql:8.0
     command:
       - --character-set-server=latin1
@@ -54,8 +61,14 @@ services:
       context: .
       dockerfile: server/Dockerfile
     depends_on:
-      mysql:
+      # Phase N: server speaks Postgres via libpqxx, not MySQL. The mysql
+      # service is kept around behind the `mysql-legacy` profile for
+      # contributors who want to inspect the original 2010 schema with
+      # phpMyAdmin; the server itself does NOT depend on it.
+      postgres:
         condition: service_healthy
+      schema-init:
+        condition: service_completed_successfully
       # Phase J: the login container's entrypoint chmod's the shared
       # /run/net7-ipc volume to 0777 (server runs as net7:net7 uid 999
       # and otherwise can't bind a datagram socket in the root-owned
@@ -93,6 +106,11 @@ services:
       # proxy over the same docker network when needed.
       - "3501-3550:3501-3550/tcp"
       - "3808:3808/udp"
+      # Phase K: UDP_GLOBAL_SERVER_PORT — proxy<->server "global" control
+      # plane (ticket validation, avatar list, char create/delete). Was TCP
+      # via SSL_LOCALCERT_LOGIN_PORT in the kyp-era Win32 build; Phase Q
+      # deleted that endpoint so the wire moved to UDP here.
+      - "3810:3810/udp"
     restart: unless-stopped
 
   # --------------------------------------------------------------
@@ -112,8 +130,15 @@ services:
       context: .
       dockerfile: proxy/Dockerfile
     depends_on:
-      mysql:
-        condition: service_healthy
+      # Phase K: the proxy opens connect()'d UDP sockets to "server" at
+      # boot (UDPClient_linux.cpp::ResolveGameServerIP). If `server`
+      # isn't a registered hostname in docker's DNS at that moment,
+      # getaddrinfo() fails and the proxy falls back to its ip_addr ctor
+      # arg (127.0.0.1 — its own loopback), which silently breaks both
+      # the master and global UDP planes. Wait for the server container
+      # to exist before starting the proxy.
+      server:
+        condition: service_started
     extra_hosts:
       - "local.net-7.org:127.0.0.1"
     ports:
@@ -141,15 +166,21 @@ services:
       context: .
       dockerfile: login-server/Dockerfile
     depends_on:
-      mysql:
+      # Phase N: login-server (Net7SSL) also speaks Postgres via libpqxx
+      # now. See the depends_on block on the `server` service for why
+      # this block was rewritten.
+      postgres:
         condition: service_healthy
+      schema-init:
+        condition: service_completed_successfully
     extra_hosts:
       - "local.net-7.org:127.0.0.1"
     environment:
-      # Phase J: LinuxAuth.cpp reads these to talk to the MySQL container.
-      # Defaults are baked into the binary; env overrides make swapping
-      # the backing DB straightforward in CI / staging.
-      MYSQL_HOST: "mysql:3306"
+      # Phase J/N: LinuxAuth.cpp reads these to talk to the DB. They are
+      # named MYSQL_* for backwards compatibility with the env-var contract
+      # baked into the binary; Phase N migrated the implementation to
+      # libpqxx (Postgres) without renaming the env vars.
+      MYSQL_HOST: "postgres:5432"
       MYSQL_USER: "net7"
       MYSQL_PASS: "net7"
       MYSQL_DB: "net7_user"
@@ -183,8 +214,9 @@ services:
     restart: unless-stopped
 
   # --------------------------------------------------------------
-  # Opt-in: phpMyAdmin against the mysql container.
-  # docker compose --profile dev-tools up phpmyadmin
+  # Opt-in: phpMyAdmin against the mysql container (mysql is itself
+  # behind the `mysql-legacy` profile). To get both up:
+  #   docker compose --profile mysql-legacy --profile dev-tools up phpmyadmin
   # --------------------------------------------------------------
   phpmyadmin:
     profiles: ["dev-tools"]
@@ -200,19 +232,23 @@ services:
     restart: unless-stopped
 
   # --------------------------------------------------------------
-  # Phase C continuation: Postgres backend. Kept behind a profile so
-  # the default stack stays MySQL until the libpqxx port lands.
-  # docker compose --profile postgres up postgres schema-init
+  # Postgres backend (Phase N: now the canonical backend; was originally
+  # behind a `postgres` profile while the libpqxx port was in flight).
+  # `schema-init` below applies the converted schema + seed data on first
+  # boot.
   # --------------------------------------------------------------
   postgres:
-    profiles: ["postgres"]
     image: postgres:16
     environment:
       POSTGRES_USER: net7
       POSTGRES_PASSWORD: net7
       POSTGRES_DB: net7
     ports:
-      - "5432:5432"
+      # Host 5434 -> container 5432 to dodge a developer's local
+      # system Postgres on host:5432 (and a hanging rootlesskit binding
+      # on :5433 observed in dev). Compose-internal traffic still uses
+      # postgres:5432 regardless of the host mapping.
+      - "5434:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -223,7 +259,6 @@ services:
     restart: unless-stopped
 
   schema-init:
-    profiles: ["postgres"]
     image: postgres:16
     depends_on:
       postgres:
@@ -236,12 +271,23 @@ services:
     command:
       - |
         set -e
-        echo "schema-init: applying /db/schema.sql"
+        # The C++ server connects to two databases: "net7" (game content;
+        # schema.sql) and "net7_user" (accounts/avatars; seed.sql in this
+        # repo's MySQL-derived dumps). Idempotently ensure both exist.
+        psql -h postgres -U net7 -d postgres -tA \
+          -c "SELECT 1 FROM pg_database WHERE datname='net7_user'" \
+          | grep -q 1 \
+          || psql -h postgres -U net7 -d postgres -c "CREATE DATABASE net7_user OWNER net7;"
+        # net7 (game content) — schema.sql validates clean per
+        # db/postgres/README.md.
+        echo "schema-init: applying /db/schema.sql -> net7"
         psql -h postgres -U net7 -d net7 -v ON_ERROR_STOP=1 -f /db/schema.sql
-        if [ -f /db/seed.sql ]; then
-          echo "schema-init: applying /db/seed.sql"
-          psql -h postgres -U net7 -d net7 -v ON_ERROR_STOP=0 -f /db/seed.sql || true
-        fi
+        # net7_user (accounts) — seed.sql still contains a handful of
+        # MySQL-only stored functions (DELIMITER/IF-THEN-END IF). Those
+        # are tracked as Phase C continuation items; tolerate the errors
+        # so the rest of the seed data lands.
+        echo "schema-init: applying /db/seed.sql -> net7_user"
+        psql -h postgres -U net7 -d net7_user -v ON_ERROR_STOP=0 -f /db/seed.sql || true
         echo "schema-init: done"
     restart: "no"
 

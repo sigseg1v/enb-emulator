@@ -1,47 +1,70 @@
 // UDPClient_linux.cpp
 //
-// Phase K Linux port of the UDPClient subset required to drive
-// HandleMasterJoin -> SendMasterLogin -> UDP_MASTER (server:3808) ->
-// MasterLoginConfirm -> SendServerRedirect.
+// Phase K Linux port of UDPClient. Two roles on Linux, one class:
 //
-// SCOPE
-// -----
+//   * Master plane (peer = UDP_MASTER_SERVER_PORT 3808): drives
+//     HandleMasterJoin -> SendMasterLogin -> wait for 0x2009 -> reply
+//     ServerRedirect to the client.
+//
+//   * Global plane (peer = UDP_GLOBAL_SERVER_PORT 3810): drives
+//     HandleGlobalConnect / HandleGlobalTicketRequest /
+//     HandleCreateCharacter / HandleDeleteCharacter -> wait for
+//     0x2003 / 0x2005 / 0x200C / 0x200E -> reply to the client.
+//
+// One UDPClient instance per plane, each connect()'d to its own peer.
+// Linux's connected SOCK_DGRAM filters by (peer_addr, peer_port) on
+// recv, which is exactly the property we need to keep the two RecvThread
+// dispatchers from cross-talking.
+//
+// Win32 origin
+// ------------
 // The Win32 UDPClient is a ~1900 LOC class spanning 4 source files. The
-// vast majority is client-launcher machinery (read ENB.exe memory for
-// position updates, drive MVAS keep-alives, packet-sequence replay,
-// data-file streaming, prospecting / tractor / loot opcodes, etc.) that
-// is not relevant to the server-side proxy and remains WIN32-walled at
-// file level in:
-//   - UDPClient.cpp         (RecvThread + full ctor / OpenFixedPort)
-//   - UDPProxyMVAS.cpp      (position-update thread, client-process IO)
-//   - UDPProxyToClient.cpp  (server-to-client forwarding)
-//   - UDPProxyToGlobal.cpp  (full SendMasterLogin / Avatar* / Ticket)
+// global plane there rides over TCP (Connection::SendResponse with
+// m_ServerTCP obtained from EstablishTCPConnection(SSL_LOCALCERT_LOGIN_PORT)).
+// Phase Q deleted the server-side TCP cluster that backed that endpoint,
+// so on Linux the global plane is UDP — symmetric with the master plane.
+// The Win32 client-launcher code (read ENB.exe memory, MVAS keep-alives,
+// packet-sequence replay, data-file streaming, etc.) remains WIN32-walled
+// at file level in UDPClient.cpp / UDPProxyMVAS.cpp / UDPProxyToClient.cpp /
+// UDPProxyToGlobal.cpp and is not ported here — that's launcher-side
+// concern, irrelevant to a server-side proxy.
 //
-// This file implements only the methods on the MasterJoin -> ServerRedirect
-// path:
+// What this file defines
+// ----------------------
 //   - ctor (FixedPort path)               -- opens local UDP socket,
 //                                            resolves NET7_GAME_SERVER_HOST
-//                                            (default "server") :3808,
+//                                            (default "server"),
+//                                            connect()s to (server, port),
 //                                            starts RecvThread
-//   - OpenFixedPort                       -- POSIX socket + bind + connect
-//   - CreateFrom                          -- shared with header inline
-//   - SendMasterLogin                     -- builds opcode 0x2008 and waits
-//                                            for opcode 0x2009 confirm
-//   - MasterLoginConfirm                  -- sets m_global_account_rcv
-//   - WaitForResponse(port,op,data,len)   -- bounded retry loop
-//   - SendResponse(port,...)              -- prepend EnbUdpHeader + sendto
-//   - UDP_Send                            -- sendto on m_Listen_Socket
-//   - UDP_RecvFromServer                  -- recv on m_Listen_Socket
-//   - RecvThread                          -- minimal dispatch: only
-//                                            ENB_OPCODE_2009 wakes WaitFor
-//   - FixedClientComm                     -- opcode 0x200F
-//   - several no-op stubs the link path may hit (BlankTCPConnection)
+//   - OpenFixedPort(port, ip_addr)        -- POSIX socket + bind ephemeral
+//                                            + connect to (ip_addr, port).
+//                                            `port` is the PEER port; pass
+//                                            UDP_MASTER_SERVER_PORT for the
+//                                            master plane or
+//                                            UDP_GLOBAL_SERVER_PORT for the
+//                                            global plane.
+//   - CreateFrom                          -- populate m_SockAddr
+//   - RecvThread                          -- dispatches both master and
+//                                            global plane opcodes (see
+//                                            switch below)
+//   - UDP_Send / UDP_RecvFromServer       -- send/recv on m_Listen_Socket
+//   - SendResponse(port, op, ...)         -- prepend EnbUdpHeader + sendto;
+//                                            port=0 sends to default peer
+//   - WaitForResponse                     -- bounded retry loop
+//   - Master plane: SendMasterLogin, MasterLoginConfirm, FixedClientComm
+//   - Global plane: SendTicket, SendAvatarLogin, CreateCharacter,
+//                   DeleteCharacter, SetAccountName, ValidateAccount,
+//                   ReceiveAvatarList, AvatarLoginConfirm,
+//                   CreateDeleteConfirm, ProcessGlobalError
+//   - BlankTCPConnection                  -- no-op (Win32 launcher
+//                                            machinery — kept for legacy
+//                                            link symbols)
 //
-// Everything else (avatar list, ticket exchange, position updates,
-// keep-alives, packet-sequence resend, custom opcodes, etc.) is NOT
-// defined here. If a future Linux code path references one of those
-// methods directly, the linker will tell us — and that's the right
-// signal to port the next slice.
+// Everything else (avatar list streaming to launcher, position updates,
+// MVAS keep-alives, packet-sequence resend, custom opcodes, etc.) is
+// launcher-side and not ported. If a future Linux code path references
+// one of those methods directly, the linker will tell us — and that's
+// the right signal to port the next slice.
 //
 // LICENSE
 // -------
@@ -62,6 +85,7 @@
 #include <net7/PacketStructures.h>
 #include "PacketMethods.h"
 #include "ServerManager.h"
+#include "Connection.h"
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -141,16 +165,20 @@ void UDPClient::CreateFrom(long ip_addr, short port)
 
 // ---------------------------------------------------------------------------
 // OpenFixedPort — POSIX UDP socket, bind to ephemeral on INADDR_ANY,
-// connect() to (ip_addr, port). The connect() lets us use send()/recv()
-// without specifying the peer every time (matches the Win32 path).
+// connect() to (ip_addr, peer_port). The connect() lets us use send()/recv()
+// without specifying the peer every time AND filters the recv stream to
+// just this peer — which is the property that keeps the master-plane
+// RecvThread and global-plane RecvThread from cross-talking.
+//
+// `port` is interpreted as the PEER UDP port (i.e. UDP_MASTER_SERVER_PORT
+// or UDP_GLOBAL_SERVER_PORT). The historical Linux build hardcoded
+// UDP_MASTER_SERVER_PORT here; we now honour the caller's choice so the
+// global-plane UDPClient can be pointed at UDP_GLOBAL_SERVER_PORT (3810).
+// A 0 falls back to UDP_MASTER_SERVER_PORT for back-compat.
 // ---------------------------------------------------------------------------
 bool UDPClient::OpenFixedPort(short port, long ip_addr)
 {
-    (void) port;  // The 'port' arg in the Win32 path is actually the
-                  // PEER port, not the bind port. The ctor passes
-                  // MVAS_LOGIN_PORT and then later code calls
-                  // SendResponse(UDP_MASTER_SERVER_PORT, ...) which
-                  // overrides via UDP_Send/sendto on a per-call basis.
+    short peer_port = (port == 0) ? (short) UDP_MASTER_SERVER_PORT : port;
 
     m_Listen_Socket = ::socket(AF_INET, SOCK_DGRAM, 0);
     if (m_Listen_Socket < 0)
@@ -181,9 +209,9 @@ bool UDPClient::OpenFixedPort(short port, long ip_addr)
     // doesn't resolve (e.g. running outside docker).
     long server_ip = ResolveGameServerIP(ip_addr);
 
-    // Per-call sendto uses CreateFrom + UDP_Send; we keep m_SockAddr
-    // pointing at UDP_MASTER_SERVER_PORT as the default peer.
-    CreateFrom(server_ip, UDP_MASTER_SERVER_PORT);
+    // Set the default peer; SendResponse(port=0, ...) routes here via
+    // send() on the connected socket.
+    CreateFrom(server_ip, peer_port);
 
     if (::connect(m_Listen_Socket, (struct sockaddr *) &m_SockAddr,
                   sizeof(m_SockAddr)) < 0)
@@ -203,9 +231,9 @@ bool UDPClient::OpenFixedPort(short port, long ip_addr)
                       &actual_len) == 0)
     {
         unsigned char *b = (unsigned char *) &server_ip;
-        LogMessage("UDPClient: bound UDP %u (src) -> %u.%u.%u.%u:%d (game server)\n",
+        LogMessage("UDPClient: bound UDP %u (src) -> %u.%u.%u.%u:%d (game server peer)\n",
                    ntohs(actual.sin_port), b[0], b[1], b[2], b[3],
-                   UDP_MASTER_SERVER_PORT);
+                   (int) peer_port);
     }
 
     return true;
@@ -327,8 +355,36 @@ void UDPClient::RecvThread()
 
         switch (opcode)
         {
+        // ----- Master plane -----
         case ENB_OPCODE_2009_MASTER_HANDOFF_CONFIRM:
             MasterLoginConfirm(msg, header);
+            break;
+
+        // ----- Global plane -----
+        // 0x2003 AVATARLIST is the server's reply to a 0x2002 TICKET. The
+        // payload is sizeof(GlobalAvatarList) of network-order avatar
+        // records (see server/src/UDP_Global.cpp SendAvatarList ->
+        // BuildAvatarList).
+        case ENB_OPCODE_2003_AVATARLIST:
+            ReceiveAvatarList(msg, header);
+            break;
+
+        // 0x2005 AVATARLOGIN_CONFIRM is the server's reply to a 0x2004
+        // AVATARLOGIN. Payload: long avatar_id. The server also stamps
+        // header->player_id with the allocated GameID.
+        case ENB_OPCODE_2005_AVATARLOGIN_CONFIRM:
+            AvatarLoginConfirm(msg, header);
+            break;
+
+        // 0x200C is the confirm for both create (0x200B) and delete
+        // (0x200D); payload is a refreshed GlobalAvatarList.
+        case ENB_OPCODE_200C_CREATE_DELETE_AVATAR_CONFIRM:
+            CreateDeleteConfirm(msg, header);
+            break;
+
+        // 0x200E is GLOBAL_ERROR with a single int32 G_ERROR_* code.
+        case ENB_OPCODE_200E_GLOBAL_ERROR:
+            ProcessGlobalError(msg, header);
             break;
 
         default:
@@ -535,6 +591,196 @@ void UDPClient::BlankTCPConnection()
     // No-op on Linux. The Win32 implementation tears down the TCP link
     // owned by the launcher; the Linux proxy has no per-UDPClient TCP
     // ownership.
+}
+
+// ===========================================================================
+// Global plane (peer = UDP_GLOBAL_SERVER_PORT 3810)
+// ===========================================================================
+//
+// Sequence diagrams (server-side handlers in server/src/UDP_Global.cpp):
+//
+//   HandleGlobalConnect
+//     proxy --0x2002 TICKET (length=strlen(ticket))------> server
+//     proxy <--0x2003 AVATARLIST  (or 0x200E error)------- server
+//
+//   HandleGlobalTicketRequest
+//     proxy --0x2004 AVATARLOGIN (char_slot | account)---> server
+//     proxy <--0x2005 AVATARLOGIN_CONFIRM (avatar_id)----- server
+//                     (header.player_id = GameID)
+//
+//   HandleCreateCharacter
+//     proxy --0x200B CREATE_AVATAR (GlobalCreateCharacter)-> server
+//     proxy <--0x2003 AVATARLIST  (or 0x200E error)------- server
+//
+//   HandleDeleteCharacter
+//     proxy --0x200D DELETE_AVATAR (slot | account)------> server
+//     proxy <--0x2003 AVATARLIST  (or 0x200E error)------- server
+//
+// All four wait synchronously on m_global_account_rcv being flipped by
+// the RecvThread for THIS UDPClient. Because HandleGlobal* are invoked
+// from Connection's per-client worker thread (not the recv thread), the
+// flip happens out-of-line and the wait returns. Each global-plane
+// request must complete before the next one is issued on the same
+// UDPClient (single-outstanding-request contract); that matches how the
+// Win32 path used the connection too.
+
+void UDPClient::SetAccountName(char *name)
+{
+    if (name)
+    {
+        // strlen below could overflow m_AccountName (128 bytes) for a
+        // pathological ticket. Cap to sizeof-1 and NUL-terminate.
+        size_t n = strnlen(name, sizeof(m_AccountName) - 1);
+        memcpy(m_AccountName, name, n);
+        m_AccountName[n] = '\0';
+    }
+}
+
+void UDPClient::ValidateAccount(char *msg, EnbUdpHeader *header)
+{
+    m_global_account_rcv = true;
+    m_ticket        = msg;
+    m_ticket_length = header->size;
+}
+
+void UDPClient::ReceiveAvatarList(char *msg, EnbUdpHeader * /*header*/)
+{
+    // The server replies with a 0x2003 AVATARLIST whose payload is
+    // sizeof(GlobalAvatarList) bytes. m_RecvBuffer is what `msg` points
+    // into; the caller (HandleGlobalConnect / Create / Delete) will
+    // memcpy it into the Connection's m_Player_Avatar_List before the
+    // next UDP recv overwrites it.
+    m_global_account_rcv = true;
+    m_ticket             = msg;
+}
+
+void UDPClient::AvatarLoginConfirm(char *msg, EnbUdpHeader *header)
+{
+    m_global_account_rcv = true;
+    m_ticket             = msg;
+    m_PlayerID           = header->player_id;
+    // Mirror the new GameID on the master-plane UDPClient (the one that
+    // SendMasterLogin will use next, and the one whose FixedClientComm
+    // announces the comm port to the server).
+    if (g_ServerMgr->m_UDPClient)
+    {
+        g_ServerMgr->m_UDPClient->SetPlayerID(m_PlayerID);
+        g_ServerMgr->m_UDPClient->FixedClientComm();
+    }
+    LogMessage("UDPClient(Linux,global): AvatarLoginConfirm GameID=0x%08lx\n",
+               (long) m_PlayerID);
+}
+
+void UDPClient::CreateDeleteConfirm(char *msg, EnbUdpHeader * /*header*/)
+{
+    m_global_account_rcv = true;
+    m_ticket             = msg;
+}
+
+void UDPClient::ProcessGlobalError(char *msg, EnbUdpHeader * /*header*/)
+{
+    // Forward to the proxy<->client connection so it can build a
+    // 0x0075 GLOBAL_ERROR frame for the client (see
+    // Connection::GlobalError in ClientToGlobalServer_linux_stubs.cpp).
+    // m_global_account_rcv = true wakes any caller currently blocked in
+    // WaitForResponse so it can fail cleanly instead of timing out.
+    m_global_account_rcv = true;
+    m_ticket             = NULL;  // sentinel: failure path
+
+    if (g_ServerMgr && g_ServerMgr->m_GlobalConnection)
+    {
+        long err = *((long *) msg);
+        g_ServerMgr->m_GlobalConnection->GlobalError(err);
+    }
+}
+
+char *UDPClient::SendTicket(char *ticket)
+{
+    if (!ticket) return NULL;
+
+    int length = (int) strlen(ticket);
+    m_global_account_rcv = false;
+    m_ticket             = NULL;
+    m_ticket_length      = 0;
+
+    WaitForResponse((short) 0, ENB_OPCODE_2002_TICKET,
+                    (unsigned char *) ticket, length);
+
+    if (m_global_account_rcv && m_ticket)
+    {
+        LogMessage("UDPClient(Linux,global): SendTicket -> AvatarList received\n");
+        return m_ticket;
+    }
+
+    LogMessage("UDPClient(Linux,global): SendTicket timed out / errored\n");
+    return NULL;
+}
+
+long UDPClient::SendAvatarLogin(long char_slot)
+{
+    LogMessage("UDPClient(Linux,global): SendAvatarLogin slot=%ld user=%s\n",
+               (long) ntohl((uint32_t) char_slot), m_AccountName);
+
+    unsigned char data[128];
+    int index = 0;
+    memset(data, 0, sizeof(data));
+    m_ticket_length      = 0;
+    m_global_account_rcv = false;
+    m_ticket             = NULL;
+
+    // Layout: [be32 char_slot][len-prefixed string account_name]
+    // (matches the Win32 path in UDPProxyToGlobal.cpp:133-167)
+    AddData(data, ntohl((uint32_t) char_slot), index);
+    AddDataLS(data, m_AccountName, index);
+
+    WaitForResponse((short) 0, ENB_OPCODE_2004_AVATARLOGIN, data, index);
+
+    if (m_global_account_rcv && m_ticket && m_PlayerID != 0)
+    {
+        // Payload of 0x2005 AVATARLOGIN_CONFIRM is a single long avatar_id.
+        return *((long *) m_ticket);
+    }
+    return -1;
+}
+
+char *UDPClient::CreateCharacter(GlobalCreateCharacter *create)
+{
+    if (!create) return NULL;
+
+    m_global_account_rcv = false;
+    m_ticket             = NULL;
+
+    WaitForResponse((short) 0, ENB_OPCODE_200B_CREATE_AVATAR,
+                    (unsigned char *) create, sizeof(GlobalCreateCharacter));
+
+    if (m_global_account_rcv && m_ticket)
+    {
+        LogMessage("UDPClient(Linux,global): CreateCharacter confirm received\n");
+        return m_ticket;
+    }
+    return NULL;
+}
+
+char *UDPClient::DeleteCharacter(long character_slot)
+{
+    unsigned char data[128];
+    int index = 0;
+    memset(data, 0, sizeof(data));
+    m_ticket_length      = 0;
+    m_global_account_rcv = false;
+    m_ticket             = NULL;
+
+    AddData(data, ntohl((uint32_t) character_slot), index);
+    AddDataLS(data, m_AccountName, index);
+
+    WaitForResponse((short) 0, ENB_OPCODE_200D_DELETE_AVATAR, data, index);
+
+    if (m_global_account_rcv && m_ticket)
+    {
+        LogMessage("UDPClient(Linux,global): DeleteCharacter confirm received\n");
+        return m_ticket;
+    }
+    return NULL;
 }
 
 #endif  // !WIN32

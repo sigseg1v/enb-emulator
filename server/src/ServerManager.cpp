@@ -53,6 +53,9 @@ ServerManager::ServerManager(bool is_master_server, unsigned long ip_address, sh
     m_SkillList = (0);
 	m_SectorUpdateSelect = false;
 	m_SectorCount = 0;
+	m_UDPConnection = NULL;
+	m_UDPMasterConnection = NULL;
+	m_UDPGlobalConnection = NULL;
 
 	g_ServerMgr = this;
 
@@ -158,6 +161,15 @@ void ServerManager::RunMasterServer()
     //UdpListener master_tcp_listener(m_IpAddressInternal, MASTER_SERVER_PORT, *this, CONNECTION_TYPE_CLIENT_TO_MASTER_SERVER);
     UDP_Connection master_udp_listener(UDP_MASTER_SERVER_PORT, this, CONNECTION_TYPE_MASTER_SERVER_TO_PROXY);
     m_UDPMasterConnection = &master_udp_listener;
+
+    // Phase K (2026-05-24): proxy<->server "global" control plane. Was TCP in
+    // the kyp-era Win32 build via SSL_LOCALCERT_LOGIN_PORT; Phase Q deleted
+    // the server-side TCP cluster so we bind UDP_GLOBAL_SERVER_PORT here and
+    // the proxy gets a second UDPClient pointed at it. Server dispatcher
+    // routes CONNECTION_TYPE_GLOBAL_SERVER_TO_PROXY into HandleGlobalOpcode
+    // (server/src/UDPConnection.cpp:203, handlers in UDP_Global.cpp).
+    UDP_Connection global_udp_listener(UDP_GLOBAL_SERVER_PORT, this, CONNECTION_TYPE_GLOBAL_SERVER_TO_PROXY);
+    m_UDPGlobalConnection = &global_udp_listener;
 
 	g_MailMgr = new MailManager();
 

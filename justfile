@@ -31,11 +31,12 @@ build-tools:
 # for the central toolslauncher GUI (button per editor); use `just launch-X`
 # to skip straight to a specific editor.
 #
-# All editors that talk to MySQL connect via the Login dialog on startup —
-# point it at the dev stack (`just init` first, then host=localhost
-# port=3307 user=net7 pass=net7). Tools that don't talk to the DB
-# (toolslauncher, launchnet7, enbpatcher, toolspatcher, w3d-parser,
-# talktreeeditor) skip the login dialog.
+# All editors that talk to the DB connect via the Login dialog on
+# startup — point it at the dev stack (`just init` first, then
+# host=localhost port=5434 user=net7 pass=net7; Phase N: Postgres, was
+# MySQL on 3307 before). Tools that don't talk to the DB (toolslauncher,
+# launchnet7, enbpatcher, toolspatcher, w3d-parser, talktreeeditor) skip
+# the login dialog.
 
 # Central launcher GUI — button per editor; spawns Avalonia projects.
 launch:
@@ -92,15 +93,19 @@ build-tests:
 
 # ---- dev stack ----
 
-# One-shot first-time setup: generate dev SSL certs, bring up mysql, wait
-# for the schema-load init scripts to finish, smoke-check it's reachable.
+# One-shot first-time setup: generate dev SSL certs, bring up postgres,
+# wait for it + the one-shot `schema-init` service to finish loading the
+# converted schema + seed data, smoke-check it's reachable.
 init: gen-certs
-    @echo ">>> bringing up mysql + loading dumps"
-    docker compose up -d mysql
-    @echo ">>> waiting for mysql to become healthy"
-    @bash -c 'until [ "$$(docker inspect -f {{{{.State.Health.Status}}}} enb-emulator-mysql-1 2>/dev/null)" = "healthy" ]; do echo "  ...waiting"; sleep 3; done'
+    @echo ">>> bringing up postgres + applying schema"
+    docker compose up -d postgres schema-init
+    @echo ">>> waiting for postgres to become healthy"
+    @bash -c 'until [ "$$(docker inspect -f {{{{.State.Health.Status}}}} enb-emulator-postgres-1 2>/dev/null)" = "healthy" ]; do echo "  ...waiting"; sleep 3; done'
+    @echo ">>> waiting for schema-init to finish"
+    @bash -c 'until docker inspect -f "{{{{.State.Status}}}}" enb-emulator-schema-init-1 2>/dev/null | grep -q exited; do echo "  ...waiting"; sleep 2; done'
     @echo ">>> verifying net7 + net7_user databases"
-    docker compose exec -T mysql mysql -unet7 -pnet7 -e "SHOW DATABASES; SELECT COUNT(*) AS account_rows FROM net7_user.accounts;"
+    docker compose exec -T -e PGPASSWORD=net7 postgres psql -U net7 -l
+    docker compose exec -T -e PGPASSWORD=net7 postgres psql -U net7 -d net7_user -c "SELECT COUNT(*) AS account_rows FROM accounts;"
     @echo ">>> init complete. Next: 'just run-stack'"
 
 # Generate the self-signed dev cert pair the server expects to find at
@@ -118,8 +123,9 @@ gen-certs:
         echo "deploy/certs/local.net-7.org.cer exists, skipping"; \
     fi
 
-# Bring up the full runtime stack (mysql + server + login). Server image
-# is built on demand. Streams logs in the foreground; Ctrl-C to stop.
+# Bring up the full runtime stack (postgres + schema-init + server +
+# login + proxy). Server image is built on demand. Streams logs in the
+# foreground; Ctrl-C to stop.
 run-stack: init
     docker compose up server login
 
@@ -134,11 +140,11 @@ dev: run-stack-bg
 dev-fg:
     docker compose up
 
-# Tear down (containers + network; named volume `mysqldata` survives).
+# Tear down (containers + network; named volume `pgdata` survives).
 down:
     docker compose down
 
-# Tear down AND wipe the mysqldata volume (destructive — dumps reload next `just init`).
+# Tear down AND wipe the pgdata volume (destructive — schema-init reloads next `just init`).
 nuke:
     docker compose down -v
 

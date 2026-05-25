@@ -26,7 +26,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ninja-build \
         pkg-config \
         libssl-dev \
-        libmysqlclient-dev \
+        libpq-dev \
+        libpqxx-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -47,7 +48,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         libssl3 \
-        libmysqlclient21 \
+        libpqxx-7.8t64 \
         iproute2 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system net7 \

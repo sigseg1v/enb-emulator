@@ -1,39 +1,59 @@
 -- SPDX-License-Identifier: CC-BY-NC-SA-3.0
 -- Deterministic test-account pool for the Phase T integration suite.
 --
--- ServerFixture pipes this into the mysql container with
---   docker compose exec -T mysql mysql -unet7 -pnet7 net7_user
--- after `docker compose up -d --wait` has returned (mysql healthcheck
--- has fired), before any test gets the fixture handed in.
+-- ServerFixture pipes this into the postgres container with
+--   docker compose exec -T postgres psql -U net7 -d net7_user
+-- after `docker compose up -d --wait` has returned (postgres
+-- healthcheck has fired + the one-shot `schema-init` service has
+-- successfully created both the `net7` and `net7_user` databases),
+-- before any test gets the fixture handed in.
 --
 -- Each test run starts from scratch because ServerFixture tears down
--- with `down -v` (wipes mysqldata). The seed is therefore safe to
--- TRUNCATE+INSERT every run — no migration headaches.
+-- with `down -v` (wipes pgdata). The seed is therefore safe to
+-- DELETE+INSERT every run.
 --
--- Password hash matches login-server/Net7SSL/LinuxAuth.cpp:227 which
--- validates with `password = UPPER(MD5(?))`. So the stored value is
--- UPPER(MD5('<plaintext>')). The plaintext for every account in this
--- pool is the literal string "testpw" — same for all five so tests
--- don't have to track per-account secrets.
+-- Password hash matches login-server/Net7SSL/LinuxAuth.cpp which
+-- validates by comparing UPPER(MD5(plaintext)) against the stored
+-- column. The plaintext for every account in this pool is the literal
+-- string "testpw" — same for all five so tests don't have to track
+-- per-account secrets.
 --
 -- The hash is computed server-side at INSERT time via UPPER(MD5(...));
--- don't hardcode the digest here. (For reference, MySQL evaluates
--- UPPER(MD5('testpw')) to '8EEE3EFDDE1EB6CF6639A58848362BF4', but
--- whatever MySQL produces is what gets stored — don't trust this comment
--- over the function call.)
+-- don't hardcode the digest here. (For reference, MD5('testpw')
+-- evaluates to '8eee3efdde1eb6cf6639a58848362bf4', upper-cased before
+-- insert — but trust the function call over this comment.)
 --
 -- The accounts here use IDs 9000001..9000005 to stay well clear of any
 -- real account IDs the dumps might carry (AUTO_INCREMENT=15965 on the
 -- accounts table per net7_user.sql), so seed and dump never collide.
+--
+-- Phase N portability note: was MySQL-flavoured (USE / backticks /
+-- UPPER(MD5(...))) before the libpqxx migration. The Postgres rewrite
+-- drops USE (the connection already targets net7_user), strips
+-- backticks (double-quoted identifiers are reserved word safe but the
+-- column names here aren't reserved so we can leave them bare), and
+-- swaps MySQL's MD5() (returns lowercase hex) for Postgres
+-- `encode(digest(..., 'md5'), 'hex')`. pgcrypto's `digest()` returns
+-- bytea; encode to hex then UPPER for parity with the MySQL hash.
 
-USE `net7_user`;
+-- Account status convention (server/src/UDP_Global.cpp:ProcessTicketInfo):
+--   0    STRESS_TEST_CLOSED — rejected at the global UDP plane (G_ERROR 12)
+--   -1   INACTIVE          — Net7SSL refuses login
+--   -2   BANNED             — Net7SSL refuses login
+--   100  ACTIVE/admin       — what real accounts use (cf. net7_user.sql admin row)
+-- We seed status=100 so the proxy↔server global UDP handshake (Phase K)
+-- succeeds and the test gets a real GlobalAvatarList back. status=0 was
+-- the original placeholder and only worked for the AuthLogin-only tests
+-- that never reach ProcessTicketInfo.
 
-DELETE FROM `accounts` WHERE `id` BETWEEN 9000001 AND 9000099;
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
-INSERT INTO `accounts` (`id`, `username`, `password`, `status`, `formname`, `email`, `warn_level`)
+DELETE FROM accounts WHERE id BETWEEN 9000001 AND 9000099;
+
+INSERT INTO accounts (id, username, password, status, formname, email, warn_level)
 VALUES
-  (9000001, 'cli_test01', UPPER(MD5('testpw')), 0, 'cli_test01_form', 'cli_test01@net-7.test', 0),
-  (9000002, 'cli_test02', UPPER(MD5('testpw')), 0, 'cli_test02_form', 'cli_test02@net-7.test', 0),
-  (9000003, 'cli_test03', UPPER(MD5('testpw')), 0, 'cli_test03_form', 'cli_test03@net-7.test', 0),
-  (9000004, 'cli_test04', UPPER(MD5('testpw')), 0, 'cli_test04_form', 'cli_test04@net-7.test', 0),
-  (9000005, 'cli_test05', UPPER(MD5('testpw')), 0, 'cli_test05_form', 'cli_test05@net-7.test', 0);
+  (9000001, 'cli_test01', UPPER(encode(digest('testpw', 'md5'), 'hex')), 100, 'cli_test01_form', 'cli_test01@net-7.test', 0),
+  (9000002, 'cli_test02', UPPER(encode(digest('testpw', 'md5'), 'hex')), 100, 'cli_test02_form', 'cli_test02@net-7.test', 0),
+  (9000003, 'cli_test03', UPPER(encode(digest('testpw', 'md5'), 'hex')), 100, 'cli_test03_form', 'cli_test03@net-7.test', 0),
+  (9000004, 'cli_test04', UPPER(encode(digest('testpw', 'md5'), 'hex')), 100, 'cli_test04_form', 'cli_test04@net-7.test', 0),
+  (9000005, 'cli_test05', UPPER(encode(digest('testpw', 'md5'), 'hex')), 100, 'cli_test05_form', 'cli_test05@net-7.test', 0);

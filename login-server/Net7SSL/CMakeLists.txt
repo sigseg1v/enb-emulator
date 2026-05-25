@@ -51,14 +51,15 @@ message(STATUS "net7ssl: discovered ${_net7ssl_src_count} .cpp files under login
 find_package(OpenSSL 3.0 REQUIRED)
 find_package(Threads REQUIRED)
 
-# libmysqlclient is consumed via pkg-config; the upstream package ships
-# either `mysqlclient` or (on noble) the unprefixed name. Fall back to
-# the linker flag if pkg-config can't find it.
+# Phase N+ wave 3: LinuxAuth.cpp speaks Postgres via libpqxx now (the
+# original Phase J port used libmysqlclient; mysqlclient was a holdover
+# from the pre-Phase-N MariaDB dev stack). libpqxx pulls libpq in
+# transitively and ships its own pkg-config / CMake config — same
+# pattern as server/CMakeLists.txt.
+find_package(PostgreSQL REQUIRED)
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(MYSQLCLIENT IMPORTED_TARGET mysqlclient)
-if(NOT MYSQLCLIENT_FOUND)
-    message(STATUS "net7ssl: pkg-config didn't find mysqlclient; falling back to -lmysqlclient")
-endif()
+pkg_check_modules(LIBPQXX REQUIRED IMPORTED_TARGET libpqxx)
+message(STATUS "net7ssl: libpqxx ${LIBPQXX_VERSION} — ${LIBPQXX_LINK_LIBRARIES}")
 
 # --------------------------------------------------------------------------
 # Target
@@ -103,11 +104,7 @@ target_link_libraries(net7ssl PRIVATE
     OpenSSL::Crypto
 )
 
-if(MYSQLCLIENT_FOUND)
-    target_link_libraries(net7ssl PRIVATE PkgConfig::MYSQLCLIENT)
-else()
-    target_link_libraries(net7ssl PRIVATE mysqlclient)
-endif()
+target_link_libraries(net7ssl PRIVATE PkgConfig::LIBPQXX PostgreSQL::PostgreSQL)
 
 # --------------------------------------------------------------------------
 # Install

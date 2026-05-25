@@ -46,6 +46,19 @@
 #define UDP_MASTER_SERVER_PORT      3808
 #define PROXY_SERVER_PORT           3809
 
+// Phase K continuation (2026-05-24): the proxy->server "global" control
+// plane (ticket validation, avatar list, char create/delete) was TCP in
+// the kyp-era Win32 build via SSL_LOCALCERT_LOGIN_PORT, driven by
+// Connection::SendResponse on a Connection* obtained from
+// EstablishTCPConnection(server_ip, SSL_LOCALCERT_LOGIN_PORT). Phase Q
+// deleted the server-side TCP cluster that made that endpoint live, so
+// the Linux build needs a different wire. The server dispatcher already
+// routes CONNECTION_TYPE_GLOBAL_SERVER_TO_PROXY to
+// UDP_Connection::HandleGlobalOpcode (server/src/UDPConnection.cpp:203,
+// handlers in server/src/UDP_Global.cpp) — we bind UDP here and the
+// proxy gets a second UDPClient instance pointed at it.
+#define UDP_GLOBAL_SERVER_PORT      3810
+
 // Connection-type tags (constants, not ports — kept here because they're
 // referenced in the same blocks the port macros are):
 #define CLIENT_TYPE_FIXED_PORT      1

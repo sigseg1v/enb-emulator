@@ -138,16 +138,32 @@ int main(int argc, char* argv[])
     // The ip_addr arg is a FALLBACK only — UDPClient::OpenFixedPort
     // first tries getenv("NET7_GAME_SERVER_HOST") (default "server",
     // which docker resolves to the game server container).
-    UDPClient udp_to_server(MVAS_LOGIN_PORT,
+    //
+    // The ctor's first arg is the PEER port (Linux interprets it as
+    // such — see UDPClient_linux.cpp::OpenFixedPort). Win32 historically
+    // passed MVAS_LOGIN_PORT here; that was a launcher-side artefact and
+    // is wrong server-side.
+    UDPClient udp_to_master(UDP_MASTER_SERVER_PORT,
                             CLIENT_TYPE_FIXED_PORT,
                             ip_address_internal);
 
-    // The proxy uses ONE UDPClient instance for both roles on Linux:
-    // both m_UDPConnection (send-to-server) and m_UDPClient (recv-from-
-    // server) point at it. The Win32 path had two distinct objects
-    // (FIXED + MULTI port); on Linux we only port FIXED, and that one
-    // object handles both the send and recv halves.
-    server_mgr.SetUDPConnections(&udp_to_server, &udp_to_server);
+    server_mgr.SetUDPConnections(&udp_to_master, &udp_to_master);
+
+    // Phase K (2026-05-24): second UDPClient for the proxy<->server
+    // "global" control plane (peer = UDP_GLOBAL_SERVER_PORT 3810).
+    // Was TCP via SSL_LOCALCERT_LOGIN_PORT in the kyp-era Win32 build;
+    // Phase Q deleted the server-side TCP cluster so the wire is now
+    // UDP — symmetric with the master plane.
+    //
+    // Two UDPClients (not one) because Linux's connected SOCK_DGRAM
+    // filters incoming datagrams by (peer_addr, peer_port); a single
+    // socket connect()'d to 3808 would never see replies from 3810
+    // and vice versa.
+    UDPClient udp_to_global(UDP_GLOBAL_SERVER_PORT,
+                            CLIENT_TYPE_FIXED_PORT,
+                            ip_address_internal);
+
+    server_mgr.SetGlobalUDPClient(&udp_to_global);
 
     server_mgr.RunServer();
 

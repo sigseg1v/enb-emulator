@@ -18,12 +18,24 @@
 // allocated response string. SSL_Listener.cpp's Linux accept branch
 // calls it inline.
 //
+// Phase N+ wave 3: switched from libmysqlclient to libpqxx. The original
+// Phase J Linux port shipped with mysql_real_connect / mysql_stmt_*
+// because the dev stack still ran MariaDB. Phase N migrated the game
+// server (server/src/mysql/mysqlplus.cpp) to Postgres via libpqxx but
+// LinuxAuth was left behind — its query templates use UPPER(MD5(?)) and
+// CALL net7_user.accLogin(?, ?), neither of which Postgres speaks. The
+// rewrite uses pgcrypto's digest() (encode(digest(?, 'md5'), 'hex')
+// upper-cased) for the password column and drops the accLogin stored
+// proc entirely (it was a non-fatal MySQL-flavoured CALL that doesn't
+// exist in the Postgres schema). Parameterised pqxx::exec_params keeps
+// the SQL-injection immunity that wave 2 introduced.
+//
 // What's ported:
 //   - URL routing: /AuthLogin, /sectorserver.cgi, /touchsession.jsp,
 //     /certificate.html, /who.cgi stub, and the 404 fallback. Matches
 //     SSL_Connection::GetResponse() in SSL_Connection.cpp.
 //   - AuthLogin handler: parses username= / password= query args,
-//     validates against net7_user.accounts using libmysqlclient, and
+//     validates against net7_user.accounts using libpqxx, and
 //     issues a ticket on success. Matches SSL_Connection::AuthLogin()
 //     + AccountManager::IssueTicket() + ValidateAccount() + BuildTicket().
 //   - SectorServer handler: returns Success=TRUE if the version matches
@@ -51,12 +63,14 @@
 #include "SSL_Connection.h"   // For *_TAG macros (USERNAME_TAG etc.)
 #include <net7/Mutex.h>
 
-#include <mysql/mysql.h>
+#include <pqxx/pqxx>
 
 #include <ctime>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
+#include <string>
 
 // --------------------------------------------------------------------------
 // In-memory ticket store. A ticket is the opaque string the client must
@@ -113,14 +127,14 @@ const char *BuildTicketLocked(const char *username)
 }
 
 // --------------------------------------------------------------------------
-// MySQL connection helpers. Connect lazily on first use, hold the
-// connection for the life of the process. libmysqlclient is thread-safe
-// in single-connection mode as long as concurrent queries are
-// serialised; we serialise on g_DbMutex.
+// Postgres connection helpers (Phase N+ wave 3). pqxx::connection is
+// reused for the life of the process; concurrent queries are serialised
+// on g_DbMutex (same model the previous mysqlclient code used). A
+// dropped backend connection is detected via conn->is_open() and the
+// next call reconnects.
 // --------------------------------------------------------------------------
 Mutex g_DbMutex;
-MYSQL *g_DbConn = nullptr;
-bool g_DbInitTried = false;
+std::unique_ptr<pqxx::connection> g_DbConn;
 
 const char *EnvOr(const char *name, const char *fallback)
 {
@@ -128,40 +142,15 @@ const char *EnvOr(const char *name, const char *fallback)
     return (v && *v) ? v : fallback;
 }
 
-bool EnsureDbConnected()
+std::string BuildDsn()
 {
-    g_DbMutex.Lock();
-    if (g_DbConn) {
-        // Reconnect-on-ping in case the server bounced.
-        if (mysql_ping(g_DbConn) == 0) {
-            g_DbMutex.Unlock();
-            return true;
-        }
-        mysql_close(g_DbConn);
-        g_DbConn = nullptr;
-    }
-
-    g_DbConn = mysql_init(nullptr);
-    if (!g_DbConn) {
-        g_DbMutex.Unlock();
-        LogMessage("LinuxAuth: mysql_init failed\n");
-        return false;
-    }
-
-    // Auto-reconnect.
-    bool reconnect = true;
-    mysql_options(g_DbConn, MYSQL_OPT_RECONNECT, &reconnect);
-
-    // libmysqlclient 8.0 defaults to SSL_MODE_PREFERRED which produces
-    // "Unable to get certificate from ''" against the latin1 dev
-    // mysql container. Match the workaround in server/src/mysql/mysqlplus.cpp.
-    {
-        unsigned int ssl_mode = 1; // SSL_MODE_DISABLED
-        mysql_options(g_DbConn, MYSQL_OPT_SSL_MODE, &ssl_mode);
-    }
-
-    // Parse host:port — config / env may include the port suffix.
-    const char *host_env = EnvOr("MYSQL_HOST", g_MySQL_Host[0] ? g_MySQL_Host : "mysql:3306");
+    // Phase N: host string may carry a :port suffix
+    // (Net7Config.cfg writes "postgres:5432"). pqxx wants explicit
+    // host=/port= keywords. The schema lives in two DBs:
+    //   - net7        — game content
+    //   - net7_user   — accounts (this file only touches this one)
+    // The schema-init container creates both at startup.
+    const char *host_env = EnvOr("MYSQL_HOST", g_MySQL_Host[0] ? g_MySQL_Host : "postgres:5432");
     const char *user     = EnvOr("MYSQL_USER", g_MySQL_User[0] ? g_MySQL_User : "net7");
     const char *pass     = EnvOr("MYSQL_PASS", g_MySQL_Pass[0] ? g_MySQL_Pass : "net7");
     const char *db       = EnvOr("MYSQL_DB",   "net7_user");
@@ -169,163 +158,107 @@ bool EnsureDbConnected()
     char host_buf[256];
     strncpy(host_buf, host_env, sizeof(host_buf) - 1);
     host_buf[sizeof(host_buf) - 1] = 0;
-    int port = 3306;
+    int port = 5432;
     char *colon = strchr(host_buf, ':');
     if (colon) {
         *colon = 0;
         port = atoi(colon + 1);
-        if (port <= 0) port = 3306;
+        if (port <= 0) port = 5432;
     }
 
-    if (!mysql_real_connect(g_DbConn, host_buf, user, pass, db, port, nullptr,
-                            CLIENT_REMEMBER_OPTIONS)) {
-        LogMessage("LinuxAuth: mysql_real_connect to %s:%d/%s as %s failed: %s\n",
-                   host_buf, port, db, user, mysql_error(g_DbConn));
-        mysql_close(g_DbConn);
-        g_DbConn = nullptr;
-        g_DbMutex.Unlock();
+    char dsn_buf[1024];
+    snprintf(dsn_buf, sizeof(dsn_buf),
+             "host=%s port=%d user=%s password=%s dbname=%s",
+             host_buf, port, user, pass, db);
+    return std::string(dsn_buf);
+}
+
+// Caller must hold g_DbMutex. Returns true on success.
+bool EnsureDbConnectedLocked()
+{
+    if (g_DbConn && g_DbConn->is_open()) return true;
+
+    g_DbConn.reset();
+
+    try {
+        g_DbConn = std::make_unique<pqxx::connection>(BuildDsn());
+    } catch (const pqxx::failure &e) {
+        LogMessage("LinuxAuth: pqxx::connection failed: %s\n", e.what());
+        g_DbConn.reset();
+        return false;
+    } catch (const std::exception &e) {
+        LogMessage("LinuxAuth: connection unexpected error: %s\n", e.what());
+        g_DbConn.reset();
         return false;
     }
 
-    LogMessage("LinuxAuth: connected to MySQL %s:%d/%s as %s\n",
-               host_buf, port, db, user);
-    g_DbMutex.Unlock();
+    if (!g_DbConn->is_open()) {
+        LogMessage("LinuxAuth: pqxx::connection opened but is_open()=false\n");
+        g_DbConn.reset();
+        return false;
+    }
+
+    LogMessage("LinuxAuth: connected to Postgres (%s)\n",
+               g_DbConn->dbname());
     return true;
 }
 
-// Returns true if (username, MD5(password)) matches a row in
-// net7_user.accounts. Matches AccountManager::ValidateAccount.
+// Returns true if (username, UPPER(MD5(password))) matches a row in
+// net7_user.accounts. Mirrors AccountManager::ValidateAccount; preserves
+// the wave-2 prepared-statement / parameter-binding pattern so hostile
+// input rounds-trips as literal data and never gets concatenated into SQL.
 //
-// Phase N+ Wave 2: switched to libmysqlclient prepared statements
-// (mysql_stmt_*). Parameter binding gives true SQL-injection immunity —
-// the query template and the values travel on separate channels, so
-// hostile input ("'; DROP TABLE accounts; --") rounds-trips as literal
-// data and never executes. This retired SafeUsername/SafePassword,
-// which were per-character whitelists masquerading as input policy:
-// SafePassword rejected `'`/`"`/`\`/`%` (legal password characters!)
-// purely because those were the SQL-shape escape hazards.
+// The stored password column is the upper-cased MD5 hex of the
+// plaintext. MySQL's MD5() returned lowercase hex; pgcrypto's digest()
+// returns bytea, so we encode to hex first then upper-case for parity
+// with whatever legacy data was migrated from net7_user.sql.
 bool ValidateAccountLinux(const char *username, const char *password)
 {
-    if (!EnsureDbConnected()) return false;
     if (!username || !password || !*username || !*password) return false;
 
     bool ok = false;
-    long account_id = -1;
 
     g_DbMutex.Lock();
 
-    MYSQL_STMT *stmt = mysql_stmt_init(g_DbConn);
-    if (!stmt) {
-        LogMessage("LinuxAuth: mysql_stmt_init failed: %s\n",
-                   mysql_error(g_DbConn));
+    if (!EnsureDbConnectedLocked()) {
         g_DbMutex.Unlock();
         return false;
     }
 
-    static const char kSelect[] =
-        "SELECT `id` FROM `accounts` "
-        "WHERE `username` = ? AND `password` = UPPER(MD5(?))";
+    try {
+        pqxx::work tx(*g_DbConn);
 
-    if (mysql_stmt_prepare(stmt, kSelect, sizeof(kSelect) - 1) != 0) {
-        LogMessage("LinuxAuth: ValidateAccount prepare failed: %s\n",
-                   mysql_stmt_error(stmt));
-        mysql_stmt_close(stmt);
+        // pgcrypto's digest() lives in the pgcrypto extension. seed.sql
+        // (Fixtures/seed.sql and db/postgres/schema bootstrap) does
+        // CREATE EXTENSION IF NOT EXISTS pgcrypto so this function is
+        // always available against any dev/prod schema we ship.
+        pqxx::result r = tx.exec_params(
+            "SELECT id FROM accounts "
+            "WHERE username = $1 "
+            "AND password = UPPER(encode(digest($2, 'md5'), 'hex'))",
+            username, password);
+
+        ok = !r.empty();
+        // Commit isn't strictly needed for a SELECT but is cheap and
+        // releases the snapshot quickly.
+        tx.commit();
+    } catch (const pqxx::broken_connection &e) {
+        LogMessage("LinuxAuth: ValidateAccount lost connection: %s\n", e.what());
+        g_DbConn.reset(); // force reconnect on next call
+        g_DbMutex.Unlock();
+        return false;
+    } catch (const pqxx::sql_error &e) {
+        LogMessage("LinuxAuth: ValidateAccount SQL error: %s [query=%s]\n",
+                   e.what(), e.query().c_str());
+        g_DbMutex.Unlock();
+        return false;
+    } catch (const std::exception &e) {
+        LogMessage("LinuxAuth: ValidateAccount unexpected: %s\n", e.what());
         g_DbMutex.Unlock();
         return false;
     }
 
-    MYSQL_BIND in_bind[2];
-    memset(in_bind, 0, sizeof(in_bind));
-    unsigned long ulen = (unsigned long)strlen(username);
-    unsigned long plen = (unsigned long)strlen(password);
-    in_bind[0].buffer_type   = MYSQL_TYPE_STRING;
-    in_bind[0].buffer        = const_cast<char *>(username);
-    in_bind[0].buffer_length = ulen;
-    in_bind[0].length        = &ulen;
-    in_bind[1].buffer_type   = MYSQL_TYPE_STRING;
-    in_bind[1].buffer        = const_cast<char *>(password);
-    in_bind[1].buffer_length = plen;
-    in_bind[1].length        = &plen;
-
-    if (mysql_stmt_bind_param(stmt, in_bind) != 0) {
-        LogMessage("LinuxAuth: bind_param failed: %s\n",
-                   mysql_stmt_error(stmt));
-        mysql_stmt_close(stmt);
-        g_DbMutex.Unlock();
-        return false;
-    }
-
-    if (mysql_stmt_execute(stmt) != 0) {
-        LogMessage("LinuxAuth: ValidateAccount execute failed: %s\n",
-                   mysql_stmt_error(stmt));
-        mysql_stmt_close(stmt);
-        g_DbMutex.Unlock();
-        return false;
-    }
-
-    MYSQL_BIND out_bind;
-    memset(&out_bind, 0, sizeof(out_bind));
-    long out_id = 0;
-    // MySQL 8.0 dropped `my_bool`; the bind struct's is_null field is `bool*`.
-    bool out_null = false;
-    out_bind.buffer_type = MYSQL_TYPE_LONG;
-    out_bind.buffer      = &out_id;
-    out_bind.is_null     = &out_null;
-    mysql_stmt_bind_result(stmt, &out_bind);
-
-    if (mysql_stmt_store_result(stmt) == 0 &&
-        mysql_stmt_num_rows(stmt) > 0 &&
-        mysql_stmt_fetch(stmt) == 0 &&
-        !out_null) {
-        account_id = out_id;
-        ok = true;
-    }
-    mysql_stmt_close(stmt);
     g_DbMutex.Unlock();
-
-    if (ok) {
-        // Match the Win32 UpdateLoginTime() — call accLogin stored proc.
-        // Same prepared-statement pattern. account_id is server-controlled
-        // (came from the SELECT above) but bind anyway for consistency.
-        char ts[32];
-        time_t now;
-        time(&now);
-        struct tm gmt;
-        gmtime_r(&now, &gmt);
-        strftime(ts, sizeof(ts), "%Y/%m/%d %H:%M:%S", &gmt);
-
-        g_DbMutex.Lock();
-        MYSQL_STMT *upd = mysql_stmt_init(g_DbConn);
-        if (upd) {
-            static const char kCall[] = "CALL net7_user.accLogin(?, ?)";
-            if (mysql_stmt_prepare(upd, kCall, sizeof(kCall) - 1) == 0) {
-                MYSQL_BIND b[2];
-                memset(b, 0, sizeof(b));
-                unsigned long tslen = (unsigned long)strlen(ts);
-                b[0].buffer_type = MYSQL_TYPE_LONG;
-                b[0].buffer      = &account_id;
-                b[1].buffer_type = MYSQL_TYPE_STRING;
-                b[1].buffer      = ts;
-                b[1].buffer_length = tslen;
-                b[1].length      = &tslen;
-                mysql_stmt_bind_param(upd, b);
-                if (mysql_stmt_execute(upd) != 0) {
-                    // Non-fatal — the proc may not exist on stripped schemas.
-                    LogMessage("LinuxAuth: accLogin update failed (non-fatal): %s\n",
-                               mysql_stmt_error(upd));
-                } else {
-                    // Drain any result so the connection is reusable.
-                    while (mysql_stmt_next_result(upd) == 0) { /* discard */ }
-                }
-            } else {
-                LogMessage("LinuxAuth: accLogin prepare failed (non-fatal): %s\n",
-                           mysql_stmt_error(upd));
-            }
-            mysql_stmt_close(upd);
-        }
-        g_DbMutex.Unlock();
-    }
-
     return ok;
 }
 

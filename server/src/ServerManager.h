@@ -146,6 +146,7 @@ public:
 	SectorContentParser m_SectorContent;
 	UDP_Connection	  * m_UDPConnection;	// for MVAS
     UDP_Connection    * m_UDPMasterConnection;
+    UDP_Connection    * m_UDPGlobalConnection;  // Phase K: proxy<->server global control plane
     GMemoryHandler    * m_GlobMemMgr;
     StringManager     * m_StringMgr;
 	SaveManager		  * m_SaveMgr;

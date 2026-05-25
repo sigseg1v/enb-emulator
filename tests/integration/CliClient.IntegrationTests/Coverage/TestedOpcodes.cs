@@ -68,7 +68,7 @@ public static class TestedOpcodes
     /// <see cref="Opcodes"/>. NEVER decrease without a commit message
     /// explaining what deleted coverage and why it was OK to delete.
     /// </summary>
-    public const int MinTestedCount = 4;
+    public const int MinTestedCount = 6;
 
     /// <summary>
     /// Every opcode with round-trip coverage in this suite, with an
@@ -85,6 +85,10 @@ public static class TestedOpcodes
             "Opcodes/MasterJoinTests.cs — live send into proxy on 3801, ServerRedirect reply asserted; AND Verification/CaptureReplayTests.cs — retail capture_1 frame 220 decoded + codec round-trip identity."),
         new TestedOpcode(0x0036, "SERVER_REDIRECT",
             "Opcodes/MasterJoinTests.cs — received as the reply to MASTER_JOIN; AND Verification/CaptureReplayTests.cs — retail capture_1 frame 222 decoded with field-by-field assertions."),
+        new TestedOpcode(0x006D, "GLOBAL_CONNECT",
+            "Opcodes/GlobalConnectTests.cs — client sends GlobalConnect with a real Net7SSL-issued ticket; round-trip drives the Phase K proxy↔server global UDP plane (UDP 3810)."),
+        new TestedOpcode(0x0070, "GLOBAL_AVATAR_LIST",
+            "Opcodes/GlobalConnectTests.cs — received as the reply to GlobalConnect after the proxy's SendTicket UDP round-trip to the server's HandleGlobalOpcode dispatcher and back."),
     };
 }
 

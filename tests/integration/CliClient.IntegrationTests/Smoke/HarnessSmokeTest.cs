@@ -52,6 +52,9 @@ public sealed class HarnessSmokeTest
             Assert.Contains(account.Username, seed);
             Assert.Contains(account.Id.ToString(), seed);
         }
-        Assert.Contains("UPPER(MD5('testpw'))", seed);
+        // Phase N: was UPPER(MD5('testpw')) under MySQL; Postgres uses
+        // pgcrypto digest() since MySQL's MD5() was dropped with the
+        // libpqxx migration.
+        Assert.Contains("UPPER(encode(digest('testpw', 'md5'), 'hex'))", seed);
     }
 }

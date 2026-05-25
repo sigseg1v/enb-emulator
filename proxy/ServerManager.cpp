@@ -27,6 +27,9 @@ ServerManager::ServerManager(bool is_master_server, unsigned long ip_address, sh
     m_GlobalConnection = (0);
     m_SectorConnection = (0);
     m_ConnectionCount = 0;
+    m_UDPConnection = (0);
+    m_UDPClient = (0);
+    m_UDPGlobalClient = (0);
 }
 
 // Destructor

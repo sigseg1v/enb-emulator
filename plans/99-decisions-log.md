@@ -681,3 +681,101 @@ sessions. Marking items more done than they are, or shipping
 "infrastructure" with no caller, makes the next agent waste a session
 re-discovering what's true. The honest steady-state note is the
 better artifact.
+
+## 2026-05-24 — Phase K global UDP plane lit up (proxy↔server UDP_GLOBAL_SERVER_PORT 3810 end-to-end)
+
+The unblock the prior "Phase K steady state" decision called for is
+done. Path (b) from that decision (bind `UDP_GLOBAL_SERVER_PORT` on the
+server, have the proxy talk UDP to it) was already partially landed in
+earlier sessions; this session closed the remaining gaps and added the
+`cli-integration` scenario the prior note required as the bar for
+"declaring partial progress."
+
+**What landed.**
+
+- `tests/integration/CliClient.IntegrationTests/Opcodes/GlobalConnectTests.cs`
+  — `ValidTicket_RoundTripsThroughUdpGlobalPlane_ReturnsAvatarList`
+  drives the full round-trip against the live docker-compose stack:
+  AuthLogin (TLS) for a real Net7SSL-issued `<user>-<rand>` ticket →
+  EncryptedTcpConnection on TCP 3805 → 0x006D GlobalConnect with the
+  `[u32 ticket_len_be][char ticket[len]][NUL]` payload → wait for
+  0x0070 GlobalAvatarList; fail loud (with the G_ERROR code) if
+  0x0075 GlobalError comes back instead.
+- `TestedOpcodes.cs` ratchet: +2 entries (0x006D, 0x0070), floor
+  4 → 6. 34/34 cli-integration green.
+
+**Two latent bugs surfaced and got fixed.**
+
+1. **Seed account `status=0`.** The Phase T fixture pool was seeded
+   with `status=0` — placeholder from the pre-global-plane era when
+   the only tests reached AuthLogin and never went further. Server
+   `ProcessTicketInfo` (server/src/UDP_Global.cpp:138-143) hard-rejects
+   `status==0` with `G_ERROR_STRESS_TEST_CLOSED` (code 12) by design
+   — that's what production servers used to refuse logins during
+   load-test windows. Real accounts use status=100 (cf.
+   `db/mysql/net7_user.sql` admin row). Per server-integrity rules
+   (CLAUDE.md), the fix is to seed valid status, not loosen the
+   server's check. `tests/integration/CliClient.IntegrationTests/
+   Fixtures/seed.sql` now seeds status=100 with an enum-table comment
+   explaining the convention (0/-1/-2/100 each tied to its server
+   meaning).
+2. **Proxy `g_GlobalErrorMsg[]` table was truncated.** `proxy/
+   ClientToServer_linux_stubs.cpp` had 12 entries (codes 0-11) but
+   `login-server/Net7SSL/AccountManager.h` defines G_ERROR_* through
+   code 14 (`STRESS_TEST_CLOSED=12`, `ACCOUNT_IN_USE=13`,
+   `SERVER_SHUTDOWN=14`). When the server returned code 12 above,
+   `Connection::GlobalError`'s bounds check tripped — `unknown error
+   code 12 — dropping` — and the client got a connection timeout
+   instead of the actual reason. Fixed: full 0-14 table with comments
+   tying each entry to its `G_ERROR_*` constant. This is preservation-
+   accuracy (the proxy now forwards everything the server is allowed
+   to send), not a server-side relax.
+
+**Why this matters for the larger plan.** The Phase S
+`[!]`-blocked items 10-12 (enumerate sectors/missions/items
+workflows in the CLI client) and the Phase T `[!]`-blocked
+enumerate-* tests were both gated on this round-trip. The block
+still nominally stands until a `GlobalAvatarList` codec lands on the
+C# side so an avatar can actually be picked → enter sector — but the
+wire path no longer needs new infrastructure, just decoders.
+
+**Server-integrity audit on the seed fix.** Changing the seed from
+status=0 to status=100 is a test-fixture change, not a server change.
+The server's `ProcessTicketInfo` reject path is exactly what the
+retail server did. Validating that this reject happens (when the test
+seeds status=0) is also a useful coverage scenario for a future test
+— filed in plans/11-phase-k-ingame.md as a follow-up under the new
+item, not gated here.
+
+## 2026-05-24 — Phase N+ wave 3: LinuxAuth.cpp migrated to libpqxx
+
+Net7SSL's `LinuxAuth.cpp` was the last Linux-active site still
+linking `libmysqlclient` after Phase N (Wave 1+2 finished the server-
+side mysqlplus rewrite). Until this session it was reaching out to
+the postgres container with `mysql_real_connect`, which silently
+failed at runtime in the new Postgres-only dev-stack — every cli-
+integration login test went red after the Phase C postgres-stack
+landed.
+
+Rewrote `ValidateAccountLinux` on `pqxx::connection` + `pqxx::work` +
+`tx.exec_params`. Parameter binding (`$1` / `$2`) preserves the
+Phase N+ Wave 2 SQL-injection immunity. The MySQL stored procedure
+`accLogin(...)` referenced by the original code does not exist in
+the Postgres schema (and didn't carry meaningful logic — the .sql
+dump's body is the same SELECT), so the migration drops the CALL.
+`UPPER(MD5(...))` becomes `UPPER(encode(digest($2, 'md5'), 'hex'))`
+via pgcrypto (extension added to `Fixtures/seed.sql` in the same
+session). `login-server/Net7SSL/CMakeLists.txt` swapped `mysqlclient`
+pkg-config for `libpqxx` + `PostgreSQL`; `login-server/Dockerfile`
+swapped `libmysqlclient-dev` / `libmysqlclient21` for `libpq-dev` +
+`libpqxx-dev` / `libpqxx-7.8t64`. Default DSN host flipped from
+`mysql:3306` to `postgres:5432` to match docker-compose.
+
+The Phase T `HarnessSmokeTest.SeedSql_IsCopiedToOutput_...`
+assertion was also updated to look for the pgcrypto syntax instead
+of the dropped MySQL `MD5()` call.
+
+After this landed, login flow (TLS terminate → /AuthLogin → ticket
+issue → DB validation) is fully Postgres-native, the dev-stack has
+no MySQL dependency anywhere, and all 33 prior + 1 new cli-
+integration tests pass (34/34).
