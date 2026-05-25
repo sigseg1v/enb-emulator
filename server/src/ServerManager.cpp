@@ -192,8 +192,15 @@ void ServerManager::RunMasterServer()
 	gmttime = gmtime(&rawtime);
 	strftime(timestr, sizeof(timestr), "%Y/%m/%d %H:%M:%S", gmttime);
 
+    // Phase N: the original `CALL net7_user.logoutOnShutdown(theTime)` stored
+    // procedure body is two UPDATEs against `accounts` and `avatar_info`
+    // setting last_logout for rows where last_login > last_logout
+    // (db/postgres/seed.sql:759). Postgres has no equivalent procedure (the
+    // MySQL DELIMITER block doesn't load), so we inline both statements.
     MissionTable.AddParam(timestr);
-    MissionTable.execute_params( "CALL net7_user.logoutOnShutdown(?);" );
+    MissionTable.execute_params( "UPDATE accounts SET last_logout = ? WHERE last_login > last_logout" );
+    MissionTable.AddParam(timestr);
+    MissionTable.execute_params( "UPDATE avatar_info SET last_logout = ? WHERE last_login > last_logout" );
 
 	// ------------------------------------
 
@@ -632,6 +639,11 @@ void LogMySQLMsg(char *format, ...)
     }
 
     fprintf(stdout, "%s %s", timestr, buffer); //TODO: put this on a 'verbose' switch
+    // Without a TTY (e.g. running under `docker compose logs`) stdout is fully
+    // block-buffered and LogMessage output is invisible until the buffer fills
+    // or the process exits. Flush explicitly so log lines reach observers in
+    // real time.
+    fflush(stdout);
 }
 
 // This function formats a message and adds it to the message queue
@@ -723,6 +735,11 @@ void LogMessage(const char *format, ...)
     }
 
     fprintf(stdout, "%s %s", timestr, buffer); //TODO: put this on a 'verbose' switch
+    // Without a TTY (e.g. running under `docker compose logs`) stdout is fully
+    // block-buffered and LogMessage output is invisible until the buffer fills
+    // or the process exits. Flush explicitly so log lines reach observers in
+    // real time.
+    fflush(stdout);
 }
 
 void LogDebug(char *format, ...)
