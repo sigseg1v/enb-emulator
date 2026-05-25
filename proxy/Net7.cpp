@@ -159,9 +159,24 @@ int main(int argc, char* argv[])
     // filters incoming datagrams by (peer_addr, peer_port); a single
     // socket connect()'d to 3808 would never see replies from 3810
     // and vice versa.
+    //
+    // Phase K (2026-05-25): construct the global plane UNCONNECTED. The
+    // global plane source port is what the server records as
+    // player->m_Player_Port during HandleGlobalTicketRequest (server/src/
+    // UDP_Global.cpp:227 sets it from the AVATARLOGIN packet's source).
+    // Once login completes, all server->proxy in-game UDP comes from
+    // MVASauth (server:3806) because player->m_UDPConnection is always
+    // MVASauth (server/src/UDP_Master.cpp:73). That packet is destined for
+    // (proxy_ip, proxy_global_src) — i.e. THIS socket — but from a
+    // different peer port than the global plane's 3810. A connect() here
+    // would have the kernel drop those packets. Unconnected mode keeps
+    // the same default-peer for outgoing sendto() while accepting recv()
+    // from any peer port (with a source-IP whitelist check in
+    // UDP_RecvFromServer).
     UDPClient udp_to_global(UDP_GLOBAL_SERVER_PORT,
                             CLIENT_TYPE_FIXED_PORT,
-                            ip_address_internal);
+                            ip_address_internal,
+                            true /*unconnected*/);
 
     server_mgr.SetGlobalUDPClient(&udp_to_global);
 

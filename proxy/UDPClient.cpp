@@ -82,11 +82,13 @@ bool UDPClient::OpenMultiPort(short port, long ip_addr)
     return success;
 }
 
-UDPClient::UDPClient(short port, short connection_type, long ip_addr)
+UDPClient::UDPClient(short port, short connection_type, long ip_addr,
+                     bool unconnected)
 {
     m_IPAddr = ip_addr;
     m_Port = port;
     m_ConnectionType = connection_type;
+    m_Unconnected = unconnected;  // Win32 ignores; Linux only — see header.
     m_logged_in = false;
     m_global_account_rcv = false;
     m_PlayerID = 0;

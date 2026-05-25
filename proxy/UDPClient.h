@@ -27,7 +27,15 @@ class Connection;
 class UDPClient
 {
 public:
-    UDPClient(short port, short connection_type, long ip_addr);
+    // unconnected=true (Linux only): skip the connect() call on the
+    // SOCK_DGRAM socket. Required for the global plane, which must accept
+    // server->proxy replies on TWO source ports — UDP_GLOBAL_SERVER_PORT
+    // (control opcodes: 0x2003/0x2005/0x200C/0x200E) AND MVAS_LOGIN_PORT
+    // (in-game opcodes: 0x2010/0x2016/0x201A and default sector traffic
+    // routed via server->player->m_UDPConnection==MVASauth). A connect()
+    // would filter recv() by single peer port and silently drop the other.
+    // See proxy/UDPClient_linux.cpp::OpenFixedPort / ::RecvThread.
+    UDPClient(short port, short connection_type, long ip_addr, bool unconnected = false);
 	virtual ~UDPClient();
 
     void    SetBroadcast(SOCKET socket);
@@ -172,6 +180,8 @@ private:
     bool m_AlternatePorts;
     bool m_LoginComplete;
     bool m_Resync;
+    // Linux unconnected-socket flag — see ctor comment above. Win32 ignores.
+    bool m_Unconnected;
 	unsigned long m_PacketResendTimer;
 
     PacketList m_Packets;

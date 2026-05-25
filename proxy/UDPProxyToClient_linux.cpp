@@ -601,10 +601,17 @@ void UDPClient::HandleStageConfirm(char *ch_msg, u8 *tcp_packet, short &tcp_inde
 
     LogVMessage("UDPClient(Linux): confirm login stage %ld\n", stage_id);
 
+    // Phase K: forward EXACTLY 4 bytes (int32_t stage). sizeof(stage_id)
+    // = sizeof(long) is 8 on Linux x86_64, and the server's
+    // HandleLoginAckReturn reads exactly that many bytes — so passing 8
+    // here would shift every subsequent opcode in the UDP packet by 4
+    // bytes. Same long-vs-int32 wire-size class as the server's
+    // SendLoginStageConfirm / HandleLoginAckReturn fixes.
     if (g_ServerMgr && g_ServerMgr->m_UDPConnection) {
+        int32_t stage_wire = (int32_t) stage_id;
         g_ServerMgr->m_UDPConnection->ForwardClientOpcode(
-            ENB_OPCODE_2021_LOGIN_STAGE_ACK_C_S, sizeof(stage_id),
-            (char *) &stage_id);
+            ENB_OPCODE_2021_LOGIN_STAGE_ACK_C_S, sizeof(stage_wire),
+            (char *) &stage_wire);
     }
 }
 

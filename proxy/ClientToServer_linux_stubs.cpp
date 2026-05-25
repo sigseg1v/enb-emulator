@@ -396,6 +396,17 @@ void Connection::ProcessSectorServerOpcode(short opcode, short bytes)
         g_ServerMgr->m_UDPConnection->SetConnectionActive(true);
         g_ServerMgr->m_UDPClient->SetConnectionActive(true);
         g_ServerMgr->m_UDPConnection->SetLoginComplete(false);
+        // Phase K: the server's MVASauth (3806) sends in-game UDP (0x2016
+        // PACKET_SEQUENCE wrapping 0x2020 LOGIN_STAGE_S_C, position fan-out,
+        // etc.) to the proxy's *global plane* source port (m_Player_Port is
+        // captured from the AVATARLOGIN's source in server/src/UDP_Global.cpp).
+        // The global-plane UDPClient's SendPacketSequence early-returns on
+        // !m_ConnectionActive, so without this we drop every in-game packet
+        // and the server's login-stage retry loop spins forever.
+        if (g_ServerMgr->m_UDPGlobalClient) {
+            g_ServerMgr->m_UDPGlobalClient->SetConnectionActive(true);
+            g_ServerMgr->m_UDPGlobalClient->SetLoginComplete(false);
+        }
         m_SectorTCPRequest = false;
         break;
 
@@ -428,6 +439,8 @@ void Connection::ProcessSectorServerOpcode(short opcode, short bytes)
         }
         g_ServerMgr->m_UDPClient->SetLoginComplete(true);
         g_ServerMgr->m_UDPConnection->SetLoginComplete(true);
+        if (g_ServerMgr->m_UDPGlobalClient)
+            g_ServerMgr->m_UDPGlobalClient->SetLoginComplete(true);
 
         LogMessage("<client> START_ACK -> server (player_id=%ld start_id=%ld)\n",
                    (long) player_id, (long) *((int32_t *) &m_RecvBuffer[0]));

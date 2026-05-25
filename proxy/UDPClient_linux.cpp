@@ -219,16 +219,19 @@ bool UDPClient::OpenFixedPort(short port, long ip_addr)
     long server_ip = ResolveGameServerIP(ip_addr);
 
     // Set the default peer; SendResponse(port=0, ...) routes here via
-    // send() on the connected socket.
+    // send() on the connected socket (or sendto() if unconnected).
     CreateFrom(server_ip, peer_port);
 
-    if (::connect(m_Listen_Socket, (struct sockaddr *) &m_SockAddr,
-                  sizeof(m_SockAddr)) < 0)
+    if (!m_Unconnected)
     {
-        // connect() on a SOCK_DGRAM is just default-peer setup; if it
-        // fails we can still sendto() explicitly. Log and continue.
-        LogMessage("UDPClient: connect() warning: %s (continuing)\n",
-                   strerror(errno));
+        if (::connect(m_Listen_Socket, (struct sockaddr *) &m_SockAddr,
+                      sizeof(m_SockAddr)) < 0)
+        {
+            // connect() on a SOCK_DGRAM is just default-peer setup; if it
+            // fails we can still sendto() explicitly. Log and continue.
+            LogMessage("UDPClient: connect() warning: %s (continuing)\n",
+                       strerror(errno));
+        }
     }
 
     m_IPAddr = server_ip;
@@ -240,9 +243,10 @@ bool UDPClient::OpenFixedPort(short port, long ip_addr)
                       &actual_len) == 0)
     {
         unsigned char *b = (unsigned char *) &server_ip;
-        LogMessage("UDPClient: bound UDP %u (src) -> %u.%u.%u.%u:%d (game server peer)\n",
+        LogMessage("UDPClient: bound UDP %u (src) -> %u.%u.%u.%u:%d (%s peer)\n",
                    ntohs(actual.sin_port), b[0], b[1], b[2], b[3],
-                   (int) peer_port);
+                   (int) peer_port,
+                   m_Unconnected ? "unconnected default" : "connected");
     }
 
     return true;
@@ -251,11 +255,13 @@ bool UDPClient::OpenFixedPort(short port, long ip_addr)
 // ---------------------------------------------------------------------------
 // Constructor — FixedPort path only on Linux.
 // ---------------------------------------------------------------------------
-UDPClient::UDPClient(short port, short connection_type, long ip_addr)
+UDPClient::UDPClient(short port, short connection_type, long ip_addr,
+                     bool unconnected)
 {
     m_IPAddr               = ip_addr;
     m_Port                 = port;
     m_ConnectionType       = connection_type;
+    m_Unconnected          = unconnected;
     m_logged_in            = false;
     m_global_account_rcv   = false;
     m_PlayerID             = 0;
@@ -407,15 +413,25 @@ void UDPClient::RecvThread()
         // wrapped in a single UDP packet (with reliable-delivery /
         // resend semantics). Reassembled by SendPacketSequence and
         // forwarded opcode-at-a-time via the proxy↔client TCP socket.
+        //
+        // SendPacketSequence stores `header->size` bytes from its first
+        // arg, then later re-casts that buffer to EnbUdpHeader inside
+        // SendClientPacketSequence. It therefore expects the WHOLE UDP
+        // packet (header + payload), not the payload alone — matching
+        // Win32 UDPClient.cpp:256/260. Passing payload-only `msg` here
+        // would have SendClientPacketSequence interpret the first 12
+        // payload bytes as the header and skip them, dropping the real
+        // first inner [length][opcode] tuple and producing the
+        // "bad opcode 0x0000 len 0x0" diagnostic.
         case ENB_OPCODE_2016_PACKET_SEQUENCE:
-            SendPacketSequence(msg, header, false);
+            SendPacketSequence((char *) m_RecvBuffer, header, false);
             break;
 
         // 0x201A PACKET_C_SEQUENCE: continuation chunk of an oversized
         // 0x2016 packet that exceeded the UDP MTU. Same reassembler with
-        // continuation=true.
+        // continuation=true. Same whole-packet calling convention as 0x2016.
         case ENB_OPCODE_201A_PACKET_C_SEQUENCE:
-            SendPacketSequence(msg, header, true);
+            SendPacketSequence((char *) m_RecvBuffer, header, true);
             break;
 
         default:
@@ -436,7 +452,34 @@ void UDPClient::RecvThread()
 
 int UDPClient::UDP_RecvFromServer(char *buffer, int size)
 {
-    int rtn = ::recv(m_Listen_Socket, buffer, size, 0);
+    int rtn;
+    if (m_Unconnected)
+    {
+        // Unconnected SOCK_DGRAM (global plane). Use recvfrom so we can
+        // validate the source address — drop anything not from the game
+        // server IP. The peer port is intentionally unfiltered here:
+        // server->proxy in-game UDP arrives from MVASauth (3806) while
+        // global-control replies arrive from UDP_GLOBAL_SERVER_PORT (3810),
+        // and we want the same dispatcher to handle both.
+        struct sockaddr_in src;
+        socklen_t          src_len = sizeof(src);
+        rtn = ::recvfrom(m_Listen_Socket, buffer, size, 0,
+                         (struct sockaddr *) &src, &src_len);
+        if (rtn > 0)
+        {
+            if ((long) src.sin_addr.s_addr != m_IPAddr)
+            {
+                unsigned char *b = (unsigned char *) &src.sin_addr.s_addr;
+                LogMessage("UDPClient(Linux,unconnected): drop packet from %u.%u.%u.%u:%d (not game server)\n",
+                           b[0], b[1], b[2], b[3], ntohs(src.sin_port));
+                return 0;  // dispatcher treats <=0 as "no packet"
+            }
+        }
+    }
+    else
+    {
+        rtn = ::recv(m_Listen_Socket, buffer, size, 0);
+    }
     if (rtn < 0)
     {
         // 200ms backoff matches the Win32 path's usleep(200 * 1000) on -1.
@@ -504,11 +547,20 @@ void UDPClient::UDP_Send(short port, const char *buffer, int bufferLen)
     ssize_t sent;
     if (port == 0)
     {
-        // The Win32 path uses send() on a connected SOCK_DGRAM, which
-        // routes to the default peer (we connect()'d to
-        // UDP_MASTER_SERVER_PORT in OpenFixedPort). Match that here:
-        // port=0 means "send to the default peer".
-        sent = ::send(m_Listen_Socket, buffer, bufferLen, 0);
+        // port=0 means "send to the default peer". For connected sockets
+        // use send() (routes via the peer we connect()'d to). For
+        // unconnected sockets (global plane) sendto() the default peer
+        // captured in m_SockAddr by CreateFrom().
+        if (m_Unconnected)
+        {
+            sent = ::sendto(m_Listen_Socket, buffer, bufferLen, 0,
+                            (struct sockaddr *) &m_SockAddr,
+                            sizeof(m_SockAddr));
+        }
+        else
+        {
+            sent = ::send(m_Listen_Socket, buffer, bufferLen, 0);
+        }
     }
     else
     {
