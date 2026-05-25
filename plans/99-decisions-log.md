@@ -2140,3 +2140,141 @@ SIGSEGV until the bounds check lands.
   reply, fits the survival-probe shape.
 * 0x002F INIT_RENDER_STATE / BUY_ITEM — name collision in `Opcodes.h`; need to
   disambiguate which arm the dispatcher routes before sending a payload.
+
+
+## 2026-05-25 — Phase K Wave 18: 0x005A VERB_REQUEST survival round-trip
+
+### What landed
+
+* `tests/integration/CliClient.IntegrationTests/Opcodes/SectorVerbRequestTests.cs`
+  (new) — `VerbRequest_OnNonMatchingSubject_DoesNotBreakConnection_RequestTimeStillRoundTrips`
+  exercises the `Player::HandleVerbRequest` silent-no-op branch (SubjectID=0,
+  ObjectID=0, Action=1; 12B canonical wire payload), then probes pipe survival
+  via 0x0044 REQUEST_TIME → 0x0034 CLIENT_SET_TIME with a randomised sentinel
+  tick echoed back as ClientSent. 90s budget; 400-frame drain cap. Pool[13]
+  cli_test15 dedicated.
+
+* `tools/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs` — added
+  `OpcodeId.Known.VerbRequest = new(0x005A)` in sorted position between SkillUp
+  (0x0057) and GlobalConnect (0x006D).
+
+* `tests/integration/CliClient.IntegrationTests/TestAccounts.cs` and
+  `Fixtures/seed.sql` — added `cli_test15` (id 9_000_015, status=100) to the
+  shared deterministic-account pool.
+
+* `tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs` —
+  `MinTestedCount` 27 → 28; added 0x005A VERB_REQUEST entry in sorted position.
+
+* Zero server-side changes — Phase R already had VerbRequest canonical at 12B
+  and the proxy default-case ForwardClientOpcode arm carries the opcode through
+  without explicit listing.
+
+### Why survival probe rather than direct reply assertion
+
+`Player::HandleVerbRequest` (server/src/PlayerConnection.cpp:3547-3574) is short:
+
+```cpp
+void Player::HandleVerbRequest(unsigned char *data) {
+    VerbRequest * pkt = (VerbRequest *) data;
+    long subject_id = (long) ntohl(pkt->SubjectID);
+    long object_id  = (long) ntohl(pkt->ObjectID);
+    if (subject_id == GameID() && pkt->Action == 1)
+        UpdateVerbs(true);
+}
+```
+
+The single conditional is "is this verb-request from me about myself, with
+Action=1 (refresh-now)?". On mismatch — including any SubjectID that isn't our
+own GameID — the handler returns silently. We send SubjectID=0; cli_test15's
+GameID is non-zero (SaveManager assigns `account_id*5 + slot + 1`, never zero
+for any seeded account), so equality fails. Even on a match,
+`UpdateVerbs(true)` (server/src/PlayerClass.cpp:3500) early-returns when
+`GetObjectFromID(GetTargetGameID())` returns null — exactly the post-handshake
+state for a freshly-created character: no targeted object. No reply on either
+branch. Per CLAUDE.md server-integrity we don't fabricate one. Survival probe
+is the only assertable post-condition.
+
+### CLAUDE.md server-integrity compliance
+
+The VerbRequest payload is byte-identical to what the retail Win32 client
+emits when the user right-clicks an in-world object to refresh available
+verbs: 4B SubjectID + 4B ObjectID + 4B Action. SubjectID=0 is the value the
+retail client would send if its UI ever dispatched a verb-refresh outside of
+a targeted context. The retail server's silent no-op on subject-mismatch is
+the faithful behaviour. We are not making the server accept any new input
+shape, and we don't fabricate a reply (retail doesn't emit one on this branch
+either).
+
+### Regression coverage
+
+Concrete regression class this catches: VerbRequest is
+`{int32_t SubjectID; int32_t ObjectID; int32_t Action;}` = 12B canonical
+(common/include/net7/PacketStructures.h:570). If any of the three int32_t
+fields is widened to `long`, the struct grows from 12B to 16B/20B/24B on Linux
+x86_64 and the Action field reads from the wrong offset — at minimum
+mis-comparing against the equality guard, at worst reading garbage from past
+the 12B payload end into undefined memory.
+
+Other bugs this test would also catch:
+
+* **Proxy default-case ForwardClientOpcode regression.** VERB_REQUEST is not
+  explicitly listed in `proxy/ClientToServer_linux_stubs.cpp`, so it hits the
+  `default:` arm at line 514 and falls through to bottom-of-switch
+  `ForwardClientOpcode`. A regression that `return`ed early or added an empty
+  hand-coded case that returned would silently drop the opcode.
+* **Dispatch mis-route.** The case label at
+  `server/src/PlayerConnection.cpp:507` is hand-maintained in a ~200-entry
+  switch; a copy-paste error could route 0x005A to a different handler that
+  crashes on the 12-byte payload.
+* **ntohl byte-order flip on the SubjectID/ObjectID fields.** SubjectID=0 is a
+  fixed point under byte-swap so the equality test result is invariant — but a
+  regression that dropped the ntohl (or added an extra one) on a non-zero
+  SubjectID would suddenly hit (or miss) the GameID-equality branch on the
+  wrong endianness.
+* **Regression in the equality short-circuit.** Current code reads both
+  subject_id and object_id from the wire before the equality check; a refactor
+  that reordered the deref past a null-check or that introduced a null-deref
+  on a stale pkt pointer would surface here.
+
+### Full-suite ACCOUNT_IN_USE gotcha (preserved for future debugging)
+
+After the isolated SectorVerbRequestTests run passed (1/1, 7s), running the
+full integration suite *without* recycling the docker stack produced
+`Failed: 1, Passed: 48` with the failure being
+`server returned GlobalError code=13` (G_ERROR_ACCOUNT_IN_USE per
+login-server/Net7SSL/AccountManager.h:26) during EstablishAsync at
+SectorHandshake.cs:89. The cli_test15 account was still marked active on the
+global server from the prior isolated invocation.
+
+Fix: `docker compose down -v && docker compose up -d` cleans global session
+state. Full suite green from a fresh stack (49/49, 1m32s) is the authoritative
+verification.
+
+Future hardening (not bundled in this wave): the test's `finally` block
+currently relies on `DeleteCreatedCharacterAsync` which deletes the avatar
+slot but doesn't necessarily clear the global-server account session. An
+explicit logoff before the delete would close the loophole. Out of scope —
+the other waves' tests handle the same teardown pattern and don't trip this
+because they don't all share the same pool slot (and most test runs don't
+mix isolated + full-suite invocations against the same stack).
+
+### Test-account pool
+
+* `cli_test15` (id 9_000_015) — Pool[13]. Dedicated to SectorVerbRequest so
+  its Create/Delete cycle doesn't collide with Pool[3..12].
+
+### Coverage ratchet
+
+* Pre-Wave-18: 27/207 (13.0%).
+* Post-Wave-18: 28/207 (13.5%) — +0x005A VERB_REQUEST.
+
+### Next-Phase-K targets
+
+* 0x0011 NAV — in-flight nav target selection. Natural follow-on to Wave 14
+  MOVE; should be a short-payload state-mutator with no direct reply
+  (survival-probe shape).
+* 0x002F BUY_ITEM — vendor purchase, pure server state mutator on Player
+  inventory. Need to seed a vendor/item row first or send against an empty
+  vendor so the handler trips its "no such item" early-return.
+* 0x0017 STOP_MOVE — opposite-pole of MOVE; engine-off flips the same path
+  in reverse. Worth pairing with Wave 14 for symmetric coverage.
