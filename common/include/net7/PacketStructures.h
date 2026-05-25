@@ -177,9 +177,20 @@ struct AvatarInfo
 
 struct ColorInfo
 {
+    // Phase K: int32_t (was `long`). Win32 packed = 12 + 1 + 4 = 17 bytes;
+    // Linux with 8-byte long = 21 bytes. Embedded 8× in ShipData which is
+    // embedded in GlobalCreateCharacter — pre-migration GCC bloated
+    // ShipData to 226 bytes and GlobalCreateCharacter to 571 bytes (vs
+    // canonical Win32 539). Sent verbatim via sizeof(GlobalCreateCharacter)
+    // in UDPClient_linux.cpp::CreateCharacter so any Linux client paying
+    // attention to Win32 wire size would corrupt the server's parse.
+    // Server-side `metal` consumers (server/src/PlayerMisc.cpp,
+    // AccountManager.cpp) all assign from a local `int metal`, so
+    // narrowing long→int32_t is value-preserving for every existing
+    // call site.
     float   HSV[3];
     char    flat;
-    long    metal;
+    int32_t metal;
 } ATTRIB_PACKED;  // 17 bytes
 
 struct ShipData

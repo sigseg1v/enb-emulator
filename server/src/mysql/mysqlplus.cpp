@@ -805,54 +805,80 @@ void sql_query::Clear()
     m_Values[0] = 0;
 }
 
+// Append formatted text to m_Values without aliasing the destination buffer
+// as a printf source argument. The original idiom
+//
+//     sprintf_s(m_Values, sizeof(m_Values), "%s, X", m_Values, ...)
+//
+// is undefined behaviour: glibc's snprintf may read and write the same
+// memory in any order, and in practice clobbers prior contents on the
+// first byte written, leaving only the most-recent field in the buffer.
+// On Win32 the MSVC sprintf_s tolerated the overlap; on Linux it silently
+// truncated every INSERT to its last column (e.g. INSERT INTO "avatar_info"
+// ("trade") VALUES ('0')), causing CreateCharacter to fail at the DB layer.
+// Format once into a small scratch buffer, then strncat onto m_Values.
+static void AppendValue(char *dst, size_t dst_size, const char *fmt, ...)
+{
+    char scratch[256];
+    va_list ap; va_start(ap, fmt);
+    vsnprintf(scratch, sizeof(scratch), fmt, ap);
+    va_end(ap);
+
+    size_t cur = strlen(dst);
+    if (cur + strlen(scratch) >= dst_size) {
+        return; // would overflow; caller's assert in AddField catches this
+    }
+    strcat(dst + cur, scratch);
+}
+
 void sql_query::AddData(char * Field, int Value)
 {
-    sprintf_s(m_Values, sizeof(m_Values), "%s, '%d'", m_Values, Value);
+    AppendValue(m_Values, sizeof(m_Values), ", '%d'", Value);
     AddField(Field);
 }
 
 #ifndef WIN32
 void sql_query::AddData(char * Field, unsigned int Value)
 {
-    sprintf_s(m_Values, sizeof(m_Values), "%s, '%u'", m_Values, Value);
+    AppendValue(m_Values, sizeof(m_Values), ", '%u'", Value);
     AddField(Field);
 }
 
 void sql_query::AddData(char * Field, unsigned short Value)
 {
-    sprintf_s(m_Values, sizeof(m_Values), "%s, '%u'", m_Values, (unsigned int)Value);
+    AppendValue(m_Values, sizeof(m_Values), ", '%u'", (unsigned int)Value);
     AddField(Field);
 }
 #endif
 
 void sql_query::AddData(char * Field, unsigned long Value)
 {
-    sprintf_s(m_Values, sizeof(m_Values), "%s, '%lu'", m_Values, Value);
+    AppendValue(m_Values, sizeof(m_Values), ", '%lu'", Value);
     AddField(Field);
 }
 
 void sql_query::AddData(char * Field, long Value)
 {
-    sprintf_s(m_Values, sizeof(m_Values), "%s, '%ld'", m_Values, Value);
+    AppendValue(m_Values, sizeof(m_Values), ", '%ld'", Value);
     AddField(Field);
 }
 
 void sql_query::AddData(char * Field, float Value)
 {
-    sprintf_s(m_Values, sizeof(m_Values), "%s, '%f'", m_Values, Value);
+    AppendValue(m_Values, sizeof(m_Values), ", '%f'", Value);
     AddField(Field);
 }
 
 void sql_query::AddData(char * Field, double Value)
 {
-    sprintf_s(m_Values, sizeof(m_Values), "%s, '%f'", m_Values, Value);
+    AppendValue(m_Values, sizeof(m_Values), ", '%f'", Value);
     AddField(Field);
 }
 
 //The char is now interpreted as a numerical value
 void sql_query::AddData(char * Field, char Value)
 {
-    sprintf_s(m_Values, sizeof(m_Values), "%s, '%d'", m_Values, (int)Value);
+    AppendValue(m_Values, sizeof(m_Values), ", '%d'", (int)Value);
     AddField(Field);
 }
 
@@ -870,22 +896,34 @@ void sql_query::AddData(char * Field, char * Value)
         if (*p == '\'' || *p == '\\') esc.push_back(*p);
         esc.push_back(*p);
     }
-    sprintf_s(m_Values, sizeof(m_Values), "%s, '%s'", m_Values, esc.c_str());
+    // Build into a heap buffer so we don't cap at AppendValue's 256B scratch.
+    size_t cur = strlen(m_Values);
+    size_t need = 4 + esc.size(); // ", '" + esc + "'"
+    if (cur + need < sizeof(m_Values)) {
+        m_Values[cur++] = ',';
+        m_Values[cur++] = ' ';
+        m_Values[cur++] = '\'';
+        memcpy(m_Values + cur, esc.data(), esc.size());
+        cur += esc.size();
+        m_Values[cur++] = '\'';
+        m_Values[cur] = '\0';
+    }
     AddField(Field);
 }
 
 // Do not add a quote to the data
 void sql_query::AddDataNQ(char * Field, char * Value)
 {
-    sprintf_s(m_Values, sizeof(m_Values), "%s, %s", m_Values, Value);
+    AppendValue(m_Values, sizeof(m_Values), ", %s", Value);
     AddField(Field);
 }
 
 void sql_query::AddField(char * Field)
 {
     // Postgres uses double-quotes for identifier quoting (vs. MySQL's
-    // backticks). Emit double-quotes directly.
-    sprintf_s(m_Fields, sizeof(m_Fields), "%s, \"%s\"", m_Fields, Field);
+    // backticks). Emit double-quotes directly. See AppendValue above for
+    // why we cannot use `sprintf_s(m_Fields, sz, "%s, X", m_Fields, ...)`.
+    AppendValue(m_Fields, sizeof(m_Fields), ", \"%s\"", Field);
     assert(strlen(m_Fields) < sizeof(m_Fields));
     assert(strlen(m_Values) < sizeof(m_Values));
 }

@@ -106,14 +106,19 @@ public sealed class GlobalAvatarListCodecTests
         int dataStart = GlobalAvatarListCodec.AvatarInfoSize;
         var data = payload.AsSpan(dataStart, GlobalAvatarListCodec.AvatarDataSize);
 
+        // Offsets verified by offsetof() against the live packed struct:
+        // race=46, profession=50, gender=54, mood_type=58. The pre-Phase K
+        // codec used 48/52/56/60 — a 2-byte slide because the original
+        // comments assumed implicit 2-byte alignment padding after
+        // filler1+avatar_version, but ATTRIB_PACKED disables that.
         Encoding.ASCII.GetBytes("Skylar").CopyTo(data.Slice(0, 20));
         Encoding.ASCII.GetBytes("Skywalker").CopyTo(data.Slice(20, 20));
         BinaryPrimitives.WriteInt32LittleEndian(data.Slice(40, 4), 7);  // AvatarType
         data[45] = 3;                                                    // AvatarVersion
-        BinaryPrimitives.WriteInt32LittleEndian(data.Slice(48, 4), 2);  // Race
-        BinaryPrimitives.WriteInt32LittleEndian(data.Slice(52, 4), 9);  // Profession
-        BinaryPrimitives.WriteInt32LittleEndian(data.Slice(56, 4), 1);  // Gender
-        BinaryPrimitives.WriteInt32LittleEndian(data.Slice(60, 4), 4);  // MoodType
+        BinaryPrimitives.WriteInt32LittleEndian(data.Slice(46, 4), 2);  // Race
+        BinaryPrimitives.WriteInt32LittleEndian(data.Slice(50, 4), 9);  // Profession
+        BinaryPrimitives.WriteInt32LittleEndian(data.Slice(54, 4), 1);  // Gender
+        BinaryPrimitives.WriteInt32LittleEndian(data.Slice(58, 4), 4);  // MoodType
 
         var result = (GlobalAvatarList)new GlobalAvatarListCodec()
             .DecodeInbound(payload);
@@ -127,7 +132,7 @@ public sealed class GlobalAvatarListCodecTests
         Assert.Equal(9, decoded.Profession);
         Assert.Equal(1, decoded.Gender);
         Assert.Equal(4, decoded.MoodType);
-        Assert.Equal(241 - 64, decoded.RawAppearance.Length);
+        Assert.Equal(241 - 62, decoded.RawAppearance.Length);
     }
 
     [Fact]

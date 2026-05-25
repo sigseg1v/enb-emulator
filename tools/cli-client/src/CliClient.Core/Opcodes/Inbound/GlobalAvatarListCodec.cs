@@ -194,27 +194,33 @@ public sealed class GlobalAvatarListCodec : IOpcodeCodec
 
     private static AvatarData DecodeAvatarData(ReadOnlySpan<byte> data)
     {
-        // AvatarData wire layout (post-int32_t migration, 241 bytes):
-        //   0..19   first_name[20]   (NUL-padded ASCII)
-        //   20..39  last_name[20]    (NUL-padded ASCII)
-        //   40..43  avatar_type      int32 LE (host order — sourced from
-        //                            DB without ntohl wrapper)
-        //   44      filler1
-        //   45      avatar_version   byte
-        //   46..47  (padding)
-        //   48..51  race
-        //   52..55  profession
-        //   56..59  gender
-        //   60..63  mood_type
-        //   64..240 appearance blob (chars + floats + 4 metals)
+        // AvatarData wire layout (post-int32_t migration, 241 bytes). The
+        // struct is __attribute__((packed)) — no inter-field padding — so
+        // the int32 race/profession/gender/mood quartet starts immediately
+        // after filler1+avatar_version (44+45). Offsets here are verified
+        // by offsetof against the live packed struct on x86_64.
+        //
+        //   0..19   first_name[20]    (NUL-padded ASCII)
+        //   20..39  last_name[20]     (NUL-padded ASCII)
+        //   40..43  avatar_type       int32 LE (host order — DB-sourced
+        //                             without ntohl wrapper)
+        //   44      filler1           byte
+        //   45      avatar_version    byte
+        //   46..49  race              int32 LE
+        //   50..53  profession        int32 LE
+        //   54..57  gender            int32 LE
+        //   58..61  mood_type         int32 LE
+        //   62..240 appearance blob (personality, body parts, tattoo
+        //                            offsets, hair/eye/skin colors,
+        //                            shirt/pants colors+metals, h/w arrays)
         string firstName = ReadCString(data.Slice(0, 20));
         string lastName = ReadCString(data.Slice(20, 20));
         int avatarType = BinaryPrimitives.ReadInt32LittleEndian(data.Slice(40, 4));
         byte avatarVersion = data[45];
-        int race = BinaryPrimitives.ReadInt32LittleEndian(data.Slice(48, 4));
-        int profession = BinaryPrimitives.ReadInt32LittleEndian(data.Slice(52, 4));
-        int gender = BinaryPrimitives.ReadInt32LittleEndian(data.Slice(56, 4));
-        int moodType = BinaryPrimitives.ReadInt32LittleEndian(data.Slice(60, 4));
+        int race = BinaryPrimitives.ReadInt32LittleEndian(data.Slice(46, 4));
+        int profession = BinaryPrimitives.ReadInt32LittleEndian(data.Slice(50, 4));
+        int gender = BinaryPrimitives.ReadInt32LittleEndian(data.Slice(54, 4));
+        int moodType = BinaryPrimitives.ReadInt32LittleEndian(data.Slice(58, 4));
 
         return new AvatarData(
             FirstName:     firstName,
@@ -225,7 +231,7 @@ public sealed class GlobalAvatarListCodec : IOpcodeCodec
             Profession:    profession,
             Gender:        gender,
             MoodType:      moodType,
-            RawAppearance: data.Slice(64).ToArray());
+            RawAppearance: data.Slice(62).ToArray());
     }
 
     private static Galaxy DecodeGalaxy(ReadOnlySpan<byte> g)

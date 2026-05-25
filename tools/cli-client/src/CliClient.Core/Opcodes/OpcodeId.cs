@@ -40,5 +40,8 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId GlobalTicketRequest    = new(0x006E);
         public static readonly OpcodeId GlobalTicket           = new(0x006F);
         public static readonly OpcodeId GlobalAvatarList       = new(0x0070);
+        public static readonly OpcodeId GlobalDeleteCharacter  = new(0x0071);
+        public static readonly OpcodeId GlobalCreateCharacter  = new(0x0072);
+        public static readonly OpcodeId GlobalError            = new(0x0075);
     }
 }

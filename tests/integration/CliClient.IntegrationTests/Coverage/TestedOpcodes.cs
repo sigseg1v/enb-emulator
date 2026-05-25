@@ -68,7 +68,7 @@ public static class TestedOpcodes
     /// <see cref="Opcodes"/>. NEVER decrease without a commit message
     /// explaining what deleted coverage and why it was OK to delete.
     /// </summary>
-    public const int MinTestedCount = 9;
+    public const int MinTestedCount = 11;
 
     /// <summary>
     /// Every opcode with round-trip coverage in this suite, with an
@@ -92,7 +92,11 @@ public static class TestedOpcodes
         new TestedOpcode(0x006F, "GLOBAL_TICKET",
             "Opcodes/GlobalTicketRequestTests.cs — received as the proxy's failure-path reply (response_code=1002 galaxy full) after SendAvatarLogin's WaitForResponse times out; decoded via GlobalTicketCodec which verifies the Phase K 68B canonical Win32 size (was 72B on Linux pre-int32_t migration)."),
         new TestedOpcode(0x0070, "GLOBAL_AVATAR_LIST",
-            "Opcodes/GlobalConnectTests.cs — received as the reply to GlobalConnect after the proxy's SendTicket UDP round-trip to the server's HandleGlobalOpcode dispatcher and back."),
+            "Opcodes/GlobalConnectTests.cs — received as the reply to GlobalConnect after the proxy's SendTicket UDP round-trip to the server's HandleGlobalOpcode dispatcher and back; ALSO Opcodes/GlobalDeleteCharacterTests.cs — received as the refreshed-list reply after 0x0071 DELETE."),
+        new TestedOpcode(0x0071, "GLOBAL_DELETE_CHARACTER",
+            "Opcodes/GlobalDeleteCharacterTests.cs — client sends GlobalDeleteCharacter with slot=0 against a seeded account with no avatars; exercises the proxy+server PacketMethods.h ExtractLong wire-size fix (cast long* → int32_t* so the read width matches the 4-byte wire width on Linux x86_64). Without the fix, ExtractLong pulls 8 bytes from a 4-byte slot field plus 4 bytes of the next LP-string length prefix, the server's GetAvatarID rejects the bogus slot, the delete silently no-ops, and the 0x200D → 0x2003 round-trip times out at WaitForResponse(~5s). ALSO Opcodes/GlobalCreateCharacterTests.cs — used at the test's tail to clean up the created character."),
+        new TestedOpcode(0x0072, "GLOBAL_CREATE_CHARACTER",
+            "Opcodes/GlobalCreateCharacterTests.cs — client sends a 539-byte canonical Win32 GlobalCreateCharacter payload (Terran Warrior, slot 0, 'Testavus' / 'TestShip') against the seeded cli_test03 account; the proxy forwards as 0x200B CREATE_AVATAR over UDP 3810 and the test asserts the refreshed GlobalAvatarList carries the new character (race=0, profession=0, sector=10151 Luna, account_id=9000003). Failure detector for the Phase K ColorInfo wire-size fix (`long metal` → `int32_t metal` — pre-fix ColorInfo was 21B, ShipData 226B, GlobalCreateCharacter 571B vs canonical 539B), and for the GlobalAvatarListCodec AvatarData offset fix (race/profession/gender/mood at 46/50/54/58, not 48/52/56/60 — the struct is __attribute__((packed)) and has no implicit padding after filler1+avatar_version)."),
         new TestedOpcode(0x0075, "GLOBAL_ERROR",
             "Opcodes/GlobalConnectTests.cs — StressTestClosedAccount_GlobalConnect_ReturnsGlobalErrorCode12 sends GlobalConnect for a status=0 (STRESS_TEST_CLOSED) seed account; the server emits 0x2004 GLOBAL_ERROR err=12 on UDP 3810, the proxy forwards it as 0x0075, and the test asserts both the error code (12) and that the message text from the proxy's g_GlobalErrorMsg[12] table comes through (validates the table wasn't truncated at 11 entries)."),
     };

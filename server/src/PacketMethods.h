@@ -12,11 +12,13 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 �, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 �, Net-7 Entertainment.
 **
 */
 #ifndef _PACKET_METHODS_H_INCLUDED_
 #define _PACKET_METHODS_H_INCLUDED_
+
+#include <stdint.h>
 
 template <typename T>
 static void AddData(unsigned char *packet, T mydata, int &index)
@@ -58,10 +60,12 @@ static void AddDataLSN(unsigned char *packet, char *mydata, int &index)
     index += strlen(mydata) + 1;
 }
 
-/* Flip the byte order of the data */
+/* Flip the byte order of the data. See proxy/PacketMethods.h for the
+** rationale on the int32_t cast — Win32 `long` is 4 bytes, Linux is 8,
+** and the wire format is 4. */
 static void AddDataFlip4(unsigned char *packet, long mydata, int &index)
 {
-	*((long *) &packet[index]) = ntohl(mydata);
+	*((int32_t *) &packet[index]) = ntohl((uint32_t)mydata);
 	index += 4;
 }
 
@@ -89,10 +93,14 @@ static void ExtractDataLS(unsigned char *packet, char *buffer, int &index)
     index += string_length;
 }
 
+/* Win32 long is 4B, Linux is 8B, wire is 4B. The original `long*` cast
+** read 8 bytes on Linux — 4 valid + 4 of the next wire field as garbage.
+** See proxy/PacketMethods.h for the read-side rationale; same fix here.
+*/
 static long ExtractLong(unsigned char *packet, int &index)
 {
     index += 4;
-    return (*((long*) &packet[index-4]) );
+    return (long) *((int32_t*) &packet[index-4]);
 }
 
 static short ExtractShort(unsigned char *packet, int &index)
