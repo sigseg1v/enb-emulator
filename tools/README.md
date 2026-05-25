@@ -1,134 +1,124 @@
 # tools/ — C# editor suite
 
-This directory holds the C# editors and helper utilities used to build /
-inspect / modify Net-7 game data. They were originally authored against
-Visual Studio 2008, .NET Framework 2.0–3.5, WinForms. Phase D migrated
-them to **.NET 10** SDK-style csproj targeting `net10.0-windows` with
-`<UseWindowsForms>true</UseWindowsForms>`.
+The Net-7 game-data editors. Each editor reads/writes the live MySQL
+database (or game-asset files); together they're what content authors
+used to add abilities, mobs, missions, sectors, factions, dialog trees,
+particle effects, vendor inventories, etc.
 
-## Build (cross-platform)
+There are **two parallel sets** of projects in this directory:
+
+- **`<tool>-avalonia/`** — Phase L ports targeting `net10.0` + **Avalonia 11**.
+  These run **natively on Linux** (no WINE) and are the recommended path.
+- **`<tool>/`** — original Phase D ports of the 2008-era WinForms code, targeting
+  `net10.0-windows`. Cross-compiles, but the binaries only run on Windows
+  or under WINE. Kept for reference / diff during the migration.
+
+If you're not sure which one to use, **use the Avalonia version**.
+
+## Quickstart
+
+Get the dev DB up first (editors that talk to the DB need it):
 
 ```sh
-dotnet build tools/Net7Tools.slnx
+just init           # boots mysql + loads dumps  (~30s)
 ```
 
-On Linux you need .NET SDK 10.0 (`apt install dotnet-sdk-10.0` or via
-`dotnet-install.sh`). The build produces Windows-only binaries.
+Then either launch the central launcher GUI…
 
-All 16 C# projects build cleanly under Phase D. Build warnings
-(currently ~437) are mostly `CA1416` (Windows-only WinForms APIs called
-from a `net10.0-windows` TFM — which is fine; the binaries are
-Windows-only at runtime). The full per-project status is in
-`BUILD_STATUS.md`.
+```sh
+just launch         # button-per-editor menu
+```
 
-## Run (Windows-only at runtime)
+…or jump straight to a specific editor:
 
-The editors are WinForms apps and require a Windows environment to run.
-Options on Linux:
+```sh
+just launch-mob-editor
+just launch-faction-editor
+just launch-sector-editor
+just launch-mission-editor
+just launch-talktree-editor
+just launch-station-tools
+just launch-effect-editor
+just launch-dataimport
+just launch-net7              # game client launcher (LaunchNet7)
+just launch-enbpatcher        # client patcher
+just launch-toolspatcher      # patcher for the editors themselves
+```
 
-- Run the published binaries under WINE + the WINE-bundled .NET runtime.
-  (Works for some editors; UI fidelity varies.)
-- Run a Windows VM and shell-in.
-- Use a Windows workstation.
+`just --list` shows them all. Each recipe just runs
+`dotnet run --project tools/<name>-avalonia/`. First run rebuilds on
+demand; subsequent runs start in a few seconds.
 
-The data-pipeline tools (`dataimport`, `xml-exporter`, `chunktypes`,
-`enb-ini-parser`, `udpdump`, `unmix`, `w3d-parser`) don't structurally
-need WinForms; future work could retarget them to `net10.0`.
+Editors that talk to MySQL pop a Login dialog on startup. For the dev
+stack the defaults are:
 
-## The tools
-
-### C# projects (in Net7Tools.slnx)
-
-| Project | Purpose |
+| Field | Value |
 |---|---|
-| `commontools`      | Shared library used by the editors |
-| `dataimport`       | Bulk import of game data into the DB |
-| `effect-editor` (SQLBind) | Visual / particle effect authoring |
-| `enb-ini-parser`   | Parse the client `.ini` config files (console) |
-| `faction-editor`   | NPC faction relationships |
-| `launchnet7/ExeUpdater` | Launcher's exe-replacement helper |
-| `launchnet7/FileListCreator` | Manifest generator for the launcher |
-| `launchnet7/LaunchNet7` | Game launcher (current) |
-| `missioneditor`    | Mission / quest authoring |
-| `mob-editor`       | Mob (NPC) data |
-| `sector-editor`    | Sector / map authoring |
-| `station-tools`    | Station authoring |
-| `talktreeeditor`   | NPC dialog tree authoring |
-| `toolslauncher`    | Front-end that launches the other editors |
-| `toolspatcher`     | Patches the tools themselves |
-| `w3d-parser`       | Parse Westwood 3D model files |
+| Host | `localhost` |
+| Port | `3307` |
+| User | `net7` |
+| Password | `net7` |
+| Database | `net7` (or `net7_user` for the accounts schema) |
 
-### C# tools without csproj (deferred)
+## Editor status (Phase L)
 
-These have C# source but the original repo never shipped a csproj.
-They would need a new SDK-style csproj written from scratch:
+Phase L tracks per-tool ports under `plans/12-phase-l-avalonia.md`. Current state:
 
-- `enbpatcher` — apply client patches (single Form1 + crc32)
-- `itemeditor` — item / inventory data editor (has app.config + forms)
+| Tool                  | Avalonia? | Talks to DB? | Notes |
+|---|:-:|:-:|---|
+| `commontools`         | ✅ shared lib | n/a | Login dialog + DB layer used by the others |
+| `dataimport`          | ✅ | ✅ | Bulk-load game data |
+| `effect-editor`       | ✅ | ✅ | Particle / stat effects |
+| `enbpatcher`          | ✅ |    | Client binary patcher |
+| `faction-editor`      | ✅ | ✅ | NPC faction matrix |
+| `launchnet7`          | ✅ |    | Game client launcher |
+| `mission-editor`      | ✅ | ✅ | Mission / quest authoring |
+| `mob-editor`          | ✅ | ✅ | Mob (NPC) data |
+| `sector-editor`       | ✅ | ✅ | Sector / map authoring (Piccolo-on-Avalonia canvas) |
+| `station-tools`       | ✅ | ✅ | Station / vendor / NPC authoring |
+| `talktreeeditor`      | ✅ |    | NPC dialog trees (XML in/out) |
+| `toolslauncher`       | ✅ |    | The central GUI launcher |
+| `toolspatcher`        | ✅ |    | Patcher for the tools themselves |
+| `item-editor`         | ❌ | ✅ | Original `tools/itemeditor/` never had a csproj |
+| `chunktypes`          | ❌ |    | 2010-era C++ utility (`.dsp`) — out of Phase D/L scope |
+| `udpdump`             | ❌ |    | 2010-era C++ utility (`.dsp`) — out of Phase D/L scope |
+| `unmix`               | ❌ |    | 2010-era C++ utility (`.dsp`) — out of Phase D/L scope |
+| `w3d-parser`          | ❌ |    | 2010-era C# utility — not user-facing |
+| `xml-exporter`        | ❌ |    | 2010-era C++ utility (`.dsp`) — out of Phase D/L scope |
 
-### C++ tools (not part of Phase D)
+## Building everything (without running)
 
-These are misnamed as "tools" but are actually pre-2010 C++ utilities
-with `.dsp` (VS6) project files. They are not part of the .NET 10
-migration — modernizing them would be a separate phase:
+```sh
+# Build the Avalonia ports (any *-avalonia project picks up the rest via solution refs).
+dotnet build tools/toolslauncher-avalonia/
 
-- `chunktypes`     — Inspect / dump CHUNK file format types
-- `launchnet7-old` — Legacy MFC launcher
-- `udpdump`        — Capture / inspect game UDP traffic (uses Westwood RSA)
-- `unmix`          — Unpack `.MIX` archive files
-- `xml-exporter`   — Export DB tables to XML
+# Build the legacy WinForms tools (cross-compiles; binaries are Windows-only).
+just build-tools
+```
 
-## Phase D translation patterns
+## Legacy WinForms route (not recommended on Linux)
 
-The conversion was driven by `tools/convert_csproj.py`. Patterns:
+The `tools/<name>/` projects (without `-avalonia`) were the Phase D
+attempt to retarget the 2008-era WinForms code to `net10.0-windows`.
+They build cross-platform (`dotnet build tools/Net7Tools.slnx`) but
+their runtime story on Linux is "WINE + .NET runtime" — varying UI
+fidelity, no real integration. Phase L superseded them with the
+Avalonia ports above. See `BUILD_STATUS.md` for the Phase D status
+table.
 
-- Old-style csproj (`<Project ToolsVersion="3.5" ...>`) → SDK-style
-  (`<Project Sdk="Microsoft.NET.Sdk">`).
-- `TargetFrameworkVersion=v3.5` → `TargetFramework=net10.0-windows`
-  (WinForms apps) or `net10.0` (console).
-- `<OutputType>WinExe</OutputType>` implies `<UseWindowsForms>true</UseWindowsForms>`.
-- Stripped framework refs (`System`, `System.Core`, `System.Xml`,
-  `System.Data`, `System.Windows.Forms`, `System.Drawing`,
-  `System.Deployment`, `System.Design`, `System.Drawing.Design`) — the
-  SDK provides them via `<UseWindowsForms>`.
-- `<Reference Include="MySql.Data, Version=5.2.5.0, ...">` →
-  `<PackageReference Include="MySql.Data" Version="9.4.0" />` (Oracle's
-  current NuGet, drop-in API).
-- Vendored DLL refs (`Meebey.SmartIrc4net`, `SandDock`,
-  `UMD.HCIL.Piccolo`, `LaMarvin.Windows.Forms.ColorPicker`, `log4net`)
-  rewritten as `<Reference>` with HintPath into
-  `tools/commontools/Libs/release/`.
-- `<ProjectReference>` paths case-corrected for case-sensitive
-  filesystems (`..\CommonTools\` → `../commontools/`) and slashes
-  normalised to forward.
-- The old `<Compile Include="...">` lists were dropped in favour of the
-  SDK's automatic globbing. Where the SDK glob picked up files the
-  original csproj never compiled (legacy `Design/`, vendored
-  `Libs/SmartIrc4Net/`, duplicate-class `Enumerations.cs`, typo
-  `TexturesChunke.cs`, etc.), per-project `<Compile Remove>` rules were
-  added — see the individual csproj files.
-
-### Solution-wide settings: `Directory.Build.props`
-
-- `EnableWindowsTargeting=true` lets `net10.0-windows` build on Linux.
-- A large `NoWarn` list silences the categories of warning that 2008-era
-  C# triggers under modern Roslyn (CS0108 hides-by-name, CS0414/19/68/69
-  unused, CS0612/18 obsolete, CA1416 Windows-only APIs, SYSLIB* obsolete).
-- `WarningsNotAsErrors` demotes WFO1000/WFO2001 (WinForms designer
-  analyzer) from error to warning where the analyzer fires on existing
-  code patterns.
-- `RuntimeIdentifiers=win-x64;win-x86` — runtime targets.
-- `DefaultItemExcludes` excludes vendored library sources (`Libs/**`)
-  and the `*.old` backup csprojs left next to the converted ones.
+If you're running these on Windows or under WINE, point them at the
+same `localhost:3307` MySQL the Avalonia editors use.
 
 ## Vendored binaries
 
-See `tools/THIRD_PARTY_BINARIES.md` for the list of vendored DLLs (some
-editors ship .NET assemblies we don't have source for; the file records
-provenance and license info for each).
+See `tools/THIRD_PARTY_BINARIES.md` for the list of vendored DLLs the
+WinForms ports reference (Piccolo, SandDock, SmartIrc4Net, etc.). The
+Avalonia ports drop most of these — the Piccolo dep was rewritten as a
+shim against Avalonia primitives under `tools/sector-editor-avalonia/PiccoloShim/`.
 
 ## Old csproj backups
 
-The original `*.csproj` files are kept beside the new ones as
-`*.csproj.old` for reference / diff. Once the migration has soaked in
-production they can be deleted.
+The original `*.csproj` files under `tools/<name>/` are kept beside the
+new ones as `*.csproj.old` for reference / diff. Safe to delete once
+the Phase D path is fully retired (currently kept because some content
+authors still run Windows).

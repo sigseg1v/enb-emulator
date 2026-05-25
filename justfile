@@ -25,6 +25,66 @@ build:
 build-tools:
     dotnet build tools/Net7Tools.slnx
 
+# ---- launch C# editors (Avalonia ports — Linux native) ----
+#
+# Each recipe runs the Avalonia port of a tools/* editor. Use `just launch`
+# for the central toolslauncher GUI (button per editor); use `just launch-X`
+# to skip straight to a specific editor.
+#
+# All editors that talk to MySQL connect via the Login dialog on startup —
+# point it at the dev stack (`just init` first, then host=localhost
+# port=3307 user=net7 pass=net7). Tools that don't talk to the DB
+# (toolslauncher, launchnet7, enbpatcher, toolspatcher, w3d-parser,
+# talktreeeditor) skip the login dialog.
+
+# Central launcher GUI — button per editor; spawns Avalonia projects.
+launch:
+    dotnet run --project tools/toolslauncher-avalonia
+
+# Game client launcher (LaunchNet7 port).
+launch-net7:
+    dotnet run --project tools/launchnet7-avalonia
+
+# Effect / particle / stat editor (DB).
+launch-effect-editor:
+    dotnet run --project tools/effect-editor-avalonia
+
+# NPC faction relationships editor (DB).
+launch-faction-editor:
+    dotnet run --project tools/faction-editor-avalonia
+
+# Mission / quest authoring (DB).
+launch-mission-editor:
+    dotnet run --project tools/missioneditor-avalonia
+
+# Mob (NPC) data editor (DB).
+launch-mob-editor:
+    dotnet run --project tools/mob-editor-avalonia
+
+# Sector / map authoring (DB, Piccolo-on-Avalonia canvas).
+launch-sector-editor:
+    dotnet run --project tools/sector-editor-avalonia
+
+# Station / vendor / NPC editor (DB).
+launch-station-tools:
+    dotnet run --project tools/station-tools-avalonia
+
+# NPC dialog tree editor (XML in/out, no DB).
+launch-talktree-editor:
+    dotnet run --project tools/talktreeeditor-avalonia
+
+# Bulk import of game data into the DB.
+launch-dataimport:
+    dotnet run --project tools/dataimport-avalonia
+
+# Client patcher.
+launch-enbpatcher:
+    dotnet run --project tools/enbpatcher-avalonia
+
+# Patches the tools themselves.
+launch-toolspatcher:
+    dotnet run --project tools/toolspatcher-avalonia
+
 # Build the gtest harness (Phase G).
 build-tests:
     cmake -S tests -B build/tests -G Ninja

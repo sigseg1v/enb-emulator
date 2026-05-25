@@ -47,16 +47,19 @@ namespace ToolsLauncherAvalonia
     {
         readonly Settings _settings = Settings.Load();
 
-        // (display name, avalonia project name, "(not yet ported)" stub)
+        // (display name, avalonia project name, "(not yet ported)" stub).
+        // Phase L Tier 12e closeout (2026-05-24): sector-editor flipped to
+        // Ported=true. Item Editor remains the only un-ported editor (original
+        // is tools/itemeditor/ — never had a csproj in the upstream repo).
         readonly List<(string Label, string Project, bool Ported)> _editors = new()
         {
             ("Effect Editor",   "effect-editor-avalonia",       true),
+            ("Faction Editor",  "faction-editor-avalonia",      true),
             ("Item Editor",     "item-editor-avalonia",         false),
             ("Mission Editor",  "missioneditor-avalonia",       true),
             ("Mob Editor",      "mob-editor-avalonia",          true),
-            ("Sector Editor",   "sector-editor-avalonia",       false),
+            ("Sector Editor",   "sector-editor-avalonia",       true),
             ("Station Tools",   "station-tools-avalonia",       true),
-            ("Faction Editor",  "faction-editor-avalonia",      true),
             ("Talk Tree",       "talktreeeditor-avalonia",      true),
         };
 
