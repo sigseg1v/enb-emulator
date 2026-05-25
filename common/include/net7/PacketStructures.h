@@ -184,11 +184,16 @@ struct ColorInfo
 
 struct ShipData
 {
-    long    race;                           // 00
-    long    profession;                     // 04
-    long    hull;                           // 0c
-    long    wing;                           // 08
-    long    decal;                          // 10
+    // Phase K: int32_t (was `long`). Win32 packed = 5*4 + 26 + 12 + 8*17 = 194
+    // bytes; Linux with 8-byte long = 5*8 + 26 + 12 + 136 = 214 bytes. Embedded
+    // in GlobalCreateCharacter — without this migration the proxy stamped a
+    // 20-byte-too-large payload into the UDP_GLOBAL_SERVER_PORT exchange, and
+    // the server's wire offsets walked off into the ship_data/unknown region.
+    int32_t race;                           // 00
+    int32_t profession;                     // 04
+    int32_t hull;                           // 0c
+    int32_t wing;                           // 08
+    int32_t decal;                          // 10
 
     char    ship_name[26];                  // 14
     float   ship_name_color[3];             // 2e
@@ -274,9 +279,16 @@ struct GlobalAvatarList
 
 struct GlobalCreateCharacter
 {
-    long    galaxy_id;              // 4 bytes
-    long    character_slot;         // 4 bytes
-    long    tutorial_status;        // 4 bytes
+    // Phase K: int32_t (was `long`). Win32 packed = 3*4 + 65 + 241 + 194 + 27 =
+    // 539 bytes; Linux with 8-byte long = 3*8 + 65 + 241 + 194 + 27 = 551
+    // bytes (still divergent through the embedded ShipData, since both this
+    // struct and ShipData carry `long` fields). Sent verbatim as the payload
+    // of the proxy->server UDP exchange (UDPClient_linux.cpp:746) via
+    // sizeof(GlobalCreateCharacter), so a size mismatch silently corrupts the
+    // CREATE_AVATAR request and AccountManager::CreateCharacter reads garbage.
+    int32_t galaxy_id;              // 4 bytes
+    int32_t character_slot;         // 4 bytes
+    int32_t tutorial_status;        // 4 bytes
     char    account_username[65];   // 65 bytes
     AvatarData avatar;              // 241 bytes
     ShipData ship_data;             // 194 bytes
@@ -315,7 +327,12 @@ struct MasterJoin
 //
 struct GlobalTicket
 {
-    long    response_code;
+    // Phase K: int32_t (was `long`). Win32 = 4 + 64 = 68 bytes; Linux with
+    // 8-byte long was 8 + 64 = 72. Sent by Connection::SendGlobalTicket via
+    // sizeof(GlobalTicket) so the 4-byte gap would have shifted the embedded
+    // MasterJoin avatar_id / sector_id / ticket fields on the Win32 client's
+    // side, producing a wrong-galaxy ServerRedirect or rejected ticket.
+    int32_t     response_code;
     MasterJoin  join_data;
 } ATTRIB_PACKED;
 

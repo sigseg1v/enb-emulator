@@ -561,7 +561,10 @@ short UDPClient::SendMasterLogin(long avatar_id, long sector_id,
         short udp_port = *((short *) &m_ticket[4]);
         LogMessage("UDPClient(Linux): MasterLoginConfirm avatar=0x%08lx udp_port=%d\n",
                    (long) m_PlayerID, (int) udp_port);
-        *sector_ipaddr = *((long *) m_ticket);
+        // m_ticket layout: [u32 ipaddr][u16 udp_port]. Reading ipaddr as
+        // Linux `long` (8 bytes) pulls udp_port + 2 bytes past into the
+        // upper half. Cast through int32_t so we copy exactly 4 wire bytes.
+        *sector_ipaddr = (long) *((int32_t *) m_ticket);
         return udp_port;
     }
 
@@ -689,7 +692,11 @@ void UDPClient::ProcessGlobalError(char *msg, EnbUdpHeader * /*header*/)
 
     if (g_ServerMgr && g_ServerMgr->m_GlobalConnection)
     {
-        long err = *((long *) msg);
+        // Wire field is 4 bytes (server-side UDP_Global.cpp writes int32_t).
+        // Reading as Linux `long` would pull 8 bytes and treat the next 4
+        // bytes of the UDP payload as the high half of the error code,
+        // routing valid codes through the "unknown error — dropping" branch.
+        long err = (long) *((int32_t *) msg);
         g_ServerMgr->m_GlobalConnection->GlobalError(err);
     }
 }
@@ -737,8 +744,10 @@ long UDPClient::SendAvatarLogin(long char_slot)
 
     if (m_global_account_rcv && m_ticket && m_PlayerID != 0)
     {
-        // Payload of 0x2005 AVATARLOGIN_CONFIRM is a single long avatar_id.
-        return *((long *) m_ticket);
+        // Payload of 0x2005 AVATARLOGIN_CONFIRM is a single 4-byte avatar_id
+        // (server writes a 32-bit value). Reading as `long` on Linux x86_64
+        // pulls 8 bytes and sign-extends garbage from the next field.
+        return (long) *((int32_t *) m_ticket);
     }
     return -1;
 }
