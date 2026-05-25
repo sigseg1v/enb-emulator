@@ -208,7 +208,9 @@ integration-test:
     spawned=0
     if ! timeout 1 bash -c '</dev/tcp/127.0.0.1/3801' 2>/dev/null; then
         echo ">>> no proxy on tcp/3801; building + starting net7proxy-local"
-        docker build -t enb-proxy:local proxy/
+        # Context = repo root: proxy/Dockerfile COPYs proxy/ AND common/
+        # (Phase R headers). Matches cbacf78 for CI workflow.
+        docker build -t enb-proxy:local -f proxy/Dockerfile .
         docker rm -f net7proxy-local 2>/dev/null || true
         docker run -d --name net7proxy-local -p 3801:3801 -p 3805:3805 -p 3500:3500 enb-proxy:local
         spawned=1

@@ -44,11 +44,15 @@ struct VersionRequest
 //If we have the player_id it makes things a lot simpler
 struct EnbUdpHeader
 {
-    short size;
-    short opcode;
-    long player_id;
-    long packet_sequence;
-};
+    // Phase K: int32_t guarantees 4 bytes on every platform. `long` is 8
+    // bytes on Linux x86_64 vs 4 bytes on Win32, which made sizeof(header)
+    // 20 on Linux and 12 on Win32 — wire format is 12. Both server and
+    // proxy recompile from this header, so the size flip is symmetric.
+    short   size;
+    short   opcode;
+    int32_t player_id;
+    int32_t packet_sequence;
+} ATTRIB_PACKED;
 
 /*
 

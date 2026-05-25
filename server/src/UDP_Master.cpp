@@ -12,7 +12,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -47,7 +47,10 @@ void UDP_Connection::ProcessHandoff(char *msg, EnbUdpHeader *hdr, const long sou
 {
     unsigned char data[32],*ip;
     int index = 0;
-    long sector_id = *((long*) msg);
+    // Wire format: bytes 0-3 sector_id, byte 4 packet_opt. Original code
+    // read sizeof(long)=8 bytes for sector_id (would over-read 3 bytes on
+    // Linux x86_64); ntohl masked it because it only consumes the low 32 bits.
+    int32_t sector_id = *((int32_t*) msg);
 	u8 packet_opt = *((u8*) &msg[4]);
     Player *player = m_ServerMgr->m_PlayerMgr.GetPlayer(hdr->player_id);
 
@@ -84,8 +87,10 @@ void UDP_Connection::ProcessHandoff(char *msg, EnbUdpHeader *hdr, const long sou
     {
         LogMessage("[UDP] SERVER ERROR: Unable to find player [%x]\n", hdr->player_id);
 		//send msg to proxy to terminate client
-		long player_id = 0;
-		SendOpcode(ENB_OPCODE_100A_MVAS_TERMINATE_S_C, (unsigned char *) &player_id, sizeof(long), source_addr, source_port);
+		// Phase K: wire expects 4-byte game id; sizeof(long) was 8 on Linux
+		// x86_64, blowing the packet length by 4 bytes.
+		int32_t player_id = 0;
+		SendOpcode(ENB_OPCODE_100A_MVAS_TERMINATE_S_C, (unsigned char *) &player_id, sizeof(player_id), source_addr, source_port);
     }
 }
 
