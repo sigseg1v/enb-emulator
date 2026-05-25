@@ -2575,3 +2575,116 @@ complementary tests — Wave 19 asserts the mirrored-GameID case, Wave
   survival probe candidate.
 * **0x001A DEBUG** — debug-mode opcode; guarded on admin status, may
   be a fast survival probe.
+
+## 2026-05-25 — Phase K Wave 21: 0x002D ACTION2 survival round-trip + Wave-12 `u_long*` cast tightening
+
+### What landed
+
+Phase K Wave 21 — `SectorAction2Tests.Action2_NoOpSubActionAndEmptyName_DoesNotBreakConnection_RequestTimeStillRoundTrips`:
+the simpler-payload sibling of Wave 13's 0x002C ACTION. Test sends
+the minimum 14-byte ActionPacket2 (`{GameID=0 BE, Action=23 BE,
+string_len=0 LE, OptionalVar=0 BE}`) and asserts survival by
+round-tripping `0x0044 REQUEST_TIME → 0x0034 CLIENT_SET_TIME` with a
+randomised sentinel tick.
+
+Passes in isolation in 7s. Full integration suite **52/52 in 1m54s**
+from a freshly-recycled stack.
+
+### Server tightening shipped in same wave (preservation-aligned)
+
+Fixed the one `*(u_long *)` cast that Wave 12's grep sweep missed:
+
+  server/src/PlayerConnection.cpp:4265 (`HandleAction2`):
+    converted.OptionalVar = ntohl(*(u_long *)(myAction2->string+myAction2->string_len));
+                                    ^^^^^^^^^^
+    changed to:
+    converted.OptionalVar = ntohl(*(uint32_t *)(myAction2->string+myAction2->string_len));
+
+Same bug class as Wave 12 (`sizeof(long)==8` on Linux x86_64 vs `4` on
+Win32). The Wave 12 sweep ran `grep -rn '\*((long \*)'` and
+`grep -rn '\*((unsigned long \*)'` but did NOT match the POSIX `u_long`
+typedef variant. This single site was missed.
+
+Why this is tightening, not relaxation, per CLAUDE.md server-integrity
+rules: on Win32 retail the `u_long` cast happened to be correct
+(4 bytes). On Linux x86_64 `sizeof(u_long)==8`, so the cast read 4
+bytes past the wire's `int32_t OptionalVar` field, picking up garbage
+adjacent to whatever buffer the packet lived in. Restoring 4B read
+parity with retail is fidelity. We're not changing what the server
+accepts, only correcting how it reads what it already accepted.
+
+Verification: `grep -rn '\*(u_long \*)' server/src/` → single hit at
+PlayerConnection.cpp:4265. Also greped for `*(u_int32_t *)` and
+`*(ulong *)` variants — clean. No other variant typedefs in the tree.
+
+### Test design
+
+* **Action=23** chosen because the `HandleAction` switch dispatches
+  case 23 to a literal commented-out no-op (`//keep trading???`
+  server/src/PlayerConnection.cpp:4104) — same branch Wave 13 used
+  for 0x002C ACTION. Walking through `HandleAction2 → HandleAction`
+  via the case-23 branch is guaranteed to produce no DB writes, no
+  fan-out, no reply.
+
+* **string_len=0** chosen specifically to exercise the OptionalVar
+  offset arithmetic with zero string slack — the worst case for the
+  read-width bug. With string_len=0, the OptionalVar pointer is
+  `myAction2->string+0`, which sits at the very tail of the wire
+  payload. A pre-fix Linux read would clobber whatever lay 4 bytes
+  past the payload (buffer-allocator metadata at worst).
+
+* **GameID=0 / empty Target name**: `HandleAction2` first calls
+  `PlayerManager::GetGameIDFromName("")` (server/src/PlayerManager.cpp:258)
+  which returns -1 for any name not in the global list (including
+  empty). Then `ObjectManager::GetObjectFromID(-1)` (server/src/
+  ObjectManager.cpp:563) is safe: the three branches all fail-safe
+  for negative IDs and `obj` stays null. The converted ActionPacket
+  is then passed to `HandleAction` which runs the case-23 no-op.
+
+### Regression coverage (7 classes)
+
+1. Wave-12-class `u_long*` read-width drift on Linux x86_64.
+2. Player→HandleAction2 dispatch reachability.
+3. ActionPacket2 → ActionPacket ntohl conversion correctness
+   (every field needs the correct byte-order swap).
+4. `GetGameIDFromName("")` empty-string safety (no string-table OOB
+   on zero-length name).
+5. `GetObjectFromID(-1)` negative-ID safety.
+6. `HandleAction` case-23 chain safety after Action2 conversion.
+7. Connection survival after the full Action2 → Action no-op chain
+   (REQUEST_TIME round-trips with sentinel tick echo).
+
+### Why ACTION2 isn't proxy-listed
+
+ACTION2 (0x002D) is NOT explicitly listed in
+`proxy/ClientToServer_linux_stubs.cpp` so it hits the `default:` arm
+and falls through to bottom-of-switch ForwardClientOpcode. Matches
+Win32 ClientToSectorServer.cpp behaviour: all non-special opcodes
+forward verbatim.
+
+### Test-account pool
+
+Pool[16] cli_test18 dedicated. Continues the
+9_000_001..9_000_018 sequential allocation (skipping 9_000_010 which
+is the StressTestClosed out-of-pool fixture).
+
+### Coverage ratchet
+
+`Coverage/TestedOpcodes.cs` MinTestedCount bumped 31 → 32 (+1).
+Phase K coverage: 31/207 → **32/207 (15.5%)**.
+
+### Full-suite re-run pattern (this wave: clean)
+
+Did NOT recur this wave — the docker-compose recycle between the
+isolated and full runs handled it. Pattern remains tracked for Wave
+N+1 hardening (explicit LOGOFF in test `finally` blocks).
+
+### Next-Phase-K targets
+
+* **0x0027 INVENTORY_MOVE** — first inventory-state-mutator wave;
+  needs seeded inventory.
+* **0x0029 ITEM_STATE** — item-state-flip cousin of INVENTORY_MOVE.
+* **0x002E OPTION** — client-side option toggle; likely a pure-no-op
+  survival probe candidate.
+* **0x001A DEBUG** — debug-mode opcode; guarded on admin status, may
+  be a fast survival probe.

@@ -4262,7 +4262,11 @@ void Player::HandleAction2(unsigned char *data)
 	converted.GameID = ntohl(myAction2->GameID);
 	converted.Action = ntohl(myAction2->Action);
 	converted.Target = g_PlayerMgr->GetGameIDFromName(myAction2->string);
-	converted.OptionalVar = ntohl(*(u_long *)(myAction2->string+myAction2->string_len));
+	// uint32_t* (not u_long*): sizeof(u_long)==8 on Linux x86_64 would read 4 bytes past
+	// the wire's int32 OptionalVar field. Same bug class fixed sweep-wide in Wave 12;
+	// missed there because Wave 12's grep covered `unsigned long` but not the `u_long`
+	// POSIX typedef. See plans/99-decisions-log.md 2026-05-25 Wave 12.
+	converted.OptionalVar = ntohl(*(uint32_t *)(myAction2->string+myAction2->string_len));
 
 	HandleAction((unsigned char *)&converted);
 }
