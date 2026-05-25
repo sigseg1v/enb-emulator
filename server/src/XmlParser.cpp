@@ -16,7 +16,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -286,9 +286,9 @@ double XmlParser::ParseDouble(char **buffer, int id, double min, double max, boo
     return (value);
 }
 
-DWORD XmlParser::ParseColor(char **buffer, int id)
+uint32_t XmlParser::ParseColor(char **buffer, int id)
 {
-    DWORD color = 0;
+    uint32_t color = 0;
     char data[512];
 
     CheckID(id);

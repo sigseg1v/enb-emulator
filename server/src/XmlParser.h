@@ -16,7 +16,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -54,7 +54,7 @@ public:
     bool    GetXmlData(char **buffer, char *data, long length);
     int     ParseInt(char **buffer, int id, int min, int max);
     double  ParseDouble(char **buffer, int id, double min, double max, bool allow_minus_one = false);
-    DWORD   ParseColor(char **buffer, int id);
+    uint32_t ParseColor(char **buffer, int id);
     bool    ParseFloatArray(char *attrib_values, int count, float *array);
     bool    CheckID(int id);
 

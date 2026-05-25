@@ -13,7 +13,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -65,12 +65,12 @@ private:
     unsigned long	m_Cumulative_Count;
 
     MessageEntry   *m_EntryBuffer;
-    UINT            m_EntryIndex;
+    unsigned int    m_EntryIndex;
 
 	Mutex			m_Mutex;
 
-	DWORD m_MessageSlots;
-	DWORD m_EntriesInQueue;
+	uint32_t m_MessageSlots;
+	uint32_t m_EntriesInQueue;
 	u32	  m_WarningTimer;
 
 	bool			m_CheckSlots;
@@ -95,7 +95,7 @@ public:
 	void RemoveAllPlayerEntries(long player_id);
 	void ResetQueue();
 
-	DWORD Count() { return m_EntriesInQueue; };
+	uint32_t Count() { return m_EntriesInQueue; };
 
 	void RetreiveMessage( unsigned char *pMessage, int length, unsigned char * pBuffer );
 
@@ -107,15 +107,15 @@ private:
 
 	MessageEntry   **m_Queue;
 
-	DWORD m_QueueIndexSize;
-	DWORD m_ReadIndex;
-	DWORD m_WriteIndex;
+	uint32_t m_QueueIndexSize;
+	uint32_t m_ReadIndex;
+	uint32_t m_WriteIndex;
 
-	DWORD m_TotalAdded;
-	DWORD m_TotalAddedToHead;
-	DWORD m_TotalAddedToTail;
-	DWORD m_TotalRemoved;
-	DWORD m_EntriesInQueue;
+	uint32_t m_TotalAdded;
+	uint32_t m_TotalAddedToHead;
+	uint32_t m_TotalAddedToTail;
+	uint32_t m_TotalRemoved;
+	uint32_t m_EntriesInQueue;
 
 	char *m_Name;
 	bool  m_CheckQueue;

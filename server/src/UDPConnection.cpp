@@ -71,7 +71,11 @@ UDP_Connection::~UDP_Connection()
 {
 //	LogMessage("UDP connection terminated.\n");
 
+#ifdef WIN32
 	shutdown(m_Socket, SD_BOTH);
+#else
+	shutdown(m_Socket, SHUT_RDWR);
+#endif
 	closesocket(m_Socket); // unblock the recv
 	m_Socket = INVALID_SOCKET;
 	int timeout = 0; // port 3702 is not closing properly!
@@ -82,11 +86,11 @@ UDP_Connection::~UDP_Connection()
 	}
 }
 
-ULONG GetLocalAddr()
+unsigned long GetLocalAddr()
 {
 	struct hostent* hp;
 	char localname[MAX_PATH];
-	ULONG addr = 0;
+	unsigned long addr = 0;
 
 
 #ifdef WIN32
@@ -99,7 +103,7 @@ ULONG GetLocalAddr()
 		if (hp != NULL)	
 		{
 			strcpy_s(localname, sizeof(localname), hp->h_name);
-			addr = *((ULONG *) hp->h_addr_list[0]);
+			addr = *((unsigned long *) hp->h_addr_list[0]);
 		}
 	}
 
@@ -109,7 +113,7 @@ ULONG GetLocalAddr()
 bool UDP_Connection::UDP_BindPort(short port, SOCKET socket)  
 {
 	sockaddr_in localAddr;
-	ULONG addr;
+	unsigned long addr;
     
 	memset(&localAddr, 0, sizeof(localAddr));
 	localAddr.sin_family = AF_INET;
@@ -136,7 +140,7 @@ unsigned long UDP_Connection::checksum(char *buffer, int size)
 	unsigned long cksum=0; 
 
 	while(size > 1) { cksum+=*buffer++; size -= 2; }
-	if(size) cksum += *(UCHAR*)buffer; 
+	if(size) cksum += *(unsigned char*)buffer;
  
 	cksum = (cksum >> 16) + (cksum & 0xffff); 
 	cksum += (cksum >>16); 
@@ -302,7 +306,7 @@ int UDP_Connection::UDP_RecvS(char *buffer, int size, long &source_addr, unsigne
 		if (!g_ServerShutdown)
 		{
 			//usleep(200 * 1000);
-			DWORD dwError = errno;
+			uint32_t dwError = errno;
 #ifdef WIN32
 			if (dwError == WSAENOTSOCK)
 #else

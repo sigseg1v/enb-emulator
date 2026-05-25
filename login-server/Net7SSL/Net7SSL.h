@@ -95,12 +95,6 @@
 	#ifndef WSAECONNRESET
 	#define WSAECONNRESET	ECONNRESET
 	#endif
-	#ifndef UCHAR
-	typedef unsigned char UCHAR;
-	#endif
-	#ifndef UINT
-	typedef unsigned int UINT;
-	#endif
 
 	typedef uint64_t u64;
 	typedef int64_t  s64;
@@ -127,60 +121,29 @@
 	// MSVC-only directives gcc doesn't understand.
 	#define WINAPI
 	#define __cdecl
-	#define SOCKADDR_IN struct sockaddr_in
 	// SOMAXCONN normally provided by <sys/socket.h> on Linux too — no-op.
 
-	// Minimal Win32 typedef aliases used by both walled (#ifdef WIN32)
-	// and Linux-active legacy code. Walled code never compiles on
-	// Linux; these are here so the Linux paths that reference
-	// SOCKET m_Socket (etc.) typecheck.
-	typedef uint32_t  DWORD;
-	typedef uint16_t  WORD;
-	typedef uint8_t   BYTE;
-	typedef int       BOOL;
-	typedef int32_t   LONG;
-	typedef uint32_t  ULONG;
-	typedef int64_t   LONGLONG;
-	typedef uint64_t  ULONGLONG;
-	typedef void*       LPVOID;
-	typedef const char* LPCSTR;
-	typedef char*       LPSTR;
-	typedef char*       LPTSTR;
-	typedef const char* LPCTSTR;
-	typedef void* HANDLE;
-	typedef int   SOCKET;
+	// Phase M Wave 3: the per-target ~25-symbol Win32 typedef block
+	// (DWORD/WORD/BYTE/BOOL/LONG/ULONG/LONGLONG/ULONGLONG/LPVOID/LPCSTR/
+	// LPSTR/LPTSTR/LPCTSTR/HANDLE/UCHAR/UINT/SOCKADDR_IN/TRUE/FALSE/TEXT/
+	// _T/INVALID_HANDLE_VALUE/INFINITE/WAIT_OBJECT_0/WAIT_FAILED) was
+	// retired in lockstep with the proxy/Net7.h cleanup. Every typedef
+	// that had zero Linux-active call sites was deleted. What remains:
+	//   - SOCKET (60+ Linux-active sites), INVALID_SOCKET, SOCKET_ERROR —
+	//     canonical socket idioms.
+	//   - WAIT_TIMEOUT (one Linux-active site: connection_B.h:82
+	//     SocketReady default arg).
+	// Everything else was either WIN32-walled, in string literals
+	// ("Valid=TRUE\r\n" — not affected by macros), or in comments.
+	typedef int SOCKET;
 	#ifndef INVALID_SOCKET
 	#  define INVALID_SOCKET (-1)
 	#endif
 	#ifndef SOCKET_ERROR
 	#  define SOCKET_ERROR   (-1)
 	#endif
-	#ifndef TRUE
-	#  define TRUE  1
-	#endif
-	#ifndef FALSE
-	#  define FALSE 0
-	#endif
-	#ifndef TEXT
-	#  define TEXT(x) x
-	#endif
-	#ifndef _T
-	#  define _T(x) x
-	#endif
-	#ifndef INVALID_HANDLE_VALUE
-	#  define INVALID_HANDLE_VALUE ((HANDLE)(intptr_t)(-1))
-	#endif
-	#ifndef INFINITE
-	#  define INFINITE       0xFFFFFFFFu
-	#endif
-	#ifndef WAIT_OBJECT_0
-	#  define WAIT_OBJECT_0  0x00000000u
-	#endif
 	#ifndef WAIT_TIMEOUT
 	#  define WAIT_TIMEOUT   0x00000102u
-	#endif
-	#ifndef WAIT_FAILED
-	#  define WAIT_FAILED    0xFFFFFFFFu
 	#endif
 
 	// Phase M: Sleep() and GetTickCount() were inlined Win32-name shims here;

@@ -3,6 +3,7 @@
 #ifndef _TCP_LISTENER_SSL_H_INCLUDED_
 #define _TCP_LISTENER_SSL_H_INCLUDED_
 
+#include <cstdint>
 #include <net7/Mutex.h>
 #include "MemoryHandler.h"
 
@@ -22,7 +23,7 @@ private:
 	bool		SocketReady(int ttimeout);
 	unsigned long	m_IpAddress;
 	Mutex		m_Mutex;
-	WORD		m_TcpPort;
+	uint16_t	m_TcpPort;
 	ServerManager	&m_ServerMgr;
 	int		m_ServerType;
 	SOCKET		m_TcpListenerSocket;

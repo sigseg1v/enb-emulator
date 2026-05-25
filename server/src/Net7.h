@@ -91,21 +91,13 @@
 
 #else // LINUX
 	#define ATTRIB_PACKED __attribute__((packed))
-	#define TRUE            1
-	#define FALSE           0
 	#define MAX_PATH        260
-	#define WORD            unsigned short
-	#define DWORD           unsigned long
 	#define SOCKET          int
 	#define INVALID_SOCKET	-1
 	#define closesocket	close
 	#define WSAGetLastError() (errno)
 	#define WSAECONNRESET	ECONNRESET
 
-	#define ULONG 			unsigned long
-	#define UINT 			unsigned int
-	#define UCHAR			unsigned char
-    	#define BOOL			bool
 	#define u64				u_int64_t
 	#define s64				int64_t
 	// MSVC integer typedefs.
@@ -157,19 +149,13 @@
 	#define WINAPI
 	#define CALLBACK
 
-	// Win32 OLE/COM string types kept as harmless typedefs. The HANDLE family
-	// (HANDLE, INVALID_HANDLE_VALUE, CloseHandle, _OVERLAPPED, ...) was
-	// retired in Phase M — every Linux-compiled call site that used those is
-	// either rewritten over POSIX (mailslot → AF_UNIX SOCK_DGRAM, see
-	// common/include/net7/PosixIpc.h) or walled in `#ifdef WIN32` and never
-	// reached on the Linux build.
-	typedef wchar_t* BSTR;
-	typedef char* LPSTR;
-	typedef const char* LPCSTR;
-	typedef char* LPTSTR;
-	typedef const char* LPCTSTR;
-	typedef void* LPVOID;
-	typedef const void* LPCVOID;
+	// Phase M Wave 3: the Win32 OLE/COM string-pointer typedef block
+	// (BSTR, LPSTR, LPCSTR, LPTSTR, LPCTSTR, LPVOID, LPCVOID) was
+	// retired. Zero Linux-active call sites — every remaining hit was
+	// either WIN32-walled or in vendored upstream code (xmlParser
+	// _XMLWINDOWS branch, Net7Mysql MFC dialogs not built on Linux).
+	// BSTR's definition now lives in common/include/net7/Packing.h
+	// behind an `ifndef BSTR` guard so PacketStructures.h still compiles.
 
 	// MSVC safe-string functions — map to their POSIX counterparts. Buffer size is
 	// honored where possible; for *_s variants that take a size before the format
@@ -242,17 +228,12 @@
 	// WAIT_*/ERROR_* macros for handle objects, and INFINITE were retired
 	// in Phase M — see the typedef-block comment above.
 	static inline unsigned long GetLastError() { return (unsigned long)errno; }
-	// SocketReady() in Connection.h uses WAIT_TIMEOUT as a default arg.
-	#define WAIT_TIMEOUT 258
 
-	// The vendored OpenSSL 1.0 headers (server/src/openssl/) hard-code
-	// OPENSSL_SYSNAME_WIN32 in opensslconf.h, which makes rand.h declare
-	// RAND_event(UINT, WPARAM, LPARAM) even on Linux. Keep these typedefs so
-	// the header compiles — the actual symbol is never linked because Phase E
-	// migrated to the system OpenSSL 3.x runtime. Real fix is to stop using
-	// the vendored headers; tracked in plans/05-phase-e-openssl.md.
-	typedef long LPARAM;
-	typedef unsigned int WPARAM;
+	// Phase O+ deleted the vendored OpenSSL 1.0 header tree, so the
+	// WPARAM/LPARAM/WAIT_TIMEOUT compat that used to live here for the
+	// RAND_event(UINT, WPARAM, LPARAM) declaration in the bundled
+	// opensslconf.h-on-Linux mess is also gone. server/src has no Linux-
+	// active call sites for those symbols any more.
 
 	// fopen_s / memcpy_s / sscanf_s — MSVC bounds-checked variants
 	#include <stdio.h>
@@ -271,11 +252,9 @@
 	#define sscanf_s sscanf
 	#define _strnicmp strncasecmp
 
-	// TCHAR / TEXT — Win32 wide-vs-narrow string macros. Treat as narrow.
-	typedef char TCHAR;
-	#define TEXT(x) x
-	#define _TEXT(x) x
-	#define _T(x) x
+	// Phase M Wave 3: TCHAR / TEXT / _TEXT / _T retired. Zero Linux-
+	// active hits — the only references were inside the xmlParser
+	// _XMLWINDOWS branch (dead on Linux) and an HTML doc file.
 
 	// Threading: just include <pthread.h>. The Win32 _beginthreadex,
 	// TerminateProcess, CreateMutex, CreateMailslot, CreateEvent,

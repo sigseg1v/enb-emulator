@@ -53,7 +53,7 @@ private:
 	bool m_global_account_rcv;
 	bool m_TransactionComplete;
     SOCKET m_Listen_Socket;
-    SOCKADDR_IN m_SockAddr;
+    struct sockaddr_in m_SockAddr;
     unsigned char m_RecvBuffer[MAX_UDPC_BUFFER];
     unsigned char m_SendBuffer[MAX_UDPC_BUFFER];
     unsigned char m_QueueBuffer[MAX_QUEUE_BUFFER];

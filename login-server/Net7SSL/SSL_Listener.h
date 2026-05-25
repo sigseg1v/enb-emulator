@@ -3,6 +3,7 @@
 #ifndef _SSL_LISTENER_H_INCLUDED_
 #define _SSL_LISTENER_H_INCLUDED_
 
+#include <cstdint>
 #include <net7/Mutex.h>
 #include <openssl/ssl.h>
 
@@ -36,7 +37,7 @@ public:
 private:
 	bool		SocketReady(int ttimeout);
 	Mutex		m_Mutex;
-	WORD		m_TcpPort;
+	uint16_t	m_TcpPort;
 	unsigned long	m_IpAddress;
 	SOCKET		m_ListenerSocket;
 	bool		m_SslListenerThreadRunning;
