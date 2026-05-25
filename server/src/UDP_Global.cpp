@@ -12,7 +12,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -191,11 +191,16 @@ void UDP_Connection::SendAvatarList(long account_id, const long source_addr, con
 
 void UDP_Connection::HandleGlobalTicketRequest(char *msg, EnbUdpHeader *hdr, const long source_addr, const short source_port)
 {
-    // The player selected a character
-    long char_slot = *(long *) msg;
+    // The player selected a character.
+    // Phase K: wire field is 4 bytes (proxy's UDPClient_linux.cpp::SendAvatarLogin
+    // writes via AddData / ntohl which produces an int32_t). Reading as Linux
+    // `long` (8 bytes) used to pull the trailing length-prefix of the username
+    // into the high half of char_slot, so every Linux GlobalTicketRequest
+    // resolved to a wrong slot and GetAvatarID returned -1.
+    long char_slot = (long) *(int32_t *) msg;
     char username[128];
     int index = 4;
-    ExtractDataLS((unsigned char*)msg, username, index); 
+    ExtractDataLS((unsigned char*)msg, username, index);
     long avatar_id = g_AccountMgr->GetAvatarID(username, char_slot);
 
     if (avatar_id == -1)
@@ -225,8 +230,12 @@ void UDP_Connection::HandleGlobalTicketRequest(char *msg, EnbUdpHeader *hdr, con
         g_AccountMgr->ReadDatabase(player->Database(), avatar_id);
         player->SetName(player->Database()->avatar.avatar_first_name);
 
-        //Now send the avatar_id and relay the new player's GameID to confirm login
-        SendOpcode(ENB_OPCODE_2005_AVATARLOGIN_CONFIRM, player, (unsigned char *) &avatar_id, sizeof(long), source_addr, source_port);
+        //Now send the avatar_id and relay the new player's GameID to confirm login.
+        // Phase K: wire payload is 4 bytes (proxy reads via int32_t cast in
+        // UDPClient_linux.cpp::SendAvatarLogin). Sending sizeof(long)=8 on
+        // Linux x86_64 trailed 4 bytes of garbage into the UDP frame.
+        int32_t avatar_id_wire = (int32_t) avatar_id;
+        SendOpcode(ENB_OPCODE_2005_AVATARLOGIN_CONFIRM, player, (unsigned char *) &avatar_id_wire, sizeof(avatar_id_wire), source_addr, source_port);
     }
     else
     {
