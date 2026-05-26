@@ -1442,10 +1442,25 @@ if [ -n "${XDG_DATA_DIRS:-}" ] ; then
         if gsettings get "${dot_ogdaf}" folder-children >/dev/null 2>&1 ; then
             if ! pf gsettings get "${dot_ogdaf}" folder-children | grep "${GNOME_APP_FOLDER}" ; then
                 EXISTING_GNOME_APP_FOLDERS="$(pf gsettings get "${dot_ogdaf}" folder-children | pf sed 's/[\[]//g' | sed 's/[]]//g')"
-                gsettings set "${dot_ogdaf}" folder-children \
-                    "[${EXISTING_GNOME_APP_FOLDERS}, '${GNOME_APP_FOLDER}']"
-                gsettings set "${dot_ogdaf}"'.folder:/'"${slash_ogdaf}/${GNOME_APP_FOLDER}"'/' name 'Earth & Beyond'
-                gsettings set "${dot_ogdaf}"'.folder:/'"${slash_ogdaf}/${GNOME_APP_FOLDER}"'/' categories "['${GNOME_APP_FOLDER}']"
+                # *** LOCAL MOD (enb-emulator fork, 2026-05-26) ***
+                # If folder-children is an empty typed array (gsettings prints
+                # "@as []" on a never-set key), the sed strip leaves the
+                # literal "@as " behind and the concat "[@as , 'enb']" is a
+                # gvariant parse error. Detect empty after stripping the
+                # type-prefix + whitespace and emit a plain single-element
+                # array in that case. Also `|| true` the gsettings set calls
+                # so a hostile/unexpected GNOME state doesn't abort the
+                # install over a cosmetic app-folder organisation.
+                EXISTING_GNOME_APP_FOLDERS_STRIPPED="$(echo "${EXISTING_GNOME_APP_FOLDERS}" | sed 's/@as//g' | tr -d '[:space:]')"
+                if [ -n "${EXISTING_GNOME_APP_FOLDERS_STRIPPED}" ] ; then
+                    NEW_GNOME_APP_FOLDERS="[${EXISTING_GNOME_APP_FOLDERS}, '${GNOME_APP_FOLDER}']"
+                else
+                    NEW_GNOME_APP_FOLDERS="['${GNOME_APP_FOLDER}']"
+                fi
+                gsettings set "${dot_ogdaf}" folder-children "${NEW_GNOME_APP_FOLDERS}" || true
+                gsettings set "${dot_ogdaf}"'.folder:/'"${slash_ogdaf}/${GNOME_APP_FOLDER}"'/' name 'Earth & Beyond' || true
+                gsettings set "${dot_ogdaf}"'.folder:/'"${slash_ogdaf}/${GNOME_APP_FOLDER}"'/' categories "['${GNOME_APP_FOLDER}']" || true
+                # *** END LOCAL MOD ***
             fi
             if [ -d "${ENB_APP_DIR}" ] ; then
                 # shellcheck disable=SC2016

@@ -4276,3 +4276,51 @@ Key decisions logged:
   pointed at (LaunchNet7 TLS) instead of looking at the broader
   consequence of the install aborting. The Wave 2 follow-up is
   fixing a problem I should have flagged in Wave 1.
+
+## 2026-05-26 — Phase U Wave 3: GNOME folder-children empty-array crash
+
+* **Symptom.** Same-session re-run of the Wave-2-patched installer
+  got past C&S, generated the proxy launcher + `~/.local/bin/enb*`
+  symlinks, reached "Update application shortcuts", then crashed:
+  ```
+  expected value:
+    [@as , 'enb']
+         ^
+  ```
+
+* **Root cause.** Upstream's `folder-children` rewrite at line ~1444
+  builds the new array by stripping `[` `]` from the current value
+  and concatenating. On a stock GNOME install where the user has
+  never customised an app folder before, `gsettings get … folder-
+  children` returns `@as []` (typed-empty array of strings). The
+  sed strip leaves the literal `@as ` between the brackets, producing
+  the malformed gvariant `[@as , 'enb']`. Hits the modal GNOME user.
+
+* **Why it matters even though the block looks cosmetic.** Activities-
+  overview app-folder organisation is, in fact, cosmetic. But the
+  block is gated by `set -o errexit`, so failing here aborts the
+  whole script — including the final user-prompted post-install
+  configuration steps. So a "cosmetic" block was hard-blocking the
+  install from finishing cleanly.
+
+* **Fix.** After the existing bracket-strip, additionally strip
+  `@as` + whitespace into a scratch var. If the scratch is empty,
+  emit `['enb']` (a single-element array) instead of `[, 'enb']`.
+  Defensively wrap all three `gsettings set` calls in `|| true` —
+  since the block is genuinely cosmetic, no future GNOME schema
+  surprise should be allowed to abort the install over it.
+
+* **The shape of these waves is consistent.** Wave 1, 2, and 3 are
+  all instances of *the same class of failure*: upstream wrote
+  brittle assumptions ("TLS 1.0 is fine", "C&S Creator install
+  always succeeds", "folder-children is always non-empty") that
+  hold on the original tested matrix (Manjaro + wine-9.20 + GNOME
+  with custom app folders, presumably) but break elsewhere. Each
+  patch is small. Each one is `|| true` / soft-fail / sane-default
+  rather than a new behaviour. None of them change what the script
+  *does* on the happy path — only what it does on the unhappy path.
+
+* **Push authorization is per-commit.** Auto-mode classifier
+  rejected the Wave 2 push citing scope ("prior 'push to main is
+  fine' was for a different commit"). Will hold both commits and
+  let the user authorize the push.

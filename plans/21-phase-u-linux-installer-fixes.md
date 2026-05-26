@@ -4,9 +4,11 @@
 on 2026-05-26 with the directive "any fixes we do, modify our copy of
 the script locally". Wave 1 (LaunchNet7 TLS) landed. Wave 2 (C&S Creator
 hard-fail → soft-fail; unblocks `Earth & Beyond.desktop` rewrite + Net-7
-proxy launcher generation downstream) landed on 2026-05-26 pending fresh-
-prefix re-run verification. C&S Creator rc 71 root cause (items U.1–U.5)
-still open.**
+proxy launcher generation downstream) landed and re-verified by user
+re-run on 2026-05-26 — proxy launcher + symlinks + shortcuts all
+generated. Wave 3 (GNOME `folder-children` empty-typed-array gsettings
+crash) landed on 2026-05-26 to unblock the same re-run reaching its
+end. C&S Creator rc 71 root cause (items U.1–U.5) still open.**
 
 ## Why this phase exists
 
@@ -241,6 +243,46 @@ install non-fatal, which lets every downstream step run normally.
   optional follow-up PR to ciphersimian/enb-linux-installer arguing
   that C&S Creator should not be install-blocking. Independent of
   W2.4 / W1.6.
+
+## Wave 3 — GNOME app-folder gsettings empty-array crash (2026-05-26)
+
+After Wave 2 unblocked the install, the user re-ran and got past
+the C&S step (warned, continued), wrote the proxy launcher, created
+all four `~/.local/bin/enb*` symlinks, and reached "Update
+application shortcuts" — then crashed:
+
+```
+expected value:
+  [@as , 'enb']
+       ^
+```
+
+Upstream's `gsettings set ... folder-children "[<existing>, 'enb']"`
+builds the new array by stripping `[` `]` from the current value and
+concatenating. On a stock GNOME install where `folder-children` is
+default (`@as []` — typed empty string-array), the result is
+`[@as , 'enb']`, which gvariant rejects. Aborts via `set -o errexit`.
+
+- [x] **W3.1 — Reproduce and root-cause.** Confirmed
+  `gsettings get org.gnome.desktop.app-folders folder-children`
+  returns `@as []` on the user's box. The `@as` type prefix is what
+  trips the concat. Hits any GNOME user who never customised app
+  folders — i.e. most of them.
+
+- [x] **W3.2 — Fix the empty-array branch + harden the gsettings
+  calls.** After stripping brackets, strip `@as` and whitespace
+  into a scratch var. If empty, emit `['enb']`; else preserve the
+  existing non-empty path. Add `|| true` to the three `gsettings set`
+  calls so any other GNOME surprise doesn't abort an otherwise-
+  successful install (this block is cosmetic — application-folder
+  organisation in the Activities overview, not anything required
+  for the game to run).
+
+- [ ] **W3.3 — Verify on user's box.** User re-runs; script should
+  finish the "Update application shortcuts" banner without aborting
+  and continue into the final post-install configuration steps.
+
+- [ ] **W3.4 — Upstream the fix.** Same disposition as W1.7 / W2.5.
 
 ## Reference
 

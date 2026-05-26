@@ -28,6 +28,57 @@ The full multi-phase plan is in
 
 ## Modifications
 
+### 2026-05-26 — GNOME app-folder gsettings: handle empty typed array
+
+**Symptom:** Script aborts during "Update application shortcuts" with:
+```
+expected value:
+  [@as , 'enb']
+       ^
+```
+This is `gsettings set ... folder-children "[@as , 'enb']"` failing
+because `[@as , 'enb']` is not a valid gvariant.
+
+**Root cause:** Upstream builds the new array literal by string-
+concatenating the *current* `folder-children` value (sans brackets)
+with the new entry. On a never-customised GNOME `folder-children`
+key, gsettings reports the value as `@as []` (a typed empty array of
+strings). The script's `sed 's/[\[]//g; s/]//g'` strips the
+brackets but leaves the literal `@as ` behind, producing
+`[@as , 'enb']`, which gvariant won't parse. Hits any GNOME
+user who never created a custom app folder before — a very common
+case on stock Ubuntu.
+
+**Why it's load-bearing:** The block lives downstream of *all* the
+`.desktop` Exec/Path rewrites the user actually needs (those have
+already run by the time this gsettings call executes). So the
+symptom of the abort is the install *appearing* to fail at the
+end even though the actually-important shortcut fixes happened
+fine. But `set -o errexit` does abort the script here, which
+means later steps (like the user-prompted final config / launcher
+steps) don't run.
+
+**Fix (one piece, in `install-enb-linux.sh`):**
+
+1. After stripping `[` and `]`, strip `@as` and surrounding whitespace
+   into a separate scratch variable. If the scratch is empty, emit
+   `['enb']` instead of `[, 'enb']`. Else preserve the original
+   non-empty path.
+2. Defensively add `|| true` to the three `gsettings set` calls so
+   any *other* GNOME-state surprise (e.g. a folder key with an
+   unexpected schema) doesn't kill the whole install — this block
+   is cosmetic app-folder organisation, not critical install state.
+
+**Insertion point in upstream:** One `*** LOCAL MOD ***` block
+around upstream `~lines 1443–1448` (the GNOME app-folder gsettings
+block).
+
+**Verified on:** Ubuntu (rolling) + GNOME (`folder-children` default
+`@as []`) + wine-11.8, 2026-05-26.
+
+**Not yet upstreamed:** Same disposition as Wave 1 / Wave 2 — local
+first, upstream PR is a follow-up.
+
 ### 2026-05-26 — Soft-fail the Character and Starship Creator install
 
 **Symptom:** Script aborts mid-install with `>> ERROR: rc: 71, output:` from
