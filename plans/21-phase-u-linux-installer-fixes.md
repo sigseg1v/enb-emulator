@@ -121,6 +121,19 @@ script — most likely a stale setup.iss GUID against a newer
   - Instructions for pinning wine via winehq's apt repo if the
     distro ships a too-new version.
 
+## Known sharp edges (not bugs, but worth documenting)
+
+- **"Earth & Beyond" start-menu shortcut is launcher-bypass.** Upstream
+  intentionally points it at `net7proxy.exe_wine_launcher.sh`, which
+  runs `net7proxy.exe` directly without invoking LaunchNet7 first.
+  This is fine *after* the launcher has successfully run at least once
+  and pulled the current Net7Proxy version. On a fresh install (or any
+  state where the bundled Net7Proxy is older than what `play.net-7.org`
+  accepts), clicking "Earth & Beyond" first surfaces a "Server Failed
+  to respond to Login attempt" dialog from the proxy's own
+  version-check, not from a network failure. Workaround is just "click
+  Net-7 Launcher first". Confirmed live on user's box 2026-05-26.
+
 ## Out of scope
 
 - Rewriting the installer in non-bash. Upstream is bash; we stay bash.
@@ -175,10 +188,13 @@ landed before any of U.1–U.6 in the original ordering.
   Plus a new `client/linux-installer/LOCAL_MODIFICATIONS.md` per
   GPLv3 §5(a) listing the diff.
 
-- [ ] **W1.6 — Re-sync verify.** Wipe `~/.wine-enb` and re-run the
-  modified script end-to-end on Ubuntu + wine-11.8 to confirm the
-  launcher connects on a fresh install (not just on the live prefix
-  where I poked the registry by hand). Open until reproducible.
+- [x] **W1.6 — Re-sync verify.** Verified end-to-end on user's
+  Ubuntu + wine-11.8 box on 2026-05-26 — running `enb-launcher`
+  (= LaunchNet7) connects to `patch.net-7.org` over HTTPS, performs
+  the auto-update of Net7Proxy, and the launcher's Play path
+  successfully reaches `play.net-7.org` and logs into the live
+  Net-7 server. Wave 1 TLS fix proven against the live infra,
+  not just speculative.
 
 - [ ] **W1.7 — Upstream the patch.** Optional follow-up. Open an
   issue / PR at github.com/ciphersimian/enb-linux-installer with the
