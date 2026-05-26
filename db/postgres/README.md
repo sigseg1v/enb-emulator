@@ -36,9 +36,18 @@ just apply-schema   # re-apply (idempotent-ish; CASCADE-drops first)
 - `bigint(N)` -> `bigint` (or `numeric(20,0)` if unsigned, to preserve
   range — `bigint unsigned` can hold values beyond `int8`).
 - `mediumint(N)` -> `integer`.
-- `double(M,N)` / `double unsigned` -> `double precision`.
+- `double(M,N)` / `double unsigned` / bare `double` -> `double precision`.
 - `float(M,N)` -> `real`.
+- `varchar(0)` -> `text` (Postgres rejects varchar(0); MySQL's
+  `varchar(0)` only ever held empty strings or NULL, which `text` covers).
 - `datetime` -> `timestamp`.
+- `'0000-00-00 00:00:00'` and `'0000-00-00'` literals (illegal in
+  Postgres) -> epoch (`'1970-01-01 ...'`). Affects both CREATE TABLE
+  DEFAULT clauses and INSERT values.
+- MySQL stored procedures and functions (`DELIMITER` / `CREATE DEFINER`
+  blocks) are stripped wholesale — Phase N inlined every `CALL ...`
+  into the C++ libpqxx path, so the procs are dead weight that won't
+  parse in Postgres anyway.
 - `AUTO_INCREMENT` -> `GENERATED ALWAYS AS IDENTITY` (and any
   `AUTO_INCREMENT=NNN` table option dropped).
 - `DROP TABLE IF EXISTS x` -> `DROP TABLE IF EXISTS "x" CASCADE`.
@@ -51,18 +60,19 @@ just apply-schema   # re-apply (idempotent-ish; CASCADE-drops first)
 
 ## Validation status
 
-Validated against Postgres 16 on 2026-05-22 (Phase C invocation):
+Validated against Postgres 16 on 2026-05-26:
 
-- **71 of 71 tables created cleanly.** No DDL errors.
-- The only errors logged are MySQL stored functions (`isAccLoggedIn`,
-  `isAvaLoggedIn`) using `DELIMITER`, `DEFINER`, and `IF/THEN/END IF`
-  syntax. These need rewrite as PL/pgSQL — tracked as a Phase C
-  continuation item.
-- `seed.sql` applies its reference-data INSERTs without error.
+- **71 of 71 tables in `schema.sql` created cleanly.** No DDL errors.
+- **`seed.sql` applies fully clean** under `ON_ERROR_STOP=1` — zero
+  errors, zero warnings. The docker-compose `schema-init` service uses
+  the strict mode so regressions break the boot rather than being
+  silently swallowed.
 
 ## What `convert.sh` does NOT handle (Phase C continuation)
 
-These will produce `psql` errors when applying `schema.sql` / `seed.sql`:
+These don't currently produce errors against the *current* MySQL dumps,
+but are semantic-translation gaps that may bite when re-running
+`convert.sh` against an updated dump or when wiring up new code paths:
 
 1. **`text` semantics**. MySQL's `text` is implicitly UTF-8 (or whatever
    `CHARSET=` says); Postgres `text` is whatever the DB encoding is. The

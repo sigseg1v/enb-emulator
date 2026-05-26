@@ -30,7 +30,7 @@ CREATE TABLE "account_avatar_forumname" (
 DROP TABLE IF EXISTS "account_infractions" CASCADE;
 CREATE TABLE "account_infractions" (
   "account_ID" bigint NOT NULL,
-  "infraction_date" timestamp NOT NULL DEFAULT '0000-00-00 00:00:00',
+  "infraction_date" timestamp NOT NULL DEFAULT '1970-01-01 00:00:00',
   "admin_ID" bigint NOT NULL,
   "infraction" text NOT NULL,
   "warn_level_increment" bigint NOT NULL
@@ -314,13 +314,13 @@ CREATE TABLE "avatar_mission_progress" (
 DROP TABLE IF EXISTS "avatar_position" CASCADE;
 CREATE TABLE "avatar_position" (
   "avatar_id" integer NOT NULL DEFAULT '0',
-  "posx" double DEFAULT NULL,
-  "posy" double DEFAULT NULL,
-  "posz" double DEFAULT NULL,
-  "ori_w" double DEFAULT NULL,
-  "ori_x" double DEFAULT NULL,
-  "ori_y" double DEFAULT NULL,
-  "ori_z" double DEFAULT NULL,
+  "posx" double precision DEFAULT NULL,
+  "posy" double precision DEFAULT NULL,
+  "posz" double precision DEFAULT NULL,
+  "ori_w" double precision DEFAULT NULL,
+  "ori_x" double precision DEFAULT NULL,
+  "ori_y" double precision DEFAULT NULL,
+  "ori_z" double precision DEFAULT NULL,
   "sector_id" integer DEFAULT NULL,
   PRIMARY KEY ("avatar_id")
 );
@@ -522,7 +522,7 @@ CREATE TABLE "ignore_lists" (
 -- ----------------------------
 DROP TABLE IF EXISTS "local_respawn_time" CASCADE;
 CREATE TABLE "local_respawn_time" (
-  "local_respawn_time" varchar(0) DEFAULT NULL
+  "local_respawn_time" text DEFAULT NULL
 );
 
 -- ----------------------------
@@ -682,207 +682,6 @@ CREATE TABLE "warning_levels" (
   "avatar_id" integer NOT NULL,
   PRIMARY KEY ("avatar_id")
 );
-
--- ----------------------------
--- Procedure structure for accLogin
--- ----------------------------
-DROP PROCEDURE IF EXISTS "accLogin";
-DELIMITER ;;
-CREATE DEFINER="root"@"%" PROCEDURE "accLogin"(IN accID INTEGER, IN theTime VARCHAR(40))
-BEGIN
-    UPDATE net7_user.accounts
-      SET last_login = theTime
-    WHERE id = accID;
-  END;;
-DELIMITER ;
-
--- ----------------------------
--- Procedure structure for accLogout
--- ----------------------------
-DROP PROCEDURE IF EXISTS "accLogout";
-DELIMITER ;;
-CREATE DEFINER="root"@"%" PROCEDURE "accLogout"(IN accID INTEGER, IN theTime VARCHAR(40))
-BEGIN
-    UPDATE net7_user.accounts
-      SET last_logout = theTime
-    WHERE id = accID;
-  END;;
-DELIMITER ;
-
--- ----------------------------
--- Procedure structure for avaLogin
--- ----------------------------
-DROP PROCEDURE IF EXISTS "avaLogin";
-DELIMITER ;;
-CREATE DEFINER="root"@"%" PROCEDURE "avaLogin"(IN avaID INTEGER, IN theTime VARCHAR(40))
-BEGIN
-    UPDATE net7_user.avatar_info
-      SET last_login = theTime
-    WHERE avatar_id = avaID;
-  END;;
-DELIMITER ;
-
--- ----------------------------
--- Procedure structure for avaLogout
--- ----------------------------
-DROP PROCEDURE IF EXISTS "avaLogout";
-DELIMITER ;;
-CREATE DEFINER="root"@"%" PROCEDURE "avaLogout"(IN avaID INTEGER, IN theTime VARCHAR(40))
-BEGIN
-    UPDATE net7_user.avatar_info
-      SET last_logout = theTime, time_played = time_played + (now() - last_login)
-    WHERE avatar_id = avaID;
-  END;;
-DELIMITER ;
-
--- ----------------------------
--- Procedure structure for incWarn
--- ----------------------------
-DROP PROCEDURE IF EXISTS "incWarn";
-DELIMITER ;;
-CREATE DEFINER="root"@"%" PROCEDURE "incWarn"(IN accID INTEGER, IN adminID INTEGER, IN infrac TEXT, IN incAmount INTEGER)
-BEGIN
-    UPDATE Net7_user.accounts
-      SET warn_level = warn_level + incAmount
-    WHERE id = accID;
-
-    INSERT INTO Net7_user.account_infractions
-      VALUES(accID, NOW(), adminID, infrac, incAmount);
-  END;;
-DELIMITER ;
-
--- ----------------------------
--- Procedure structure for logoutOnShutdown
--- ----------------------------
-DROP PROCEDURE IF EXISTS "logoutOnShutdown";
-DELIMITER ;;
-CREATE DEFINER="root"@"%" PROCEDURE "logoutOnShutdown"(IN theTime VARCHAR(40))
-BEGIN
-    UPDATE Net7_user.accounts
-      SET last_logout = theTime
-    WHERE last_login > last_logout;
-
-    UPDATE Net7_user.avatar_info
-      SET last_logout = theTime
-    WHERE last_login > last_logout;
-  END;;
-DELIMITER ;
-
--- ----------------------------
--- Function structure for getDPS
--- ----------------------------
-DROP FUNCTION IF EXISTS "getDPS";
-DELIMITER ;;
-CREATE DEFINER="root"@"%" FUNCTION "getDPS"(avaID INT(11), cat INT(11), slot INT(11), itemID INT(11)) RETURNS float
-    READS SQL DATA
-BEGIN
-    DECLARE DPS FLOAT;
-    DECLARE qMOD FLOAT;
-
-    SELECT quality_mod INTO qMOD FROM net7.item_base WHERE id = itemID;
-
-    SET DPS = 0.0;
-
-    CASE
-      
-      WHEN cat = 100 THEN
-        BEGIN
-
-          SELECT (beam.damage_100 * (1 + (((a.Quality * 100) - 100) * (qMOD - 1) / 100)) / beam.reload_100) INTO DPS
-          FROM net7_user.avatar_equipment a
-          INNER JOIN net7.item_base ib ON
-            a.item_id = ib.id
-          INNER JOIN net7.item_beam beam ON
-            a.item_id = beam.item_id
-          WHERE a.avatar_id = avaID AND
-            a.equipment_slot = slot;
-
-          RETURN DPS;
-        END;
-      
-      WHEN cat = 101 THEN
-        BEGIN
-
-          SELECT (((ia.damage_100 * (1 + (((aa.Quality * 100) - 100) * (aib.quality_mod - 1) / 100))) * pl.ammo_per_shot) / (pl.reload_100 * (1 -(((ae.Quality * 100) - 100) * (1 - qMOD) / 100)))) INTO DPS
-          FROM net7_user.avatar_ammo aa
-          INNER JOIN net7_user.avatar_equipment ae ON
-            ae.avatar_id = aa.avatar_id AND
-            ae.equipment_slot = aa.equipment_slot
-          INNER JOIN net7.item_base aib ON
-            aa.item_id = aib.id
-          INNER JOIN net7.item_ammo ia ON
-            aa.item_id = ia.item_id
-          INNER JOIN net7.item_projectile pl ON
-            ae.item_id = pl.item_id
-          WHERE ae.avatar_id = avaID AND
-            ae.equipment_slot = slot;
-
-          RETURN DPS;
-        END;
-      
-      WHEN cat = 102 THEN
-        BEGIN
-
-          SELECT (((ia.damage_100 * (1 + (((aa.Quality * 100) - 100) * (aib.quality_mod - 1) / 100))) * ml.ammo_per_shot) / (ml.reload_100 * (1 -(((ae.Quality * 100) - 100) * (1 - qMOD) / 100)))) INTO DPS
-          FROM net7_user.avatar_ammo aa
-          INNER JOIN net7_user.avatar_equipment ae ON
-            ae.avatar_id = aa.avatar_id AND
-            ae.equipment_slot = aa.equipment_slot
-          INNER JOIN net7.item_base aib ON
-            aa.item_id = aib.id
-          INNER JOIN net7.item_ammo ia ON
-            aa.item_id = ia.item_id
-          INNER JOIN net7.item_missile ml ON
-            ae.item_id = ml.item_id
-          WHERE ae.avatar_id = avaID AND
-            ae.equipment_slot = slot;
-
-          RETURN DPS;
-        END;
-    END CASE;
-
-  END;;
-DELIMITER ;
-
--- ----------------------------
--- Function structure for isAccLoggedIn
--- ----------------------------
-DROP FUNCTION IF EXISTS "isAccLoggedIn";
-DELIMITER ;;
-CREATE DEFINER="root"@"%" FUNCTION "isAccLoggedIn"(theID Int(11)) RETURNS smallint
-    DETERMINISTIC
-BEGIN
-       DECLARE li TIMESTAMP;
-       DECLARE lo TIMESTAMP;
-       SELECT last_login INTO li FROM net7_user.accounts WHERE id = theID;
-       SELECT last_logout INTO lo FROM net7_user.accounts WHERE id = theID;
-       IF li > lo THEN
-         RETURN 1;
-       ELSE
-         RETURN 0;
-       END IF;
-    END;;
-DELIMITER ;
-
--- ----------------------------
--- Function structure for isAvaLoggedIn
--- ----------------------------
-DROP FUNCTION IF EXISTS "isAvaLoggedIn";
-DELIMITER ;;
-CREATE DEFINER="root"@"%" FUNCTION "isAvaLoggedIn"(theID Int(11)) RETURNS smallint
-    DETERMINISTIC
-BEGIN
-       DECLARE li TIMESTAMP;
-       DECLARE lo TIMESTAMP;
-       SELECT last_login INTO li FROM net7_user.avatar_info WHERE avatar_id = theID;
-       SELECT last_logout INTO lo FROM net7_user.avatar_info WHERE avatar_id = theID;
-       IF li > lo THEN
-         RETURN 1;
-       ELSE
-         RETURN 0;
-       END IF;
-    END;;
-DELIMITER ;
 
 -- ----------------------------
 -- Records 

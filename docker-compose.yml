@@ -243,6 +243,12 @@ services:
       POSTGRES_USER: net7
       POSTGRES_PASSWORD: net7
       POSTGRES_DB: net7
+      # Force UTF8 encoding and the locale-independent C.UTF-8 collation
+      # on initdb so the cluster (template0/template1/postgres/net7) is
+      # identical across host machines regardless of the host's $LANG. The
+      # `schema-init` service mirrors the same flags on the CREATE DATABASE
+      # it issues for net7_user.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C.UTF-8"
     ports:
       # Host 5434 -> container 5432 to dodge a developer's local
       # system Postgres on host:5432 (and a hanging rootlesskit binding
@@ -273,21 +279,41 @@ services:
         set -e
         # The C++ server connects to two databases: "net7" (game content;
         # schema.sql) and "net7_user" (accounts/avatars; seed.sql in this
-        # repo's MySQL-derived dumps). Idempotently ensure both exist.
+        # repo's MySQL-derived dumps).
+        #
+        # This service is idempotent: every apply is gated on "is the
+        # target table already present?". On first boot both checks miss
+        # and the full ~110k-row apply runs (~minutes). On every
+        # subsequent boot both checks hit and the service exits in well
+        # under a second. To force a re-apply, wipe the volume:
+        #   docker compose down -v   (or `just nuke-pg`)
         psql -h postgres -U net7 -d postgres -tA \
           -c "SELECT 1 FROM pg_database WHERE datname='net7_user'" \
           | grep -q 1 \
-          || psql -h postgres -U net7 -d postgres -c "CREATE DATABASE net7_user OWNER net7;"
-        # net7 (game content) — schema.sql validates clean per
-        # db/postgres/README.md.
-        echo "schema-init: applying /db/schema.sql -> net7"
-        psql -h postgres -U net7 -d net7 -v ON_ERROR_STOP=1 -f /db/schema.sql
-        # net7_user (accounts) — seed.sql still contains a handful of
-        # MySQL-only stored functions (DELIMITER/IF-THEN-END IF). Those
-        # are tracked as Phase C continuation items; tolerate the errors
-        # so the rest of the seed data lands.
-        echo "schema-init: applying /db/seed.sql -> net7_user"
-        psql -h postgres -U net7 -d net7_user -v ON_ERROR_STOP=0 -f /db/seed.sql || true
+          || psql -h postgres -U net7 -d postgres -c \
+               "CREATE DATABASE net7_user OWNER net7 ENCODING 'UTF8' LC_COLLATE 'C.UTF-8' LC_CTYPE 'C.UTF-8' TEMPLATE template0;"
+        # net7 (game content). Probe for `item_base` — it's one of the
+        # 71 tables schema.sql creates and is non-empty after a successful
+        # apply.
+        if psql -h postgres -U net7 -d net7 -tA \
+             -c "SELECT to_regclass('public.item_base') IS NOT NULL" | grep -q t; then
+          echo "schema-init: net7.item_base already present — skipping schema.sql"
+        else
+          echo "schema-init: applying /db/schema.sql -> net7"
+          psql -h postgres -U net7 -d net7 -v ON_ERROR_STOP=1 -f /db/schema.sql
+        fi
+        # net7_user (accounts). Probe for `accounts` for the same reason.
+        # seed.sql is now strict-clean after the convert.sh updates
+        # (varchar(0)->text, bare double->double precision, zero-date
+        # defaults sentinelled, MySQL stored procs stripped because Phase
+        # N inlined every CALL into the C++ libpqxx path).
+        if psql -h postgres -U net7 -d net7_user -tA \
+             -c "SELECT to_regclass('public.accounts') IS NOT NULL" | grep -q t; then
+          echo "schema-init: net7_user.accounts already present — skipping seed.sql"
+        else
+          echo "schema-init: applying /db/seed.sql -> net7_user"
+          psql -h postgres -U net7 -d net7_user -v ON_ERROR_STOP=1 -f /db/seed.sql
+        fi
         echo "schema-init: done"
     restart: "no"
 

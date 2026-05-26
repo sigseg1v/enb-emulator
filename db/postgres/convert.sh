@@ -76,10 +76,42 @@ convert() {
         -e 's/USING BTREE//g' \
         -e 's/binary\(([0-9]+)\)/bytea/g' \
         -e 's/varbinary\(([0-9]+)\)/bytea/g' \
+        -e 's/varchar\(0\)/text/g' \
+        -e "s/'0000-00-00 00:00:00'/'1970-01-01 00:00:00'/g" \
+        -e "s/'0000-00-00'/'1970-01-01'/g" \
         -e 's/^\s*KEY "([^"]+)" \(([^)]+)\)[[:space:]]*,?[[:space:]]*$/  -- INDEX TODO: \1 ON (\2)/g' \
         -e 's/^\s*CONSTRAINT "[^"]+" FOREIGN KEY[^,]*,$/  -- FK TODO/g' \
         -e 's/^\s*CONSTRAINT "[^"]+" FOREIGN KEY[^,]*$/  -- FK TODO/g' \
         "${in}" > "${out}"
+
+    # MySQL allows bare `double` as a column type; Postgres needs
+    # `double precision`. The earlier `double(N,N)` / `double unsigned`
+    # sed rules already produce `double precision`, so we must only rewrite
+    # bare `double` — and ONLY on lines that look like a CREATE TABLE
+    # column definition (`  "col_name" double ...`). Anchoring on the
+    # `<ws>"<ident>" double<ws>` shape avoids rewriting the word "double"
+    # inside INSERT string-literal text ("double-crossing", "double the
+    # other", etc.). The DDL convention used by mysqldump puts each column
+    # on its own line, so this is reliable for the dumps we ingest.
+    perl -i -pe 's/^(\s+"[^"]+"\s+)double(\s+)(?!precision)/$1double precision$2/g' "${out}"
+
+    # Strip MySQL stored procedures and functions.
+    #
+    # The MySQL dumps wrap each procedure/function in a
+    #   DROP PROCEDURE IF EXISTS `x`;     (or DROP FUNCTION)
+    #   DELIMITER ;;
+    #   CREATE DEFINER=... PROCEDURE/FUNCTION `x`(...) ... END;;
+    #   DELIMITER ;
+    # block. MySQL-flavoured PL (DELIMITER, DEFINER, CASE/WHEN/IF-THEN-END IF,
+    # INT(N) parameter types) does not parse in Postgres, and the C++ server
+    # no longer calls these — Phase N inlined every CALL into the libpqxx
+    # path in server/src/{Account,Save,Server}Manager.cpp. The only
+    # remaining `CALL net7_user.accLogin` is in WIN32-only
+    # login-server/Net7SSL/AccountManager.cpp, which doesn't build on Linux.
+    # Drop them rather than carry stale stubs that just spew errors at boot.
+    perl -0777 -i -pe '
+        s{(?:^--\s*-+\s*\n--\s*(?:Procedure|Function)\s+structure[^\n]*\n--\s*-+\s*\n)?DROP\s+(?:PROCEDURE|FUNCTION)\s+IF\s+EXISTS\s+"[^"]+";\s*\nDELIMITER\s+;;.*?DELIMITER\s+;\s*\n}{}gms;
+    ' "${out}"
 
     # Strip trailing commas before the closing paren of CREATE TABLE.
     # Two passes:
