@@ -64,6 +64,8 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId AvatarEmoteResponse    = new(0x005F);
         public static readonly OpcodeId MissionForfeit         = new(0x0086);
         public static readonly OpcodeId PetitionStuck          = new(0x0088);
+        public static readonly OpcodeId LogoffRequest          = new(0x00B9);
+        public static readonly OpcodeId LogoffConfirmation     = new(0x00BA);
         public static readonly OpcodeId GlobalConnect          = new(0x006D);
         public static readonly OpcodeId GlobalTicketRequest    = new(0x006E);
         public static readonly OpcodeId GlobalTicket           = new(0x006F);
