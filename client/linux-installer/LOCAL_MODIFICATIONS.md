@@ -28,6 +28,55 @@ The full multi-phase plan is in
 
 ## Modifications
 
+### 2026-05-26 — Soft-fail the Character and Starship Creator install
+
+**Symptom:** Script aborts mid-install with `>> ERROR: rc: 71, output:` from
+the silent InstallShield run of `CharacterStarshipCreator.exe /s /sms`
+under wine-11.8 on Ubuntu. The script exits at that point — which means
+*everything downstream* (the Net-7 proxy launcher heredoc at
+~line 1199, the `~/.local/bin/enb*` symlinks at ~line 1287+, and the
+critical `Earth & Beyond.desktop` rewrite at ~line 1396 that swaps the
+wine-default `e&b.lnk` Exec for the Net-7 proxy launcher) never runs.
+Net result: the user's start-menu "Earth & Beyond" entry still calls
+`wine ...\Earth & Beyond.lnk` → `e&b.exe`, which bypasses Net-7
+entirely and tries to talk to the long-dead retail Westwood servers.
+
+**Root cause (of the rc 71 itself):** Not fully diagnosed. Most likely
+candidates per `plans/21-phase-u-linux-installer-fixes.md` U.2 — stale
+setup.iss GUID against a rebuilt installer, a wine 10/11 ABI break vs.
+the 2002-era InstallShield 6/7 runtime, or a missing wine-gecko
+prerequisite. Out of scope for this mod.
+
+**Why soft-fail is the right call:** C&S Creator is an *optional* tool
+that only customises player avatars. The main game (`e&b.exe`) and the
+Net-7 launcher (`LaunchNet7.exe`) are entirely independent of it —
+they neither depend on its DLLs nor reference its install path during
+the login/play flow. Treating C&S as install-blocking is a script
+ordering bug that upstream inherited and we now patch out.
+
+**Fix (two pieces, both in `install-enb-linux.sh`):**
+
+1. **Demote the C&S `/s /sms` failure to a warning.** Replace the
+   `|| { ... exit "${rc}"; }` block immediately after the
+   `start /wait "${CSC_INSTALL_EXE}"` invocation with a block that
+   logs the failure via `err` and *continues*. Adds a pointer to
+   `plans/21-phase-u-linux-installer-fixes.md` U.1–U.5 for the
+   real-root-cause fix.
+2. **Guard the post-install `mv "${CSC_LINUX_PATH_EXE}" ...`** so it
+   no-ops when the source doesn't exist (would otherwise trip the
+   global `set -o errexit` and kill the script just as cleanly as
+   the original `exit`).
+
+**Insertion points in upstream:** Two `*** LOCAL MOD ***` blocks
+around upstream `~lines 861–868` (the C&S install invocation) and
+`~lines 1178–1180` (the post-install rename).
+
+**Verified on:** Will be verified by user re-run on Ubuntu + wine-11.8
+after this commit lands. Pending re-run, the structural reasoning above
+is the justification.
+
+**Not yet upstreamed:** Tracked in Phase U W2.* / W1.7.
+
 ### 2026-05-26 — Patch LaunchNet7 to connect to patch.net-7.org over modern TLS
 
 **Symptom:** LaunchNet7.exe (the Net-7 patcher GUI) sits on

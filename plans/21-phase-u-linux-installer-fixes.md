@@ -2,8 +2,11 @@
 
 **Status: in progress (2026-05-26). User approved local-fork direction
 on 2026-05-26 with the directive "any fixes we do, modify our copy of
-the script locally". Wave 1 (LaunchNet7 TLS) landed; C&S Creator rc 71
-(items U.1–U.5 in their original framing) still open.**
+the script locally". Wave 1 (LaunchNet7 TLS) landed. Wave 2 (C&S Creator
+hard-fail → soft-fail; unblocks `Earth & Beyond.desktop` rewrite + Net-7
+proxy launcher generation downstream) landed on 2026-05-26 pending fresh-
+prefix re-run verification. C&S Creator rc 71 root cause (items U.1–U.5)
+still open.**
 
 ## Why this phase exists
 
@@ -179,6 +182,65 @@ landed before any of U.1–U.6 in the original ordering.
   issue / PR at github.com/ciphersimian/enb-linux-installer with the
   reproducer + fix. If accepted, drop the local-mods section from
   `LOCAL_MODIFICATIONS.md` on the next sync.
+
+## Wave 2 — Start-menu "Earth & Beyond" shortcut bypasses Net-7 (2026-05-26)
+
+After Wave 1 landed and the user re-ran the installer, the live system
+still had a broken start-menu entry: clicking "Earth & Beyond" runs
+`wine "...\\Earth & Beyond.lnk"` which resolves to `e&b.exe` directly,
+skipping the Net-7 proxy entirely. The user reported the exact Exec
+line verbatim.
+
+Root cause is *not* winemenubuilder clobbering — first-suspected, ruled
+out. The actual cause is upstream script ordering: when the C&S Creator
+`InstallShield /s /sms` step fails (rc 71 on wine-11.8), the script's
+`|| { err ...; exit "${rc}"; }` block kills the install at upstream
+line ~865 — *before* the heredocs that generate the Net-7 proxy
+launcher (line ~1199), the `~/.local/bin/enb*` symlinks (line ~1287),
+and the `.desktop` Exec/Path rewrites (line ~1372) ever run. The Wine
+default `Earth & Beyond.desktop` (which points at the .lnk → e&b.exe)
+is left untouched.
+
+C&S Creator is *not* required for the main game or the Net-7 launcher
+to work — it only customises avatars. So the fix is to make the C&S
+install non-fatal, which lets every downstream step run normally.
+
+- [x] **W2.1 — Confirm the failure mode by inspection.** Live system:
+  `~/.local/share/applications/wine/Programs/EA GAMES/Earth & Beyond/Earth & Beyond.desktop`
+  contains the wine-generated `Exec=env "WINEPREFIX=..." wine "...\\Earth & Beyond.lnk"`,
+  not the proxy-launcher Exec the script intends. `net7proxy.exe_wine_launcher.sh`
+  does not exist under `${N7_LINUX_INSTALL_PATH}/bin/`. No `~/.local/bin/enb*`
+  symlinks exist. All three are downstream of the C&S install step → confirms
+  the C&S failure aborted the script before that block.
+
+- [x] **W2.2 — Demote C&S install failure to a warning.** Replaced the
+  `exit "${rc}"` in upstream's `start /wait "${CSC_INSTALL_EXE}" /s /sms`
+  `|| { ... }` block with an `err`-only block. Added a LOCAL MOD comment
+  block citing Phase U U.1–U.5 as the place the real root-cause work
+  lives. Done in commit (TODO sha).
+
+- [x] **W2.3 — Guard the post-install C&S rename.** Upstream's
+  `mv "${CSC_LINUX_PATH_EXE}" "${CSC_LINUX_INSTALL_PATH}/${CSC_REDIRECT_EXE}"`
+  at line ~1179 trips `set -o errexit` if the source doesn't exist
+  (which is what we now allow). Added `&& [ -e "${CSC_LINUX_PATH_EXE}" ]`
+  to the existing if-condition so the mv no-ops cleanly.
+
+- [ ] **W2.4 — Verify on fresh prefix.** User re-runs the installer
+  (or wipes `~/.wine-enb` and runs cleanly). Expected outcome:
+    1. Script logs `[local mod] C&S Creator install failed (rc 71). Continuing`
+       and proceeds.
+    2. `${N7_LINUX_INSTALL_PATH}/bin/net7proxy.exe_wine_launcher.sh` exists,
+       is executable.
+    3. `~/.local/share/applications/wine/Programs/EA GAMES/Earth & Beyond/Earth & Beyond.desktop`
+       has `Exec="${N7_PROXY_SCRIPT}"`, not the wine-default `e&b.lnk` line.
+    4. Clicking the start-menu "Earth & Beyond" entry launches Net-7 proxy,
+       which in turn launches the game, which connects to the launcher's
+       configured server.
+
+- [ ] **W2.5 — Upstream the soft-fail.** Same disposition as W1.7 —
+  optional follow-up PR to ciphersimian/enb-linux-installer arguing
+  that C&S Creator should not be install-blocking. Independent of
+  W2.4 / W1.6.
 
 ## Reference
 

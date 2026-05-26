@@ -860,10 +860,25 @@ echo
 
 if [ ! -e "${CSC_LINUX_PATH_EXE}" ] ; then
     out "Run Character and Starship Creator InstallShield (this will take a few minutes)"
+    # *** LOCAL MOD (enb-emulator fork, 2026-05-26) ***
+    # C&S Creator's silent InstallShield (vintage 2002 IS6/7) regressed against
+    # newer wine (observed: rc 71 on wine-11.8 / Ubuntu). The main game and the
+    # Net-7 launcher do NOT depend on C&S Creator — it only customises player
+    # avatars — so demote the failure to a warning and continue, otherwise the
+    # downstream shortcut/proxy-launcher generation never runs and the start
+    # menu entry stays pointed at the wine-default e&b.lnk that bypasses
+    # Net-7. Phase U items U.1–U.5 (in plans/21-phase-u-linux-installer-fixes.md)
+    # track the real rc-71 root-cause fix; soft-fail keeps the rest of the
+    # install usable in the meantime.
     output=$(WINEPREFIX="${WINEPREFIX}" ${WINE_EXEC} start /wait \
         "${CSC_WINE_INSTALL_SOURCE}\\${CSC_INSTALL_EXE}" /s /sms 2>&1) || {
-        rc="${?}"; err "rc: ${rc}, output: ${output}"; exit "${rc}"
+        rc="${?}"; err "rc: ${rc}, output: ${output}"
+        err "[local mod] C&S Creator install failed (rc ${rc}). Continuing — the"
+        err "[local mod] main game + Net-7 launcher do not require it. Re-run"
+        err "[local mod] CharacterStarshipCreator.exe later if avatar customisation"
+        err "[local mod] is needed; see plans/21-phase-u-linux-installer-fixes.md."
     }
+    # *** END LOCAL MOD ***
     echo
 fi
 
@@ -1160,9 +1175,15 @@ EOF
 
 chmod a+x "${CFG_SCRIPT}"
 
-if [ ! -e "${CSC_LINUX_INSTALL_PATH}/${CSC_REDIRECT_EXE}" ] ; then
+# *** LOCAL MOD (enb-emulator fork, 2026-05-26) ***
+# Added "&& [ -e ${CSC_LINUX_PATH_EXE} ]" guard so this mv doesn't trip
+# errexit when the C&S install above soft-failed. Without the guard the
+# rest of the script (proxy launcher generation, .desktop rewrites)
+# would still never run on a C&S-failure box.
+if [ ! -e "${CSC_LINUX_INSTALL_PATH}/${CSC_REDIRECT_EXE}" ] && [ -e "${CSC_LINUX_PATH_EXE}" ] ; then
     mv "${CSC_LINUX_PATH_EXE}" "${CSC_LINUX_INSTALL_PATH}/${CSC_REDIRECT_EXE}"
 fi
+# *** END LOCAL MOD ***
 
 cat <<-EOF > "${CSC_SCRIPT}"
 #!/bin/sh
