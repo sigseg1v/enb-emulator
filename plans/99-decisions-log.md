@@ -4003,3 +4003,149 @@ Key decisions logged:
   commits ahead of origin (Wave 29 code + plans + Wave 30
   code+plans pair) is fine — the next session or human can
   push the batch.
+
+## 2026-05-25 — Phase K Wave 31 (0x00B9 LOGOFF_REQUEST → 0x00BA LOGOFF_CONFIRMATION direct-reply round-trip)
+
+Context: Wave 30 closed a +1 direct-reply slot (0x0086 MISSION_FORFEIT
+on the SendVaMessageC else-branch). Wave 31 hunts for the next
+candidate. The handler that jumps out from the dispatcher table is
+0x00B9 LOGOFF_REQUEST — three-statement sequence ending in
+`DropPlayerFromGalaxy(this)` (teardown) with `SendLogoffConfirmation()`
+sandwiched between a pre-teardown safety call and the teardown
+itself. The reply opcode (0x00BA) is unique to LOGOFF and matches a
+reply opcode the proxy already forwards unchanged, so this is a +2
+ratchet (request + reply both gain coverage). The interesting
+question is ordering: does `SendPacketCache()` flush the reply to the
+wire BEFORE `DropPlayerFromGalaxy` runs? Answer: yes, synchronously,
+via `m_UDPConnection->SendResponse`. So the wire-level assertion
+(payload.Length == 0, opcode == 0x00BA) lands before the async
+teardown completes, and the test never sees a connection-reset
+race.
+
+Key decisions logged:
+
+* **0x00B9 → 0x00BA direct-reply ordering verified safe**:
+  HandleLogoffRequest at server/src/PlayerConnection.cpp:7709-7720
+  is three statements: `g_ServerMgr->m_PlayerMgr.LeaveGroup(GroupID(),
+  GameID())` → `SendLogoffConfirmation()` → `g_ServerMgr->m_PlayerMgr.
+  DropPlayerFromGalaxy(this)`. Statement 1 (LeaveGroup) is pre-emit
+  safety — for a fresh char `GroupID() == -1`, and `GetGroupFromID(-1)`
+  has an early-return guard at GroupManager.cpp:39 (`if (group_id ==
+  -1) return NULL`), so LeaveGroup falls through to `SendEmptyGroupAux`
+  which is idempotent for an already-empty GroupInfo. Statement 2
+  (SendLogoffConfirmation, PlayerConnection.cpp:7746-7751) calls
+  `SendOpcode(ENB_OPCODE_00BA_LOGOFF_CONFIRMATION, 0, 0)` (per-client
+  path, length=0 payload) then `SendPacketCache()` which synchronously
+  flushes via `m_UDPConnection->SendResponse` — the reply hits the
+  wire BEFORE statement 3 runs. Statement 3 (DropPlayerFromGalaxy)
+  is post-emit teardown — async DB write (SAVE_CODE_LOGOUT queued in
+  PlayerSaves.cpp:1638) and connection cleanup. The accounts/characters
+  DB row PERSISTS through SaveLogout, so global-plane
+  DeleteCreatedCharacterAsync cleanup in the test still works.
+
+* **Why 0x00B9 LOGOFF_REQUEST not other 0x0080+ candidates**:
+  Wave 30's "read past every CALL AND identify which branch the
+  payload selects" methodology was applied to four other 0x0080+
+  candidates and rejected all four:
+  - 0x009B WARP: HandleWarp at PlayerConnection.cpp:1876. The
+    direct-reply error branch fires when CheckForInstalls returns
+    FALSE for the destination wormhole, but for a fresh-starbase
+    character CheckForInstalls returns TRUE (all installs default
+    to available on fresh char), so the direct-reply branch isn't
+    selected — the warp would actually proceed and trigger
+    sector-teleport machinery the test can't safely exercise.
+  - 0x0098 GALAXY_MAP_REQUEST: reply 0x2011 GALAXY_MAP_DATA sits
+    OUTSIDE the proxy SendClientPacketSequence opcode guard at
+    line 568 (`opcode > 0x0000 && opcode < 0x0FFF`). 0x2011 > 0x0FFF
+    so the proxy would refuse to forward it to the test client.
+    This is a hard wall — would require proxy work, out of Wave 31
+    scope.
+  - 0x00BC CTA_REQUEST: HandleCtaRequest at PlayerConnection.cpp:9941
+    has a `sizeof(long)` stack-clobber bug — `char buf[9]; memcpy(buf,
+    data, sizeof(long))` writes 8 bytes (sizeof(long)==8 on Linux
+    x86_64) into a 9-byte array, fine in isolation but the
+    immediately-following code path writes another byte assuming
+    `sizeof(long)==4` semantics. Not a SEGV but is bug-prone; better
+    to land a separate fix-and-test wave for this rather than rely
+    on the broken code path for a "safe" reply.
+  - 0x005D EQUIP_USE: viable as a survival probe (handler has a
+    bounds-checked early-return for out-of-range InvSlot) but
+    weaker assertion than a direct reply — would only land a +1
+    ratchet on the request side via the sentinel-tick dance, not a
+    +2 ratchet via observable reply.
+
+* **+2 ratchet via distinct reply opcode**: Wave 31 is the SECOND
+  wave in Phase K to land a +2 ratchet where the reply opcode is
+  genuinely distinct from MessageString/PriorityMessage. Wave 24
+  was the first (0x0057 SKILL_UP → 0x0058 SKILL_ABILITY). Wave 28
+  also +2 but its second opcode was 0x0056 TALK_TREE_ACTION which
+  is the request the test sends, not a server-originated reply
+  (the +2 came from observing BOTH 0x0055 SELECT_TALK_TREE and
+  0x0056 TALK_TREE_ACTION on the wire). Wave 31's distinction:
+  0x00BA LOGOFF_CONFIRMATION is server-originated, exclusively-reply
+  opcode (never sent client→server), and length=0 payload — three
+  properties that combine to make the assertion bulletproof
+  (`payload.Length == 0 && opcode == 0x00BA` would flag any
+  reply-shape regression).
+
+* **7 regression classes covered by the single assertion**:
+  (1) dispatcher routing for 0x00B9 — server's opcode table maps
+  0x00B9 to HandleLogoffRequest correctly. (2) fixed-length
+  LogoffRequest decode — handler accepts 8B payload without
+  malformed-packet rejection. (3) GroupID=-1 early-return guard at
+  GroupManager.cpp:39 — refactor that removes the guard would
+  SEGV here. (4) per-client SendOpcode emission of 0x00BA — the
+  reply opcode constant in Opcodes.h matches 0x00BA. (5)
+  SendPacketCache synchronous flush ordering vs DropPlayerFromGalaxy
+  teardown — if SendPacketCache were ever changed to async, the
+  reply would race against connection teardown and the test would
+  time out (it doesn't). (6) proxy 0x00BA forward at
+  ClientToServer_linux_stubs.cpp:498-507 — the proxy correctly
+  forwards 0x00BA from server→client without intercepting. (7)
+  length=0 reply assertion — catches accidental payload growth
+  (if someone adds a field to LOGOFF_CONFIRMATION the test fails
+  with a clear message).
+
+* **All-zero payload selects the safe path deterministically**:
+  Wire format is 8 bytes — 4B `LogoutNum` + 4B `Padding` per Net7's
+  LogoffRequest struct in PacketStructures.h. The handler IGNORES
+  both fields (the body is `LeaveGroup → SendLogoffConfirmation →
+  DropPlayerFromGalaxy`, no decode), so any payload exercises the
+  same code path. An all-zero payload is the minimal, most-canonical
+  shape; matches what the retail Win32 client emits on user-clicks-
+  Exit-Game per capture analysis in docs/03 §8.
+
+* **Pool growth — Pool[26] = cli_test28**: layout now
+  Pool[0..8] = cli_test01..09, Pool[9..22] = cli_test11..24,
+  Pool[23] = cli_test25, Pool[24] = cli_test26 (Wave 29),
+  Pool[25] = cli_test27 (Wave 30), Pool[26] = cli_test28 (Wave 31).
+  Routine update; both seed.sql and TestAccounts.cs updated
+  atomically. cli_test10 stays out-of-pool — it's the
+  StressTestClosed fixture (status=0) used only by the
+  GLOBAL_ERROR test.
+
+* **Direct-reply pattern count: 6/31 waves**: Waves 8, 24, 26, 27,
+  28, 30, 31 now establish direct-reply as the dominant Phase K
+  test shape. Wave 31 is the third +2 ratchet via direct-reply
+  (after Waves 24 and 28); the others (8, 26, 27, 30) are +1
+  ratchets. Going forward: when triaging a candidate, the +2
+  shape (request + distinct server-originated reply) should
+  be preferred over +1 when both options exist for the same
+  opcode subrange, because it doubles the per-wave coverage
+  delta with the same wire-level test cost.
+
+* **Coverage ratchet 44/207 → 46/207 (22.2%)**: third +2 ratchet
+  in Phase K. We're now over the 1/5 mark of the dispatcher table.
+  Remaining 161 opcodes split roughly: ~30 high-value direct-reply
+  candidates (mid-table 0x0040-0x00BF range), ~50 survival-probe
+  candidates (handlers with no synchronous reply), ~80 require
+  more elaborate fixture setup (group ops, trade ops, mob spawns,
+  warp-driven state changes). The next 20 waves should be
+  direct-reply or survival-probe (cheap); the trailing ~80 will
+  need fixture work.
+
+* **Push-to-main authorization remains per-action**: Same as Wave
+  29/30. Plan: commit locally; the user said earlier in session
+  "push to main is fine" so attempt the push (auto-mode may still
+  block). Accumulating local commits is fine — the next session
+  or human can push the batch.
