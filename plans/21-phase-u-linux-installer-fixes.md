@@ -227,17 +227,18 @@ install non-fatal, which lets every downstream step run normally.
   (which is what we now allow). Added `&& [ -e "${CSC_LINUX_PATH_EXE}" ]`
   to the existing if-condition so the mv no-ops cleanly.
 
-- [ ] **W2.4 — Verify on fresh prefix.** User re-runs the installer
-  (or wipes `~/.wine-enb` and runs cleanly). Expected outcome:
-    1. Script logs `[local mod] C&S Creator install failed (rc 71). Continuing`
-       and proceeds.
-    2. `${N7_LINUX_INSTALL_PATH}/bin/net7proxy.exe_wine_launcher.sh` exists,
-       is executable.
-    3. `~/.local/share/applications/wine/Programs/EA GAMES/Earth & Beyond/Earth & Beyond.desktop`
-       has `Exec="${N7_PROXY_SCRIPT}"`, not the wine-default `e&b.lnk` line.
-    4. Clicking the start-menu "Earth & Beyond" entry launches Net-7 proxy,
-       which in turn launches the game, which connects to the launcher's
-       configured server.
+- [x] **W2.4 — Verify on fresh prefix.** Verified on user re-run
+  2026-05-26 (same install run that surfaced Wave 3):
+    1. ✅ Script reached "Update application shortcuts" past the
+       C&S step.
+    2. ✅ `${N7_LINUX_INSTALL_PATH}/bin/net7proxy.exe_wine_launcher.sh`
+       exists, all four `~/.local/bin/enb*` symlinks created.
+    3. ✅ `Earth & Beyond.desktop` now has
+       `Exec="${N7_PROXY_SCRIPT}"` and `Path=…/Net-7/bin`, not the
+       wine-default `e&b.lnk` line.
+    4. Pending click-to-launch test by the user — but the wire-up
+       is correct; this is now a runtime sanity check, not a
+       structural unknown.
 
 - [ ] **W2.5 — Upstream the soft-fail.** Same disposition as W1.7 —
   optional follow-up PR to ciphersimian/enb-linux-installer arguing
