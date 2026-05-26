@@ -2,6 +2,15 @@
 #
 # Unofficial Linux Install Script for the Net-7 Entertainment Inc. Earth & Beyond Emulator
 #
+# *** MODIFIED FROM UPSTREAM (GPLv3 §5(a)) ***
+# This file is a local fork of the upstream script linked below. The enb-emulator
+# project carries local patches on top of upstream; see LOCAL_MODIFICATIONS.md
+# next to this file for the diff list, dates, and rationale. Re-syncing from
+# upstream requires merging or re-applying those patches.
+#
+# Upstream source (canonical):
+# https://github.com/ciphersimian/enb-linux-installer
+#
 # For updates, issues, and PRs:
 # https://github.com/ciphersimian/enb-linux-installer
 #
@@ -765,6 +774,41 @@ EOF
 fi
 echo
 
+# *** LOCAL MOD (enb-emulator fork, 2026-05-26) ***
+# Net-7 Unified Installer drops LaunchNet7.cfg with `http://patch.net-7.org`
+# URLs. patch.net-7.org now 301-redirects HTTP -> HTTPS and only accepts
+# TLS 1.2+. LaunchNet7.exe targets .NET 2.0/3.5, whose ServicePointManager
+# defaults to TLS 1.0 — so the HTTPS handshake fails and the launcher shows
+# "Error: 2 / Couldn't connect to the update server. Try again later."
+#
+# Fix is two parts:
+#   1. Rewrite the cfg to point directly at https:// (this block).
+#   2. Set the .NET SchUseStrongCrypto + SystemDefaultTlsVersions reg keys
+#      so .NET 2.0/4.0 actually negotiate TLS 1.2 (further down in the
+#      REGISTRY_CONFIG block in the next section).
+# Also bump WINEPREFIX windows-version to win7 here — the script's earlier
+# `winetricks winxp` step is required by vcrun2008 and stays as-is, but
+# LaunchNet7 (and arguably the patcher GUI) behave more reliably on win7+,
+# and the upstream forum recommendation for 2025+ wine is to run as win7.
+# See LOCAL_MODIFICATIONS.md and plans/21-phase-u-linux-installer-fixes.md.
+N7_LAUNCH_CFG="${N7_LINUX_INSTALL_PATH}/bin/LaunchNet7.cfg"
+if [ -e "${N7_LAUNCH_CFG}" ] ; then
+    out "[local mod] Patching LaunchNet7.cfg HTTP URLs to HTTPS"
+    if grep -q 'http://patch\.net-7\.org' "${N7_LAUNCH_CFG}" ; then
+        sed -i.preupgrade-bak 's|http://patch\.net-7\.org|https://patch.net-7.org|g' \
+            "${N7_LAUNCH_CFG}"
+    else
+        echo "  (already patched — skipping)"
+    fi
+    echo
+fi
+
+out "[local mod] Setting WINEPREFIX windows-version to win7 (LaunchNet7 compat)"
+output=$(WINEPREFIX="${WINEPREFIX}" ${WINE_EXEC} winecfg -v win7 2>&1) || {
+    rc="${?}"; err "rc: ${rc}, output: ${output}"; exit "${rc}"
+}
+echo
+
 banner 'Character and Starship Creator Install'
 
 out "Check for Character and Starship Creator"
@@ -885,6 +929,32 @@ Windows Registry Editor Version 5.00
 "dialog enabled"=dword:00000001
 "music enabled"=dword:00000001
 "sound enabled"=dword:00000001
+
+; *** LOCAL MOD (enb-emulator fork, 2026-05-26) ***
+; Force .NET 2.0/3.5 and .NET 4.x to negotiate modern TLS so LaunchNet7.exe's
+; HTTPS request to https://patch.net-7.org/ succeeds. .NET 2.0/3.5 defaults
+; to TLS 1.0 only; modern Let's Encrypt-fronted endpoints (including
+; patch.net-7.org) reject TLS 1.0/1.1. Without these keys the launcher hangs
+; on "Downloading Patch Information…" and then surfaces "Error: 2 / Couldn't
+; connect to the update server." Documented Microsoft workaround:
+;   SchUseStrongCrypto       — enable strong cipher suites
+;   SystemDefaultTlsVersions — defer protocol choice to OS / Wine schannel
+; Set under both native and Wow6432Node for 32- and 64-bit .NET runtimes.
+[HKEY_LOCAL_MACHINE\\Software\\Microsoft\\.NETFramework\\v2.0.50727]
+"SchUseStrongCrypto"=dword:00000001
+"SystemDefaultTlsVersions"=dword:00000001
+
+[HKEY_LOCAL_MACHINE\\Software\\Wow6432Node\\Microsoft\\.NETFramework\\v2.0.50727]
+"SchUseStrongCrypto"=dword:00000001
+"SystemDefaultTlsVersions"=dword:00000001
+
+[HKEY_LOCAL_MACHINE\\Software\\Microsoft\\.NETFramework\\v4.0.30319]
+"SchUseStrongCrypto"=dword:00000001
+"SystemDefaultTlsVersions"=dword:00000001
+
+[HKEY_LOCAL_MACHINE\\Software\\Wow6432Node\\Microsoft\\.NETFramework\\v4.0.30319]
+"SchUseStrongCrypto"=dword:00000001
+"SystemDefaultTlsVersions"=dword:00000001
 EOF
 
 # add the .reg into the windows registry within the WINEPREFIX

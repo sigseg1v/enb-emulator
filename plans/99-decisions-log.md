@@ -4149,3 +4149,63 @@ Key decisions logged:
   "push to main is fine" so attempt the push (auto-mode may still
   block). Accumulating local commits is fine — the next session
   or human can push the batch.
+
+## 2026-05-26 — Phase U opened + Wave 1 (LaunchNet7 TLS fix)
+
+* **Phase U opened as optional/late-stage on 2026-05-26.** Reason:
+  user hit the C&S Creator installer rc 71 failure during a real
+  install run on Ubuntu + wine-11.8 (upstream `ciphersimian/enb-linux-installer`
+  is last-tested against Manjaro + wine-9.20). User explicitly asked
+  for a phase before the work proceeded: "dont do it without approval
+  from me".
+
+* **Local-fork-first chosen over upstream-PR-first** (overrides the
+  conservative preference baked into U.4 of the original plan). User
+  directive 2026-05-26: "any fixes we do, modify our copy of the
+  script locally". Triggered:
+  - Header note in `install-enb-linux.sh` per GPLv3 §5(a).
+  - New `client/linux-installer/LOCAL_MODIFICATIONS.md` documenting
+    each modification with date + symptom + fix mechanism.
+  - Upstream PR to `ciphersimian/enb-linux-installer` is now W1.7
+    (follow-up), not gating.
+
+* **Wave 1 root cause is two-layer and reproducible.** LaunchNet7.exe
+  surfaced "Error: 2 / Couldn't connect to the update server. Try
+  again later." Diagnosis from this session:
+  1. `patch.net-7.org` now 301-redirects HTTP→HTTPS and serves a
+     Let's Encrypt cert (verified via `curl -v` + `openssl s_client`).
+  2. LaunchNet7.exe is a vintage .NET 2.0/3.5 WinForms binary whose
+     `ServicePointManager.SecurityProtocol` defaults to TLS 1.0 only;
+     modern Let's Encrypt-fronted endpoints reject TLS 1.0/1.1.
+  Fix needs **both** a config-level rewrite (so .NET doesn't even try
+  to follow the 301) and a runtime-level reg-key bump (so .NET
+  negotiates TLS 1.2 in the first place).
+
+* **First fix-attempt was wrong-by-itself.** My initial diagnosis was
+  "doesn't follow 301s" → `sed s|http|https|` in LaunchNet7.cfg alone.
+  That landed but didn't unblock the user. The actual problem was the
+  TLS 1.0 default. The lesson: when a vintage .NET app talks to a
+  modern HTTPS endpoint and fails with no other signal, suspect
+  `SchUseStrongCrypto` + `SystemDefaultTlsVersions` first, then the
+  network-side stuff. Both fixes together are the canonical recipe;
+  either alone is unreliable.
+
+* **`winecfg -v win7` added as belt-and-suspenders.** User received
+  this suggestion from a third party mid-session. The script's
+  existing `winetricks winxp` at line 610 is required by `vcrun2008`
+  / `dotnet20` and stays as-is; the new `winecfg -v win7` runs AFTER
+  the Net-7 Unified Installer so LaunchNet7 runs in win7 mode without
+  perturbing the EnB-client install path. Cost: ~zero. Benefit:
+  matches what current EnB-on-wine forum advice recommends for
+  wine ≥10.
+
+* **What this session did NOT solve.** C&S Creator rc 71 remains
+  unfixed (items U.1–U.5 from the original plan). The user can use
+  the launcher (and presumably play the game) without C&S Creator;
+  it's a standalone avatar-customization tool, not a launch
+  dependency. Will re-open when the user asks for it or when we have
+  another contributor hit it.
+
+* **Push authorization same as Wave 29–31:** "push to main is fine"
+  from earlier in session covers the launcher-fix commit. The C&S
+  Creator follow-up will need its own push when it lands.
