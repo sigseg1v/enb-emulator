@@ -5111,3 +5111,112 @@ in turn.
   (16 opcodes total).
 * Push to main authorized this session — Wave 36 will go out
   as the next session-commit batch.
+
+---
+
+## 2026-05-26 — Phase K Wave 37: 0x0051 SKILL_STRING_RQ survival-probe (+1 ratchet)
+
+**Context** — Wave 36 picked the cleanest safe arm
+(STARBASE_AVATAR_CHANGE) from the un-tested
+`PlayerConnection.cpp` dispatch arms. Wave 37 takes the next
+candidate from the same safe list: 0x0051 SKILL_STRING_RQ —
+the retail loot-from-HUSK request opcode.
+
+**Decision** — bump coverage 67/207 → **68/207 (32.9%)** by
+landing 0x0051 SKILL_STRING_RQ as a survival probe. Client
+sends the canonical 8B `ClientSkillsRequest` payload
+(`{int32_t PlayerID; int32_t unknown1}`) with both fields
+zero. The handler at
+`server/src/PlayerConnection.cpp:1534-1614`:
+
+1. Casts `data` to `ClientSkillsRequest*` (cast result never
+   field-accessed — handler reads target from
+   `ShipIndex()->GetTargetGameID()` instead).
+2. Fetches the per-player ObjectManager via
+   `GetObjectManager()`.
+3. Reads `ShipIndex()->GetTargetGameID()` — **-1** on a fresh
+   char per the explicit init in `Player::FinishInit` at
+   `PlayerClass.cpp:1085`.
+4. Calls `om->GetObjectFromID(-1)` → null.
+5. Tests `if (obj && obj->ObjectType() == OT_HUSK)` →
+   short-circuits.
+6. Function returns. Zero state mutation, zero SendOpcode,
+   zero observer fan-out.
+
+The `m_ProspectWindow` mutation, the
+`SendOpcode(ENB_OPCODE_008C_LOOT_HULK_PERMISSION,...)` emit,
+the `AwardCreditsToGroup(...)` credit-award, and the
+loot-lock state writes all sit BEHIND the OT_HUSK guard.
+
+**Why this opcode** — second wave drawn from the safe-candidate
+list Wave 36 triaged. Five more safe candidates remain
+(0x00C0, 0x00C5, 0x00CD, 0x00D4, 0x0087) for Waves 38-42.
+
+**Test-author footgun: second occurrence** — initial firstName
+"Skstrq" returned G_ERROR_ONE_VOWEL (code=4) at
+CreateCharacter, **identical to Wave 36's "AvCh" failure**.
+The vowel check at `server/src/AccountManager.cpp:1147`
+matches only lowercase a/e/i/o/u/y on the raw `name[i]`,
+BEFORE the toupper→tolower normalization at line 1153. Fix:
+renamed firstName to "Skstreq" (lowercase 'e' at index 5).
+
+**Two consecutive waves tripping the same footgun** suggests:
+
+* Future wave authors should mechanically check candidate
+  firstName against `/[aeiouy]/` before submitting.
+* OR: add a name-validation helper in
+  `tests/integration/CliClient.IntegrationTests/Opcodes/SectorHandshake.cs`
+  that pre-validates firstName/shipName before sending the
+  CREATE_CHAR frame, surfacing the failure at test-author
+  time instead of at the 3-minute compose-cycle mark.
+
+Filed as Wave 39+ infra-hygiene candidate (low-priority;
+doesn't block opcode-ratchet work).
+
+**CLAUDE.md server-integrity compliance** — zero permissiveness
+added. The 8B wire shape is byte-identical to
+`common/include/net7/PacketStructures.h:781-785`. 0x0051 is
+what the retail Win32 client emits when the user clicks the
+'Loot' action on a targeted HUSK. The no-target/no-HUSK
+silent-skip is exactly what the retail server does — the
+loot-permission grant fires only when the user has targeted
+a wreck. No security posture changes; no widening of
+validation; no dev-flag escape hatch.
+
+**Regression classes** — see plans/11-phase-k-ingame.md Wave 37
+entry and the test file's xmldoc for the full 6-class
+breakdown (struct long-revert, dispatcher mis-route at
+PlayerConnection.cpp:491, GetObjectManager() null-deref
+removal, OT_HUSK guard removal, SendOpcode header-width
+revert, proxy default-case ForwardClientOpcode regression).
+
+**Pool growth** — `cli_test34` (id=9_000_034) added to
+`TestAccounts.Pool[32]` with matching `seed.sql` row at
+status=100. Pool layout: Pool[0..8] = cli_test01..09,
+Pool[9..22] = cli_test11..24, Pool[23..31] = cli_test25..33,
+Pool[32] = cli_test34. cli_test10 still SKIPPED.
+
+**Files touched** —
+
+* `tests/integration/CliClient.IntegrationTests/Opcodes/SectorSkillStringRqTests.cs` (new)
+* `tests/integration/CliClient.IntegrationTests/TestAccounts.cs` (Pool[32] += cli_test34)
+* `tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql` (cli_test34 INSERT row)
+* `tools/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs` (+0x0051 SkillStringRq)
+* `tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs`
+  (MinTestedCount 67→**68**; +1 sorted-position entry for 0x0051)
+
+**Verification** —
+
+* Test passes in isolation: 1/1 in **7s** after the firstName
+  fix.
+* Build green: 0 warnings, 0 errors.
+
+**Next** — Wave 38 = 0x00C0 CONFIRMED_ACTION_RESPONSE survival
+probe (no-op when `player_id != GameID`). Then 0x00C5,
+0x00CD, 0x00D4, 0x0087 from the safe-candidate list in turn.
+
+* Direct-reply/survival-probe pattern count now 10 waves;
+  passive-observation pattern count unchanged at 2 waves
+  (16 opcodes total).
+* Push to main authorized this session — Wave 37 will go out
+  as the next session-commit batch.
