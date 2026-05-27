@@ -5363,3 +5363,189 @@ probe (unknown-guildname early-skip path). Then 0x00CD,
   this wave (69/207 = 33.3%).
 * Push to main authorized this session — Wave 38 will go out
   as the next session-commit batch.
+
+---
+
+## 2026-05-26 — Phase K Wave 39: 0x00D4 GUILD_RANK_NAMES_REQUEST_CLIENT survival-probe (+1 ratchet; pivoted from 0x00C5)
+
+**Context** — Wave 39 was originally queued as 0x00C5
+GUILD_LEADER_ACCEPT_CLIENT, the next candidate from Wave 36's
+safe-candidate list. Inspection of HandleGuildLeaderAcceptClient
+at `server/src/PlayerGuild.cpp:737-766` surfaced an unfixed bug
+class that disqualifies 0x00C5 as a survival probe:
+
+```cpp
+long gameid = *(long *)data;                          // 8B over-read on Linux x86_64 (Phase K Wave 11 class)
+short length = *(short *)&data[4];                     // overlaps gameid's high half
+char guildname[64];
+strncpy(guildname, (char *)&data[6], 64);              // reads 64B regardless of length
+guildname[length] = 0;                                 // OOB write if length >= 64
+unsigned char accept = data[6+length];                 // OOB read with caller-controlled length
+```
+
+The retail server presumably either has bounds-checked layouts
+the upstream forks dropped, or the retail client only ever emits
+sane payloads — either way, survival-probing 0x00C5 without
+either triggering UB or fixing the bug first is not on. The
+fix-first path is a legitimate CLAUDE.md fidelity-tightening but
+out of scope for an opcode-coverage wave. **Pivoted to 0x00D4
+GUILD_RANK_NAMES_REQUEST_CLIENT** which has a clean `if (g)`
+short-circuit gate and zero payload-field reads.
+
+**Decision** — bump coverage 69/207 → **70/207 (33.8%)** by
+landing 0x00D4 GUILD_RANK_NAMES_REQUEST_CLIENT as a survival
+probe. Client sends a 6B payload (`{int32 gameid; short
+unknown}` per `struct GuildRankNamesRequestPacket` at
+`server/src/PlayerGuild.cpp:677-681` — the local struct's
+`long gameid` is also a Phase K Wave 11 sizeof(long) bug class
+on Linux x86_64, but the handler at PlayerGuild.cpp:675-699
+NEVER field-accesses the cast result, so the bug is dormant for
+this payload). Handler walks:
+
+1. Cast `data` to `GuildRankNamesRequestPacket *` (cast result
+   not field-accessed).
+2. `g = g_PlayerMgr->GuildFromId(m_GuildID)` — fresh char has
+   `m_GuildID == 0` (initialised to 0; `Player::SetupGuildInfo`
+   at PlayerGuild.cpp:25 is the only setter and is never called
+   on the fresh-char path).
+3. `GuildFromId(0)` returns null — no real guild has ID 0 (the
+   `guilds.AUTO_INCREMENT` starts non-zero and the fresh-char
+   test pool seeds no guild rows).
+4. `if (g)` short-circuits, function returns.
+
+The unconditional 10-iteration `AddDataLS`/`AddData` loop and the
+`SendOpcode(ENB_OPCODE_00D3_GUILD_RANK_NAMES_SECTOR, ...)` emit
+at line 697 all sit BEHIND the `if (g)` guard — none of them run
+on this test's payload. Zero state mutation, zero SendOpcode,
+zero observer fan-out.
+
+**Disambiguation finding — prior decisions-log entry was wrong** —
+the Wave 32 era entry at lines 4449-4453 of this same file
+previously claimed:
+
+> **Guild opcodes** (HandleGuildLeaderAcceptClient,
+> HandleGuildSimpleClientSector, HandleGuildRankNamesRequestClient,
+> HandleRecruitAcceptClient) — DECLARED in PlayerClass.h but NOT
+> DEFINED in any .cpp file. Would either be link-time errors or
+> weak/no-op symbols; rejected as unsafe.
+
+That claim is wrong. All four handlers are defined in
+`server/src/PlayerGuild.cpp`:
+
+* `Player::HandleGuildRankNamesRequestClient` — line 675
+* `Player::HandleGuildSimpleClientSector` — line 701
+* `Player::HandleGuildLeaderAcceptClient` — line 737
+* `Player::HandleRecruitAcceptClient` — line 768
+
+`nm -C server/build/net7` resolves all four symbols. The build
+links cleanly (verified by rebuilding `server/build/net7` this
+wave). The original triage author must have grepped only
+`PlayerClass.cpp` and `PlayerConnection.cpp`, missing
+`PlayerGuild.cpp`. The misclassification kept these opcodes off
+the safe-candidate list for an unnecessary period.
+
+**Per-opcode revised triage**:
+
+* **0x00C5 GUILD_LEADER_ACCEPT_CLIENT** — STILL unsafe, but via a
+  different mechanism than originally claimed. Has sizeof(long)
+  over-read + unbounded strncpy + OOB read pattern (see Context
+  section above). Could become safe via a fix-first wave that
+  brings the handler's read widths to canonical (int32_t cast)
+  and adds bounds checks on the strncpy + accept read. That fix
+  is a legitimate CLAUDE.md fidelity-tightening (the real client
+  emits length-bounded payloads; tightening the parse to enforce
+  the implicit invariant matches retail behaviour).
+* **0x00C9 GUILD_RECRUIT_ACCEPT_CLIENT** — STILL unsafe. Line
+  777 derefs `m_Recruiter->HandleRecruitMember2(...)` without a
+  null check. Fresh-char `m_Recruiter` is null (only set when a
+  guild leader sends a recruit invite). SEGV on probe.
+* **0x00CD GUILD_SIMPLE_CLIENT_SECTOR** — SAFE. Switch on
+  `request->type` (a `long` — sizeof(long) bug class but the
+  read width affects only WHICH case fires; for all-zero payload
+  type=0 which doesn't match any case → default
+  `LogMessage("Unknown guild confirmation type %d\n", ...)` →
+  safe no-op. Wave 40 candidate.
+* **0x00D4 GUILD_RANK_NAMES_REQUEST_CLIENT** — SAFE (this wave).
+
+**Why this opcode** — clean survival-probe shape: zero payload-
+field reads (handler reads only server-side `m_GuildID` state),
+guard gate is a single `if (g)` test, no SendOpcode on the
+short-circuit path. Same favourable post-emit shape as Wave 27
+(INVENTORY_MOVE default arm), Wave 29 (PETITION_STUCK), Wave 30
+(RELATIONSHIP), Wave 36 (STARBASE_AVATAR_CHANGE early-return),
+Wave 37 (SKILL_STRING_RQ OT_HUSK short-circuit), Wave 38
+(CONFIRMED_ACTION_RESPONSE non-matching player_id).
+
+**Test-author footgun — none this wave** — firstName "Guildrn"
+includes lowercase 'u' and 'i' and cleared the
+AccountManager.cpp:1147 vowel check first-try. The
+hit-twice-in-two-waves W36/W37 footgun (case-sensitive
+a/e/i/o/u/y scan before toupper at line 1153) still standing as
+Wave 39+ infra-hygiene candidate.
+
+**CLAUDE.md server-integrity compliance** — zero permissiveness
+added. The 6B wire shape matches the local struct's wire-
+effective width (4B int32 + 2B short). 0x00D4 is what the retail
+Win32 client emits when the user opens the guild rank-names UI.
+The no-guild silent-skip is exactly the retail server's
+behaviour — the user wouldn't normally see the UI unless they
+were in a guild, but the wire frame is reachable via scripted or
+modded clients, and the retail server's `if (g)` guard at
+PlayerGuild.cpp:685 silently ignores it. No security posture
+changes; no widening of validation; no dev-flag escape hatch.
+
+**Regression classes** — see plans/11-phase-k-ingame.md Wave 39
+entry and the test file's xmldoc for the full 6-class
+breakdown:
+
+* Dispatcher mis-route at PlayerConnection.cpp:617 (GUILD_SIMPLE
+  swap → wrong code arm; GUILD_LEADER_ACCEPT swap → UB on the
+  bug-laden 0x00C5 handler).
+* `m_GuildID` initialisation regression to a non-zero
+  placeholder (would emit unexpected 0x00D3 frame).
+* `if (g)` guard removal at PlayerGuild.cpp:685 (would SEGV
+  inside GetRankName on null Guild*).
+* SendOpcode header-width revert at PlayerConnection.cpp:127.
+* Proxy default-case ForwardClientOpcode regression.
+* Proxy SendClientPacketSequence inner-opcode guard tightening
+  at UDPProxyToClient_linux.cpp:568.
+
+**Pool growth** — `cli_test36` (id=9_000_036) added to
+`TestAccounts.Pool[34]` with matching `seed.sql` row at
+status=100. Pool layout: Pool[0..8] = cli_test01..09,
+Pool[9..22] = cli_test11..24, Pool[23..31] = cli_test25..33,
+Pool[32] = cli_test34 (W37), Pool[33] = cli_test35 (W38),
+Pool[34] = cli_test36 (this wave). cli_test10 still SKIPPED.
+
+**Files touched** —
+
+* `tests/integration/CliClient.IntegrationTests/Opcodes/SectorGuildRankNamesRequestClientTests.cs` (new)
+* `tests/integration/CliClient.IntegrationTests/TestAccounts.cs` (Pool[34] += cli_test36)
+* `tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql` (cli_test36 INSERT row)
+* `tools/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs` (+0x00D4 GuildRankNamesRequestClient)
+* `tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs`
+  (MinTestedCount 69→**70**; +1 sorted-position entry for 0x00D4 with full
+  regression-class commentary and the disambiguation-finding citation)
+
+**Verification** —
+
+* Test passes in isolation: 1/1 in **7s** (no vowel-check retry
+  needed).
+* Build green: 0 warnings, 0 errors.
+* `server/build/net7` rebuild confirms `nm -C` resolves all four
+  guild handlers (line 4449-4453 claim debunked).
+
+**Next** — Wave 40 = 0x00CD GUILD_SIMPLE_CLIENT_SECTOR survival
+probe (default-LogMessage path on `type==0` — the safe revised-
+triage candidate). Then 0x0087 MISSION_DISMISSAL (out-of-range
+MissionID filtered, per Wave 36 triage). 0x00C5 and 0x00C9
+remain deferred until either a fidelity-tightening fix wave
+lands the sizeof(long) and m_Recruiter null-deref repairs, or
+until we find a payload that doesn't reach the bug.
+
+* Direct-reply/survival-probe pattern count now 12 waves;
+  passive-observation pattern count unchanged at 2 waves
+  (16 opcodes total).
+* Phase K is now **33.8%** tested (70/207).
+* Push to main authorized this session — Wave 39 will go out
+  as the next session-commit batch.
