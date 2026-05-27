@@ -6464,3 +6464,158 @@ upstream code preserved verbatim.
 * Phase K coverage **37.2%** (77/207).
 * Push to main authorized this session — Wave 46 will go
   out as the next session-commit batch.
+
+---
+
+## 2026-05-27 — Phase K Wave 47: 0x3008 STARBASE_LOGIN_COMPLETE survival-probe (true no-op handler — write-only field setter with no reader)
+
+* **Wave 47 outcome.** Landed 0x3008 STARBASE_LOGIN_COMPLETE
+  survival-probe. +1 ratchet 77/207 → **78/207 (37.7%)**.
+  Test passes 1/1 in 7s. New seam-discovery pattern:
+  **"the cleanest possible survival probe is a write-only
+  field setter with no reader"** — generalisable beyond
+  0x3008 to any other handler that turns out to be a
+  similar one-line setter whose backing field has no
+  reader.
+
+* **Wave 47 handler walk-through.** Handler at
+  `server/src/PlayerConnection.cpp:631-634`:
+  ```cpp
+  case ENB_OPCODE_3008_STARBASE_LOGIN_COMPLETE:
+      // fix bad opcode messages
+      SetNavCommence();
+      break;
+  ```
+  `SetNavCommence()` is a one-line inline at
+  `server/src/PlayerClass.h:1055`:
+  ```cpp
+  void SetNavCommence() { m_NavCommence = true; }
+  ```
+  `m_NavCommence` declared at `PlayerClass.h:1300` as
+  `bool m_NavCommence;`. Initialised to `false` at
+  `PlayerClass.cpp:259` in the Player ctor. The only
+  declared reader `WaitForNavCommence()` at
+  `PlayerClass.h:1056` has **NO definition anywhere in
+  `server/src/`** (confirmed by
+  `grep -rn WaitForNavCommence server/` returning only
+  the one declaration), and **zero call sites**. The
+  field is write-only — assigned by SetNavCommence
+  (called from 0x3004 PLAYER_SHIP_SENT and 0x3008
+  STARBASE_LOGIN_COMPLETE in PlayerConnection.cpp:627/633,
+  and at PlayerConnection.cpp:11119 in a different code
+  path) but never read.
+
+* **Primary-source proof (CLAUDE.md escape hatch).** The
+  Linux proxy at
+  `proxy/ClientToServer_linux_stubs.cpp:413-449` (mirroring
+  the original Win32
+  `proxy/ClientToSectorServer.cpp:33-49`) synthesises a
+  0x3008 frame and forwards it to the server during the
+  in-game START_ACK fan-out when
+  `m_UDPClient->GetSectorID() > 9999` (starbase). The
+  payload is `sizeof(player_id)` bytes where
+  `long player_id = m_UDPClient->PlayerID()` — 4B on
+  Win32 but 8B on Linux x86_64. Since the server handler
+  does NOT read the payload at all, the cross-platform
+  width mismatch is harmless. The retail proxy↔server
+  pair has always exchanged 0x3008 during starbase
+  logins — preservation-load-bearing dispatch arm.
+
+* **Wave 47 wave-target triage rationale.** Walked the
+  full PlayerConnection dispatch list at lines 423-639
+  against the existing TestedOpcodes coverage to find
+  handlers that still fit the pure-survival-probe
+  pattern. The remaining untested PlayerConnection
+  opcodes are mostly UNSAFE:
+    * `0x0082/0x0084 RECUSTOMIZE_*_DONE` at
+      PlayerConnection.cpp:10045/10086 — memcmp/equality +
+      SetCredits + SaveDatabase pattern, no switch seam;
+    * `0x008D INCAPACITANCE_REQUEST` at
+      PlayerConnection.cpp:11053 — emits 0x0054 TALK_TREE,
+      mutates NPC template global state
+      (`NPCs->Avatar.shirt_primary_color[0] += 0.1f`),
+      can SEGV on missing station;
+    * `0x0098 GALAXY_MAP_REQUEST` — proxy-blocked;
+    * `0x009B WARP` at PlayerConnection.cpp:1876 —
+      CheckForInstalls → WarpDrive → CheckGroupFormation →
+      SetupWarpNavs + PrepareForWarp, state-mutating
+      throughout, no switch seam;
+    * `0x00BC CTA_REQUEST` at PlayerConnection.cpp:7723 —
+      `*((long*) &CTAResponse[0])` stack buffer overflow
+      bug; per CLAUDE.md server-integrity rules we can't
+      fix the bug without primary-source proof of the
+      retail server behaviour, so we can't ship a test
+      that would trigger the UB;
+    * `0x00C5/0x00C9 GUILD_*_ACCEPT` — sizeof(long)
+      over-read + null m_Recruiter SEGV;
+    * `0x007B/0x007C` — require m_CurManuItem pre-set,
+      defer to Wave 48 (the `if (!m_CurManuItem)`
+      early-bail at PlayerManufacturing.cpp:352/462 may
+      fire on fresh char since GetItem(0) likely returns
+      nullptr);
+    * `0x2017 RESEND_PACKET_SEQUENCE` at
+      PlayerConnection.cpp:263 — touches m_ResendQueue
+      and m_UDPConnection;
+    * `0x3004 PLAYER_SHIP_SENT` at PlayerConnection.cpp:625
+      — SetNavCommence + FinishLogin (large state
+      mutation).
+
+  0x3008 stood out as the absolute simplest handler in
+  the entire dispatch list. The handler's existence in
+  the dispatch list is preservation-load-bearing:
+  removing it would convert the proxy's existing 0x3008
+  emit into a default-LogMessage "Bad opcode" spam line
+  on every starbase login.
+
+* **Test design.** Pool grew by one to 43 — added
+  `cli_test44` at id=9_000_044, Pool[42], with matching
+  `seed.sql` row at status=100. firstName "Umbriel"
+  starts with lowercase 'u' for the AccountManager.cpp:1147
+  vowel-check footgun. sectorId=10151 (Luna Station,
+  > 9999 = starbase) so the proxy's existing 0x3008 emit
+  during handshake exercises the dispatch arm a first
+  time, then the test sends a SECOND idempotent 0x3008
+  via the sector connection and verifies connection
+  survival via REQUEST_TIME → CLIENT_SET_TIME round-trip.
+  The payload is 8 zero bytes matching the proxy's
+  `sizeof(long)`-wide wire shape — but the handler
+  doesn't read the payload, so any size works.
+
+* **Seam-discovery pattern catalogue.** Phase K Wave 47
+  is the FOURTH concrete instance of the seam-discovery
+  meta-pattern:
+    1. **Wave 44**: post-switch tail no-op via ctor-init
+       equality (`SetDifficulty(DIFFICULTY_AUTOMATIC)` is
+       a ReplaceData no-op when Data.Difficulty is
+       ctor-init to 0);
+    2. **Wave 45**: ReplaceData equality short-circuit at
+       AuxBase.h:94 + empty m_ManuRecipes;
+    3. **Wave 46**: outer-switch default fall-through
+       when ctor-init enum value lacks a switch arm
+       (MODE_NONE=0 not in HandleManufactureAction's
+       outer switch);
+    4. **Wave 47**: write-only field setter with no
+       reader (`m_NavCommence` set by SetNavCommence,
+       only declared reader WaitForNavCommence has no
+       body and no call sites).
+
+  The pattern is now the dominant driver of Phase K
+  coverage growth.
+
+* **Per CLAUDE.md server-integrity rules.** Zero
+  permissiveness added; the 8B all-zero payload matches
+  the proxy's existing emit shape (the proxy fills with
+  player_id but the handler ignores); the
+  SetNavCommence-only handler arm is exactly what the
+  retail proxy↔server pair has always exchanged during
+  starbase login. Not loosening any security posture;
+  not fabricating any reply. The "fix bad opcode
+  messages" comment at PlayerConnection.cpp:632 is
+  upstream code preserved verbatim.
+
+* Direct-reply/survival-probe pattern count now 20 waves;
+  passive-observation pattern count unchanged at 2 waves
+  (22 opcodes total).
+* Phase K coverage **37.7%** (78/207).
+* Push to main authorized this session — Wave 47 will go
+  out as the next session-commit batch.
