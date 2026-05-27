@@ -6730,3 +6730,133 @@ upstream code preserved verbatim.
 * Phase K coverage **38.2%** (79/207).
 * Push to main authorized this session — Wave 48 will go
   out as the next session-commit batch.
+
+## 2026-05-27 — Phase K Wave 49 (this session): 0x007C REFINERY_ITEM_ID with Item=0 invalid-item early-bail
+
+* **Wave 49 outcome.** Twenty-second direct-stimulus
+  wave (survival-probe; client→server one-shot with
+  single 0x001D MESSAGE_STRING "Invalid Item!" reply,
+  connection survival verified via REQUEST_TIME→
+  CLIENT_SET_TIME round-trip). +1 ratchet 79/207 →
+  **80/207 (38.6%)**.
+  `SectorRefinerySetItemTests.RefinerySetItem_InvalidItemZero_DoesNotBreakConnection_RequestTimeStillRoundTrips`
+  passes 1/1 in 7s.
+
+* **Wave 49 handler walk-through.** Companion wave to
+  Wave 48 (0x007B HandleManufactureSetItem). Client
+  sends 8B packed `ManufactureData` payload `{int32
+  GameID=0 (LE); int32 Data=0 (network order)}`.
+  Handler `HandleRefineSetItem` at
+  `server/src/PlayerManufacturing.cpp:442-497` is
+  structurally near-identical to HandleManufactureSetItem
+  with TWO meaningful differences:
+    1. **No leading ntohl.** The first read is
+       `long Item = Packet->Data` at line 446 — the
+       ntohl only fires inside the `if (Item > 0xFFFF)`
+       re-swap guard at lines 448-451, distinct from
+       0x007B at line 336 which does `long Item =
+       ntohl(Packet->Data)` unconditionally. Item=0 is
+       endian-invariant either way so the test passes;
+       a future non-zero-Item refine wave would expose
+       the per-handler endian-handling divergence.
+    2. **No AllowManufacture gate.** 0x007B has an
+       AllowManufacture call at line 360 that bounces
+       any non-allowed manufacture attempt; 0x007C has
+       NO such gate. For any non-null m_CurManuItem the
+       refine path runs UNCONDITIONALLY — `ResetManuItems`,
+       the `for (int i=0;i<6;i++)
+       ManuIndex()->Components.Item[i].SetItemTemplateID(...)`
+       loop, `SetValidity(0)`, `SetAdditionalIterations(0)`,
+       `SetBaseCost(m_CurManuItem->Cost())`, the
+       `Negotiate(m_CurManuItem->ManufactureCost(),...)`
+       call, `CheckItemRequirements()`, and `SendAuxManu()`
+       all run for any valid recipe template. This makes
+       0x007C strictly LESS GUARDED than 0x007B.
+
+  The Item=0 walk-through is identical to Wave 48:
+    * `if (m_Manufacturing) return;` at line 453 —
+      ctor-init false so skip.
+    * `SendItemBase(0)` at line 458 — ItemBaseManager
+      null-guard skips.
+    * `m_CurManuItem = g_ItemBaseMgr->GetItem(0) =
+      nullptr` at line 460.
+    * `if (!m_CurManuItem) { SendVaMessage("Invalid
+      Item!"); return; }` at lines 462-466 — emits ONE
+      0x001D MESSAGE_STRING and returns. The 30+ lines
+      of state-mutating code at 468-496 sit BEHIND the
+      early-bail and never run.
+
+* **Seam-discovery pattern catalogue (unchanged).**
+  Wave 49 reinforces the Wave-48 "null-item-from-GetItem
+  early-bail" variant rather than adding a new variant.
+  The pattern catalogue stays at FIVE concrete
+  instances through Wave 48:
+    1. Wave 44 post-switch tail no-op via ctor-init
+       equality
+    2. Wave 45 ReplaceData equality short-circuit
+    3. Wave 46 outer-switch default fall-through
+    4. Wave 47 write-only-field setter with no reader
+    5. Wave 48 null-item-from-GetItem early-bail
+       (now applied a second time at Wave 49)
+
+* **Manufacture-action family coverage now complete.**
+  0x0079/0x007A/0x007B/0x007C/0x007E all now have
+  survival-probe entries via Waves 44/45/48/49/46.
+  The bulk-UNSAFE flag on the manufacture-action family
+  was overly pessimistic — five of five handlers have
+  fresh-char-safe arms reachable via canonical
+  payload values, and all five are now exercised.
+
+* **Per CLAUDE.md server-integrity rules.** Zero
+  permissiveness added; the 8B wire shape matches the
+  canonical `ManufactureData` struct byte-for-byte;
+  the invalid-item early-bail with "Invalid Item!"
+  reply is exactly what the retail server does when
+  the player requests a non-existent refine recipe
+  template. Item=0 models a UI race where the player
+  selects a refine recipe that's just been delisted
+  server-side. Not loosening any security posture;
+  not fabricating any reply.
+
+* **Test-author footgun (preserved).** firstName "Orin"
+  starts with lowercase 'o' which cleared the
+  AccountManager.cpp:1147 vowel-check first-try.
+
+* Direct-reply/survival-probe pattern count now 22 waves;
+  passive-observation pattern count unchanged at 2 waves
+  (24 opcodes total).
+* Phase K coverage **38.6%** (80/207).
+* Push to main authorized this session — Wave 49 will go
+  out as the next session-commit batch.
+
+* **Wave 50+ outlook.** The dispatch list at
+  PlayerConnection.cpp 423-639 is now substantially
+  picked over for the easy-survival-probe arms. The
+  Wave-47 triage flagged 0x0082/0x0084 RECUSTOMIZE
+  (memcmp + SaveDatabase), 0x008D INCAPACITANCE
+  (NPC state mutation), 0x009B WARP (state-mutating
+  PrepareForWarp), 0x00BC CTA_REQUEST (sizeof(long)
+  buffer overflow), 0x00C5/0x00C9 GUILD (sizeof(long)
+  + null SEGV), 0x2017 RESEND_PACKET_SEQUENCE
+  (m_ResendQueue), and 0x3004 PLAYER_SHIP_SENT
+  (FinishLogin) as UNSAFE. Wave 50+ targets to evaluate
+  off the dispatch list:
+    * 0x0027 INVENTORY_MOVE — first inventory-state
+      mutator wave; read HandleInventoryMove to see if
+      a no-op same-slot move is fresh-char-safe.
+    * 0x002D ACTION2 — simpler-payload sibling of Wave
+      13's ACTION; check PlayerCombat.cpp for a
+      fresh-char-safe arm.
+    * 0x0018 REQUEST_TARGETS_TARGET — natural follow-on
+      to Wave 13's REQUEST_TARGET; the -1 sentinel in
+      our SetTarget reply tells the client to re-request
+      via this opcode.
+    * 0x0080 MANUFACTURE_TECH_LEVEL_FILTER — adjacent
+      to the manufacture family but uses a different
+      payload struct (9B with trailing Enable byte).
+    * Deferred byte-comparison wave to upgrade the
+      existing 22 survival-probe assertions into
+      byte-exact reply-shape assertions.
+    * Passive-observation waves for server-emitted
+      opcodes in the existing handshake stream that
+      aren't yet attributed.
