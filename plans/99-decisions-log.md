@@ -4874,3 +4874,126 @@ entry's "Regression coverage" subsection.
   SendRelationship / SendAdvancedPositionalUpdate), then
   SectorLogin2's later chain (SendShipInfo / SendServerParameters
   / SendAllNavs / SendVaMessage).
+
+---
+
+## 2026-05-26 — Phase K Wave 35: passive-observation +14 ratchet on handshake-stream opcodes
+
+**Context** — Wave 34 introduced the `Session.HandshakeOpcodes`
+capture infrastructure with a deliberate +2 to validate the
+pattern. Wave 35 demonstrates the pattern's near-constant-cost
+property by harvesting the next batch in one shot: **14
+previously-unobserved opcodes** the handshake stream already
+emits today, no server change, no new client stimulus.
+
+**Decision** — bump coverage 52/207 → **66/207 (31.9%)** in a
+single wave. Biggest single ratchet in Phase K to date. This
+sets the working ratchet pattern for the remainder of Phase K's
+handshake-reachable opcodes: each subsequent observable opcode
+is a ~10 LOC, 0-server-change ratchet.
+
+**The 14 opcodes** (sorted by opcode value, with primary-source
+server-side emit citations):
+
+| Opcode | Name | Emit site |
+|---|---|---|
+| 0x0004 | CREATE | server/src/PlayerConnection.cpp:1531 |
+| 0x0010 | DECAL | server/src/PlayerConnection.cpp:1182 |
+| 0x0011 | COLORIZATION | server/src/PlayerClass.cpp:1363 |
+| 0x001B | AUX_DATA | server/src/PlayerClass.cpp:959 (multi-site: SendAuxPlayer / SendAuxStarbase / SendAuxShip / SendAuxStats) |
+| 0x0025 | ITEM_BASE | server/src/ItemBaseManager.cpp:114 |
+| 0x0037 | CLIENT_AVATAR | server/src/PlayerClass.cpp:879 |
+| 0x003E | ADVANCED_POSITIONAL_UPDATE | server/src/PlayerConnection.cpp:1383 |
+| 0x0040 | CONSTANT_POSITIONAL_UPDATE | server/src/PlayerConnection.cpp:1217 |
+| 0x004F | STARBASE_SET | server/src/PlayerConnection.cpp:716 |
+| 0x0052 | LOUNGE_NPC | server/src/PlayerConnection.cpp:9721 |
+| 0x007F | MANUFACTURE_SET_MANUFACTURE_ID | server/src/PlayerConnection.cpp:10129 |
+| 0x0089 | RELATIONSHIP | server/src/PlayerConnection.cpp:10698 |
+| 0x00B2 | NAME_DECAL | server/src/PlayerConnection.cpp:1197 |
+| 0x00B4 | SUBPARTS | server/src/PlayerClass.cpp:1041 |
+
+**Reasoning** — picked the set by reading the captured
+`Session.HandshakeOpcodes` list from a successful handshake and
+cross-referencing against `OpcodeId.Known` to find emits that
+are reachable today but uncovered. Triaged and rejected from
+this wave: opcodes whose payload semantics aren't yet trivially
+assertable from an `Assert.Contains` (the passive-observation
+pattern asserts opcode presence, not payload field correctness
+— future waves can add typed-codec wire-shape assertions);
+opcodes that are emitted by the handshake stream conditionally
+(e.g. based on installed items, sector-specific NPCs, faction
+state) where a regression that disabled the emit would still
+pass the test on a fresh char; opcodes already covered by
+direct-reply waves (e.g. 0x001D MESSAGE_STRING which Wave
+8/24/26/27/30 hit).
+
+Note that 0x0037 CLIENT_AVATAR was already present in
+`OpcodeId.Known` (since the Phase S baseline set, used by other
+codecs) but had no `TestedOpcodes` coverage entry — Wave 35
+adds the coverage entry, not a new `OpcodeId.Known` constant.
+Net `OpcodeId.Known` additions in Wave 35 = 13 (Create, Decal,
+Colorization, AuxData, ItemBase, AdvancedPositionalUpdate,
+ConstantPositionalUpdate, StarbaseSet, LoungeNpc,
+ManufactureSetManufactureId, Relationship, NameDecal, Subparts);
+net `TestedOpcodes` additions = 14 (the 13 above + 0x0037).
+
+**Per CLAUDE.md server-integrity** — zero permissiveness added;
+all 14 opcodes are server-originated. The server emits them on
+every successful handshake today, Wave 35 simply records them
+as ground truth. This is exactly the kind of "tightening" the
+rule welcomes (rejecting an input the real server rejected but
+we currently accept is the inverse — adding assertions on emits
+the real server produces is the same shape from the other
+direction).
+
+**Regression classes** — see plans/11-phase-k-ingame.md Wave 35
+entry's "Regression coverage" subsection. Net protection: a
+single regression in `DoSectorLoginUntilStartAsync`'s
+drain-loop capture (one point of failure) protects all 16
+opcodes covered by Wave 34 + Wave 35 simultaneously.
+
+**Touches** —
+* `tests/integration/CliClient.IntegrationTests/Opcodes/SectorHandshakeFanoutTests.cs`
+  (new `HandshakeEmitsFullSendLoginShipDataFanout` test method
+  — 14 `Assert.Contains` calls + xmldoc with per-opcode emit
+  citations; uses Pool[30] cli_test32 dedicated to avoid racing
+  the sibling Wave 34 test on Pool[29])
+* `tests/integration/CliClient.IntegrationTests/TestAccounts.cs`
+  (Pool[30] += cli_test32 — 9_000_032)
+* `tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql`
+  (cli_test32 INSERT row, status=100)
+* `tools/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs`
+  (+13 OpcodeId.Known entries in sorted-position order)
+* `tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs`
+  (MinTestedCount 52→**66**; **+14** sorted-position entries
+  with full per-opcode regression-class citations)
+* `plans/11-phase-k-ingame.md` (Wave 35 entry inserted above
+  Wave 34)
+* `plans/00-master.md` (Phase K row demotes Wave 34 to "Earlier
+  this session", Wave 35 leads)
+* `plans/99-decisions-log.md` (this entry)
+
+**Notes** —
+* Build: 0 warnings, 0 errors.
+* `HandshakeEmitsFullSendLoginShipDataFanout` passes in
+  isolation in ~2s. Combined SectorHandshakeFanout +
+  CoverageRatchet filter run: 8/8 in 42.9s
+  (handshake-establishment latency dominates per-test cost;
+  assertions run synchronously against already-captured state).
+* CoverageRatchetTests still pass after the 52→66 bump.
+* Direct-reply pattern count unchanged at 8 waves;
+  passive-observation pattern count now 2 waves but covering
+  **16 opcodes** (Wave 34 = 2, Wave 35 = 14).
+* The handshake-stream capture infrastructure is now paying
+  back its Wave 34 investment cost: from this point forward,
+  every previously-unobserved opcode appearing in
+  `Session.HandshakeOpcodes` is a +1 ratchet for ~10 LOC.
+* Push to main authorized this session — Wave 35 will go out as
+  the next session-commit batch.
+* Next-Phase-K targets after Wave 35: triage the remaining
+  `Session.HandshakeOpcodes` entries against `OpcodeId.Known`
+  and `TestedOpcodes` to identify the next batch of
+  passive-observation candidates; for opcodes the handshake
+  stream doesn't reach, consider richer in-sector stimulus
+  (movement, combat, vendor, mission) or capture-replay
+  verification.
