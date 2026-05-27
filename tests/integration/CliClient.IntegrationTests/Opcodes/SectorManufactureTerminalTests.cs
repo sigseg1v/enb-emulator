@@ -230,11 +230,7 @@ public sealed class SectorManufactureTerminalTests
     [Fact]
     public async Task ManufactureTerminal_TerminalZeroExit_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
-        // cli_test41 — Pool[39]. Dedicated to this wave so its
-        // Create/Delete cycle doesn't collide with Pool slots owned
-        // by earlier waves. seed.sql carries the matching 9_000_041
-        // row.
-        var account = TestAccounts.Pool[39];
+        var account = TestAccounts.For();
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 

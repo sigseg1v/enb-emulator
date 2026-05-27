@@ -163,11 +163,7 @@ public sealed class SectorPetitionStuckTests
     [Fact]
     public async Task PetitionStuck_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
-        // cli_test26 — Pool[24]. Dedicated to this wave so its
-        // Create/Delete cycle doesn't collide with the Pool slots
-        // owned by earlier waves. seed.sql carries the matching
-        // 9_000_026 row.
-        var account = TestAccounts.Pool[24];
+        var account = TestAccounts.For();
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 

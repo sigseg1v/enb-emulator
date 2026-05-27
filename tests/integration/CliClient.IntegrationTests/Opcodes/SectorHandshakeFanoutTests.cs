@@ -147,11 +147,7 @@ public sealed class SectorHandshakeFanoutTests
     [Fact]
     public async Task HandshakeEmitsClientShipAndAvatarDescription()
     {
-        // cli_test31 — Pool[29]. Layout: Pool[0..8]=cli_test01..09,
-        // Pool[9..22]=cli_test11..24, Pool[23..28]=cli_test25..30,
-        // Pool[29]=cli_test31 (this test). Pool skips cli_test10
-        // which is the out-of-pool STRESS_TEST_CLOSED fixture.
-        var account = TestAccounts.Pool[29];
+        var account = TestAccounts.For();
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -221,11 +217,7 @@ public sealed class SectorHandshakeFanoutTests
     [Fact]
     public async Task HandshakeEmitsFullSendLoginShipDataFanout()
     {
-        // cli_test32 — Pool[30]. Dedicated account so this test's
-        // create/delete cycle doesn't race against the sibling
-        // HandshakeEmitsClientShipAndAvatarDescription test (which
-        // also creates+deletes a character on Pool[29]/slot 0).
-        var account = TestAccounts.Pool[30];
+        var account = TestAccounts.For();
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -266,4 +258,5 @@ public sealed class SectorHandshakeFanoutTests
             catch { /* best-effort cleanup */ }
         }
     }
+
 }

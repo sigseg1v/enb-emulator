@@ -205,11 +205,7 @@ public sealed class SectorInventoryMoveTests
     [Fact]
     public async Task InventoryMove_UnrecognisedFromInv_ReceivesUnrecognisedErrorString()
     {
-        // cli_test24 — Pool[22] (Pool skips index for cli_test10 which
-        // is the out-of-pool STRESS_TEST_CLOSED fixture). Dedicated to
-        // this test so its Create/Delete cycle doesn't collide with
-        // Pool[3..21] which are owned by prior Phase K waves.
-        var account = TestAccounts.Pool[22];
+        var account = TestAccounts.For();
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 

@@ -200,10 +200,7 @@ public sealed class SectorSkillAbilityTests
     [Fact]
     public async Task SkillAbility_OnUnknownAbilityIndex_ReceivesPriorityMessageNotYetWorking()
     {
-        // cli_test23 — Pool[21]. Dedicated to this test so its
-        // Create/Delete cycle doesn't collide with Pool[3..20] which
-        // are owned by prior Phase K waves.
-        var account = TestAccounts.Pool[21];
+        var account = TestAccounts.For();
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 

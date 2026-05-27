@@ -201,10 +201,7 @@ public sealed class SectorOptionTests
     [Fact]
     public async Task Option_UnhandledOptionType_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
-        // cli_test19 — Pool[17]. Dedicated to this test so its
-        // Create/Delete cycle doesn't collide with Pool[3..16] which
-        // are owned by prior Phase K waves.
-        var account = TestAccounts.Pool[17];
+        var account = TestAccounts.For();
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 

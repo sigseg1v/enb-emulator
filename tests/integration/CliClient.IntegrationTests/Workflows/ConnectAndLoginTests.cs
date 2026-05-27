@@ -10,7 +10,7 @@ namespace N7.CliClient.IntegrationTests.Workflows;
 
 /// <summary>
 /// End-to-end driver of <see cref="ConnectAndLogin"/> against the live
-/// dev stack: TLS login on Pool[0] → global TCP connect → idle drain
+/// dev stack: TLS login → global TCP connect → idle drain
 /// → clean disconnect. Asserts the whole workflow ends in a Global
 /// stage with a non-empty ticket and no health-guard trip.
 ///
@@ -36,7 +36,7 @@ public sealed class ConnectAndLoginTests
     [Fact]
     public async Task ValidAccount_LandsInGlobalStage_NoHealthTrip()
     {
-        var account = TestAccounts.Pool[0];
+        var account = TestAccounts.For();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
         var workflow = new ConnectAndLogin(
@@ -72,7 +72,7 @@ public sealed class ConnectAndLoginTests
     [Fact]
     public async Task WrongPassword_AbortsWithLoginRejection()
     {
-        var account = TestAccounts.Pool[0];
+        var account = TestAccounts.For();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
         var workflow = new ConnectAndLogin(

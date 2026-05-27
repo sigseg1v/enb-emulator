@@ -144,13 +144,7 @@ public sealed class SectorRequestTargetTests
     [Fact]
     public async Task RequestTarget_OnNullTarget_ReceivesSetTargetWithSentinelTargetIdMinusOne()
     {
-        // cli_test16 — Pool[14]. Dedicated to this test so its
-        // Create/Delete cycle doesn't collide with Pool[3..13] which
-        // are owned by SectorLogin / SectorChat / SectorRequestTime /
-        // SectorStartAck / SectorTurnTilt / SectorAction / SectorMove /
-        // SectorStarbaseRoomChange / SectorStarbaseRequest / SectorSkillUp /
-        // SectorVerbRequest respectively.
-        var account = TestAccounts.Pool[14];
+        var account = TestAccounts.For();
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 

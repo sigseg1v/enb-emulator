@@ -61,11 +61,7 @@ public sealed class SectorLoginTests
     [Fact]
     public async Task FullSectorLogin_ReceivesStart()
     {
-        // cli_test04 — Pool[3]. Reserved here so the per-compose-lifetime
-        // CreateCharacter / DeleteCharacter cycle this test runs can't
-        // collide on IsUsernameUnique with the create-character test
-        // (which uses Pool[2]).
-        var account = TestAccounts.Pool[3];
+        var account = TestAccounts.For();
         const int slot = 0;
 
         // Terran Warrior starting sector from avatar_base

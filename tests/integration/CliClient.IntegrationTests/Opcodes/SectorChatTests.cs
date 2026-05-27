@@ -77,10 +77,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task GroupChat_WhenUngrouped_ReceivesNotInGroupErrorString()
     {
-        // cli_test05 — Pool[4]. Owned by this test; no other test
-        // touches it, so the per-compose CreateCharacter/DeleteCharacter
-        // cycle below is the only mutation against the row.
-        var account = TestAccounts.Pool[4];
+        var account = TestAccounts.For();
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 

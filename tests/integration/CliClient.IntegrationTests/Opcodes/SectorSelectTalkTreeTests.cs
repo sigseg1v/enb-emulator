@@ -238,14 +238,7 @@ public sealed class SectorSelectTalkTreeTests
     [Fact]
     public async Task SelectTalkTree_NoCurrentNpc_ReceivesTalkTreeActionCloseSentinel()
     {
-        // cli_test25 — Pool[23]. seed.sql adds the 9000025 row;
-        // TestAccounts.Pool gets the matching entry at the new tail
-        // index. (Pool skips index for cli_test10 — the out-of-pool
-        // STRESS_TEST_CLOSED fixture — so cli_test25 is the new
-        // Pool[23], not Pool[24]. cli_test24 from Wave 27 stays at
-        // Pool[22]. Documented trap: any future cli_test* addition
-        // bumps the tail index by 1 unless a gap is introduced.)
-        var account = TestAccounts.Pool[23];
+        var account = TestAccounts.For();
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 

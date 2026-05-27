@@ -191,11 +191,7 @@ public sealed class SectorStarbaseLoginCompleteTests
     [Fact]
     public async Task StarbaseLoginComplete_OnFreshChar_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
-        // cli_test44 — Pool[42]. Dedicated to this wave so its
-        // Create/Delete cycle doesn't collide with Pool slots owned
-        // by earlier waves. seed.sql carries the matching 9_000_044
-        // row.
-        var account = TestAccounts.Pool[42];
+        var account = TestAccounts.For();
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station (> 9999 = starbase)
 

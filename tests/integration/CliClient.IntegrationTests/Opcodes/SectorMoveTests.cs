@@ -118,13 +118,7 @@ public sealed class SectorMoveTests
     [Fact]
     public async Task Move_EngineOn_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
-        // cli_test11 — Pool[9]. Dedicated to this test so its
-        // Create/Delete cycle doesn't collide with Pool[3..8] which
-        // are owned by SectorLogin / SectorChat / SectorRequestTime /
-        // SectorStartAck / SectorTurnTilt / SectorAction respectively.
-        // (Pool[10] is unused; 9_000_010 is reserved for
-        // TestAccounts.StressTestClosed.)
-        var account = TestAccounts.Pool[9];
+        var account = TestAccounts.For();
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 

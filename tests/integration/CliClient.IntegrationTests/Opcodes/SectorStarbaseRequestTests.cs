@@ -106,9 +106,8 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// the server accept anything it didn't previously accept. The retail
 /// server emits no direct reply on the empty-job-list branch (it just
 /// sets <c>m_TradeWindow = false</c> and returns); we don't fabricate
-/// one. Pool[11] = cli_test13 is a fresh starbase character in Luna
-/// Station per the standard test handshake, so dispatch context
-/// matches retail.
+/// one. The test account is a fresh starbase character in Luna Station
+/// per the standard test handshake, so dispatch context matches retail.
 /// </para>
 ///
 /// <para>
@@ -131,12 +130,7 @@ public sealed class SectorStarbaseRequestTests
     [Fact]
     public async Task JobTerminal_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
-        // cli_test13 — Pool[11]. Dedicated to this test so its
-        // Create/Delete cycle doesn't collide with Pool[3..10] which
-        // are owned by SectorLogin / SectorChat / SectorRequestTime /
-        // SectorStartAck / SectorTurnTilt / SectorAction / SectorMove /
-        // SectorStarbaseRoomChange respectively.
-        var account = TestAccounts.Pool[11];
+        var account = TestAccounts.For();
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 

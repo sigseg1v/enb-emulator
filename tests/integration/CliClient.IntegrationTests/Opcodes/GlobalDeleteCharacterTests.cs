@@ -84,7 +84,7 @@ public sealed class GlobalDeleteCharacterTests
     [Fact]
     public async Task EmptySlot_ReturnsRefreshedAvatarList()
     {
-        var account = TestAccounts.Pool[1];
+        var account = TestAccounts.For();
 
         // 40s budget: TLS login + RC4+RSA handshake + GlobalConnect
         // round-trip (sub-second) + the proxy's DeleteCharacter UDP

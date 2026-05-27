@@ -228,10 +228,7 @@ public sealed class SectorAvatarEmoteTests
     [Fact]
     public async Task AvatarEmote_EmoteTrigger_ReceivesAvatarEmoteResponseWithEchoedSentinel()
     {
-        // cli_test22 — Pool[20]. Dedicated to this test so its
-        // Create/Delete cycle doesn't collide with Pool[3..19] which
-        // are owned by prior Phase K waves.
-        var account = TestAccounts.Pool[20];
+        var account = TestAccounts.For();
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 

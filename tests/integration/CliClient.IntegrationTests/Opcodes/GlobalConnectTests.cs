@@ -68,7 +68,7 @@ public sealed class GlobalConnectTests
     [Fact]
     public async Task ValidTicket_RoundTripsThroughUdpGlobalPlane_ReturnsAvatarList()
     {
-        var account = TestAccounts.Pool[0];
+        var account = TestAccounts.For();
 
         // 30s budget: TLS login + RSA handshake + the proxy's UDP round-trip
         // to the server (sub-second in the happy path; the proxy's

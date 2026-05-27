@@ -194,14 +194,7 @@ public sealed class SectorRequestTargetsTargetTests
     [Fact]
     public async Task RequestTargetsTarget_OnUnknownPlayer_ReceivesSetTargetWithLiteralZeroGameId()
     {
-        // cli_test17 — Pool[15]. Dedicated to this test so its
-        // Create/Delete cycle doesn't collide with Pool[3..14] which
-        // are owned by prior Phase K waves (SectorLogin / SectorChat /
-        // SectorRequestTime / SectorStartAck / SectorTurnTilt /
-        // SectorAction / SectorMove / SectorStarbaseRoomChange /
-        // SectorStarbaseRequest / SectorSkillUp / SectorVerbRequest /
-        // SectorRequestTarget).
-        var account = TestAccounts.Pool[15];
+        var account = TestAccounts.For();
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 

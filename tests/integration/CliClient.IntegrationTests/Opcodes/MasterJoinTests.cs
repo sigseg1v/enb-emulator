@@ -48,7 +48,7 @@ public sealed class MasterJoinTests
     [Fact]
     public async Task ValidMasterJoin_ReceivesServerRedirect()
     {
-        var account = TestAccounts.Pool[0];
+        var account = TestAccounts.For();
 
         // 30s budget: TLS login + RSA handshake + ~5s UDP timeout in
         // the proxy's HandleMasterJoin fallback path + slack. The

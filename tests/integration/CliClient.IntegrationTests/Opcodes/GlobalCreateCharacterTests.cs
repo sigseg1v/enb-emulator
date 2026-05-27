@@ -99,10 +99,7 @@ public sealed class GlobalCreateCharacterTests
     [Fact]
     public async Task ValidAvatar_AppearsInRefreshedAvatarList_AndCleanlyDeletes()
     {
-        // cli_test03 — Pool[2]. Reserved for this test so other Pool
-        // entries don't accidentally collide on the global IsUsernameUnique
-        // check during the same compose lifetime.
-        var account = TestAccounts.Pool[2];
+        var account = TestAccounts.For();
 
         const string CharacterFirstName = "Testavus";  // 8 chars, has 'e','a','u' vowels, no 3-repeating
         const string ShipName = "TestShip";

@@ -115,12 +115,7 @@ public sealed class SectorStarbaseRoomChangeTests
     [Fact]
     public async Task RoomChange_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
-        // cli_test12 — Pool[10]. Dedicated to this test so its
-        // Create/Delete cycle doesn't collide with Pool[3..9] which
-        // are owned by SectorLogin / SectorChat / SectorRequestTime /
-        // SectorStartAck / SectorTurnTilt / SectorAction / SectorMove
-        // respectively.
-        var account = TestAccounts.Pool[10];
+        var account = TestAccounts.For();
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 

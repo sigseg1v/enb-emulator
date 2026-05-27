@@ -236,11 +236,7 @@ public sealed class SectorInventorySortTests
     [Fact]
     public async Task InventorySort_UnrecognisedTargetInv_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
-        // cli_test47 — Pool[45]. Dedicated to this wave so its
-        // Create/Delete cycle doesn't collide with Pool slots owned
-        // by earlier waves. seed.sql carries the matching 9_000_047
-        // row.
-        var account = TestAccounts.Pool[45];
+        var account = TestAccounts.For();
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 

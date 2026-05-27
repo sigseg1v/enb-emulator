@@ -234,15 +234,7 @@ public sealed class SectorTriggerEmoteTests
     [Fact]
     public async Task TriggerEmote_DefaultPayload_ReceivesNotifyEmoteEchoed()
     {
-        // cli_test30 — Pool[28]. Layout: Pool[0..8]=cli_test01..09,
-        // Pool[9..22]=cli_test11..24, Pool[23]=cli_test25,
-        // Pool[24]=cli_test26 (Wave 29 PETITION_STUCK),
-        // Pool[25]=cli_test27 (Wave 30 MISSION_FORFEIT),
-        // Pool[26]=cli_test28 (Wave 31 LOGOFF_REQUEST),
-        // Pool[27]=cli_test29 (Wave 32 CLIENT_CHAT_REQUEST),
-        // Pool[28]=cli_test30 (this test). Pool skips cli_test10
-        // which is the out-of-pool STRESS_TEST_CLOSED fixture.
-        var account = TestAccounts.Pool[28];
+        var account = TestAccounts.For();
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
         const int emoteSentinel = 0x4D454D45;  // "EMEM" LE — distinct from any retail emote ID and from zero.

@@ -92,10 +92,7 @@ public sealed class SectorRequestTimeTests
     [Fact]
     public async Task RequestTime_RoundTripsClientSentTickAndReturnsServerTimes()
     {
-        // cli_test06 — Pool[5]. Owned by this test exclusively so the
-        // per-compose Create/Delete cycle doesn't collide with Pool[3]
-        // (SectorLogin) or Pool[4] (SectorChat).
-        var account = TestAccounts.Pool[5];
+        var account = TestAccounts.For();
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 

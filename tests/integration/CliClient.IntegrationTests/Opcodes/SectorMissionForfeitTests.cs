@@ -227,12 +227,7 @@ public sealed class SectorMissionForfeitTests
     [Fact]
     public async Task MissionForfeit_EmptySlotZero_ReceivesNonForfeitableErrorString()
     {
-        // cli_test27 — Pool[25]. Layout: Pool[0..8]=cli_test01..09,
-        // Pool[9..22]=cli_test11..24, Pool[23]=cli_test25,
-        // Pool[24]=cli_test26 (Wave 29 PETITION_STUCK), Pool[25]=
-        // cli_test27 (this test). Pool skips cli_test10 which is
-        // the out-of-pool STRESS_TEST_CLOSED fixture.
-        var account = TestAccounts.Pool[25];
+        var account = TestAccounts.For();
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 

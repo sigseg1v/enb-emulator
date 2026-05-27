@@ -47,7 +47,7 @@ public sealed class HarnessSmokeTest
             $"Fixtures/seed.sql not next to the test assembly at '{seedPath}'");
 
         var seed = File.ReadAllText(seedPath);
-        foreach (var account in TestAccounts.Pool)
+        foreach (var account in TestAccounts.All)
         {
             Assert.Contains(account.Username, seed);
             Assert.Contains(account.Id.ToString(), seed);

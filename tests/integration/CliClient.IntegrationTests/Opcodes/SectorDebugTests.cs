@@ -142,10 +142,7 @@ public sealed class SectorDebugTests
     [Fact]
     public async Task Debug_EmptyPayload_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
-        // cli_test20 — Pool[18]. Dedicated to this test so its
-        // Create/Delete cycle doesn't collide with Pool[3..17] which
-        // are owned by prior Phase K waves.
-        var account = TestAccounts.Pool[18];
+        var account = TestAccounts.For();
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
