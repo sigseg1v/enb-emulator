@@ -143,3 +143,6 @@ deploy/certs/*.pem
 deploy/certs/*.cer
 deploy/certs/*.key
 deploy/certs/*.crt
+
+# Local-only scratch space. Never committed.
+/scratch/

@@ -57,6 +57,19 @@ public static class SectorHandshake
         /// <summary>Character slot used for the avatar this session belongs to.</summary>
         public required int Slot { get; init; }
 
+        /// <summary>
+        /// Every opcode received on <see cref="Sector"/> between the
+        /// LOGIN frame and the 0x0005 START frame that terminates the
+        /// handshake drain. Captured so passive-observation tests can
+        /// assert on opcodes the server emits as part of
+        /// SectorManager::SectorLogin2 (SendLoginShipData →
+        /// SendShipInfo → SendServerParameters → SendAllNavs →
+        /// SendVaMessage → SendStart) without re-running the
+        /// handshake. List order matches receive order; duplicates
+        /// preserved. Wave 34 lit this up.
+        /// </summary>
+        public required IReadOnlyList<ushort> HandshakeOpcodes { get; init; }
+
         public async ValueTask DisposeAsync()
         {
             await Sector.DisposeAsync();
@@ -101,7 +114,7 @@ public static class SectorHandshake
             Assert.Equal(sectorId, redirect.SectorId);
             Assert.Equal(server.SectorPort, redirect.ServerEndPoint.Port);
 
-            var (sectorConn, startId) = await DoSectorLoginUntilStartAsync(
+            var (sectorConn, startId, handshakeOpcodes) = await DoSectorLoginUntilStartAsync(
                 server, authTicket, gameId, sectorId, ct);
 
             return new Session
@@ -111,6 +124,7 @@ public static class SectorHandshake
                 GameId = gameId,
                 StartId = startId,
                 Slot = slot,
+                HandshakeOpcodes = handshakeOpcodes,
             };
         }
         catch
@@ -293,10 +307,15 @@ public static class SectorHandshake
     /// Open a sector-server TCP connection, send the 137-byte LOGIN
     /// frame, drain the reply stream until 0x0005 START arrives.
     /// Returns the still-open connection so callers can keep driving
-    /// in-sector opcodes through it, plus the start id (read out of
-    /// the first 4 bytes of the START payload).
+    /// in-sector opcodes through it, the start id (read out of the
+    /// first 4 bytes of the START payload), and the list of opcodes
+    /// seen during the drain (terminating 0x0005 included) so
+    /// passive-observation tests can assert on handshake fan-out
+    /// emits like 0x0037 CLIENT_AVATAR, 0x0047 CLIENT_SHIP, and
+    /// 0x0061 AVATAR_DESCRIPTION that the server pushes from
+    /// SendLoginShipData before SendStart.
     /// </summary>
-    public static async Task<(EncryptedTcpConnection conn, int startId)>
+    public static async Task<(EncryptedTcpConnection conn, int startId, IReadOnlyList<ushort> opcodes)>
         DoSectorLoginUntilStartAsync(
             ServerFixture server, string authTicket, int gameId, int sectorId,
             CancellationToken ct)
@@ -308,6 +327,7 @@ public static class SectorHandshake
         {
             await conn.SendAsync(BuildLoginPacket(authTicket, gameId, sectorId), ct);
 
+            var opcodes = new List<ushort>();
             int framesSeen = 0;
             const int maxFrames = 4000;
             while (framesSeen++ < maxFrames)
@@ -315,12 +335,14 @@ public static class SectorHandshake
                 var reply = await conn.ReceiveAsync(ct);
                 Assert.NotNull(reply);
 
-                if (reply!.Header.Opcode == OpcodeId.Known.Start.Value)
+                opcodes.Add(reply!.Header.Opcode);
+
+                if (reply.Header.Opcode == OpcodeId.Known.Start.Value)
                 {
                     int startId = reply.Payload.Length >= 4
                         ? BinaryPrimitives.ReadInt32LittleEndian(reply.Payload.Span[..4])
                         : 0;
-                    return (conn, startId);
+                    return (conn, startId, opcodes);
                 }
             }
 
