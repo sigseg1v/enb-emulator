@@ -4997,3 +4997,117 @@ opcodes covered by Wave 34 + Wave 35 simultaneously.
   stream doesn't reach, consider richer in-sector stimulus
   (movement, combat, vendor, mission) or capture-replay
   verification.
+
+---
+
+## 2026-05-26 — Phase K Wave 36: 0x009D STARBASE_AVATAR_CHANGE survival-probe (+1 ratchet)
+
+**Context** — Wave 35 exhausted the easy passive-observation
+batch (14 opcodes from the default station handshake stream).
+Wave 36 returns to direct client→server stimulus, picking the
+cleanest **safe** opcode from the remaining un-tested
+`PlayerConnection.cpp` dispatch arms: a handler whose first
+operation after deref is a null-check that early-returns on
+fresh-character state.
+
+**Decision** — bump coverage 66/207 → **67/207 (32.4%)** by
+landing 0x009D STARBASE_AVATAR_CHANGE as a survival probe.
+Client sends the canonical 28B payload with
+`AvatarID=0x12345678` (well above the
+`account_id*5+slot+1` range any of our test accounts can hash
+into). The handler at `server/src/PlayerClass.cpp:587-629`:
+
+1. Casts `data` to `StarbaseAvatarChange*`
+2. Reads `change->AvatarID` at offset 0
+3. Calls `g_PlayerMgr->GetPlayer(change->AvatarID)`
+4. Gets null
+5. **Early-returns at line 596**
+
+before any mutex / position / orientation / action-flag /
+observer-fanout state is touched. Survival is verified via
+REQUEST_TIME → CLIENT_SET_TIME round-trip.
+
+**Why this opcode, not another** — triaged the remaining
+client→server dispatch arms in `PlayerConnection.cpp`'s
+switch-block (lines 423-618) into safe vs unsafe groups:
+
+* **Safe** (early-return / out-of-range / no-op on fresh char):
+  0x009D STARBASE_AVATAR_CHANGE (this wave), 0x0051 SKILL_STRING_RQ,
+  0x00C0 CONFIRMED_ACTION_RESPONSE, 0x00C5 GUILD_LEADER_ACCEPT_CLIENT,
+  0x00CD GUILD_SIMPLE_CLIENT_SECTOR, 0x00D4 GUILD_RANK_NAMES_REQUEST_CLIENT,
+  0x0087 MISSION_DISMISSAL.
+* **Unsafe** (known SEGV / formation walk / array deref on
+  fresh char): 0x008D INCAPACITANCE_REQUEST,
+  0x00BC CTA_REQUEST, 0x00C9 RECRUIT_ACCEPT_CLIENT,
+  0x009B WARP, 0x005D EQUIP_USE.
+
+0x009D wins as the cleanest safe arm — single null-check gate,
+clean early-return, no further state touched. 0x0051 SKILL_STRING_RQ
+is the Wave 37 target.
+
+**Test-author footgun discovered** — initial firstName "AvCh"
+returned G_ERROR_ONE_VOWEL (code=4) at CreateCharacter on the
+first run. The vowel check at
+`server/src/AccountManager.cpp:1147` matches only lowercase
+a/e/i/o/u/y on the raw `name[i]`, **before** the
+toupper→tolower normalization at line 1153. Names with only
+uppercase vowels fail the check. Fix: renamed firstName to
+"Avchnge" (lowercase 'e' at index 6 satisfies the check). All
+prior wave firstNames happen to have lowercase vowels — Wave
+36's "AvCh" was the first to trip this. Filed in the Wave 36
+plan entry for future wave authors.
+
+**CLAUDE.md server-integrity compliance** — zero permissiveness
+added. The 28B wire shape is byte-identical to retail
+(`common/include/net7/PacketStructures.h:787-794`,
+`ATTRIB_PACKED`, no implicit padding). The unknown-AvatarID
+early-return is exactly what the retail server does — the
+lookup fails for any AvatarID the server doesn't have in its
+active-player map. 0x009D is what the retail Win32 client
+emits when the user clicks an avatar position-update terminal
+in a starbase room. No security posture changes; no widening
+of validation; no dev-flag escape hatch.
+
+**Regression classes** — see plans/11-phase-k-ingame.md Wave 36
+entry for the full 5-class breakdown (struct long-revert,
+dispatcher mis-route to HandleWarp, null-check removal,
+SendOpcode header-width revert, proxy default-case forward
+regression). Verbatim citations are kept in both the test's
+xmldoc and the `TestedOpcodes.cs` entry for the opcode so a
+renamer/refactorer can navigate from either.
+
+**Pool growth** — `cli_test33` (id=9_000_033) added to
+`TestAccounts.Pool[31]` with matching `seed.sql` row at
+status=100. Pool layout: Pool[0..8] = cli_test01..09,
+Pool[9..22] = cli_test11..24, Pool[23..30] = cli_test25..32,
+Pool[31] = cli_test33. cli_test10 still SKIPPED
+(StressTestClosed fixture at id=9_000_010).
+
+**Files touched** —
+
+* `tests/integration/CliClient.IntegrationTests/Opcodes/SectorStarbaseAvatarChangeTests.cs` (new)
+* `tests/integration/CliClient.IntegrationTests/TestAccounts.cs` (Pool[31] += cli_test33)
+* `tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql` (cli_test33 INSERT row)
+* `tools/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs` (+0x009D StarbaseAvatarChange)
+* `tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs`
+  (MinTestedCount 66→**67**; +1 sorted-position entry for 0x009D)
+
+**Verification** —
+
+* Test passes in isolation: 1/1 in **7s** after the firstName
+  fix (the first attempt with "AvCh" failed during
+  CreateCharacter on the global plane — 3.6m, the test
+  fixture's full compose up→down cycle).
+* Build green: 0 warnings, 0 errors.
+
+**Next** — Wave 37 = 0x0051 SKILL_STRING_RQ survival probe
+(HandleSkillStringRequest at PlayerConnection.cpp:1534;
+no-HUSK-target early skip is the safe path). Then 0x00C0,
+0x00C5, 0x00CD, 0x00D4, 0x0087 from the safe-candidate list
+in turn.
+
+* Direct-reply/survival-probe pattern count now 9 waves;
+  passive-observation pattern count unchanged at 2 waves
+  (16 opcodes total).
+* Push to main authorized this session — Wave 36 will go out
+  as the next session-commit batch.
