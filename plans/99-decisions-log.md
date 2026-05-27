@@ -5220,3 +5220,146 @@ probe (no-op when `player_id != GameID`). Then 0x00C5,
   (16 opcodes total).
 * Push to main authorized this session — Wave 37 will go out
   as the next session-commit batch.
+
+---
+
+## 2026-05-26 — Phase K Wave 38: 0x00C0 CONFIRMED_ACTION_RESPONSE survival-probe (+1 ratchet)
+
+**Context** — Waves 36 (STARBASE_AVATAR_CHANGE) and 37
+(SKILL_STRING_RQ) picked the two cleanest safe arms from the
+`PlayerConnection.cpp` dispatch-arm triage. Wave 38 takes the
+next candidate from the same safe list: 0x00C0
+CONFIRMED_ACTION_RESPONSE — the retail confirm/dismiss reply
+for a server-pushed CONFIRMED_ACTION_OFFER popup. **Phase K
+crosses the one-third coverage threshold with this wave**
+(33.3%).
+
+**Decision** — bump coverage 68/207 → **69/207 (33.3%)** by
+landing 0x00C0 CONFIRMED_ACTION_RESPONSE as a survival probe.
+Client sends a 4B payload `{int32 player_id=0}` in network
+byte order. The 12-line handler at
+`server/src/PlayerConnection.cpp:875-886`:
+
+```cpp
+void Player::HandleActionResponse(unsigned char *data)
+{
+    long player_id = ntohl(*((int32_t *) &data[0]));
+    if (player_id == GameID())
+    {
+        m_ActionResponseReceived = true;
+        ProcessConfirmedActionOffer();
+    }
+}
+```
+
+For a fresh-starbase character GameID() = `account_id*5+slot+1`
+(account 9_000_035 slot 0 → 45_000_176). The payload's
+`player_id=0` cannot match this value; the if-block
+short-circuits and the function returns. Zero state mutation,
+zero SendOpcode, zero observer fan-out.
+
+**First survival-probe wave whose handler actually reads a
+payload field and uses it to gate the short-circuit** — earlier
+waves W36/W37 short-circuited on server-side state
+(GetPlayer/GetObjectFromID lookups); W27/W29/W30 did pure
+no-op writes regardless of payload. Wave 38 is the first
+survival-probe wave that closes the loop: dispatcher case
+hit, payload field read at the canonical 4B width, and the
+read value used in a gating decision.
+
+**Why this opcode** — third wave drawn from the safe-candidate
+list Wave 36 triaged. The handler is unusually small (12 lines
+including the Wave-11 fix comment), the gate is a single
+equality test against `GameID()`, and a fresh char has a
+deterministic GameID that the test can avoid by sending
+`player_id=0`. Four safe candidates remain (0x00C5, 0x00CD,
+0x00D4, 0x0087) for Waves 39-42.
+
+**Phase K Wave 11 read-width fix sits load-bearing on this
+handler** — the `ntohl(*((int32_t *) &data[0]))` cast pins the
+read width at 4B. A revert to `*((long *)` on Linux x86_64
+(sizeof(long)==8) reads 4B of payload + 4B of adjacent memory
+and byte-swaps the lot into garbage; UBSAN/ASAN runs would
+flag the over-read. Wave 38's test cannot directly assert on
+the read width (the silent-no-op branch fires either way
+because the garbage value still won't match GameID()), but
+the dispatcher arm is verified to be reached and the test
+documents the read-width invariant for the next direct-reply
+wave that exercises the `player_id == GameID()` true-arm.
+
+**Test-author footgun — none this wave** — firstName "Confact"
+includes both 'o' and 'a' lowercase and cleared the
+`AccountManager.cpp:1147` vowel check first-try. The
+hit-twice-in-two-waves W36/W37 footgun (case-sensitive
+lowercase a/e/i/o/u/y scan before toupper at line 1153) is
+still standing as a Wave 39+ infra-hygiene item (factor a
+name-validation helper into SectorHandshake.cs). Not waived,
+just deferred.
+
+**CLAUDE.md server-integrity compliance** — zero permissiveness
+added. The 4B wire shape matches the handler's read width
+exactly. 0x00C0 is what the retail Win32 client emits when the
+user clicks the confirm/dismiss action button on a server-
+pushed CONFIRMED_ACTION_OFFER popup (e.g. the mission-accept
+dialogue). The non-matching-player_id silent-skip is exactly
+what the retail server does — the `m_ActionResponseReceived`
+flip and the `ProcessConfirmedActionOffer()` call fire only
+when an action offer is pending and the responding player_id
+matches the offer's recipient. No security posture changes; no
+widening of validation; no dev-flag escape hatch.
+
+**Regression classes** — see plans/11-phase-k-ingame.md Wave 38
+entry and the test file's xmldoc for the full 6-class
+breakdown:
+
+* Dispatcher mis-route at PlayerConnection.cpp:599
+  (CTA_REQUEST swap → SEGV; GUILD_LEADER_ACCEPT swap → null
+  m_pGuildInfo walk).
+* Phase K Wave 11 ntohl read-width fix regression at
+  PlayerConnection.cpp:880 (long-revert → 8B over-read).
+* `player_id == GameID()` guard removal at line 881 (would
+  unconditionally fire ProcessConfirmedActionOffer →
+  unexpected 0x00BE frame).
+* SendOpcode header-width revert at PlayerConnection.cpp:127
+  (Phase K sizeof(int32_t) fix; corrupts 0x2016 inner-tuple
+  parser → REQUEST_TIME reply path goes silent).
+* Proxy default-case ForwardClientOpcode regression (0x00C0
+  is not explicitly listed in proxy switch; falls through to
+  default arm).
+* Proxy SendClientPacketSequence inner-opcode guard tightening
+  at UDPProxyToClient_linux.cpp:568 (currently passes 0x0034
+  CLIENT_SET_TIME because 0x0034 < 0x0FFF).
+
+**Pool growth** — `cli_test35` (id=9_000_035) added to
+`TestAccounts.Pool[33]` with matching `seed.sql` row at
+status=100. Pool layout: Pool[0..8] = cli_test01..09,
+Pool[9..22] = cli_test11..24, Pool[23..31] = cli_test25..33,
+Pool[32] = cli_test34 (W37), Pool[33] = cli_test35 (this
+wave). cli_test10 still SKIPPED.
+
+**Files touched** —
+
+* `tests/integration/CliClient.IntegrationTests/Opcodes/SectorConfirmedActionResponseTests.cs` (new)
+* `tests/integration/CliClient.IntegrationTests/TestAccounts.cs` (Pool[33] += cli_test35)
+* `tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql` (cli_test35 INSERT row)
+* `tools/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs` (+0x00C0 ConfirmedActionResponse)
+* `tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs`
+  (MinTestedCount 68→**69**; +1 sorted-position entry for 0x00C0)
+
+**Verification** —
+
+* Test passes in isolation: 1/1 in **7s** (no vowel-check
+  retry needed).
+* Build green: 0 warnings, 0 errors.
+
+**Next** — Wave 39 = 0x00C5 GUILD_LEADER_ACCEPT_CLIENT survival
+probe (unknown-guildname early-skip path). Then 0x00CD,
+0x00D4, 0x0087 from the safe-candidate list in turn.
+
+* Direct-reply/survival-probe pattern count now 11 waves;
+  passive-observation pattern count unchanged at 2 waves
+  (16 opcodes total).
+* Phase K crosses the **one-third tested** threshold with
+  this wave (69/207 = 33.3%).
+* Push to main authorized this session — Wave 38 will go out
+  as the next session-commit batch.
