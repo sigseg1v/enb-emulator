@@ -185,4 +185,85 @@ public sealed class SectorHandshakeFanoutTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 35 passive-observation +14 ratchet: assert that the full
+    /// fan-out of opcodes captured during the sector-login handshake
+    /// are all present in <see cref="SectorHandshake.Session.HandshakeOpcodes"/>.
+    /// All 14 are server-originated emits the server has been pushing
+    /// on every prior wave's handshake — Wave 35 simply records them
+    /// as ground truth.
+    ///
+    /// <para>
+    /// Per-opcode emit citations (kept in <c>TestedOpcodes.cs</c> for
+    /// each entry's regression-class commentary): 0x0004 CREATE
+    /// (PlayerConnection.cpp:1531), 0x0010 DECAL (PlayerConnection.cpp:1182),
+    /// 0x0011 COLORIZATION (PlayerClass.cpp:1363), 0x001B AUX_DATA
+    /// (PlayerClass.cpp:959+et al — multi-site SendAux*), 0x0025 ITEM_BASE
+    /// (ItemBaseManager.cpp:114), 0x0037 CLIENT_AVATAR (PlayerClass.cpp:879),
+    /// 0x003E ADVANCED_POSITIONAL_UPDATE (PlayerConnection.cpp:1383),
+    /// 0x0040 CONSTANT_POSITIONAL_UPDATE (PlayerConnection.cpp:1217),
+    /// 0x004F STARBASE_SET (PlayerConnection.cpp:716), 0x0052 LOUNGE_NPC
+    /// (PlayerConnection.cpp:9721), 0x007F MANUFACTURE_SET_MANUFACTURE_ID
+    /// (PlayerConnection.cpp:10129), 0x0089 RELATIONSHIP
+    /// (PlayerConnection.cpp:10698), 0x00B2 NAME_DECAL
+    /// (PlayerConnection.cpp:1197), 0x00B4 SUBPARTS (PlayerClass.cpp:1041).
+    /// </para>
+    ///
+    /// <para>
+    /// All 14 opcodes ride the standard SendOpcode→m_UDPQueue→
+    /// SendPacketCache→0x2016 PACKET_SEQUENCE→proxy SendClientPacketSequence→
+    /// TCP fan-out path. Per CLAUDE.md server-integrity: server-originated,
+    /// no new client stimulus, no server change, no widened input
+    /// acceptance — this is exactly the "tightening" the rule welcomes.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task HandshakeEmitsFullSendLoginShipDataFanout()
+    {
+        // cli_test32 — Pool[30]. Dedicated account so this test's
+        // create/delete cycle doesn't race against the sibling
+        // HandshakeEmitsClientShipAndAvatarDescription test (which
+        // also creates+deletes a character on Pool[29]/slot 0).
+        var account = TestAccounts.Pool[30];
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Fanout", shipName: "FanoutShip2", cts.Token);
+
+        try
+        {
+            // 14 opcodes from the captured handshake stream, sorted by
+            // opcode value. Each assertion produces a clean per-opcode
+            // failure message identifying which emit went missing.
+            Assert.Contains(OpcodeId.Known.Create.Value, session.HandshakeOpcodes);
+            Assert.Contains(OpcodeId.Known.Decal.Value, session.HandshakeOpcodes);
+            Assert.Contains(OpcodeId.Known.Colorization.Value, session.HandshakeOpcodes);
+            Assert.Contains(OpcodeId.Known.AuxData.Value, session.HandshakeOpcodes);
+            Assert.Contains(OpcodeId.Known.ItemBase.Value, session.HandshakeOpcodes);
+            Assert.Contains(OpcodeId.Known.ClientAvatar.Value, session.HandshakeOpcodes);
+            Assert.Contains(OpcodeId.Known.AdvancedPositionalUpdate.Value, session.HandshakeOpcodes);
+            Assert.Contains(OpcodeId.Known.ConstantPositionalUpdate.Value, session.HandshakeOpcodes);
+            Assert.Contains(OpcodeId.Known.StarbaseSet.Value, session.HandshakeOpcodes);
+            Assert.Contains(OpcodeId.Known.LoungeNpc.Value, session.HandshakeOpcodes);
+            Assert.Contains(OpcodeId.Known.ManufactureSetManufactureId.Value, session.HandshakeOpcodes);
+            Assert.Contains(OpcodeId.Known.Relationship.Value, session.HandshakeOpcodes);
+            Assert.Contains(OpcodeId.Known.NameDecal.Value, session.HandshakeOpcodes);
+            Assert.Contains(OpcodeId.Known.Subparts.Value, session.HandshakeOpcodes);
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
