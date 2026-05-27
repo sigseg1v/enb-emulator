@@ -77,6 +77,7 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId AvatarDescription            = new(0x0061);
         public static readonly OpcodeId ManufactureSetManufactureId  = new(0x007F);
         public static readonly OpcodeId ManufactureTerminal          = new(0x0079);
+        public static readonly OpcodeId ManufactureCategorySelect    = new(0x007A);
         public static readonly OpcodeId ManufactureTechLevelFilter   = new(0x0080);
         public static readonly OpcodeId MissionForfeit               = new(0x0086);
         public static readonly OpcodeId MissionDismissal             = new(0x0087);
