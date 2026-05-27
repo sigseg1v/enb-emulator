@@ -4538,3 +4538,190 @@ matching seed.sql row at status=100. Pool layout after Wave 32:
 * Build: 0 warnings, 0 errors.
 * Push to main pending — Wave 31 push remains blocked by
   per-session authorization classifier; Wave 32 batches up.
+
+## 2026-05-26 — Phase K Wave 33: 0x00A1 TRIGGER_EMOTE → 0x00A2 NOTIFY_EMOTE landed (+2 ratchet)
+
+Direct-reply round-trip via the m_RangeList self-receive fan-out path.
+
+**Selection** — after Wave 32, the easy +2 candidates were largely
+exhausted. The triage queue had narrowed to: server-SEGV opcodes (rejected
+per CLAUDE.md — tool adapts, server doesn't), unbuildable handlers
+(declared but not defined in any .cpp), no-direct-reply-on-fresh-char
+opcodes (would require richer server state), proxy-0x0FFF-guard-failing
+replies, and risky state-mutation handlers. 0x00A1 TRIGGER_EMOTE
+emerged as the cleanest remaining target after I confirmed that
+SectorLogin's `AddPlayerToRangeList(this)` at PlayerClass.cpp:467
+explicitly seeds the originator into its own m_RangeList, which means
+the SendToRangeList fan-out from HandleTriggerEmote → SendNotifyEmote
+reaches the originator even for a solo player. This is the same
+pattern Wave 16 relied on (SendToSector) but exercised through the
+parallel SendToRangeList path that ~70% of the server's positional/
+event broadcasts use.
+
+**Wire format reasoning** — TriggerEmote and NotifyEmote share an
+identical `{ int32 GameID; int32 Emote }` layout per
+PacketStructures.h:589-599. Both are `ATTRIB_PACKED`, 8B total, no
+implicit padding. This is the minimum fixed-length wire shape — no
+variable-length strings, no length prefixes, no optional trailing
+blocks. The handler reads but doesn't interpret either field; it
+only echoes them through SendNotifyEmote's parameter-pass. Wire
+shape lock: `[0..4) int32 GameID; [4..8) int32 Emote` for both
+directions.
+
+**Three-assertion structure** —
+1. Opcode == 0x00A2: proves dispatcher case at PlayerConnection.cpp:583
+   routed to HandleTriggerEmote and that SendNotifyEmote emits the
+   correct opcode constant (ENB_OPCODE_00A2_NOTIFY_EMOTE).
+2. Payload length == 8: pins the NotifyEmote int32 layout. A
+   long-revert on either field would grow the struct to 16B on
+   Linux x86_64.
+3. body[4..7] == 0x4D454D45 sentinel ("EMEM" LE): proves
+   SendNotifyEmote's field-copy at PlayerConnection.cpp:10381-10383
+   (`response.Emote = emote`) didn't lose or transform the value.
+   Sentinel chosen distinct from zero and from any retail-meaningful
+   emote ID so a zero-defaulted struct or hardcoded literal would be
+   visibly wrong.
+
+**Why this opcode at this wave** —
+* +2 ratchet (both 0x00A1 and 0x00A2 previously uncovered, the
+  fifth +2 in Phase K after Waves 19/28/31/32).
+* Handler is a one-liner with no payload-selected branch — the
+  simplest possible direct-reply shape (compare Wave 32's variable-
+  length string walker + switch-on-type or Wave 28's wrapped
+  CheckTalkTree dispatch).
+* Reply is unconditional: no IsIgnored/m_TellsFromFriendsOnly/
+  admin-level/group-state/inventory-state/skill-state guards (compare
+  Wave 32's three guards plus GetPostFix default-branch dependency).
+* Self-receive-via-m_RangeList is deterministic via SectorLogin's
+  seed at PlayerClass.cpp:467 (independent of any other server state
+  — works for any character regardless of profession, race, level,
+  inventory, group state, etc.).
+* First wave to exercise the SendToRangeList → SendOpcode →
+  m_UDPQueue → SendPacketCache → 0x2016 → proxy → TCP fan-out path
+  explicitly (Wave 16 covered the parallel SendToSector path which
+  uses a different m_SectorPlayerList walk).
+
+**Triaged & rejected alternatives** —
+* **0x008D INCAPACITANCE_REQUEST**: Wave 29 abandoned after the
+  handler's m_IncapAvatarSent branch (PlayerConnection.cpp:11069-11104)
+  mutates static NPC template state and SEGVs. Per CLAUDE.md
+  server-integrity, the tool adapts to the server, not vice versa.
+* **0x00BC CTA_REQUEST**: HandleCTARequest at PlayerConnection.cpp:7723
+  writes `*((long*) &CTAResponse[N])` into a 9-byte stack buffer —
+  spills 4 bytes past end on Linux x86_64 where sizeof(long)==8.
+* **0x0098 GALAXY_MAP_REQUEST**: reply opcode is 0x2011 which fails
+  the proxy SendClientPacketSequence guard at UDPProxyToClient_linux.cpp:568
+  (`opcode > 0x0000 && opcode < 0x0FFF`); 0x2011 > 0x0FFF so the
+  proxy marks the packet sequence malformed and tears down.
+* **Manufacture opcodes (0x0079-0x0080)**: declared in PlayerClass.h
+  but not defined in any .cpp — would link-fail or be no-op stubs.
+* **Guild opcodes (0x00C5, 0x00C9, 0x00CD, 0x00D4)**: same — declared
+  not defined.
+* **0x009B WARP**: CheckForInstalls (PlayerMisc.cpp:1083) returns
+  TRUE for a fresh character so the warp-guard loop never triggers
+  the SendVaMessage error reply path.
+* **0x00C0 CONFIRMED_ACTION_RESPONSE**: no direct reply to self on
+  fresh-char path; the handler validates against m_ActionResponseReceived
+  which is false by default.
+* **0x009D STARBASE_AVATAR_CHANGE**: BroadcastPosition at
+  PlayerClass.cpp:676 and SendStarbaseAvatarList both filter the
+  originator out via GetSectorPlayerList walks that exclude self.
+* **0x0051 SKILL_STRING_RQ**: handler requires a HUSK (incapacitated
+  player) target to produce a reply; fresh-char doesn't have one
+  available in its sector.
+* **0x0087 MISSION_DISMISSAL**: guard rejects MissionID=-1 (the
+  fresh-char default for an empty mission slot).
+* **0x0082 RECUSTOMIZE_SHIP_DONE / 0x0084 RECUSTOMIZE_AVATAR_DONE**:
+  mutate m_Database fields and call SaveDatabase — risky state
+  mutation that could persist test artifacts.
+* **0x0061 AVATAR_DESCRIPTION**: emitted during CompleteLogin/
+  SetupPlayer at PlayerClass.cpp:889 — already crosses the wire
+  during the existing handshake on every successful login. Adding
+  a passive-observation assertion would give +1 ratchet only;
+  preferred 0x00A1's +2 instead. May be a candidate for a future
+  passive-observation wave once the easy +2s are fully exhausted.
+
+**Eight regression classes covered** —
+1. Dispatcher mis-route at PlayerConnection.cpp:583 — case label
+   sits between 0x00A0 STARBASE_ROOM_CHANGE_S_C and 0x00A3
+   CLIENT_CHAT_REQUEST; copy-paste swap with HandleClientChatRequest
+   reads 8B as start of 18B variable-length payload, walks past end
+   into garbage.
+2. PacketStructures.h TriggerEmote/NotifyEmote long-revert at
+   lines 589-599 — currently 2× int32_t = 8B canonical; widening
+   either field grows struct to 16B and Emote reads past end of 8B
+   payload into stack garbage. Pinned by payload-length-8 assert.
+3. SectorLogin self-add removal at PlayerClass.cpp:467 — if
+   `AddPlayerToRangeList(this)` is removed or guarded incorrectly,
+   m_RangeList is empty for solo player and SendToRangeList loop
+   never executes (test times out). Would also break Wave 16's
+   AVATAR_EMOTE self-receive — both tests would surface it.
+4. SendNotifyEmote field-copy regression at PlayerConnection.cpp:10381-10383
+   — if `response.Emote = emote` were hardcoded to a literal or read
+   from `this->Emote` instead of the parameter, the sentinel echo
+   would fail. The 0x4D454D45 sentinel is distinct from zero and
+   from any retail-meaningful emote ID so any such regression
+   surfaces immediately.
+5. Proxy default-case ForwardClientOpcode dropping 0x00A1 — 0x00A1
+   is NOT explicitly cased in proxy/ClientToServer_linux_stubs.cpp
+   so it falls through to the bottom-of-switch default-case forward.
+   A regression that re-introduced opcode whitelisting or that broke
+   the default-case forward would stop the server from ever
+   receiving 0x00A1 → no 0x00A2 reply → test times out.
+6. Proxy SendClientPacketSequence guard at UDPProxyToClient_linux.cpp:568
+   — currently `opcode > 0x0000 && opcode < 0x0FFF` passes 0x00A2;
+   a regression to e.g. `< 0x0080` would silently drop the reply.
+7. SendOpcode header-width revert at PlayerConnection.cpp:127 —
+   would corrupt the 0x2016 inner-tuple parser for every reply
+   opcode, not just NotifyEmote.
+8. SendToRangeList originator-exclusion regression at PlayerClass.cpp:3325-3347
+   — if a future refactor adds a `p != this` guard mirroring
+   SendToVisibilityList's pattern at line 3134, the originator-receive
+   path would break for solo players (test times out).
+
+**Pool growth** — cli_test30 (id=9_000_030) added to TestAccounts.Pool[28]
+with matching seed.sql row at status=100. Pool layout: Pool[0..8] =
+cli_test01..09, Pool[9..22] = cli_test11..24, Pool[23] = cli_test25
+(Wave 28), Pool[24] = cli_test26 (Wave 29), Pool[25] = cli_test27
+(Wave 30), Pool[26] = cli_test28 (Wave 31), Pool[27] = cli_test29
+(Wave 32), Pool[28] = cli_test30 (Wave 33). cli_test10 still SKIPPED
+(StressTestClosed fixture at id=9_000_010).
+
+**CLAUDE.md server-integrity check** — passed. Zero permissiveness
+added. TRIGGER_EMOTE is exactly what retail Win32 client emits when
+user triggers an emote in space or starbase (two int32_t LE fields,
+GameID + Emote code; sizeof(long)==4 on Win32 made the original
+source accidentally portable for this struct). The
+SendToRangeList(0x00A2, NotifyEmote{GameID, Emote}, 8) fan-out is
+verbatim retail server behaviour — the originator receives the
+emote-broadcast just like any other observer in scan range because
+retail client has no client-side prediction (the retail client
+always rendered the emote on its own avatar via this round-trip).
+We are not making the server accept any new input shape, not
+loosening any security posture, not fabricating any reply.
+
+**Touches** —
+* `tests/integration/CliClient.IntegrationTests/Opcodes/SectorTriggerEmoteTests.cs`
+  (new — uses Pool[28] cli_test30 dedicated; 90s budget; 400-frame
+  drain cap; xmldoc walks through the dispatcher case, two-line
+  handler, SendNotifyEmote field-copy, SendToRangeList fan-out,
+  SectorLogin self-add invariant, three-assertion structure, and
+  8 regression classes)
+* `tests/integration/CliClient.IntegrationTests/TestAccounts.cs`
+  (Pool[28] += cli_test30 — 9_000_030)
+* `tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql`
+  (cli_test30 INSERT row, status=100)
+* `tools/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs`
+  (+0x00A1 TriggerEmote and +0x00A2 NotifyEmote in sorted position
+  between 0x0088 PetitionStuck and 0x00A3 ClientChatRequest)
+* `tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs`
+  (MinTestedCount 48→**50**; **+2** sorted-position entries for
+  0x00A1 TRIGGER_EMOTE and 0x00A2 NOTIFY_EMOTE inserted between
+  0x009F STARBASE_ROOM_CHANGE and 0x00A3 CLIENT_CHAT_REQUEST)
+
+**Notes** —
+* Test runs in 7s in isolation, 1/1 passes. CoverageRatchetTests
+  6/6 pass.
+* Build: 0 warnings, 0 errors.
+* Push to main pending — Wave 31 and Wave 32 pushes remain blocked
+  by per-session authorization classifier; Wave 33 batches up.
