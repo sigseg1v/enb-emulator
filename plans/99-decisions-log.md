@@ -5549,3 +5549,149 @@ until we find a payload that doesn't reach the bug.
 * Phase K is now **33.8%** tested (70/207).
 * Push to main authorized this session — Wave 39 will go out
   as the next session-commit batch.
+
+---
+
+## 2026-05-26 — Phase K Wave 40: 0x00CD GUILD_SIMPLE_CLIENT_SECTOR survival-probe (+1 ratchet)
+
+**Context** — Wave 39's revised triage of the four guild
+handlers (after disambiguating the prior wrong claim that they
+were undefined) identified 0x00CD GUILD_SIMPLE_CLIENT_SECTOR as
+the second safe survival-probe candidate (after 0x00D4). Wave 40
+takes it.
+
+**Decision** — bump coverage 70/207 → **71/207 (34.3%)** by
+landing 0x00CD GUILD_SIMPLE_CLIENT_SECTOR as a survival probe.
+Client sends a 26B payload matching the wire-effective shape of
+the local `struct GuildSimpleClientSectorPacket` at
+`server/src/PlayerGuild.cpp:703-709`:
+
+```cpp
+struct GuildSimpleClientSectorPacket
+{
+    long  type;            // sizeof(long) bug — wire is int32
+    long  gameid;          // sizeof(long) bug — wire is int32
+    short length;
+    char  optionalparam[16];
+};
+```
+
+The two `long` fields are the same Phase K Wave 11 bug class as
+the GuildLeaderAccept handler — on Linux x86_64 the 8B reads
+over-pull the wire-effective 4B int32 fields. For an all-zero
+payload the over-read pulls 8 bytes of zeros which still
+resolves `type=0`. The wire-effective size is 26B (4 + 4 + 2 +
+16); we send 26B of zeros which leaves room for the handler's
+full struct cast regardless of how the read widths resolve.
+
+Handler walk-through at `server/src/PlayerGuild.cpp:701-735`:
+
+1. Cast `data` to `GuildSimpleClientSectorPacket *`.
+2. `switch (request->type)` — for all-zero payload `type=0`.
+3. Case labels are `GUILD_PROMOTE_CONFIRM+1=2`,
+   `GUILD_DEMOTE_CONFIRM+1=6`, `GUILD_REMOVE_CONFIRM+1=8`,
+   `GUILD_LEAVE_CONFIRM+1=10`, `GUILD_DISBAND_CONFIRM+1=12`,
+   `GUILD_GM_DISBAND_CONFIRM+1=14` (per
+   `server/src/Guilds.h:140-146`). `type=0` doesn't match any.
+4. Falls to default arm:
+   `LogMessage("Unknown guild confirmation type %d\n", request->type)`
+   — safe no-op. Function returns.
+
+Zero state mutation. Zero SendOpcode. Zero observer fan-out. The
+`HandlePromoteMember`/`HandleDemoteMember`/`HandleRemoveMember`/
+`HandleLeaveGuild`/`HandleDisbandGuild`/`HandleGMDisbandGuild`
+mutators all sit BEHIND the matched-case arms — none run for
+type=0.
+
+**Why this opcode** — second draw from Wave 39's revised triage
+of the four guild handlers. 0x00CD is the second-cleanest safe
+arm in the guild family — it does read `request->type` (so
+unlike Wave 39 the handler IS exercising a payload field), but
+the switch fall-through to a logger-only default arm gives the
+same favourable zero-mutation shape.
+
+**Comparison to W39 survival-probe shape** — W39
+(GUILD_RANK_NAMES_REQUEST_CLIENT) reads zero payload fields and
+short-circuits on server-side state (`m_GuildID==0`). W40
+(GUILD_SIMPLE_CLIENT_SECTOR) reads `request->type` and uses it
+in a switch dispatch decision; the all-zero payload falls into
+the default LogMessage arm. Both end in safe no-op but W40
+demonstrates payload-field-read + dispatch-fall-through coverage
+that W39's null-guard short-circuit doesn't exercise.
+
+**Test-author footgun — none this wave** — firstName "Gusimple"
+includes lowercase 'u', 'i', 'e' and cleared the
+AccountManager.cpp:1147 vowel check first-try. Three consecutive
+no-retry waves (W38/W39/W40) suggests the firstName-vowel
+convention is now habit; the Wave 39+ infra-hygiene item (factor
+a name-validation helper into SectorHandshake.cs) is lower-
+priority now but still standing.
+
+**CLAUDE.md server-integrity compliance** — zero permissiveness
+added. The 26B wire shape matches the local struct's wire-
+effective width (4B int32 type + 4B int32 gameid + 2B short
+length + 16B optionalparam). 0x00CD is what the retail Win32
+client emits when the user clicks a confirm/cancel button in the
+guild-management UI (promote/demote/remove/leave/disband/
+GM-disband). Sending GUILD_SIMPLE_CLIENT_SECTOR with `type=0`
+(i.e. invalid/zero confirmation type) is a legal but server-side
+no-op — the retail server's default arm in the switch silently
+logs the unknown type and returns. No security posture changes;
+no widening of validation; no dev-flag escape hatch.
+
+**Regression classes** — see plans/11-phase-k-ingame.md Wave 40
+entry and the test file's xmldoc for the full 7-class
+breakdown:
+
+* Dispatcher mis-route at PlayerConnection.cpp:613 (swap with
+  HandleRecruitAcceptClient → SEGV on null m_Recruiter; swap
+  with HandleGuildRankNamesRequestClient → wrong code arm).
+* Switch case-label drift in Guilds.h:140-146 (any constant
+  wrapping to 0 would route type=0 into a real mutator;
+  HandleLeaveGuild(true) sets m_GuildID=0 + LogChange).
+* `request->type` read-width MIS-fix (cast to int16_t would
+  read different bytes than expected).
+* Default arm LogMessage removal (would pass test but lose
+  diagnostic).
+* SendOpcode header-width revert at PlayerConnection.cpp:127.
+* Proxy default-case ForwardClientOpcode regression (0x00CD
+  not explicitly listed in proxy switch).
+* Proxy SendClientPacketSequence inner-opcode guard tightening
+  at UDPProxyToClient_linux.cpp:568.
+
+**Pool growth** — `cli_test37` (id=9_000_037) added to
+`TestAccounts.Pool[35]` with matching `seed.sql` row at
+status=100. Pool layout: Pool[0..8] = cli_test01..09,
+Pool[9..22] = cli_test11..24, Pool[23..31] = cli_test25..33,
+Pool[32..35] = cli_test34..37 (W37/W38/W39/this wave).
+cli_test10 still SKIPPED.
+
+**Files touched** —
+
+* `tests/integration/CliClient.IntegrationTests/Opcodes/SectorGuildSimpleClientSectorTests.cs` (new)
+* `tests/integration/CliClient.IntegrationTests/TestAccounts.cs` (Pool[35] += cli_test37)
+* `tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql` (cli_test37 INSERT row)
+* `tools/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs` (+0x00CD GuildSimpleClientSector)
+* `tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs`
+  (MinTestedCount 70→**71**; +1 sorted-position entry for 0x00CD)
+
+**Verification** —
+
+* Test passes in isolation: 1/1 in **7s** (no vowel-check retry
+  needed).
+* Build green: 0 warnings, 0 errors.
+
+**Next** — Wave 41 = 0x0087 MISSION_DISMISSAL survival probe
+(out-of-range MissionID filtered, per Wave 36 triage). After
+that the larger un-triaged dispatch-arm space in
+`PlayerConnection.cpp:423-618` needs another sweep — ~150
+opcodes remain uncovered, and the direct-stimulus / passive-
+observation / typed-codec patterns each have different
+applicability profiles.
+
+* Direct-reply/survival-probe pattern count now 13 waves;
+  passive-observation pattern count unchanged at 2 waves
+  (16 opcodes total).
+* Phase K coverage **34.3%** (71/207).
+* Push to main authorized this session — Wave 40 will go out
+  as the next session-commit batch.
