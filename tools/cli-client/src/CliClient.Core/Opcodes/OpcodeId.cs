@@ -76,6 +76,7 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId AvatarDescription            = new(0x0061);
         public static readonly OpcodeId ManufactureSetManufactureId  = new(0x007F);
         public static readonly OpcodeId MissionForfeit               = new(0x0086);
+        public static readonly OpcodeId MissionDismissal             = new(0x0087);
         public static readonly OpcodeId PetitionStuck                = new(0x0088);
         public static readonly OpcodeId Relationship                 = new(0x0089);
         public static readonly OpcodeId TriggerEmote                 = new(0x00A1);
