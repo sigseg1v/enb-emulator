@@ -6619,3 +6619,114 @@ upstream code preserved verbatim.
 * Phase K coverage **37.7%** (78/207).
 * Push to main authorized this session — Wave 47 will go
   out as the next session-commit batch.
+
+## 2026-05-27 — Phase K Wave 48 (this session): 0x007B MANUFACTURE_ITEM_ID with Item=0 invalid-item early-bail
+
+* **Wave 48 outcome.** Twenty-first direct-stimulus wave
+  (survival-probe; client→server one-shot with single
+  0x001D MESSAGE_STRING "Invalid Item!" reply, connection
+  survival verified via REQUEST_TIME→CLIENT_SET_TIME
+  round-trip). +1 ratchet 78/207 → **79/207 (38.2%)**.
+  `SectorManufactureSetItemTests.ManufactureSetItem_InvalidItemZero_DoesNotBreakConnection_RequestTimeStillRoundTrips`
+  passes 1/1 in 7s.
+
+* **Wave 48 handler walk-through.** Client sends 8B packed
+  `ManufactureData` payload `{int32 GameID=0 (LE); int32
+  Data=0 (network order)}` over the sector connection.
+  Handler `HandleManufactureSetItem` at
+  `server/src/PlayerManufacturing.cpp:333-440` casts data
+  → `ManufactureData *`, `ntohl`-decodes
+  `Packet->Data` into `long Item`, runs the redundant
+  `if (Item > 0xFFFF) Item = ntohl(...)` guard (no-op for
+  Item=0), then walks:
+    1. `if (m_Manufacturing) return;` at line 343 —
+       m_Manufacturing is ctor-initialised to false at
+       `server/src/PlayerClass.cpp:214` so the guard
+       does NOT fire on fresh char.
+    2. `SendItemBase(0)` at line 348 delegates to
+       `ItemBaseManager::SendItem` via PlayerInventory.cpp;
+       `ItemBaseManager::SendItem(Player*, long ItemID)`
+       calls `GetItem(0)` → returns
+       `m_ItemDB[0]` which is nullptr (template id 0 is
+       reserved-empty); the
+       `if (m_Item && m_Item->BuildPacket())` null-guard
+       short-circuits so SendItemBase emits ZERO frames.
+    3. `m_CurManuItem = g_ItemBaseMgr->GetItem(0) =
+       nullptr` at line 350.
+    4. `if (!m_CurManuItem) { SendVaMessage("Invalid
+       Item!"); return; }` at lines 352-356 — the
+       invalid-item early-bail fires, SendVaMessage
+       emits ONE 0x001D MESSAGE_STRING frame with the
+       literal "Invalid Item!" payload, then the handler
+       returns. The 100+ lines of state-mutating code at
+       PlayerManufacturing.cpp:358-439 (AllowManufacture
+       gate, ResetManuItems, ManuIndex Target/Components
+       SetItemTemplateID, Cost/ManufactureCost
+       calculation, Negotiate, CheckItemRequirements,
+       quality calculation, SendAuxManu emit) all sit
+       BEHIND the early-bail and NEVER run on this code
+       arm.
+
+* **Seam-discovery pattern variant.** New variant:
+  **null-item-from-GetItem early-bail** — generalisable
+  to any handler that resolves an item-ID-from-payload
+  via `g_ItemBaseMgr->GetItem` and has an
+  `if (!m_CurX)` guard. The 0x007C HandleRefineSetItem
+  handler at `PlayerManufacturing.cpp:442-497` has a
+  near-identical structure (modulo no AllowManufacture
+  gate, no quality calculations) and is the obvious Wave
+  49 candidate.
+
+* **Seam-discovery pattern catalogue (updated).** Phase
+  K Waves 44–48 collectively establish that the cleanest
+  survival-probe targets are state-machine arms that
+  reduce to a no-op against fresh-char ctor-init state.
+  Five concrete instances now:
+    1. **Wave 44**: post-switch tail no-op via ctor-init
+       equality (HandleStarbaseSwitchTab inner-switch
+       arms that match m_CurrentTab default).
+    2. **Wave 45**: ReplaceData equality short-circuit
+       at `AuxBase.h:94` + empty m_ManuRecipes
+       (HandleManufactureCategorySelect).
+    3. **Wave 46**: outer-switch default fall-through
+       when ctor-init enum value (MODE_NONE) lacks an
+       outer-switch arm (HandleManufactureAction).
+    4. **Wave 47**: write-only field setter with no
+       reader (`m_NavCommence` set by SetNavCommence,
+       only declared reader WaitForNavCommence has no
+       body and no call sites).
+    5. **Wave 48**: null-item-from-GetItem early-bail
+       (HandleManufactureSetItem with Item=0 →
+       m_CurManuItem=nullptr → SendVaMessage "Invalid
+       Item!" return; the 100+ lines of state-mutating
+       code sit BEHIND the early-bail).
+
+  The pattern is now the dominant driver of Phase K
+  coverage growth.
+
+* **Per CLAUDE.md server-integrity rules.** Zero
+  permissiveness added; the 8B wire shape matches the
+  canonical `ManufactureData` struct byte-for-byte; the
+  invalid-item early-bail with "Invalid Item!" reply is
+  exactly what the retail server does when the player
+  requests a non-existent item template (Item=0 models a
+  UI-race delisted-recipe scenario or a stale client
+  cache referencing a template that's been removed
+  from the items table). Not loosening any security
+  posture; not fabricating any reply.
+
+* **Test-author footgun (preserved).** firstName "Uria"
+  starts with lowercase 'u' which cleared the
+  AccountManager.cpp:1147 vowel-check first-try (the
+  vowel check is case-sensitive lowercase
+  a/e/i/o/u/y BEFORE toupper at 1153 — uppercase
+  vowels FAIL the check, so any test that picks a
+  firstName starting with uppercase A/E/I/O/U/Y must
+  flip to lowercase first letter).
+
+* Direct-reply/survival-probe pattern count now 21 waves;
+  passive-observation pattern count unchanged at 2 waves
+  (23 opcodes total).
+* Phase K coverage **38.2%** (79/207).
+* Push to main authorized this session — Wave 48 will go
+  out as the next session-commit batch.
