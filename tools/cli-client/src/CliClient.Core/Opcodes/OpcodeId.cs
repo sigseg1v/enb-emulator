@@ -86,6 +86,7 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId Subparts                     = new(0x00B4);
         public static readonly OpcodeId LogoffRequest                = new(0x00B9);
         public static readonly OpcodeId LogoffConfirmation           = new(0x00BA);
+        public static readonly OpcodeId ConfirmedActionResponse      = new(0x00C0);
         public static readonly OpcodeId GlobalConnect          = new(0x006D);
         public static readonly OpcodeId GlobalTicketRequest    = new(0x006E);
         public static readonly OpcodeId GlobalTicket           = new(0x006F);
