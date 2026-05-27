@@ -64,6 +64,8 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId AvatarEmoteResponse    = new(0x005F);
         public static readonly OpcodeId MissionForfeit         = new(0x0086);
         public static readonly OpcodeId PetitionStuck          = new(0x0088);
+        public static readonly OpcodeId TriggerEmote           = new(0x00A1);
+        public static readonly OpcodeId NotifyEmote            = new(0x00A2);
         public static readonly OpcodeId ClientChatRequest      = new(0x00A3);
         public static readonly OpcodeId ClientChatEvent        = new(0x00A5);
         public static readonly OpcodeId LogoffRequest          = new(0x00B9);
