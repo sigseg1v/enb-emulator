@@ -4725,3 +4725,152 @@ loosening any security posture, not fabricating any reply.
 * Build: 0 warnings, 0 errors.
 * Push to main pending — Wave 31 and Wave 32 pushes remain blocked
   by per-session authorization classifier; Wave 33 batches up.
+
+## 2026-05-26 — Phase K Wave 34: 0x0047 CLIENT_SHIP + 0x0061 AVATAR_DESCRIPTION landed (passive-observation +2 ratchet)
+
+**Selection reasoning** —
+* After Wave 33 the +2 direct-reply candidates were materially
+  exhausted on a fresh-starbase character — Wave 33's triage list
+  documented the surviving rejects (SEGV branches, stack-clobber
+  handlers, proxy `0x0FFF` guard rejections, handlers declared but
+  not defined, state-required handlers we can't satisfy on a fresh
+  char). Continuing to chase direct-reply +2 waves was going to
+  start costing scaffolding (multi-player groups, populated
+  inventory, capture-replay rigging) that doesn't pay off until
+  later phases anyway.
+* The handshake stream itself was the unobserved cache. Every prior
+  wave's `SectorHandshake.EstablishAsync` drove the server through
+  the same `SectorManager::SectorLogin2` chain that emits dozens of
+  server-originated frames before `SendStart` closes the handshake
+  with 0x0005. The harness was *discarding* those frames —
+  `DoSectorLoginUntilStartAsync` only watched for the 0x0005
+  terminator and returned. Capturing the in-order opcode list as
+  `Session.HandshakeOpcodes` unlocks an entire new ratchet pattern:
+  one new opcode constant in `OpcodeId.Known` + one new
+  `TestedOpcodes` row + one `Assert.Contains` per opcode, against
+  emits the server is *already* producing on every wave.
+* Picked 0x0047 + 0x0061 as the first passive-observation pair
+  because: (a) both come from the same handler
+  (`Player::SendLoginShipData`) so a single assertion test has a
+  natural home; (b) both pass the proxy `0x0FFF` forwarding guard
+  (0x0047=71, 0x0061=97); (c) both are +1 each (no prior coverage),
+  giving a +2 ratchet from a single test file; (d) `SendLoginShipData`
+  also emits 0x0037 CLIENT_AVATAR on line 879 but 0x0037 is already
+  in `OpcodeId.Known` (added during early Phase K plumbing) — saving
+  it for a Wave 35 batch keeps Wave 34's +2 ratchet clean.
+
+**Primary-source citations** —
+* `server/src/PlayerClass.cpp:857-901` — `Player::SendLoginShipData`
+  body. Line 879 emits 0x0037 CLIENT_AVATAR, line 880 emits 0x0047
+  CLIENT_SHIP, line 889 emits 0x0061 AVATAR_DESCRIPTION. All three
+  go through `SendOpcode` which writes to the per-client UDP queue.
+  Lines 874-878 are the inline Phase K Wave 11 fix that marshals
+  `m_CreateInfo.GameID` (a `long` — sizeof(long)==8 on Linux x86_64)
+  through a stack `int32_t game_id_wire` temporary so the wire
+  payload is exactly 4 bytes (instead of 4 bytes of high-half
+  garbage).
+* `server/src/SectorManager.cpp:354-380` — `SectorManager::SectorLogin2`
+  is the per-stage chain that calls `player->SendLoginShipData()`
+  (among many other Send* helpers) before `PlayerManager::SendStart`
+  emits 0x0005 START as the handshake's final frame.
+* `server/src/PlayerConnection.cpp:1068` — `PlayerManager::SendStart`
+  emits 0x0005, the handshake-drain terminator that
+  `DoSectorLoginUntilStartAsync` watches for.
+* `proxy/UDPProxyToClient_linux.cpp:568` — proxy's
+  `SendClientPacketSequence` inner-opcode guard
+  (`opcode > 0x0000 && opcode < 0x0FFF`). Both 0x0047 (71) and 0x0061
+  (97) pass.
+
+**Why passive observation is a legit ratchet pattern** —
+* Direct-reply waves prove "the dispatcher routed to the right
+  handler AND the handler produced the right reply payload."
+  Passive observation only proves "the dispatcher routed and the
+  emit happened." It is a strictly weaker assertion than direct-
+  reply — but it is also strictly stronger than no assertion. The
+  trade is depth vs. breadth: each passive-observation wave is +N
+  opcodes at ~10 LOC per opcode, whereas each direct-reply wave is
+  +1-2 opcodes at ~200 LOC per opcode.
+* The opcode-presence assertion catches: whole-emit deletion
+  (the SendOpcode call vanishes), dispatch ordering regressions
+  (the emit moves to after SendStart), proxy guard tightening
+  (the 0x0FFF guard becomes too narrow), SendOpcode header-width
+  regressions (the 0x2016 inner-tuple parser sees garbage), and
+  `DoSectorLoginUntilStartAsync` drain-loop regressions (the
+  capture infrastructure itself).
+* What it does NOT catch: payload field-value regressions (a
+  refactor that changes which fields go on the wire would not be
+  detected). Future waves should layer typed codecs for the
+  observed structs (`Ship`, `AvatarDescription`) on top of the
+  presence assertion to recover full direct-reply coverage at
+  marginal cost.
+
+**Latent divergence noted but not addressed** —
+* `AvatarDescription`'s `long AvatarID` field at PlayerClass.cpp:884
+  is `sizeof(long)==8` on Linux x86_64 vs 4 on Win32. The retail
+  client expects the Win32 wire shape. That `SendLoginShipData`'s
+  0x0061 emit works at all today suggests either the receiving
+  client tolerates the over-width or the proxy/inner-frame path
+  normalises the layout — neither has been audited. Wave 34
+  captures this as a known divergence in plans/11-phase-k-ingame.md
+  Wave 34 entry; a future typed-codec wave should audit and
+  tighten. Calling this out so the next agent doesn't paper over
+  it when writing the `AvatarDescription` codec.
+
+**Other handshake opcodes left on the table for future waves** —
+* `0x0037 CLIENT_AVATAR` — emitted by `SendLoginShipData` line 879;
+  already in `OpcodeId.Known` so would be a +1 not +2 ratchet via
+  the same passive-observation mechanism. Wave 35 candidate.
+* `SendCreate(GameID, scale, hull, CREATE_SHIP)` at line 869 — opcode
+  TBD via grep on `ENB_OPCODE_*CREATE*` once we audit which
+  constant SendCreate emits.
+* `SendSubparts`, `SendShipColorization`, `SendDecal`,
+  `SendNameDecal`, `SendRelationship`,
+  `SendAdvancedPositionalUpdate` — each emits a server-originated
+  opcode from `SendLoginShipData`'s body lines 871-896. Each is a
+  +1 candidate for a future passive-observation wave once the
+  opcode constant is identified.
+* `SendShipInfo`, `SendServerParameters`, `SendAllNavs`,
+  `SendVaMessage` — emitted later in `SectorLogin2`'s chain. Same
+  +1 each pattern.
+* `0x2020 LOGIN_STAGE_S_C` inner-opcode emits — already in
+  `OpcodeId.Known` and TestedOpcodes; not a candidate.
+
+**Regression classes** — see plans/11-phase-k-ingame.md Wave 34
+entry's "Regression coverage" subsection.
+
+**Touches** —
+* `tests/integration/CliClient.IntegrationTests/Opcodes/SectorHandshake.cs`
+  (Session.HandshakeOpcodes field + drain-loop capture tuple)
+* `tests/integration/CliClient.IntegrationTests/Opcodes/SectorHandshakeFanoutTests.cs`
+  (new)
+* `tests/integration/CliClient.IntegrationTests/TestAccounts.cs`
+  (Pool[29] += cli_test31)
+* `tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql`
+  (cli_test31 row, status=100)
+* `tools/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs`
+  (+ClientShip 0x0047, +AvatarDescription 0x0061)
+* `tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs`
+  (MinTestedCount 50→52, +2 entries)
+* `plans/11-phase-k-ingame.md` (Wave 34 entry above Wave 33)
+* `plans/00-master.md` (Phase K row demotes Wave 33 to "Earlier
+  this session", Wave 34 leads)
+* `plans/99-decisions-log.md` (this entry)
+
+**Notes** —
+* Build: 0 warnings, 0 errors.
+* SectorHandshakeFanout test passes in ~2s in isolation
+  (handshake ~2s, assertions ~0s); CoverageRatchetTests still
+  pass after the 50→52 bump. Combined filter run: 7 pass in 10s.
+* Push to main authorized this session — the Waves 31/32/33/34
+  batch will go out as part of this wave's commit.
+* First passive-observation wave in Phase K. Direct-reply pattern
+  count unchanged at 8/34. Sixth +2 ratchet in Phase K.
+* Pattern unlock: future waves can land +N opcodes per test by
+  asserting on additional handshake-stream emits — the per-opcode
+  cost is one `OpcodeId.Known` line + one `TestedOpcodes` row +
+  one `Assert.Contains` call. Targets: 0x0037, then the
+  SendLoginShipData fan-out (SendCreate / SendSubparts /
+  SendShipColorization / SendDecal / SendNameDecal /
+  SendRelationship / SendAdvancedPositionalUpdate), then
+  SectorLogin2's later chain (SendShipInfo / SendServerParameters
+  / SendAllNavs / SendVaMessage).
