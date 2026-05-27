@@ -5968,3 +5968,118 @@ the pivot.
 * Phase K coverage **35.3%** (73/207).
 * Push to main authorized this session — Wave 42 will go out
   as the next session-commit batch.
+
+## 2026-05-26 — Phase K Wave 43 — 0x0080 MANUFACTURE_TECH_LEVEL_FILTER direct-stimulus (fresh-char no-op filter)
+
+**Context** — Wave 42 landed 0x005D EQUIP_USE. Wave 43
+returned to the un-triaged dispatch-arm space looking for the
+next clean direct-stimulus survival-probe candidate. The
+summary thread carried a stale belief that 0x009D
+STARBASE_AVATAR_CHANGE was an untriaged target — on file-read
+it is in fact already covered by **Wave 36**
+(`SectorStarbaseAvatarChangeTests.StarbaseAvatarChange_OnUnknownAvatarId_DoesNotBreakConnection_RequestTimeStillRoundTrips`)
+which exploits the `g_PlayerMgr->GetPlayer(AvatarID)`
+null-check early-return at PlayerClass.cpp:596-599 with
+AvatarID=0x12345678. 0x009F STARBASE_ROOM_CHANGE is likewise
+already covered. The manufacture-action family
+(0x0079/0x007A/0x007B/0x007C/0x007E) was triaged out: all
+mutate inventory/ManuIndex slots in ways that require
+terminal-state setup; no early-bail arm for fresh-char-
+no-recipes input.
+
+**Decision** — bump coverage 73/207 → **74/207 (35.7%)** by
+landing 0x0080 MANUFACTURE_TECH_LEVEL_FILTER as a survival
+probe with Enable=0, BitField=0 (a no-op against the existing
+filter state). The handler at
+`server/src/PlayerManufacturing.cpp:688-705`:
+
+1. Casts `data` to `ManufactureTechLevelFilter *`
+2. Reads `Enable` byte directly (no ntohl — single byte is
+   endianness-invariant)
+3. `ntohl`-decodes `BitField` into a local `long`
+4. Routes Enable=0 to the else-arm at line 701:
+   `SetTechFilterBitField(GetTechFilterBitField() & ~BitField)`
+   — `existing & ~0 = existing & 0xFFFFFFFF = existing`
+   unchanged. No state mutation visible to anyone.
+5. Calls `BuildManufactureList()` at line 704 which iterates
+   `m_ManuRecipes` (empty for a freshly-created character —
+   the `m_ManuRecipes.clear()` in the Player ctor at
+   `server/src/PlayerClass.cpp:184` is the post-handshake
+   default and no learn-recipe action has populated it in
+   this test). For-loop at PlayerManufacturing.cpp:716-728 is
+   a no-op. `m_NumFormulas` stays at its ctor-initialised
+   value 0 (PlayerClass.cpp:87).
+6. `SendAuxManu()` at line 739 emits a single 0x001B AUX_DATA
+   frame via
+   `SendOpcode(ENB_OPCODE_001B_AUX_DATA, ManuIndex()->PacketBuffer, ManuIndex()->PacketSize)`
+   (PlayerClass.cpp:1301-1308).
+
+Zero crashes, zero malloc churn, zero observer fan-out
+beyond the single back-to-self AUX_DATA reply. Survival probe
+via REQUEST_TIME→CLIENT_SET_TIME round-trip — identical
+template to Wave 32/34/35/37/38/39/40/41/42.
+
+**Test** — `SectorManufactureTechLevelFilterTests.ManufactureTechLevelFilter_DisableZeroBitField_DoesNotBreakConnection_RequestTimeStillRoundTrips`.
+Pool[38] = cli_test40 (9_000_040) with matching seed.sql row
+at status=100. firstName "Anufa" starts with lowercase 'a'
+which cleared the AccountManager.cpp:1147 vowel check first-
+try. 90s budget; 400-frame drain cap to tolerate interleaved
+in-sector frames including the 0x001B AUX_DATA reply the
+handler emits. Passes 1/1 in 7s in isolation.
+
+**Regression coverage** — 10 classes documented inline in
+the test xmldoc and TestedOpcodes citation: dispatcher mis-
+route at PlayerConnection.cpp:539 / ATTRIB_PACKED drop on
+ManufactureTechLevelFilter at PacketStructures.h:1068 / ntohl
+revert at PlayerManufacturing.cpp:692 / `long`-widening of
+BitField at PlayerManufacturing.cpp:692 / BuildManufactureList
+loop-boundary regression at PlayerManufacturing.cpp:716-728 /
+AuxManufacturingIndex::TechFilterBitField init regression at
+AuxManufacturingIndex.cpp:553 / SendAuxManu BuildPacket
+failure regression at PlayerClass.cpp:1301 / SendOpcode
+header-width revert at PlayerConnection.cpp:127 / proxy
+SendClientPacketSequence inner-opcode guard tightening at
+UDPProxyToClient_linux.cpp:568 / proxy default-case
+ForwardClientOpcode regression for 0x0080.
+
+**Server integrity (CLAUDE.md).** Zero permissiveness added.
+The 9B wire shape matches the canonical
+`ManufactureTechLevelFilter` struct byte-for-byte (depending
+on ATTRIB_PACKED to defeat the 3B alignment hole between
+Enable and BitField that GCC would otherwise insert). The
+AND-NOT-zero no-op is exactly what the retail server does on
+this input. Sending Enable=0+BitField=0 models a legal UI
+tab-focus re-emit of existing filter state — the client may
+re-send the current filter mask when the manufacture panel
+gains focus. Not loosening any security posture; not
+fabricating any reply.
+
+**Wave 44 outlook.** Easy-direct-stimulus seam is running
+thin. Remaining options:
+
+(a) Full survey of the dispatch list at
+    PlayerConnection.cpp:423-639 against TestedOpcodes.cs to
+    find any untested arm I haven't yet looked at. The
+    summary thread's candidate list was incomplete — I
+    rediscovered Wave 36 already covered 0x009D, so other
+    "untriaged" candidates in the thread may also be already
+    covered.
+(b) Passive-observation (Wave 34/35 pattern) for handshake-
+    emitted opcodes — find a server-emit-only opcode that
+    fires during the SectorLogin2 chain or starbase fan-out
+    and isn't yet asserted in SectorHandshakeFanoutTests.
+(c) The deferred typed-codec wave (add SerDe codecs for known
+    structs, byte-comparison-assert the wire shape).
+(d) Tighten one of the deferred UNSAFE opcodes by adding the
+    minimal server-side fix the prior wave triage documented
+    (e.g. 0x00BC sizeof(long) OOB; 0x00C5 m_Recruiter null-
+    deref; 0x008D first-time m_IncapAvatarSent crash). Each
+    of these is a server-side change separate from the
+    coverage ratchet, so they belong in their own commits.
+
+* Direct-reply/survival-probe pattern count now 16 waves;
+  passive-observation pattern count unchanged at 2 waves
+  (18 opcodes total).
+* Phase K coverage **35.7%** (74/207).
+* Push to main authorized this session — Wave 43 will go out
+  as the next session-commit batch.
