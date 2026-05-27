@@ -6184,3 +6184,134 @@ posture; not fabricating any reply.
 * Phase K coverage **36.2%** (75/207).
 * Push to main authorized this session — Wave 44 will go out
   as the next session-commit batch.
+
+## 2026-05-26 — Phase K Wave 45: 0x007A MANUFACTURE_ITEM_CATAGORY direct-stimulus (Category=0 default-state no-op)
+
+Eighteenth direct-stimulus wave; coverage 75/207 → **76/207
+(36.7%)**. Direct continuation of Wave 44's seam-discovery
+lesson — the bulk-UNSAFE flag on the manufacture-action
+family was overly pessimistic, and per-arm re-reads keep
+turning up safe paths.
+
+**Test** —
+`SectorManufactureCategorySelectionTests.ManufactureCategorySelect_CategoryZeroDefault_DoesNotBreakConnection_RequestTimeStillRoundTrips`.
+
+Client sends an 8B packed `ManufactureData` payload
+`{int32 GameID=0 (LE); int32 Data=0 (network order)}`
+(struct at `common/include/net7/PacketStructures.h:1062-1066`,
+ATTRIB_PACKED). NOTE: 0x007A's macro name in
+`common/include/net7/Opcodes.h:119` is *also*
+`MANUFACTURE_ITEM_CATAGORY` (the same name as 0x0079 — an
+upstream typo duplicate); the dispatch at
+PlayerConnection.cpp:523-525 correctly routes 0x007A to
+`HandleManufactureCategorySelection`.
+
+**Handler walk-through** —
+`HandleManufactureCategorySelection` at
+`server/src/PlayerManufacturing.cpp:72-80` casts data →
+`ManufactureData *`, `ntohl`-decodes `Packet->Data` into
+`long Category`, LogDebugs, calls
+`ManuIndex()->SetCurrentItemCat(Category)`, then
+`BuildManufactureList()`. `SetCurrentItemCat` at
+`AuxManufacturingIndex.cpp:343-346` is `ReplaceData(&Data.CurrentItemCat, NewCurrentItemCat, 13)` —
+per the AuxBase.h:82-129 template, the `if (cur != src)`
+guard at line 94 short-circuits the dirty-bit flip and the
+parent-flag walk when the field is already at the
+requested value. `Data.CurrentItemCat` is ctor-initialised
+to 0 at `AuxManufacturingIndex.cpp:406` and we pass 0, so
+SetCurrentItemCat is a pure no-op. `BuildManufactureList`
+at `PlayerManufacturing.cpp:707-741` then runs:
+`KnownFormulas.ResetKnownFormulas(false)` iterates only
+`m_NumFormulas` entries (loop never runs on fresh char with
+0); `m_NumFormulas = 0`; the for-loop over `m_ManuRecipes`
+is empty because the recipe map is cleared in the Player
+ctor at `PlayerClass.cpp:184`; `GetKnownFormulas() == 0`
+and `m_NumFormulas == 0` so 0 > 0 is false → else-branch
+runs `SetKnownFormulas(0)` (another ReplaceData no-op) plus
+`SendAuxManu()` emit-once.
+
+**Two-layer safety profile** — Wave 45 exploits two
+independent escape hatches that together make Category=0 a
+safe direct-stimulus target:
+
+1. **ReplaceData equality short-circuit** at AuxBase.h:94.
+   Lets us no-op state setters when the new value matches
+   the ctor-init default. Generalisable: any AuxClasses
+   setter called with the ctor-init default value is safe
+   to fire from a survival probe.
+2. **Empty m_ManuRecipes on fresh char** at
+   PlayerClass.cpp:184. Lets us no-op the BuildManufactureList
+   iteration. Generalisable: any handler that iterates a
+   container the Player ctor clears is safe on fresh char.
+
+**Pool growth** — `cli_test42` (id=9_000_042) added to
+`TestAccounts.Pool[40]` with matching `seed.sql` row at
+status=100. Pool layout: Pool[0..8]=cli_test01..09,
+Pool[9..22]=cli_test11..24, Pool[23..31]=cli_test25..33,
+Pool[32..40]=cli_test34..42. cli_test10 still SKIPPED
+(stress-test-closed out-of-pool fixture).
+
+**Test-author footgun** — firstName "Ocata" starts with
+lowercase 'o' which cleared the AccountManager.cpp:1147
+vowel-check footgun on the first try. 90s budget; 400-frame
+drain cap.
+
+**Regression coverage** — 12 classes documented inline in
+the test xmldoc and TestedOpcodes citation: dispatcher mis-
+route at PlayerConnection.cpp:523 / ATTRIB_PACKED drop on
+ManufactureData at PacketStructures.h:1062 / ntohl revert
+at PlayerManufacturing.cpp:75 / `long`-widening of Category
+/ ReplaceData equality short-circuit regression at
+AuxBase.h:94 / BuildManufactureList iteration crash
+regression at PlayerManufacturing.cpp:716 / Empty-map
+sentinel-key regression at PlayerClass.cpp:184 /
+ResetKnownFormulas over-iteration regression at
+AuxKnownFormulas.cpp:64 / SendAuxManu BuildPacket failure /
+SendOpcode header-width revert at PlayerConnection.cpp:127
+/ proxy SendClientPacketSequence inner-opcode guard
+tightening / proxy default-case ForwardClientOpcode
+regression for 0x007A.
+
+**Wave 45+ outlook** — the per-arm re-read pattern from
+Wave 44 keeps paying off. Remaining manufacture-action
+family arms:
+
+- 0x007B HandleManufactureSetItem — requires m_CurManuItem
+  pre-set, defer.
+- 0x007C HandleRefineSetItem — requires m_CurManuItem
+  pre-set, defer.
+- 0x007E HandleManufactureAction — gated on
+  `m_Manufacturing` being false on entry; case=0/SetItem
+  path may be reachable on a fresh char. Worth a per-arm
+  read next wave.
+
+Beyond the manufacture-action family:
+
+- 0x0082 RECUSTOMIZE_SHIP_DONE / 0x0084 RECUSTOMIZE_AVATAR_DONE
+  — bulk-triaged UNSAFE (SaveDatabase + credit deduction)
+  but per-arm re-read may reveal a no-change early-bail arm
+  if the payload signals "no changes."
+- 0x009B WARP — bulk-triaged state-mutating but on a fresh
+  non-grouped char the GetMemberID iteration may early-exit
+  cleanly.
+- Deferred typed-codec wave: still on the table for already-
+  covered survival-probe opcodes (would upgrade their
+  regression coverage from "connection survives" to "reply
+  bytes byte-equal to canonical").
+
+**Server integrity (CLAUDE.md).** Zero permissiveness added.
+The 8B wire shape matches the canonical `ManufactureData`
+struct byte-for-byte. The Category=0 ReplaceData-no-op +
+empty-recipe-loop + SendAuxManu emit is exactly what the
+retail server does when the manufacture UI opens in its
+default uncategorised state — client UI fills the formula
+list from the AUX_DATA snapshot, no special-case needed.
+Not loosening any security posture; not fabricating any
+reply.
+
+* Direct-reply/survival-probe pattern count now 18 waves;
+  passive-observation pattern count unchanged at 2 waves
+  (20 opcodes total).
+* Phase K coverage **36.7%** (76/207).
+* Push to main authorized this session — Wave 45 will go out
+  as the next session-commit batch.
