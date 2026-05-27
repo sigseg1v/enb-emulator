@@ -65,6 +65,7 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId StarbaseRequest              = new(0x004E);
         public static readonly OpcodeId StarbaseSet                  = new(0x004F);
         public static readonly OpcodeId LoungeNpc                    = new(0x0052);
+        public static readonly OpcodeId SkillStringRq                = new(0x0051);
         public static readonly OpcodeId SelectTalkTree               = new(0x0055);
         public static readonly OpcodeId TalkTreeAction               = new(0x0056);
         public static readonly OpcodeId SkillUp                      = new(0x0057);
