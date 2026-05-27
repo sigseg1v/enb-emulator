@@ -6860,3 +6860,129 @@ upstream code preserved verbatim.
     * Passive-observation waves for server-emitted
       opcodes in the existing handshake stream that
       aren't yet attributed.
+
+---
+**2026-05-27 — Phase K Wave 50 landed.**
+
+* **0x0028 INVENTORY_SORT (`HandleInventorySort` at
+  `server/src/PlayerConnection.cpp:3285-3357`,
+  TargetInv=99 default arm).** Twenty-third
+  direct-stimulus wave; survival-probe with ZERO
+  observable wire reply (the default arm only calls
+  `LogMessage` and returns). 21B packed `InvSort`
+  payload `{int32 ID; int32 TargetInv; int32 Sort1;
+  int32 Sort2; int32 Sort3; char Reverse}` BIG-ENDIAN
+  (handler ntohl-decodes every int32 field).
+  TargetInv=99 hits the default arm guaranteed.
+  Survival via REQUEST_TIME→CLIENT_SET_TIME round-trip.
+  Test passes 1/1 in 7s.
+
+* **Wave 50 triage validated the workflow.** The four
+  candidates carried over from Wave 49's wrap-up
+  (0x0027 INVENTORY_MOVE, 0x002D ACTION2, 0x0018
+  REQUEST_TARGETS_TARGET, 0x0080
+  MANUFACTURE_TECH_LEVEL_FILTER) ALL turned out to be
+  already covered when cross-referenced against
+  `TestedOpcodes.cs` + the existing
+  `Opcodes/Sector*Tests.cs` files. The triage workflow
+  caught the stale plan list and pivoted to 0x0028
+  INVENTORY_SORT (the next-cleanest
+  dispatched-but-untested in-sector opcode) without
+  losing time on duplicate coverage. Future wave plans
+  should re-validate candidate lists against
+  `TestedOpcodes.cs` before starting work.
+
+* **NEW seam-discovery variant: "server-only LogMessage
+  default arm with no client-observable reply".**
+  Distinct from the SendVaMessage UNRECOGNISED-error
+  pattern used by Waves 24/26/27 because the
+  inventory-sort default arm doesn't even bother with
+  a user-facing MESSAGE_STRING — the retail UI assumes
+  only valid TargetInv column-headers are ever clicked,
+  so a bad value is treated as developer-only
+  diagnostic rather than user-facing error.
+  Catalogue now SIX concrete instances:
+    1. Wave 44 post-switch tail no-op via ctor-init
+       equality.
+    2. Wave 45 ReplaceData equality short-circuit.
+    3. Wave 46 outer-switch default fall-through.
+    4. Wave 47 write-only-field setter with no reader.
+    5. Wave 48 null-item-from-GetItem early-bail.
+    6. **Wave 50 server-only LogMessage default arm with
+       no client-observable reply.**
+
+* **Naming quirk preserved.** `common/include/net7/
+  Opcodes.h:58` mis-prefixes the #define as
+  `ENB_OPCODE_0027_INVENTORY_SORT` but the actual macro
+  value is `0x0028`. Preserved verbatim from upstream;
+  a future Phase R rename pass would diff against the
+  upstream macro name rather than the current
+  prefix-derived name.
+
+* **Rate-limiter awareness preserved in xmldoc.** The
+  handler has a 10s rate limit at line 3291
+  (`if (tick < (m_LastSort + 10000))`) with
+  `m_LastSort` ctor-initialised to 0
+  (`PlayerClass.cpp:144`/271). On first invocation
+  with server-up >10s the guard doesn't fire; on a
+  rate-trip path it emits `SendVaMessageC(17, "Cargo
+  sort machine resetting...")` MESSAGE_STRING which is
+  harmless (REQUEST_TIME still round-trips). Test
+  doesn't depend on rate-trip behaviour but documents
+  the contract.
+
+* **Server-integrity (CLAUDE.md) clean.** 0x0028
+  INVENTORY_SORT is what the retail Win32 client emits
+  when the user clicks a column header on the cargo/
+  vault grid; the default arm IS the documented
+  bad-input handler (LogMessage call is the retail
+  diagnostic). Zero permissiveness added; not
+  loosening any security posture; not fabricating any
+  reply (the default arm emits none — survival probe
+  doesn't depend on the default arm doing anything
+  client-observable).
+
+* **Test-author footgun (preserved).** firstName "iris"
+  starts with lowercase 'i' which cleared the
+  AccountManager.cpp:1147 vowel-check first-try.
+
+* Direct-reply/survival-probe pattern count now 23 waves;
+  passive-observation pattern count unchanged at 2 waves
+  (25 opcodes total).
+* Phase K coverage **39.1%** (81/207).
+* Push to main authorized this session — Wave 50 will go
+  out as the next session-commit batch.
+
+* **Wave 51+ outlook.** The cleanly-dispatched-and-clearly
+  untested set after Wave 50 narrows substantially.
+  Inventory of remaining client→server dispatched opcodes
+  via the `comm -23` workflow:
+    * **0x0003 LOGOFF** — dispatched but I haven't yet
+      located the handler; needs read. Should be a clean
+      Wave 51 candidate since 0x00B9 LOGOFF_REQUEST is
+      already tested and 0x0003 is the lower-level
+      logoff opcode the client emits.
+    * **Passive-observation waves on handshake-emitted
+      server→client opcodes.** The `Session.HandshakeOpcodes`
+      capture in SectorHandshake.cs records every opcode
+      received during handshake. Candidates: 0x0042
+      SERVER_PARAMETERS, 0x0046 COMPONENT_POSITIONAL_UPDATE,
+      0x002A SET_ZBAND, 0x002B SET_BBOX, 0x002F
+      INIT_RENDER_STATE, 0x0031 ACTIVATE_NEXT_RENDER_STATE,
+      0x0032 DEACTIVATE_RENDER_STATE, 0x0066 OPEN_INTERFACE.
+      All emit during handshake or post-handshake fan-out;
+      asserting their presence in the capture is zero
+      additional client stimulus.
+    * **Deferred byte-comparison wave to upgrade the
+      existing 23 survival-probe assertions** into
+      byte-exact reply-shape assertions.
+    * **Unreachable / hostile-input categories** to defer
+      indefinitely: MVAS/UDP infrastructure
+      (0x3001/0x3005/0x3006/0x1000-100B/0x2000-201A/
+      0x4000-4002/0x5000/0x7802/0x7902), proxy-blocked
+      reply opcodes (0x0097 GALAXY_MAP blocked by 0x2011
+      proxy drop), state-mutating handlers flagged UNSAFE
+      in Wave 47/48 triage (0x0082/0x0084, 0x0027 inventory
+      moves into populated slots, 0x002D into combat,
+      0x009B real-warp, 0x00BC, 0x00C5/0x00C9, 0x2017,
+      0x3004).
