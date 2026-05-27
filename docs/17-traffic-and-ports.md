@@ -2,7 +2,7 @@
 
 This page covers every network leg the stack uses end-to-end: which component talks to which, on what port, over TCP or UDP, with what crypto, and where the boundary lives.
 
-If you only remember one thing: **the client never talks directly to a public server.** It only talks to the local proxy on `localhost`. The local proxy is what decides which (if any) upstream the traffic gets forwarded to. That choice is configurable at proxy runtime — no recompile needed.
+If you only remember one thing: **the client talks to wherever `Network.ini` / `Auth.ini` / `rg_regdata.ini` point it.** In this repo those files are patched to `localhost` by default, because the dev scenario is "everything on one Linux box, client under WINE on the same host." For a remote deployment the client's INIs would name the public hostname of whichever box runs `net7proxy`. The client speaks Westwood RC4 to that hostname on `PROXY_LOCAL_TCP_PORT` (3500); from there `net7proxy` is what bridges into the auth and game UDP planes.
 
 ## Components
 
@@ -11,7 +11,7 @@ If you only remember one thing: **the client never talks directly to a public se
 | `client.exe`     | Windows native or Linux via WINE                    | `client/mods/release/`                            | The game client. Speaks Westwood RC4 framing to whatever it's pointed at.                  |
 | `authlogin.dll`  | Loaded in-process by `client.exe`                   | `client/mods/release/`                            | The client's auth plugin. Performs the HTTPS `/AuthLogin` call to get a session ticket.    |
 | `LaunchNet7.exe` | Same host as the client (Win/WINE)                  | `tools/launchnet7/LaunchNet7/`                    | Patches client config / `authlogin.dll` offsets, runs `mkcert`, spawns the proxy + client. |
-| `Net7Proxy.exe`  | Same host as the client (Win/WINE) OR Linux native  | `proxy/`                                          | TLS / Westwood-crypto terminator. Bridges the client's loopback traffic to the upstream.    |
+| `net7proxy`      | Linux container (`docker-compose` service `server` colocates it; production: same box as game server) | `proxy/`                                          | Server-side terminator for the client's Westwood RC4 TCP connection (`PROXY_LOCAL_TCP_PORT` 3500). Bridges into the colocated game server's UDP planes and the auth server's TLS endpoint. Build is Linux-only (`proxy/CMakeLists.txt`); there is no Win32 build target in this repo. |
 | `Net7SSL` (login) | Linux container (`docker-compose` service `login`) | `login-server/Net7SSL/`                           | Terminates TLS for `/AuthLogin`, validates credentials, issues 20-byte session tickets.    |
 | `Net7` (server)  | Linux container (`docker-compose` service `server`) | `server/`                                         | The game world. Sector / global / master control planes, UDP fan-out, world simulation.    |
 | Postgres         | Linux container                                     | `db/postgres/`                                    | Persistence for accounts, characters, world state.                                         |
@@ -19,30 +19,33 @@ If you only remember one thing: **the client never talks directly to a public se
 ## Topology
 
 ```
-                            (loopback only)
-                              ┌──────────────┐
-+----------+   Westwood RC4   │              │   TLS 1.3      ┌─────────────────┐
-|client.exe| ───── TCP ──────►│ Net7Proxy.exe├──── TCP ──────►│  Net7SSL (auth) │
-| (Win/    | ◄──── UDP ──────►│              │  port 443      └─────────────────┘
-|  WINE)   |                  │              │
-+----------+                  │              │   UDP control  ┌─────────────────┐
-                              │              │◄───────────────┤ Net7 (game)     │
-                              │              │   ports 3808/  │  ports 3501+    │
-                              │              │   3810         └─────────────────┘
-                              └──────┬───────┘
-                                     │
-                              (optional, runtime-
-                               configurable)
-                                     │
-                                     ▼
-                        ┌──────────────────────────┐
-                        │ NET7_UPSTREAM_HOST       │
-                        │ (your public deployment, │
-                        │  whatever it is)         │
-                        └──────────────────────────┘
+                                                                          ┌─────────────────────┐
++----------+   Westwood RC4   ┌────────────────────┐    TLS 1.3 :443      │  Net7SSL (auth)     │
+|client.exe| ────── TCP ─────►│   net7proxy        │─────────────────────►│  bound on :443      │
+| (Win/    |                  │   listens :3500    │                      └─────────────────────┘
+|  WINE)   |                  │   (PROXY_LOCAL_TCP)│
++----------+                  │                    │    UDP :3806/3808    ┌─────────────────────┐
+                              │                    │◄────────────────────►│  Net7 (game server) │
+                              │                    │       /3810          │  bound on 3806/3808 │
+                              └──────────┬─────────┘                      │  /3810 + 3501+      │
+                                         │                                └─────────────────────┘
+                                         │                                          ▲
+                                         │            host the proxy dials for      │
+                                         │            UDP game traffic is           │
+                                         │            NET7_GAME_SERVER_HOST ────────┘
+                                         │            (default "server" — docker
+                                         │             compose DNS name)
+                                         │
+                                         │
+                                         └────► (no separate "upstream" leg today;
+                                                 the proxy IS server-side in this
+                                                 build and dials the colocated
+                                                 auth/game services directly)
 ```
 
-The bracketed "loopback only" box is the whole story for the client's network surface. Everything south of the proxy can move between hosts, containers, or stay on the same machine — the client doesn't know and doesn't care.
+**Where each box runs.** In this codebase the proxy is server-native Linux (see the Phase M comment at the top of `proxy/Net7.cpp`). The dev topology is one Linux host running `net7proxy`, `Net7SSL`, and `Net7`, with the client (Win/WINE) connecting in over RC4 on port 3500. For a public deployment, the same three Linux processes move to whichever box you point the client at — the client only needs the proxy's reachable hostname in `Network.ini`/`Auth.ini`/`rg_regdata.ini`.
+
+There is no "client-side local proxy that forwards to a remote game server" flow in the current build. The launcher's `LaunchNet7Proxy()` step is vestigial in that sense: this repo's `proxy/CMakeLists.txt` is Linux-only, so the `bin/Net7Proxy.exe` it tries to spawn does not come from this source tree.
 
 ## Ports
 
@@ -50,12 +53,12 @@ Authoritative list — every port the stack binds. Macros are in [`common/includ
 
 | Macro                          | Port  | Proto    | Bound by                | Talks to                          | Role                                                                                                                            |
 | ------------------------------ | ----- | -------- | ----------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `SSL_PORT`                     | 443   | TCP/TLS  | `login-server/Net7SSL/` | `Net7Proxy.exe` (and `client.exe` via the proxy) | Terminates the auth TLS pipe. Parses `/AuthLogin`, validates against the user DB, returns a 20-byte session ticket.            |
+| `SSL_PORT`                     | 443   | TCP/TLS  | `login-server/Net7SSL/` (primary), `proxy/` (also has an `SSL_Listener` on `ssl_port`, default 443) | `authlogin.dll` (in-process in `client.exe`) | Terminates the auth TLS pipe. Parses `/AuthLogin`, validates against the user DB, returns a 20-byte session ticket. In docker dev, Net7SSL binds 443 inside the login container and the host sees it as 4443; the client's `authlogin.dll` is what dials it (via `authlogin.dll`'s patched port — see Configuration below). |
 | `PROXY_LOCAL_TCP_PORT`         | 3500  | TCP      | `proxy/`                | `client.exe`                      | The proxy's own loopback terminator. Where the client's Westwood RC4-framed traffic lands.                                      |
 | `SECTOR_SERVER_PORT`           | 3501+ | TCP      | `server/` (per sector)  | `proxy/`                          | Sector-server TCP control plane. Each sector adds an offset to the base port.                                                   |
 | `MASTER_SERVER_PORT`           | 3801  | TCP      | `proxy/` and `server/`  | each other                        | Per-galaxy master handler. Multiplexes client connections onto the right sector.                                                |
 | `GLOBAL_SERVER_PORT`           | 3805  | TCP      | `proxy/`                | `server/`                         | Global control plane (cross-galaxy). The proxy's listener that the master service registers with.                               |
-| `MVAS_LOGIN_PORT`              | 3806  | TCP      | n/a (client-side hookup, port number only) | n/a                | The launcher's MVAS hookup; here for the port number only, no server binds it.                                                  |
+| `MVAS_LOGIN_PORT`              | 3806  | UDP      | `server/` (`MVASauth` in `server/src/Net7.cpp:383`) | `proxy/`, `login-server/Net7SSL/` | Per-player "MVAS" channel. Carries avatar-login / position-update / logoff opcodes (`0x1000`-family, `0x3005_PLAYER_COMMS_ALIVE`, `0x4000_REGISTER_SSL`, `0x4003_AVATARLOGIN`). Bound by the game server; written to by the proxy (`proxy/UDPProxyMVAS.cpp`, `proxy/UDPClient.cpp`, `proxy/UDPProxyToGlobal.cpp`) and by Net7SSL during the auth handoff (`login-server/Net7SSL/UDPClient.cpp`). |
 | `SSL_LOCALCERT_LOGIN_PORT`     | 3807  | TCP      | `login-server/Net7SSL/` (legacy)  | `proxy/`                | Out-of-band local-cert login. The original TCP global-control plane, since superseded by `UDP_GLOBAL_SERVER_PORT` (3810).        |
 | `UDP_MASTER_SERVER_PORT`       | 3808  | UDP      | `server/`               | `proxy/` (via `UDPClient`)        | Master handoff for the proxy → server direction (ticket validation, sector port assignment).                                    |
 | `PROXY_SERVER_PORT`            | 3809  | UDP      | `proxy/`                | `server/`                         | Proxy-to-proxy UDP plane.                                                                                                       |
@@ -113,12 +116,14 @@ If `mkcert.exe` isn't on `PATH` or in the launcher's `bin/`, the launcher fails 
 
 ## Configuration
 
-| Concern                  | Where to set                        | How it propagates                                                                                                                              |
-| ------------------------ | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| Local hostname           | `Launcher.LocalHostname` (C#) + `NET7_DOMAIN` env var (proxy) | Defaults to `localhost`. Cert CN matches. Client config files (`Network.ini`, `Auth.ini`, `rg_regdata.ini`) are rewritten on every launch to this value. |
-| Upstream host (where the proxy forwards) | `NET7_UPSTREAM_HOST` env var, or `/UPSTREAM:<host>` on the proxy CLI | The launcher passes the user-selected entry from `LaunchNet7.cfg` through to the proxy as `NET7_UPSTREAM_HOST` when spawning. The proxy logs the configured upstream at startup. Empty = no upstream configured (outbound flows that require one log and skip). |
-| Auth port                | `LaunchSetting.AuthenticationPort` (C#) + patched into `authlogin.dll` | The launcher patches the port and HTTPS flag into the DLL at byte offsets `0x8328` (HTTPS bool), `0x82AD` (port u16 LE), `0x8292` (timeout u16 LE). Patching is gated on `authlogin.dll` reporting `FileVersion == 3.3.0.6` — mismatched builds are refused. |
-| TLS cert path            | `proxy/SSL_Connection.cpp` builds `%s.cer` / `%s.pem` from `g_DomainName` | So the cert filename tracks the local hostname automatically; changing `NET7_DOMAIN=foo` looks for `foo.cer`/`foo.pem`. |
+The proxy has three independent hostname/port knobs. They do different things and the difference matters — confusing them silently breaks remote deployments.
+
+| Concern                  | Knob                                                              | Default                  | What it actually does                                                                                                                                                                                                                                                                              | Status      |
+| ------------------------ | ----------------------------------------------------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| Local TLS listener name  | `NET7_DOMAIN` env var (proxy reads it in `proxy/Net7.cpp:125`)    | `localhost`              | Sets `g_DomainName`, which `proxy/SSL_Connection.cpp` then uses to build the cert path (`<g_DomainName>.cer` / `.pem`). It is **not** a hostname the proxy dials anywhere — it's the name the embedded TLS listener uses for its own cert lookup. The cert's CN must match.                       | Active.     |
+| Game server target host  | `NET7_GAME_SERVER_HOST` env var (proxy reads it in `proxy/UDPClient_linux.cpp:129`) | `server` (docker compose DNS name) | Hostname the proxy's `UDPClient::OpenFixedPort` resolves and dials for the game server's UDP planes (`UDP_MASTER_SERVER_PORT` 3808, `UDP_GLOBAL_SERVER_PORT` 3810, `MVAS_LOGIN_PORT` 3806). **If you split the proxy and game server onto different boxes, this is the env var you set.** | Active.     |
+| Auth port                | `LaunchSetting.AuthenticationPort` (C#) + patched into `authlogin.dll` | 443                   | Launcher patches the port + HTTPS flag into `authlogin.dll` at byte offsets `0x8328` (HTTPS bool), `0x82AD` (port u16 LE), `0x8292` (timeout u16 LE). Patching is gated on `authlogin.dll` reporting `FileVersion == 3.3.0.6` — mismatched builds are refused.                                  | Active.     |
+| Public-facing server host | `NET7_UPSTREAM_HOST` env var, or `/UPSTREAM:<host>` proxy CLI flag (alias for `NET7_GAME_SERVER_HOST`) | empty                    | **This is the knob the launcher writes when the user picks a server.** At proxy startup, if set and `NET7_GAME_SERVER_HOST` is not already explicitly set, `g_UpstreamHost`'s value is propagated into `NET7_GAME_SERVER_HOST` via `setenv` (`proxy/Net7.cpp` post-CLI block) — `ResolveGameServerIP` then picks it up like any other game-server host. An explicit `NET7_GAME_SERVER_HOST` always wins (split-deployment override). | Active. |
 
 ## Client patching and the backup rule
 

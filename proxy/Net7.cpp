@@ -16,11 +16,15 @@
 char g_LogFilename[MAX_PATH];
 char g_InternalIP[MAX_PATH];
 char g_DomainName[MAX_PATH];
-// Upstream host the proxy forwards outbound auth/registration calls to.
-// Runtime-configurable: NET7_UPSTREAM_HOST env var, or /UPSTREAM:<host> CLI
-// flag. Empty string means "no upstream configured" — outbound flows that
-// need it must check and either skip or hard-error rather than dialling a
-// hardcoded default.
+// Upstream host the proxy dials for the game server's UDP planes (3806/
+// 3808/3810). Runtime-configurable via NET7_UPSTREAM_HOST env var or
+// /UPSTREAM:<host> CLI flag. At startup, when set, this value is also
+// propagated into NET7_GAME_SERVER_HOST (which is what
+// proxy/UDPClient_linux.cpp::ResolveGameServerIP actually reads). The
+// launcher is the primary writer — it passes the user-selected server
+// hostname through as NET7_UPSTREAM_HOST when spawning the proxy.
+// Empty string means "no upstream configured"; the game-server resolver
+// then falls back to its docker-compose default ("server").
 char g_UpstreamHost[MAX_PATH];
 char *g_server_addr = (0);
 char *default_addr = "127.0.0.1";
@@ -129,6 +133,16 @@ int main(int argc, char* argv[])
 
     // Upstream host. /UPSTREAM: on the CLI wins (set above); otherwise read
     // the env var. No hardcoded default — operators set this per deployment.
+    //
+    // NET7_UPSTREAM_HOST is the public-facing knob (this is what the launcher
+    // passes when the user picks a server entry). Internally the proxy's
+    // outbound game-server resolver reads NET7_GAME_SERVER_HOST
+    // (proxy/UDPClient_linux.cpp::ResolveGameServerIP). To make the two
+    // behave as one variable, we propagate g_UpstreamHost into
+    // NET7_GAME_SERVER_HOST below — unless NET7_GAME_SERVER_HOST is already
+    // explicitly set, in which case the explicit override wins (useful for
+    // split-deployment debugging where the proxy and game server live on
+    // separate boxes).
     if (g_UpstreamHost[0] == '\0')
     {
         const char *env_upstream = getenv("NET7_UPSTREAM_HOST");
@@ -140,6 +154,24 @@ int main(int argc, char* argv[])
     if (g_UpstreamHost[0] != '\0')
     {
         LogMessage("Net7Proxy: upstream host = %s\n", g_UpstreamHost);
+
+        const char *env_game_host = getenv("NET7_GAME_SERVER_HOST");
+        if (!env_game_host || !*env_game_host)
+        {
+            // setenv(name, value, overwrite=0) is a no-op if it's already set
+            // with a non-empty value; we've already gated on that, so this
+            // sets it for real. POSIX setenv copies, so g_UpstreamHost's
+            // lifetime doesn't matter.
+            setenv("NET7_GAME_SERVER_HOST", g_UpstreamHost, 0);
+            LogMessage("Net7Proxy: aliasing NET7_GAME_SERVER_HOST = %s\n",
+                       g_UpstreamHost);
+        }
+        else
+        {
+            LogMessage("Net7Proxy: NET7_GAME_SERVER_HOST already set to '%s' "
+                       "— keeping it (split-deployment override wins over "
+                       "NET7_UPSTREAM_HOST)\n", env_game_host);
+        }
     }
 
     // Bind on 0.0.0.0 by default so the container is reachable from the
