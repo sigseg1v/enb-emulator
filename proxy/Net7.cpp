@@ -16,6 +16,12 @@
 char g_LogFilename[MAX_PATH];
 char g_InternalIP[MAX_PATH];
 char g_DomainName[MAX_PATH];
+// Upstream host the proxy forwards outbound auth/registration calls to.
+// Runtime-configurable: NET7_UPSTREAM_HOST env var, or /UPSTREAM:<host> CLI
+// flag. Empty string means "no upstream configured" — outbound flows that
+// need it must check and either skip or hard-error rather than dialling a
+// hardcoded default.
+char g_UpstreamHost[MAX_PATH];
 char *g_server_addr = (0);
 char *default_addr = "127.0.0.1";
 char *g_internal_addr = (0);
@@ -58,7 +64,7 @@ bool StartENBClient()
 //
 // What this main does:
 //   - parse minimal command-line (currently none required)
-//   - set up g_DomainName (default: local.net-7.org)
+//   - set up g_DomainName (default: localhost, overridable via NET7_DOMAIN)
 //   - construct a ServerManager and call RunMasterServer()
 // What it intentionally does NOT do (vs. the deleted Win32 main):
 //   - launch the ENB.exe client (irrelevant server-side)
@@ -100,6 +106,10 @@ int main(int argc, char* argv[])
                 ssl_port = (unsigned short)ssl_p;
             }
         }
+        else if (strncmp(argv[i], "/UPSTREAM:", 10) == 0)
+        {
+            snprintf(g_UpstreamHost, MAX_PATH, "%s", argv[i] + 10);
+        }
         else
         {
             printf("Unrecognized switch: '%s'\n", argv[i]);
@@ -108,9 +118,29 @@ int main(int argc, char* argv[])
         }
     }
 
-    // g_DomainName defaults to local.net-7.org; docker-compose extra_hosts
-    // remaps it to the container loopback so gethostbyname() succeeds.
-    snprintf(g_DomainName, MAX_PATH, "local.net-7.org");
+    // Local hostname the embedded HTTPS listener / cert path use. Override
+    // at runtime with NET7_DOMAIN; default is loopback so the cert (CN =
+    // localhost) validates without any external DNS setup.
+    {
+        const char *env_domain = getenv("NET7_DOMAIN");
+        snprintf(g_DomainName, MAX_PATH, "%s",
+                 (env_domain && *env_domain) ? env_domain : "localhost");
+    }
+
+    // Upstream host. /UPSTREAM: on the CLI wins (set above); otherwise read
+    // the env var. No hardcoded default — operators set this per deployment.
+    if (g_UpstreamHost[0] == '\0')
+    {
+        const char *env_upstream = getenv("NET7_UPSTREAM_HOST");
+        if (env_upstream && *env_upstream)
+        {
+            snprintf(g_UpstreamHost, MAX_PATH, "%s", env_upstream);
+        }
+    }
+    if (g_UpstreamHost[0] != '\0')
+    {
+        LogMessage("Net7Proxy: upstream host = %s\n", g_UpstreamHost);
+    }
 
     // Bind on 0.0.0.0 by default so the container is reachable from the
     // host. The TcpListener actually uses INADDR_ANY (TcpListener.cpp:80)

@@ -130,6 +130,7 @@ extern unsigned short ssl_port;
 extern char g_LogFilename[MAX_PATH];
 extern char g_InternalIP[MAX_PATH];
 extern char g_DomainName[MAX_PATH];
+extern char g_UpstreamHost[MAX_PATH];
 extern char g_MySQL_User[MAX_PATH];
 extern char g_MySQL_Pass[MAX_PATH];
 extern char g_MySQL_Host[MAX_PATH];

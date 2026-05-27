@@ -36,7 +36,7 @@ const char *g_EventName  = "Net7SSLSlot";
 // would otherwise own these symbols.
 char g_LogFilename[MAX_PATH]   = {0};
 char g_InternalIP[MAX_PATH]    = {0};
-char g_DomainName[MAX_PATH]    = "local.net-7.org";
+char g_DomainName[MAX_PATH]    = "localhost";
 char g_MySQL_User[MAX_PATH]    = {0};
 char g_MySQL_Pass[MAX_PATH]    = {0};
 char g_MySQL_Host[MAX_PATH]    = {0};

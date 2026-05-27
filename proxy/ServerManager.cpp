@@ -387,7 +387,7 @@ bool ServerManager::RegisterSectorServer(short first_port, short max_sectors)
     SSLeay_add_ssl_algorithms();
 #ifdef WIN32
 	// SSLv2 is gone in OpenSSL 3.x — and the entire RegisterSectorServer
-	// flow targets the legacy net-7.org auth registration HTTPS endpoint.
+	// flow targets the legacy external auth registration HTTPS endpoint.
 	// On Linux Phase J we don't register against an external auth server;
 	// short-circuit to success so the local listener path keeps running.
 	ssl_client_method = SSLv2_client_method();

@@ -29,7 +29,7 @@ card08prefix=6011
 card08id=3
 [Connection]
 ; Production Server
-regserverurl=https://localhost/subsxml
+regserverurl=https://www.net-7.org/subsxml
 regserverpage=subsxml.jsp
 regserverver=2.0
 [Settings]

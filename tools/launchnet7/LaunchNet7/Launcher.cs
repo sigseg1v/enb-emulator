@@ -12,6 +12,15 @@ namespace LaunchNet7
 {
     public class Launcher
     {
+        /// <summary>
+        /// The hostname every patched client config file points at. The client
+        /// only ever connects to the local proxy on this name; the proxy is
+        /// what decides which upstream the traffic is forwarded to. mkcert
+        /// generates a cert with this name as the CN so the embedded HTTPS
+        /// listener validates correctly.
+        /// </summary>
+        public const string LocalHostname = "localhost";
+
         public Launcher(LaunchSetting setting)
         {
             if (setting == null) throw new ArgumentNullException("setting");
@@ -28,11 +37,13 @@ namespace LaunchNet7
         public void Launch()
         {
             PatchRegistry();
+            PatchRegistry64();
             PatchAuthLoginFile();
             PatchRegDataFileNames();
             PatchRegDataFile();
             PatchAuthIniFile();
             PatchNetworkIniFile();
+            EnsureLocalCertIfRequested();
 
             switch (Setting.LaunchName.ToUpperInvariant())
             {
@@ -40,7 +51,7 @@ namespace LaunchNet7
                     {
                         LaunchNet7Server();
                         Thread.Sleep(25000); //allow 25 seconds for server startup
-                        
+
                         LaunchNet7Proxy();
                     }
                     break;
@@ -61,8 +72,8 @@ namespace LaunchNet7
 
         private void LaunchClient()
         {
-            IPAddress[] addresses = Dns.GetHostAddresses(Setting.Hostname);
-            if (addresses.Length == 0) throw new InvalidOperationException(String.Format("Could not resolve hostname '{0}'.", Setting.Hostname));
+            IPAddress[] addresses = Dns.GetHostAddresses(LocalHostname);
+            if (addresses.Length == 0) throw new InvalidOperationException(String.Format("Could not resolve hostname '{0}'.", LocalHostname));
 
             ProcessStartInfo info = new ProcessStartInfo();
             if (Setting.UseClientDetours)
@@ -71,7 +82,7 @@ namespace LaunchNet7
                 info.FileName = Path.Combine(info.WorkingDirectory, "Detours.exe");
                 info.Arguments = String.Format
                 (
-                    "/ADDR:{0} /CLIENT:{1}",
+                    "/ADDR:{0} /CLIENT:\"{1}\"",
                     addresses[0].ToString(),
                     LauncherUtility.GetShortPathName(Setting.ClientPath)
                 );
@@ -99,16 +110,18 @@ namespace LaunchNet7
 
         private void LaunchNet7Proxy()
         {
-            IPAddress[] addresses = Dns.GetHostAddresses(Setting.Hostname);
-            if (addresses.Length == 0) throw new InvalidOperationException(String.Format("Could not resolve hostname '{0}'.", Setting.Hostname));
+            IPAddress[] addresses = Dns.GetHostAddresses(LocalHostname);
+            if (addresses.Length == 0) throw new InvalidOperationException(String.Format("Could not resolve hostname '{0}'.", LocalHostname));
 
             ProcessStartInfo info = new ProcessStartInfo();
 
             info.WorkingDirectory = Path.Combine(Directory.GetCurrentDirectory(), "bin");
             info.FileName = Path.Combine(info.WorkingDirectory, "Net7Proxy.exe");
+            // /CLIENT path is quoted so WINE prefixes / "Program Files" / any
+            // path with a space survives the argv parse on the proxy side.
             info.Arguments = String.Format
             (
-                "/ADDRESS:{0} /CLIENT:{1}",
+                "/ADDRESS:{0} /CLIENT:\"{1}\"",
                 addresses[0].ToString(),
                 LauncherUtility.GetShortPathName(Setting.ClientPath)
             );
@@ -126,6 +139,16 @@ namespace LaunchNet7
                     " /SSL:{0}",
                     Setting.AuthenticationPort.ToString()
                 );
+            }
+
+            // Pass the user-selected upstream through to the proxy. The proxy
+            // honours NET7_UPSTREAM_HOST as the trivially-runtime-changeable
+            // way to point traffic at a different deployment without rebuild.
+            if (!String.IsNullOrEmpty(Setting.Hostname) &&
+                !String.Equals(Setting.Hostname, LocalHostname, StringComparison.OrdinalIgnoreCase))
+            {
+                info.EnvironmentVariables["NET7_UPSTREAM_HOST"] = Setting.Hostname;
+                info.UseShellExecute = false;
             }
 
             try
@@ -161,80 +184,38 @@ namespace LaunchNet7
             string fileBackup = Path.Combine(Setting.CommonDirectoryName, "Network.ini.orig");
             bool patchRequired = false;
 
+            EnsureBackup(file, fileBackup);
             if (File.Exists(file) == false && File.Exists(fileBackup))
             {
-                // Restore Backup
                 File.Copy(fileBackup, file);
             }
 
-            string hostName = Setting.Hostname;
+            string hostName = LocalHostname;
 
-            if (Setting.UseLocalCert)
+            string[] sections =
             {
-                hostName = "local.net-7.org";
-            }
+                "MasterServer", "RegisterServer", "ReporterServer",
+                "GlobalServer_Directory", "GlobalServer_Client",
+                "GlobalServer_Register", "GlobalServer_Parent",
+                "ChatServer", "ChatServer_Basic",
+                "GroupServer", "GuildServer",
+            };
 
-            if (String.Equals(IniUtility.GetValue(file, "MasterServer", "Name"), hostName, StringComparison.InvariantCultureIgnoreCase) == false)
+            foreach (string s in sections)
             {
-                patchRequired = true;
-            }
-            else if (String.Equals(IniUtility.GetValue(file, "RegisterServer", "Name"), hostName, StringComparison.InvariantCultureIgnoreCase) == false)
-            {
-                patchRequired = true;
-            }
-            else if (String.Equals(IniUtility.GetValue(file, "ReporterServer", "Name"), hostName, StringComparison.InvariantCultureIgnoreCase) == false)
-            {
-                patchRequired = true;
-            }
-            else if (String.Equals(IniUtility.GetValue(file, "GlobalServer_Directory", "Name"), hostName, StringComparison.InvariantCultureIgnoreCase) == false)
-            {
-                patchRequired = true;
-            }
-            else if (String.Equals(IniUtility.GetValue(file, "GlobalServer_Client", "Name"), hostName, StringComparison.InvariantCultureIgnoreCase) == false)
-            {
-                patchRequired = true;
-            }
-            else if (String.Equals(IniUtility.GetValue(file, "GlobalServer_Register", "Name"), hostName, StringComparison.InvariantCultureIgnoreCase) == false)
-            {
-                patchRequired = true;
-            }
-            else if (String.Equals(IniUtility.GetValue(file, "GlobalServer_Parent", "Name"), hostName, StringComparison.InvariantCultureIgnoreCase) == false)
-            {
-                patchRequired = true;
-            }
-            else if (String.Equals(IniUtility.GetValue(file, "ChatServer", "Name"), hostName, StringComparison.InvariantCultureIgnoreCase) == false)
-            {
-                patchRequired = true;
-            }
-            else if (String.Equals(IniUtility.GetValue(file, "ChatServer_Basic", "Name"), hostName, StringComparison.InvariantCultureIgnoreCase) == false)
-            {
-                patchRequired = true;
-            }
-            else if (String.Equals(IniUtility.GetValue(file, "GroupServer", "Name"), hostName, StringComparison.InvariantCultureIgnoreCase) == false)
-            {
-                patchRequired = true;
-            }
-            else if (String.Equals(IniUtility.GetValue(file, "GuildServer", "Name"), hostName, StringComparison.InvariantCultureIgnoreCase) == false)
-            {
-                patchRequired = true;
+                if (!String.Equals(IniUtility.GetValue(file, s, "Name"), hostName, StringComparison.InvariantCultureIgnoreCase))
+                {
+                    patchRequired = true;
+                    break;
+                }
             }
 
-            if (patchRequired == false) return;
+            if (!patchRequired) return;
 
-            // Create Backup
-            File.Copy(file, fileBackup, true);
-
-            IniUtility.SetValue(file, "MasterServer", "Name", hostName);
-            IniUtility.SetValue(file, "RegisterServer", "Name", hostName);
-            IniUtility.SetValue(file, "ReporterServer", "Name", hostName);
-            IniUtility.SetValue(file, "GlobalServer_Directory", "Name", hostName);
-            IniUtility.SetValue(file, "GlobalServer_Client", "Name", hostName);
-            IniUtility.SetValue(file, "GlobalServer_Register", "Name", hostName);
-            IniUtility.SetValue(file, "GlobalServer_Parent", "Name", hostName);
-            IniUtility.SetValue(file, "ChatServer", "Name", hostName);
-            IniUtility.SetValue(file, "ChatServer_Basic", "Name", hostName);
-            IniUtility.SetValue(file, "GroupServer", "Name", hostName);
-            IniUtility.SetValue(file, "GuildServer", "Name", hostName);
+            foreach (string s in sections)
+            {
+                IniUtility.SetValue(file, s, "Name", hostName);
+            }
         }
 
         private void PatchAuthIniFile()
@@ -243,17 +224,13 @@ namespace LaunchNet7
             string fileBackup = Path.Combine(Setting.IniDirectoryName, "Auth.ini.orig");
             bool patchRequired = false;
 
+            EnsureBackup(file, fileBackup);
             if (File.Exists(file) == false && File.Exists(fileBackup))
             {
-                // Restore Backup
                 File.Copy(fileBackup, file);
             }
 
-            string RegHostName = Setting.RegistrationHostname;
-            if (Setting.UseLocalCert)
-            {
-                RegHostName = "local.net-7.org";
-            }
+            string RegHostName = LocalHostname;
 
             UriBuilder builder = new UriBuilder();
             builder.Scheme = Setting.UseSecureAuthentication ? "https" : "http";
@@ -274,9 +251,6 @@ namespace LaunchNet7
 
             if (patchRequired == false) return;
 
-            // Create Backup
-            File.Copy(file, fileBackup, true);
-
             IniUtility.SetValue(file, "General", "AAIUrl", RegHostName);
             IniUtility.SetValue(file, "General", "LKeyUrl", url);
         }
@@ -287,15 +261,11 @@ namespace LaunchNet7
             string fileBackup = Path.Combine(Setting.IniDirectoryName, "rg_regdata.ini.orig");
             bool patchRequired = false;
 
-            string RegHostName = Setting.RegistrationHostname;
-            if (Setting.UseLocalCert)
-            {
-                RegHostName = "local.net-7.org";
-            }
+            string RegHostName = LocalHostname;
 
+            EnsureBackup(file, fileBackup);
             if (File.Exists(file) == false && File.Exists(fileBackup))
             {
-                // Restore Backup
                 File.Copy(fileBackup, file);
             }
 
@@ -312,9 +282,6 @@ namespace LaunchNet7
             }
 
             if (patchRequired == false) return;
-
-            // Create Backup
-            File.Copy(file, fileBackup, true);
 
             IniUtility.SetValue(file, "Connection", "regserverurl", registrationUrl);
         }
@@ -341,6 +308,7 @@ namespace LaunchNet7
         {
             try
             {
+                EnsureBackup(Setting.AuthLoginFileName, Setting.AuthLoginFileName + ".orig");
                 AuthPatcherInfo info = AuthLoginPatcher.ReadInformation(Setting.AuthLoginFileName);
                 if (info.Port != Setting.AuthenticationPort || info.UseHttps != Setting.UseSecureAuthentication)
                 {
@@ -358,7 +326,8 @@ namespace LaunchNet7
         private void PatchRegistry()
         {
             string keyName = "HKEY_LOCAL_MACHINE\\Software\\Westwood Studios\\Earth and Beyond\\Registration";
-            if (((int)Registry.GetValue(keyName, "Registered", 0)) != 1)
+            object value = Registry.GetValue(keyName, "Registered", 0);
+            if (value == null || ((int)value) != 1)
             {
                 try
                 {
@@ -369,6 +338,69 @@ namespace LaunchNet7
                     throw new ApplicationException("Could not patch registry-settings.", e);
                 }
             }
+        }
+
+        /// <summary>
+        /// 64-bit hosts running the 32-bit client/launcher under WoW64 (or
+        /// WINE's 64-bit prefix with the 32-bit client) write registry keys
+        /// under Wow6432Node. Mirror the same Registered=1 value there so
+        /// either bitness of the client sees a registered install.
+        /// </summary>
+        private void PatchRegistry64()
+        {
+            string keyName = "HKEY_LOCAL_MACHINE\\Software\\Wow6432Node\\Westwood Studios\\Earth and Beyond\\Registration";
+            try
+            {
+                object value = Registry.GetValue(keyName, "Registered", null);
+                if (value == null || !(value is int) || ((int)value) != 1)
+                {
+                    Registry.SetValue(keyName, "Registered", 1, RegistryValueKind.DWord);
+                }
+            }
+            catch (Exception e)
+            {
+                // On a 32-bit host (or a WINE prefix without Wow6432Node) the
+                // write may be redirected or fail. That's fine — the 32-bit
+                // path in PatchRegistry() already covered it.
+                Program.LogException(e);
+            }
+        }
+
+        private void EnsureLocalCertIfRequested()
+        {
+            if (!Setting.UseLocalCert) return;
+
+            string binDir = Path.Combine(Directory.GetCurrentDirectory(), "bin");
+            string certPath = Path.Combine(binDir, "local.crt");
+            string keyPath = Path.Combine(binDir, "local.key");
+
+            try
+            {
+                CertificationUtility.EnsureLocalCert(LocalHostname, certPath, keyPath);
+            }
+            catch (Exception e)
+            {
+                throw new ApplicationException(
+                    "Could not provision local TLS cert via mkcert. " +
+                    "Install mkcert from https://github.com/FiloSottile/mkcert " +
+                    "and place mkcert.exe in the launcher's bin/ directory.\n" +
+                    "Details: " + e.Message,
+                    e);
+            }
+        }
+
+        /// <summary>
+        /// Copy <paramref name="src"/> to <paramref name="backup"/> the FIRST
+        /// time we ever see <paramref name="src"/> without a backup. The
+        /// backup is never overwritten or modified after that. Callers wanting
+        /// to re-patch from a clean baseline must copy <paramref name="backup"/>
+        /// back over <paramref name="src"/> themselves.
+        /// </summary>
+        private static void EnsureBackup(string src, string backup)
+        {
+            if (!File.Exists(src)) return;
+            if (File.Exists(backup)) return;
+            File.Copy(src, backup);
         }
     }
 }

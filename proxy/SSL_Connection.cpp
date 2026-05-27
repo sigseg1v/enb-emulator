@@ -1,9 +1,9 @@
 // SSL_Connection.cpp
 //
-// Test URL: https://local.net-7.org/certificate.html
-// Test URL: https://local.net-7.org/shutdown.cgi
-// Test URL: https://local.net-7.org/sectorserver.cgi?username=VectoR&port=3500&max_sectors=20&version=0.2
-// Test URL: https://local.net-7.org/AuthLogin?username=VectoR&password=go&serviceID=2184&version=2.5
+// Test URL: https://localhost/certificate.html
+// Test URL: https://localhost/shutdown.cgi
+// Test URL: https://localhost/sectorserver.cgi?username=VectoR&port=3500&max_sectors=20&version=0.2
+// Test URL: https://localhost/AuthLogin?username=VectoR&password=go&serviceID=2184&version=2.5
 //
 // TODO: Add code for subsxml to return XML data from resource files
 //
@@ -524,7 +524,7 @@ char *SSL_Connection::AuthLogin(size_t *response_length, char *recv_buffer)
 
 		GET /AuthLogin?username=VectoR&password=go&serviceID=2184&version=2.5 HTTP/1.1
 		User-Agent: AuthLogin
-		Host: local.net-7.org
+		Host: localhost
 		Connection: Keep-Alive
 		Cache-Control: no-cache
 	*/
@@ -598,7 +598,7 @@ char *SSL_Connection::SectorServer(size_t *response_length, char *recv_buffer)
 
 		GET /sectorserver.cgi?username=VectoR&port=3500&max_sectors=20&version=0.2 HTTP/1.1
 		User-Agent: AuthLogin
-		Host: local.net-7.org
+		Host: localhost
 		Connection: Keep-Alive
 		Cache-Control: no-cache
 	*/
