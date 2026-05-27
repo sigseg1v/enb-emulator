@@ -6315,3 +6315,152 @@ reply.
 * Phase K coverage **36.7%** (76/207).
 * Push to main authorized this session — Wave 45 will go out
   as the next session-commit batch.
+
+## 2026-05-26 — Phase K Wave 46: 0x007E MANUFACTURE_ACTION survival-probe (MODE_NONE outer-switch default fall-through)
+
+**Direct continuation of Wave 44/45.** The bulk-UNSAFE flag
+on the manufacture-action family (0x0079 / 0x007A / 0x007B
+/ 0x007C / 0x007E) keeps yielding per-arm safe paths on
+re-read. Wave 44 found the Terminal=0 arm in
+HandleManufactureTerminal safe via post-switch tail no-op
++ ctor-init equality. Wave 45 found the Category=0 arm in
+HandleManufactureCategorySelection safe via the ReplaceData
+equality short-circuit + empty m_ManuRecipes. Wave 46 lands
+**0x007E HandleManufactureAction** by exploiting a third
+distinct seam: the handler's outer switch on
+`ManuIndex()->GetMode()` has no `case MODE_NONE` arm and
+falls into a pure-LogMessage default.
+
+**Wire shape.** Same 8B packed `ManufactureData` payload
+as Wave 44/45: `{int32 GameID; int32 Data}`. Per
+`common/include/net7/PacketStructures.h:1062-1066`,
+ATTRIB_PACKED. The Action field (Data) is network-order
+ntohl-decoded at PlayerManufacturing.cpp:502.
+
+**Handler walk.** `HandleManufactureAction` at
+`server/src/PlayerManufacturing.cpp:499-686` casts data →
+`ManufactureData *`, ntohl-decodes `Packet->Data` into
+`long Action`, LogDebugs, defines local `NextFormula=0`
+and grabs `SectorManager *sm = GetSectorManager()` (unused
+on our path), then switches on `ManuIndex()->GetMode()` at
+line 508.
+
+**The seam.** `AuxManufacturingIndex::Data.Mode` is
+ctor-initialised to 0 at `AuxManufacturingIndex.cpp:394`.
+The `Manufacture_Mode` enum at
+`server/src/PlayerManufacturing.h:29-37` declares
+MODE_NONE as the first value (=0), MODE_MANUFACTURE=1,
+MODE_ANALIZE=2, MODE_DISMANTLE=3, MODE_REFINE=4,
+MODE_REFINE_STACK=5. Data.Mode only flips non-zero on
+manufacture-terminal entry (via TerminalReset at
+AuxManufacturingIndex.cpp:210-241 — called from the
+terminal UI flow we don't exercise). So `GetMode()`
+returns MODE_NONE=0 throughout our session. The outer
+switch covers MODE_MANUFACTURE / MODE_DISMANTLE /
+MODE_ANALIZE / MODE_REFINE but **not** MODE_NONE — mode=0
+falls into the outer-switch default arm at
+PlayerManufacturing.cpp:682-684 which is purely
+`LogMessage("ManufactureAction - Unknown Action: %d\n", ManuIndex()->GetMode())`.
+
+**Why this is the cleanest probe yet.** No SendOpcode, no
+state mutation, no SaveDatabase, no credit deduction, no
+SetCredits, no `sm->AddTimedCall` scheduling, no
+SendAuxManu emit. Strictly safer than Wave 44 (which had a
+SendAuxManu 0x001B reply) and Wave 45 (also SendAuxManu).
+The only externally observable change is a server log
+line. Handler dispatches, decodes 4 bytes, logs, returns.
+
+**New seam-discovery pattern (generalisable).** Wave 46
+surfaces a reusable insight: **"handler switches on a
+per-session state field whose ctor-init value lacks a
+switch arm" → default-arm fall-through is usually a benign
+LogMessage / no-op.** Applies beyond the manufacture-action
+family — any handler that gates on a session-state enum
+(Mode, Stage, State, Status, Phase, etc.) where the
+ctor-init default isn't in the switch will have a default
+path reachable on a fresh char with arbitrary inner-payload
+values. The pattern now has three concrete instances:
+- Wave 44: post-switch tail no-op via ctor-init equality
+  (DIFFICULTY_AUTOMATIC == ctor-init 0, ReplaceData detects
+  no-change).
+- Wave 45: ReplaceData equality short-circuit at
+  AuxBase.h:94 + empty m_ManuRecipes loop.
+- Wave 46: outer-switch default fall-through when ctor-init
+  enum value lacks a switch arm.
+
+**Pool growth.** Pool[41] += `cli_test43` (id=9_000_043).
+Matching seed.sql row at status=100. Pool sequence now
+covers Pool[0..8] = cli_test01..09, Pool[9..22] =
+cli_test11..24, Pool[23..31] = cli_test25..33, Pool[32..41]
+= cli_test34..43; cli_test10 still SKIPPED. Test-author
+footgun: firstName "Ulani" starts with lowercase 'u' which
+clears the AccountManager.cpp:1147 vowel-check on the
+first character.
+
+**Coverage.** MinTestedCount 76 → 77. Phase K coverage
+ratchet 76/207 → **77/207 (37.2%)**.
+
+**Regression classes documented in xmldoc + TestedOpcodes
+entry.** 11 classes: dispatcher mis-route at
+PlayerConnection.cpp:535-537 / ATTRIB_PACKED drop on
+ManufactureData at PacketStructures.h:1062 / ntohl revert
+at PlayerManufacturing.cpp:502 / `long`-widening of Action
+at the same line / MODE_NONE enum-value drift at
+PlayerManufacturing.h:31 / MODE_NONE arm insertion
+regression at PlayerManufacturing.cpp:508-685 /
+outer-switch default crash regression at
+PlayerManufacturing.cpp:683 / GetSectorManager null deref
+regression at PlayerManufacturing.cpp:506 / SendOpcode
+header-width revert at PlayerConnection.cpp:127 / proxy
+SendClientPacketSequence inner-opcode guard tightening at
+UDPProxyToClient_linux.cpp:568 / proxy default-case
+ForwardClientOpcode regression for 0x007E.
+
+**Wave 47+ outlook.** Remaining manufacture-action family
+arms:
+
+- 0x007B HandleManufactureSetItem — requires m_CurManuItem
+  pre-set, defer.
+- 0x007C HandleRefineSetItem — requires m_CurManuItem
+  pre-set, defer.
+
+Beyond the manufacture-action family:
+
+- 0x0082 RECUSTOMIZE_SHIP_DONE / 0x0084 RECUSTOMIZE_AVATAR_DONE
+  — bulk-triaged UNSAFE (SaveDatabase + credit deduction)
+  but per-arm re-read using the Wave 46 seam-discovery
+  pattern may reveal a payload-mode early-bail arm.
+- 0x009B WARP — bulk-triaged state-mutating but on a fresh
+  non-grouped char the GetMemberID iteration may early-exit
+  cleanly.
+- Deferred byte-comparison wave: still on the table for
+  already-covered survival-probe opcodes (would upgrade
+  their regression coverage from "connection survives" to
+  "reply bytes byte-equal to canonical"). 19 waves of
+  survival-probe coverage now have known reply shapes
+  (most: 0x001B AUX_DATA reply with known body; Wave 46
+  uniquely has ZERO reply).
+- Walk the full dispatch list at
+  PlayerConnection.cpp:423-639 once more looking for
+  handlers that switch on a per-session-state enum where
+  the ctor-init value lacks a switch arm — Wave 46's
+  pattern may apply to several more opcodes.
+
+**Server integrity (CLAUDE.md).** Zero permissiveness
+added. The 8B wire shape matches the canonical
+`ManufactureData` struct byte-for-byte. The MODE_NONE
+outer-switch default LogMessage fall-through is exactly
+what the retail server does when the client sends an
+action without an active manufacture mode — a legal but
+degenerate state representing e.g. a UI race where the
+player closes a terminal while a queued action is pending.
+Not loosening any security posture; not fabricating any
+reply. The "Unknown Action" log line in the default arm is
+upstream code preserved verbatim.
+
+* Direct-reply/survival-probe pattern count now 19 waves;
+  passive-observation pattern count unchanged at 2 waves
+  (21 opcodes total).
+* Phase K coverage **37.2%** (77/207).
+* Push to main authorized this session — Wave 46 will go
+  out as the next session-commit batch.
