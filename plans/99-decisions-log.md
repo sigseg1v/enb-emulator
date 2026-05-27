@@ -5857,3 +5857,114 @@ still warrants a methodical pass.
 * Phase K coverage **34.8%** (72/207).
 * Push to main authorized this session — Wave 41 will go out
   as the next session-commit batch.
+
+## 2026-05-26 — Phase K Wave 42 — 0x005D EQUIP_USE direct-stimulus (empty slot survival probe)
+
+Fifteenth direct-stimulus wave. Client sends a 6B canonical
+`EquipUse` payload `{int32 GameID=0; char InvNum=0; char InvSlot=15}`
+(struct lives at `common/include/net7/PacketStructures.h:929-934`,
+ATTRIB_PACKED). Server `HandleEquipUse` at
+`PlayerConnection.cpp:4556-4561` is a direct two-line dispatch:
+`m_Equip[myUse->InvSlot].ManualActivate()` with NO ntohl (InvSlot
+is a single byte, endianness-invariant) and NO bounds check on
+InvSlot. PlayerClass.cpp:387-391 unconditionally Init+PullAuxData
+all 20 m_Equip slots during login, so slot 15 lands on a valid
+Equipable for a fresh char. For a Terran Warrior with no equipped
+device, `EquipItem[15]` has `GetItemTemplateID()==-1` and
+`GetData()==NULL`, so Equipable::ManualActivate at
+Equipable.cpp:548-575 early-bails at the line 551 guard. Zero
+Activate(), zero SendAuxShip(), zero observer fan-out, zero
+state mutation.
+
+**Triple-pivot session.** Wave 42 attempt #1 was 0x0098
+GALAXY_MAP_REQUEST: HandleGalaxyMapRequest at
+PlayerConnection.cpp:10702-10707 emits `SendOpcode(0x2011, 0, 0)`,
+and 0x2011 GALAXY_MAP_CACHE is BLOCKED by the proxy
+SendClientPacketSequence inner-opcode guard at
+proxy/UDPProxyToClient_linux.cpp:568
+(`opcode > 0x0000 && opcode < 0x0FFF`; 0x2011 > 0x0FFF →
+`terminate = true` → connection drops). This is a real
+Linux-proxy regression vs Win32 — HandleCustomOpcode at
+UDPProxyToClient_linux.cpp:480-518 returns false for 0x2011
+with the stated intent of fall-through forward, but the outer
+guard contradicts the comment. Tracked separately, out of scope
+for coverage wave. Wave 42 attempt #2 was 0x002E OPTION:
+discovery showed it was already covered by Wave 22's
+`SectorOptionTests.Option_UnhandledOptionType_DoesNotBreakConnection_RequestTimeStillRoundTrips`
+(would have been a duplicate, no ratchet credit). Wave 42
+attempt #3 was 0x005D EQUIP_USE — direct two-line dispatch with
+a documented early-bail for empty slots, no SendOpcode
+side-effects, no state mutation.
+
+Why this wave target — 0x005D was the next dispatched-but-
+untested handler with all three favourable shape attributes
+(direct dispatch, payload-byte-guarded early-bail, zero
+observer fan-out). The remaining untested-and-dispatched space
+narrows further: 0x0079/0x007A/0x007B/0x007C/0x007E
+(manufacture family — all mutate ManuIndex state, deferred),
+0x0080 MANUFACTURE_TECH_LEVEL_FILTER (mutates TechFilterBitField,
+deferred), 0x0082 RECUSTOMIZE_SHIP_DONE / 0x0084
+RECUSTOMIZE_AVATAR_DONE (state-mutating + credit deduction +
+SaveDatabase — UNSAFE, won't wave), 0x0098 GALAXY_MAP_REQUEST
+(blocked behind proxy guard fix), 0x3004 / 0x3008 (login-flow
+opcodes already implicitly covered by every handshake wave),
+0x008D INCAPACITANCE_REQUEST (UNSAFE — known crash per Wave 29
+triage), 0x00BC CTA_REQUEST (sizeof(long) OOB), 0x009B WARP
+(state-mutating). Survival-probe targets narrowing toward the
+known-UNSAFE set; future waves will need to bring up either
+a typed-codec pass on already-tested opcodes, an
+observer-fan-out passive-observation wave on a second player
+client, or a fidelity-tightening wave to repair the UNSAFE
+handlers before they can be covered.
+
+**Test-author footgun audit.** None this wave. firstName
+"Equse" includes lowercase 'e' and 'u' and cleared the
+AccountManager.cpp:1147 vowel check first-try. Pool[37]
+addition was originally staged for the abandoned 0x002E
+attempt earlier this session; repurposed for 0x005D when
+the duplicate-coverage triage closed 0x002E.
+
+**Regression coverage** — 8 classes documented inline in the
+test xmldoc and TestedOpcodes citation: m_Equip OOB bounds
+regression at PlayerConnection.cpp:4560 / PacketStructures.h
+EquipUse struct layout regression / dispatcher mis-route at
+PlayerConnection.cpp:511-513 / Equipable::ManualActivate
+guard-order regression at Equipable.cpp:551 / Init-loop
+boundary regression at PlayerClass.cpp:387 / proxy default-case
+ForwardClientOpcode dropping 0x005D / SendOpcode header-width
+revert at PlayerConnection.cpp:127 / proxy
+SendClientPacketSequence inner-opcode guard tightening.
+
+**Server integrity (CLAUDE.md).** Zero permissiveness added.
+The 6B wire shape matches the canonical `EquipUse` struct
+byte-for-byte. The empty-slot no-op is exactly what the retail
+server does. CRITICALLY: NO new bounds check on InvSlot was
+added — the missing bounds check is a real-world security
+concern (a wire-supplied InvSlot of 99 dereferences
+`m_Equip[99]` which is past the 20-element array) but adding
+one would tighten input acceptance beyond the real server,
+which CLAUDE.md forbids without primary-source proof retail
+did the same. The test uses InvSlot=15 (in-bounds) to exercise
+the dispatch + early-bail path, not the OOB path.
+
+**Proxy gap follow-up** — 0x0098/0x2011 proxy guard at
+UDPProxyToClient_linux.cpp:568 BLOCKS server-emit replies in
+the 0x2xxx range with `terminate=true`. The comment at
+HandleCustomOpcode UDPProxyToClient_linux.cpp:501-513 states
+the intent for 0x2011 is fall-through forward, but the outer
+guard contradicts. Real Linux-proxy regression vs Win32
+(Win32's SendClientPacketSequence in UDPProxyToClient.cpp
+doesn't have the same `< 0x0FFF` cutoff). Tracked as a
+separate follow-up; fix is to either (a) widen the guard to
+allow the 0x2xxx range, or (b) move HandleCustomOpcode's
+0x2011 case to a true forward arm rather than return-false-
+and-let-the-guard-decide. Not a coverage-wave concern;
+documented so the next person who tries 0x0098 doesn't repeat
+the pivot.
+
+* Direct-reply/survival-probe pattern count now 15 waves;
+  passive-observation pattern count unchanged at 2 waves
+  (17 opcodes total).
+* Phase K coverage **35.3%** (73/207).
+* Push to main authorized this session — Wave 42 will go out
+  as the next session-commit batch.
