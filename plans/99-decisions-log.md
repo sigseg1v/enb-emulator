@@ -5695,3 +5695,165 @@ applicability profiles.
 * Phase K coverage **34.3%** (71/207).
 * Push to main authorized this session — Wave 40 will go out
   as the next session-commit batch.
+
+---
+
+## 2026-05-26 — Phase K Wave 41: 0x0087 MISSION_DISMISSAL survival probe
+
+**Outcome** — 14th direct-stimulus wave; out-of-range
+MissionID path verified. Ratchet 71/207 → **72/207 (34.8%)**.
+
+**Pattern** — `SectorMissionDismissalTests.MissionDismissal_
+OutOfRangeMissionId_DoesNotBreakConnection_RequestTimeStillRoundTrips`:
+client sends an 8B canonical `MissionDismissal` payload
+`{int32 PlayerID=0; int32 MissionID=999}` BIG-ENDIAN on the
+sector connection after STAGE handshake completes. Handler at
+`server/src/PlayerConnection.cpp:11000-11007`:
+
+```c
+void Player::HandleMissionDismissal(unsigned char *data)
+{
+    MissionDismissal *dismiss = (MissionDismissal *)data;
+    long MissionID = ntohl(dismiss->MissionID);
+    long PlayerID = ntohl(dismiss->PlayerID);  // never used
+
+    MissionDismiss(MissionID, false);
+}
+```
+
+`MissionDismiss` at `server/src/PlayerMissions.cpp:1616-1633`:
+
+```c
+void Player::MissionDismiss(long mission_slot, bool forfeit_pressed)
+{
+    if (mission_slot >= 0 && mission_slot < 12)
+    {
+        AuxMission * m = &m_PlayerIndex.Missions.Mission[mission_slot];
+        if (m && (!forfeit_pressed || m->GetIsForfeitable()))
+        {
+            RemoveMission(mission_slot);
+        }
+        else
+        {
+            SendVaMessageC(17, "This mission is non forfeitable.");
+        }
+    }
+}
+```
+
+For `MissionID=999`, the `< 12` half of the guard at line
+1618 fails, and the function returns with no side effect.
+Zero state mutation. Zero `RemoveMission`. Zero
+`SendVaMessageC`. Zero SendOpcode. Zero observer fan-out.
+
+Connection-survival probe via REQUEST_TIME → CLIENT_SET_TIME
+round-trip with sentinel client tick. 400-frame drain cap
+to tolerate interleaved in-sector frames.
+
+**Why this wave target** — Wave 36 triage flagged 0x0087 as
+the natural follow-on to 0x0086 MISSION_FORFEIT (Wave 36's
+in-range-but-non-forfeitable direct-reply target). 0x0087
+shares the `MissionDismissal` struct with 0x0086 but has a
+SHALLOWER call chain — the dismissal path goes directly to
+`MissionDismiss` with `forfeit_pressed=false`, which means
+the boolean reduces to `(!false || X) = true` and the
+if-branch fires `RemoveMission` for every in-range slot
+regardless of forfeitable. So 0x0087 cannot use the
+in-range-slot direct-reply pattern that worked for 0x0086 —
+`RemoveMission(0)` on a fresh char's empty-but-initialised
+slot 0 is technically a state mutation. The cleanest
+survival-probe is therefore the out-of-range path which
+both handlers share via the same `< 12` filter at line
+1618. Pairs naturally with Wave 36's in-range-but-non-
+forfeitable arm — together they pin both gates of the only
+state-mutating path.
+
+**PlayerID payload-field-but-never-referenced observation** —
+Handler ntohl-decodes `dismiss->PlayerID` into a local
+`long PlayerID` (line 11004) but never references it after
+the assignment. This is a vestige from a presumed earlier
+multi-player dismissal flow; the retail handler trusts the
+per-connection player identity (m_GameID), not the payload
+PlayerID. Per CLAUDE.md server-integrity rules, we preserve
+this fidelity — the test does NOT exercise a non-zero
+payload PlayerID to assert it's ignored, because doing so
+would mean asserting on undefined-but-observed behaviour
+rather than the documented-by-retail-binary behaviour. The
+zero payload PlayerID is the conservative choice.
+
+**Regression coverage** —
+
+* Dispatcher mis-route at PlayerConnection.cpp:555 (swap
+  with HandlePetitionStuck → SavePetition over-reads our 8B
+  payload past 8B end into adjacent stack/heap memory; UB
+  but connection might survive).
+* Removal of `mission_slot < 12` guard at
+  PlayerMissions.cpp:1618 — `&m_PlayerIndex.Missions.
+  Mission[999]` is OOB read into adjacent Player instance
+  memory; `m` pointer non-null (pointer arithmetic result)
+  so if-branch proceeds to RemoveMission(999) which indexes
+  same array OOB; SEGV likely.
+* Removal of `mission_slot >= 0` guard — negative MissionID
+  (e.g. 0xFFFFFFFF in payload → -1 after ntohl-into-long
+  sign extension) indexes BEFORE the array, also OOB;
+  symmetric guard documented but not exercised by this
+  wave.
+* HandleMissionDismissal silent regression to `true` forfeit
+  flag — would still pass for out-of-range but a future
+  in-range wave would surface it as a stray 0x001D
+  MESSAGE_STRING ("non forfeitable") frame.
+* `ntohl` read-width regression (ntohl → ntohs would read
+  2B of each 4B field and swap them; MissionID=999 in NBO
+  is 00 00 03 E7, so ntohs of first 2B reads 0 → in-range
+  → MissionDismiss(0, false) → RemoveMission(0) on empty
+  slot; subtle path shift from no-mutation to no-op-
+  mutation).
+* SendOpcode header-width revert at PlayerConnection.cpp:127
+  (Phase K sizeof(int32_t) fix; revert corrupts 0x2016
+  inner-tuple parser → REQUEST_TIME silent).
+* Proxy default-case ForwardClientOpcode regression (0x0087
+  not explicitly listed in proxy/ClientToServer_linux_
+  stubs.cpp's ProcessSectorServerOpcode switch).
+* Proxy SendClientPacketSequence inner-opcode guard
+  tightening at UDPProxyToClient_linux.cpp:568.
+
+**Pool growth** — `cli_test38` (id=9_000_038) added to
+`TestAccounts.Pool[36]` with matching `seed.sql` row at
+status=100. Pool layout: Pool[0..8] = cli_test01..09,
+Pool[9..22] = cli_test11..24, Pool[23..31] = cli_test25..33,
+Pool[32..36] = cli_test34..38 (W37/W38/W39/W40/this wave).
+cli_test10 still SKIPPED.
+
+**Files touched** —
+
+* `tests/integration/CliClient.IntegrationTests/Opcodes/SectorMissionDismissalTests.cs` (new)
+* `tests/integration/CliClient.IntegrationTests/TestAccounts.cs` (Pool[36] += cli_test38)
+* `tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql` (cli_test38 INSERT row)
+* `tools/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs` (+0x0087 MissionDismissal)
+* `tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs`
+  (MinTestedCount 71→**72**; +1 sorted-position entry for 0x0087)
+
+**Verification** —
+
+* Test passes in isolation: 1/1 in **7s** (no vowel-check retry
+  needed; firstName "Misdis" cleared first-try).
+* Build green: 0 warnings, 0 errors.
+
+**Next** — Re-examine the larger un-triaged dispatch-arm
+space (PlayerConnection.cpp:423-618 still has ~150
+uncovered opcodes). Known-safe candidates from prior sweeps:
+0x0098 GALAXY_MAP_REQUEST is a strong next candidate
+(HandleGalaxyMapRequest takes no parameters and emits a
+single galaxy-map opcode reply per call — direct-reply
+pattern eligible). 0x008D INCAPACITANCE_REQUEST remains
+UNSAFE per Wave 29 (known crash in first-time
+m_IncapAvatarSent block mutating shared NPC template
+state). The unswept space in PlayerConnection.cpp:423-618
+still warrants a methodical pass.
+
+* Direct-reply/survival-probe pattern count now 14 waves;
+  passive-observation pattern count unchanged at 2 waves
+  (16 opcodes total).
+* Phase K coverage **34.8%** (72/207).
+* Push to main authorized this session — Wave 41 will go out
+  as the next session-commit batch.
