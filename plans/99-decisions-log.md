@@ -4324,3 +4324,217 @@ Key decisions logged:
   rejected the Wave 2 push citing scope ("prior 'push to main is
   fine' was for a different commit"). Will hold both commits and
   let the user authorize the push.
+
+---
+
+## 2026-05-26 — Phase K Wave 32: 0x00A3 CLIENT_CHAT_REQUEST → 0x00A5 CLIENT_CHAT_EVENT direct-reply
+
+Round-trip integration test exercising HandleClientChatRequest's
+CCR_FRIEND_STATUS_ONLY branch which unconditionally emits a 0x00A5
+CHEV_FRIEND_STATUS_ONLY reply to the originator. First wave to exercise
+a non-trivial variable-length-payload struct (three back-to-back
+short-prefixed string fields + trailing int32 data-size), albeit in
+its empty-strings degenerate shape.
+
+### Selection
+
+**Target opcode**: 0x00A3 CLIENT_CHAT_REQUEST, type=28 (CCR_FRIEND_STATUS_ONLY).
+**Reply opcode**: 0x00A5 CLIENT_CHAT_EVENT, body[0..3]=0x19000000
+(CHEV_FRIEND_STATUS_ONLY=25 LE).
+**Ratchet**: +2 (both 0x00A3 and 0x00A5 previously uncovered).
+**Pattern**: direct-reply (7th of 32 waves; Waves 8/24/26/27/28/30/31/32).
+
+Path:
+1. Dispatcher case at `server/src/PlayerConnection.cpp:587` →
+   `HandleClientChatRequest(data)`.
+2. Handler at line 1648 casts to `ClientChatRequest*`, walks the
+   variable-length string layout (lines 1659-1692): reads
+   `string_length1` (=0), advances past the short, optionally
+   memcpys length1 bytes (skipped — length1=0), reads
+   `_string_length2` (=0), then `_string_length3` (=0), then trailing
+   `_data_size` int32 (=0). All-zero lengths → walker fast-paths.
+3. Switch on `request->type` at line 1695 hits
+   `case CCR_FRIEND_STATUS_ONLY` (=28, PacketStructures.h:663) at
+   line 1709 — sets `m_StatusToFriendsOnly = true` and calls
+   `SendClientChatEvent(CHEV_FRIEND_STATUS_ONLY, this)`, breaks.
+4. After-switch if-else chain (lines 1731-1803) skipped because
+   type=28 matches none of CCE_SPEAK_LOCALLY/CCE_SPEAK_ON/
+   CCE_ENTER_CHANNEL/CCE_EXIT_CHANNEL/CCE_INSERT_CHANNEL/
+   CCR_LIST_CHANNELS/CCR_LIST_ALL_CHANNELS/CCR_SECTOR_LOGIN.
+5. `SendClientChatEvent` at PlayerConnection.cpp:10318-10369 for
+   `Source==this`: IsIgnored(self)→false (m_NumIgnore==0), guard
+   irrelevant (type!=PRIVATE_MESSAGE), GetPostFix falls into
+   AdminLevel<HELPER default→snprintf "%s",Name() with no postfix.
+6. Body assembled via AddData(Type=25 int32 LE)/AddData(0 int32)/
+   AddDataLS(LastName)×2/AddDataLS(NULL)×3/AddData((short)0)/
+   AddData(0) at lines 10351-10360.
+7. `SendOpcode(0x00A5, Packet, Index)` at line 10368 → per-client
+   UDP queue add. SendPacketCache synchronously flushes to wire via
+   m_UDPConnection->SendResponse.
+
+### Wire-format reasoning
+
+`ClientChatRequest` at common/include/net7/PacketStructures.h:669-681
+is **variable-length** (`char stringN[1]` is "1-or-more bytes" per
+the upstream comment, prefixed by the preceding `short
+_string_lengthN`). Collapsed to its empty-strings degenerate shape
+the canonical wire is:
+
+```
+[0..4)   int32 PlayerID         = 0   (handler ignores; switch is on type)
+[4..8)   int32 type             = 28  (CCR_FRIEND_STATUS_ONLY)
+[8..10)  short string_length1   = 0   (no Friend name)
+[10..12) short string_length2   = 0   (no Channel)
+[12..14) short string_length3   = 0   (no Message)
+[14..18) int32 data_size        = 0   (no trailing data block)
+```
+
+18 bytes total. `ATTRIB_PACKED` → no implicit padding.
+
+### Reply assertion
+
+The first 4 bytes of the 0x00A5 body carry the int32 LE `Type` field
+(=25 = CHEV_FRIEND_STATUS_ONLY per PacketStructures.h:756). Pinning
+`body[0..4) == {0x19, 0x00, 0x00, 0x00}` is the most robust anchor:
+
+* Robust to LastName length (avatar firstName + optional admin
+  postfix would shift later bytes).
+* Survives admin-level changes (no postfix path lights up for USER).
+* Differentiates this branch from any other Type the server could
+  mis-emit if the switch were scrambled (PRIVATE_MESSAGE=4,
+  CHANNEL_MESSAGE=3, LOGGED_IN=1, etc).
+
+### Why type=28 not type=25
+
+CCR_FRIEND_STATUS_ONLY (=28) was chosen over CCR_LIST_CHANNELS (=25):
+
+* The type=25 branch (line 1791) emits 0x001D MESSAGE_STRING via
+  `SendVaMessage("Request channel list")`. 0x001D is already
+  covered by Waves 8/24/26/27/30 — type=25 would give +1 ratchet
+  (just 0x00A3 added).
+* The type=28 branch emits the previously-uncovered 0x00A5
+  CLIENT_CHAT_EVENT — gives +2 ratchet.
+* Both branches are equally deterministic on a fresh-starbase
+  char; the +2 is strictly better.
+
+### Why this opcode at this wave
+
+* Cleanest remaining +2 direct-reply candidate after Wave 31.
+* Handler is a clean switch-on-type so wire payload directly
+  selects the path (Wave 30's methodology-refinement requirement —
+  "read past every CALL + identify which branch the wire payload
+  selects" — is satisfied cleanly).
+* Reply opcode 0x00A5 passes proxy SendClientPacketSequence guard
+  (0x00A5 < 0x0FFF) at UDPProxyToClient_linux.cpp:568 (Wave 31's
+  new check requirement satisfied).
+* No spontaneous 0x00A5 emits on login: all SendClientChatEvent
+  sites are tied to explicit chat actions (CCR_*/CCE_* dispatch).
+* No pre-emit state mutations that could crash (m_StatusToFriendsOnly
+  bit-flip is benign for fresh char with no friends).
+* No post-emit teardown (unlike Wave 31's DropPlayerFromGalaxy)
+  so the test can drain frames without timing pressure.
+
+### Triaged & rejected alternatives during Wave 32 selection
+
+* **0x008D INCAPACITANCE_REQUEST** — initially promising
+  (unconditional 0x0054 TALK_TREE emit, +2 ratchet potential)
+  but Wave-29-era plan notes documented the handler mutates
+  static NPC template state and can SEGV via the avatar branch.
+  Per CLAUDE.md cannot patch server to make tests pass; rejected.
+* **0x0079/0x007A/0x007E MANUFACTURE opcodes** — need SendAuxManu
+  emit verification on fresh char (no manufacturing state seeded);
+  deferred to future wave with proper trace.
+* **0x00C0/0x00C5/0x00C9** — dispatcher case lookup needed;
+  deferred.
+* **Guild opcodes** (HandleGuildLeaderAcceptClient,
+  HandleGuildSimpleClientSector, HandleGuildRankNamesRequestClient,
+  HandleRecruitAcceptClient) — DECLARED in PlayerClass.h but NOT
+  DEFINED in any .cpp file. Would either be link-time errors or
+  weak/no-op symbols; rejected as unsafe.
+
+### Regression classes the test catches
+
+1. **Dispatcher mis-route at PlayerConnection.cpp:587.** Case
+   label sits between 0x00A1 TRIGGER_EMOTE and 0x00B9
+   LOGOFF_REQUEST. Swap with HandleTriggerEmote routes our 18B
+   into SendNotifyEmote which fans out 0x00A2 NOTIFY_EMOTE to
+   range-list peers only (test times out). Swap with
+   HandleLogoffRequest tears down sector before 0x00A5 emits
+   (test sees surprise 0x00BA and connection drop).
+2. **ClientChatRequest layout regression** at
+   PacketStructures.h:669-681 — long→int32 revert on PlayerID
+   or type would shift type to offset 8 where our short(0) sits,
+   switch reads type==0 → default branch → no reply → timeout.
+3. **Variable-length string walker regression** at
+   PlayerConnection.cpp:1659-1692 — short→int32 revert on
+   string_length fields desyncs the walker.
+4. **CCR_FRIEND_STATUS_ONLY case-label drift** — constant must
+   match PacketStructures.h:663=28.
+5. **SendClientChatEvent guards firing on
+   CHEV_FRIEND_STATUS_ONLY** — IsIgnored(self) returning true →
+   early return at line 10334; m_TellsFromFriendsOnly+
+   PRIVATE_MESSAGE guard widening → emits 0x00A4
+   CLIENT_CHAT_ERROR instead.
+6. **AddData<long> width revert** at PacketMethods.h:38-42 (the
+   Phase K Wave 11 fix class) — Type lands as int32 but occupies
+   8 bytes; body[0..3] anchor still passes but body[4..7] would
+   overlap (0) spacer.
+7. **Proxy default-case ForwardClientOpcode** dropping 0x00A3
+   (0x00A3 NOT explicitly cased in
+   proxy/ClientToServer_linux_stubs.cpp; relies on
+   bottom-of-switch forward).
+8. **Proxy SendClientPacketSequence guard tightening** at
+   UDPProxyToClient_linux.cpp:568 — currently
+   `opcode > 0x0000 && opcode < 0x0FFF` passes 0x00A5; a
+   regression would silently drop the reply.
+
+### Pool growth
+
+`cli_test29` (id=9_000_029) added to `TestAccounts.Pool[27]` with
+matching seed.sql row at status=100. Pool layout after Wave 32:
+
+* Pool[0..8] = cli_test01..09
+* Pool[9..22] = cli_test11..24
+* Pool[23] = cli_test25 (Wave 28)
+* Pool[24] = cli_test26 (Wave 29)
+* Pool[25] = cli_test27 (Wave 30)
+* Pool[26] = cli_test28 (Wave 31)
+* Pool[27] = cli_test29 (this wave)
+* cli_test10 still SKIPPED (StressTestClosed fixture at id=9_000_010).
+
+### CLAUDE.md server-integrity check
+
+* Wire shape (3 empty strings + type=28) is exactly what retail
+  Win32 client emits when user toggles "Only friends can see my
+  status" checkbox in chat options.
+* 0x00A5 CHEV_FRIEND_STATUS_ONLY reply is the verbatim retail
+  server response (server echoes the new policy state back to the
+  client UI so the indicator can update).
+* Zero permissiveness added; no security posture relaxed; no
+  payload shapes accepted that retail server didn't accept.
+* No server changes needed for this test — the handler path
+  already exists and emits 0x00A5 unconditionally on type=28.
+
+### Touches
+
+* `tests/integration/CliClient.IntegrationTests/Opcodes/SectorClientChatRequestTests.cs` — new
+* `tests/integration/CliClient.IntegrationTests/TestAccounts.cs` — Pool[27] += cli_test29
+* `tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql` — cli_test29 INSERT row
+* `tools/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs` — +ClientChatRequest 0x00A3, +ClientChatEvent 0x00A5
+* `tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs` — MinTestedCount 46→48; +0x00A3 and +0x00A5 entries
+* `plans/11-phase-k-ingame.md` — Wave 32 entry
+* `plans/00-master.md` — row 19 Wave 32 preamble
+* `plans/99-decisions-log.md` — this entry
+
+### Notes
+
+* Coverage ratchet: 46/207 → **48/207 (23.2%)** — fourth +2
+  ratchet in Phase K (Wave 19 RequestTarget/SetTarget, Wave 28
+  SelectTalkTree/TalkTreeAction, Wave 31 LogoffRequest/
+  LogoffConfirmation, and now Wave 32).
+* Direct-reply pattern count after Wave 32: 7/32 waves.
+* Test runs in 7s in isolation, 1/1 passes. CoverageRatchetTests
+  6/6 pass.
+* Build: 0 warnings, 0 errors.
+* Push to main pending — Wave 31 push remains blocked by
+  per-session authorization classifier; Wave 32 batches up.
