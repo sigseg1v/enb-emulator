@@ -6083,3 +6083,104 @@ thin. Remaining options:
 * Phase K coverage **35.7%** (74/207).
 * Push to main authorized this session — Wave 43 will go out
   as the next session-commit batch.
+
+## 2026-05-26 — Phase K Wave 44 — 0x0079 MANUFACTURE_ITEM_CATAGORY / HandleManufactureTerminal direct-stimulus (Terminal=0 exit no-op)
+
+**Context** — Wave 43's outlook noted the easy-direct-stimulus
+seam was running thin, and the manufacture-action family
+(0x0079/0x007A/0x007B/0x007C/0x007E) had been bulk-triaged
+"all UNSAFE — require terminal-state setup." Wave 44 went
+back to the family individually and discovered the bulk
+triage was overly pessimistic: only the mode-set arms
+(Terminal=1/2/4) of HandleManufactureTerminal mutate
+ManuIndex state. The Terminal=0 exit arm is fully fresh-
+char-safe.
+
+**Decision** — bump coverage 74/207 → **75/207 (36.2%)** by
+landing 0x0079 MANUFACTURE_ITEM_CATAGORY (handler
+`HandleManufactureTerminal`) as a survival probe with
+Terminal=0. The handler at
+`server/src/PlayerManufacturing.cpp:25-70`:
+
+1. Casts `data` to `ManufactureData *` (8B packed
+   `{int32_t GameID; int32_t Data;}` at
+   `common/include/net7/PacketStructures.h:1062-1066`).
+2. `ntohl`-decodes `Packet->Data` into `long Terminal`.
+3. Switches on Terminal. Terminal=0 enters the terminal-exit
+   arm at lines 32-48: an inner switch on
+   `ManuIndex()->GetMode()` whose four known cases (MODE_
+   MANUFACTURE / MODE_ANALIZE / MODE_DISMANTLE / MODE_REFINE)
+   are all plain `break` — no SendOpcode and no state change
+   — plus a default that LogMessage's an unknown previous
+   mode.
+4. Post-switch tail at lines 67-69 unconditionally runs:
+   - `SetDifficulty(DIFFICULTY_AUTOMATIC)` —
+     AuxManufacturingIndex.cpp:468 ReplaceData write of u32;
+     Data.Difficulty ctor-init'd to 0 (AuxManufacturingIndex.cpp:537)
+     and DIFFICULTY_AUTOMATIC is the 0 default, so the
+     ReplaceData detects no change.
+   - `ResetManuItems()` —
+     AuxManufacturingIndex.cpp:239-249 `.Empty()` on
+     Override.Item[0], Target.Item[0], Components.Item[0..5];
+     all default-empty on fresh char so no-op-ish.
+   - `SendAuxManu()` —
+     PlayerClass.cpp:1301-1308 single 0x001B AUX_DATA emit
+     gated on BuildPacket success.
+
+Connection-survival via REQUEST_TIME→CLIENT_SET_TIME round-
+trip — identical template to Waves 32/34/35/37-43.
+
+**Test** — `SectorManufactureTerminalTests.ManufactureTerminal_TerminalZeroExit_DoesNotBreakConnection_RequestTimeStillRoundTrips`.
+Pool[39] = cli_test41 (9_000_041) with matching seed.sql row
+at status=100. firstName "Erman" starts with lowercase 'e'
+which cleared the AccountManager.cpp:1147 vowel check first-
+try. 90s budget; 400-frame drain cap.
+
+**Seam-discovery lesson.** The bulk-UNSAFE flag carried in
+from earlier wave triage was wrong. Per-handler re-read of
+the switch arms exposed the Terminal=0 safe path. The same
+re-read pattern should be applied to:
+
+- 0x007A HandleManufactureCategorySelection — case-0
+  `SetCurrentItemCat(0)` + `BuildManufactureList`; both safe
+  on fresh char (m_ManuRecipes is empty so the loop is a
+  no-op, same as Wave 43).
+- 0x007B HandleManufactureSetItem — needs per-arm read.
+- 0x007C HandleRefineSetItem — needs per-arm read.
+- 0x007E HandleManufactureAction — needs per-arm read.
+- 0x0082/0x0084 RECUSTOMIZE_*_DONE — flagged UNSAFE
+  (SaveDatabase + credit deduction) but may have a no-change
+  early-bail arm if the payload signals "no changes."
+- 0x009B HandleWarp — flagged state-mutating but on a fresh
+  non-grouped char the `GetMemberID` iteration may early-
+  exit cleanly.
+
+These are Wave 45+ candidates.
+
+**Regression coverage** — 10 classes documented inline in
+the test xmldoc and TestedOpcodes citation: dispatcher mis-
+route at PlayerConnection.cpp:519 / ATTRIB_PACKED drop on
+ManufactureData at PacketStructures.h:1062 / ntohl revert
+at PlayerManufacturing.cpp:28 / `long`-widening of Terminal
+/ Terminal=0 inner-switch all-break regression /
+SetDifficulty(DIFFICULTY_AUTOMATIC) drift / ResetManuItems
+crash regression / SendAuxManu BuildPacket failure /
+SendOpcode header-width revert at PlayerConnection.cpp:127
+/ proxy SendClientPacketSequence inner-opcode guard
+tightening.
+
+**Server integrity (CLAUDE.md).** Zero permissiveness added.
+The 8B wire shape matches the canonical `ManufactureData`
+struct byte-for-byte. The Terminal=0 all-break inner switch
++ SetDifficulty(0) + ResetManuItems + SendAuxManu is
+exactly what the retail server does on a manufacture-
+terminal close — the client wants a fresh state-of-the-
+world on next terminal entry. Not loosening any security
+posture; not fabricating any reply.
+
+* Direct-reply/survival-probe pattern count now 17 waves;
+  passive-observation pattern count unchanged at 2 waves
+  (19 opcodes total).
+* Phase K coverage **36.2%** (75/207).
+* Push to main authorized this session — Wave 44 will go out
+  as the next session-commit batch.
