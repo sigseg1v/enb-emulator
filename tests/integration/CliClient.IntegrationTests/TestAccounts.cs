@@ -124,6 +124,7 @@ public static class TestAccounts
             ["FgpsSlashCommand_OnSlashFgps_ReceivesConfirmedActionOfferAndClientSound"]               = A(9_000_059, "cli_test59"),
             ["ClientChatRequest_ListFriendsEmptyFriendList_ReceivesClientChatList"]                   = A(9_000_060, "cli_test60"),
             ["ClientChatRequest_SpeakLocallyNonexistentRecipient_ReceivesClientChatError"]            = A(9_000_061, "cli_test61"),
+            ["StarbaseJobTerminalAction6_InNet7SolJtSector_ReceivesWellFormedJobList"]                = A(9_000_062, "cli_test62"),
         };
 
     /// <summary>
