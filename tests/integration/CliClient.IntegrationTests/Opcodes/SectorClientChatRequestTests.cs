@@ -898,4 +898,196 @@ public sealed class SectorClientChatRequestTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 117 sibling byte-exact pin on the POST-SWITCH if-else branch
+    /// of <c>HandleClientChatRequest</c> at
+    /// <c>server/src/PlayerConnection.cpp:1788-1791</c>:
+    /// <code>
+    ///     else if (request->type == CCR_LIST_CHANNELS)
+    ///     {
+    ///         SendVaMessage("Request channel list");
+    ///     }
+    /// </code>
+    ///
+    /// <para>
+    /// Drives a 0x00A3 CLIENT_CHAT_REQUEST with <c>type=25</c>
+    /// (CCR_LIST_CHANNELS per
+    /// <c>common/include/net7/PacketStructures.h:660</c>), threads
+    /// through the switch which has NO matching case (Wave 32/113/116
+    /// covered case labels 28/29; Wave 115/63 covered 23/24; no case
+    /// label = 25 exists), falls through the switch's default branch,
+    /// then matches the post-switch <c>else if</c> chain at line 1788
+    /// firing <c>SendVaMessage("Request channel list")</c>.
+    /// <c>SendVaMessage</c> at <c>PlayerClass.cpp:3415-3425</c> walks
+    /// va_args through <c>vsprintf_s</c> into a stack scratch buffer
+    /// then calls <c>SendMessageString(pch)</c> with the default
+    /// <c>colour=5</c> per <c>PlayerClass.h:277</c>. The literal
+    /// <c>"Request channel list"</c> has NO printf format specifiers
+    /// so vsprintf_s emits the literal verbatim — 20 ASCII bytes.
+    /// </para>
+    ///
+    /// <para>
+    /// Reply wire layout (mirror of <c>SendMessageString</c> at
+    /// <c>server/src/PlayerConnection.cpp:10987-10997</c>):
+    /// <code>
+    ///   [0..2)   short LE   length-field = 21 (strlen + NUL)
+    ///   [2]      byte       colour       = 5  (SendMessageString default)
+    ///   [3..23)  ASCII      payload      = "Request channel list" (20 bytes)
+    ///   [23]     byte       NUL          = 0x00
+    /// </code>
+    /// 24 bytes total (length + 3).
+    /// </para>
+    ///
+    /// <para>
+    /// NINTH byte-exact upgrade of a direct-reply assertion in Phase K
+    /// (after Waves 108/109/110/111/112/113/114/115/116). FIFTH
+    /// SendMessageString-flavour byte-exact wave (after Waves
+    /// 108/109/110/111). FIRST byte-exact wave to exercise the
+    /// <b>post-switch if-else fall-through branch</b> of a multi-arm
+    /// dispatcher — Waves 113/116 hit cases INSIDE the switch; Wave 115
+    /// pinned the CCR_LIST_IGNORES case inside the switch; Wave 117
+    /// uniquely exercises the post-switch <c>else if (request->type ==
+    /// CCR_LIST_CHANNELS)</c> path that fires AFTER the switch breaks.
+    /// </para>
+    ///
+    /// <para>
+    /// Coverage delta. 0x00A3 already counted by Wave 32; 0x001D already
+    /// counted by Wave 24/27/etc; coverage stays at 105/207 = 50.7%.
+    /// </para>
+    ///
+    /// <para>
+    /// Concrete regressions THIS sibling catches that Waves 32/113/116
+    /// do NOT:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b>Post-switch if-else fall-through deletion or reorder.</b>
+    ///     If a refactor accidentally deleted the <c>else if
+    ///     (request->type == CCR_LIST_CHANNELS)</c> branch, or moved it
+    ///     above one of the <c>SPEAK_ON/SPEAK_LOCALLY/ENTER_CHANNEL</c>
+    ///     branches, our type=25 request would silently no-op (no
+    ///     reply). Wave 117 traps via timeout. Wave 32/113/116 keep
+    ///     passing because they only exercise inside-switch cases.
+    ///   </item>
+    ///   <item>
+    ///     <b>SendVaMessage va_args walker regression.</b> A regression
+    ///     in <c>SendVaMessage</c>'s <c>vsprintf_s</c> or
+    ///     <c>strlen+_alloca</c> path that mis-allocated the scratch
+    ///     buffer (e.g. <c>len = strlen(string)</c> without the +256
+    ///     headroom) could overflow on long literals; the 20-byte
+    ///     literal here is short so the overflow wouldn't fire, but a
+    ///     regression that read length from the WRONG buffer (e.g.
+    ///     hard-coded zero) would emit an empty MessageString. Wave 117
+    ///     traps with length-field-not-21 / verbatim-literal mismatch.
+    ///   </item>
+    ///   <item>
+    ///     <b>Literal drift.</b> "Request channel list" is also a
+    ///     candidate for a user-visible polish edit (e.g. "Request
+    ///     Channel List" capitalisation, or "Channels list" rename).
+    ///     Wave 117's verbatim Assert.Equal catches any drift.
+    ///   </item>
+    ///   <item>
+    ///     <b>CCR_LIST_CHANNELS=25 constant drift</b> at
+    ///     PacketStructures.h:660. If renumbered, no branch matches —
+    ///     timeout.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Wave 117 firstName "Chnel117" — 8 ASCII bytes; vowel 'e'
+    /// satisfies AccountManager.cpp:1147 G_ERROR_ONE_VOWEL; "11" peaks
+    /// at 2 repeats (under triple) so passes
+    /// AccountManager.cpp:1158-1166 G_ERROR_REPEATING_CHAR. firstName
+    /// is irrelevant to the wire content (SendMessageString emits the
+    /// literal, not Name()), so any printable-vowel-bearing name works.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity note. No new server behaviour, no loosening of
+    /// input acceptance — the 18B request is exactly what the retail
+    /// Win32 client emits when the user opens the "Channels" menu and
+    /// the 24B response is exactly what the retail server's
+    /// SendVaMessage→SendMessageString path produces for this literal.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s. Handshake ~2s; CLIENT_CHAT_REQUEST + 0x001D
+    /// round-trip is sub-second.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task ClientChatRequest_ListChannelsBranch_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        const string FirstName = "Chnel117";
+        const string ExpectedLiteral = "Request channel list";
+        const int ExpectedLengthField = 21;   // strlen("Request channel list") + NUL
+        const byte ExpectedColour = 5;         // SendMessageString default
+        const int ExpectedReplyPayloadLength = 24; // length + 3
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: FirstName, shipName: "Chnel117Ship", cts.Token);
+
+        try
+        {
+            byte[] payload = new byte[18];
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 25);  // CCR_LIST_CHANNELS
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(8, 2), 0);
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(10, 2), 0);
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(12, 2), 0);
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(14, 4), 0);
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(OpcodeId.Known.ClientChatRequest.Value, payload),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 3) continue;
+                short lengthField = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (lengthField != ExpectedLengthField) continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal((short)ExpectedLengthField, lengthField);
+                Assert.Equal(ExpectedColour, span[2]);
+                Assert.Equal(ExpectedLiteral,
+                    Encoding.ASCII.GetString(span.Slice(3, ExpectedLiteral.Length)));
+                Assert.Equal((byte)0x00, span[3 + ExpectedLiteral.Length]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x00A3 CLIENT_CHAT_REQUEST " +
+                $"(type=CCR_LIST_CHANNELS=25) without seeing 0x001D MESSAGE_STRING " +
+                $"with length-field=21 for byte-exact pin.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
