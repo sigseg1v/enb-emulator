@@ -114,6 +114,7 @@ public static class TestAccounts
             ["HandshakeEmitsClientTypeAndGalaxyMapOnSpaceSectorLogin"]                                = A(9_000_049, "cli_test49"),
             ["HandshakeEmitsServerParametersOnSpaceSectorLogin"]                                      = A(9_000_050, "cli_test50"),
             ["HandshakeEmitsPlanetPositionalUpdateAndNavigationOnSpaceSectorLogin"]                   = A(9_000_051, "cli_test51"),
+            ["StarbaseExitAction_ReceivesServerHandoffFrame"]                                         = A(9_000_052, "cli_test52"),
         };
 
     /// <summary>
