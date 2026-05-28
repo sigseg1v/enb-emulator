@@ -201,4 +201,111 @@ public sealed class SectorRelationshipHardeningTests
         Assert.All(relationshipFrames, f =>
             Assert.Equal(ExpectedRelationshipPayloadLength, f.PayloadLength));
     }
+
+    /// <summary>
+    /// Wave 92 frame-count hardening (+0 ratchet, 0x0089): pins the
+    /// exact 2-frame emit-count invariant Wave 79's xmldoc flagged
+    /// implicitly via the two named dispatch sites. The captured
+    /// station-sector handshake stream emits 0x0089 RELATIONSHIP
+    /// exactly twice — once from <c>Player::SendLoginShipData</c> at
+    /// <c>server/src/PlayerClass.cpp:893</c> (the player-self
+    /// relationship, <c>SendRelationship(GameID(), RELATIONSHIP_FRIENDLY,
+    /// false)</c>); once from <c>SectorManager::StationLogin</c> at
+    /// <c>server/src/SectorManager.cpp:479</c> (the manufacture-lab
+    /// pseudo-object relationship,
+    /// <c>player-&gt;SendRelationship(ManuID, RELATIONSHIP_FRIENDLY,
+    /// false)</c>).
+    ///
+    /// <para>
+    /// Why a separate test method, not an in-place assertion. Wave 79's
+    /// existing test caps at <c>Assert.NotEmpty + Assert.All(payload==9)</c>
+    /// and the xmldoc documents the two named dispatch sites without
+    /// pinning the count. Keeping the count assertion in its own method
+    /// preserves Wave 79's narrow-scope failure surface (a count
+    /// regression would not surface as a payload-length failure, and
+    /// vice versa) and gives Wave 92 a discrete test artifact for the
+    /// regression-class catalogue. Mirrors the Wave 91 pattern that
+    /// followed Wave 84 for 0x0004 CREATE.
+    /// </para>
+    ///
+    /// <para>
+    /// Single-player single-sector scope. The third
+    /// <c>Player::SendRelationship</c> call site at
+    /// <c>server/src/PlayerClass.cpp:953</c> is inside
+    /// <c>Player::SendShipData</c>, which is the peer-broadcast fan-out
+    /// invoked when another player's ship enters the observer's tracked
+    /// set. In the single-player station handshake the test exercises
+    /// (one account logging into an empty Luna Station), no other
+    /// players are tracked, so that emit path does not fire. The
+    /// captured count is therefore deterministic at exactly 2.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression classes this catches (beyond what Wave 79 catches).
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b><c>SendLoginShipData</c> self-emit deletion at
+    ///     <c>server/src/PlayerClass.cpp:893</c>.</b> Removing the
+    ///     <c>SendRelationship(GameID(), RELATIONSHIP_FRIENDLY, false)</c>
+    ///     call would drop the player-self relationship. Wave 79's
+    ///     <c>Assert.NotEmpty</c> would still pass (the StationLogin
+    ///     manu-lab relationship remains) and
+    ///     <c>Assert.All(payload==9)</c> would still pass (the
+    ///     remaining frame is still 9B). Wave 92's
+    ///     <c>Assert.Equal(2, count)</c> catches.
+    ///   </item>
+    ///   <item>
+    ///     <b><c>StationLogin</c> manu-lab emit deletion at
+    ///     <c>server/src/SectorManager.cpp:479</c>.</b> Removing the
+    ///     <c>player-&gt;SendRelationship(ManuID, RELATIONSHIP_FRIENDLY,
+    ///     false)</c> would drop the manufacture-lab relationship. Same
+    ///     observability gap as the self-emit deletion above — Wave 79
+    ///     wouldn't surface it but Wave 92's count check catches.
+    ///   </item>
+    ///   <item>
+    ///     <b>Spurious extra <c>SendRelationship</c> in the chain.</b>
+    ///     A refactor that adds a third <c>SendRelationship</c> call
+    ///     (e.g. wrongly broadcasting an observed-object relationship
+    ///     during single-player handshake) would produce 3+ frames;
+    ///     <c>Assert.Equal(2, count)</c> catches.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Per CLAUDE.md server-integrity. Pure passive-observation
+    /// tightening. No client stimulus, no server change. The 2-frame
+    /// invariant is a retail-faithful invariant of the station-sector
+    /// SendLoginShipData + StationLogin dispatch pair.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task Relationship_EmittedExactlyTwiceDuringStationSectorHandshake_PinsSelfAndManuLabEmits()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, stationSectorId,
+            firstName: "Rel92", shipName: "Rel92Ship", cts.Token);
+
+        var relationshipFrames = session.HandshakeFrames
+            .Where(f => f.Opcode == OpcodeId.Known.Relationship.Value)
+            .ToList();
+
+        // Wave 92 pins the 2-frame invariant: SendLoginShipData (self
+        // RELATIONSHIP_FRIENDLY at PlayerClass.cpp:893) + StationLogin
+        // (ManuID RELATIONSHIP_FRIENDLY at SectorManager.cpp:479).
+        Assert.Equal(2, relationshipFrames.Count);
+        Assert.All(relationshipFrames, f =>
+            Assert.Equal(ExpectedRelationshipPayloadLength, f.PayloadLength));
+    }
 }
