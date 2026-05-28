@@ -153,6 +153,7 @@ public static class TestAccounts
             ["AdvancedPositionalUpdate_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmit"] = A(9_000_088, "cli_test88"),
             ["NameDecal_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmit"]                 = A(9_000_089, "cli_test89"),
             ["Decal_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmit"]                     = A(9_000_090, "cli_test90"),
+            ["ConstantPositionalUpdate_EmittedExactlyOnceDuringStationSectorHandshake_PinsManuLabEmit"] = A(9_000_091, "cli_test91"),
         };
 
     /// <summary>

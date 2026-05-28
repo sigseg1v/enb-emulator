@@ -205,4 +205,110 @@ public sealed class SectorConstantPositionalUpdateHardeningTests
         Assert.All(constantPositionalUpdateFrames, f =>
             Assert.Equal(ExpectedConstantPositionalUpdatePayloadLength, f.PayloadLength));
     }
+
+    /// <summary>
+    /// Wave 96 frame-count hardening (+0 ratchet, 0x0040): pins the
+    /// exact 1-frame emit-count invariant Wave 82's payload-length
+    /// hardening was structurally blind to. The captured single-player
+    /// station-sector handshake stream emits 0x0040
+    /// CONSTANT_POSITIONAL_UPDATE exactly once — from
+    /// <c>SectorManager::StationLogin</c> at
+    /// <c>server/src/SectorManager.cpp:480</c>
+    /// (<c>player-&gt;SendConstantPositionalUpdate(ManuID, 0, 0, 0)</c>
+    /// for the manufacture-lab pseudo-object positional anchor).
+    ///
+    /// <para>
+    /// Structurally distinct from Wave 93/94/95 — this opcode does NOT
+    /// fire from <c>Player::SendLoginShipData</c>. The
+    /// <c>SendConstantPositionalUpdate</c> handler at
+    /// <c>server/src/PlayerConnection.cpp:1202</c> has exactly one
+    /// known caller in the entire server: the station-arm
+    /// <c>SectorManager::StationLogin</c> manu-lab anchor at
+    /// SectorManager.cpp:480 (verified by grep over server/src
+    /// `SendConstantPositionalUpdate\b` — only the SectorManager.cpp:480
+    /// call site appears alongside the declaration and definition).
+    /// </para>
+    ///
+    /// <para>
+    /// This is the FIRST frame-count hardening that pins a
+    /// SectorManager-only single-emit invariant (Waves 93/94/95 all
+    /// pinned SendLoginShipData self-emit-only opcodes). For 0x0040,
+    /// the inverse holds: there's no SendLoginShipData self-emit at
+    /// all — the manu-lab anchor is the only emit on the handshake
+    /// path. A regression that adds a SendLoginShipData self-emit
+    /// (e.g. for a hypothetical "player stationary position confirm"
+    /// step) would surface as 2+ frames. A regression that removes
+    /// the SectorManager.cpp:480 manu-lab emit would leave the
+    /// captured count at 0 — Wave 82's <c>Assert.NotEmpty</c> catches
+    /// that side already, but Wave 96's <c>Assert.Single</c> is the
+    /// tighter bound for spurious-extra-emit regressions.
+    /// </para>
+    ///
+    /// <para>
+    /// Why a separate test method, not an in-place assertion. Wave 82's
+    /// existing test caps at <c>Assert.NotEmpty + Assert.All(payload==32)</c>,
+    /// which would still pass if a refactor added a spurious second
+    /// emit. Keeping the count assertion in its own method preserves
+    /// Wave 82's narrow-scope failure surface and gives Wave 96 a
+    /// discrete test artifact for the regression-class catalogue.
+    /// Mirrors the Wave 91/92/93/94/95 sibling-method pattern.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression classes this catches (beyond what Wave 82 catches).
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b>Spurious extra <c>SendConstantPositionalUpdate</c> in
+    ///     the chain.</b> A refactor adding a SendLoginShipData
+    ///     self-emit (e.g. mirroring the SendAdvancedPositionalUpdate
+    ///     self-emit pattern Wave 93 pins) would produce 2+ frames.
+    ///     Wave 82's <c>Assert.NotEmpty</c> still passes (every frame
+    ///     is still 32B). Wave 96's <c>Assert.Single</c> catches.
+    ///   </item>
+    ///   <item>
+    ///     <b>StationLogin refactor that splits the manu-lab emit into
+    ///     pre-/post-handshake emits.</b> A symmetric refactor adding
+    ///     a pre-handshake or post-handshake manu-lab positional
+    ///     re-anchor would surface as 2+ frames. Wave 96 catches.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Per CLAUDE.md server-integrity. Pure passive-observation
+    /// tightening. No client stimulus, no server change. The 1-frame
+    /// invariant is a retail-faithful invariant of the StationLogin
+    /// manu-lab-anchor-only dispatch pattern (no SendLoginShipData
+    /// self-emit for this opcode).
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task ConstantPositionalUpdate_EmittedExactlyOnceDuringStationSectorHandshake_PinsManuLabEmit()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, stationSectorId,
+            firstName: "CnstPos96", shipName: "CnstPos96Ship", cts.Token);
+
+        var constantPositionalUpdateFrames = session.HandshakeFrames
+            .Where(f => f.Opcode == OpcodeId.Known.ConstantPositionalUpdate.Value)
+            .ToList();
+
+        // Wave 96 pins the 1-frame invariant: StationLogin manu-lab
+        // anchor (SectorManager.cpp:480). Only known caller of
+        // SendConstantPositionalUpdate in the entire server during
+        // the station-sector handshake path.
+        var single = Assert.Single(constantPositionalUpdateFrames);
+        Assert.Equal(ExpectedConstantPositionalUpdatePayloadLength, single.PayloadLength);
+    }
 }
