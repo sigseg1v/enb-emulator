@@ -265,4 +265,95 @@ public sealed class SectorSubpartsHardeningTests
         Assert.All(subpartsFrames, f =>
             Assert.Equal(ExpectedSubpartsPayloadLength, f.PayloadLength));
     }
+
+    /// <summary>
+    /// Wave 98 frame-count hardening (+0 ratchet, 0x00B4): pins the
+    /// exact 1-frame emit-count invariant Wave 90's payload-length
+    /// hardening was structurally blind to. The captured single-player
+    /// station-sector handshake stream emits 0x00B4 SUBPARTS exactly
+    /// once — from <c>Player::SendLoginShipData</c> at
+    /// <c>server/src/PlayerClass.cpp:871</c>
+    /// (<c>SendSubparts(this)</c>, self-emit dispatch).
+    ///
+    /// <para>
+    /// Single-player single-sector scope. The only other
+    /// <c>SendSubparts</c> call site is:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><c>Player::SendShipData</c> at PlayerClass.cpp:920 —
+    ///     <c>SendSubparts(player_to_send_to)</c>, the broadcast arm
+    ///     fired for each observer in the sector's player list when
+    ///     a new player enters. Does NOT fire during a single-player
+    ///     station-sector login (no observers, no broadcast).</item>
+    /// </list>
+    /// <para>
+    /// So 0x00B4 is exactly 1 emit per station-sector login. The
+    /// captured count is deterministic at exactly 1. Mirrors the
+    /// Wave 94/95-style SendLoginShipData self-emit pinning.
+    /// </para>
+    ///
+    /// <para>
+    /// Why a separate test method, not an in-place assertion. Wave 90's
+    /// existing test caps at <c>Assert.NotEmpty + Assert.All(payload==54)</c>,
+    /// which would still pass if a refactor added a spurious second
+    /// emit. Keeping the count assertion in its own method preserves
+    /// Wave 90's narrow-scope failure surface and gives Wave 98 a
+    /// discrete test artifact for the regression-class catalogue.
+    /// Mirrors the Wave 91-97 sibling-method pattern.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression classes this catches (beyond what Wave 90 catches).
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b>Spurious extra <c>SendSubparts</c> in the chain.</b>
+    ///     A refactor adding a pre-handshake confirmation emit or
+    ///     a duplicate self-broadcast would produce 2+ frames.
+    ///     Wave 90's <c>Assert.NotEmpty</c> still passes (every frame
+    ///     is still 54B). Wave 98's <c>Assert.Single</c> catches.
+    ///   </item>
+    ///   <item>
+    ///     <b>SendShipData accidentally fired during single-player
+    ///     login.</b> A refactor that walks the sector's player list
+    ///     and includes <c>this</c> as an observer would emit a
+    ///     second 0x00B4 (this→this broadcast). Wave 98 catches.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Per CLAUDE.md server-integrity. Pure passive-observation
+    /// tightening. No client stimulus, no server change. The 1-frame
+    /// invariant is a retail-faithful invariant of the SendLoginShipData
+    /// single-self-emit dispatch pattern.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task Subparts_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmit()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, stationSectorId,
+            firstName: "Sub98", shipName: "Sub98Ship", cts.Token);
+
+        var subpartsFrames = session.HandshakeFrames
+            .Where(f => f.Opcode == OpcodeId.Known.Subparts.Value)
+            .ToList();
+
+        // Wave 98 pins the 1-frame invariant: SendLoginShipData self-emit
+        // (PlayerClass.cpp:871). The broadcast arm at PlayerClass.cpp:920
+        // does not fire during a single-player station-sector login.
+        var single = Assert.Single(subpartsFrames);
+        Assert.Equal(ExpectedSubpartsPayloadLength, single.PayloadLength);
+    }
 }

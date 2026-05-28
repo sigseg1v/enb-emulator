@@ -196,4 +196,98 @@ public sealed class SectorStarbaseSetHardeningTests
         Assert.All(starbaseSetFrames, f =>
             Assert.Equal(ExpectedStarbaseSetPayloadLength, f.PayloadLength));
     }
+
+    /// <summary>
+    /// Wave 97 frame-count hardening (+0 ratchet, 0x004F): pins the
+    /// exact 1-frame emit-count invariant Wave 80's payload-length
+    /// hardening was structurally blind to. The captured single-player
+    /// station-sector handshake stream emits 0x004F STARBASE_SET
+    /// exactly once — from <c>SectorManager::StationLogin2</c> at
+    /// <c>server/src/SectorManager.cpp:514</c>
+    /// (<c>player-&gt;SendStarbaseSet(0, 0)</c> for the entering-starbase
+    /// state with action=0, exit_mode=0).
+    ///
+    /// <para>
+    /// Single-player single-sector scope. The only other
+    /// <c>SendStarbaseSet</c> call site is:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><c>SectorManager::LaunchIntoSpace</c> at
+    ///     SectorManager.cpp:537 — <c>player-&gt;SendStarbaseSet(1, 0)</c>
+    ///     for the leaving-starbase state, only fires when the player
+    ///     undocks. Does NOT fire during a passive station login.</item>
+    /// </list>
+    /// <para>
+    /// So 0x004F is exactly 1 emit per station-sector login. The
+    /// captured count is deterministic at exactly 1. This is the
+    /// SECOND manu-lab-arm-style single-emit pinning (after Wave 96
+    /// CONSTANT_POSITIONAL_UPDATE) — both pin SectorManager-side
+    /// single emitters rather than SendLoginShipData self-emits.
+    /// </para>
+    ///
+    /// <para>
+    /// Why a separate test method, not an in-place assertion. Wave 80's
+    /// existing test caps at <c>Assert.NotEmpty + Assert.All(payload==6)</c>,
+    /// which would still pass if a refactor added a spurious second
+    /// emit. Keeping the count assertion in its own method preserves
+    /// Wave 80's narrow-scope failure surface and gives Wave 97 a
+    /// discrete test artifact for the regression-class catalogue.
+    /// Mirrors the Wave 91-96 sibling-method pattern.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression classes this catches (beyond what Wave 80 catches).
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b>Spurious extra <c>SendStarbaseSet</c> in the chain.</b>
+    ///     A refactor adding a SendLoginShipData self-emit or a
+    ///     pre-handshake confirmation emit would produce 2+ frames.
+    ///     Wave 80's <c>Assert.NotEmpty</c> still passes (every frame
+    ///     is still 6B). Wave 97's <c>Assert.Single</c> catches.
+    ///   </item>
+    ///   <item>
+    ///     <b>StationLogin2 split refactor that double-emits the
+    ///     entering-starbase state.</b> A refactor that emits both
+    ///     action=0 and action=1 during login (e.g. for a hypothetical
+    ///     "reset-then-enter" handshake) would surface as 2+ frames.
+    ///     Wave 97 catches.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Per CLAUDE.md server-integrity. Pure passive-observation
+    /// tightening. No client stimulus, no server change. The 1-frame
+    /// invariant is a retail-faithful invariant of the StationLogin2
+    /// entering-starbase-only dispatch pattern.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task StarbaseSet_EmittedExactlyOnceDuringStationSectorHandshake_PinsStationLogin2Emit()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, stationSectorId,
+            firstName: "SbSet97", shipName: "SbSet97Ship", cts.Token);
+
+        var starbaseSetFrames = session.HandshakeFrames
+            .Where(f => f.Opcode == OpcodeId.Known.StarbaseSet.Value)
+            .ToList();
+
+        // Wave 97 pins the 1-frame invariant: StationLogin2 entering-starbase
+        // emit (SectorManager.cpp:514). LaunchIntoSpace at SectorManager.cpp:537
+        // does not fire during passive station login.
+        var single = Assert.Single(starbaseSetFrames);
+        Assert.Equal(ExpectedStarbaseSetPayloadLength, single.PayloadLength);
+    }
 }

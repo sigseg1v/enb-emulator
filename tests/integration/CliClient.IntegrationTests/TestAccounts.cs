@@ -154,6 +154,8 @@ public static class TestAccounts
             ["NameDecal_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmit"]                 = A(9_000_089, "cli_test89"),
             ["Decal_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmit"]                     = A(9_000_090, "cli_test90"),
             ["ConstantPositionalUpdate_EmittedExactlyOnceDuringStationSectorHandshake_PinsManuLabEmit"] = A(9_000_091, "cli_test91"),
+            ["StarbaseSet_EmittedExactlyOnceDuringStationSectorHandshake_PinsStationLogin2Emit"]       = A(9_000_092, "cli_test92"),
+            ["Subparts_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmit"]                   = A(9_000_093, "cli_test93"),
         };
 
     /// <summary>
