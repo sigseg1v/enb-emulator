@@ -87,6 +87,7 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId ManufactureTechLevelFilter   = new(0x0080);
         public static readonly OpcodeId RecustomizeShipStart         = new(0x0081);
         public static readonly OpcodeId RecustomizeAvatarStart       = new(0x0083);
+        public static readonly OpcodeId JobAcceptReply               = new(0x0096);
         public static readonly OpcodeId MissionForfeit               = new(0x0086);
         public static readonly OpcodeId MissionDismissal             = new(0x0087);
         public static readonly OpcodeId PetitionStuck                = new(0x0088);

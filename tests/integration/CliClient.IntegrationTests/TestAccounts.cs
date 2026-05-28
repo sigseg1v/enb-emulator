@@ -116,6 +116,7 @@ public static class TestAccounts
             ["HandshakeEmitsPlanetPositionalUpdateAndNavigationOnSpaceSectorLogin"]                   = A(9_000_051, "cli_test51"),
             ["StarbaseExitAction_ReceivesServerHandoffFrame"]                                         = A(9_000_052, "cli_test52"),
             ["StarbaseRecustomizeActions_ReceivesShipAndAvatarStartFrames"]                           = A(9_000_053, "cli_test53"),
+            ["StarbaseAcceptJobAction9_ReceivesBareJobAcceptReply"]                                   = A(9_000_054, "cli_test54"),
         };
 
     /// <summary>
