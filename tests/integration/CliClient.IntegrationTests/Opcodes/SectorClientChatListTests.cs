@@ -207,6 +207,104 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// sub-second; LOGOFF sub-second.
 /// </para>
 /// </summary>
+/// <summary>
+/// Wave 115 +0 hardening sibling to Wave 63 (CCR_LIST_FRIENDS → 0x00A4).
+/// Same opcode (0x00A4 CLIENT_CHAT_LIST) emitted by the same
+/// <c>Player::SendClientChatList</c> at
+/// <c>server/src/PlayerConnection.cpp:4645-4665</c>, but reached through
+/// the <b>CCR_LIST_IGNORES (=23)</b> switch arm at
+/// <c>PlayerConnection.cpp:1714</c>, which calls
+/// <c>Player::ListIgnores</c> at <c>PlayerMisc.cpp:1525-1539</c>:
+/// <code>
+///   void Player::ListIgnores()
+///   {
+///       char *name[MAX_FRIEND_LIST];
+///       short count = 0;
+///       for (int i=0;i &lt; m_NumIgnore;i++)
+///           if (m_IgnoreNames[i][0]) { name[count] = m_IgnoreNames[i]; count++; }
+///       SendClientChatList(CHAT_LIST_IGNORES, name, NULL, count, 0);
+///   }
+/// </code>
+///
+/// <para>
+/// Three properties Wave 63 did NOT pin that this wave does:
+/// </para>
+/// <list type="number">
+///   <item>
+///     <b>CCR_LIST_IGNORES dispatch.</b> Wave 63 covered the
+///     CCR_LIST_FRIENDS arm (type=24); the CCR_LIST_IGNORES arm
+///     (type=23, <c>PacketStructures.h:658</c>) sits one switch case
+///     above at <c>PlayerConnection.cpp:1714</c> and was previously
+///     untested. A typo/drift on the literal <c>CCR_LIST_IGNORES</c>
+///     would land here.
+///   </item>
+///   <item>
+///     <b>ListIgnores body.</b> The Wave 63 sibling reaches
+///     ListFriends; this wave reaches ListIgnores. A regression to the
+///     ListIgnores body — e.g. mistakenly iterating <c>m_NumFriends</c>
+///     instead of <c>m_NumIgnore</c>, or calling SendClientChatList with
+///     CHAT_LIST_FRIENDS=0 instead of CHAT_LIST_IGNORES=1 — is
+///     caught by the byte[0] assertion below.
+///   </item>
+///   <item>
+///     <b>CHAT_LIST_IGNORES=1 ListType byte.</b> Wave 63 pins ListType=0
+///     (CHAT_LIST_FRIENDS). This wave pins ListType=1
+///     (CHAT_LIST_IGNORES, <c>PacketStructures.h:684</c>). Drift in
+///     either constant — or swapping the two calls inside
+///     SendClientChatList — would surface here.
+///   </item>
+/// </list>
+///
+/// <para>
+/// One additional preservation property: ListIgnores passes
+/// <c>sector == NULL</c> with <c>number2 == 0</c>. Wave 63 passed a
+/// stack array with <c>number2 == 0</c>. The matching invariant pinned
+/// is the <c>for(int x=0;x&lt;number2;x++)</c> loop at
+/// <c>PlayerConnection.cpp:4658</c> — it MUST guard the NULL sector
+/// dereference behind <c>number2 == 0</c>. A regression that
+/// pre-fetched <c>sector[0]</c> before the loop guard would segfault
+/// the server on the ListIgnores path while Wave 63 (passing a valid
+/// stack array) would still pass.
+/// </para>
+///
+/// <para>
+/// Wire payload is byte-identical to Wave 63 except <c>bytes[0..4]</c>
+/// is <c>0x01 0x00 0x00 0x00</c> (CHAT_LIST_IGNORES=1 LE) instead of
+/// all-zero:
+/// <code>
+///   bytes [0..4]   int32 LE ListType = 1 (CHAT_LIST_IGNORES)
+///   bytes [4..6]   int16 LE channel_len = 0 (empty channel)
+///   bytes [6..10]  int32 LE number1 = 0 (no ignore entries)
+///   bytes [10..14] int32 LE number2 = 0 (sector NULL, irrelevant)
+/// </code>
+/// Total: 14 bytes — same length as Wave 63.
+/// </para>
+///
+/// <para>
+/// Note on dispatcher control flow. CCR_LIST_IGNORES uses
+/// <c>break;</c> (not <c>return;</c> like CCR_LIST_FRIENDS), so the
+/// post-switch if-chain at <c>PlayerConnection.cpp:1728</c> runs after
+/// ListIgnores. None of those branches (CCE_SPEAK_LOCALLY=1,
+/// CCE_SPEAK_ON=0) match request->type=23, so no follow-up emit
+/// occurs — 0x00A4 remains the only frame.
+/// </para>
+///
+/// <para>
+/// Server-integrity note (per CLAUDE.md). 0x00A3 with
+/// type=CCR_LIST_IGNORES is what the retail Win32 client emits when
+/// the user opens the Ignores tab in the social UI — three empty
+/// strings and the type=23 selector. The 0x00A4 CLIENT_CHAT_LIST reply
+/// with CHAT_LIST_IGNORES=1 and a zero-count name list is the verbatim
+/// retail-server response for a character with an empty ignore list.
+/// No new server permissiveness; no relaxed security posture; no
+/// fabricated reply.
+/// </para>
+///
+/// <para>
+/// Budget: 90s. Handshake ~22s; CLIENT_CHAT_REQUEST + 0x00A4 round-trip
+/// sub-second; LOGOFF sub-second.
+/// </para>
+/// </summary>
 [Collection(ServerCollection.Name)]
 public sealed class SectorClientChatListTests
 {
@@ -295,6 +393,115 @@ public sealed class SectorClientChatListTests
             throw new Xunit.Sdk.XunitException(
                 $"drained {maxFrames} frames after sending 0x00A3 " +
                 $"CLIENT_CHAT_REQUEST (type=CCR_LIST_FRIENDS=24) without " +
+                $"seeing 0x00A4 CLIENT_CHAT_LIST. Observed [{observed.Count}]: " +
+                $"{string.Join(" | ", observed)}");
+        }
+        finally
+        {
+            try
+            {
+                using var logoffCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                byte[] logoffPayload = new byte[8];
+                await session.Sector.SendAsync(
+                    Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
+                    logoffCts.Token);
+                await SectorHandshake.DrainUntilOpcode(
+                    session.Sector, OpcodeId.Known.LogoffConfirmation.Value, logoffCts.Token);
+            }
+            catch { /* best-effort logoff */ }
+
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Wave 115 sibling: CCR_LIST_IGNORES (type=23) → 0x00A4 with
+    /// CHAT_LIST_IGNORES=1. See class-level docstring for the full
+    /// preservation rationale and the three properties this pins that
+    /// Wave 63 (CCR_LIST_FRIENDS) did not.
+    /// </summary>
+    [Fact]
+    public async Task ClientChatRequest_ListIgnoresEmptyIgnoreList_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Ignorer", shipName: "IgnorerShip", cts.Token);
+
+        try
+        {
+            // 0x00A3 CLIENT_CHAT_REQUEST — 18B canonical layout.
+            //   [0..4)   int32 PlayerID       = 0
+            //   [4..8)   int32 type           = 23 (CCR_LIST_IGNORES)
+            //   [8..10)  short string_length1 = 0
+            //   [10..12) short string_length2 = 0
+            //   [12..14) short string_length3 = 0
+            //   [14..18) int32 data_size      = 0
+            byte[] payload = new byte[18];
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 23);
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(8, 2), 0);
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(10, 2), 0);
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(12, 2), 0);
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(14, 4), 0);
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(OpcodeId.Known.ClientChatRequest.Value, payload),
+                cts.Token);
+
+            // Drain inbound until we see 0x00A4 CLIENT_CHAT_LIST. The
+            // ListIgnores/SendClientChatList chain emits exactly one
+            // 0x00A4 frame per CCR_LIST_IGNORES request — no interleaving
+            // emits expected for type=23 (the post-switch if-chain at
+            // PlayerConnection.cpp:1728 runs after the break but none of
+            // its branches match type=23, so it's a no-op).
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            var observed = new List<string>();
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+                observed.Add($"0x{reply!.Header.Opcode:X4}/{reply.Payload.Length}");
+
+                if (reply.Header.Opcode != OpcodeId.Known.ClientChatList.Value)
+                    continue;
+
+                // Expected wire payload (14 bytes):
+                //   bytes [0..4]   int32 LE ListType = 1 (CHAT_LIST_IGNORES)
+                //   bytes [4..6]   int16 LE channel_len = 0
+                //   bytes [6..10]  int32 LE number1 = 0
+                //   bytes [10..14] int32 LE number2 = 0
+                Assert.Equal(ExpectedClientChatListPayloadSize, reply.Payload.Length);
+
+                byte[] expected = new byte[14];
+                expected[0] = 0x01;  // CHAT_LIST_IGNORES = 1, LE int32
+                // bytes [1..14] all zero
+                Assert.Equal(expected, reply.Payload.ToArray());
+
+                var span = reply.Payload.Span;
+                Assert.Equal(1, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(0, 4)));
+                Assert.Equal((short)0, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(4, 2)));
+                Assert.Equal(0, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(6, 4)));
+                Assert.Equal(0, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(10, 4)));
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x00A3 " +
+                $"CLIENT_CHAT_REQUEST (type=CCR_LIST_IGNORES=23) without " +
                 $"seeing 0x00A4 CLIENT_CHAT_LIST. Observed [{observed.Count}]: " +
                 $"{string.Join(" | ", observed)}");
         }
