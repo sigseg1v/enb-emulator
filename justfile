@@ -8,6 +8,12 @@
 IMAGE_REGISTRY := env_var_or_default("IMAGE_REGISTRY", "ghcr.io/anthropics/enb-emulator")
 IMAGE_TAG      := env_var_or_default("IMAGE_TAG", "dev")
 
+# Per-worktree docker compose project name, derived from the current git
+# branch so parallel worktrees don't fight over the same container set.
+# main/master/detached-HEAD collapse to plain `enb-emulator`. Already-prefixed
+# branches (enb-emulator-foo) are used as-is. Override with the env var.
+export COMPOSE_PROJECT_NAME := env_var_or_default("COMPOSE_PROJECT_NAME", `b=$(git branch --show-current 2>/dev/null); if [ -z "$b" ] || [ "$b" = main ] || [ "$b" = master ]; then echo enb-emulator; else s=$(printf '%s' "$b" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9_-' '-' | tr -s '-' | sed 's/^-//;s/-$//'); case "$s" in enb-emulator-*) echo "$s";; *) echo "enb-emulator-$s";; esac; fi`)
+
 # Default: list targets.
 default:
     @just --list
@@ -100,9 +106,9 @@ init: gen-certs
     @echo ">>> bringing up postgres + applying schema"
     docker compose up -d postgres schema-init
     @echo ">>> waiting for postgres to become healthy"
-    @bash -c 'until [ "$(docker inspect -f {{{{.State.Health.Status}} enb-emulator-postgres-1 2>/dev/null)" = "healthy" ]; do echo "  ...waiting"; sleep 3; done'
+    @bash -c 'until [ "$(docker inspect -f {{{{.State.Health.Status}} ${COMPOSE_PROJECT_NAME}-postgres-1 2>/dev/null)" = "healthy" ]; do echo "  ...waiting"; sleep 3; done'
     @echo ">>> waiting for schema-init to finish"
-    @bash -c 'until docker inspect -f "{{{{.State.Status}}" enb-emulator-schema-init-1 2>/dev/null | grep -q exited; do echo "  ...waiting"; sleep 2; done'
+    @bash -c 'until docker inspect -f "{{{{.State.Status}}" ${COMPOSE_PROJECT_NAME}-schema-init-1 2>/dev/null | grep -q exited; do echo "  ...waiting"; sleep 2; done'
     @echo ">>> verifying net7 + net7_user databases"
     docker compose exec -T -e PGPASSWORD=net7 postgres psql -U net7 -l
     docker compose exec -T -e PGPASSWORD=net7 postgres psql -U net7 -d net7_user -c "SELECT COUNT(*) AS account_rows FROM accounts;"

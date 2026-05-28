@@ -11,7 +11,7 @@
 # long-term Phase C target (mysqlclient -> libpqxx port). MySQL is the
 # short path because the 2010 dumps + the embedded SQL are MySQL-native.
 
-name: enb-emulator
+name: ${COMPOSE_PROJECT_NAME:-enb-emulator}
 
 services:
   mysql:
