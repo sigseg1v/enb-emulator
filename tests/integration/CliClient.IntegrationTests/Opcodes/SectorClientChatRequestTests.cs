@@ -1090,4 +1090,180 @@ public sealed class SectorClientChatRequestTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 118 sibling byte-exact pin on the SECOND post-switch
+    /// if-else branch — sibling to Wave 117's CCR_LIST_CHANNELS=25
+    /// branch — at <c>server/src/PlayerConnection.cpp:1792-1795</c>:
+    /// <code>
+    ///     else if (request->type == CCR_LIST_ALL_CHANNELS)
+    ///     {
+    ///         SendVaMessage("Request all channels list");
+    ///     }
+    /// </code>
+    ///
+    /// <para>
+    /// Drives a 0x00A3 CLIENT_CHAT_REQUEST with <c>type=26</c>
+    /// (CCR_LIST_ALL_CHANNELS per
+    /// <c>common/include/net7/PacketStructures.h:661</c>), the literal
+    /// emitted is <c>"Request all channels list"</c> (25 ASCII bytes,
+    /// distinct from Wave 117's <c>"Request channel list"</c> 20-byte
+    /// literal).
+    /// </para>
+    ///
+    /// <para>
+    /// Reply wire layout (mirror of <c>SendMessageString</c> at
+    /// <c>server/src/PlayerConnection.cpp:10987-10997</c>):
+    /// <code>
+    ///   [0..2)   short LE   length-field = 26 (strlen + NUL)
+    ///   [2]      byte       colour       = 5  (SendMessageString default)
+    ///   [3..28)  ASCII      payload      = "Request all channels list" (25 bytes)
+    ///   [28]     byte       NUL          = 0x00
+    /// </code>
+    /// 29 bytes total (length + 3).
+    /// </para>
+    ///
+    /// <para>
+    /// TENTH byte-exact upgrade of a direct-reply assertion in Phase K
+    /// (after Waves 108/109/110/111/112/113/114/115/116/117). SIXTH
+    /// SendMessageString-flavour byte-exact wave. SECOND post-switch
+    /// if-else fall-through byte-exact wave (sibling to Wave 117 on
+    /// the same dispatcher's T2 chain). THIRD multi-arm dispatcher
+    /// sibling-arm-pinning wave (after Wave 115's CCR_LIST_IGNORES vs
+    /// CCR_LIST_FRIENDS and Wave 116's CCR_ANYONE_STATUS vs
+    /// CCR_FRIEND_STATUS_ONLY) — but FIRST sibling pair on the T2
+    /// post-switch chain rather than the T1 inside-switch case-label
+    /// chain.
+    /// </para>
+    ///
+    /// <para>
+    /// Coverage delta. 0x00A3 already counted; 0x001D already counted;
+    /// coverage stays at 105/207 = 50.7%.
+    /// </para>
+    ///
+    /// <para>
+    /// Concrete regressions THIS sibling catches that Wave 117 does NOT:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b>case CCR_LIST_ALL_CHANNELS branch deletion or reorder.</b>
+    ///     Wave 117 only exercises the CCR_LIST_CHANNELS arm; if a
+    ///     refactor deleted the <c>else if (request->type ==
+    ///     CCR_LIST_ALL_CHANNELS)</c> branch at line 1792, our type=26
+    ///     request would silently no-op. Wave 117 keeps passing.
+    ///   </item>
+    ///   <item>
+    ///     <b>Literal drift.</b> "Request all channels list" is a
+    ///     user-visible polish-edit candidate distinct from Wave 117's
+    ///     "Request channel list" — the words "all channels" are a
+    ///     natural target for rename (e.g. "global channels", "world
+    ///     channels"). Wave 117 is structurally blind; Wave 118's
+    ///     verbatim Assert.Equal catches.
+    ///   </item>
+    ///   <item>
+    ///     <b>CCR_LIST_ALL_CHANNELS=26 constant drift</b> at
+    ///     PacketStructures.h:661. If renumbered, no branch matches —
+    ///     timeout.
+    ///   </item>
+    ///   <item>
+    ///     <b>CCR_LIST_CHANNELS=25 vs CCR_LIST_ALL_CHANNELS=26
+    ///     copy-paste swap.</b> If someone copy-pasted the
+    ///     CCR_LIST_CHANNELS body into the CCR_LIST_ALL_CHANNELS arm
+    ///     (calling SendVaMessage("Request channel list") for type=26),
+    ///     Wave 117 stays green (its arm still emits its literal); Wave
+    ///     118 sees the WRONG literal and trips on the verbatim ASCII
+    ///     pin — the cleanest sibling-arm copy-paste catch.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Wave 118 firstName "Chnel118" — 8 ASCII bytes; vowel 'e'
+    /// satisfies AccountManager.cpp:1147; "11" peaks at 2 repeats.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity note. No new server behaviour, no loosening of
+    /// input acceptance — the 18B request is exactly what the retail
+    /// Win32 client emits when the user opens the "All Channels" menu
+    /// and the 29B response is the verbatim retail-server reply.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task ClientChatRequest_ListAllChannelsBranch_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        const string FirstName = "Chnel118";
+        const string ExpectedLiteral = "Request all channels list";
+        const int ExpectedLengthField = 26;   // strlen + NUL
+        const byte ExpectedColour = 5;
+        const int ExpectedReplyPayloadLength = 29;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: FirstName, shipName: "Chnel118Ship", cts.Token);
+
+        try
+        {
+            byte[] payload = new byte[18];
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 26);  // CCR_LIST_ALL_CHANNELS
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(8, 2), 0);
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(10, 2), 0);
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(12, 2), 0);
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(14, 4), 0);
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(OpcodeId.Known.ClientChatRequest.Value, payload),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 3) continue;
+                short lengthField = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (lengthField != ExpectedLengthField) continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal((short)ExpectedLengthField, lengthField);
+                Assert.Equal(ExpectedColour, span[2]);
+                Assert.Equal(ExpectedLiteral,
+                    Encoding.ASCII.GetString(span.Slice(3, ExpectedLiteral.Length)));
+                Assert.Equal((byte)0x00, span[3 + ExpectedLiteral.Length]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x00A3 CLIENT_CHAT_REQUEST " +
+                $"(type=CCR_LIST_ALL_CHANNELS=26) without seeing 0x001D MESSAGE_STRING " +
+                $"with length-field=26 for byte-exact pin.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
