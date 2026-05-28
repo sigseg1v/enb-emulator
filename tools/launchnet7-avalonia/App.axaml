@@ -1,7 +1,7 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="LaunchNet7Avalonia.App"
-             RequestedThemeVariant="Dark">
+             RequestedThemeVariant="Light">
 
   <Application.Resources>
     <!-- enb-theme: purple accent (#5d00cf), lavender secondary (#8e8cd8),
@@ -19,6 +19,7 @@
           <Color x:Key="SystemAccentColorDark2">#37007d</Color>
           <Color x:Key="SystemAccentColorDark3">#240054</Color>
           <Color x:Key="SystemRegionColor">#f9ffff</Color>
+          <SolidColorBrush x:Key="SystemRegionBrush" Color="#f9ffff" />
           <SolidColorBrush x:Key="SystemControlBackgroundAltHighBrush" Color="#f9ffff" />
         </ResourceDictionary>
 
@@ -31,6 +32,7 @@
           <Color x:Key="SystemAccentColorDark2">#37007d</Color>
           <Color x:Key="SystemAccentColorDark3">#240054</Color>
           <Color x:Key="SystemRegionColor">#333230</Color>
+          <SolidColorBrush x:Key="SystemRegionBrush" Color="#333230" />
           <SolidColorBrush x:Key="SystemControlBackgroundAltHighBrush" Color="#333230" />
         </ResourceDictionary>
 

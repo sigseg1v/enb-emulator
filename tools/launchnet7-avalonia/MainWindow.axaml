@@ -4,8 +4,9 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         x:Class="LaunchNet7Avalonia.MainWindow"
-        Width="640" Height="320"
+        Width="640" Height="340"
         Title="LaunchNet7"
+        Background="{DynamicResource SystemRegionBrush}"
         CanResize="True">
   <Grid Margin="12" RowDefinitions="Auto,Auto,Auto,Auto,*,Auto">
 
@@ -42,7 +43,7 @@
 
     <!-- Row 2: Authentication -->
     <Border Grid.Row="2" BorderBrush="Gray" BorderThickness="1" Padding="8" CornerRadius="4" Margin="0,8,0,0">
-      <Grid ColumnDefinitions="180,*">
+      <Grid ColumnDefinitions="220,*">
         <TextBlock Grid.Column="0" Text="Authentication Port (HTTPS):" VerticalAlignment="Center" />
         <TextBox   Grid.Column="1" Name="c_TextBox_Port" Width="80" HorizontalAlignment="Left" />
       </Grid>
