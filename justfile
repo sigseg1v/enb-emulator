@@ -183,8 +183,9 @@ dev: run-stack-bg
 
 # Bring up the local stack + launch the launcher pre-configured to connect.
 #
-# Pass the WINE-installed client.exe path either as a recipe arg or via
-# the ENB_CLIENT_PATH env var:
+# With no args, defaults to the linux-installer's default install location:
+#   $HOME/.wine-enb/drive_c/Program Files/EA GAMES/Earth & Beyond/release/client.exe
+# Override either as a recipe arg or via the ENB_CLIENT_PATH env var:
 #   just play-local /home/me/.wine/drive_c/.../release/client.exe
 #   ENB_CLIENT_PATH=... just play-local
 #
@@ -205,13 +206,10 @@ play-local CLIENT_PATH='':
     set -euo pipefail
     cp="{{CLIENT_PATH}}"
     if [ -z "$cp" ]; then cp="${ENB_CLIENT_PATH:-}"; fi
-    if [ -z "$cp" ]; then
-        echo "play-local: pass the client.exe path as the recipe arg, or set ENB_CLIENT_PATH." >&2
-        echo "  example: just play-local /home/me/.wine/.../release/client.exe" >&2
-        exit 1
-    fi
+    if [ -z "$cp" ]; then cp="$HOME/.wine-enb/drive_c/Program Files/EA GAMES/Earth & Beyond/release/client.exe"; fi
     if [ ! -f "$cp" ]; then
         echo "play-local: client.exe not found at: $cp" >&2
+        echo "  pass the path as the recipe arg or set ENB_CLIENT_PATH." >&2
         exit 1
     fi
 
@@ -245,7 +243,9 @@ play-local CLIENT_PATH='':
     JSON
     echo ">>> wrote $SETTINGS_DIR/LaunchNet7.settings.json"
 
-    echo ">>> launching (NET7_UPSTREAM_HOST=localhost) — click Play in the GUI"
+    : "${WINEPREFIX:=$HOME/.wine-enb}"
+    export WINEPREFIX
+    echo ">>> launching (WINEPREFIX=$WINEPREFIX, NET7_UPSTREAM_HOST=localhost) — click Play in the GUI"
     NET7_UPSTREAM_HOST=localhost dotnet run --no-build --project tools/launchnet7-avalonia
 
 # Stream all logs in the foreground.
