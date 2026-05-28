@@ -302,4 +302,202 @@ public sealed class GlobalConnectTests
         string msg = Encoding.ASCII.GetString(span.Slice(8, (int)msgLen)).TrimEnd('\0');
         Assert.Contains("not currently accepting new logins", msg);
     }
+
+    /// <summary>
+    /// Wave 114 sibling byte-exact pin on the same 0x006D GlobalConnect →
+    /// 0x0075 GLOBAL_ERROR direct-reply path probed by
+    /// <see cref="StressTestClosedAccount_GlobalConnect_ReturnsGlobalErrorCode12"/>,
+    /// but pinning the COMPLETE 89-byte reply payload byte-for-byte
+    /// instead of only the int32 errCode field and substring text.
+    ///
+    /// <para>
+    /// SEVENTH byte-exact upgrade of a direct-reply assertion in Phase K
+    /// (after Waves 108/109/110/111/112/113). FIRST byte-exact wave on
+    /// a PROXY-emit path — all six prior byte-exact waves pinned
+    /// server-side emits (SendMessageString, SendPriorityMessageString,
+    /// SendClientChatEvent). The 0x0075 GLOBAL_ERROR frame is constructed
+    /// and sent directly by <c>Connection::GlobalError</c> at
+    /// <c>proxy/ClientToServer_linux_stubs.cpp:250-271</c>; the server
+    /// emits a <c>0x2004 GLOBAL_ERROR</c> on the internal UDP 3810 plane
+    /// (server/src/UDP_Global.cpp), the proxy's UDPClient receives it,
+    /// translates the error code via <c>g_GlobalErrorMsg[]</c> and
+    /// serialises 0x0075 back to the client over the TCP 3805 wire. FIRST
+    /// byte-exact wave on a hybrid LE+BE framing path — the msg_len
+    /// header is written in host-byte-order (little-endian on Linux
+    /// x86_64) but the error code is written via <c>ntohl()</c> producing
+    /// big-endian bytes; this LE/BE interleave is unique to the proxy's
+    /// GlobalError path in our suite.
+    /// </para>
+    ///
+    /// <para>
+    /// Reply wire layout (mirror of <c>Connection::GlobalError</c> at
+    /// proxy/ClientToServer_linux_stubs.cpp:250-271 for Error=12
+    /// G_ERROR_STRESS_TEST_CLOSED):
+    /// <code>
+    ///   [0..4)   uint32 LE    msg_len = 81    (host-byte-order *((int*) p) = strlen(msg))
+    ///   [4..8)   uint32 BE    err+7   = 19    (ntohl((uint32_t)(Error + 7)))
+    ///   [8..89)  ASCII        msg     = "Sorry, the server is not currently accepting new logins.  Please try again later."
+    /// </code>
+    /// 89 bytes total. The verbatim 81-byte literal is the
+    /// <c>g_GlobalErrorMsg[12]</c> entry at
+    /// proxy/ClientToServer_linux_stubs.cpp:241 — note the DOUBLE space
+    /// after "logins." before "Please" (preserved verbatim from the
+    /// retail wire). The "+7" offset is a quirk of the kyp wire
+    /// protocol preserved verbatim by the Linux port; the retail
+    /// client subtracts it back out when displaying the error.
+    /// </para>
+    ///
+    /// <para>
+    /// Concrete regressions THIS sibling catches that the existing
+    /// substring test does NOT:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b>g_GlobalErrorMsg[12] literal drift.</b> Any change to the
+    ///     verbatim string (typo fix, modern punctuation, the double-
+    ///     space → single-space "cleanup", "logins" → "log-ins") at
+    ///     ClientToServer_linux_stubs.cpp:241 would change the byte
+    ///     content AND likely msg_len. Substring test still passes on
+    ///     "not currently accepting new logins" any of those edits leave
+    ///     intact; byte-exact pin trips immediately.
+    ///   </item>
+    ///   <item>
+    ///     <b>msg_len byte-order regression.</b> The current code writes
+    ///     msg_len via <c>*((int *) p) = (int) msg_len</c> — host-byte-
+    ///     order, LE on Linux. A "fix" to <c>htonl()</c> would flip it
+    ///     to BE: bytes 0x51 0x00 0x00 0x00 → 0x00 0x00 0x00 0x51. The
+    ///     existing test's <c>BinaryPrimitives.ReadUInt32LittleEndian</c>
+    ///     would then read msgLen=0x51000000=1359020032, far larger
+    ///     than span.Length so the <c>span.Length &gt;= 8 + msgLen</c>
+    ///     assertion would actually catch it — but Wave 114 catches the
+    ///     more subtle case where someone "fixes" both writes to be the
+    ///     same endianness symmetrically (both LE or both BE), making
+    ///     the test still parse but the wire differ from retail.
+    ///   </item>
+    ///   <item>
+    ///     <b>err+7 byte-order regression.</b> The current code writes
+    ///     <c>ntohl((uint32_t)(Error + 7))</c> producing BE bytes. A
+    ///     "consistency" fix to drop the ntohl would emit LE, changing
+    ///     bytes [4..8) from 0x00 0x00 0x00 0x13 to 0x13 0x00 0x00 0x00.
+    ///     The existing test reads as BE then subtracts 7 — flipped to
+    ///     LE that becomes 0x13000000 - 7, errCode mismatch is caught
+    ///     loudly; but Wave 114's exact byte pin documents the BE
+    ///     contract explicitly.
+    ///   </item>
+    ///   <item>
+    ///     <b>err+7 vs err+other-offset regression.</b> A revert of the
+    ///     "+7" preserved-quirk to "+0" or any other value would change
+    ///     bytes [4..8) but leave the msg unchanged. The existing test
+    ///     subtracts 7 explicitly so it catches +0 / +6 / +8 already —
+    ///     Wave 114 cross-checks via exact byte values.
+    ///   </item>
+    ///   <item>
+    ///     <b>SendResponse trailing-bytes leak.</b> If
+    ///     <c>SendResponse</c> at the bottom of GlobalError were
+    ///     mis-sized (e.g. passes <c>sizeof(buffer)</c>=1024 instead of
+    ///     the <c>p - buffer</c> computed length), the wire would carry
+    ///     935 trailing bytes of buffer garbage. Existing test's
+    ///     <c>span.Length &gt;= 8 + msgLen</c> still passes; Wave 114's
+    ///     <c>Assert.Equal(89, span.Length)</c> catches.
+    ///   </item>
+    ///   <item>
+    ///     <b>Server-side ProcessTicketInfo branch mis-selection.</b>
+    ///     If the server-side dispatcher at UDP_Global.cpp emitted a
+    ///     different G_ERROR code (e.g. 11 G_ERROR_NET7_INTERNAL or 9
+    ///     G_ERROR_INACTIVE_ACCOUNT) for status=0 accounts, the proxy
+    ///     would look up a DIFFERENT g_GlobalErrorMsg[] entry and emit
+    ///     a different verbatim literal. Wave 114's verbatim-msg pin
+    ///     catches any such re-routing; the existing test's substring
+    ///     would only fire if the chosen alternative also happened to
+    ///     omit "not currently accepting new logins".
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity POSITIVE. The stress-test rejection is exactly
+    /// what the retail server's status-100 gate produced for status=0
+    /// accounts in the retail "stress test closed" window; the proxy's
+    /// verbatim g_GlobalErrorMsg[12] literal is preserved from the
+    /// retail wire (double-space after "logins." included). No client
+    /// stimulus addition, no server change, no widened input acceptance.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 30s. AuthLogin sub-second; GlobalConnect → GlobalError
+    /// round-trip sub-second.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task StressTestClosedAccount_GlobalConnect_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.StressTestClosed;
+
+        const string ExpectedLiteral =
+            "Sorry, the server is not currently accepting new logins.  Please try again later.";
+        const int ExpectedLiteralByteCount = 81;
+        const int ExpectedReplyPayloadLength = 89;
+        const int ExpectedRawErrCodeBE = 19;  // err+7 where err=12
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password),
+            cts.Token);
+        Assert.True(login.Valid,
+            $"login should succeed (LinuxAuth ignores status): {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var conn = await EncryptedTcpConnection.ConnectAsync(
+            _server.GlobalHost, _server.GlobalPort, cts.Token);
+
+        byte[] ticketBytes = Encoding.ASCII.GetBytes(login.Ticket!);
+        byte[] payload = new byte[4 + ticketBytes.Length + 1];
+        BinaryPrimitives.WriteUInt32BigEndian(payload.AsSpan(0, 4), (uint)ticketBytes.Length);
+        ticketBytes.CopyTo(payload, 4);
+        payload[^1] = 0;
+
+        var packet = Packet.ForOpcode(
+            OpcodeId.Known.GlobalConnect.Value,
+            payload);
+
+        await conn.SendAsync(packet, cts.Token);
+
+        Packet? errReply = null;
+        while (true)
+        {
+            var p = await conn.ReceiveAsync(cts.Token);
+            Assert.NotNull(p);
+
+            if (p!.Header.Opcode == 0x0075)
+            {
+                errReply = p;
+                break;
+            }
+
+            if (p.Header.Opcode == OpcodeId.Known.GlobalAvatarList.Value)
+            {
+                throw new Xunit.Sdk.XunitException(
+                    "server returned GlobalAvatarList for a STRESS_TEST_CLOSED " +
+                    "(status=0) account — server status check has been weakened.");
+            }
+        }
+
+        Assert.NotNull(errReply);
+        var span = errReply!.Payload.Span;
+
+        Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+
+        // msg_len: u32 LE (host-byte-order on Linux x86_64).
+        Assert.Equal((uint)ExpectedLiteralByteCount,
+            BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(0, 4)));
+
+        // err+7: u32 BE (ntohl-produced big-endian bytes).
+        Assert.Equal(ExpectedRawErrCodeBE,
+            BinaryPrimitives.ReadInt32BigEndian(span.Slice(4, 4)));
+
+        // Verbatim 81-byte literal (preserves the double-space after
+        // "logins." from retail).
+        Assert.Equal(ExpectedLiteral,
+            Encoding.ASCII.GetString(span.Slice(8, ExpectedLiteralByteCount)));
+    }
 }
