@@ -214,6 +214,13 @@ public sealed class SectorClientChatErrorTests
     private const string Message = "hi";
     private const int ExpectedPayloadSize = 4 + 4 + 2 + 9 + 2 + 2;  // 23
 
+    // Wave 119 nick: 8B ASCII. Content is irrelevant for the RemoveFriend
+    // empty-list path — PlayerMisc.cpp:1400-1411 walks m_FriendNames with
+    // strcasecmp; for a fresh char m_NumFriends==0 so the loop body never
+    // runs and the post-loop "i == m_NumFriends" branch fires unconditionally.
+    private const string AbsentFriendNick = "Ghost119";
+    private const int RemoveFriendExpectedPayloadSize = 4 + 4 + 2 + 8 + 2 + 2;  // 22
+
     private readonly ServerFixture _server;
     private readonly ClientFixture _client;
 
@@ -298,6 +305,213 @@ public sealed class SectorClientChatErrorTests
                 $"drained {maxFrames} frames after sending 0x00A3 CLIENT_CHAT_REQUEST " +
                 $"(type=CCE_SPEAK_LOCALLY=1, nick=\"{NonexistentNick}\", msg=\"{Message}\") " +
                 $"without seeing 0x00A6 CLIENT_CHAT_ERROR. Observed [{observed.Count}]: " +
+                $"{string.Join(" | ", observed)}");
+        }
+        finally
+        {
+            try
+            {
+                using var logoffCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                byte[] logoffPayload = new byte[8];
+                await session.Sector.SendAsync(
+                    Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
+                    logoffCts.Token);
+                await SectorHandshake.DrainUntilOpcode(
+                    session.Sector, OpcodeId.Known.LogoffConfirmation.Value, logoffCts.Token);
+            }
+            catch { /* best-effort logoff */ }
+
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Wave 119 sibling-arm pin on the 0x00A6 CLIENT_CHAT_ERROR emit. Where
+    /// Wave 64 covered the T2 post-switch arm
+    /// <c>request->type == CCE_SPEAK_LOCALLY</c> reaching
+    /// <c>ChatSendPrivate</c>'s recipient-not-found branch
+    /// (<c>PlayerManager.cpp:1008-1011</c>), this wave covers the parallel
+    /// T1 in-switch arm <c>case CCE_REMOVE_FRIEND</c> at
+    /// <c>PlayerConnection.cpp:1697-1699</c> which routes straight to
+    /// <c>Player::RemoveFriend</c>. For a fresh character with
+    /// <c>m_NumFriends == 0</c>, the friend-list loop at
+    /// <c>PlayerMisc.cpp:1400-1407</c> never executes; the post-loop
+    /// <c>i == m_NumFriends</c> check at line 1408 fires unconditionally
+    /// and dispatches to
+    /// <c>SendClientChatError(CHAT_ERROR_NOT_A_MEMBER, CCE_REMOVE_FRIEND, name)</c>.
+    ///
+    /// <para>
+    /// Stimulus (26B 0x00A3):
+    /// <code>
+    ///   [0..4)    int32 PlayerID         = 0
+    ///   [4..8)    int32 type             = 9   (CCE_REMOVE_FRIEND)
+    ///   [8..10)   short string_length1   = 8
+    ///   [10..18)  8B ASCII               = "Ghost119"
+    ///   [18..20)  short string_length2   = 0
+    ///   [20..22)  short string_length3   = 0
+    ///   [22..26)  int32 data_size        = 0
+    /// </code>
+    /// </para>
+    ///
+    /// <para>
+    /// Reply assertion (22B 0x00A6) — mirror of <c>SendClientChatError</c>
+    /// at <c>PlayerConnection.cpp:4667-4680</c>:
+    /// <code>
+    ///   [0..4)   int32 LE reason       = 6 (CHAT_ERROR_NOT_A_MEMBER)
+    ///   [4..8)   int32 LE type         = 9 (CCE_REMOVE_FRIEND)
+    ///   [8..10)  int16 LE player_len   = 8
+    ///   [10..18) 8B ASCII player       = "Ghost119"
+    ///   [18..20) int16 LE channel_len  = 0
+    ///   [20..22) int16 LE other_len    = 0
+    /// </code>
+    /// Total 4+4+2+8+2+2 = 22 bytes.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression classes this catches beyond Wave 64.
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b>T1 switch dispatch regression at
+    ///     <c>PlayerConnection.cpp:1697-1699</c>.</b> Wave 64 exercises the
+    ///     T2 post-switch if-chain only. A regression that
+    ///     deletes/renumbers/reorders the <c>case CCE_REMOVE_FRIEND</c>
+    ///     case label (e.g. swapping with CCE_ADD_FRIEND=8 or
+    ///     CCE_UNIGNORE=11) silently routes our type=9 stimulus to a
+    ///     different friend-list mutator. Wave 64's CCE_SPEAK_LOCALLY=1
+    ///     stimulus does not touch the switch at all (it has no case for
+    ///     type=1) so Wave 64 cannot detect T1 dispatch regressions.
+    ///   </item>
+    ///   <item>
+    ///     <b><c>RemoveFriend</c> empty-list fall-through at
+    ///     <c>PlayerMisc.cpp:1408-1411</c>.</b> If the post-loop emit is
+    ///     deleted or guarded behind a non-zero check, the
+    ///     remove-not-in-list case becomes a silent no-op and 0x00A6 never
+    ///     emits.
+    ///   </item>
+    ///   <item>
+    ///     <b><c>RemoveFriend</c> name-arg threading at
+    ///     <c>PlayerMisc.cpp:1410</c>.</b> The <c>name</c> parameter
+    ///     passed to <c>SendClientChatError</c> is the same pointer the
+    ///     loop walked. A regression that swapped <c>name</c> with an
+    ///     empty-string sentinel or an unrelated buffer would echo back
+    ///     the wrong nick and the byte-exact "Ghost119" assertion catches.
+    ///   </item>
+    ///   <item>
+    ///     <b><c>CHAT_ERROR_NOT_A_MEMBER</c> value drift at
+    ///     <c>PacketStructures.h:709</c> (=6).</b> A renumber would surface
+    ///     as a byte-1 mismatch on the reason field.
+    ///   </item>
+    ///   <item>
+    ///     <b><c>CCE_REMOVE_FRIEND</c> value drift at
+    ///     <c>PacketStructures.h:644</c> (=9).</b> A renumber would
+    ///     surface on the type field, and the stimulus would also no
+    ///     longer route to the correct switch arm.
+    ///   </item>
+    ///   <item>
+    ///     <b><c>SendClientChatError</c> default-arg-default regression at
+    ///     <c>PlayerClass.h:1032</c>.</b> The declaration defaults
+    ///     <c>channel</c> and <c>other</c> to non-NULL empty string. A
+    ///     change to NULL would make <c>AddDataLS</c> emit 0 bytes each
+    ///     instead of <c>short(0)</c>, dropping the payload to 18 bytes
+    ///     and breaking the 22B length assertion.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity note (per CLAUDE.md). 0x00A3 with
+    /// type=CCE_REMOVE_FRIEND is what the retail Win32 client emits when
+    /// the user removes a friend via the Friends-tab UI or the
+    /// <c>/remfriend &lt;name&gt;</c> slash command. When the named friend
+    /// is not on the player's friend list the retail server emits 0x00A6
+    /// CLIENT_CHAT_ERROR with reason=CHAT_ERROR_NOT_A_MEMBER and the
+    /// queried name echoed — verbatim retail behaviour. We are not making
+    /// the server accept any new input shape, not loosening any security
+    /// posture, not fabricating any reply.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s. Handshake ~22s; CLIENT_CHAT_REQUEST + 0x00A6
+    /// round-trip sub-second; LOGOFF sub-second.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task ClientChatRequest_RemoveFriendNotInList_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Friender", shipName: "FrienderShip", cts.Token);
+
+        try
+        {
+            // 0x00A3 CLIENT_CHAT_REQUEST — 26B variable-length layout,
+            // type=CCE_REMOVE_FRIEND=9, string1="Ghost119" (the friend
+            // name we're asking the server to remove from our empty list).
+            byte[] nickBytes = Encoding.ASCII.GetBytes(AbsentFriendNick);
+            int payloadSize = 4 + 4 + 2 + nickBytes.Length + 2 + 2 + 4;
+            byte[] payload = new byte[payloadSize];
+            int o = 0;
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 0); o += 4;             // PlayerID
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 9); o += 4;             // type = CCE_REMOVE_FRIEND
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), (short)nickBytes.Length); o += 2;
+            nickBytes.CopyTo(payload, o); o += nickBytes.Length;
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), 0); o += 2;             // string_length2 = 0
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), 0); o += 2;             // string_length3 = 0
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 0);                     // data_size
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(OpcodeId.Known.ClientChatRequest.Value, payload),
+                cts.Token);
+
+            // Drain inbound until we see 0x00A6 CLIENT_CHAT_ERROR.
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            var observed = new List<string>();
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+                observed.Add($"0x{reply!.Header.Opcode:X4}/{reply.Payload.Length}");
+
+                if (reply.Header.Opcode != OpcodeId.Known.ClientChatError.Value)
+                    continue;
+
+                // Wire layout (22 bytes):
+                //   bytes [0..4]   int32 LE reason  = 6 (CHAT_ERROR_NOT_A_MEMBER)
+                //   bytes [4..8]   int32 LE type    = 9 (CCE_REMOVE_FRIEND)
+                //   bytes [8..10]  int16 LE player_len = 8
+                //   bytes [10..18] 8B ASCII player  = "Ghost119"
+                //   bytes [18..20] int16 LE channel_len = 0
+                //   bytes [20..22] int16 LE other_len   = 0
+                Assert.Equal(RemoveFriendExpectedPayloadSize, reply.Payload.Length);
+                var span = reply.Payload.Span;
+
+                Assert.Equal(6, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(0, 4)));
+                Assert.Equal(9, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4)));
+                Assert.Equal((short)8, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(8, 2)));
+                Assert.Equal(AbsentFriendNick, Encoding.ASCII.GetString(span.Slice(10, 8)));
+                Assert.Equal((short)0, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(18, 2)));
+                Assert.Equal((short)0, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(20, 2)));
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x00A3 CLIENT_CHAT_REQUEST " +
+                $"(type=CCE_REMOVE_FRIEND=9, nick=\"{AbsentFriendNick}\") without seeing " +
+                $"0x00A6 CLIENT_CHAT_ERROR. Observed [{observed.Count}]: " +
                 $"{string.Join(" | ", observed)}");
         }
         finally
