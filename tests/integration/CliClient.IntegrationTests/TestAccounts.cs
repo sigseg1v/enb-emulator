@@ -111,6 +111,7 @@ public static class TestAccounts
             ["RefinerySetItem_InvalidItemZero_DoesNotBreakConnection_RequestTimeStillRoundTrips"]     = A(9_000_046, "cli_test46"),
             ["InventorySort_UnrecognisedTargetInv_DoesNotBreakConnection_RequestTimeStillRoundTrips"] = A(9_000_047, "cli_test47"),
             ["ResendPacketSequence_MissPacketNum_DoesNotBreakConnection_RequestTimeStillRoundTrips"]  = A(9_000_048, "cli_test48"),
+            ["HandshakeEmitsClientTypeAndGalaxyMapOnSpaceSectorLogin"]                                = A(9_000_049, "cli_test49"),
         };
 
     /// <summary>

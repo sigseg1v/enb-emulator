@@ -135,6 +135,72 @@ public static class SectorHandshake
     }
 
     /// <summary>
+    /// Reconnect against an existing avatar (e.g. one created by a prior
+    /// <see cref="EstablishAsync"/> call) and re-run the sector handshake
+    /// against <paramref name="sectorId"/>. Skips the
+    /// <see cref="CreateCharacterOnSlotAsync"/> step — the slot is
+    /// expected to already contain a created avatar.
+    ///
+    /// <para>
+    /// Use case: drive the SPACE-sector <c>SectorManager::SectorLogin</c>
+    /// branch (sector_id ≤ 9999). Every race/class has a station
+    /// <c>StartSector</c> (race × 3 + profession), so the first login
+    /// always lands in <c>SectorManager::StationLogin</c>. A second
+    /// login with a space sector exercises the other branch.
+    /// <c>Player::ReadSavedData</c> takes the
+    /// <c>ReloadSavedData</c> path on the second login (avatar_level_info
+    /// row now exists from the first login's
+    /// <c>ReInitializeSavedData</c>), and that path preserves the
+    /// sector_num set by <c>Player::HandleLogin</c> from the LOGIN
+    /// packet's <c>ToSectorID</c>
+    /// (<c>server/src/PlayerSaves.cpp:289-291</c>).
+    /// </para>
+    /// </summary>
+    public static async Task<Session> ReestablishAsync(
+        ServerFixture server,
+        string authTicket,
+        int slot,
+        int sectorId,
+        CancellationToken ct)
+    {
+        var globalConn = await EncryptedTcpConnection.ConnectAsync(
+            server.GlobalHost, server.GlobalPort, ct);
+
+        try
+        {
+            await SendGlobalConnectAsync(globalConn, authTicket, ct);
+            await DrainUntilOpcode(globalConn, OpcodeId.Known.GlobalAvatarList.Value, ct);
+
+            int gameId = await RequestTicketAsync(globalConn, slot, ct);
+
+            const int PlayerTag = 1 << 30;
+            Assert.True((gameId & PlayerTag) != 0,
+                $"GameID 0x{gameId:X8} missing PLAYER_TAG — GlobalTicketRequest hit the failure path.");
+
+            var redirect = await DoMasterJoinAsync(server, authTicket, gameId, sectorId, ct);
+            Assert.Equal(sectorId, redirect.SectorId);
+
+            var (sectorConn, startId, handshakeOpcodes) = await DoSectorLoginUntilStartAsync(
+                server, authTicket, gameId, sectorId, ct);
+
+            return new Session
+            {
+                Global = globalConn,
+                Sector = sectorConn,
+                GameId = gameId,
+                StartId = startId,
+                Slot = slot,
+                HandshakeOpcodes = handshakeOpcodes,
+            };
+        }
+        catch
+        {
+            await globalConn.DisposeAsync();
+            throw;
+        }
+    }
+
+    /// <summary>
     /// Best-effort post-test cleanup: send 0x0071 GlobalDeleteCharacter
     /// on <paramref name="global"/> for <paramref name="slot"/> and wait
     /// for the refreshed avatar list. Wrap in try/catch at the call site

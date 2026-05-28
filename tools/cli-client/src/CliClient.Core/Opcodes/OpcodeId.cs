@@ -91,6 +91,7 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId NotifyEmote                  = new(0x00A2);
         public static readonly OpcodeId ClientChatRequest            = new(0x00A3);
         public static readonly OpcodeId ClientChatEvent              = new(0x00A5);
+        public static readonly OpcodeId GalaxyMap                    = new(0x0097);
         public static readonly OpcodeId NameDecal                    = new(0x00B2);
         public static readonly OpcodeId Subparts                     = new(0x00B4);
         public static readonly OpcodeId LogoffRequest                = new(0x00B9);

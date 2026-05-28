@@ -2,7 +2,9 @@
 // Part of the Earth & Beyond emulator preservation project.
 // License: LICENSES/enb-emulator
 
+using System.Buffers.Binary;
 using N7.CliClient.Auth;
+using N7.CliClient.Net;
 using N7.CliClient.Opcodes;
 using Xunit;
 
@@ -255,6 +257,223 @@ public sealed class SectorHandshakeFanoutTests
         {
             using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
             try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Wave 52 passive-observation +2 ratchet: assert that 0x003C
+    /// CLIENT_TYPE and 0x0097 GALAXY_MAP both appear in the captured
+    /// handshake stream when the LOGIN packet targets a SPACE sector
+    /// (<c>sector_id &lt;= 9999</c>) rather than a station
+    /// (<c>sector_id &gt; 9999</c>).
+    ///
+    /// <para>
+    /// Why a separate test from <see cref="HandshakeEmitsFullSendLoginShipDataFanout"/>:
+    /// all prior handshake-fanout tests use sectorId=10151 (Luna Station)
+    /// which routes through <c>SectorManager::HandleSectorLogin</c>'s
+    /// station branch — <c>SectorManager::StationLogin</c>
+    /// (<c>server/src/SectorManager.cpp:460-505</c>) — where neither
+    /// SendClientType nor SendGalaxyMap is called. SendGalaxyMap is
+    /// literally commented out at SectorManager.cpp:467 in the station
+    /// path, and SendClientType is only called from the SPACE-sector
+    /// branch at SectorManager.cpp:347. To observe either opcode the
+    /// LOGIN packet has to target a sector with id ≤ 9999.
+    /// </para>
+    ///
+    /// <para>
+    /// Choice of sector: 1015 = "Luna" (sector_type=1 ST_PLANET, system
+    /// 378 Sol). Picked because (a) it's the closest space neighbour to
+    /// the avatar's stored Luna Station position (10151), so the
+    /// post-login object/range-list bookkeeping is exercising the same
+    /// Sol-system code paths the existing fanout tests touch; and
+    /// (b) sector_type=1 means SendClientType's payload is a non-zero
+    /// int32 (the literal sector_type integer is shipped to the client
+    /// — verifies the wire field isn't getting zeroed by a regression).
+    /// </para>
+    ///
+    /// <para>
+    /// Dispatch path. <c>Player::HandleLogin</c>
+    /// (<c>server/src/PlayerConnection.cpp:674-696</c>) reads
+    /// <c>ToSectorID</c> from the LOGIN payload, calls
+    /// <c>PlayerIndex()-&gt;SetSectorNum(sector_id)</c> and advances the
+    /// stage machine. <c>Player::GetSectorManager</c>
+    /// (<c>server/src/PlayerMisc.cpp:354-357</c>) then resolves to
+    /// <c>g_ServerMgr-&gt;GetSectorManager(sector_id)</c> — i.e. the
+    /// LOGIN-packet's sector id IS what selects the SectorManager.
+    /// <c>SectorManager::HandleSectorLogin</c>
+    /// (<c>server/src/SectorManager.cpp:324-336</c>) then routes
+    /// <c>m_SectorID &gt; 9999</c> to StationLogin, else to SectorLogin.
+    /// Passing 1015 puts us in SectorLogin where the two opcodes emit.
+    /// </para>
+    ///
+    /// <para>
+    /// 0x003C CLIENT_TYPE emit: <c>SectorManager::SectorLogin</c>
+    /// (<c>server/src/SectorManager.cpp:347</c>) calls
+    /// <c>player-&gt;SendClientType(m_SectorData-&gt;sector_type)</c> which
+    /// invokes <c>Player::SendClientType</c>
+    /// (<c>server/src/PlayerConnection.cpp:1071-1075</c>) — a two-line
+    /// handler that wires the client_type long to
+    /// <c>SendOpcode(ENB_OPCODE_003C_CLIENT_TYPE, ..., sizeof(client_type))</c>.
+    /// Unconditional emit; no payload-shape guards.
+    /// </para>
+    ///
+    /// <para>
+    /// 0x0097 GALAXY_MAP emit: <c>SectorManager::SectorLogin</c>
+    /// (<c>server/src/SectorManager.cpp:344</c>) calls
+    /// <c>player-&gt;SendGalaxyMap(m_SystemName, m_SectorName, "")</c>
+    /// which invokes <c>Player::SendGalaxyMap</c>
+    /// (<c>server/src/PlayerConnection.cpp:10709-10758</c>) — builds a
+    /// variable-length packet with three short-prefixed strings
+    /// (system / sector / station, with station="" in the SectorLogin
+    /// call site) plus a trailing int32 "unknown" sentinel (375), and
+    /// emits as <c>SendOpcode(ENB_OPCODE_0097_GALAXY_MAP, ..., size+8)</c>.
+    /// Unconditional emit; no payload-shape guards.
+    /// </para>
+    ///
+    /// <para>
+    /// Why this is a legit +2 ratchet (not a Coverage-Cheat). Both
+    /// opcodes are server-originated emits that have always been
+    /// produced on every space-sector handshake — they just weren't
+    /// observed because no prior test sent a space-sector LOGIN. No new
+    /// server behaviour, no new permissiveness, no widened input
+    /// acceptance; the test simply records ground truth from a
+    /// dispatch-path branch the suite hadn't exercised. Per CLAUDE.md
+    /// server-integrity, this is exactly the "tightening" the rule
+    /// welcomes (rejecting more regression classes without changing
+    /// what the server accepts).
+    /// </para>
+    ///
+    /// <para>
+    /// Regression classes this catches.
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b>SectorLogin dispatch-branch deletion or short-circuit.</b>
+    ///     If <c>HandleSectorLogin</c>'s SPACE-vs-station split
+    ///     collapses to "always StationLogin", neither 0x003C nor
+    ///     0x0097 would appear in HandshakeOpcodes — distinguishes
+    ///     "the SectorLogin path stopped running" from "individual
+    ///     SendOpcode calls were removed".
+    ///   </item>
+    ///   <item>
+    ///     <b>SendClientType removal or guard regression.</b> Any
+    ///     conditional gate added around SendClientType (e.g. only
+    ///     emitting if sector_type != 0) would break the assertion
+    ///     for ST_PLANET sectors.
+    ///   </item>
+    ///   <item>
+    ///     <b>SendGalaxyMap removal or guard regression.</b> If
+    ///     SectorLogin's GalaxyMap emit at line 344 gets the same
+    ///     commenting-out treatment as the line-467 station-path
+    ///     copy, 0x0097 would silently vanish from the space-sector
+    ///     handshake.
+    ///   </item>
+    ///   <item>
+    ///     <b>sizeof(long) marshalling regression in SendClientType.</b>
+    ///     The handler currently passes <c>sizeof(client_type)</c> with
+    ///     client_type declared <c>long</c> — on Linux x86_64 that's 8
+    ///     bytes for a wire field that needs to be 4 (Phase K Wave 7 +
+    ///     11 class of bug). The proxy's PACKET_SEQUENCE inner-tuple
+    ///     parser uses the SendOpcode length byte to split inner
+    ///     frames, so an oversize length corrupts the very next inner
+    ///     opcode — could knock 0x003C OR a neighbour opcode out of
+    ///     HandshakeOpcodes. Documented here so a future Phase K wave
+    ///     auditing remaining sizeof(long) sites has a test ready to
+    ///     fail when the marshalling fix lands.
+    ///   </item>
+    ///   <item>
+    ///     <b>GalaxyMap struct layout regression.</b>
+    ///     PlayerConnection.cpp:10714-10721 was explicitly hardened in
+    ///     Phase K Wave 11 to use int32_t for Type/Size/PlayerID/unknown
+    ///     (Win32 wire layout = 80B; Linux unfixed = 96B with shifted
+    ///     offsets). A revert would still emit opcode 0x0097 but with a
+    ///     mangled payload — assertion would pass at opcode level but a
+    ///     future typed-codec wave would catch the byte-layout drift.
+    ///   </item>
+    ///   <item>
+    ///     <b>Proxy SendClientPacketSequence inner-opcode guard
+    ///     tightening at <c>proxy/UDPProxyToClient_linux.cpp:568</c>.</b>
+    ///     Currently passes both opcodes (0x003C &lt; 0x0FFF and 0x0097
+    ///     &lt; 0x0FFF). A regression to a tighter upper bound would
+    ///     silently drop them from the wire and the test would see a
+    ///     missing-opcode failure.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Budget: 90s. Handshake ~2s; passive observation — no additional
+    /// client stimulus after the session establishes.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task HandshakeEmitsClientTypeAndGalaxyMapOnSpaceSectorLogin()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
+        const int spaceSectorId = 1015;     // Luna (space, sector_type=ST_PLANET)
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        // Stage 1: create avatar and complete the StationLogin handshake.
+        // Race=0 Profession=0 (Terran Warrior) → StartSector=10151.
+        // ReadSavedData takes the ReInitializeSavedData path (no
+        // avatar_level_info row yet) which writes sector_id=10151 plus
+        // the full avatar/skill seed needed to subsequently reload.
+        var stationSession = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, stationSectorId,
+            firstName: "SpaceHs", shipName: "SpaceHsShip", cts.Token);
+
+        try
+        {
+            // Cleanly tear down stage 1 with an explicit 0x00B9
+            // LOGOFF_REQUEST so the server runs DropPlayerFromGalaxy
+            // synchronously. A bare TCP disconnect leaves the in-memory
+            // Player around long enough that the stage-2 GlobalConnect
+            // hits G_ERROR_ACCOUNT_IN_USE (UDP_Global.cpp:166-170).
+            byte[] logoffPayload = new byte[8];
+            await stationSession.Sector.SendAsync(
+                Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
+                cts.Token);
+            await SectorHandshake.DrainUntilOpcode(
+                stationSession.Sector, OpcodeId.Known.LogoffConfirmation.Value, cts.Token);
+            await stationSession.DisposeAsync();
+
+            // Stage 2: reconnect (no char create) and LOGIN to space
+            // sector 1015. ReadSavedData now takes the ReloadSavedData
+            // path (avatar_level_info exists from stage 1), which
+            // preserves the sector_num set by HandleLogin
+            // (PlayerSaves.cpp:289-291). GetSectorManager(1015)
+            // resolves m_SectorID=1015 ≤ 9999 →
+            // SectorManager::HandleSectorLogin dispatches to SectorLogin
+            // (SectorManager.cpp:332), which emits 0x0097 GALAXY_MAP
+            // (line 344) and 0x003C CLIENT_TYPE (line 347).
+            await using var spaceSession = await SectorHandshake.ReestablishAsync(
+                _server, login.Ticket!, slot, spaceSectorId, cts.Token);
+
+            Assert.Contains(OpcodeId.Known.ClientType.Value, spaceSession.HandshakeOpcodes);
+            Assert.Contains(OpcodeId.Known.GalaxyMap.Value, spaceSession.HandshakeOpcodes);
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            try
+            {
+                await using var cleanupGlobal = await N7.CliClient.Net.EncryptedTcpConnection.ConnectAsync(
+                    _server.GlobalHost, _server.GlobalPort, cleanupCts.Token);
+                await SectorHandshake.SendGlobalConnectAsync(
+                    cleanupGlobal, login.Ticket!, cleanupCts.Token);
+                await SectorHandshake.DrainUntilOpcode(
+                    cleanupGlobal, OpcodeId.Known.GlobalAvatarList.Value, cleanupCts.Token);
+                await SectorHandshake.DeleteCreatedCharacterAsync(
+                    cleanupGlobal, slot, cleanupCts.Token);
+            }
             catch { /* best-effort cleanup */ }
         }
     }
