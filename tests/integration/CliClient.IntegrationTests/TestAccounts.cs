@@ -24,7 +24,7 @@ namespace N7.CliClient.IntegrationTests;
 /// Account IDs start at 9_000_001 to stay clear of any real-account IDs
 /// the dumps might one day carry (the dump's accounts.AUTO_INCREMENT is
 /// 15_965). Adding a new test that needs its own account: (1) pick an
-/// unused id in 9_000_001..9_000_105, (2) add a row to
+/// unused id in 9_000_001..9_000_106, (2) add a row to
 /// <c>Fixtures/seed.sql</c>, (3) add a key in <see cref="Assignments"/>
 /// matching the test method name. Tests that only exercise login or
 /// pure-read flows can re-use an existing entry (multiple keys may map
@@ -168,6 +168,7 @@ public static class TestAccounts
             ["ItemState_UnrecognisedInventoryByte_PinsExactReplyWireShape"]                            = A(9_000_103, "cli_test103"),
             ["InventoryMove_UnrecognisedFromInv_PinsExactReplyWireShape"]                              = A(9_000_104, "cli_test104"),
             ["GroupChat_WhenUngrouped_PinsExactReplyWireShape"]                                        = A(9_000_105, "cli_test105"),
+            ["MissionForfeit_EmptySlotZero_PinsExactReplyWireShape"]                                   = A(9_000_106, "cli_test106"),
         };
 
     /// <summary>

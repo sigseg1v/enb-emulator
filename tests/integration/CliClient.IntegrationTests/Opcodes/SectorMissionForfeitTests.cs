@@ -316,4 +316,221 @@ public sealed class SectorMissionForfeitTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// The verbatim ASCII body the retail-faithful MissionDismiss
+    /// non-forfeitable branch passes to <c>SendVaMessageC</c> at
+    /// <c>server/src/PlayerMissions.cpp:1630</c>. 32 bytes of payload
+    /// content; <c>SendMessageString</c> appends a NUL terminator and
+    /// emits <c>length = 33</c>.
+    /// </summary>
+    private const string NonForfeitableLiteral =
+        "This mission is non forfeitable.";
+
+    /// <summary>
+    /// Wave 111 frame-shape hardening (+0 ratchet, 0x001D): pins the
+    /// byte-exact 36-byte wire-shape of the single 0x001D MESSAGE_STRING
+    /// the server emits in reply to a 0x0086 MISSION_FORFEIT whose
+    /// MissionID points at an empty slot. Wave 27's existing test
+    /// (<see cref="MissionForfeit_EmptySlotZero_ReceivesNonForfeitableErrorString"/>)
+    /// asserts only that the response body <em>contains</em> the
+    /// distinctive substring "non forfeitable"; Wave 111 layers byte-exact
+    /// pinning on top, locking the full 36-byte response shape in place.
+    ///
+    /// <para>
+    /// Backstory. 0x001D MESSAGE_STRING is server-emitted by
+    /// <c>Player::SendMessageString</c> at
+    /// <c>server/src/PlayerConnection.cpp:10987-10997</c>:
+    /// <code>
+    ///     short length = strlen(msg) + 1;          // includes NUL
+    ///     *((short *) &amp;buffer[0]) = length;       // wire offset 0..2 (LE)
+    ///     buffer[2]                  = color;       // wire offset 2  (u8)
+    ///     strcpy_s(&amp;buffer[3], ..., msg);          // wire offset 3..(3+length)
+    ///     SendOpcode(ENB_OPCODE_001D_MESSAGE_STRING, buffer, length + 3);
+    /// </code>
+    /// Unlike Waves 108/109/110, MissionDismiss uses
+    /// <c>SendVaMessageC(17, ...)</c> (PlayerClass.cpp:3443-3453), which
+    /// passes color=17 EXPLICITLY to <c>SendMessageString(pch, colour)</c>
+    /// rather than letting the default fire. For the verbatim 32-byte
+    /// literal "This mission is non forfeitable." at PlayerMissions.cpp:1630:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><b>length field</b> = strlen(32) + 1 = <c>33</c></item>
+    ///   <item><b>color byte</b> = <c>17</c> (SendVaMessageC explicit override)</item>
+    ///   <item><b>msg + NUL</b> = 32 + 1 = <c>33 bytes</c></item>
+    ///   <item><b>total payload</b> = <c>length + 3 = 36 bytes</c></item>
+    /// </list>
+    ///
+    /// <para>
+    /// Why a separate test method. Mirrors the Wave 108/109/110 split:
+    /// Wave 27's looser substring assertion stays intact (narrow-scope
+    /// failure surface — a wire-shape drift that still produces the
+    /// literal substring would not surface as a Wave 27 failure),
+    /// Wave 111 adds the byte-exact pin as its own discrete test artifact
+    /// for the regression-class catalogue. Wave 111 is the FIRST byte-exact
+    /// hardening wave on the <c>SendVaMessageC</c> (explicit-color) fan-out
+    /// — Waves 108/109/110 all pinned the <c>SendVaMessage</c> /
+    /// default-color=5 path. That makes Wave 111 a complementary catching
+    /// surface: a regression to <c>SendVaMessageC</c>'s color-pass-through
+    /// (e.g. discarding the colour arg on its way to SendMessageString)
+    /// would surface here but NOT on Waves 108/109/110 (and vice versa).
+    /// </para>
+    ///
+    /// <para>
+    /// Regression classes Wave 111 catches beyond what Wave 27 catches.
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b><c>SendMessageString</c> length-field width regression at
+    ///     <c>PlayerConnection.cpp:10992</c>.</b> The cast
+    ///     <c>*((short *) &amp;buffer[0]) = length</c> writes a 2-byte
+    ///     length prefix. A regression to <c>int32_t</c> would shift the
+    ///     color byte from offset 2 to offset 4 and grow the total
+    ///     payload from 36 to 38 bytes. Wave 27's loose-shape parse
+    ///     still passes; <c>Assert.Equal(36, span.Length)</c> catches.
+    ///   </item>
+    ///   <item>
+    ///     <b><c>SendVaMessageC</c> color-pass-through regression at
+    ///     <c>PlayerClass.cpp:3443-3453</c>.</b> The function signature
+    ///     is <c>SendVaMessageC(char colour, char *string, ...)</c> and
+    ///     it MUST forward <c>colour</c> to
+    ///     <c>SendMessageString(pch, colour)</c>. A refactor that drops
+    ///     the second argument (defaulting back to 5) or hardcodes a
+    ///     different value would change wire byte 2 from 17 without
+    ///     affecting the substring. Wave 27's text-only assert is
+    ///     structurally blind; Wave 111 pins <c>span[2] == 17</c>.
+    ///   </item>
+    ///   <item>
+    ///     <b>Length-field LE byte-order regression.</b> Same
+    ///     <c>*((short *)&amp;buffer[0])</c> host-LE write as Waves 108/110.
+    ///     Wave 111's
+    ///     <c>BinaryPrimitives.ReadInt16LittleEndian == 33</c> catches.
+    ///   </item>
+    ///   <item>
+    ///     <b><c>SendOpcode</c> trailing-bytes regression at
+    ///     <c>PlayerConnection.cpp:10996</c>.</b> The third arg
+    ///     <c>length + 3</c> bounds the emit to 36 bytes; a regression
+    ///     to <c>sizeof(buffer)</c> (512) would leak 476 trailing zero
+    ///     bytes. Wave 27's substring assertion still passes; Wave 111's
+    ///     <c>Assert.Equal(36, span.Length)</c> catches.
+    ///   </item>
+    ///   <item>
+    ///     <b>Verbatim-literal drift at
+    ///     <c>PlayerMissions.cpp:1630</c>.</b> A refactor that
+    ///     changes the casing of "non" / "forfeitable", drops the
+    ///     trailing period, or swaps to "cannot be forfeited" would
+    ///     silently shift wire bytes the retail Win32 client's decoder
+    ///     was compiled to accept. Wave 27's <c>Contains</c> would still
+    ///     pass on minor casing tweaks (it's case-sensitive but the
+    ///     check is on the lowercase form already); Wave 111's full-
+    ///     literal <c>Assert.Equal</c> on the body bytes catches.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Per CLAUDE.md server-integrity. 0x001D MESSAGE_STRING is
+    /// server-originated. Wave 111 adds no client stimulus beyond the
+    /// same 8-byte MISSION_FORFEIT (PlayerID=0, MissionID=0) Wave 27
+    /// already sends, and no server change — pure passive-observation
+    /// tightening of a retail-faithful wire shape. The 36-byte response
+    /// is exactly what the retail Win32 client's MESSAGE_STRING decoder
+    /// was compiled to receive. No widened input acceptance, no loosened
+    /// gating, no fabricated replies — server-integrity POSITIVE.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s. Handshake ~2s; FORFEIT+REPLY round-trip is
+    /// sub-second.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task MissionForfeit_EmptySlotZero_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (33) = 36 bytes.
+        const int ExpectedReplyPayloadLength = 36;
+        // strlen(literal) + 1 NUL = 33.
+        const short ExpectedReplyLengthField = 33;
+        // SendVaMessageC(17, ...) → SendMessageString(pch, 17) — explicit
+        // override of the default color=5; first wave to pin this path.
+        const byte ExpectedReplyColor = 17;
+        // strlen(literal) = 32.
+        const int ExpectedLiteralByteCount = 32;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Frftor11", shipName: "Frftor11Ship", cts.Token);
+
+        try
+        {
+            byte[] payload = new byte[8];
+            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(0, 4), 0);
+            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(4, 4), 0);
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(OpcodeId.Known.MissionForfeit.Value, payload),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // Filter on the distinctive substring so other
+                // MESSAGE_STRING traffic (motd, NPC chatter) doesn't
+                // race ahead of the non-forfeitable reply.
+                if (!text.Contains("non forfeitable", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(NonForfeitableLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0086 MISSION_FORFEIT (MissionID=0) " +
+                $"without seeing 0x001D MESSAGE_STRING containing \"non forfeitable\". " +
+                $"Same drain-loop budget as Wave 27's sibling test; the failure modes are " +
+                $"identical.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
