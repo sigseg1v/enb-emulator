@@ -145,6 +145,7 @@ public static class TestAccounts
             ["Decal_EmittedDuringStationSectorHandshake_HasExactly54BytePayload"]                     = A(9_000_080, "cli_test80"),
             ["AdvancedPositionalUpdate_EmittedDuringStationSectorHandshake_HasExactly42BytePayload"]  = A(9_000_081, "cli_test81"),
             ["ServerParameters_EmittedDuringSpaceSectorHandshake_HasExactly70BytePayload"]            = A(9_000_082, "cli_test82"),
+            ["Navigation_EmittedDuringSpaceSectorHandshake_HasExactly14BytePayload"]                  = A(9_000_083, "cli_test83"),
         };
 
     /// <summary>
