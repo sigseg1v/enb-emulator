@@ -505,12 +505,24 @@ bool UDPClient::HandleCustomOpcode(short opcode, char *ptr, u8 *tcp_packet,
     case ENB_OPCODE_2018_STATIC_OBJECT_CREATE:
     case ENB_OPCODE_2019_RESOURCE_OBJECT_CREATE:
         // Launcher-side responsibility; not implemented on the Linux
-        // server-side proxy. Returning false lets SendClientPacketSequence
-        // forward the raw opcode for clients that handle it themselves
-        // (the Phase K CLI test client just records it as opaque bytes).
-        LogVMessage("UDPClient(Linux): launcher-side opcode 0x%04x — forwarding raw\n",
+        // server-side proxy. The Win32 proxy consumes these locally
+        // (UDPProxyToClient.cpp HandleCustomOpcode: SendCachedGalaxyMap,
+        // StartProspecting, TractorOre, LootItem, CreateObject,
+        // CreateResource) — it does NOT forward them over the game-
+        // protocol TCP channel to the client's game receiver. Returning
+        // TRUE marks the opcode as handled-and-dropped so the sequence
+        // walker advances normally. Returning false here previously fell
+        // through to the < 0x0FFF guard at SendClientPacketSequence
+        // which set terminate=true and STALLED the entire packet sequence
+        // (caller marks PACKET_BLANK, never advances m_CurrentPacketNum,
+        // every subsequent server reply queues behind the stuck slot until
+        // the test cancellation token fires). That stall was the actual
+        // failure mode behind the Wave 70 first attempt on 0x0098
+        // GALAXY_MAP_REQUEST — the survival-probe REQUEST_TIME echo
+        // could never get past the 0x2011 stuck slot.
+        LogVMessage("UDPClient(Linux): launcher-side opcode 0x%04x — silent drop\n",
                     (unsigned short) opcode);
-        return false;
+        return true;
 
     default:
         return false;

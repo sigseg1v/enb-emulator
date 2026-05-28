@@ -98,6 +98,7 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId MissionDismissal             = new(0x0087);
         public static readonly OpcodeId PetitionStuck                = new(0x0088);
         public static readonly OpcodeId Relationship                 = new(0x0089);
+        public static readonly OpcodeId GalaxyMapRequest             = new(0x0098);
         public static readonly OpcodeId Navigation                   = new(0x0099);
         public static readonly OpcodeId TriggerEmote                 = new(0x00A1);
         public static readonly OpcodeId NotifyEmote                  = new(0x00A2);

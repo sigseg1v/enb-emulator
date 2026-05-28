@@ -128,6 +128,7 @@ public static class TestAccounts
             ["StarbaseJobTerminalAction7_InNet7SolJtSector_OnSentinelJobId_EchoesJobIdAsJobDescription"] = A(9_000_063, "cli_test63"),
             ["StarbaseAcceptJobAction8_OnSentinelJobId_ReceivesByteExact4ByteJobAcceptReply"]           = A(9_000_064, "cli_test64"),
             ["ManufactureSetManufactureId_EmittedDuringHandshake_HasExactly4BytePayload"]              = A(9_000_065, "cli_test65"),
+            ["GalaxyMapRequest_OnFreshSession_DoesNotBreakConnection_RequestTimeStillRoundTrips"]      = A(9_000_066, "cli_test66"),
         };
 
     /// <summary>
