@@ -3,6 +3,7 @@
 // License: LICENSES/enb-emulator
 
 using N7.CliClient.Auth;
+using N7.CliClient.Net;
 using N7.CliClient.Opcodes;
 using Xunit;
 
@@ -313,6 +314,161 @@ public sealed class SectorManufactureSetManufactureIdHardeningTests
         {
             using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
             try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Wave 106 frame-count hardening (+0 ratchet, 0x007F): pins the
+    /// exact 1-frame emit-count invariant of the SPACE-arm dispatch
+    /// branch (complement of Wave 105's STATION-arm pin). The captured
+    /// single-player space-sector handshake stream emits 0x007F
+    /// MANUFACTURE_SET_MANUFACTURE_ID exactly once — from
+    /// <c>SectorManager::SectorLogin</c> at
+    /// <c>server/src/SectorManager.cpp:345</c>
+    /// (<c>player-&gt;SetManufactureID(0)</c> on space-arm anchor).
+    ///
+    /// <para>
+    /// Dispatch reminder: <c>SectorManager::HandleSectorLogin</c>
+    /// (<c>server/src/SectorManager.cpp:324-336</c>) branches on
+    /// <c>m_SectorID</c>: <c>&gt; 9999</c> → <c>StationLogin</c>;
+    /// <c>≤ 9999</c> → <c>SectorLogin</c>. Sector 1015 (Luna space,
+    /// <c>sector_type=ST_PLANET</c>) takes the SectorLogin branch.
+    /// SectorLogin emits exactly one <c>SetManufactureID(0)</c> at
+    /// line 345; StationLogin's manu-lab-anchor emit at line 475 never
+    /// fires; LaunchIntoSpace at line 538 only fires on an explicit
+    /// in-session undock request, not during the handshake itself.
+    /// </para>
+    ///
+    /// <para>
+    /// Two-stage station→space pattern (mirrors Waves 89/102/103/104).
+    /// Stage 1: create the avatar via the station-sector handshake
+    /// (sector 10151) — the only handshake that hits the character-create
+    /// surface. Stage 2: cleanly LOGOFF_REQUEST/LOGOFF_CONFIRMATION the
+    /// stage-1 session so the server's <c>DropPlayerFromGalaxy</c> runs
+    /// synchronously (otherwise G_ERROR_ACCOUNT_IN_USE in stage 2). Then
+    /// reconnect (no char create) and LOGIN to space sector 1015.
+    /// </para>
+    ///
+    /// <para>
+    /// Structurally distinct from Wave 105. Wave 105 lands on sector
+    /// 10151 (StationLogin path) and pins the <c>SetManufactureID(ntohl(ManuID))</c>
+    /// manu-lab-anchor emit. Wave 106 lands on sector 1015 (SectorLogin
+    /// path) and pins the <c>SetManufactureID(0)</c> space-arm anchor
+    /// emit. Both branches of the HandleSectorLogin dispatch are now
+    /// pinned to "exactly one 0x007F frame per login handshake".
+    /// </para>
+    ///
+    /// <para>
+    /// Regression classes this catches (beyond what Wave 105 catches).
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b>Spurious extra <c>SetManufactureID</c> in the space-arm
+    ///     chain.</b> A refactor adding a SendLoginShipData self-emit
+    ///     (mirroring the SendShipInfo self-emit pattern) for the
+    ///     space-arm branch would produce 2+ frames. Wave 68's
+    ///     <c>Assert.NotEmpty</c> still passes (every frame is still 4B).
+    ///     Wave 105 doesn't fire (different dispatch path). Wave 106
+    ///     catches.
+    ///   </item>
+    ///   <item>
+    ///     <b>SectorLogin refactor that splits the space-arm anchor into
+    ///     pre-/post-handshake emits.</b> A symmetric refactor adding a
+    ///     pre-handshake or post-handshake space-arm re-anchor would
+    ///     surface as 2+ frames. Wave 106 catches.
+    ///   </item>
+    ///   <item>
+    ///     <b>StationLogin call site bleeding into the space-arm
+    ///     dispatch.</b> A regression to HandleSectorLogin's branch at
+    ///     SectorManager.cpp:324-336 — e.g. inverting the sector_id
+    ///     comparison — would let the space-arm fall through to
+    ///     StationLogin (SectorManager.cpp:475 site) on top of the
+    ///     SectorLogin emit, producing 2 frames. Wave 106 catches; Wave
+    ///     105 may also fire (depending on direction of the regression).
+    ///   </item>
+    ///   <item>
+    ///     <b>LaunchIntoSpace handshake-time bleed at
+    ///     SectorManager.cpp:538.</b> If a refactor calls LaunchIntoSpace
+    ///     (or its inner SetManufactureID(0) emit) during the handshake
+    ///     drain rather than only on explicit undock, the space-arm
+    ///     handshake would surface 2 frames. Wave 106 catches.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Per CLAUDE.md server-integrity. Pure passive-observation
+    /// tightening. No client stimulus, no server change. The 1-frame
+    /// invariant is a retail-faithful invariant of the single-call
+    /// SectorLogin dispatch.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task ManufactureSetManufactureId_EmittedExactlyOnceDuringSpaceSectorHandshake_PinsSelfEmit()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
+        const int spaceSectorId = 1015;     // Luna (space, sector_type=ST_PLANET)
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        // Stage 1: create avatar via station-sector handshake.
+        var stationSession = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, stationSectorId,
+            firstName: "MfgPin106", shipName: "MfgPin106Ship", cts.Token);
+
+        try
+        {
+            // Cleanly tear down stage 1 with an explicit 0x00B9
+            // LOGOFF_REQUEST so the server runs DropPlayerFromGalaxy
+            // synchronously (avoids G_ERROR_ACCOUNT_IN_USE in stage 2).
+            byte[] logoffPayload = new byte[8];
+            await stationSession.Sector.SendAsync(
+                Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
+                cts.Token);
+            await SectorHandshake.DrainUntilOpcode(
+                stationSession.Sector, OpcodeId.Known.LogoffConfirmation.Value, cts.Token);
+            await stationSession.DisposeAsync();
+
+            // Stage 2: reconnect (no char create) and LOGIN to space
+            // sector 1015. HandleSectorLogin dispatches to SectorLogin
+            // (SectorManager.cpp:332), which emits 0x007F
+            // MANUFACTURE_SET_MANUFACTURE_ID(0) at line 345. Filter
+            // HandshakeFrames for 0x007F and pin the count to exactly
+            // one + the payload length to 4 bytes.
+            await using var spaceSession = await SectorHandshake.ReestablishAsync(
+                _server, login.Ticket!, slot, spaceSectorId, cts.Token);
+
+            var mfgFrames = spaceSession.HandshakeFrames
+                .Where(f => f.Opcode == OpcodeId.Known.ManufactureSetManufactureId.Value)
+                .ToList();
+
+            // Wave 106 pins the 1-frame invariant: SectorLogin space-arm
+            // anchor (SectorManager.cpp:345). Only emit-site reached on the
+            // single-player space-sector handshake dispatch path.
+            var single = Assert.Single(mfgFrames);
+            Assert.Equal(ExpectedMfgIdPayloadLength, single.PayloadLength);
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            try
+            {
+                await using var cleanupGlobal = await EncryptedTcpConnection.ConnectAsync(
+                    _server.GlobalHost, _server.GlobalPort, cleanupCts.Token);
+                await SectorHandshake.SendGlobalConnectAsync(
+                    cleanupGlobal, login.Ticket!, cleanupCts.Token);
+                await SectorHandshake.DrainUntilOpcode(
+                    cleanupGlobal, OpcodeId.Known.GlobalAvatarList.Value, cleanupCts.Token);
+                await SectorHandshake.DeleteCreatedCharacterAsync(
+                    cleanupGlobal, slot, cleanupCts.Token);
+            }
             catch { /* best-effort cleanup */ }
         }
     }

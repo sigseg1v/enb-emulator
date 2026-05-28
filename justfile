@@ -168,58 +168,6 @@ gen-certs:
         echo "deploy/certs/localhost.cer exists, skipping"; \
     fi
 
-# Import deploy/certs/localhost.cer into the cert store the EnB client
-# (a Win32 binary) consults. On Linux/macOS that's a WINE prefix's
-# trusted-root store; on Windows it's the native HKCU\Root store.
-# Idempotent in both cases — re-importing the same cert is a no-op.
-#
-# Without this step the client times out the HTTPS auth with INV-300
-# ("EA.com is temporarily unavailable") because Net7SSL presents a
-# self-signed cert that nothing in the cert store trusts.
-trust-cert:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [ ! -f deploy/certs/localhost.cer ]; then
-        echo "trust-cert: deploy/certs/localhost.cer missing — run 'just init' (or 'just gen-certs') first." >&2
-        exit 1
-    fi
-    case "$(uname -s 2>/dev/null || echo unknown)" in
-        MINGW*|MSYS*|CYGWIN*|Windows_NT)
-            # Native Windows: shell out to the OS-provided certutil. This
-            # writes to HKCU\...\SystemCertificates\Root, which Win32 apps
-            # read at TLS-verify time.
-            echo ">>> importing dev cert into Windows current-user Root store"
-            certutil -addstore -user -f Root deploy/certs/localhost.cer
-            ;;
-        *)
-            # Linux/macOS: client runs under WINE, which keeps its own
-            # per-prefix registry. Build the SerializedStore Blob and
-            # import via `wine reg import`.
-            : "${WINEPREFIX:=$HOME/.wine-enb}"
-            export WINEPREFIX
-            THUMB=$(openssl x509 -in deploy/certs/localhost.cer -noout -fingerprint -sha1 | cut -d= -f2 | tr -d :)
-            TMP=$(mktemp -d)
-            trap 'rm -rf "$TMP"' EXIT
-            openssl x509 -in deploy/certs/localhost.cer -outform DER -out "$TMP/cert.der"
-            DER_LEN=$(wc -c < "$TMP/cert.der")
-            # Blob layout: 4B propID (CERT_CERT_PROP_ID=0x20), 4B reserved (1),
-            # 4B little-endian length, then the DER cert.
-            LEN_LE=$(printf '%08x' "$DER_LEN" | sed 's/\(..\)\(..\)\(..\)\(..\)/\4\3\2\1/')
-            HEX=$(xxd -p -c 9999 "$TMP/cert.der")
-            BLOB="2000000001000000${LEN_LE}${HEX}"
-            FORMATTED=$(echo "$BLOB" | sed 's/\(..\)/\1,/g' | sed 's/,$//')
-            cat > "$TMP/trust.reg" <<EOF
-    Windows Registry Editor Version 5.00
-
-    [HKEY_LOCAL_MACHINE\\Software\\Microsoft\\SystemCertificates\\Root\\Certificates\\$THUMB]
-    "Blob"=hex:$FORMATTED
-    EOF
-            echo ">>> importing dev cert (SHA1 $THUMB) into WINE prefix $WINEPREFIX"
-            wine reg import "$TMP/trust.reg" 2>/dev/null
-            ;;
-    esac
-    echo ">>> done. authlogin.dll should now accept the local TLS handshake."
-
 # Bring up the full runtime stack (postgres + schema-init + server +
 # login + proxy). Server image is built on demand. Streams logs in the
 # foreground; Ctrl-C to stop.
