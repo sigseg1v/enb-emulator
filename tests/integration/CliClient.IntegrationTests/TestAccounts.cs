@@ -112,6 +112,7 @@ public static class TestAccounts
             ["InventorySort_UnrecognisedTargetInv_DoesNotBreakConnection_RequestTimeStillRoundTrips"] = A(9_000_047, "cli_test47"),
             ["ResendPacketSequence_MissPacketNum_DoesNotBreakConnection_RequestTimeStillRoundTrips"]  = A(9_000_048, "cli_test48"),
             ["HandshakeEmitsClientTypeAndGalaxyMapOnSpaceSectorLogin"]                                = A(9_000_049, "cli_test49"),
+            ["HandshakeEmitsServerParametersOnSpaceSectorLogin"]                                      = A(9_000_050, "cli_test50"),
         };
 
     /// <summary>

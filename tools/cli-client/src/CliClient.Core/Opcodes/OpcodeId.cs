@@ -61,6 +61,7 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId ClientType                   = new(0x003C);
         public static readonly OpcodeId AdvancedPositionalUpdate     = new(0x003E);
         public static readonly OpcodeId ConstantPositionalUpdate     = new(0x0040);
+        public static readonly OpcodeId ServerParameters             = new(0x0042);
         public static readonly OpcodeId RequestTime                  = new(0x0044);
         public static readonly OpcodeId ClientShip                   = new(0x0047);
         public static readonly OpcodeId StarbaseRequest              = new(0x004E);

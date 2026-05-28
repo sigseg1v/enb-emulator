@@ -478,4 +478,175 @@ public sealed class SectorHandshakeFanoutTests
         }
     }
 
+    /// <summary>
+    /// Wave 53 passive-observation +1 ratchet: assert that 0x0042
+    /// SERVER_PARAMETERS appears in the captured handshake stream when
+    /// the LOGIN packet targets a SPACE sector. SERVER_PARAMETERS is
+    /// emitted exclusively from the SPACE-sector branch of stage-2
+    /// dispatch (<c>SectorManager::HandleSectorLogin2</c> at
+    /// <c>server/src/SectorManager.cpp:295-304</c>):
+    /// <c>SectorManager::SectorLogin2</c>
+    /// (<c>server/src/SectorManager.cpp:354-380</c>) calls
+    /// <c>SendServerParameters(player)</c> at line 364, which builds a
+    /// <c>ServerParameters</c> struct and emits
+    /// <c>SendOpcode(ENB_OPCODE_0042_SERVER_PARAMETERS, ..., sizeof(parameters))</c>
+    /// at <c>SectorManager.cpp:292</c>.
+    /// <c>SectorManager::StationLogin2</c>
+    /// (<c>server/src/SectorManager.cpp:507-535</c>) — the m_SectorID&gt;9999
+    /// branch — does NOT call <c>SendServerParameters</c>, which is why
+    /// no prior handshake-fanout test using sectorId=10151 (Luna Station)
+    /// ever captured 0x0042.
+    ///
+    /// <para>
+    /// Builds on Wave 52's 2-stage login pattern: stage 1 establishes the
+    /// character at the StartSector (Luna Station, 10151) so
+    /// <c>ReadSavedData</c> takes the
+    /// <c>ReInitializeSavedData</c> seed path; stage 2 reconnects (no
+    /// char-create) targeting space sector 1015, where
+    /// <c>ReadSavedData</c> takes the <c>ReloadSavedData</c> path that
+    /// preserves the sector_num set by <c>HandleLogin</c>
+    /// (<c>PlayerSaves.cpp:289-291</c>). The reconnect's stage machine
+    /// then walks SectorLogin → SectorLogin2 → SectorLogin3, and the
+    /// SectorLogin2 SendServerParameters emit lands in the captured
+    /// HandshakeOpcodes list.
+    /// </para>
+    ///
+    /// <para>
+    /// Why a separate test from Wave 52 (which already runs the same
+    /// 2-stage login): clean per-wave failure attribution and isolated
+    /// account ownership — if Wave 53 ever fails it's specifically the
+    /// SERVER_PARAMETERS emit (or SectorLogin2 dispatch) that broke,
+    /// not the SectorLogin (stage-1) GALAXY_MAP/CLIENT_TYPE path.
+    /// Conceptually 0x0042 lives in a different dispatch sub-stage
+    /// (HandleSectorLogin2, not HandleSectorLogin) so collapsing them
+    /// into one test would lose that signal.
+    /// </para>
+    ///
+    /// <para>
+    /// 0x0042 wire layout: the <c>ServerParameters</c> struct at
+    /// <c>SectorManager.cpp:264-291</c> packs four float speed
+    /// multipliers, four float backdrop scalars, and a backdrop
+    /// base-asset int — the receiving client reads it once at
+    /// SectorLogin2 time to set sector-wide ship-speed scalars and the
+    /// skybox. The struct is currently 36 bytes per the canonical
+    /// <c>ServerParameters</c> definition in
+    /// <c>common/include/net7/PacketStructures.h</c>; a sizeof regression
+    /// here would still produce opcode 0x0042 but with a mangled
+    /// payload (assertion would pass at opcode level but a future
+    /// typed-codec wave would catch the byte-layout drift).
+    /// </para>
+    ///
+    /// <para>
+    /// Why this is a legit +1 ratchet (not a Coverage-Cheat). 0x0042 is
+    /// a server-originated emit that has always been produced on every
+    /// space-sector stage-2 handshake — it just wasn't observed because
+    /// no prior test reached stage 2 on the SectorLogin path. No new
+    /// server behaviour, no new permissiveness, no widened input
+    /// acceptance. Per CLAUDE.md server-integrity, this is exactly the
+    /// "tightening" the rule welcomes.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression classes this catches.
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b>SectorLogin2 dispatch-branch deletion.</b> If
+    ///     <c>HandleSectorLogin2</c>'s SPACE-vs-station split
+    ///     (<c>SectorManager.cpp:297-303</c>) collapses to "always
+    ///     StationLogin2", 0x0042 would silently vanish from the
+    ///     space-sector handshake.
+    ///   </item>
+    ///   <item>
+    ///     <b>SendServerParameters removal or guard regression.</b> Any
+    ///     conditional gate around <c>SendServerParameters(player)</c> at
+    ///     <c>SectorManager.cpp:364</c> (e.g. only emitting for certain
+    ///     sector_data flags) would break the assertion. The current
+    ///     handler is unconditional.
+    ///   </item>
+    ///   <item>
+    ///     <b>SendOpcode header-width revert at
+    ///     <c>PlayerConnection.cpp:127</c>.</b> Would corrupt every
+    ///     inner opcode in the 0x2016 PACKET_SEQUENCE parser; 0x0042
+    ///     would not appear under its correct label.
+    ///   </item>
+    ///   <item>
+    ///     <b>Proxy SendClientPacketSequence inner-opcode guard
+    ///     tightening at <c>proxy/UDPProxyToClient_linux.cpp:568</c>.</b>
+    ///     Currently passes 0x0042 (&lt; 0x0FFF). A regression to a
+    ///     tighter upper bound would silently drop it from the wire.
+    ///   </item>
+    ///   <item>
+    ///     <b>SectorLogin2 stage-machine progression regression.</b> If
+    ///     <c>PlayerManager::ProcessNextLoginStage</c> stops advancing
+    ///     past HandleSectorLogin into HandleSectorLogin2, the entire
+    ///     SectorLogin2 emit fan (0x0042 plus SendShipInfo's downstream
+    ///     ItemBase/AuxData chain, SendAllNavs, etc.) would be missing
+    ///     from the captured stream. 0x0042 is the cleanest single-emit
+    ///     signal for that stage being reached.
+    ///   </item>
+    ///   <item>
+    ///     <b>DoSectorLoginUntilStartAsync drain-loop regression
+    ///     (<c>Opcodes/SectorHandshake.cs:330-346</c>).</b> Same as
+    ///     Wave 34/35/52 — exercises the capture path itself.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Budget: 120s (same as Wave 52 — the 2-stage login pattern needs
+    /// time for the explicit logoff round-trip between stages).
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task HandshakeEmitsServerParametersOnSpaceSectorLogin()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int stationSectorId = 10151;
+        const int spaceSectorId = 1015;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        var stationSession = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, stationSectorId,
+            firstName: "SrvParam", shipName: "SrvParamShip", cts.Token);
+
+        try
+        {
+            byte[] logoffPayload = new byte[8];
+            await stationSession.Sector.SendAsync(
+                Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
+                cts.Token);
+            await SectorHandshake.DrainUntilOpcode(
+                stationSession.Sector, OpcodeId.Known.LogoffConfirmation.Value, cts.Token);
+            await stationSession.DisposeAsync();
+
+            await using var spaceSession = await SectorHandshake.ReestablishAsync(
+                _server, login.Ticket!, slot, spaceSectorId, cts.Token);
+
+            Assert.Contains(OpcodeId.Known.ServerParameters.Value, spaceSession.HandshakeOpcodes);
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            try
+            {
+                await using var cleanupGlobal = await N7.CliClient.Net.EncryptedTcpConnection.ConnectAsync(
+                    _server.GlobalHost, _server.GlobalPort, cleanupCts.Token);
+                await SectorHandshake.SendGlobalConnectAsync(
+                    cleanupGlobal, login.Ticket!, cleanupCts.Token);
+                await SectorHandshake.DrainUntilOpcode(
+                    cleanupGlobal, OpcodeId.Known.GlobalAvatarList.Value, cleanupCts.Token);
+                await SectorHandshake.DeleteCreatedCharacterAsync(
+                    cleanupGlobal, slot, cleanupCts.Token);
+            }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
 }
