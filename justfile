@@ -109,18 +109,19 @@ init: gen-certs
     @echo ">>> init complete. Next: 'just run-stack'"
 
 # Generate the self-signed dev cert pair the server expects to find at
-# CWD as <g_DomainName>.cer / .pem (SSL_Listener.cpp:56-57).
+# CWD as <g_DomainName>.cer / .pem (SSL_Listener.cpp:56-57). Phase V
+# switched g_DomainName from local.net-7.org to localhost.
 gen-certs:
     @mkdir -p deploy/certs
-    @if [ ! -f deploy/certs/local.net-7.org.cer ]; then \
-        echo ">>> generating self-signed cert for local.net-7.org"; \
+    @if [ ! -f deploy/certs/localhost.cer ]; then \
+        echo ">>> generating self-signed cert for localhost"; \
         openssl req -x509 -newkey rsa:2048 -days 3650 -nodes \
-            -subj "/CN=local.net-7.org/O=Earth-and-Beyond Emulator Dev/C=US" \
-            -addext "subjectAltName=DNS:local.net-7.org,DNS:localhost,IP:127.0.0.1" \
-            -keyout deploy/certs/local.net-7.org.pem \
-            -out    deploy/certs/local.net-7.org.cer; \
+            -subj "/CN=localhost/O=Earth-and-Beyond Emulator Dev/C=US" \
+            -addext "subjectAltName=DNS:localhost,DNS:local.net-7.org,IP:127.0.0.1" \
+            -keyout deploy/certs/localhost.pem \
+            -out    deploy/certs/localhost.cer; \
     else \
-        echo "deploy/certs/local.net-7.org.cer exists, skipping"; \
+        echo "deploy/certs/localhost.cer exists, skipping"; \
     fi
 
 # Bring up the full runtime stack (postgres + schema-init + server +

@@ -88,8 +88,8 @@ services:
       - ./deploy/Net7Config.cfg:/app/Net7Config.cfg:ro
       # SSL_Listener.cpp:56-57 reads "<g_DomainName>.cer" and "<g_DomainName>.pem"
       # from CWD. Certs are generated into deploy/certs by `just gen-certs`.
-      - ./deploy/certs/local.net-7.org.cer:/app/local.net-7.org.cer:ro
-      - ./deploy/certs/local.net-7.org.pem:/app/local.net-7.org.pem:ro
+      - ./deploy/certs/localhost.cer:/app/localhost.cer:ro
+      - ./deploy/certs/localhost.pem:/app/localhost.pem:ro
       # SERVER_DATABASE_PATH (Net7.h:143) = "../database/" relative to CWD.
       # With WORKDIR=/app, that resolves to /database/.
       - ./server/data:/database:ro
@@ -187,8 +187,8 @@ services:
     volumes:
       # SSL_Listener.cpp reads "<g_DomainName>.cer" and "<g_DomainName>.pem"
       # from CWD; the same certs the server container uses also work here.
-      - ./deploy/certs/local.net-7.org.cer:/app/local.net-7.org.cer:ro
-      - ./deploy/certs/local.net-7.org.pem:/app/local.net-7.org.pem:ro
+      - ./deploy/certs/localhost.cer:/app/localhost.cer:ro
+      - ./deploy/certs/localhost.pem:/app/localhost.pem:ro
       # Phase J IPC: shares the AF_UNIX SOCK_DGRAM sockets with the server
       # container (Net7SSL writes /run/net7-ipc/net7.sock,
       # reads /run/net7-ipc/net7SSL.sock; server is the mirror).

@@ -268,10 +268,10 @@ jobs:
         run: |
           mkdir -p deploy/certs
           openssl req -x509 -newkey rsa:2048 -days 365 -nodes \
-            -subj "/CN=local.net-7.org/O=Earth-and-Beyond Emulator Dev/C=US" \
-            -addext "subjectAltName=DNS:local.net-7.org,DNS:localhost,IP:127.0.0.1" \
-            -keyout deploy/certs/local.net-7.org.pem \
-            -out    deploy/certs/local.net-7.org.cer
+            -subj "/CN=localhost/O=Earth-and-Beyond Emulator Dev/C=US" \
+            -addext "subjectAltName=DNS:localhost,DNS:local.net-7.org,IP:127.0.0.1" \
+            -keyout deploy/certs/localhost.pem \
+            -out    deploy/certs/localhost.cer
       - name: Bring up docker-compose stack (mysql + login + proxy + server)
         run: |
           docker compose up -d --wait mysql login proxy server

@@ -16,7 +16,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 �, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
 **
 */
 
