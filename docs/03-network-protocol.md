@@ -29,22 +29,39 @@ mind.
 
 ## 1. Transport overview
 
-There are five distinct transports in the code base:
+There are six distinct transports in the code base:
 
 | Transport | Where | Speakers | Status |
 |---|---|---|---|
-| HTTPS (TLS over TCP) | port 443 | EnB client (via Net7Proxy) <-> login | Active |
+| **HTTP (plaintext)** | **127.0.0.1:4180 (loopback only)** | **EnB client (authlogin.dll) <-> LocalAuthRelay (in-launcher)** | **Active** |
+| HTTPS (TLS over TCP) | port 443 | LocalAuthRelay <-> Net7SSL (loopback or remote) | Active |
 | TCP (Westwood RSA+RC4) | ports 3801, 3805, 3501+ | Legacy direct client connection | Deleted (Phase Q) — handshake moved into the proxy |
 | TCP | port 3500 (Net7Proxy local) | EnB client <-> Net7Proxy | Active |
 | UDP | ports 3806, 3808, 3809, sector dynamic | Net7Proxy <-> server | Active (game) |
 | UDP loopback | between server and login | server <-> login | Active (auth handoff) |
 | AF_UNIX SOCK_DGRAM | `/run/net7-ipc/` | server <-> login | Active (liveness pings, post-Phase M) |
 
-The EnB game client itself only knows TCP and HTTPS. Net7Proxy
-intercepts the TCP and translates to UDP. The reason for the rewrite
-(according to comments in `server/src/ServerManager.cpp:147-159`) was
-to push more of the connection handling to the client side and avoid
-holding hundreds of open TCP sockets on the server.
+The EnB game client itself only knows TCP and HTTPS. Two loopback
+middlemen sit between the client and anything that crosses the host's
+network interfaces:
+
+- **LocalAuthRelay** terminates the client's HTTPS-auth call on
+  loopback (as plaintext HTTP) and re-wraps it as TLS to the upstream
+  auth server. See §3.3 and §5.1.
+- **Net7Proxy** terminates the client's plaintext-TCP game connection
+  on loopback and translates to UDP (Westwood RSA+RC4) toward the
+  server. See §3.1 and §5.3.
+
+Net-traffic invariant — read this carefully:
+
+> **No plaintext HTTP, and no plaintext TCP game traffic, ever leaves
+> the local machine.** The two loopback middlemen above are the only
+> things on the box that *can* speak to a remote host, and both of
+> them always speak TLS (LocalAuthRelay) or Westwood RSA+RC4
+> (Net7Proxy) outbound. There is no config flag, env var, settings
+> file, registry key, or CLI argument that can move the client off
+> loopback or downgrade either middleman's outbound transport to
+> plaintext. See §3.3 for the proof on the auth path.
 
 ---
 
@@ -180,8 +197,104 @@ production.
 For sniffing: a tcpdump of UDP between client host and server host
 will show readable opcodes and structure data.
 
-### 3.3. HTTPS (auth)
+### 3.3. HTTPS (auth) and the LocalAuthRelay
 
+The auth path has three hops, only one of which crosses the host's
+network interface:
+
+```
+  EnB.exe (authlogin.dll)          LocalAuthRelay              Net7SSL
+  ────────────────────────         ───────────────             ───────
+  HTTP/1.x plaintext      ───►     accept on                   accept on
+  to 127.0.0.1:4180                127.0.0.1:4180              :443 TLS
+  (loopback, never                 (loopback bind —
+   reaches a NIC)                   IPAddress.Loopback)
+                                          │
+                                          ▼
+                                   SslStream wrap as
+                                   TLS 1.2 or 1.3
+                                   to upstream:443        ───► TLS handshake,
+                                                               request, response
+                                          ▲
+                                          │
+                                   plaintext bytes        ◄──── TLS response
+                                   relayed back to              decrypted
+                                   the client socket
+```
+
+**Hop 1 — client ↔ relay (loopback HTTP, plaintext).**
+`authlogin.dll` always speaks plaintext HTTP to `127.0.0.1:4180`. The
+launcher's `Patching/AuthLoginPatcher.cs` byte-patches the dll at fixed
+offsets every launch:
+- `0x82AD` (port, 2 bytes LE) → `LocalAuthRelay.ListenPort = 4180` (const).
+- `0x8328` (HTTPS flag) → `0x40` (HTTP), never `0xC0` (HTTPS).
+- `Software\EACom\AuthAuth\AuthLoginServer` registry value → `"localhost"`.
+
+`Launcher.PatchAuthLoginFile` writes those values unconditionally — they
+are not driven by any setting. `_setting.AuthenticationPort` (the only
+auth-port field in the launcher) is the *upstream* port the relay dials
+on hop 2, not what the dll speaks on the wire.
+`WindowsRegistryHelpers.EnsureRegistered` hardcodes the same registry
+value on Windows for parity. The relay's TcpListener binds
+`IPAddress.Loopback` specifically (not `IPAddress.Any`).
+
+Plaintext bytes on this hop never traverse a NIC. They live entirely
+inside the kernel's loopback path. An off-host attacker would need to
+already own the loopback interface (i.e. be root on the box) to MITM.
+
+**Hop 2 — relay ↔ upstream Net7SSL (TLS, always).**
+`LocalAuthRelay.HandleClient` (in `tools/launchnet7-avalonia/Network/LocalAuthRelay.cs`)
+opens a TCP connection to the user-configured upstream host/port and
+wraps it in `SslStream` with `EnabledSslProtocols = Tls12 | Tls13`.
+Cert validation policy splits by upstream, **decided syntactically
+with no DNS lookup**:
+
+| Upstream | Verify | Why |
+|---|---|---|
+| `localhost` or `IPAddress.IsLoopback(parsed-IP)` | skip (`userCertificateValidationCallback => true`) | Dev self-signed cert is on the same box; the only attacker who could MITM loopback already owns the box. |
+| anything else | full validation against the OS trust store (`userCertificateValidationCallback = null`) | A remote deploy ships a real CA-signed cert. |
+
+The syntactic check matters: if the relay resolved the host first, a
+poisoned DNS answer claiming `prod.example.com → 127.0.0.1` would
+downgrade verify. With a syntactic check, only literal `localhost`,
+`127.0.0.0/8`, and `::1` qualify.
+
+**Hop 3 — Net7SSL ↔ Net7 server (UDP loopback opcodes).**
+Once auth succeeds, Net7SSL hands off the ticket to the Net7 server
+process over UDP loopback (opcodes `0x4003` `SSL_AVATARLOGIN_SSL_S` and
+`0x4004` `SSL_AVATARCONFIRM_S_SSL`; see §5.1). This is between two
+processes on the same host — when Net7SSL and Net7 are in the same
+docker network they share the bridge; in a single-host dev stack they
+are on `lo`.
+
+**Net-traffic guarantee — no plaintext HTTP escapes the box, period.**
+
+The only places in the launcher's source where a port + scheme combine
+to make an HTTP URL the client sees are:
+
+1. `Launcher.PatchAuthLoginFile` — hardcoded `Port=4180, UseHttps=false`
+   (the const + literal pair, with no setting feeding either value).
+2. `Launcher.PatchAuthIniFile` — `Auth.ini` URLs (`AAIUrl`, `LKeyUrl`).
+   Scheme is hardcoded `https` in the source; host is the *registration*
+   hostname, which the launcher writes to `_setting.Hostname` or
+   `_setting.RegistrationHostname` (default `localhost` in `play-local`).
+3. `Launcher.PatchRegDataFile` — `rg_regdata.ini`'s `regserverurl`.
+   Same hardcoded `https` and same registration hostname as (2).
+
+Of these, (1) is the only HTTP-bound endpoint, and its target is
+*literally* `127.0.0.1:4180` — a constant in the source tree, not a
+setting. (2) and (3) are hardcoded `https://`, period; the launcher
+has no code path that ever writes `http://` to those keys.
+
+There is **no config option, no env var, no command-line flag, and
+no settings.json key** that points authlogin.dll, `AAIUrl`, `LKeyUrl`,
+or `regserverurl` at a non-loopback host with the `http` scheme. The
+relay's `ListenPort` is `const ushort`, not a settable field. The
+relay's loopback bind is hardcoded `IPAddress.Loopback`, not a
+settable field. The `IsLoopback` check is syntactic, so DNS poisoning
+cannot downgrade hop 2's TLS.
+
+**OpenSSL.**
 The login process uses OpenSSL. Dev cert files are generated by
 `just gen-certs` into `deploy/certs/` and mounted into the container
 at runtime. The server links against **system OpenSSL 3.x**
@@ -189,6 +302,12 @@ at runtime. The server links against **system OpenSSL 3.x**
 OpenSSL 1.0 header tree that used to live at `server/src/openssl/`
 was deleted in Phase O+ (2026-05-24) once the include order was
 fixed to prefer the system headers.
+
+The relay's TLS uses .NET's `SslStream` (the runtime's OpenSSL on
+Linux, schannel on Windows). The dev cert it talks to on hop 2 is
+the same OpenSSL-3-signed cert Net7SSL serves on `:443`. There is no
+WINE-side schannel in the auth path anymore — the WINE prefix only
+sees plaintext on loopback, which schannel never touches.
 
 ---
 
@@ -199,7 +318,8 @@ across the three trees):
 
 | Port | Macro | Transport | Speakers |
 |---|---|---|---|
-| 443 | `SSL_PORT` | TCP/TLS | EnB client (via proxy) <-> Net7SSL |
+| **4180** | **`LocalAuthRelay.ListenPort`** | **TCP/HTTP plaintext, loopback-only** | **EnB client (authlogin.dll) <-> LocalAuthRelay** |
+| 443 | `SSL_PORT` | TCP/TLS | LocalAuthRelay <-> Net7SSL (upstream) |
 | 3500 | (Net7Proxy) | TCP | EnB client <-> Net7Proxy (local) |
 | 3501 | `SECTOR_SERVER_PORT` | TCP (legacy) | starts here, incremented per sector |
 | 3801 | `MASTER_SERVER_PORT` | TCP (legacy) | client <-> master |
@@ -234,21 +354,26 @@ to the exact handler in source.
 
 ```mermaid
 sequenceDiagram
-    participant Client as EnB.exe
+    participant Client as EnB.exe (authlogin.dll)
+    participant Relay as LocalAuthRelay (in-launcher)
     participant Proxy as Net7Proxy
     participant SSL as Net7SSL
     participant Net7 as Net7
 
-    Client->>Proxy: TCP connect localhost:3500
-    Proxy->>Proxy: do TCP RSA+RC4 handshake with client
-    Client->>Proxy: HTTPS auth request (user/pass)
-    Proxy->>SSL: HTTPS over TLS to :443
-    SSL->>SSL: validate creds against MySQL ticket DB
+    Note over Client,Relay: hop 1 — loopback HTTP (plaintext)
+    Client->>Relay: HTTP POST to 127.0.0.1:4180 (user/pass)
+    Note over Relay,SSL: hop 2 — TLS to upstream (always)
+    Relay->>SSL: HTTPS over TLS to upstream:443
+    SSL->>SSL: validate creds against ticket DB
+    Note over SSL,Net7: hop 3 — UDP loopback opcodes
     SSL->>Net7: UDP 0x4003 SSL_AVATARLOGIN_SSL_S
     Net7->>Net7: allocate player slot in GMemoryHandler
     Net7-->>SSL: UDP 0x4004 SSL_AVATARCONFIRM_S_SSL
-    SSL-->>Proxy: HTTPS auth OK + ticket
-    Proxy-->>Client: auth OK
+    SSL-->>Relay: HTTPS auth OK + ticket
+    Relay-->>Client: HTTP auth OK + ticket (plaintext, loopback)
+    Note over Client,Proxy: game data plane (separate path, see §5.3)
+    Client->>Proxy: TCP connect localhost:3500
+    Proxy->>Proxy: do TCP RSA+RC4 handshake with client
 ```
 
 The interesting handlers:

@@ -247,10 +247,13 @@ dev: run-stack-bg
 #                                      ports as the docker proxy.
 #   3. `just build-proxy-win64`      — idempotent; ensures bin/Net7Proxy.exe.
 #   4. Pre-writes LaunchNet7.settings.json so the launcher opens with
-#      Emulator=Net7Local, Host=localhost, SSL on, port 4443 (the dev
-#      stack's host-side mapping of the login container's 443).
-#   5. Runs the launcher with NET7_UPSTREAM_HOST=localhost so the spawned
-#      WINE proxy knows where to forward.
+#      Emulator=Net7Local, Host=localhost, port 4443 (the dev stack's
+#      host-side mapping of the login container's 443). The launcher's
+#      in-process LocalAuthRelay terminates the client's plaintext-HTTP
+#      auth call on 127.0.0.1 and re-wraps it as TLS to the upstream —
+#      so we don't need the WINE prefix to trust the dev cert (verify
+#      is skipped only because upstream is loopback).
+#   5. Runs the launcher so the spawned WINE proxy knows where to forward.
 #
 # Click Play in the GUI; the client should connect to the local server.
 play-local CLIENT_PATH='':
@@ -267,11 +270,6 @@ play-local CLIENT_PATH='':
 
     echo ">>> bringing up local stack (postgres + server + login)"
     just run-stack-bg
-
-    echo ">>> ensuring dev cert is trusted by the WINE prefix"
-    : "${WINEPREFIX:=$HOME/.wine-enb}"
-    export WINEPREFIX
-    WINEPREFIX="$WINEPREFIX" just trust-cert
 
     echo ">>> stopping docker proxy if running (WINE proxy will take its place)"
     just stop-docker-proxy >/dev/null 2>&1 || true

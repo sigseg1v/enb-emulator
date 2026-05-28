@@ -35,6 +35,7 @@ namespace LaunchNet7Avalonia
         readonly UserSettings _user;
         LauncherConfig _config;
         HostConfig _lastSelectedHost;
+        Launcher _activeLauncher;
 
         public MainWindow()
         {
@@ -101,6 +102,7 @@ namespace LaunchNet7Avalonia
             _user.FormMainPositionX = Position.X;
             _user.FormMainPositionY = Position.Y;
             _user.Save();
+            _activeLauncher?.AuthRelay?.Dispose();
         }
 
         static string ResolveConfigPath()
@@ -201,9 +203,7 @@ namespace LaunchNet7Avalonia
                 return;
             }
 
-            c_TextBox_Port.Text = host.SupportsSecureAuthentication
-                ? host.SecureAuthenticationPort.ToString()
-                : host.AuthenticationPort.ToString();
+            c_TextBox_Port.Text = host.AuthenticationPort.ToString();
 
             if (emu.IsSinglePlayer)
             {
@@ -221,15 +221,13 @@ namespace LaunchNet7Avalonia
 
         int GetProbePort(HostConfig host)
         {
-            // Probe the currently-configured auth port (Net7SSL's HTTPS or
-            // HTTP endpoint). Reachability here means "the login server is
-            // up and the client can talk to it" — the canonical liveness
-            // signal for the dev stack and for any remote server too.
+            // Probe the upstream auth port (Net7SSL's TLS endpoint).
+            // Reachability here means "the login server is up and the client
+            // can talk to it" — the canonical liveness signal for the dev
+            // stack and any remote server.
             if (int.TryParse(c_TextBox_Port.Text, out var p) && p > 0 && p < 65536)
                 return p;
-            return host.SupportsSecureAuthentication
-                ? host.SecureAuthenticationPort
-                : host.AuthenticationPort;
+            return host.AuthenticationPort;
         }
 
         async Task CheckServerStatusAsync(string host, int port)
@@ -311,14 +309,9 @@ namespace LaunchNet7Avalonia
                 return;
             }
 
-            // HTTPS is always on; the client-detours and local-cert flows
-            // are wired up by the `just` recipes, not the launcher.
-            _setting.UseSecureAuthentication = true;
-            _setting.AuthenticationPort      = port;
-            _setting.Hostname                = host.Hostname;
-            _setting.LaunchName              = emu.GetLaunchName();
-            _setting.UseClientDetours        = false;
-            _setting.UseLocalCert            = false;
+            _setting.AuthenticationPort = port;
+            _setting.Hostname           = host.Hostname;
+            _setting.LaunchName         = emu.GetLaunchName();
 
             // Persist
             _user.AuthenticationPort = c_TextBox_Port.Text;
@@ -330,7 +323,9 @@ namespace LaunchNet7Avalonia
             {
                 var launcher = new Launcher(_setting, AppendLog);
                 launcher.Launch();
-                Close();
+                _activeLauncher = launcher;
+                c_Status.Text       = "Client running. Hit Quit when you're done to tear everything down.";
+                c_Button_Play.IsEnabled = false;
             }
             catch (Exception ex)
             {

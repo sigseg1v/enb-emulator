@@ -5,6 +5,7 @@ using System.IO;
 using System.Net;
 using System.Runtime.InteropServices;
 using LaunchNet7Avalonia.Config;
+using LaunchNet7Avalonia.Network;
 using LaunchNet7Avalonia.Patching;
 
 namespace LaunchNet7Avalonia
@@ -34,12 +35,9 @@ namespace LaunchNet7Avalonia
         public string CommonDirectoryName => Path.Combine(BaseFolder ?? "", "Data", "common");
 
         public int    AuthenticationPort       { get; set; } = 443;
-        public bool   UseSecureAuthentication  { get; set; } = true;
         public string Hostname                 { get; set; }
         public string RegistrationHostname     { get; set; }
         public string LaunchName               { get; set; }
-        public bool   UseClientDetours         { get; set; }
-        public bool   UseLocalCert             { get; set; }
 
         public string EffectiveRegistrationHostname
             => string.IsNullOrEmpty(RegistrationHostname) ? Hostname : RegistrationHostname;
@@ -56,8 +54,14 @@ namespace LaunchNet7Avalonia
             _warn = warn ?? (_ => { });
         }
 
+        // The relay's lifetime is tied to the launcher process. MainWindow
+        // keeps the window open after Play so the relay (and the spawned
+        // wine proxy + client) all stay up until the user hits Quit.
+        public LocalAuthRelay AuthRelay { get; private set; }
+
         public void Launch()
         {
+            StartLocalAuthRelay();
             PatchAuthLoginFile();
             PatchRegDataFileNames();
             PatchRegDataFile();
@@ -127,25 +131,9 @@ namespace LaunchNet7Avalonia
             if (addrs.Length == 0)
                 throw new InvalidOperationException($"Could not resolve hostname '{_setting.Hostname}'.");
 
-            ProcessStartInfo info;
-            if (_setting.UseClientDetours)
-            {
-                var dir  = Path.Combine(Directory.GetCurrentDirectory(), "bin");
-                var exe  = Path.Combine(dir, "Detours.exe");
-                // GetShortPathName was a Windows-only helper to avoid spaces
-                // in the path. The client accepts the long form too; we just
-                // skip the 8.3 conversion on non-Windows and pass the path
-                // as-is.
-                var clientPath = OnWindows ? ShortPath.Get(_setting.ClientPath) : _setting.ClientPath;
-                info = WinExe(dir, exe,
-                    $"/ADDR:{addrs[0]} /CLIENT:\"{clientPath}\"");
-            }
-            else
-            {
-                var dir = Path.GetDirectoryName(_setting.ClientPath);
-                info = WinExe(dir, _setting.ClientPath,
-                    $"-SERVER_ADDR {addrs[0]} -PROTOCOL TCP");
-            }
+            var dir = Path.GetDirectoryName(_setting.ClientPath);
+            var info = WinExe(dir, _setting.ClientPath,
+                $"-SERVER_ADDR {addrs[0]} -PROTOCOL TCP");
 
             try { Process.Start(info); }
             catch (Exception e)
@@ -163,13 +151,7 @@ namespace LaunchNet7Avalonia
 
             var dir = Path.Combine(Directory.GetCurrentDirectory(), "bin");
             var exe = Path.Combine(dir, "Net7Proxy.exe");
-            var args = $"/ADDRESS:{addrs[0]}";
-            if (_setting.UseLocalCert)
-            {
-                args += " /LC";
-                args += $" /SSL:{_setting.AuthenticationPort}";
-            }
-            var info = WinExe(dir, exe, args);
+            var info = WinExe(dir, exe, $"/ADDRESS:{addrs[0]}");
 
             try { Process.Start(info); }
             catch (Exception e)
@@ -206,7 +188,7 @@ namespace LaunchNet7Avalonia
 
             if (!File.Exists(file) && File.Exists(backup)) File.Copy(backup, file);
 
-            var host = _setting.UseLocalCert ? "local.net-7.org" : _setting.Hostname;
+            var host = _setting.Hostname;
             string[] sections =
             {
                 "MasterServer","RegisterServer","ReporterServer",
@@ -234,15 +216,14 @@ namespace LaunchNet7Avalonia
             var backup = Path.Combine(_setting.IniDirectoryName, "Auth.ini.orig");
             if (!File.Exists(file) && File.Exists(backup)) File.Copy(backup, file);
 
-            var regHost = _setting.UseLocalCert ? "local.net-7.org" : _setting.EffectiveRegistrationHostname;
-            var builder = new UriBuilder
+            var regHost = _setting.EffectiveRegistrationHostname;
+            var url = new UriBuilder
             {
-                Scheme = _setting.UseSecureAuthentication ? "https" : "http",
+                Scheme = "https",
                 Host   = regHost,
                 Path   = "misc/touchsession.jsp",
                 Query  = "lkey=%s",
-            };
-            var url = builder.ToString();
+            }.ToString();
 
             bool needPatch =
                 !string.Equals(IniFile.GetValue(file, "General", "AAIUrl"),  regHost, StringComparison.OrdinalIgnoreCase) ||
@@ -260,14 +241,12 @@ namespace LaunchNet7Avalonia
             var backup = Path.Combine(_setting.IniDirectoryName, "rg_regdata.ini.orig");
             if (!File.Exists(file) && File.Exists(backup)) File.Copy(backup, file);
 
-            var regHost = _setting.UseLocalCert ? "local.net-7.org" : _setting.EffectiveRegistrationHostname;
-            var builder = new UriBuilder
+            var url = new UriBuilder
             {
-                Scheme = _setting.UseSecureAuthentication ? "https" : "http",
-                Host   = regHost,
+                Scheme = "https",
+                Host   = _setting.EffectiveRegistrationHostname,
                 Path   = "subsxml",
-            };
-            var url = builder.ToString();
+            }.ToString();
 
             if (string.Equals(IniFile.GetValue(file, "Connection", "regserverurl"), url, StringComparison.OrdinalIgnoreCase))
                 return;
@@ -291,19 +270,37 @@ namespace LaunchNet7Avalonia
 
         void PatchAuthLoginFile()
         {
+            // authlogin.dll always dials 127.0.0.1:LocalAuthRelay.ListenPort plaintext.
+            // The relay terminates on loopback and re-wraps as TLS to the upstream.
             try
             {
                 var info = AuthLoginPatcher.ReadInformation(_setting.AuthLoginFileName);
-                if (info.Port != _setting.AuthenticationPort || info.UseHttps != _setting.UseSecureAuthentication)
+                if (info.Port != LocalAuthRelay.ListenPort || info.UseHttps)
                 {
-                    info.Port     = (ushort)_setting.AuthenticationPort;
-                    info.UseHttps = _setting.UseSecureAuthentication;
+                    info.Port     = (ushort)LocalAuthRelay.ListenPort;
+                    info.UseHttps = false;
                     AuthLoginPatcher.WriteInformation(_setting.AuthLoginFileName, info);
                 }
             }
             catch (Exception e)
             {
                 throw new ApplicationException("Could not patch AuthLogin.dll.", e);
+            }
+        }
+
+        void StartLocalAuthRelay()
+        {
+            try
+            {
+                AuthRelay?.Dispose();
+                AuthRelay = LocalAuthRelay.Start(
+                    upstreamHost: _setting.Hostname,
+                    upstreamPort: _setting.AuthenticationPort,
+                    log:          _warn);
+            }
+            catch (Exception e)
+            {
+                throw new ApplicationException("Could not start local auth relay.", e);
             }
         }
 
@@ -320,16 +317,15 @@ namespace LaunchNet7Avalonia
             }
 
             // Under WINE we have to write the per-prefix registry ourselves.
-            // The key that matters for redirection is
-            // HKLM\Software\EACom\AuthAuth\AuthLoginServer: authlogin.dll
-            // reads it on every login and falls back to "www.ea.com" if
-            // missing. Network.ini / Auth.ini / rg_regdata.ini already get
-            // rewritten elsewhere in this flow, but the dll itself ignores
-            // them — only the registry value controls who it dials.
-            var host = _setting.UseLocalCert ? "local.net-7.org" : _setting.Hostname;
+            // AuthLoginServer is HARDCODED to "localhost" — authlogin.dll
+            // always dials the in-process LocalAuthRelay on loopback, which
+            // re-wraps the call as TLS to the actual upstream. There is no
+            // user-facing knob for this value; changing it would let plaintext
+            // bytes leave the box, which is exactly what the relay exists to
+            // prevent.
             (string key, string value, string type, string data)[] entries =
             {
-                (@"HKLM\Software\EACom\AuthAuth",                       "AuthLoginServer",      "REG_SZ",   host),
+                (@"HKLM\Software\EACom\AuthAuth",                       "AuthLoginServer",      "REG_SZ",   "localhost"),
                 (@"HKLM\Software\EACom\AuthAuth",                       "AuthLoginBaseService", "REG_SZ",   "AuthLogin"),
                 (@"HKLM\Software\Westwood Studios\Earth and Beyond\Registration",
                                                                         "Registered",           "REG_DWORD","1"),
