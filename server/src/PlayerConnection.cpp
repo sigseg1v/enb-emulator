@@ -1068,9 +1068,11 @@ void Player::PointEffect(float *position, short effect_id, float scale)
 	SendOpcode(ENB_OPCODE_000A_POINT_EFFECT, point_data, sizeof(point_data));				
 }
 
-void Player::SendClientType(long client_type)
+void Player::SendClientType(int32_t client_type)
 {
-	//LogMessage("Sending ClientType packet\n");
+	// Wire client_type field is canonical 4-byte int32. Storing it as
+	// `long` would emit 8 bytes on LP64 platforms via sizeof(client_type)
+	// below, diverging from the retail Win32 wire shape (LP32 long).
 	SendOpcode(ENB_OPCODE_003C_CLIENT_TYPE, (unsigned char *) &client_type, sizeof(client_type));
 }
 
@@ -1458,20 +1460,19 @@ void Player::SendObjectToObjectEffect(ObjectToObjectEffect *obj_effect)
 	SendOpcode(ENB_OPCODE_000B_OBJECT_TO_OBJECT_EFFECT, effect, index);
 }
 
-void Player::SendActivateRenderState(long game_id, unsigned long render_state_id)
+void Player::SendActivateRenderState(int32_t game_id, uint32_t render_state_id)
 {
 	ActivateRenderState state;
 
 	state.GameID = game_id;
 	state.RenderStateID = render_state_id;
 
-	//LogMessage("Sending ActivateRenderState packet\n");
 	SendOpcode(ENB_OPCODE_0030_ACTIVATE_RENDER_STATE, (unsigned char *) &state, sizeof(state));
 }
 
 
 //TODO: Find out more about packet data structure - this is just a guess.
-void Player::SendInitRenderState(long game_id, unsigned long render_state_id)
+void Player::SendInitRenderState(int32_t game_id, uint32_t render_state_id)
 {
 	InitRenderState state;
 
@@ -1481,25 +1482,21 @@ void Player::SendInitRenderState(long game_id, unsigned long render_state_id)
 	SendOpcode(ENB_OPCODE_002F_INIT_RENDER_STATE, (unsigned char *) &state, sizeof(state));
 }
 
-void Player::SendActivateNextRenderState(long game_id, unsigned long render_state_id)
+void Player::SendActivateNextRenderState(int32_t game_id, uint32_t render_state_id)
 {
 	ActivateRenderState state;
 
 	state.GameID = game_id;
 	state.RenderStateID = render_state_id;
 
-	//LogMessage("Sending ActivateRenderState packet\n");
 	SendOpcode(ENB_OPCODE_0031_ACTIVATE_NEXT_RENDER_STATE, (unsigned char *) &state, sizeof(state));
 }
 
-void Player::SendDeactivateRenderState(long game_id)
+void Player::SendDeactivateRenderState(int32_t game_id)
 {
-	/*ActivateRenderState state;
-
-	state.GameID = game_id;
-	state.RenderStateID = render_state_id;*/
-
-	//LogMessage("Sending ActivateRenderState packet\n");
+	// Wire game_id field is canonical 4-byte int32. Storing it as
+	// `long` would emit 8 bytes on LP64 platforms via sizeof(game_id)
+	// below, diverging from the retail Win32 wire shape (LP32 long).
 	SendOpcode(ENB_OPCODE_0032_DEACTIVATE_RENDER_STATE, (unsigned char *) &game_id, sizeof(game_id));
 }
 
@@ -2335,8 +2332,11 @@ void Player::SetHuskDrainLevel(Object *obj, long slot)
 	SendOpcode(ENB_OPCODE_001B_AUX_DATA, pptr, index);
 }
 
-void Player::RemoveObject(long object_id)
+void Player::RemoveObject(int32_t object_id)
 {
+	// Wire object_id field is canonical 4-byte int32. Storing it as
+	// `long` would emit 8 bytes on LP64 platforms via sizeof(object_id)
+	// below, diverging from the retail Win32 wire shape (LP32 long).
 	UnSetTarget(object_id);
 	SendOpcode(ENB_OPCODE_0007_REMOVE, (unsigned char *) &object_id, sizeof(object_id)); //remove the raw resource
 #ifdef TEST_CREATE
@@ -7982,7 +7982,10 @@ void Player::ForceLogout()
 	// Give them 5 seconds to read the kick message!
 	//usleep(5000 * 1000);
 
-	long GameIDD = GameID();
+	// Wire game_id field is canonical 4-byte int32. Storing it as
+	// `long` would emit 8 bytes on LP64 platforms via sizeof(GameIDD)
+	// below, diverging from the retail Win32 wire shape (LP32 long).
+	int32_t GameIDD = GameID();
 
 	SendOpcode(ENB_OPCODE_0003_LOGOFF, (unsigned char*)&GameIDD, sizeof(GameIDD));
 	SendPacketCache();
@@ -10131,9 +10134,11 @@ void Player::HandleRecustomizeAvatarDone(unsigned char *data)
 	SendAuxPlayer();
 }
 
-void Player::SetManufactureID(long mfg_id)
+void Player::SetManufactureID(int32_t mfg_id)
 {
-	//LogMessage("Sending SetManufactureID packet\n");
+	// Wire mfg_id field is canonical 4-byte int32. Storing it as
+	// `long` would emit 8 bytes on LP64 platforms via sizeof(mfg_id)
+	// below, diverging from the retail Win32 wire shape (LP32 long).
 	SendOpcode(ENB_OPCODE_007F_MANUFACTURE_SET_MANUFACTURE_ID, (unsigned char *) &mfg_id, sizeof(mfg_id));
 }
 

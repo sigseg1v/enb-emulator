@@ -976,7 +976,7 @@ public:
     void        SendClientSound(char *sound_name, long channel = 0, char queue = 0, long warninglevel = -1);
     void        PointEffect(float *position, short effect_id, float scale = 1.0f);
     void        SendObjectEffect(ObjectEffect *object_effect);
-    void        SendClientType(long client_type);       // opcode 0x3c
+    void        SendClientType(int32_t client_type);    // opcode 0x3c
     void        SendStart(long start_id);               // opcode 0x05
     void        SendSetBBox(float xmin, float ymin, float xmax, float ymax);
     void        SendSetZBand(float min, float max);     // opcode 0x2a
@@ -991,16 +991,16 @@ public:
     void        SendComponentPositionalUpdate(long object_id, PositionInformation * position_info, long timestamp=0);
     void        SendAdvancedPositionalUpdate(long object_id, PositionInformation * position_info);
     void        SendObjectToObjectEffect(ObjectToObjectEffect *obj_effect);
-    void        SendActivateRenderState(long game_id, unsigned long render_state_id);
-    void        SendInitRenderState(long game_id, unsigned long render_state_id);
-    void        SendActivateNextRenderState(long game_id, unsigned long render_state_id);
-    void        SendDeactivateRenderState(long game_id);
+    void        SendActivateRenderState(int32_t game_id, uint32_t render_state_id);
+    void        SendInitRenderState(int32_t game_id, uint32_t render_state_id);
+    void        SendActivateNextRenderState(int32_t game_id, uint32_t render_state_id);
+    void        SendDeactivateRenderState(int32_t game_id);
     void        OpenInterface(long UIChange, long UIType);
     void        SendSetTarget(int game_id, int target_id);
     void        SendPushMessage(char *msg1, char *type, long time, long priority);
     void        SetResourceDrainLevel(Object *obj, long slot);
 	void		SetHuskDrainLevel(Object *obj, long slot);
-    void        RemoveObject(long object_id);
+    void        RemoveObject(int32_t object_id);
     void        SendProspectAUX(long value, int type); //HAX! Remove when decyphered
     void        CreateTractorComponent(float *position, float decay, float tractor_speed, long player_id, long article_id, long effect_id, long timestamp);
     bool        CheckResourceLock(long object_id);
@@ -1025,7 +1025,7 @@ public:
     void        OpenStargate(long object_id);
     void        CloseStargate(long object_id);
     bool        SendLoungeNPC(long StationID);
-    void        SetManufactureID(long mfg_id);          // opcode 0x7f
+    void        SetManufactureID(int32_t mfg_id);       // opcode 0x7f
     void        SendServerHandoff(long from_sector_id, long to_sector_id, char *from_sector, char *from_system, char *to_sector, char *to_system);
     void        SendNotifyEmote(long game_id, long emote);
     void        SendClientChatEvent(long Type, Player *Source, char *Channel="", char *Message="" , char *OtherPlayer="", char *NonPlayerSrc="");
