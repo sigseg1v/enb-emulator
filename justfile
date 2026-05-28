@@ -177,6 +177,73 @@ run-stack-bg: init
 # Convenience: legacy name. Same as run-stack-bg.
 dev: run-stack-bg
 
+# Bring up the local stack + launch the launcher pre-configured to connect.
+#
+# Pass the WINE-installed client.exe path either as a recipe arg or via
+# the ENB_CLIENT_PATH env var:
+#   just play-local /home/me/.wine/drive_c/.../release/client.exe
+#   ENB_CLIENT_PATH=... just play-local
+#
+# Steps the recipe performs:
+#   1. `just run-stack-bg`           — postgres + server + login (no proxy).
+#   2. `just stop-docker-proxy`      — the WINE proxy binds the same host
+#                                      ports as the docker proxy.
+#   3. `just build-proxy-win64`      — idempotent; ensures bin/Net7Proxy.exe.
+#   4. Pre-writes LaunchNet7.settings.json so the launcher opens with
+#      Emulator=Net7Local, Host=localhost, SSL on, port 4443 (the dev
+#      stack's host-side mapping of the login container's 443).
+#   5. Runs the launcher with NET7_UPSTREAM_HOST=localhost so the spawned
+#      WINE proxy knows where to forward.
+#
+# Click Play in the GUI; the client should connect to the local server.
+play-local CLIENT_PATH='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cp="{{CLIENT_PATH}}"
+    if [ -z "$cp" ]; then cp="${ENB_CLIENT_PATH:-}"; fi
+    if [ -z "$cp" ]; then
+        echo "play-local: pass the client.exe path as the recipe arg, or set ENB_CLIENT_PATH." >&2
+        echo "  example: just play-local /home/me/.wine/.../release/client.exe" >&2
+        exit 1
+    fi
+    if [ ! -f "$cp" ]; then
+        echo "play-local: client.exe not found at: $cp" >&2
+        exit 1
+    fi
+
+    echo ">>> bringing up local stack (postgres + server + login)"
+    just run-stack-bg
+
+    echo ">>> stopping docker proxy if running (WINE proxy will take its place)"
+    just stop-docker-proxy >/dev/null 2>&1 || true
+
+    echo ">>> ensuring bin/Net7Proxy.exe is built"
+    just build-proxy-win64
+
+    echo ">>> building launcher (so its output dir exists for settings.json)"
+    dotnet build tools/launchnet7-avalonia >/dev/null
+
+    SETTINGS_DIR=tools/launchnet7-avalonia/bin/Debug/net10.0
+    mkdir -p "$SETTINGS_DIR"
+    cp_json=$(printf '%s' "$cp" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+    cat > "$SETTINGS_DIR/LaunchNet7.settings.json" <<JSON
+    {
+      "ClientPath": $cp_json,
+      "LastEmulatorName": "Net7Local",
+      "LastServerName": "localhost",
+      "UseClientDetours": false,
+      "UseLocalCert": false,
+      "UseSecureAuthentication": true,
+      "AuthenticationPort": "4443",
+      "FormMainPositionX": -1,
+      "FormMainPositionY": -1
+    }
+    JSON
+    echo ">>> wrote $SETTINGS_DIR/LaunchNet7.settings.json"
+
+    echo ">>> launching (NET7_UPSTREAM_HOST=localhost) — click Play in the GUI"
+    NET7_UPSTREAM_HOST=localhost dotnet run --no-build --project tools/launchnet7-avalonia
+
 # Stream all logs in the foreground.
 dev-fg:
     docker compose up
