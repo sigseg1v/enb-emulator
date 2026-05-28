@@ -86,9 +86,6 @@ namespace LaunchNet7Avalonia
             }
 
             // Restore user prefs
-            c_CheckBox_ClientDetours.IsChecked        = _user.UseClientDetours;
-            c_CheckBox_LocalCert.IsChecked            = _user.UseLocalCert;
-            c_CheckBox_SecureAuthentication.IsChecked = _user.UseSecureAuthentication;
             if (!string.IsNullOrEmpty(_user.AuthenticationPort))
                 c_TextBox_Port.Text = _user.AuthenticationPort;
             if (_user.FormMainPositionX > 0 && _user.FormMainPositionY > 0)
@@ -204,18 +201,9 @@ namespace LaunchNet7Avalonia
                 return;
             }
 
-            if (host.SupportsSecureAuthentication)
-            {
-                c_CheckBox_SecureAuthentication.IsEnabled = true;
-                c_CheckBox_SecureAuthentication.IsChecked = true;
-                c_TextBox_Port.Text = host.SecureAuthenticationPort.ToString();
-            }
-            else
-            {
-                c_CheckBox_SecureAuthentication.IsEnabled = false;
-                c_CheckBox_SecureAuthentication.IsChecked = false;
-                c_TextBox_Port.Text = host.AuthenticationPort.ToString();
-            }
+            c_TextBox_Port.Text = host.SupportsSecureAuthentication
+                ? host.SecureAuthenticationPort.ToString()
+                : host.AuthenticationPort.ToString();
 
             if (emu.IsSinglePlayer)
             {
@@ -239,7 +227,7 @@ namespace LaunchNet7Avalonia
             // signal for the dev stack and for any remote server too.
             if (int.TryParse(c_TextBox_Port.Text, out var p) && p > 0 && p < 65536)
                 return p;
-            return c_CheckBox_SecureAuthentication.IsChecked == true
+            return host.SupportsSecureAuthentication
                 ? host.SecureAuthenticationPort
                 : host.AuthenticationPort;
         }
@@ -323,20 +311,19 @@ namespace LaunchNet7Avalonia
                 return;
             }
 
-            _setting.UseSecureAuthentication = c_CheckBox_SecureAuthentication.IsChecked == true;
+            // HTTPS is always on; the client-detours and local-cert flows
+            // are wired up by the `just` recipes, not the launcher.
+            _setting.UseSecureAuthentication = true;
             _setting.AuthenticationPort      = port;
             _setting.Hostname                = host.Hostname;
             _setting.LaunchName              = emu.GetLaunchName();
-            _setting.UseClientDetours        = c_CheckBox_ClientDetours.IsChecked == true;
-            _setting.UseLocalCert            = c_CheckBox_LocalCert.IsChecked == true;
+            _setting.UseClientDetours        = false;
+            _setting.UseLocalCert            = false;
 
             // Persist
-            _user.UseClientDetours        = _setting.UseClientDetours;
-            _user.UseLocalCert            = _setting.UseLocalCert;
-            _user.UseSecureAuthentication = _setting.UseSecureAuthentication;
-            _user.AuthenticationPort      = c_TextBox_Port.Text;
-            _user.LastEmulatorName        = emu.Name;
-            _user.LastServerName          = host.Hostname;
+            _user.AuthenticationPort = c_TextBox_Port.Text;
+            _user.LastEmulatorName   = emu.Name;
+            _user.LastServerName     = host.Hostname;
             _user.Save();
 
             try
@@ -354,30 +341,16 @@ namespace LaunchNet7Avalonia
 
         async void OnAdvancedClick(object sender, RoutedEventArgs e)
         {
-            // The original "Advanced Settings" form showed the contents
-            // of authlogin.log and offered a "Force Update" button that
-            // deleted the Version.txt sentinels. We've dropped the
-            // updater, so the button has nothing to do. Show the log
-            // pane if it's there; otherwise just show the file path.
-            string logPath = null;
-            if (!string.IsNullOrEmpty(_setting.ClientPath))
-            {
-                var dir = Path.GetDirectoryName(_setting.ClientPath);
-                if (!string.IsNullOrEmpty(dir))
-                    logPath = Path.Combine(dir, "authlogin.log");
-            }
-            string body;
-            try
-            {
-                body = logPath != null && File.Exists(logPath)
-                    ? File.ReadAllText(logPath)
-                    : "(no authlogin.log next to the client yet)";
-            }
-            catch (Exception ex) { body = "Could not read " + logPath + ": " + ex.Message; }
+            // Surface the launcher's own log (config load, server probe
+            // results, patch decisions, child-process spawn output). The
+            // main window keeps the log pane hidden to stay compact.
+            var body = string.IsNullOrEmpty(c_LogPane.Text)
+                ? "(no log output yet)"
+                : c_LogPane.Text;
 
             var dlg = new Window
             {
-                Title  = "Advanced Settings — authlogin.log",
+                Title  = "Advanced — launcher log",
                 Width  = 720,
                 Height = 480,
                 Content = new TextBox
