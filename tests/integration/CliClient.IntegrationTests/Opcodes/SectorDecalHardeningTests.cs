@@ -266,4 +266,103 @@ public sealed class SectorDecalHardeningTests
         Assert.All(decalFrames, f =>
             Assert.Equal(ExpectedDecalPayloadLength, f.PayloadLength));
     }
+
+    /// <summary>
+    /// Wave 95 frame-count hardening (+0 ratchet, 0x0010): pins the
+    /// exact 1-frame emit-count invariant Wave 85's payload-length
+    /// hardening was structurally blind to. The captured single-player
+    /// station-sector handshake stream emits 0x0010 DECAL exactly
+    /// once — from <c>Player::SendLoginShipData</c> at
+    /// <c>server/src/PlayerClass.cpp:891</c>
+    /// (<c>SendDecal(GameID(), m_Database.ship_data.decal, 2)</c> for
+    /// the player-self decal setup).
+    ///
+    /// <para>
+    /// Single-player single-sector scope. The only other
+    /// <c>Player::SendDecal</c> call site is:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><c>Player::SendShipData</c> at PlayerClass.cpp:951 —
+    ///     peer-broadcast fan-out, fires once per tracked observer.
+    ///     No observers in single-player handshake.</item>
+    /// </list>
+    /// <para>
+    /// Unlike 0x0004 CREATE (Wave 91) and 0x0089 RELATIONSHIP (Wave 92),
+    /// the station-arm <c>SectorManager::StationLogin</c> does NOT call
+    /// <c>SendDecal</c> for the manu-lab pseudo-object — only SendCreate
+    /// and SendRelationship get the second emit. So 0x0010 is exactly
+    /// 1 emit per single-player handshake, not 2. The captured count
+    /// is deterministic at exactly 1. Mirrors the Wave 93/94
+    /// Assert.Single pattern.
+    /// </para>
+    ///
+    /// <para>
+    /// Why a separate test method, not an in-place assertion. Wave 85's
+    /// existing test caps at <c>Assert.NotEmpty + Assert.All(payload==54)</c>,
+    /// which would still pass if a refactor added a spurious second
+    /// emit. Keeping the count assertion in its own method preserves
+    /// Wave 85's narrow-scope failure surface and gives Wave 95 a
+    /// discrete test artifact for the regression-class catalogue.
+    /// Mirrors the Wave 91/92/93/94 sibling-method pattern.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression classes this catches (beyond what Wave 85 catches).
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b>Spurious extra <c>SendDecal</c> in the chain.</b> A
+    ///     refactor that wrongly invokes the peer-broadcast emit on
+    ///     the player-self (e.g. accidentally including the new player
+    ///     in their own visibility list, or calling SendShipData with
+    ///     include_player=true from a handshake-arm code path) would
+    ///     produce 2+ frames. Wave 85's <c>Assert.NotEmpty</c> still
+    ///     passes (every frame is still 54B). Wave 95's
+    ///     <c>Assert.Single</c> catches.
+    ///   </item>
+    ///   <item>
+    ///     <b>SendLoginShipData refactor that splits the self-emit into
+    ///     a "before" and "after" decal-set emit.</b> A symmetric
+    ///     refactor adding a pre-handshake or post-handshake emit
+    ///     (e.g. for a hypothetical "redecal confirm" step) would
+    ///     surface as 2+ frames. Wave 95 catches.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Per CLAUDE.md server-integrity. Pure passive-observation
+    /// tightening. No client stimulus, no server change. The 1-frame
+    /// invariant is a retail-faithful invariant of the
+    /// SendLoginShipData self-emit-only dispatch pattern (no manu-lab
+    /// second emit for this opcode).
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task Decal_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmit()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, stationSectorId,
+            firstName: "Decal95", shipName: "Decal95Ship", cts.Token);
+
+        var decalFrames = session.HandshakeFrames
+            .Where(f => f.Opcode == OpcodeId.Known.Decal.Value)
+            .ToList();
+
+        // Wave 95 pins the 1-frame invariant: SendLoginShipData self
+        // (PlayerClass.cpp:891). No manu-lab second emit, no observer
+        // fan-out in single-player handshake.
+        var single = Assert.Single(decalFrames);
+        Assert.Equal(ExpectedDecalPayloadLength, single.PayloadLength);
+    }
 }
