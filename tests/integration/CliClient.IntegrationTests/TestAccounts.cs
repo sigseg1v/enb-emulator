@@ -148,6 +148,7 @@ public static class TestAccounts
             ["Navigation_EmittedDuringSpaceSectorHandshake_HasExactly14BytePayload"]                  = A(9_000_083, "cli_test83"),
             ["PlanetPositionalUpdate_EmittedDuringSpaceSectorHandshake_HasExactly48BytePayload"]      = A(9_000_084, "cli_test84"),
             ["Subparts_EmittedDuringStationSectorHandshake_HasExactly54BytePayloadForTerranWarrior"]  = A(9_000_085, "cli_test85"),
+            ["Create_EmittedExactlyTwiceDuringStationSectorHandshake_PinsSelfAndManuLabEmits"]        = A(9_000_086, "cli_test86"),
         };
 
     /// <summary>

@@ -260,4 +260,95 @@ public sealed class SectorCreateHardeningTests
         Assert.All(createFrames, f =>
             Assert.Equal(ExpectedCreatePayloadLength, f.PayloadLength));
     }
+
+    /// <summary>
+    /// Wave 91 frame-count hardening (+0 ratchet, 0x0004): pins the
+    /// exact 2-frame emit-count invariant Wave 84's xmldoc explicitly
+    /// flagged as a natural follow-up. The captured station-sector
+    /// handshake stream emits 0x0004 CREATE exactly twice — once from
+    /// <c>Player::SendLoginShipData</c> at
+    /// <c>server/src/PlayerClass.cpp:869</c> (the player-self ship
+    /// create, <c>SendCreate(GameID(), scale, hull, CREATE_SHIP)</c>);
+    /// once from <c>SectorManager::StationLogin</c> at
+    /// <c>server/src/SectorManager.cpp:478</c> (the manufacture-lab
+    /// create, <c>player-&gt;SendCreate(ManuID, 1.0, -1, CREATE_MANU_LAB)</c>).
+    ///
+    /// <para>
+    /// Why a separate test method, not an in-place assertion. Wave 84's
+    /// existing test caps at <c>Assert.NotEmpty + Assert.All(payload==23)</c>
+    /// and the xmldoc at line 155-160 documents the count-pinning as a
+    /// "future +1 wave". Keeping the count assertion in its own method
+    /// preserves Wave 84's narrow-scope failure surface (a count
+    /// regression would not surface as a payload-length failure, and
+    /// vice versa) and gives Wave 91 a discrete test artifact for the
+    /// regression-class catalogue.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression classes this catches (beyond what Wave 84 catches).
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b><c>SendLoginShipData</c> self-emit deletion at
+    ///     <c>server/src/PlayerClass.cpp:869</c>.</b> Removing the
+    ///     <c>SendCreate(GameID(), ..., CREATE_SHIP)</c> call would
+    ///     drop the player-self ship create. Wave 84's
+    ///     <c>Assert.NotEmpty</c> would still pass (the StationLogin
+    ///     manu-lab create remains) and
+    ///     <c>Assert.All(payload==23)</c> would still pass (the
+    ///     remaining frame is still 23B). Wave 91's
+    ///     <c>Assert.Equal(2, count)</c> catches.
+    ///   </item>
+    ///   <item>
+    ///     <b><c>StationLogin</c> manu-lab emit deletion at
+    ///     <c>server/src/SectorManager.cpp:478</c>.</b> Removing the
+    ///     <c>player-&gt;SendCreate(ManuID, 1.0, -1, CREATE_MANU_LAB)</c>
+    ///     would drop the manufacture-lab create. Same observability
+    ///     gap as the self-emit deletion above — Wave 84 wouldn't
+    ///     surface it but Wave 91's count check catches.
+    ///   </item>
+    ///   <item>
+    ///     <b>Spurious extra <c>SendCreate</c> in the chain.</b> A
+    ///     refactor that adds a third <c>SendCreate</c> call (e.g.
+    ///     wrongly broadcasting an observed-object create) would
+    ///     produce 3+ frames; <c>Assert.Equal(2, count)</c> catches.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Per CLAUDE.md server-integrity. Pure passive-observation
+    /// tightening. No client stimulus, no server change. The 2-frame
+    /// invariant is a retail-faithful invariant of the station-sector
+    /// SendLoginShipData + StationLogin dispatch pair.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task Create_EmittedExactlyTwiceDuringStationSectorHandshake_PinsSelfAndManuLabEmits()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, stationSectorId,
+            firstName: "Create91", shipName: "Create91Ship", cts.Token);
+
+        var createFrames = session.HandshakeFrames
+            .Where(f => f.Opcode == OpcodeId.Known.Create.Value)
+            .ToList();
+
+        // Wave 91 pins the 2-frame invariant: SendLoginShipData (self
+        // CREATE_SHIP at PlayerClass.cpp:869) + StationLogin (ManuID
+        // CREATE_MANU_LAB at SectorManager.cpp:478).
+        Assert.Equal(2, createFrames.Count);
+        Assert.All(createFrames, f =>
+            Assert.Equal(ExpectedCreatePayloadLength, f.PayloadLength));
+    }
 }
