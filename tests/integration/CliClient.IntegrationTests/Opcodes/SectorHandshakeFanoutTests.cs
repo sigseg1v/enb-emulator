@@ -649,4 +649,205 @@ public sealed class SectorHandshakeFanoutTests
         }
     }
 
+    /// <summary>
+    /// Wave 54: assert 0x003F PLANET_POSITIONAL_UPDATE and 0x0099
+    /// NAVIGATION are both present in <see cref="SectorHandshake.Session.HandshakeOpcodes"/>
+    /// after a SectorLogin2 (space) handshake into sector 1015.
+    ///
+    /// <para>
+    /// Why these opcodes are space-only. Both ride
+    /// <c>ObjectManager::SendAllNavs</c>
+    /// (<c>server/src/ObjectManager.cpp:406-424</c>), which is called
+    /// from <c>SectorManager::SectorLogin2</c>
+    /// (<c>server/src/SectorManager.cpp:369</c>) — the SPACE arm of
+    /// <c>HandleSectorLogin2</c>'s dispatch
+    /// (<c>SectorManager.cpp:297-303</c>). The STATION arm
+    /// <c>StationLogin2</c> at <c>SectorManager.cpp:507-535</c> does
+    /// NOT call <c>SendAllNavs</c> — stations have no static nav
+    /// objects (only the manufacturing-lab pseudo-object created in
+    /// <c>StationLogin</c>'s <c>SendCreate(ManuID, ..., CREATE_MANU_LAB)</c>
+    /// call at <c>SectorManager.cpp:478</c>). So both opcodes are
+    /// strictly diagnostic of "we reached the space-sector
+    /// SendAllNavs fan-out", complementing Wave 53's 0x0042
+    /// SERVER_PARAMETERS which only proves "we reached SectorLogin2".
+    /// </para>
+    ///
+    /// <para>
+    /// What SendAllNavs emits, in order. Iterates
+    /// <c>m_StaticSectorList</c> (the sector's static-object roster
+    /// loaded at sector-thread spawn time), skipping OT_DECO and
+    /// inactive entries. For each remaining object: if it's OT_PLANET
+    /// OR was previously in the player's <c>ExposedNavList</c>, AND
+    /// not already in <c>ObjectRangeList</c>, calls
+    /// <c>obj-&gt;SendObject(player)</c> which fans out
+    /// per-object-type. For OT_PLANET the path emits 0x0004 CREATE
+    /// (object create), 0x0089 RELATIONSHIP, 0x003F
+    /// PLANET_POSITIONAL_UPDATE (orbital position — distinct from
+    /// 0x003E ADVANCED for non-orbital and 0x0040 CONSTANT for
+    /// static), 0x001B AUX_DATA (planet aux info), 0x0099 NAVIGATION
+    /// (the nav-point metadata for the planet — game_id + sig +
+    /// visited byte + nav_type + is_huge per
+    /// <c>PlayerConnection.cpp:1138-1148</c>'s
+    /// <c>SendNavigation</c>). The sequence repeats per nav object;
+    /// our test asserts only that BOTH 0x003F and 0x0099 are present
+    /// at least once, since sector 1015's exact planet/nav roster is
+    /// data-driven and shouldn't anchor a regression test.
+    /// </para>
+    ///
+    /// <para>
+    /// Builds on Wave 52/53's 2-stage login pattern. Stage 1 lands at
+    /// Luna Station (10151) to seed avatar_level_info; stage 2
+    /// re-establishes into space sector 1015 where
+    /// <c>ReadSavedData</c>'s ReloadSavedData path preserves the
+    /// LOGIN-frame sector_num. The reestablish drives SectorLogin →
+    /// SectorLogin2 (space arm) → SendAllNavs.
+    /// </para>
+    ///
+    /// <para>
+    /// Why a +2 ratchet (0x003F and 0x0099 in the same wave). Both
+    /// opcodes ride the same emit site (per-planet SendObject), so a
+    /// regression that takes out one almost certainly takes out the
+    /// other. Splitting into two waves would mean two near-identical
+    /// 90-second test runs against the same code path. Bundling
+    /// them keeps the live-stack cost amortised; we still get
+    /// distinct named-opcode rows in TestedOpcodes so a future ratchet
+    /// audit sees them as discrete coverage units.
+    /// </para>
+    ///
+    /// <para>
+    /// Why this is a legit +2 ratchet (not a Coverage-Cheat). Both
+    /// opcodes are server-originated emits the retail server has
+    /// always produced on every space-sector handshake — they just
+    /// weren't observed because no prior test ran a stage-2 login
+    /// into a populated space sector AND captured the post-0x0042
+    /// portion of the drain. No new server behaviour, no new
+    /// permissiveness, no widened input acceptance. Per CLAUDE.md
+    /// server-integrity, this is exactly the "tightening" the rule
+    /// welcomes.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression classes this catches.
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b>SendAllNavs removal or guard regression.</b> If
+    ///     <c>SectorManager::SectorLogin2</c>'s
+    ///     <c>m_ObjectMgr-&gt;SendAllNavs(player)</c> call at
+    ///     <c>SectorManager.cpp:369</c> is deleted or gated behind a
+    ///     condition that doesn't fire for sector 1015, both 0x003F
+    ///     and 0x0099 vanish from the handshake.
+    ///   </item>
+    ///   <item>
+    ///     <b>SendAllNavs iterator-skip regression.</b> If the
+    ///     OT_PLANET-or-previously-exposed gate at
+    ///     <c>ObjectManager.cpp:416</c> is inverted (e.g. accidentally
+    ///     skipping OT_PLANET), 0x003F would still be emitted for
+    ///     non-planet objects but the first-login coverage relies on
+    ///     OT_PLANET being the always-visible branch (a fresh player
+    ///     has empty ExposedNavList) — assertion would fail.
+    ///   </item>
+    ///   <item>
+    ///     <b>m_StaticSectorList load regression.</b> If sector 1015's
+    ///     static-object roster fails to load at sector-thread spawn
+    ///     time (DB query, sector-data file parse, etc.), the loop
+    ///     iterates an empty list and emits nothing. Both opcodes
+    ///     missing is the signal.
+    ///   </item>
+    ///   <item>
+    ///     <b>Object::SendObject vtable regression.</b> The base
+    ///     <c>virtual void Object::SendObject(Player*)</c> at
+    ///     <c>ObjectClass.h:365</c> dispatches per-type to derived
+    ///     classes; a vtable corruption or override-removal that hits
+    ///     the OT_PLANET path would silently produce no
+    ///     PLANET_POSITIONAL_UPDATE or NAVIGATION.
+    ///   </item>
+    ///   <item>
+    ///     <b>SendNavigation opcode-id regression at
+    ///     <c>PlayerConnection.cpp:1147</c>.</b> A typo flip from
+    ///     <c>ENB_OPCODE_0099_NAVIGATION</c> to a neighbouring define
+    ///     would still emit a frame but under a different opcode —
+    ///     assertion catches it.
+    ///   </item>
+    ///   <item>
+    ///     <b>SendOpcode header-width revert at
+    ///     <c>PlayerConnection.cpp:127</c>.</b> Would corrupt every
+    ///     inner opcode in the 0x2016 PACKET_SEQUENCE parser; both
+    ///     0x003F and 0x0099 would not appear under their correct
+    ///     labels.
+    ///   </item>
+    ///   <item>
+    ///     <b>Proxy SendClientPacketSequence inner-opcode guard
+    ///     tightening at <c>proxy/UDPProxyToClient_linux.cpp:568</c>.</b>
+    ///     Currently passes 0x003F and 0x0099 (both &lt; 0x0FFF). A
+    ///     regression to a tighter upper bound would silently drop
+    ///     them from the wire.
+    ///   </item>
+    ///   <item>
+    ///     <b>DoSectorLoginUntilStartAsync drain-loop regression
+    ///     (<c>Opcodes/SectorHandshake.cs:330-346</c>).</b> Same as
+    ///     Wave 34/35/52/53 — exercises the capture path itself.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Budget: 120s (same as Wave 52/53 — the 2-stage login pattern
+    /// needs time for the explicit logoff round-trip between stages,
+    /// plus the SendAllNavs iteration adds a handful of milliseconds
+    /// to the stage-2 drain).
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task HandshakeEmitsPlanetPositionalUpdateAndNavigationOnSpaceSectorLogin()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int stationSectorId = 10151;
+        const int spaceSectorId = 1015;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        var stationSession = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, stationSectorId,
+            firstName: "NavFan", shipName: "NavFanShip", cts.Token);
+
+        try
+        {
+            byte[] logoffPayload = new byte[8];
+            await stationSession.Sector.SendAsync(
+                Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
+                cts.Token);
+            await SectorHandshake.DrainUntilOpcode(
+                stationSession.Sector, OpcodeId.Known.LogoffConfirmation.Value, cts.Token);
+            await stationSession.DisposeAsync();
+
+            await using var spaceSession = await SectorHandshake.ReestablishAsync(
+                _server, login.Ticket!, slot, spaceSectorId, cts.Token);
+
+            Assert.Contains(OpcodeId.Known.PlanetPositionalUpdate.Value, spaceSession.HandshakeOpcodes);
+            Assert.Contains(OpcodeId.Known.Navigation.Value, spaceSession.HandshakeOpcodes);
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            try
+            {
+                await using var cleanupGlobal = await N7.CliClient.Net.EncryptedTcpConnection.ConnectAsync(
+                    _server.GlobalHost, _server.GlobalPort, cleanupCts.Token);
+                await SectorHandshake.SendGlobalConnectAsync(
+                    cleanupGlobal, login.Ticket!, cleanupCts.Token);
+                await SectorHandshake.DrainUntilOpcode(
+                    cleanupGlobal, OpcodeId.Known.GlobalAvatarList.Value, cleanupCts.Token);
+                await SectorHandshake.DeleteCreatedCharacterAsync(
+                    cleanupGlobal, slot, cleanupCts.Token);
+            }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
 }

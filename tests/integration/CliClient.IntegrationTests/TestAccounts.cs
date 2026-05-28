@@ -113,6 +113,7 @@ public static class TestAccounts
             ["ResendPacketSequence_MissPacketNum_DoesNotBreakConnection_RequestTimeStillRoundTrips"]  = A(9_000_048, "cli_test48"),
             ["HandshakeEmitsClientTypeAndGalaxyMapOnSpaceSectorLogin"]                                = A(9_000_049, "cli_test49"),
             ["HandshakeEmitsServerParametersOnSpaceSectorLogin"]                                      = A(9_000_050, "cli_test50"),
+            ["HandshakeEmitsPlanetPositionalUpdateAndNavigationOnSpaceSectorLogin"]                   = A(9_000_051, "cli_test51"),
         };
 
     /// <summary>

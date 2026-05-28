@@ -60,6 +60,7 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId ServerHandoff                = new(0x003A);
         public static readonly OpcodeId ClientType                   = new(0x003C);
         public static readonly OpcodeId AdvancedPositionalUpdate     = new(0x003E);
+        public static readonly OpcodeId PlanetPositionalUpdate       = new(0x003F);
         public static readonly OpcodeId ConstantPositionalUpdate     = new(0x0040);
         public static readonly OpcodeId ServerParameters             = new(0x0042);
         public static readonly OpcodeId RequestTime                  = new(0x0044);
@@ -88,6 +89,7 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId MissionDismissal             = new(0x0087);
         public static readonly OpcodeId PetitionStuck                = new(0x0088);
         public static readonly OpcodeId Relationship                 = new(0x0089);
+        public static readonly OpcodeId Navigation                   = new(0x0099);
         public static readonly OpcodeId TriggerEmote                 = new(0x00A1);
         public static readonly OpcodeId NotifyEmote                  = new(0x00A2);
         public static readonly OpcodeId ClientChatRequest            = new(0x00A3);
