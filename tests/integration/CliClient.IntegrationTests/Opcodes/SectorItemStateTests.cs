@@ -262,4 +262,231 @@ public sealed class SectorItemStateTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// The verbatim ASCII body the retail-faithful HandleItemState
+    /// else-branch passes to <c>SendVaMessage</c> at
+    /// <c>server/src/PlayerConnection.cpp:3386</c>. 52 bytes of payload
+    /// content; <c>SendMessageString</c> appends a NUL terminator and
+    /// emits <c>length = 53</c>.
+    /// </summary>
+    private const string UnrecognisedItemStateLiteral =
+        "UNRECOGNISED ITEM STATE!\nPlease submit a bug report\n";
+
+    /// <summary>
+    /// Wave 108 frame-shape hardening (+0 ratchet, 0x001D): pins the
+    /// byte-exact 56-byte wire-shape of the single 0x001D MESSAGE_STRING
+    /// the server emits in reply to a 0x0029 ITEM_STATE whose
+    /// <c>Inventory</c> byte is anything other than the gate-value 2.
+    /// Wave 24's existing test
+    /// (<see cref="ItemState_UnrecognisedInventoryByte_ReceivesUnrecognisedErrorString"/>)
+    /// asserts only that the response body <em>contains</em> the
+    /// distinctive substring "UNRECOGNISED ITEM STATE"; the bounds
+    /// checks (<c>Assert.True(span.Length &gt;= 4)</c>,
+    /// <c>Assert.True(msgLen &gt;= 1)</c>) are deliberately loose so a
+    /// punctuation tweak doesn't sink it. Wave 108 layers byte-exact
+    /// pinning on top, locking the full 56-byte response shape in place.
+    ///
+    /// <para>
+    /// Backstory. 0x001D MESSAGE_STRING is server-emitted by
+    /// <c>Player::SendMessageString</c> at
+    /// <c>server/src/PlayerConnection.cpp:10987-10997</c>:
+    /// <code>
+    ///     short length = strlen(msg) + 1;          // includes NUL
+    ///     *((short *) &amp;buffer[0]) = length;       // wire offset 0..2 (LE)
+    ///     buffer[2]                  = color;       // wire offset 2  (u8)
+    ///     strcpy_s(&amp;buffer[3], ..., msg);          // wire offset 3..(3+length)
+    ///     SendOpcode(ENB_OPCODE_001D_MESSAGE_STRING, buffer, length + 3);
+    /// </code>
+    /// <c>SendVaMessage</c> (PlayerClass.cpp:3415-3425) calls
+    /// <c>SendMessageString(pch)</c> with the default <c>color=5</c>
+    /// (PlayerClass.h:277). For the verbatim 52-byte literal
+    /// "UNRECOGNISED ITEM STATE!\\nPlease submit a bug report\\n" at
+    /// <c>PlayerConnection.cpp:3386</c>:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><b>length field</b> = strlen(52) + 1 = <c>53</c></item>
+    ///   <item><b>color byte</b> = <c>5</c> (default)</item>
+    ///   <item><b>msg + NUL</b> = 52 + 1 = <c>53 bytes</c></item>
+    ///   <item><b>total payload</b> = <c>length + 3 = 56 bytes</c></item>
+    /// </list>
+    ///
+    /// <para>
+    /// Why a separate test method. Mirrors the Wave 92 (RELATIONSHIP
+    /// count) / Wave 101 (CLIENT_AVATAR+SHIP paired) split: Wave 24's
+    /// looser substring assertion stays intact (narrow-scope failure
+    /// surface — a wire-shape drift that still produces the literal
+    /// substring would not surface as a Wave 24 failure), Wave 108 adds
+    /// the byte-exact pin as its own discrete test artifact for the
+    /// regression-class catalogue. Mirrors the Wave 104 narrative's
+    /// "upgrade existing survival-probe assertions to byte-exact"
+    /// pivot.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression classes Wave 108 catches beyond what Wave 24 catches.
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b><c>SendMessageString</c> length-field width regression at
+    ///     <c>PlayerConnection.cpp:10992</c>.</b> The cast
+    ///     <c>*((short *) &amp;buffer[0]) = length</c> writes a 2-byte
+    ///     length prefix. A regression to <c>int32_t</c> (the canonical
+    ///     length type used elsewhere in the protocol) would shift the
+    ///     color byte from offset 2 to offset 4 and grow the total
+    ///     payload from 56 to 58 bytes. Wave 24's
+    ///     <c>Assert.True(span.Length &gt;= 4)</c> would still pass at
+    ///     58B; <c>Assert.Equal(56, span.Length)</c> catches.
+    ///   </item>
+    ///   <item>
+    ///     <b><c>SendMessageString</c> color-default regression at
+    ///     <c>PlayerClass.h:277</c>.</b> The signature is
+    ///     <c>SendMessageString(char *msg, char color=5, bool log=true)</c>.
+    ///     A regression to a different default (or a refactor where
+    ///     SendVaMessage passes an explicit non-5 color) would change
+    ///     wire byte 2 without changing the substring. Wave 24's text
+    ///     assertion is structurally blind; Wave 108 pins
+    ///     <c>span[2] == 5</c>.
+    ///   </item>
+    ///   <item>
+    ///     <b>Length-field LE byte-order regression.</b> The cast
+    ///     <c>*((short *) &amp;buffer[0])</c> writes a host-order short.
+    ///     The retail Win32 client (x86 LE) reads it as LE. A
+    ///     hypothetical big-endian server build would swap the byte
+    ///     pair and break decoding; Wave 24's substring assertion would
+    ///     still pass (the body bytes are after the length prefix and
+    ///     unaffected). Wave 108's
+    ///     <c>BinaryPrimitives.ReadInt16LittleEndian == 53</c> catches.
+    ///   </item>
+    ///   <item>
+    ///     <b><c>SendOpcode</c> trailing-bytes regression at
+    ///     <c>PlayerConnection.cpp:10996</c>.</b> The third argument
+    ///     <c>length + 3</c> is what bounds the emit to 56 bytes; a
+    ///     regression to <c>sizeof(buffer)</c> (512) would emit 456
+    ///     trailing zero bytes after the legitimate payload. Wave 24's
+    ///     substring assertion would still pass; Wave 108's
+    ///     <c>Assert.Equal(56, span.Length)</c> catches.
+    ///   </item>
+    ///   <item>
+    ///     <b>Verbatim-literal drift at
+    ///     <c>PlayerConnection.cpp:3386</c>.</b> A refactor that
+    ///     replaces "<c>\\n</c>" with "<c>. </c>" (a "polish-the-error"
+    ///     edit) or trims the trailing newline would silently change
+    ///     the wire bytes the retail Win32 client's decoder was
+    ///     compiled to accept (newlines are the line-break marker the
+    ///     in-game chat-log overlay uses). Wave 24's <c>Contains</c>
+    ///     would still pass; Wave 108's full-literal
+    ///     <c>Assert.Equal</c> on the body bytes catches.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Per CLAUDE.md server-integrity. 0x001D MESSAGE_STRING is
+    /// server-originated. Wave 108 adds no client stimulus beyond the
+    /// same 11-byte ITEM_STATE Wave 24 already sends, and no server
+    /// change — pure passive-observation tightening of a retail-faithful
+    /// wire shape. The 56-byte response is exactly what the retail
+    /// Win32 client's MESSAGE_STRING decoder was compiled to receive.
+    /// No widened input acceptance, no loosened gating, no fabricated
+    /// replies — server-integrity POSITIVE.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s. Handshake ~2s; ITEM_STATE+REPLY round-trip is
+    /// sub-second.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task ItemState_UnrecognisedInventoryByte_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (53) = 56 bytes.
+        const int ExpectedReplyPayloadLength = 56;
+        // strlen(literal) + 1 NUL = 53.
+        const short ExpectedReplyLengthField = 53;
+        // SendVaMessage → SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 52.
+        const int ExpectedLiteralByteCount = 52;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Itm108e", shipName: "Itm108Ship", cts.Token);
+
+        try
+        {
+            byte[] payload = new byte[11];
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 0);
+            payload[8] = 0;
+            payload[9] = 0;
+            payload[10] = 0;
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(OpcodeId.Known.ItemState.Value, payload),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // Filter on the distinctive substring so other
+                // MESSAGE_STRING traffic (motd, NPC chatter) doesn't
+                // race ahead of the UNRECOGNISED reply. Once we have
+                // the right reply we pin its full wire shape.
+                if (!text.Contains("UNRECOGNISED ITEM STATE", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(UnrecognisedItemStateLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0029 ITEM_STATE (Inventory=0) " +
+                $"without seeing 0x001D MESSAGE_STRING containing \"UNRECOGNISED ITEM STATE\". " +
+                $"Same drain-loop budget as Wave 24's sibling test; the failure modes are " +
+                $"identical.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }

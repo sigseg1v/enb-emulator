@@ -24,7 +24,7 @@ namespace N7.CliClient.IntegrationTests;
 /// Account IDs start at 9_000_001 to stay clear of any real-account IDs
 /// the dumps might one day carry (the dump's accounts.AUTO_INCREMENT is
 /// 15_965). Adding a new test that needs its own account: (1) pick an
-/// unused id in 9_000_001..9_000_102, (2) add a row to
+/// unused id in 9_000_001..9_000_103, (2) add a row to
 /// <c>Fixtures/seed.sql</c>, (3) add a key in <see cref="Assignments"/>
 /// matching the test method name. Tests that only exercise login or
 /// pure-read flows can re-use an existing entry (multiple keys may map
@@ -165,6 +165,7 @@ public static class TestAccounts
             ["ManufactureSetManufactureId_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmit"] = A(9_000_100, "cli_test100"),
             ["ManufactureSetManufactureId_EmittedExactlyOnceDuringSpaceSectorHandshake_PinsSelfEmit"]   = A(9_000_101, "cli_test101"),
             ["PlanetPositionalUpdateAndNavigation_EmittedExactlyOncePerPlanetDuringSpaceSectorHandshake_PinsSendAllNavsCount"] = A(9_000_102, "cli_test102"),
+            ["ItemState_UnrecognisedInventoryByte_PinsExactReplyWireShape"]                            = A(9_000_103, "cli_test103"),
         };
 
     /// <summary>
