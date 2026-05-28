@@ -121,6 +121,7 @@ public static class TestAccounts
             ["CtaRequest_OnDefaultArmAction_ReceivesCtaResponseWithSuccessByte"]                      = A(9_000_056, "cli_test56"),
             ["OpenInterfaceSlashCommand_OnSlashOpenif_ReceivesOpenInterfaceEmit"]                     = A(9_000_057, "cli_test57"),
             ["UiTriggerSlashCommand_OnSlashUitrigger_ReceivesUiTriggerEmit"]                          = A(9_000_058, "cli_test58"),
+            ["FgpsSlashCommand_OnSlashFgps_ReceivesConfirmedActionOfferAndClientSound"]               = A(9_000_059, "cli_test59"),
         };
 
     /// <summary>

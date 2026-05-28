@@ -81,6 +81,7 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId AvatarDescription            = new(0x0061);
         public static readonly OpcodeId UiTrigger                    = new(0x0065);
         public static readonly OpcodeId OpenInterface                = new(0x0066);
+        public static readonly OpcodeId ClientSound                  = new(0x006A);
         public static readonly OpcodeId ManufactureSetManufactureId  = new(0x007F);
         public static readonly OpcodeId ManufactureTerminal          = new(0x0079);
         public static readonly OpcodeId ManufactureCategorySelect    = new(0x007A);
@@ -107,6 +108,7 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId LogoffConfirmation           = new(0x00BA);
         public static readonly OpcodeId CtaRequest                   = new(0x00BC);
         public static readonly OpcodeId CtaResponse                  = new(0x00BD);
+        public static readonly OpcodeId ConfirmedActionOffer         = new(0x00BE);
         public static readonly OpcodeId ConfirmedActionResponse      = new(0x00C0);
         public static readonly OpcodeId GuildSimpleClientSector      = new(0x00CD);
         public static readonly OpcodeId GuildRankNamesRequestClient  = new(0x00D4);
