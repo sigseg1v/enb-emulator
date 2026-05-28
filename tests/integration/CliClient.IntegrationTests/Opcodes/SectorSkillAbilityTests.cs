@@ -293,4 +293,187 @@ public sealed class SectorSkillAbilityTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 112 sibling byte-exact pin on the same 0x0058 SKILL_ABILITY
+    /// → 0x0020 PRIORITY_MESSAGE direct-reply path probed by
+    /// <see cref="SkillAbility_OnUnknownAbilityIndex_ReceivesPriorityMessageNotYetWorking"/>,
+    /// but asserting the FULL reply payload byte-for-byte rather than
+    /// just the substring "not yet working".
+    ///
+    /// <para>
+    /// FIRST byte-exact wave on the <c>SendPriorityMessageString</c>
+    /// framing path. The 0x0020 PRIORITY_MESSAGE wire shape differs
+    /// from the SendMessageString-based 0x001D MESSAGE_STRING that
+    /// Waves 108–111 pin: SendPriorityMessageString builds two
+    /// AddDataSN-emitted null-terminated strings followed by two
+    /// AddData&lt;long&gt; 4-byte LE ints (PacketMethods.h:37-42
+    /// template specialisation forces 4-byte emission on Linux x86_64
+    /// where sizeof(long)==8). No length prefix, no colour byte —
+    /// completely different framing pattern, complementary regression
+    /// coverage to the SendMessageString path.
+    /// </para>
+    ///
+    /// <para>
+    /// Reply layout (mirror of <c>Player::SendPriorityMessageString</c>
+    /// at <c>server/src/PlayerConnection.cpp:10999</c>):
+    /// <code>
+    ///   [0..50)   "Error: This ability is not yet working. Try later!"
+    ///   [50]      0x00 (msg1 NUL terminator)
+    ///   [51..62)  "MessageLine"
+    ///   [62]      0x00 (msg2 NUL terminator)
+    ///   [63..67)  int32 time     = 1000 (0xE8 0x03 0x00 0x00 LE)
+    ///   [67..71)  int32 priority = 4    (0x04 0x00 0x00 0x00 LE)
+    /// </code>
+    /// 71 bytes total. msg1=50 bytes, msg2=11 bytes.
+    /// </para>
+    ///
+    /// <para>
+    /// Concrete regressions THIS sibling catches that the substring
+    /// probe above does NOT:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b>Frame-tail size drift.</b> Any change that widens
+    ///     time/priority back to plain <c>long</c> (8B on Linux) would
+    ///     push the payload to 79 bytes and the strict 71-byte length
+    ///     assertion below trips immediately. The substring probe
+    ///     above ignores everything past msg1's NUL and would silently
+    ///     accept the regression.
+    ///   </item>
+    ///   <item>
+    ///     <b>msg1 punctuation / typo drift.</b> A copy-edit shaving
+    ///     the trailing "!" or swapping "Try later" → "try later" in
+    ///     PlayerAbilitys.cpp:73 leaves the substring "not yet working"
+    ///     intact but the byte-exact pin trips.
+    ///   </item>
+    ///   <item>
+    ///     <b>msg2 label drift.</b> The sentinel "MessageLine" string
+    ///     is unrelated to the substring probe but pins the exact bytes
+    ///     here — a refactor to "Message Line" or "MessageLine\0" empty-
+    ///     extend would trip immediately.
+    ///   </item>
+    ///   <item>
+    ///     <b>time/priority value swap.</b> A regression that swapped
+    ///     SendPriorityMessageString's (time, priority) argument order
+    ///     in the PlayerAbilitys.cpp:73 callsite would emit
+    ///     priority=1000, time=4 — both fields still present, same
+    ///     overall payload size, msg1 still "not yet working" → the
+    ///     substring probe above passes, this sibling trips.
+    ///   </item>
+    ///   <item>
+    ///     <b>AddData&lt;long&gt; 4-vs-8-byte revert.</b> Wave 12's
+    ///     template specialisation at <c>PacketMethods.h:37-42</c> is
+    ///     what forces 4-byte int32_t emission on Linux x86_64. A
+    ///     revert to plain <c>long</c> changes the payload tail size
+    ///     immediately — this sibling's 71-byte length assertion
+    ///     catches it.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity note. No new server behaviour, no loosening
+    /// of input acceptance. We pin the byte-exact wire shape the
+    /// retail server has always emitted on this code path.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s; same handshake / round-trip cost as the sibling
+    /// substring probe.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SkillAbility_OnUnknownAbilityIndex_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        const string ExpectedMsg1 = "Error: This ability is not yet working. Try later!";
+        const string ExpectedMsg2 = "MessageLine";
+        const int ExpectedTime = 1000;
+        const int ExpectedPriority = 4;
+        const int ExpectedMsg1ByteCount = 50;
+        const int ExpectedMsg2ByteCount = 11;
+        // msg1(50) + NUL + msg2(11) + NUL + time(4) + priority(4) = 71
+        const int ExpectedReplyPayloadLength = 71;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Skilex12", shipName: "SkillShip12", cts.Token);
+
+        try
+        {
+            byte[] payload = new byte[12];
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 0);
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(8, 4), 200);
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(OpcodeId.Known.SkillAbility.Value, payload),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.PriorityMessage.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < ExpectedMsg1ByteCount + 1)
+                    continue;
+
+                int firstNul = span.IndexOf((byte)0);
+                if (firstNul < 0) continue;
+
+                string msg1Preview = Encoding.ASCII.GetString(span[..firstNul]);
+                if (!msg1Preview.Contains("not yet working", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+
+                Assert.Equal(ExpectedMsg1ByteCount, firstNul);
+                Assert.Equal(ExpectedMsg1, Encoding.ASCII.GetString(span[..ExpectedMsg1ByteCount]));
+                Assert.Equal((byte)0, span[ExpectedMsg1ByteCount]);
+
+                int msg2Start = ExpectedMsg1ByteCount + 1;
+                int msg2End = msg2Start + ExpectedMsg2ByteCount;
+                Assert.Equal(
+                    ExpectedMsg2,
+                    Encoding.ASCII.GetString(span.Slice(msg2Start, ExpectedMsg2ByteCount)));
+                Assert.Equal((byte)0, span[msg2End]);
+
+                int timeStart = msg2End + 1;
+                int priorityStart = timeStart + 4;
+                Assert.Equal(
+                    ExpectedTime,
+                    BinaryPrimitives.ReadInt32LittleEndian(span.Slice(timeStart, 4)));
+                Assert.Equal(
+                    ExpectedPriority,
+                    BinaryPrimitives.ReadInt32LittleEndian(span.Slice(priorityStart, 4)));
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0058 SKILL_ABILITY (AbilityIndex=200) " +
+                $"without seeing 0x0020 PRIORITY_MESSAGE containing \"not yet working\" for byte-exact pin.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
