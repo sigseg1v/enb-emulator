@@ -118,6 +118,7 @@ public static class TestAccounts
             ["StarbaseRecustomizeActions_ReceivesShipAndAvatarStartFrames"]                           = A(9_000_053, "cli_test53"),
             ["StarbaseAcceptJobAction9_ReceivesBareJobAcceptReply"]                                   = A(9_000_054, "cli_test54"),
             ["StarbaseTalkAction4_OnUnknownNpc_ReceivesFallbackTalkTree"]                             = A(9_000_055, "cli_test55"),
+            ["CtaRequest_OnDefaultArmAction_ReceivesCtaResponseWithSuccessByte"]                      = A(9_000_056, "cli_test56"),
         };
 
     /// <summary>

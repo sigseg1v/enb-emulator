@@ -7737,8 +7737,13 @@ void Player::HandleCTARequest(unsigned char *data)
 		0x01						//Success
 	};
 
-	*((long*) &CTAResponse[0]) = myCTARequest->SourceID;
-	*((long*) &CTAResponse[4]) = myCTARequest->Action;
+	// Phase K: wire fields are 4-byte each (Win32 sizeof(long)==4 so the
+	// original long* writes were correct on retail; on Linux x86_64
+	// sizeof(long)==8 made each write 8 bytes, overflowing the 9-byte
+	// CTAResponse buffer and clobbering the Success byte (offset 8)
+	// with the high byte of the sign-extended Action int32.
+	*((int32_t*) &CTAResponse[0]) = myCTARequest->SourceID;
+	*((int32_t*) &CTAResponse[4]) = myCTARequest->Action;
 
 	SendOpcode(ENB_OPCODE_00BD_CTA_RESPONSE, (unsigned char *) &CTAResponse, sizeof(CTAResponse));
 }
