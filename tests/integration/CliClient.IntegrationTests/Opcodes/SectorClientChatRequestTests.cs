@@ -3,6 +3,7 @@
 // License: LICENSES/enb-emulator
 
 using System.Buffers.Binary;
+using System.Text;
 using N7.CliClient.Auth;
 using N7.CliClient.Net;
 using N7.CliClient.Opcodes;
@@ -349,6 +350,289 @@ public sealed class SectorClientChatRequestTests
                 $"(g) proxy SendClientPacketSequence guard tightening at " +
                 $"UDPProxyToClient_linux.cpp:568 (opcode < 0x0FFF " +
                 $"currently passes 0x00A5).");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Wave 113 sibling byte-exact pin on the same 0x00A3 CLIENT_CHAT_REQUEST
+    /// (CCR_FRIEND_STATUS_ONLY) → 0x00A5 CLIENT_CHAT_EVENT direct-reply
+    /// path probed by
+    /// <see cref="ClientChatRequest_FriendStatusOnlyBranch_ReceivesClientChatEvent"/>,
+    /// but pinning the COMPLETE 54-byte reply payload byte-for-byte
+    /// instead of only the first 4 bytes of the Type field.
+    ///
+    /// <para>
+    /// SIXTH byte-exact upgrade of a direct-reply assertion in Phase K
+    /// (after Waves 108/109/110/111/112). Targets a NEW framing pattern
+    /// not previously exercised byte-exact: AddDataLS — a length-prefixed
+    /// (short LE) string with NO NUL terminator. Wave 32's existing
+    /// assertion only pins <c>body[0..4) == {0x19,0x00,0x00,0x00}</c>
+    /// (Type=25 little-endian), leaving 50 bytes of the body
+    /// unverified — including the entire string-encoding wire shape, the
+    /// three trailing empty AddDataLS short(0) length-prefixes, the
+    /// blank short(0), and the trailing int32(0) block-length.
+    /// </para>
+    ///
+    /// <para>
+    /// Wave 113 firstName "Cher113" (7 ASCII bytes; vowel 'e' satisfies
+    /// the AccountManager.cpp:1147 G_ERROR_ONE_VOWEL check; no triple
+    /// repeats satisfies the AccountManager.cpp:1158-1166
+    /// G_ERROR_REPEATING_CHAR check — "11" peaks count at 1, 2 repeats).
+    /// </para>
+    ///
+    /// <para>
+    /// PRESERVATION DISCOVERY (Wave 113). Test characters created by
+    /// the integration harness are ADMIN admin-level (=100), not USER
+    /// (=0) as the existing Wave 32 docstring assumed. The seeded test
+    /// accounts at Fixtures/seed.sql carry <c>status=100</c> to satisfy
+    /// the global UDP plane's ProcessTicketInfo gate (G_ERROR 12
+    /// otherwise), and at character creation
+    /// <c>AccountManager.cpp:1221</c> initialises the avatar's
+    /// admin_level from <c>GetAccountStatus(account_username)</c>
+    /// directly: <c>database.info.admin_level = ntohl(GetAccountStatus(...))</c>.
+    /// The account status 100 matches the <c>ADMIN</c> constant at
+    /// <c>server/src/Net7.h:366</c>, so every test character is ADMIN.
+    /// This propagates into <c>Player::GetPostFix</c> at
+    /// <c>PlayerConnection.cpp:10303</c>'s <c>case ADMIN</c> branch which
+    /// sets <c>PostFix = "ADMIN"</c>, and since <c>PostFix[0]</c> is
+    /// non-empty, line 10323 produces <c>FName = "Cher113 [ADMIN]"</c>
+    /// (15 bytes) via <c>snprintf(FName, length, "%s [%s]", Name(),
+    /// PostFix)</c>. This is the LastName emitted on the wire, NOT the
+    /// raw firstName.
+    /// </para>
+    ///
+    /// <para>
+    /// SECONDARY DISCOVERY. The four trailing string parameters of
+    /// <c>Player::SendClientChatEvent</c> default to <b>empty string
+    /// literal</b> <c>""</c>, not NULL, per the declaration at
+    /// <c>server/src/PlayerClass.h:1031</c>:
+    /// <code>
+    ///   void SendClientChatEvent(long Type, Player *Source,
+    ///                            char *Channel="", char *Message="",
+    ///                            char *OtherPlayer="", char *NonPlayerSrc="");
+    /// </code>
+    /// The call site <c>SendClientChatEvent(CHEV_FRIEND_STATUS_ONLY,
+    /// this)</c> at PlayerConnection.cpp:1709-1710 picks up
+    /// Channel=Message=OtherPlayer="". AddDataLS at
+    /// <c>PacketMethods.h:66-74</c> guards on <c>if (mydata)</c> — a
+    /// non-null pointer to <c>""</c> PASSES the guard and emits
+    /// <c>short(strlen("")) == short(0)</c> followed by zero bytes of
+    /// payload, i.e. 2 bytes per empty-string AddDataLS. So the three
+    /// AddDataLS(OtherPlayer/Channel/Message) calls each emit 2 bytes,
+    /// for 6 bytes total — NOT zero as a NULL-pointer reading of the
+    /// signature would suggest.
+    /// </para>
+    ///
+    /// <para>
+    /// Reply wire layout (mirror of <c>Player::SendClientChatEvent</c>
+    /// at <c>server/src/PlayerConnection.cpp:10331-10381</c> for
+    /// Source==this, ADMIN admin level, no friends, all string args
+    /// defaulting to empty):
+    /// <code>
+    ///   [0..4)    int32 LE   Type      = 25 (CHEV_FRIEND_STATUS_ONLY)
+    ///   [4..8)    int32 LE   unknown   = 0  (spacer)
+    ///   [8..10)   short LE   LastName.len = 15
+    ///   [10..25)  ASCII      LastName  = "Cher113 [ADMIN]"
+    ///   [25..27)  short LE   LastName.len = 15 (duplicated emit)
+    ///   [27..42)  ASCII      LastName  = "Cher113 [ADMIN]"
+    ///   [42..44)  short LE   OtherPlayer.len = 0
+    ///   [44..46)  short LE   Channel.len     = 0
+    ///   [46..48)  short LE   Message.len     = 0
+    ///   [48..50)  short LE   blank           = 0
+    ///   [50..54)  int32 LE   blockLen        = 0
+    /// </code>
+    /// 54 bytes total. The two duplicated AddDataLS(LastName) emits
+    /// are the retail wire idiom — historically one would have been
+    /// "Rank" but it was commented out at PlayerConnection.cpp:10366,
+    /// leaving LastName emitted twice.
+    /// </para>
+    ///
+    /// <para>
+    /// Concrete regressions THIS sibling catches that Wave 32 does NOT:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b>AdminLevel-derived PostFix path mis-selection.</b> A
+    ///     regression in GetPostFix's <c>case ADMIN</c> branch at
+    ///     PlayerConnection.cpp:10303-10305 (e.g. dropping the case,
+    ///     renaming the postfix string from "ADMIN" to "ADM", or moving
+    ///     the case below the default) would change LastName from
+    ///     "Cher113 [ADMIN]" to "Cher113" or "Cher113 [ADM]" — both
+    ///     length deltas from 15. Wave 32 never inspects LastName;
+    ///     Wave 113's byte[8..10) short(15) length pin and verbatim
+    ///     [10..25) "Cher113 [ADMIN]" string pin trip immediately.
+    ///   </item>
+    ///   <item>
+    ///     <b>AccountManager AdminLevel-from-status initialisation.</b>
+    ///     A regression at AccountManager.cpp:1221 that broke the
+    ///     <c>admin_level = ntohl(GetAccountStatus(...))</c> seeding
+    ///     (e.g. zeroed admin_level on every new character, or read from
+    ///     the wrong column) would push our test character to USER,
+    ///     changing LastName back to bare "Cher113" — Wave 113's pins
+    ///     trip on the length mismatch.
+    ///   </item>
+    ///   <item>
+    ///     <b>AddDataLS empty-string emit divergence.</b> A change that
+    ///     short-circuited <c>if (mydata &amp;&amp; *mydata)</c> instead
+    ///     of <c>if (mydata)</c> at PacketMethods.h:66-74 would skip the
+    ///     short(0) emit for empty strings, shrinking the reply by 6
+    ///     bytes (54→48). Wave 32's body[0..4) check is structurally
+    ///     blind; Wave 113's <c>span.Length == 54</c> length assertion
+    ///     trips, and the trailing short(0)/int32(0) offset pins
+    ///     pinpoint which empty-string emit went missing.
+    ///   </item>
+    ///   <item>
+    ///     <b>LastName duplicated emit.</b> The retail wire idiom is two
+    ///     LastName emits (PlayerConnection.cpp:10367-10368). A refactor
+    ///     that "cleaned up" the dup to a single emit would shrink the
+    ///     body by 17 bytes (54→37). Wave 32 is blind; Wave 113 trips
+    ///     both via length and via the byte-[27..42) firstName-with-
+    ///     postfix verbatim pins.
+    ///   </item>
+    ///   <item>
+    ///     <b>Spacer / trailing field drift.</b> The int32(0) spacer at
+    ///     offset 4 and trailing short(0)×4 + int32(0) at offsets
+    ///     42/44/46/48/50 are Wave 32 blind spots. A regression that
+    ///     swapped any of these for a different sentinel (e.g. -1 for
+    ///     unknown, or omitted the trailing blank-string short) trips
+    ///     Wave 113's exact-zero pins.
+    ///   </item>
+    ///   <item>
+    ///     <b>AddData&lt;long&gt; vs AddData&lt;short&gt; mix-up.</b>
+    ///     The body interleaves int32 (4B) and short (2B) AddData calls;
+    ///     a width regression on any AddData call would shift every
+    ///     subsequent offset. Wave 113's byte-position-anchored pins
+    ///     trip independently per field — pinpoints WHICH width
+    ///     regression by which Assert fires first.
+    ///   </item>
+    ///   <item>
+    ///     <b>Variable-length string walker request-side.</b> The
+    ///     handler's variable-length walker at
+    ///     PlayerConnection.cpp:1659-1692 has to parse our 18B request
+    ///     with three short(0) length-prefixes; a regression that mis-
+    ///     consumed the string-length fields would mis-route or
+    ///     mis-extract <c>type</c> and the switch would land on a
+    ///     different (or no) case. Wave 32 already catches that as a
+    ///     "no 0x00A5 reply" timeout; Wave 113 additionally pins the
+    ///     emit shape so any regression that DOES emit 0x00A5 (e.g. via
+    ///     a different mis-routed case label) but with a different body
+    ///     shape is caught.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity note. No new server behaviour, no loosening of
+    /// input acceptance — the 18B request is exactly what the retail
+    /// Win32 client emits when the user toggles "Only friends can see
+    /// my status" and the 54B response is exactly what the retail
+    /// server's SendClientChatEvent path produces for a 7-character
+    /// avatar firstName at ADMIN admin level with no friends. The
+    /// AdminLevel=ADMIN baseline is a property of the test fixture's
+    /// seeded account status (100), not server divergence: a retail
+    /// player with status=ADMIN would see exactly this wire shape.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s. Handshake ~2s; CLIENT_CHAT_REQUEST + 0x00A5
+    /// round-trip is sub-second.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task ClientChatRequest_FriendStatusOnlyBranch_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        const string FirstName = "Cher113";
+        const string ExpectedLastName = "Cher113 [ADMIN]";
+        const int ExpectedLastNameByteCount = 15;
+        const int ExpectedReplyPayloadLength = 54;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: FirstName, shipName: "Cher113Ship", cts.Token);
+
+        try
+        {
+            byte[] payload = new byte[18];
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 28);
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(8, 2), 0);
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(10, 2), 0);
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(12, 2), 0);
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(14, 4), 0);
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(OpcodeId.Known.ClientChatRequest.Value, payload),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.ClientChatEvent.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+                int type = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+                if (type != 25) continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(25, type);
+                Assert.Equal(0, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4)));
+
+                // First LastName emit: short(15) + "Cher113 [ADMIN]"
+                Assert.Equal((short)ExpectedLastNameByteCount,
+                    BinaryPrimitives.ReadInt16LittleEndian(span.Slice(8, 2)));
+                Assert.Equal(ExpectedLastName,
+                    Encoding.ASCII.GetString(span.Slice(10, ExpectedLastNameByteCount)));
+
+                // Duplicated LastName emit: short(15) + "Cher113 [ADMIN]"
+                int second = 10 + ExpectedLastNameByteCount;
+                Assert.Equal((short)ExpectedLastNameByteCount,
+                    BinaryPrimitives.ReadInt16LittleEndian(span.Slice(second, 2)));
+                Assert.Equal(ExpectedLastName,
+                    Encoding.ASCII.GetString(span.Slice(second + 2, ExpectedLastNameByteCount)));
+
+                // Three AddDataLS("") empty-string emits — short(0) each.
+                int afterDupName = second + 2 + ExpectedLastNameByteCount;
+                Assert.Equal((short)0,
+                    BinaryPrimitives.ReadInt16LittleEndian(span.Slice(afterDupName, 2)));      // OtherPlayer.len
+                Assert.Equal((short)0,
+                    BinaryPrimitives.ReadInt16LittleEndian(span.Slice(afterDupName + 2, 2)));  // Channel.len
+                Assert.Equal((short)0,
+                    BinaryPrimitives.ReadInt16LittleEndian(span.Slice(afterDupName + 4, 2)));  // Message.len
+
+                // Trailing AddData((short)0) blank + AddData(0L→int32) block-length.
+                Assert.Equal((short)0,
+                    BinaryPrimitives.ReadInt16LittleEndian(span.Slice(afterDupName + 6, 2)));
+                Assert.Equal(0,
+                    BinaryPrimitives.ReadInt32LittleEndian(span.Slice(afterDupName + 8, 4)));
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x00A3 CLIENT_CHAT_REQUEST " +
+                $"(type=CCR_FRIEND_STATUS_ONLY=28) without seeing 0x00A5 CLIENT_CHAT_EVENT " +
+                $"with Type=25 for byte-exact pin.");
         }
         finally
         {
