@@ -231,6 +231,13 @@ public sealed class SectorClientChatErrorTests
     private const string SelfNick = "Yorself";
     private const int AddFriendSelfExpectedPayloadSize = 4 + 4 + 2 + 7 + 2 + 2;  // 21
 
+    // Wave 121 nick: 10B ASCII. Content is irrelevant for the RemoveIgnore
+    // empty-list path — PlayerMisc.cpp:1506-1517 walks m_IgnoreNames with
+    // strcasecmp; for a fresh char m_NumIgnore==0 so the loop body never
+    // runs and the post-loop "i == m_NumIgnore" branch fires unconditionally.
+    private const string AbsentIgnoredNick = "Phantom121";
+    private const int RemoveIgnoreExpectedPayloadSize = 4 + 4 + 2 + 10 + 2 + 2;  // 24
+
     private readonly ServerFixture _server;
     private readonly ClientFixture _client;
 
@@ -753,6 +760,223 @@ public sealed class SectorClientChatErrorTests
                 $"drained {maxFrames} frames after sending 0x00A3 CLIENT_CHAT_REQUEST " +
                 $"(type=CCE_ADD_FRIEND=8, nick=\"{SelfNick}\" matching self Name()) " +
                 $"without seeing 0x00A6 CLIENT_CHAT_ERROR. Observed [{observed.Count}]: " +
+                $"{string.Join(" | ", observed)}");
+        }
+        finally
+        {
+            try
+            {
+                using var logoffCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                byte[] logoffPayload = new byte[8];
+                await session.Sector.SendAsync(
+                    Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
+                    logoffCts.Token);
+                await SectorHandshake.DrainUntilOpcode(
+                    session.Sector, OpcodeId.Known.LogoffConfirmation.Value, logoffCts.Token);
+            }
+            catch { /* best-effort logoff */ }
+
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Wave 121 sibling-arm pin on the 0x00A6 CLIENT_CHAT_ERROR emit. Where
+    /// Wave 119 covered the T1 switch arm <c>case CCE_REMOVE_FRIEND=9</c>
+    /// routing to <c>RemoveFriend</c>'s empty-list fall-through emitting
+    /// <c>reason=CHAT_ERROR_NOT_A_MEMBER=6</c>, this wave covers the
+    /// parallel T1 switch arm <c>case CCE_UNIGNORE=11</c> at
+    /// <c>PlayerConnection.cpp:1703-1705</c> routing to
+    /// <c>Player::RemoveIgnore</c> at <c>PlayerMisc.cpp:1502-1523</c>'s
+    /// empty-list fall-through at line 1514-1517 emitting the SAME
+    /// reason=CHAT_ERROR_NOT_A_MEMBER=6 but type=CCE_UNIGNORE=11.
+    ///
+    /// <para>
+    /// Stimulus (28B 0x00A3):
+    /// <code>
+    ///   [0..4)    int32 PlayerID         = 0
+    ///   [4..8)    int32 type             = 11  (CCE_UNIGNORE)
+    ///   [8..10)   short string_length1   = 10
+    ///   [10..20)  10B ASCII              = "Phantom121"
+    ///   [20..22)  short string_length2   = 0
+    ///   [22..24)  short string_length3   = 0
+    ///   [24..28)  int32 data_size        = 0
+    /// </code>
+    /// </para>
+    ///
+    /// <para>
+    /// Reply assertion (24B 0x00A6):
+    /// <code>
+    ///   [0..4)   int32 LE reason       = 6  (CHAT_ERROR_NOT_A_MEMBER)
+    ///   [4..8)   int32 LE type         = 11 (CCE_UNIGNORE)
+    ///   [8..10)  int16 LE player_len   = 10
+    ///   [10..20) 10B ASCII player      = "Phantom121"
+    ///   [20..22) int16 LE channel_len  = 0
+    ///   [22..24) int16 LE other_len    = 0
+    /// </code>
+    /// Total 4+4+2+10+2+2 = 24 bytes.
+    /// </para>
+    ///
+    /// <para>
+    /// Why this wave target. Wave 119 pinned the T1 arm
+    /// <c>case CCE_REMOVE_FRIEND</c> with reason=6 routing through
+    /// <c>RemoveFriend</c>. Wave 121 pins the parallel T1 arm
+    /// <c>case CCE_UNIGNORE</c> with the SAME reason=6 routing through
+    /// <c>RemoveIgnore</c> — different intermediate handler, different
+    /// type byte (11 vs 9), different list (m_IgnoreNames vs
+    /// m_FriendNames), different save fn (SaveIgnoreList vs
+    /// SaveFriendsList), but structurally parallel control flow. A
+    /// regression that broke ONE intermediate handler (e.g. relaxed the
+    /// fresh-char `m_NumIgnore==0` post-loop emit) is invisible to Wave
+    /// 119; Wave 121 catches via drain-timeout. The Wave 119↔121 pair
+    /// also catches reason→reason copy-paste swaps between the two empty-
+    /// list fall-throughs — both emit reason=6 so a swap is byte-clean on
+    /// reason, but a regression that swapped the TYPE constants
+    /// (CCE_REMOVE_FRIEND ↔ CCE_UNIGNORE in the SendClientChatError call)
+    /// trips on byte[4]==0x0B in Wave 121's reply.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression classes this catches beyond Wave 119.
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b>T1 switch arm <c>case CCE_UNIGNORE=11</c> deletion or
+    ///     copy-paste swap with <c>case CCE_IGNORE=10</c> at
+    ///     <c>PlayerConnection.cpp:1700-1705</c>.</b> The IGNORE/UNIGNORE
+    ///     case-label pair is parallel to ADD_FRIEND/REMOVE_FRIEND
+    ///     (Wave 120↔119 pair); a refactor swapping the two case bodies
+    ///     would route our type=11 stimulus to AddIgnore which would
+    ///     either succeed (no-op self-name check fails) and emit
+    ///     CHEV_NOW_IGNORING (0x00A5) or hit no error path at all —
+    ///     drain-timeout catches.
+    ///   </item>
+    ///   <item>
+    ///     <b>RemoveIgnore empty-list fall-through deletion at
+    ///     <c>PlayerMisc.cpp:1514-1517</c>.</b> Wave 119 never enters
+    ///     RemoveIgnore — they walk different lists. If the post-loop
+    ///     emit is deleted, remove-from-empty-ignore-list becomes a
+    ///     silent no-op.
+    ///   </item>
+    ///   <item>
+    ///     <b><c>CCE_UNIGNORE=11</c> constant drift at
+    ///     <c>PacketStructures.h:646</c>.</b> Wave 119 pins type=9; a
+    ///     renumber on CCE_UNIGNORE is invisible to Wave 119 but surfaces
+    ///     on Wave 121's type field AND misroutes T1 switch dispatch.
+    ///   </item>
+    ///   <item>
+    ///     <b><c>RemoveIgnore</c> argument-routing regression at
+    ///     <c>PlayerMisc.cpp:1516</c>.</b> The third arg passed to
+    ///     SendClientChatError is the stimulus <c>name</c> pointer; the
+    ///     SECOND arg is the literal <c>CCE_UNIGNORE</c> constant. A
+    ///     refactor that hardcoded the second arg to CCE_REMOVE_FRIEND or
+    ///     passed a different list-type constant would surface as byte[4]
+    ///     drift.
+    ///   </item>
+    ///   <item>
+    ///     <b>List-confusion regression at <c>PlayerMisc.cpp:1506-1511</c>.</b>
+    ///     If RemoveIgnore was refactored to walk <c>m_FriendNames</c>
+    ///     instead of <c>m_IgnoreNames</c>, our fresh-char path stays
+    ///     accidentally-green (both lists are empty) — Wave 121 does NOT
+    ///     catch this. A follow-on wave with a pre-seeded ignore list
+    ///     would close the gap; documented for catalogue completeness.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity note (per CLAUDE.md). 0x00A3 with
+    /// type=CCE_UNIGNORE is what the retail Win32 client emits when the
+    /// user invokes the <c>/unignore &lt;name&gt;</c> slash command or
+    /// uses the Friends-tab Ignore-list remove. When the named player is
+    /// not on the ignore list the retail server emits 0x00A6 with
+    /// reason=CHAT_ERROR_NOT_A_MEMBER — verbatim retail behaviour. We
+    /// are not making the server accept any new input shape, not
+    /// loosening any security posture, not fabricating any reply.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s. Handshake ~22s; CLIENT_CHAT_REQUEST + 0x00A6
+    /// round-trip sub-second; LOGOFF sub-second.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task ClientChatRequest_RemoveIgnoreNotInList_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Ignorer", shipName: "IgnorerShip", cts.Token);
+
+        try
+        {
+            // 0x00A3 CLIENT_CHAT_REQUEST — 28B variable-length layout,
+            // type=CCE_UNIGNORE=11, string1="Phantom121" (the nick the
+            // server walks m_IgnoreNames against — content irrelevant for
+            // the empty-list fall-through).
+            byte[] nickBytes = Encoding.ASCII.GetBytes(AbsentIgnoredNick);
+            int payloadSize = 4 + 4 + 2 + nickBytes.Length + 2 + 2 + 4;
+            byte[] payload = new byte[payloadSize];
+            int o = 0;
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 0); o += 4;             // PlayerID
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 11); o += 4;            // type = CCE_UNIGNORE
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), (short)nickBytes.Length); o += 2;
+            nickBytes.CopyTo(payload, o); o += nickBytes.Length;
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), 0); o += 2;             // string_length2 = 0
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), 0); o += 2;             // string_length3 = 0
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 0);                     // data_size
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(OpcodeId.Known.ClientChatRequest.Value, payload),
+                cts.Token);
+
+            // Drain inbound until we see 0x00A6 CLIENT_CHAT_ERROR.
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            var observed = new List<string>();
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+                observed.Add($"0x{reply!.Header.Opcode:X4}/{reply.Payload.Length}");
+
+                if (reply.Header.Opcode != OpcodeId.Known.ClientChatError.Value)
+                    continue;
+
+                // Wire layout (24 bytes):
+                //   bytes [0..4]   int32 LE reason  = 6 (CHAT_ERROR_NOT_A_MEMBER)
+                //   bytes [4..8]   int32 LE type    = 11 (CCE_UNIGNORE)
+                //   bytes [8..10]  int16 LE player_len = 10
+                //   bytes [10..20] 10B ASCII player = "Phantom121"
+                //   bytes [20..22] int16 LE channel_len = 0
+                //   bytes [22..24] int16 LE other_len   = 0
+                Assert.Equal(RemoveIgnoreExpectedPayloadSize, reply.Payload.Length);
+                var span = reply.Payload.Span;
+
+                Assert.Equal(6, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(0, 4)));
+                Assert.Equal(11, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4)));
+                Assert.Equal((short)10, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(8, 2)));
+                Assert.Equal(AbsentIgnoredNick, Encoding.ASCII.GetString(span.Slice(10, 10)));
+                Assert.Equal((short)0, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(20, 2)));
+                Assert.Equal((short)0, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(22, 2)));
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x00A3 CLIENT_CHAT_REQUEST " +
+                $"(type=CCE_UNIGNORE=11, nick=\"{AbsentIgnoredNick}\") without seeing " +
+                $"0x00A6 CLIENT_CHAT_ERROR. Observed [{observed.Count}]: " +
                 $"{string.Join(" | ", observed)}");
         }
         finally
