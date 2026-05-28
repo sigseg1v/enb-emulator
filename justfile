@@ -12,6 +12,10 @@ IMAGE_TAG      := env_var_or_default("IMAGE_TAG", "dev")
 # branch so parallel worktrees don't fight over the same container set.
 # main/master/detached-HEAD collapse to plain `enb-emulator`. Already-prefixed
 # branches (enb-emulator-foo) are used as-is. Override with the env var.
+#
+# Note: only the container/network/volume *names* are namespaced. Host
+# port bindings in docker-compose.yml are still fixed at the conventional
+# defaults, so only one worktree at a time can run its stack.
 export COMPOSE_PROJECT_NAME := env_var_or_default("COMPOSE_PROJECT_NAME", `b=$(git branch --show-current 2>/dev/null); if [ -z "$b" ] || [ "$b" = main ] || [ "$b" = master ]; then echo enb-emulator; else s=$(printf '%s' "$b" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9_-' '-' | tr -s '-' | sed 's/^-//;s/-$//'); case "$s" in enb-emulator-*) echo "$s";; *) echo "enb-emulator-$s";; esac; fi`)
 
 # Default: list targets.
