@@ -130,6 +130,7 @@ public static class TestAccounts
             ["ManufactureSetManufactureId_EmittedDuringHandshake_HasExactly4BytePayload"]              = A(9_000_065, "cli_test65"),
             ["GalaxyMapRequest_OnFreshSession_DoesNotBreakConnection_RequestTimeStillRoundTrips"]      = A(9_000_066, "cli_test66"),
             ["ClientType_EmittedDuringSpaceSectorHandshake_HasExactly4BytePayload"]                    = A(9_000_067, "cli_test67"),
+            ["HandshakeDoesNotEmitStarbaseSetOnSpaceSectorLogin"]                                      = A(9_000_068, "cli_test68"),
         };
 
     /// <summary>

@@ -850,4 +850,193 @@ public sealed class SectorHandshakeFanoutTests
         }
     }
 
+    /// <summary>
+    /// Wave 73 negative-assertion: 0x004F STARBASE_SET MUST NOT appear
+    /// in the handshake fan-out of a SPACE-sector login. The opcode is
+    /// emitted unconditionally during StationLogin2 (<c>SectorManager.cpp:514</c>
+    /// <c>player-&gt;SendStarbaseSet(0, 0)</c>) for docked characters,
+    /// and again unconditionally during LaunchIntoSpace
+    /// (<c>SectorManager.cpp:537</c> <c>player-&gt;SendStarbaseSet(1, 0)</c>)
+    /// at the explicit station→space transition; it has no SectorLogin2
+    /// (space-arm) emit site. A test that re-establishes directly into
+    /// Luna space sector 1015 (taking the ReloadSavedData path which
+    /// routes through SectorLogin2 rather than StationLogin2) must
+    /// observe zero 0x004F frames in HandshakeOpcodes.
+    ///
+    /// <para>
+    /// Why this is a negative-assertion wave (and the first one in
+    /// Phase K). Positive presence assertions catch
+    /// "opcode-stopped-emitting" regressions; negative absence
+    /// assertions catch "opcode-emits-when-it-shouldn't" regressions.
+    /// Both shapes matter for preservation fidelity — the retail
+    /// Win32 client interprets a 0x004F STARBASE_SET frame as
+    /// "you-are-now-docked-at-starbase" (with body field action=0) or
+    /// "you-have-just-launched" (with body field action=1); a spurious
+    /// 0x004F mid-space-handshake would either confusingly re-dock a
+    /// player into a starbase UI overlay (action=0) or re-trigger the
+    /// launch-cutscene (action=1). The retail server never emits 0x004F
+    /// during a plain space-sector login, so neither should ours. Wave
+    /// 73 pins that invariant.
+    /// </para>
+    ///
+    /// <para>
+    /// Why +0 ratchet. 0x004F is already counted in TestedOpcodes by
+    /// HandshakeEmitsFullSendLoginShipDataFanout (Wave 51 — the
+    /// positive presence assertion in the STATION-sector handshake).
+    /// Wave 73 strengthens the existing coverage with the absence
+    /// invariant on the SPACE-sector branch.
+    /// </para>
+    ///
+    /// <para>
+    /// Test structure. 2-stage station→space handshake pattern reused
+    /// from Wave 52/54: stage 1 EstablishAsync at Luna Station 10151
+    /// creates the avatar via ReInitializeSavedData; explicit
+    /// 0x00B9 LOGOFF_REQUEST → 0x00BA LOGOFF_CONFIRMATION round-trip
+    /// forces synchronous DropPlayerFromGalaxy (avoids
+    /// G_ERROR_ACCOUNT_IN_USE); DisposeAsync tears down the stage-1
+    /// sockets; stage 2 ReestablishAsync at sectorId 1015 (Luna space)
+    /// takes the ReloadSavedData path which preserves the space
+    /// sector_num and routes HandleSectorLogin into the SectorLogin
+    /// branch (sector_id ≤ 9999), NOT the StationLogin branch
+    /// (sector_id &gt; 9999). After the space handshake completes, we
+    /// assert <c>Assert.DoesNotContain(0x004F, spaceSession.HandshakeOpcodes)</c>.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression classes this catches.
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b>SendStarbaseSet leak into SectorLogin2 at
+    ///     <c>SectorManager.cpp:354-384</c>.</b> If a refactor
+    ///     accidentally copies the
+    ///     <c>player-&gt;SendStarbaseSet(0, 0)</c> line from
+    ///     StationLogin2:514 into SectorLogin2 (or moves
+    ///     SendStarbaseSet earlier in the common HandleSectorLogin
+    ///     prologue at SectorManager.cpp:325-352), the space handshake
+    ///     would gain a spurious 0x004F — assertion catches.
+    ///   </item>
+    ///   <item>
+    ///     <b>HandleSectorLogin dispatch-branch collapse at
+    ///     <c>SectorManager.cpp:324-336</c>.</b> If the
+    ///     <c>m_SectorID &gt; 9999</c> guard inverts or collapses
+    ///     (e.g. <c>&gt;= 9999</c> instead of <c>&gt; 9999</c>, or both
+    ///     branches falling through to StationLogin), sector 1015
+    ///     would re-route into StationLogin2 and emit 0x004F. Assertion
+    ///     catches.
+    ///   </item>
+    ///   <item>
+    ///     <b>LaunchIntoSpace mis-call during space-sector login.</b>
+    ///     LaunchIntoSpace at SectorManager.cpp:534 calls
+    ///     SendStarbaseSet(1, 0) and is meant to fire only during the
+    ///     explicit station→space transition (when a docked player
+    ///     clicks "Launch"). A regression that calls LaunchIntoSpace
+    ///     from the SectorLogin path (or from a sector-thread spawn
+    ///     hook on entering a space sector) would emit a spurious
+    ///     action=1 0x004F. Assertion catches.
+    ///   </item>
+    ///   <item>
+    ///     <b>SendOpcode header-width revert at
+    ///     <c>PlayerConnection.cpp:127</c>.</b> Same load-bearing
+    ///     invariant as the Wave 49/52/54 positive assertions. A revert
+    ///     to <c>sizeof(long) == 8</c> on Linux would shift the 0x2016
+    ///     PACKET_SEQUENCE inner-tuple parser by 4 bytes, mis-labelling
+    ///     every inner opcode — including potentially producing a fake
+    ///     0x004F where there shouldn't be one (mis-decoded from a
+    ///     neighbouring opcode's byte slot). Negative assertion would
+    ///     catch the false-positive case the positive assertions don't.
+    ///   </item>
+    ///   <item>
+    ///     <b>DoSectorLoginUntilStartAsync drain-loop capture-path
+    ///     regression (<c>Opcodes/SectorHandshake.cs:330-346</c>).</b>
+    ///     If the capture loop accidentally appends frames AFTER the
+    ///     0x0005 START terminator (e.g. continuing past the START
+    ///     boundary into the post-handshake stream), it could capture
+    ///     a delayed 0x004F that the post-handshake game-state code
+    ///     happens to emit — the negative assertion would catch the
+    ///     capture-path corruption.
+    ///   </item>
+    ///   <item>
+    ///     <b>Stage 1 → Stage 2 logoff-and-reconnect path regression at
+    ///     <c>SectorHandshake.cs:436-446</c>.</b> Same load-bearing
+    ///     path as Wave 52/54/71. A bare TCP disconnect between stages
+    ///     leaves the in-memory Player around so stage-2 GlobalConnect
+    ///     hits G_ERROR_ACCOUNT_IN_USE at UDP_Global.cpp:166-170 —
+    ///     test times out before the assertion runs.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity note (per CLAUDE.md). 0x004F STARBASE_SET is
+    /// a server-originated emit; Wave 73 adds no new client input
+    /// shapes and no new server response. The retail Win32 client +
+    /// retail server pair never emits 0x004F during a plain
+    /// space-sector login (it would confuse the space HUD overlay);
+    /// our negative assertion pins that retail behaviour. Pure
+    /// passive-observation tightening, exactly the kind of fidelity
+    /// guard the rule welcomes.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 120s (same as Wave 52/54 — 2-stage login pattern).
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task HandshakeDoesNotEmitStarbaseSetOnSpaceSectorLogin()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int stationSectorId = 10151;
+        const int spaceSectorId = 1015;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        var stationSession = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, stationSectorId,
+            firstName: "NoSbsLeak", shipName: "NoSbsLeakShip", cts.Token);
+
+        try
+        {
+            byte[] logoffPayload = new byte[8];
+            await stationSession.Sector.SendAsync(
+                Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
+                cts.Token);
+            await SectorHandshake.DrainUntilOpcode(
+                stationSession.Sector, OpcodeId.Known.LogoffConfirmation.Value, cts.Token);
+            await stationSession.DisposeAsync();
+
+            await using var spaceSession = await SectorHandshake.ReestablishAsync(
+                _server, login.Ticket!, slot, spaceSectorId, cts.Token);
+
+            // Negative assertion: 0x004F STARBASE_SET must NOT appear in
+            // the space-sector handshake. It's a STATION-only emit
+            // (SectorManager.cpp:514 in StationLogin2) plus an explicit
+            // LaunchIntoSpace emit (SectorManager.cpp:537) which only
+            // fires on the docked→space transition, never on a direct
+            // space-sector login.
+            Assert.DoesNotContain(OpcodeId.Known.StarbaseSet.Value, spaceSession.HandshakeOpcodes);
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            try
+            {
+                await using var cleanupGlobal = await N7.CliClient.Net.EncryptedTcpConnection.ConnectAsync(
+                    _server.GlobalHost, _server.GlobalPort, cleanupCts.Token);
+                await SectorHandshake.SendGlobalConnectAsync(
+                    cleanupGlobal, login.Ticket!, cleanupCts.Token);
+                await SectorHandshake.DrainUntilOpcode(
+                    cleanupGlobal, OpcodeId.Known.GlobalAvatarList.Value, cleanupCts.Token);
+                await SectorHandshake.DeleteCreatedCharacterAsync(
+                    cleanupGlobal, slot, cleanupCts.Token);
+            }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
 }
