@@ -641,4 +641,261 @@ public sealed class SectorClientChatRequestTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 116 sibling byte-exact pin on the ADJACENT switch arm to
+    /// Wave 113 (<see cref="ClientChatRequest_FriendStatusOnlyBranch_PinsExactReplyWireShape"/>),
+    /// distinguished from Wave 113 by exactly ONE BYTE on the wire — the
+    /// 0x00A5 reply's Type field flips from 25 (CHEV_FRIEND_STATUS_ONLY)
+    /// to 26 (CHEV_ALL_STATUS) — and ONE BIT of server state — the
+    /// <c>m_StatusToFriendsOnly</c> flag flips from <c>true</c> to
+    /// <c>false</c>.
+    ///
+    /// <para>
+    /// 0x00A5 CLIENT_CHAT_EVENT is +0 (already counted by Wave 32 with
+    /// the CHEV_FRIEND_STATUS_ONLY=25 Type variant; coverage stays at
+    /// 105/207 = 50.7%). 0x00A3 CLIENT_CHAT_REQUEST is +0 (already
+    /// counted by Wave 32 with the type=28 CCR_FRIEND_STATUS_ONLY arm).
+    /// </para>
+    ///
+    /// <para>
+    /// SECOND multi-arm dispatcher sibling-arm-pinning wave (after
+    /// Wave 115 which pinned the CCR_LIST_IGNORES arm vs Wave 63's
+    /// CCR_LIST_FRIENDS arm of the same SendClientChatList emit fn).
+    /// </para>
+    ///
+    /// <para>
+    /// Wave 113 covered <c>case CCR_FRIEND_STATUS_ONLY</c> at
+    /// <c>server/src/PlayerConnection.cpp:1706-1709</c>:
+    /// <code>
+    ///     case CCR_FRIEND_STATUS_ONLY:
+    ///         m_StatusToFriendsOnly = true;
+    ///         SendClientChatEvent(CHEV_FRIEND_STATUS_ONLY, this);
+    ///         break;
+    /// </code>
+    /// Wave 116 covers the <b>immediately-following</b>
+    /// <c>case CCR_ANYONE_STATUS</c> at
+    /// <c>server/src/PlayerConnection.cpp:1710-1713</c>:
+    /// <code>
+    ///     case CCR_ANYONE_STATUS:
+    ///         m_StatusToFriendsOnly = false;
+    ///         SendClientChatEvent(CHEV_ALL_STATUS, this);
+    ///         break;
+    /// </code>
+    /// </para>
+    ///
+    /// <para>
+    /// Wire deltas vs Wave 113:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b>Request payload byte 4</b> flips from 28 (0x1C) to 29
+    ///     (0x1D) — the dispatcher's <c>request->type</c> field. Per
+    ///     <c>common/include/net7/PacketStructures.h:663-664</c>:
+    ///     <code>
+    ///       #define CCR_FRIEND_STATUS_ONLY 28
+    ///       #define CCR_ANYONE_STATUS      29
+    ///     </code>
+    ///   </item>
+    ///   <item>
+    ///     <b>Reply payload byte 0</b> flips from 25 (0x19) to 26
+    ///     (0x1A) — the <c>SendClientChatEvent</c> body's <c>Type</c>
+    ///     field. Per <c>common/include/net7/PacketStructures.h:756-757</c>:
+    ///     <code>
+    ///       #define CHEV_FRIEND_STATUS_ONLY 25
+    ///       #define CHEV_ALL_STATUS         26
+    ///     </code>
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// All other 53 bytes of the 54-byte reply are byte-identical to
+    /// Wave 113 (same firstName-driven LastName "Cher116 [ADMIN]"
+    /// duplicated emit, same three trailing empty-string AddDataLS
+    /// short(0) emits, same short(0) blank, same int32(0) block-length).
+    /// </para>
+    ///
+    /// <para>
+    /// Concrete regressions THIS sibling catches that Wave 113 does NOT:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b>case CCR_ANYONE_STATUS dispatch deletion or fall-through</b>
+    ///     at <c>PlayerConnection.cpp:1710-1713</c>. Wave 113 only
+    ///     exercises the CCR_FRIEND_STATUS_ONLY arm; if a refactor
+    ///     accidentally deleted the CCR_ANYONE_STATUS case label or
+    ///     merged it into the default branch, our 18B type=29 request
+    ///     would silently no-op (no reply) — Wave 116 traps via
+    ///     assertion-timeout. Wave 113 stays green.
+    ///   </item>
+    ///   <item>
+    ///     <b>CHEV_ALL_STATUS constant drift</b> at
+    ///     <c>PacketStructures.h:757</c>. If the constant changed from
+    ///     26 to any other value, Wave 113's CHEV_FRIEND_STATUS_ONLY=25
+    ///     assertion stays green (different constant) but Wave 116's
+    ///     byte[0]==0x1A pin trips.
+    ///   </item>
+    ///   <item>
+    ///     <b>CCR_ANYONE_STATUS → CHEV_ALL_STATUS routing scramble</b>.
+    ///     If someone copy-pasted the CCR_FRIEND_STATUS_ONLY body into
+    ///     the CCR_ANYONE_STATUS case (calling
+    ///     <c>SendClientChatEvent(CHEV_FRIEND_STATUS_ONLY, this)</c>
+    ///     from the type=29 arm), Wave 113 sees its own correct reply
+    ///     and stays green; Wave 116 sees Type=25 instead of 26 and
+    ///     trips on the byte[0]==0x1A pin. This is the cleanest
+    ///     copy-paste-error catch in the dispatcher.
+    ///   </item>
+    ///   <item>
+    ///     <b><c>m_StatusToFriendsOnly = false</c> assignment drift</b>.
+    ///     The two arms differ in the per-player flag setting (true vs
+    ///     false). Wave 116 doesn't directly inspect the flag, but if a
+    ///     regression swapped the two assignments (CCR_ANYONE_STATUS
+    ///     setting true), the test character's status would be reported
+    ///     to friends only thereafter — caught indirectly via downstream
+    ///     IsIgnored / m_TellsFromFriendsOnly tests, but Wave 116
+    ///     surfaces the wrong reply Type as the proximate symptom.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Why a paired sibling test rather than parameterising Wave 113:
+    /// the regression classes above are catchable ONLY by exercising
+    /// both arms independently. A parameterised <c>[Theory]</c> would
+    /// still satisfy the catch surface, but a discrete <c>[Fact]</c>
+    /// per arm produces clearer failure attribution (one method name
+    /// fails) and matches the established Phase K sibling-arm-pinning
+    /// convention (Wave 63 + Wave 115 on the same SendClientChatList
+    /// emit).
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity note. No new server behaviour, no loosening of
+    /// input acceptance — the 18B request is exactly what the retail
+    /// Win32 client emits when the user toggles "Everyone can see my
+    /// status" (the inverse of the Wave 113 toggle), and the 54B
+    /// response is exactly what the retail server's
+    /// SendClientChatEvent path produces for a 7-character avatar
+    /// firstName at ADMIN admin level with no friends.
+    /// </para>
+    ///
+    /// <para>
+    /// Wave 116 firstName "Cher116" — 7 ASCII bytes; vowel 'e' satisfies
+    /// the AccountManager.cpp:1147 G_ERROR_ONE_VOWEL check; "11" peaks
+    /// at 2 repeats (well under triple) so passes
+    /// AccountManager.cpp:1158-1166 G_ERROR_REPEATING_CHAR. Same
+    /// LastName-byte-length of 15 ("Cher116 [ADMIN]") as Wave 113's
+    /// "Cher113 [ADMIN]", so the 54-byte reply length and offsets are
+    /// byte-identical to Wave 113 except for byte[0].
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s. Handshake ~2s; CLIENT_CHAT_REQUEST + 0x00A5
+    /// round-trip is sub-second.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task ClientChatRequest_AnyoneStatusBranch_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        const string FirstName = "Cher116";
+        const string ExpectedLastName = "Cher116 [ADMIN]";
+        const int ExpectedLastNameByteCount = 15;
+        const int ExpectedReplyPayloadLength = 54;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: FirstName, shipName: "Cher116Ship", cts.Token);
+
+        try
+        {
+            // 0x00A3 CLIENT_CHAT_REQUEST — 18B canonical layout.
+            //   [0..4)   int32 PlayerID       = 0  (handler ignores)
+            //   [4..8)   int32 type           = 29 (CCR_ANYONE_STATUS)
+            //   [8..10)  short string_length1 = 0
+            //   [10..12) short string_length2 = 0
+            //   [12..14) short string_length3 = 0
+            //   [14..18) int32 data_size      = 0
+            byte[] payload = new byte[18];
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 29);
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(8, 2), 0);
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(10, 2), 0);
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(12, 2), 0);
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(14, 4), 0);
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(OpcodeId.Known.ClientChatRequest.Value, payload),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.ClientChatEvent.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+                int type = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+                if (type != 26) continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(26, type);
+                Assert.Equal(0, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4)));
+
+                // First LastName emit: short(15) + "Cher116 [ADMIN]"
+                Assert.Equal((short)ExpectedLastNameByteCount,
+                    BinaryPrimitives.ReadInt16LittleEndian(span.Slice(8, 2)));
+                Assert.Equal(ExpectedLastName,
+                    Encoding.ASCII.GetString(span.Slice(10, ExpectedLastNameByteCount)));
+
+                // Duplicated LastName emit: short(15) + "Cher116 [ADMIN]"
+                int second = 10 + ExpectedLastNameByteCount;
+                Assert.Equal((short)ExpectedLastNameByteCount,
+                    BinaryPrimitives.ReadInt16LittleEndian(span.Slice(second, 2)));
+                Assert.Equal(ExpectedLastName,
+                    Encoding.ASCII.GetString(span.Slice(second + 2, ExpectedLastNameByteCount)));
+
+                // Three AddDataLS("") empty-string emits — short(0) each.
+                int afterDupName = second + 2 + ExpectedLastNameByteCount;
+                Assert.Equal((short)0,
+                    BinaryPrimitives.ReadInt16LittleEndian(span.Slice(afterDupName, 2)));
+                Assert.Equal((short)0,
+                    BinaryPrimitives.ReadInt16LittleEndian(span.Slice(afterDupName + 2, 2)));
+                Assert.Equal((short)0,
+                    BinaryPrimitives.ReadInt16LittleEndian(span.Slice(afterDupName + 4, 2)));
+
+                // Trailing AddData((short)0) blank + AddData(0L→int32) block-length.
+                Assert.Equal((short)0,
+                    BinaryPrimitives.ReadInt16LittleEndian(span.Slice(afterDupName + 6, 2)));
+                Assert.Equal(0,
+                    BinaryPrimitives.ReadInt32LittleEndian(span.Slice(afterDupName + 8, 4)));
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x00A3 CLIENT_CHAT_REQUEST " +
+                $"(type=CCR_ANYONE_STATUS=29) without seeing 0x00A5 CLIENT_CHAT_EVENT " +
+                $"with Type=26 (CHEV_ALL_STATUS) for byte-exact pin.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
