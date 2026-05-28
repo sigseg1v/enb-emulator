@@ -160,6 +160,7 @@ public static class TestAccounts
             ["AvatarDescription_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmit"]          = A(9_000_095, "cli_test95"),
             ["ClientAvatarAndClientShip_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmits"] = A(9_000_096, "cli_test96"),
             ["ClientType_EmittedExactlyOnceDuringSpaceSectorHandshake_PinsSectorLoginEmit"]            = A(9_000_097, "cli_test97"),
+            ["StartAck_AfterSpaceArmHandshake_EmitsCameraControlWithEightBytePayload"]                = A(9_000_098, "cli_test98"),
         };
 
     /// <summary>
