@@ -281,4 +281,170 @@ public sealed class SectorServerParametersHardeningTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 104 frame-count hardening (+0 ratchet, 0x0042): pins the
+    /// exact 1-frame emit-count invariant Wave 87's payload-length
+    /// hardening was structurally blind to. The captured single-player
+    /// space-sector login stream emits 0x0042 SERVER_PARAMETERS exactly
+    /// once — from <c>SectorManager::SectorLogin2</c> at
+    /// <c>server/src/SectorManager.cpp:364</c>
+    /// (<c>SendServerParameters(player)</c>), which dispatches to
+    /// <c>SectorManager::SendServerParameters</c> at SectorManager.cpp:264-293
+    /// where the single <c>SendOpcode(ENB_OPCODE_0042_SERVER_PARAMETERS, ...,
+    /// sizeof(parameters))</c> call lives. SectorLogin2 is the space-arm
+    /// dispatch path (PlayerConnection.cpp:324-336 routes sector_id ≤ 9999
+    /// to SectorLogin → SectorLogin2; sector_id &gt; 9999 routes to
+    /// StationLogin which does NOT call SendServerParameters).
+    ///
+    /// <para>
+    /// The 0x0042 SendOpcode at SectorManager.cpp:292 is the only emit
+    /// site for this opcode in the entire server source tree (verified
+    /// by grep: SectorManager.cpp:292 is the unique
+    /// ENB_OPCODE_0042_SERVER_PARAMETERS SendOpcode call). So 0x0042 is
+    /// exactly 1 emit per single-player space-sector login. Mirrors the
+    /// Wave 91-103 sibling-method pattern.
+    /// </para>
+    ///
+    /// <para>
+    /// Why a separate test method, not an in-place assertion. Wave 87's
+    /// existing test caps at <c>Assert.NotEmpty + Assert.All(payload==70)</c>,
+    /// which would still pass if a refactor added a spurious second
+    /// emit (e.g., re-introducing the commented-out
+    /// <c>SendDataFileToClient("ServerParameters.dat")</c> call at
+    /// SectorManager.cpp:363 alongside the SendServerParameters call,
+    /// then accidentally re-emitting via both paths). Keeping the count
+    /// assertion in its own method preserves Wave 87's narrow-scope
+    /// failure surface for payload-length-only regressions.
+    /// </para>
+    ///
+    /// <para>
+    /// Catches:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b>Duplicate SendServerParameters at SectorManager.cpp:364.</b>
+    ///     A copy-paste regression that introduced a second SendServerParameters
+    ///     call (e.g., one before and one after the SendAllNavs block) would
+    ///     emit 2 frames. <c>Assert.NotEmpty + Assert.All</c> would still pass
+    ///     (both frames have the correct 70-byte length); <c>Assert.Single</c>
+    ///     catches.
+    ///   </item>
+    ///   <item>
+    ///     <b>SendServerParameters loop regression at SectorManager.cpp:264-293.</b>
+    ///     The current implementation emits exactly one SendOpcode call per
+    ///     invocation. A future refactor that wrapped the SendOpcode in a
+    ///     loop (e.g., to emit per-sub-sector params) without guarding the
+    ///     iteration count would inflate the emit count. <c>Assert.Single</c>
+    ///     catches.
+    ///   </item>
+    ///   <item>
+    ///     <b>Spurious mid-handshake re-emit from a sector handoff path.</b>
+    ///     If a handler in SectorLogin / SectorLogin2 was modified to re-emit
+    ///     0x0042 on the same connection (e.g., as part of a Phase K fidelity
+    ///     fix for sector transitions), <c>Assert.Single</c> catches the
+    ///     extra emit. This is the same invariant class as Wave 91-103's
+    ///     sibling pinning waves.
+    ///   </item>
+    ///   <item>
+    ///     <b>StationLogin path leak.</b> If a future refactor moved
+    ///     SendServerParameters into a shared helper that StationLogin
+    ///     accidentally inherited, a station-only handshake would gain
+    ///     a 0x0042 emit. (Not covered by this test directly — this
+    ///     test is space-arm only — but the symmetric station-arm
+    ///     coverage is implicit via the existing handshake-fanout tests
+    ///     that would see an unexpected 0x0042 frame in their station
+    ///     captures.)
+    ///   </item>
+    ///   <item>
+    ///     <b>HandshakeFrames capture regression at SectorHandshake.cs:194-205.</b>
+    ///     The Wave 68 harness addition populates Session.HandshakeFrames
+    ///     during the ReestablishAsync drain loop. If a future refactor
+    ///     drops or under-counts the frame-capture path, the
+    ///     <c>Assert.Single</c> over-counts or under-counts versus
+    ///     reality. This is the same regression class as Wave 87's
+    ///     length-only assertion would see.
+    ///   </item>
+    ///   <item>
+    ///     <b>Stage 1 → Stage 2 logoff-and-reconnect path regression at
+    ///     SectorHandshake.cs:436-446.</b> Mirror of Wave 87's same item
+    ///     — a bare TCP disconnect leaves the in-memory Player around,
+    ///     stage-2 GlobalConnect hits G_ERROR_ACCOUNT_IN_USE, both
+    ///     Wave 87's and Wave 104's assertions surface the failure
+    ///     mode identically.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Budget: 120s. Stage 1 handshake ~2s; stage 1 logoff ~1s; stage 2
+    /// re-handshake ~2s; assertions run synchronously. No additional
+    /// client stimulus.
+    /// </para>
+    ///
+    /// <para>
+    /// Per CLAUDE.md server-integrity: pure passive-observation
+    /// tightening of a pre-existing single-emit invariant. No client
+    /// stimulus, no server change, no permissiveness added.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task ServerParameters_EmittedExactlyOnceDuringSpaceSectorHandshake_PinsSelfEmit()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
+        const int spaceSectorId = 1015;     // Luna (space, sector_type=ST_PLANET)
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        var stationSession = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, stationSectorId,
+            firstName: "SrvPar104", shipName: "SrvPar104Ship", cts.Token);
+
+        try
+        {
+            byte[] logoffPayload = new byte[8];
+            await stationSession.Sector.SendAsync(
+                Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
+                cts.Token);
+            await SectorHandshake.DrainUntilOpcode(
+                stationSession.Sector, OpcodeId.Known.LogoffConfirmation.Value, cts.Token);
+            await stationSession.DisposeAsync();
+
+            await using var spaceSession = await SectorHandshake.ReestablishAsync(
+                _server, login.Ticket!, slot, spaceSectorId, cts.Token);
+
+            var serverParametersFrames = spaceSession.HandshakeFrames
+                .Where(f => f.Opcode == OpcodeId.Known.ServerParameters.Value)
+                .ToList();
+
+            // Wave 104 pins the 1-frame invariant: SendServerParameters
+            // self-emit (SectorManager.cpp:292) — the unique
+            // ENB_OPCODE_0042_SERVER_PARAMETERS SendOpcode call site in
+            // the server.
+            var single = Assert.Single(serverParametersFrames);
+            Assert.Equal(ExpectedServerParametersPayloadLength, single.PayloadLength);
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            try
+            {
+                await using var cleanupGlobal = await EncryptedTcpConnection.ConnectAsync(
+                    _server.GlobalHost, _server.GlobalPort, cleanupCts.Token);
+                await SectorHandshake.SendGlobalConnectAsync(
+                    cleanupGlobal, login.Ticket!, cleanupCts.Token);
+                await SectorHandshake.DrainUntilOpcode(
+                    cleanupGlobal, OpcodeId.Known.GlobalAvatarList.Value, cleanupCts.Token);
+                await SectorHandshake.DeleteCreatedCharacterAsync(
+                    cleanupGlobal, slot, cleanupCts.Token);
+            }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
