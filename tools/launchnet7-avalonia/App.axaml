@@ -4,20 +4,15 @@
              RequestedThemeVariant="Light">
 
   <Application.Styles>
-    <!-- enb-theme: purple accent (#5d00cf), off-white light region
-         (#f9ffff), charcoal dark region (#333230). Source palette:
-         ~/Documents/enb-theme. FluentTheme.Palettes.ColorPaletteResources
-         is the supported override hook in Avalonia 11.x — it cascades
-         the Accent into AccentFillColorDefault et al., and RegionColor
-         into SystemRegionColor / window chrome. -->
+    <!-- enb-theme: full XAML export from the Avalonia Theme Editor web
+         app, source palette ~/Documents/enb-theme. All 25-ish slots
+         (Base*, Alt*, Chrome*, List*, RegionColor) are explicit so the
+         shade ramps Fluent's control templates consume don't fall back
+         to defaults. -->
     <FluentTheme>
       <FluentTheme.Palettes>
-        <ColorPaletteResources x:Key="Light"
-                               Accent="#5d00cf"
-                               RegionColor="#f9ffff" />
-        <ColorPaletteResources x:Key="Dark"
-                               Accent="#5d00cf"
-                               RegionColor="#333230" />
+        <ColorPaletteResources x:Key="Light" Accent="#ff5d00cf" AltHigh="White" AltLow="White" AltMedium="White" AltMediumHigh="White" AltMediumLow="White" BaseHigh="Black" BaseLow="#ff8e8cd8" BaseMedium="#ff4e54a3" BaseMediumHigh="#ff242f7f" BaseMediumLow="#ff394291" ChromeAltLow="#ff242f7f" ChromeBlackHigh="Black" ChromeBlackLow="#ff8e8cd8" ChromeBlackMedium="#ff242f7f" ChromeBlackMediumLow="#ff4e54a3" ChromeDisabledHigh="#ff8e8cd8" ChromeDisabledLow="#ff4e54a3" ChromeGray="#ff394291" ChromeHigh="#ff8e8cd8" ChromeLow="#ffd4d3fc" ChromeMedium="#ffc6c5f5" ChromeMediumLow="#ffd4d3fc" ChromeWhite="White" ListLow="#ffc6c5f5" ListMedium="#ff8e8cd8" RegionColor="#fff9ffff" />
+        <ColorPaletteResources x:Key="Dark"  Accent="#ff5d00cf" AltHigh="Black" AltLow="Black" AltMedium="Black" AltMediumHigh="Black" AltMediumLow="Black" BaseHigh="White" BaseLow="#ff8e8cd8" BaseMedium="#ffc6c5f5" BaseMediumHigh="#ffd4d3fc" BaseMediumLow="#ffaaa8e6" ChromeAltLow="#ffd4d3fc" ChromeBlackHigh="Black" ChromeBlackLow="#ffd4d3fc" ChromeBlackMedium="Black" ChromeBlackMediumLow="Black" ChromeDisabledHigh="#ff8e8cd8" ChromeDisabledLow="#ffc6c5f5" ChromeGray="#ffb8b7ee" ChromeHigh="#ffb8b7ee" ChromeLow="#ff394291" ChromeMedium="#ff4e54a3" ChromeMediumLow="#ff7979c6" ChromeWhite="White" ListLow="#ff4e54a3" ListMedium="#ff8e8cd8" RegionColor="#ff333230" />
       </FluentTheme.Palettes>
     </FluentTheme>
   </Application.Styles>
