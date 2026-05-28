@@ -10006,7 +10006,10 @@ void Player::HandleStarbaseRequest(unsigned char *data)
 	case 8: // Accept job?
 		LogMessage("Accepting Job %d\n", pkt->StarbaseID);
 		{
-			long job_id = pkt->StarbaseID;
+			// Wire job_id field is canonical 4-byte int32; storing it as
+			// `long` would emit 8 bytes on LP64 platforms via the
+			// sizeof(job_id) below, diverging from the retail wire shape.
+			int32_t job_id = pkt->StarbaseID;
 			SendOpcode(ENB_OPCODE_0096_JOB_ACCEPT_REPLY, (u8*)&job_id, sizeof(job_id));
 			SectorManager *sm = GetSectorManager();
 			if (sm && !sm->AwardJob(this, job_id))
