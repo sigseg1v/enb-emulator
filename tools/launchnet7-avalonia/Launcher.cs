@@ -138,7 +138,7 @@ namespace LaunchNet7Avalonia
                 // as-is.
                 var clientPath = OnWindows ? ShortPath.Get(_setting.ClientPath) : _setting.ClientPath;
                 info = WinExe(dir, exe,
-                    $"/ADDR:{addrs[0]} /CLIENT:{clientPath}");
+                    $"/ADDR:{addrs[0]} /CLIENT:\"{clientPath}\"");
             }
             else
             {
@@ -163,9 +163,7 @@ namespace LaunchNet7Avalonia
 
             var dir = Path.Combine(Directory.GetCurrentDirectory(), "bin");
             var exe = Path.Combine(dir, "Net7Proxy.exe");
-            var clientPath = OnWindows ? ShortPath.Get(_setting.ClientPath) : _setting.ClientPath;
-            var args = $"/ADDRESS:{addrs[0]} /CLIENT:{clientPath}";
-            if (_setting.UseClientDetours) args += " /L";
+            var args = $"/ADDRESS:{addrs[0]}";
             if (_setting.UseLocalCert)
             {
                 args += " /LC";
