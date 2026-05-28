@@ -143,6 +143,7 @@ public static class TestAccounts
             ["Start_TerminatorOfStationSectorHandshake_HasExactly4BytePayload"]                       = A(9_000_078, "cli_test78"),
             ["Create_EmittedDuringStationSectorHandshake_HasExactly23BytePayload"]                    = A(9_000_079, "cli_test79"),
             ["Decal_EmittedDuringStationSectorHandshake_HasExactly54BytePayload"]                     = A(9_000_080, "cli_test80"),
+            ["AdvancedPositionalUpdate_EmittedDuringStationSectorHandshake_HasExactly42BytePayload"]  = A(9_000_081, "cli_test81"),
         };
 
     /// <summary>
