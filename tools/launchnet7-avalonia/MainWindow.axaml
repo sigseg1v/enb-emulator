@@ -61,8 +61,8 @@
       <TextBox Name="c_LogPane" IsVisible="False" />
       <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
         <Button Name="c_Button_Advanced" Content="Advanced..." Click="OnAdvancedClick" />
-        <Button Name="c_Button_Play"     Content="Play"        Click="OnPlayClick"     IsDefault="True" />
         <Button Name="c_Button_Cancel"   Content="Quit"        Click="OnCancelClick"   IsCancel="True" />
+        <Button Name="c_Button_Play"     Content="Play"        Click="OnPlayClick"     IsDefault="True" Classes="accent" />
       </StackPanel>
     </Grid>
 

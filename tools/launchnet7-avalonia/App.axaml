@@ -1,7 +1,43 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="LaunchNet7Avalonia.App"
-             RequestedThemeVariant="Default">
+             RequestedThemeVariant="Dark">
+
+  <Application.Resources>
+    <!-- enb-theme: purple accent (#5d00cf), lavender secondary (#8e8cd8),
+         off-white light background (#f9ffff) / charcoal dark (#333230).
+         Source: ~/Documents/enb-theme (user-supplied palette JSON). -->
+    <ResourceDictionary>
+      <ResourceDictionary.ThemeDictionaries>
+
+        <ResourceDictionary x:Key="Light">
+          <Color x:Key="SystemAccentColor">#5d00cf</Color>
+          <Color x:Key="SystemAccentColorLight1">#7a2adb</Color>
+          <Color x:Key="SystemAccentColorLight2">#9755e6</Color>
+          <Color x:Key="SystemAccentColorLight3">#b380f1</Color>
+          <Color x:Key="SystemAccentColorDark1">#4a00a6</Color>
+          <Color x:Key="SystemAccentColorDark2">#37007d</Color>
+          <Color x:Key="SystemAccentColorDark3">#240054</Color>
+          <Color x:Key="SystemRegionColor">#f9ffff</Color>
+          <SolidColorBrush x:Key="SystemControlBackgroundAltHighBrush" Color="#f9ffff" />
+        </ResourceDictionary>
+
+        <ResourceDictionary x:Key="Dark">
+          <Color x:Key="SystemAccentColor">#5d00cf</Color>
+          <Color x:Key="SystemAccentColorLight1">#7a2adb</Color>
+          <Color x:Key="SystemAccentColorLight2">#9755e6</Color>
+          <Color x:Key="SystemAccentColorLight3">#b380f1</Color>
+          <Color x:Key="SystemAccentColorDark1">#4a00a6</Color>
+          <Color x:Key="SystemAccentColorDark2">#37007d</Color>
+          <Color x:Key="SystemAccentColorDark3">#240054</Color>
+          <Color x:Key="SystemRegionColor">#333230</Color>
+          <SolidColorBrush x:Key="SystemControlBackgroundAltHighBrush" Color="#333230" />
+        </ResourceDictionary>
+
+      </ResourceDictionary.ThemeDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
+
   <Application.Styles>
     <FluentTheme />
   </Application.Styles>

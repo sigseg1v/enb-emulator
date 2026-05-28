@@ -309,26 +309,70 @@ namespace LaunchNet7Avalonia
 
         void PatchRegistry()
         {
-            // On Linux/macOS the EnB client runs under WINE, which manages
-            // its own (per-prefix) registry. Microsoft.Win32.Registry
-            // throws PlatformNotSupportedException on non-Windows, so we
-            // skip with a warning. WINE will create the
-            // Westwood\Earth and Beyond\Registration entry on first run
-            // anyway; if a user hits a registration-related crash we can
-            // document `wine regedit` as the workaround.
-            if (!OnWindows)
+            if (OnWindows)
             {
-                _warn("Skipping Windows registry patch on non-Windows host (WINE handles this in its per-prefix registry).");
+                try { WindowsRegistryHelpers.EnsureRegistered(); }
+                catch (Exception e)
+                {
+                    throw new ApplicationException("Could not patch registry-settings.", e);
+                }
                 return;
             }
-            try
+
+            // Under WINE we have to write the per-prefix registry ourselves.
+            // The key that matters for redirection is
+            // HKLM\Software\EACom\AuthAuth\AuthLoginServer: authlogin.dll
+            // reads it on every login and falls back to "www.ea.com" if
+            // missing. Network.ini / Auth.ini / rg_regdata.ini already get
+            // rewritten elsewhere in this flow, but the dll itself ignores
+            // them — only the registry value controls who it dials.
+            var host = _setting.UseLocalCert ? "local.net-7.org" : _setting.Hostname;
+            (string key, string value, string type, string data)[] entries =
             {
-                WindowsRegistryHelpers.EnsureRegistered();
-            }
-            catch (Exception e)
+                (@"HKLM\Software\EACom\AuthAuth",                       "AuthLoginServer",      "REG_SZ",   host),
+                (@"HKLM\Software\EACom\AuthAuth",                       "AuthLoginBaseService", "REG_SZ",   "AuthLogin"),
+                (@"HKLM\Software\Westwood Studios\Earth and Beyond\Registration",
+                                                                        "Registered",           "REG_DWORD","1"),
+            };
+            foreach (var e in entries)
             {
-                throw new ApplicationException("Could not patch registry-settings.", e);
+                try { WineRegAdd(e.key, e.value, e.type, e.data); }
+                catch (Exception ex)
+                {
+                    _warn($"WINE registry write failed for {e.key}\\{e.value}: {ex.Message}");
+                }
             }
+        }
+
+        static void WineRegAdd(string key, string value, string type, string data)
+        {
+            // `wine reg add KEY /v VALUE /t TYPE /d DATA /f`. /f suppresses
+            // the overwrite prompt. UseShellExecute=false so we inherit
+            // WINEPREFIX from the launching process (set by `just play-local`).
+            var psi = new ProcessStartInfo
+            {
+                FileName               = "wine",
+                UseShellExecute        = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError  = true,
+                CreateNoWindow         = true,
+            };
+            psi.ArgumentList.Add("reg");
+            psi.ArgumentList.Add("add");
+            psi.ArgumentList.Add(key);
+            psi.ArgumentList.Add("/v"); psi.ArgumentList.Add(value);
+            psi.ArgumentList.Add("/t"); psi.ArgumentList.Add(type);
+            psi.ArgumentList.Add("/d"); psi.ArgumentList.Add(data);
+            psi.ArgumentList.Add("/f");
+
+            using var p = Process.Start(psi) ?? throw new InvalidOperationException("wine reg add did not start");
+            if (!p.WaitForExit(10000))
+            {
+                try { p.Kill(); } catch { }
+                throw new TimeoutException("wine reg add timed out");
+            }
+            if (p.ExitCode != 0)
+                throw new InvalidOperationException($"wine reg add exited {p.ExitCode}: {p.StandardError.ReadToEnd().Trim()}");
         }
     }
 }
