@@ -1,6 +1,6 @@
 // ClientToSectorServer.cpp
 // Phase J: heavy opcode dispatch — WIN32-only on Linux. See Connection.cpp.
-#ifdef WIN32
+#ifdef NET7_LEGACY_WIN32
 
 #include "Net7.h"
 #include "Connection.h"

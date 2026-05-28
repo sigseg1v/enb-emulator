@@ -51,7 +51,7 @@ void ServerManager::RunMasterServer()
 	SSL_Listener *ssl_listener = 0;
 	TcpListener *global_server_listener = 0;
 
-#ifdef WIN32
+#ifdef NET7_LEGACY_WIN32
 	if (g_LocalCert)
 	{
 		// Instantiate the SSL Listener object
@@ -101,7 +101,7 @@ FILE *OpenLogFile(FILE *logfile, char *name)
         // If the log file is not open, then open it
         // Create log filename with the current date
         char filename[MAX_PATH];
-#ifdef WIN32
+#ifdef NET7_LEGACY_WIN32
         SYSTEMTIME systime;
         GetSystemTime(&systime);
         sprintf(filename, "%s_%04d_%02d_%02d.log", name, systime.wYear, systime.wMonth, systime.wDay);
@@ -385,7 +385,7 @@ bool ServerManager::RegisterSectorServer(short first_port, short max_sectors)
 	SSL * ssl;
 
     SSLeay_add_ssl_algorithms();
-#ifdef WIN32
+#ifdef NET7_LEGACY_WIN32
 	// SSLv2 is gone in OpenSSL 3.x — and the entire RegisterSectorServer
 	// flow targets the legacy external auth registration HTTPS endpoint.
 	// On Linux Phase J we don't register against an external auth server;

@@ -11,7 +11,7 @@
 // Net7Proxy used to authenticate sector-server registrations. Server-side
 // on Linux the auth flow belongs to login-server/Net7SSL/; the proxy
 // doesn't need to host an HTTPS responder. WIN32-only on Linux.
-#ifdef WIN32
+#ifdef NET7_LEGACY_WIN32
 
 #include "Net7.h"
 #include "SSL_Connection.h"
@@ -23,7 +23,7 @@
 #include "UDPClient.h"
 
 // This helper function is referenced by _beginthread to launch the SSL Connection thread.
-#ifdef WIN32
+#ifdef NET7_LEGACY_WIN32
 void __cdecl RunSslConnectionThread(void *arg)
 {
     ((SSL_Connection *) arg)->RunThread();
@@ -57,7 +57,7 @@ SSL_Connection::SSL_Connection(SOCKET s, ServerManager &server_mgr, long ip_addr
 	//printf("Got IP: %u.%u.%u.%u\n", ip[0], ip[1], ip[2], ip[3]);
 
     // Launch the Listener thread
-#ifdef WIN32
+#ifdef NET7_LEGACY_WIN32
     _beginthread(&RunSslConnectionThread, 0, this);
 #else
     pthread_create(&m_Thread, NULL, &RunSslConnectionThread, (void *) this);

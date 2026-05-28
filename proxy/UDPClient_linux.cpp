@@ -86,7 +86,7 @@
 // New code is contributed under the project default license
 // (CC BY-NC-SA 3.0 — LICENSES/enb-emulator).
 
-#ifndef WIN32
+#ifndef NET7_LEGACY_WIN32
 
 #include "Net7.h"
 #include "UDPClient.h"
@@ -96,13 +96,9 @@
 #include "ServerManager.h"
 #include "Connection.h"
 
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <unistd.h>
-#include <pthread.h>
+// Sockets / POSIX / pthread headers are pulled in by Net7.h with platform
+// guards (winsock2 on Win32, POSIX on Linux); only the platform-neutral
+// libc headers need explicit re-includes here.
 #include <errno.h>
 #include <string.h>
 #include <stdlib.h>

@@ -63,7 +63,7 @@ void SectorServerManager::LoadSectorList()
 	// For now, let's just load the list from a flat text file
 	char buffer[4096];
 	char filename[MAX_PATH];
-#ifdef WIN32
+#ifdef NET7_LEGACY_WIN32
 	sprintf_s(filename, 4096, "%ssector_list.txt", SERVER_DATABASE_PATH);
 #else
 	snprintf(filename, 4096, "%ssector_list.txt", SERVER_DATABASE_PATH);

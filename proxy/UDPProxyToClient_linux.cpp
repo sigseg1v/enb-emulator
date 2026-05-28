@@ -83,7 +83,7 @@
 // New code is contributed under the project default license
 // (CC BY-NC-SA 3.0 — LICENSES/enb-emulator).
 
-#ifndef WIN32
+#ifndef NET7_LEGACY_WIN32
 
 #include "Net7.h"
 #include "UDPClient.h"
@@ -93,7 +93,7 @@
 #include "Connection.h"
 #include "ServerManager.h"
 
-#include <unistd.h>
+// unistd is provided via Net7.h on both platforms.
 #include <string.h>
 #include <stdint.h>
 

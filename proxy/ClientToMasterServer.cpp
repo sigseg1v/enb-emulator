@@ -42,7 +42,7 @@ void Connection::ProcessMasterServerOpcode(short opcode, short bytes)
 	}
 }
 
-#ifdef WIN32
+#ifdef NET7_LEGACY_WIN32
 void Connection::HandleMasterJoin()
 {
 	// The player's client is displaying the inter-sector wait screen

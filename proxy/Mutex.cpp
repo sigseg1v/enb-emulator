@@ -1,93 +1,59 @@
 // Mutex.cpp
 //
-// Encapsulates mutual exclusion methods for both Windows and Linux platforms.
+// pthread-based recursive mutex shim. The header (common/include/net7/
+// Mutex.h) declares pthread fields unconditionally; on the Win32 PE
+// build of net7proxy this lands on winpthreads (MinGW-posix variant),
+// which provides the same POSIX threading API the Linux build uses.
 //
 // DESIGN NOTES:
-// Windows allows nested calls to the mutex lock method, but Linux does not.
-// This class has been modified to add a "Lock Count" to pthreads_mutex in order
-// to support nested calls.
-
-// In practice a mutex is a semaphore with count 1
+// pthread_mutex_t isn't recursive by default. This class adds a thread-
+// owner field and a lock counter on top so the same thread can re-acquire
+// the mutex without deadlocking — matching how the Win32 CRITICAL_SECTION
+// (which the historical Win32 launcher used) behaved.
 
 #include "Net7.h"
 #include <net7/Mutex.h>
 
 Mutex::Mutex()
 {
-#ifdef WIN32
-    InitializeCriticalSection(&m_Mutex);
-#else
     pthread_mutex_init(&m_Mutex, NULL);
     m_LockCount = 0;
-#endif
 }
 
 Mutex::~Mutex()
 {
-#ifdef WIN32
-    DeleteCriticalSection(&m_Mutex);
-#else
     pthread_mutex_destroy(&m_Mutex);
-#endif
 }
 
 void Mutex::Lock()
 {
-#ifdef WIN32
-
-    bool locked = false;
-    if (m_Mutex.LockCount > 0)
-    {
-        fprintf(stderr,"Mutex appears locked %d.", m_Mutex.LockCount);
-        locked = true;
-    }
-    EnterCriticalSection(&m_Mutex);
-
-    if (locked)
-    {
-        fprintf(stderr,"Mutex unlocked, and re-blocked [%d].\n", m_Mutex.LockCount);
-    }
-#else
-
     pthread_t thread_id = pthread_self();
     int ret = pthread_mutex_trylock(&m_Mutex);
     if (ret == 0)
     {
-        // Lock was successful
         m_ThreadID = thread_id;
         m_LockCount++;
     }
-    else if (m_ThreadID == thread_id)
+    else if (pthread_equal(m_ThreadID, thread_id))
     {
-        // Lock failed, we already own the lock
         m_LockCount++;
     }
     else
     {
-        // Another thread owns the lock.
-        // We have no choice but to wait until they release it.
         pthread_mutex_lock(&m_Mutex);
+        m_ThreadID = thread_id;
+        m_LockCount = 1;
     }
-
-#endif
 }
 
 void Mutex::Unlock()
 {
-#ifdef WIN32
-    LeaveCriticalSection(&m_Mutex);
-
-#else
     if (m_LockCount > 0)
     {
         m_LockCount--;
         if (m_LockCount == 0)
         {
-            // When the lock count reaches zero, release the resource
             pthread_mutex_unlock(&m_Mutex);
         }
     }
-    // else mutex is not locked, ignore the call
-#endif
 }
-

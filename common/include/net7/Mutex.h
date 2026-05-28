@@ -13,22 +13,20 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
 #ifndef _MUTEX_H_INCLUDED_
 #define _MUTEX_H_INCLUDED_
 
-#ifdef WIN32
-    #ifndef WIN32_LEAN_AND_MEAN
-	#define WIN32_LEAN_AND_MEAN		// Exclude rarely-used stuff from Windows headers
-    #endif
-
-    #include <windows.h>
-#else
-    #include <pthread.h>
-#endif
+// pthread is used unconditionally â€” winpthreads (MinGW-posix variant) makes
+// the same API available on the Win32 PE build of net7proxy. Picking one
+// implementation here avoids the header/body skew that came up when
+// minwindef.h (via windows.h) re-defines the bare `WIN32` macro inside
+// a TU compiled with -UWIN32, leaving the header on the pthread branch
+// while the .cpp tries to use CRITICAL_SECTION (or vice versa).
+#include <pthread.h>
 
 class Mutex
 {
@@ -41,13 +39,9 @@ public:
     void Unlock();
 
 private:
-#ifdef WIN32
-    CRITICAL_SECTION m_Mutex;
-#else
     pthread_mutex_t m_Mutex;
     pthread_t m_ThreadID;
     int m_LockCount;
-#endif
 };
 
 #endif // _MUTEX_H_INCLUDED_

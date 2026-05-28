@@ -25,9 +25,7 @@ private:
 	ServerManager &m_ServerMgr;
     SOCKET  m_ListenerSocket;
 	bool	m_SslListenerThreadRunning;
-#ifndef WIN32
     pthread_t m_Thread;
-#endif
 };
 
 #endif // _SSL_LISTENER_H_INCLUDED_

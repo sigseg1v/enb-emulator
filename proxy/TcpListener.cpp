@@ -88,7 +88,7 @@ void TcpListener::RunThread()
 
     struct sockaddr_in from;
     memset(&from, 0, sizeof(from));
-#ifdef WIN32
+#ifdef NET7_LEGACY_WIN32
     int from_length;
 #else
     socklen_t from_length;

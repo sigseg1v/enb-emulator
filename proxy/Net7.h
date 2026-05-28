@@ -1,9 +1,18 @@
 // Net7.h
 //
-// Phase M: server-native-Linux only. The Win32 build of net7proxy is
-// not maintained — the proxy is the TCP entry point for the Westwood
-// RSA+RC4 handshake on port 3801, not a client launcher. Win32 branches
-// were stripped to remove cross-platform parity that nothing exercises.
+// Net7Proxy is a TCP/UDP terminator for the Westwood RSA+RC4 handshake
+// (port 3801) and the master/global UDP planes. It builds in two flavours:
+//
+//   * Linux (g++) — the historical server-side deployment target. The
+//     proxy runs as a docker service alongside the game server.
+//   * Win32 PE (x86_64-w64-mingw32-g++) — the same proxy, packaged for
+//     side-by-side execution under WINE next to the Win32 client. This
+//     mode is what end users actually ship and run; the launcher spawns
+//     the proxy as a sibling process inside the same WINE prefix.
+//
+// Header guards below isolate platform-specific includes/shims so the
+// rest of the codebase can write straight BSD-style socket idioms
+// (SOCKET / INVALID_SOCKET / closesocket / WSAGetLastError).
 
 #ifndef _NET_7_H_INCLUDED_
 #define _NET_7_H_INCLUDED_
@@ -21,48 +30,99 @@
 #include <time.h>
 #include <math.h>
 #include <ctype.h>
-
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <pthread.h>
-#include <strings.h>
 #include <cstdint>
 #include <ctime>
 #include <limits.h>
 
+#ifdef _WIN32
+// Win32 (MinGW) sockets. winsock2.h must precede windows.h.
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  include <winsock2.h>
+#  include <ws2tcpip.h>
+#  include <windows.h>
+#  include <io.h>
+#  include <process.h>
+#  include <unistd.h>   // MinGW-posix: usleep, sleep, close
+#  include <pthread.h>  // MinGW-posix: winpthreads
+// winsock2.h provides SOCKET / INVALID_SOCKET / SOCKET_ERROR /
+// closesocket / WSAGetLastError natively. MinGW also ships _vsnprintf.
+// strcasecmp / strncasecmp aren't in <string.h> on Win32 — alias them
+// to MSVC's _stricmp / _strnicmp so legacy call sites compile.
+#  ifndef strcasecmp
+#    define strcasecmp  _stricmp
+#  endif
+#  ifndef strncasecmp
+#    define strncasecmp _strnicmp
+#  endif
+// MSG_NOSIGNAL doesn't exist on Win32 (no SIGPIPE on send-to-closed).
+#  ifndef MSG_NOSIGNAL
+#    define MSG_NOSIGNAL 0
+#  endif
+// POSIX setenv → Win32 _putenv_s. Ignore `overwrite` like setenv does
+// (current callers all pass overwrite=0, and we only setenv after gating
+// on getenv being empty, so the semantics line up).
+#  include <stdlib.h>
+static inline int setenv(const char *name, const char *value, int /*overwrite*/)
+{
+    return _putenv_s(name, value);
+}
+// POSIX `in_addr_t` is the inet_addr() return type / IPv4 in network byte
+// order. Winsock spells it ULONG and exposes no `in_addr_t` typedef.
+typedef ULONG in_addr_t;
+// Socket shutdown(2) "how" values. POSIX: SHUT_RD/SHUT_WR/SHUT_RDWR.
+// Winsock: SD_RECEIVE/SD_SEND/SD_BOTH. Map the POSIX names.
+#  ifndef SHUT_RD
+#    define SHUT_RD   SD_RECEIVE
+#  endif
+#  ifndef SHUT_WR
+#    define SHUT_WR   SD_SEND
+#  endif
+#  ifndef SHUT_RDWR
+#    define SHUT_RDWR SD_BOTH
+#  endif
+#else
+// POSIX (Linux) sockets + threading.
+#  include <sys/types.h>
+#  include <sys/socket.h>
+#  include <netinet/in.h>
+#  include <netinet/tcp.h>
+#  include <arpa/inet.h>
+#  include <netdb.h>
+#  include <unistd.h>
+#  include <fcntl.h>
+#  include <errno.h>
+#  include <pthread.h>
+#  include <strings.h>
+
 // MSVC names that legacy code uses; map to their POSIX equivalents.
-#define _vsnprintf  vsnprintf
-#define closesocket(s) ::close(s)
-#define WSAGetLastError() errno
+#  define _vsnprintf  vsnprintf
+#  define closesocket(s) ::close(s)
+#  define WSAGetLastError() errno
 
 // MSVC-only directives gcc doesn't understand.
-#define __cdecl
-#ifndef WINAPI
-#define WINAPI
-#endif
+#  define __cdecl
+#  ifndef WINAPI
+#    define WINAPI
+#  endif
 
-#ifndef MAX_PATH
-#define MAX_PATH 260
-#endif
+#  ifndef MAX_PATH
+#    define MAX_PATH 260
+#  endif
 
 // Phase M Wave 3: the proxy's ~25-symbol Win32 typedef shim was retired.
 // Only SOCKET / INVALID_SOCKET / SOCKET_ERROR are kept — 60+ Linux-active
 // call sites across the listener/connection layer use them as canonical
 // socket idioms, and rewriting them is cosmetic.
 typedef int SOCKET;
-#ifndef INVALID_SOCKET
-#  define INVALID_SOCKET (-1)
-#endif
-#ifndef SOCKET_ERROR
-#  define SOCKET_ERROR   (-1)
-#endif
+#  ifndef INVALID_SOCKET
+#    define INVALID_SOCKET (-1)
+#  endif
+#  ifndef SOCKET_ERROR
+#    define SOCKET_ERROR   (-1)
+#  endif
+#endif // !_WIN32
 
 // The Net7Proxy logs/database paths are unused on the server-side Linux
 // build (Net7Proxy was originally a client-side launcher). Keep the names
@@ -74,19 +134,10 @@ typedef int SOCKET;
 
 #define CONFIG_FILE             "Net7Config.cfg"
 
-// gcc equivalent of MSVC's #pragma pack(1) / __declspec(packed).
-// Applied per-struct via the ATTRIB_PACKED suffix (see PacketStructures.h).
-#define ATTRIB_PACKED __attribute__((packed))
-
+// ATTRIB_PACKED + sized integer typedefs are defined in net7/Packing.h
+// (included by net7/PacketStructures.h). Don't redefine here — the
+// per-process redef triggers -Wmacro-redefined on cross-builds.
 #include <stdint.h>
-typedef uint64_t u64;
-typedef int64_t  s64;
-typedef uint32_t u32;
-typedef int32_t  s32;
-typedef unsigned short  u16;
-typedef signed short    s16;
-typedef unsigned char   u8;
-typedef signed char     s8;
 
 #define PERIODIC_CACHE_SEND_SIZE 512
 

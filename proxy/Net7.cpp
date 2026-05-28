@@ -85,7 +85,22 @@ int main(int argc, char* argv[])
     // they happen (default for a non-tty is fully-buffered).
     setvbuf(stdout, NULL, _IOLBF, 0);
 
-    printf("Net7Proxy (server-side, Linux) version %s\n", VERSION);
+#ifdef _WIN32
+    // Winsock must be initialised before any socket() / bind() / connect()
+    // call. Without WSAStartup every winsock call fails with WSANOTINITIALISED
+    // (which surfaces here as bind() "Invalid argument").
+    {
+        WSADATA wsa_data;
+        int wsa_err = WSAStartup(MAKEWORD(2, 2), &wsa_data);
+        if (wsa_err != 0)
+        {
+            fprintf(stderr, "WSAStartup failed: %d\n", wsa_err);
+            return 1;
+        }
+    }
+#endif
+
+    printf("Net7Proxy version %s\n", VERSION);
     fflush(stdout);
 
     for (int i = 1; i < argc; i++)

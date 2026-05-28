@@ -44,9 +44,7 @@ private:
 	bool	m_ConnectionActive;
 	bool	m_ServerShutdown;
     char    m_Buffer[MAX_SERVER_FILE_SIZE];
-#ifndef WIN32
     pthread_t m_Thread;
-#endif
 };
 
 #endif // _SSL_CONNECTION_H_INCLUDED_

@@ -5,8 +5,8 @@
 // exchange, ~150 opcode handlers. Porting it to Linux is a Phase J
 // continuation; for now it is WIN32-only and the Linux net7proxy binary
 // links a TcpListener that accept()s connections and immediately closes
-// them. Wrap-out per CLAUDE.md "wrap in #ifdef WIN32 if you can't port".
-#ifdef WIN32
+// them. Wrap-out per CLAUDE.md "wrap in #ifdef NET7_LEGACY_WIN32 if you can't port".
+#ifdef NET7_LEGACY_WIN32
 
 #include "Net7.h"
 #include "Connection.h"
@@ -19,7 +19,7 @@
 extern bool g_ShuttingDown;
 
 // This helper function is referenced by _beginthread to launch the TCP thread.
-#ifdef WIN32
+#ifdef NET7_LEGACY_WIN32
 void __cdecl LaunchSendThread(void *arg)
 {
     ((Connection *) arg)->RunSendThread();
@@ -71,7 +71,7 @@ Connection::Connection(SOCKET s, ServerManager &server_mgr, short port, int serv
 	m_Turn_Sent = 0;
 
 	// Launch the Receiver thread
-#ifdef WIN32
+#ifdef NET7_LEGACY_WIN32
 	_beginthread(&LaunchRecvThread, 0, this);
 #else
     pthread_create(&m_Thread, NULL, &LaunchRecvThread, (void *) this);
@@ -404,7 +404,7 @@ void Connection::RunRecvThread()
     m_TcpThreadRunning = true;
 
     // Launch the Send Thread
-#ifdef WIN32
+#ifdef NET7_LEGACY_WIN32
   	UINT uiThreadId = 0;
     m_SendThreadHandle = (HANDLE)_beginthreadex(NULL, 0, SocketSendThread, this, CREATE_SUSPENDED, &uiThreadId);
 	//_beginthread(&LaunchSendThread, 0, this);
@@ -775,9 +775,8 @@ bool Connection::CheckTCPShutdownCycle()
 #include <net7/WestwoodRSA.h>
 #include <net7/WestwoodRC4.h>
 
-#include <sys/socket.h>
-#include <unistd.h>
-#include <arpa/inet.h>
+// Sockets/POSIX headers are pulled in by Net7.h with platform guards;
+// these explicit includes were redundant on Linux and unbuildable on Win32.
 #include <errno.h>
 
 namespace {

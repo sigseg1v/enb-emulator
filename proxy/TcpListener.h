@@ -25,9 +25,7 @@ private:
 	int		m_ServerType;
     SOCKET  m_TcpListenerSocket;
 	bool	m_TcpListenerThreadRunning;
-#ifndef WIN32
     pthread_t m_Thread;
-#endif
 };
 
 #endif // _TCP_LISTENER_H_INCLUDED_

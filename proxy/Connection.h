@@ -4,9 +4,7 @@
 #define _TCP_CONNECTION_H_INCLUDED_
 
 #include <net7/Mutex.h>
-#ifndef WIN32
 #include <pthread.h>
-#endif
 #include <net7/WestwoodRSA.h>
 #include <net7/WestwoodRC4.h>
 #include <net7/PacketStructures.h>
@@ -93,7 +91,7 @@ private:
     bool    DoClientKeyExchange();
     void    Send(unsigned char *Buffer, int length);
 
-#ifdef WIN32
+#ifdef NET7_LEGACY_WIN32
     static unsigned int __stdcall SocketSendThread(void *param);
 #else
     static void *SocketSendThread(void *param);
@@ -391,9 +389,7 @@ private:
     short               m_TcpPort;					// TCP/IP port number
 
 	UDPClient		*	m_UDPClient;				// Used for account reference
-#ifndef WIN32
     pthread_t m_Thread;
-#endif
 
     char * m_AccountUsername;
 
@@ -411,11 +407,7 @@ public:
 	// The following are for use the slash commands
 private:
     MessageQueue        m_SendQueue;
-#ifdef WIN32
-    void               *m_SendThreadHandle;  // HANDLE; only used by walled WIN32 path
-#else
-    pthread_t           m_SendThreadHandle;  // unused on Linux: Connection.cpp is WIN32-walled
-#endif
+    pthread_t           m_SendThreadHandle;  // unused on the modern path; Connection.cpp's RunSendThread is a dead Win32-only branch
     Mutex			    m_Mutex;
 	unsigned long		m_Tilt_Sent;
 	unsigned long		m_Turn_Sent;

@@ -40,7 +40,7 @@
 // This file is Linux-only (the WIN32 build picks up the real dispatch
 // from ClientToGlobalServer.cpp / ClientToSectorServer.cpp).
 
-#ifndef WIN32
+#ifndef NET7_LEGACY_WIN32
 
 #include "Net7.h"
 #include "Connection.h"
@@ -50,8 +50,8 @@
 #include "ServerManager.h"
 #include "UDPClient.h"
 
-#include <arpa/inet.h>
 #include <string.h>
+// arpa/inet.h is redundant — Net7.h provides ntohl on both platforms.
 
 namespace {
 

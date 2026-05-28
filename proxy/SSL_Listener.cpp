@@ -71,7 +71,7 @@ void SSL_Listener::RunThread()
 	name.sin_port = htons(m_TcpPort);
 
 	struct in_addr in;
-#ifdef WIN32
+#ifdef NET7_LEGACY_WIN32
 	in.S_un.S_addr = m_IpAddress;
 #else
 	in.s_addr = m_IpAddress;
@@ -95,7 +95,7 @@ void SSL_Listener::RunThread()
     m_SslListenerThreadRunning = true;
 
     struct sockaddr_in from;
-#ifdef WIN32
+#ifdef NET7_LEGACY_WIN32
     int from_length = sizeof(from);
 #else
     socklen_t from_length = sizeof(from);
@@ -114,7 +114,7 @@ void SSL_Listener::RunThread()
             m_Mutex.Lock();
 
 			// Create a new SSL_Connection using the new socket
-#ifdef WIN32
+#ifdef NET7_LEGACY_WIN32
 			SSL_Connection * ssl_connection = new SSL_Connection(s, m_ServerMgr, from.sin_addr.S_un.S_addr);
 #else
 			SSL_Connection * ssl_connection = new SSL_Connection(s, m_ServerMgr, from.sin_addr.s_addr);
