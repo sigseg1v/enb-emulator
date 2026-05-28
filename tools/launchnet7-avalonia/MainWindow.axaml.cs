@@ -226,17 +226,28 @@ namespace LaunchNet7Avalonia
             {
                 c_ServerStatus.Text = "CHECKING";
                 c_Button_Check.IsEnabled = true;
-                _ = CheckServerStatusAsync(host.Hostname, 3809);
+                _ = CheckServerStatusAsync(host.Hostname, GetProbePort(host));
             }
             _lastSelectedHost = host;
         }
 
+        int GetProbePort(HostConfig host)
+        {
+            // Probe the currently-configured auth port (Net7SSL's HTTPS or
+            // HTTP endpoint). Reachability here means "the login server is
+            // up and the client can talk to it" — the canonical liveness
+            // signal for the dev stack and for any remote server too.
+            if (int.TryParse(c_TextBox_Port.Text, out var p) && p > 0 && p < 65536)
+                return p;
+            return c_CheckBox_SecureAuthentication.IsChecked == true
+                ? host.SecureAuthenticationPort
+                : host.AuthenticationPort;
+        }
+
         async Task CheckServerStatusAsync(string host, int port)
         {
-            // Probe the proxy listener (3809) — the original FormMain
-            // already redirected port to 3809 regardless of the auth
-            // port; the auth port is the HTTP/HTTPS side which is
-            // serviced by Net7SSL.
+            // TCP connect probe of the auth port. We don't speak TLS here —
+            // just verify the port accepts connections.
             try
             {
                 using var client = new TcpClient();
@@ -265,7 +276,7 @@ namespace LaunchNet7Avalonia
         {
             if (!TryGetSelectedHost(out _, out var host)) return;
             c_ServerStatus.Text = "CHECKING";
-            _ = CheckServerStatusAsync(host.Hostname, 3809);
+            _ = CheckServerStatusAsync(host.Hostname, GetProbePort(host));
         }
 
         async void OnBrowseClient(object sender, RoutedEventArgs e)
