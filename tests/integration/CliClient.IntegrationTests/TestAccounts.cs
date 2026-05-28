@@ -120,6 +120,7 @@ public static class TestAccounts
             ["StarbaseTalkAction4_OnUnknownNpc_ReceivesFallbackTalkTree"]                             = A(9_000_055, "cli_test55"),
             ["CtaRequest_OnDefaultArmAction_ReceivesCtaResponseWithSuccessByte"]                      = A(9_000_056, "cli_test56"),
             ["OpenInterfaceSlashCommand_OnSlashOpenif_ReceivesOpenInterfaceEmit"]                     = A(9_000_057, "cli_test57"),
+            ["UiTriggerSlashCommand_OnSlashUitrigger_ReceivesUiTriggerEmit"]                          = A(9_000_058, "cli_test58"),
         };
 
     /// <summary>
