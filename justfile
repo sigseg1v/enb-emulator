@@ -268,24 +268,23 @@ logs SERVICE='server':
 shell SERVICE='server':
     docker compose exec {{SERVICE}} bash
 
-# Open a mysql client against the dev DB.
-mysql:
-    docker compose exec mysql mysql -unet7 -pnet7 net7
+# Open a psql client against the dev net7_user DB (the one with accounts).
+psql-user:
+    docker compose exec -e PGPASSWORD=net7 postgres psql -U net7 -d net7_user
 
-# Seed a known-good test account into net7_user.accounts. Idempotent.
-# Default user/pass: testuser/testpass. Password is stored as upper-case MD5
-# (matches Net7SSL hash form). Schema is the 2010 dump's `accounts` table:
-#   id (PK), username, password, status, formname, email, last_login,
-#   last_logout, warn_level.
+# Seed a known-good test account into net7_user.accounts. Idempotent
+# (DELETE-by-username then INSERT — the schema has no UNIQUE on username,
+# so a plain UPSERT isn't available). Default user/pass: testuser/testpass.
+# Password is stored as upper-case MD5, matching what Net7SSL's LinuxAuth
+# compares against. pgcrypto's digest() does the hashing server-side.
 seed-account USER='testuser' PASS='testpass':
-    #!/usr/bin/env bash
-    set -euo pipefail
-    MD5=$(printf "%s" "{{PASS}}" | md5sum | awk '{print toupper($1)}')
-    docker compose exec -T mysql mysql -unet7 -pnet7 net7_user -e \
-        "INSERT INTO accounts (username, password, status, formname, email) \
-         VALUES ('{{USER}}', '$MD5', 100, 'forum_{{USER}}', '{{USER}}@local') \
-         ON DUPLICATE KEY UPDATE password='$MD5';"
-    echo ">>> seeded {{USER}} with MD5($MD5)"
+    docker compose exec -T -e PGPASSWORD=net7 postgres psql -U net7 -d net7_user -v ON_ERROR_STOP=1 -c \
+        "CREATE EXTENSION IF NOT EXISTS pgcrypto; \
+         SELECT setval('accounts_id_seq', GREATEST((SELECT COALESCE(MAX(id),0) FROM accounts), 1)); \
+         DELETE FROM accounts WHERE username = '{{USER}}'; \
+         INSERT INTO accounts (username, password, status, formname, email) \
+         VALUES ('{{USER}}', UPPER(encode(digest('{{PASS}}', 'md5'), 'hex')), 100, '{{USER}}_form', '{{USER}}@local');"
+    @echo ">>> seeded {{USER}} / {{PASS}} (status=100)"
 
 # ---- Phase C continuation (Postgres) ----
 
