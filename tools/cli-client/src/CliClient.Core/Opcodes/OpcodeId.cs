@@ -79,6 +79,7 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId AvatarEmote                  = new(0x005E);
         public static readonly OpcodeId AvatarEmoteResponse          = new(0x005F);
         public static readonly OpcodeId AvatarDescription            = new(0x0061);
+        public static readonly OpcodeId OpenInterface                = new(0x0066);
         public static readonly OpcodeId ManufactureSetManufactureId  = new(0x007F);
         public static readonly OpcodeId ManufactureTerminal          = new(0x0079);
         public static readonly OpcodeId ManufactureCategorySelect    = new(0x007A);
