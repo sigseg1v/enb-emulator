@@ -138,6 +138,7 @@ public static class TestAccounts
             ["AvatarDescription_EmittedDuringStationSectorHandshake_HasExactly260BytePayload"]         = A(9_000_073, "cli_test73"),
             ["Relationship_EmittedDuringStationSectorHandshake_HasExactly9BytePayload"]                = A(9_000_074, "cli_test74"),
             ["StarbaseSet_EmittedDuringStationSectorHandshake_HasExactly6BytePayload"]                 = A(9_000_075, "cli_test75"),
+            ["NameDecal_EmittedDuringStationSectorHandshake_HasExactly48BytePayload"]                  = A(9_000_076, "cli_test76"),
         };
 
     /// <summary>
