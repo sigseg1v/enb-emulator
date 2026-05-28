@@ -197,4 +197,80 @@ public sealed class SectorClientAvatarShipHardeningTests
         Assert.All(clientShipFrames, f =>
             Assert.Equal(ExpectedGameIdWirePayloadLength, f.PayloadLength));
     }
+
+    /// <summary>
+    /// Wave 101 frame-count hardening (+0 ratchet, 0x0037 + 0x0047):
+    /// pins the exact 1-frame emit-count invariant Wave 77's
+    /// payload-length hardening was structurally blind to. The
+    /// captured single-player station-sector handshake stream emits
+    /// 0x0037 CLIENT_AVATAR and 0x0047 CLIENT_SHIP exactly once each
+    /// — from <c>Player::SendLoginShipData</c> at
+    /// <c>server/src/PlayerClass.cpp:879</c> and
+    /// <c>server/src/PlayerClass.cpp:880</c>
+    /// (paired <c>SendOpcode</c> calls marshalling the 4-byte
+    /// <c>int32_t game_id_wire = (int32_t) m_CreateInfo.GameID</c>).
+    ///
+    /// <para>
+    /// Single-player single-sector scope. The other call sites for
+    /// both opcodes are inside <c>Player::SendShipData</c> at
+    /// PlayerClass.cpp:928 / :929 — guarded by
+    /// <c>if (this == player)</c>. <c>SendShipData</c> is called from
+    /// peer-visibility paths (AddPlayerToRangeList, ShipUpgrade,
+    /// HandleSlashCommands, HandleRecustomizeShipDone,
+    /// RecalculateEnergyRegen) — none of which fire during a passive
+    /// station-sector login. So 0x0037 and 0x0047 are exactly 1 emit
+    /// each per station-sector login. Mirrors the Wave 94/95/98/99/100-style
+    /// SendLoginShipData self-emit pinning, but pinning a PAIR of
+    /// co-emitted opcodes — FIRST paired-pinning in Phase K.
+    /// </para>
+    ///
+    /// <para>
+    /// Why a separate test method, not an in-place assertion. Wave 77's
+    /// existing test caps at <c>Assert.NotEmpty + Assert.All(payload==4)</c>
+    /// for both opcodes, which would still pass if a refactor added a
+    /// spurious second emit on either. Keeping the count assertion in
+    /// its own method preserves Wave 77's narrow-scope failure surface.
+    /// Mirrors the Wave 91-100 sibling-method pattern.
+    /// </para>
+    ///
+    /// <para>
+    /// Per CLAUDE.md server-integrity. Pure passive-observation
+    /// tightening. No client stimulus, no server change.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task ClientAvatarAndClientShip_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmits()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, stationSectorId,
+            firstName: "AvShip101", shipName: "AvShip101Ship", cts.Token);
+
+        var clientAvatarFrames = session.HandshakeFrames
+            .Where(f => f.Opcode == OpcodeId.Known.ClientAvatar.Value)
+            .ToList();
+        var clientShipFrames = session.HandshakeFrames
+            .Where(f => f.Opcode == OpcodeId.Known.ClientShip.Value)
+            .ToList();
+
+        // Wave 101 pins the 1-frame-each invariant: SendLoginShipData
+        // self-emits at PlayerClass.cpp:879 (0x0037) and PlayerClass.cpp:880
+        // (0x0047). The SendShipData broadcast arm at PlayerClass.cpp:928/929
+        // is guarded by `if (this == player)` and does not fire during a
+        // single-player station-sector login.
+        var singleAvatar = Assert.Single(clientAvatarFrames);
+        var singleShip = Assert.Single(clientShipFrames);
+        Assert.Equal(ExpectedGameIdWirePayloadLength, singleAvatar.PayloadLength);
+        Assert.Equal(ExpectedGameIdWirePayloadLength, singleShip.PayloadLength);
+    }
 }

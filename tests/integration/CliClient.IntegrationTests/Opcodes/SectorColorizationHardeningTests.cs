@@ -197,4 +197,76 @@ public sealed class SectorColorizationHardeningTests
         Assert.All(colorizationFrames, f =>
             Assert.Equal(ExpectedColorizationPayloadLength, f.PayloadLength));
     }
+
+    /// <summary>
+    /// Wave 99 frame-count hardening (+0 ratchet, 0x0049): pins the
+    /// exact 1-frame emit-count invariant Wave 76's payload-length
+    /// hardening was structurally blind to. The captured single-player
+    /// station-sector handshake stream emits 0x0049 SHIP_COLORIZATION
+    /// exactly once — from <c>Player::SendLoginShipData</c> at
+    /// <c>server/src/PlayerClass.cpp:872</c>
+    /// (<c>SendShipColorization(this, 8)</c>, self-emit dispatch).
+    ///
+    /// <para>
+    /// Single-player single-sector scope. The only other
+    /// <c>Player::SendShipColorization</c> call site is:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><c>Player::SendShipData</c> at PlayerClass.cpp:921 —
+    ///     <c>SendShipColorization(player_to_send_to, 8)</c>, the
+    ///     broadcast arm fired for each observer in the sector's
+    ///     player list when a new player enters. Does NOT fire during
+    ///     a single-player station-sector login (no observers, no
+    ///     broadcast).</item>
+    /// </list>
+    /// <para>
+    /// So 0x0049 is exactly 1 emit per station-sector login. Mirrors
+    /// the Wave 94/95/98-style SendLoginShipData self-emit pinning.
+    /// </para>
+    ///
+    /// <para>
+    /// Why a separate test method, not an in-place assertion. Wave 76's
+    /// existing test caps at <c>Assert.NotEmpty + Assert.All(payload==134)</c>,
+    /// which would still pass if a refactor added a spurious second
+    /// emit. Keeping the count assertion in its own method preserves
+    /// Wave 76's narrow-scope failure surface and gives Wave 99 a
+    /// discrete test artifact for the regression-class catalogue.
+    /// Mirrors the Wave 91-98 sibling-method pattern.
+    /// </para>
+    ///
+    /// <para>
+    /// Per CLAUDE.md server-integrity. Pure passive-observation
+    /// tightening. No client stimulus, no server change. The 1-frame
+    /// invariant is a retail-faithful invariant of the SendLoginShipData
+    /// single-self-emit dispatch pattern.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task Colorization_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmit()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, stationSectorId,
+            firstName: "Colr99", shipName: "Colr99Ship", cts.Token);
+
+        var colorizationFrames = session.HandshakeFrames
+            .Where(f => f.Opcode == OpcodeId.Known.Colorization.Value)
+            .ToList();
+
+        // Wave 99 pins the 1-frame invariant: SendLoginShipData self-emit
+        // (PlayerClass.cpp:872). The broadcast arm at PlayerClass.cpp:921
+        // does not fire during a single-player station-sector login.
+        var single = Assert.Single(colorizationFrames);
+        Assert.Equal(ExpectedColorizationPayloadLength, single.PayloadLength);
+    }
 }

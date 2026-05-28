@@ -201,4 +201,89 @@ public sealed class SectorAvatarDescriptionHardeningTests
         Assert.All(avatarDescriptionFrames, f =>
             Assert.Equal(ExpectedAvatarDescriptionPayloadLength, f.PayloadLength));
     }
+
+    /// <summary>
+    /// Wave 100 frame-count hardening (+0 ratchet, 0x0061): pins the
+    /// exact 1-frame emit-count invariant Wave 78's payload-length
+    /// hardening was structurally blind to. The captured single-player
+    /// station-sector handshake stream emits 0x0061 AVATAR_DESCRIPTION
+    /// exactly once — from <c>Player::SendLoginShipData</c> at
+    /// <c>server/src/PlayerClass.cpp:889</c>
+    /// (<c>SendOpcode(ENB_OPCODE_0061_AVATAR_DESCRIPTION, &amp;avatar, sizeof(avatar))</c>,
+    /// self-emit dispatch).
+    ///
+    /// <para>
+    /// Single-player single-sector scope. The other call sites for
+    /// 0x0061 do not fire during a passive station-sector login:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><c>Player::SendShipData</c> at PlayerClass.cpp:949 —
+    ///     peer-broadcast arm fired for each observer when a new
+    ///     player enters. Does NOT fire single-player (no observers).</item>
+    ///   <item><c>Player::SendStarbaseAvatarList</c> at
+    ///     PlayerClass.cpp:733 / :751 — walks the sector's player
+    ///     list and emits avatar/room metadata for OTHER docked
+    ///     players in the same room. The inner loop body at
+    ///     PlayerClass.cpp:715 filters out <c>this</c> player; in
+    ///     single-player handshake the list is empty so the body
+    ///     never executes. SendStarbaseAvatarList is only called
+    ///     from explicit handlers (HandleStarbaseRoomChange,
+    ///     LaunchIntoSpace, HandleRecustomizeAvatarDone), none of
+    ///     which fire during a passive login.</item>
+    ///   <item><c>Player::HandleIncapacitanceRequest</c> at
+    ///     PlayerConnection.cpp:11117 — fires on explicit client
+    ///     incapacitance request, never during a passive login.</item>
+    ///   <item><c>Player::SendPIPAvatar</c> at PlayerConnection.cpp:11225
+    ///     — emits the picture-in-picture avatar overlay only when
+    ///     called from a chat/petition flow, not during login.</item>
+    /// </list>
+    /// <para>
+    /// So 0x0061 is exactly 1 emit per single-player station-sector
+    /// login. Mirrors the Wave 94/95/98/99-style SendLoginShipData
+    /// self-emit pinning.
+    /// </para>
+    ///
+    /// <para>
+    /// Why a separate test method, not an in-place assertion. Wave 78's
+    /// existing test caps at <c>Assert.NotEmpty + Assert.All(payload==260)</c>,
+    /// which would still pass if a refactor added a spurious second
+    /// emit. Keeping the count assertion in its own method preserves
+    /// Wave 78's narrow-scope failure surface. Mirrors the Wave 91-99
+    /// sibling-method pattern.
+    /// </para>
+    ///
+    /// <para>
+    /// Per CLAUDE.md server-integrity. Pure passive-observation
+    /// tightening. No client stimulus, no server change.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task AvatarDescription_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmit()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, stationSectorId,
+            firstName: "AvDesc100", shipName: "AvDesc100Ship", cts.Token);
+
+        var avatarDescriptionFrames = session.HandshakeFrames
+            .Where(f => f.Opcode == OpcodeId.Known.AvatarDescription.Value)
+            .ToList();
+
+        // Wave 100 pins the 1-frame invariant: SendLoginShipData self-emit
+        // (PlayerClass.cpp:889). Other call sites (SendShipData broadcast,
+        // SendStarbaseAvatarList, HandleIncapacitanceRequest, SendPIPAvatar)
+        // do not fire during a single-player passive login.
+        var single = Assert.Single(avatarDescriptionFrames);
+        Assert.Equal(ExpectedAvatarDescriptionPayloadLength, single.PayloadLength);
+    }
 }

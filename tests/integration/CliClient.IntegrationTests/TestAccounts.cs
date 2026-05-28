@@ -156,6 +156,9 @@ public static class TestAccounts
             ["ConstantPositionalUpdate_EmittedExactlyOnceDuringStationSectorHandshake_PinsManuLabEmit"] = A(9_000_091, "cli_test91"),
             ["StarbaseSet_EmittedExactlyOnceDuringStationSectorHandshake_PinsStationLogin2Emit"]       = A(9_000_092, "cli_test92"),
             ["Subparts_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmit"]                   = A(9_000_093, "cli_test93"),
+            ["Colorization_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmit"]              = A(9_000_094, "cli_test94"),
+            ["AvatarDescription_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmit"]          = A(9_000_095, "cli_test95"),
+            ["ClientAvatarAndClientShip_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmits"] = A(9_000_096, "cli_test96"),
         };
 
     /// <summary>
