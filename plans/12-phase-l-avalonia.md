@@ -306,6 +306,87 @@ The existing WinForms targets stay in the tree. They still build via `dotnet bui
 
       **7/14 tools have Linux-native paths now.**
 
+- [x] **launchnet7-avalonia in-process auth relay** — 2026-05-28.
+      Root cause for the WINE-side `INV-300` / `wininet 12029` login
+      failures was schannel cert validation flakiness against the dev
+      self-signed cert (the cert was installed in the WINE prefix's
+      `Root\Certificates` store and verified by SHA1, but TLS handshakes
+      against it only succeeded intermittently — most attempts surfaced
+      `SSL_accept failed (err=1)` on the Net7SSL side).
+
+      Fix is **architectural**, not a cert-trust patch: the launcher
+      now owns a `TcpListener` + `SslStream` bridge bound to
+      `IPAddress.Loopback` on a HARDCODED port. authlogin.dll always
+      talks plaintext HTTP to `127.0.0.1:<fixed port>`; the relay
+      terminates the plaintext on loopback (bytes never leave the
+      machine) and re-wraps each connection as TLS to the actual
+      upstream auth host.
+
+      Design constraints (user-directed):
+      - The relay's loopback address and port are HARDCODED in code.
+        No setting, env-var, or registry key can move authlogin.dll
+        off of localhost. `LocalAuthRelay.ListenPort` is a `const`,
+        `Launcher.PatchAuthLoginFile` writes `Port=ListenPort, UseHttps=false`
+        unconditionally (no setting feeds either value), and
+        `PatchRegistry` hardcodes `AuthLoginServer=localhost` for
+        both WINE and the Windows-native path
+        (`WindowsRegistryHelpers.EnsureRegistered`). The launcher has
+        no toggle for HTTPS-on-hop-1; the relay design makes the knob
+        meaningless, so it was removed along with the parallel
+        `UseClientDetours` / `UseLocalCert` knobs in the same change.
+      - Cert validation policy splits by upstream:
+        - Loopback upstream (dev stack) → skip verify (the cert is
+          the dev self-signed one on this same machine).
+        - Remote upstream → full validation against OS trust store.
+          A remote deploy is expected to ship a real CA-signed cert.
+        Branch is logged at startup (`verify=skip` vs `verify=full`).
+        `LocalAuthRelay.IsLoopback` uses syntactic matches only
+        (`localhost` / `IPAddress.IsLoopback`) — no DNS lookup, so a
+        malicious DNS answer can't trick the relay into skipping verify.
+
+      Touches:
+      - new `tools/launchnet7-avalonia/Network/LocalAuthRelay.cs`
+        (132 LOC; `TcpListener` on `IPAddress.Loopback`, `SslStream`
+        upstream with TLS 1.2|1.3, bidirectional `CopyToAsync`).
+      - `Launcher.cs`: added `AuthRelay` property +
+        `StartLocalAuthRelay()` called first in `Launch()`;
+        rewrote `PatchAuthLoginFile` to always emit
+        `Port=LocalAuthRelay.ListenPort, UseHttps=false`; rewrote
+        `PatchRegistry` WINE branch to hardcode
+        `HKLM\Software\EACom\AuthAuth\AuthLoginServer=localhost`
+        (no `_setting.Hostname` substitution).
+      - `WindowsRegistryHelpers.cs`: `EnsureRegistered` now also
+        forces `Software\EACom\AuthAuth\{AuthLoginServer,
+        AuthLoginBaseService}` to `localhost`/`AuthLogin` on Windows
+        for parity.
+      - `MainWindow.axaml.cs`: `OnPlayClick` no longer closes the
+        window; it disables Play and updates status. `OnClosing`
+        disposes the active relay so the listener doesn't outlive
+        the GUI.
+      - `justfile`: `play-local` no longer calls `trust-cert` (the
+        WINE prefix doesn't need to trust the dev cert — the relay
+        skips verify only when upstream is loopback).
+
+      Smoke test (headless, against the live docker stack):
+      ```
+      [relay] auth relay: listening on 127.0.0.1:4180 -> localhost:4443 (verify=skip)
+      smoke: connected to relay
+      smoke: sent GET /
+      smoke: response (159 bytes):
+      HTTP/1.1 404 File Not Found
+      Server: AuthServer/2.5
+      ...
+      smoke: PASS — got HTTP status line through the relay
+      ```
+      Non-loopback upstream flips the log to `verify=full` (verified
+      with `192.168.1.1:4443`).
+
+      Build: `dotnet build tools/launchnet7-avalonia` clean
+      (0 warn / 0 err).
+
+      Status: code complete; live GUI test (Click Play with WINE
+      client) is user-driven follow-up.
+
 ### Tier 5 — first MySQL editor port (complete)
 
 - [x] **faction-editor-avalonia** — full Avalonia port of

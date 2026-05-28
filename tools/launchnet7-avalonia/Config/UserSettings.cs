@@ -13,9 +13,6 @@ namespace LaunchNet7Avalonia.Config
         public string ClientPath { get; set; } = "";
         public string LastEmulatorName { get; set; } = "";
         public string LastServerName { get; set; } = "";
-        public bool UseClientDetours { get; set; } = false;
-        public bool UseLocalCert { get; set; } = false;
-        public bool UseSecureAuthentication { get; set; } = true;
         public string AuthenticationPort { get; set; } = "";
         public int FormMainPositionX { get; set; } = -1;
         public int FormMainPositionY { get; set; } = -1;

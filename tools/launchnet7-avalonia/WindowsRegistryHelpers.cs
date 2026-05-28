@@ -22,10 +22,24 @@ namespace LaunchNet7Avalonia
         public static void EnsureRegistered()
         {
 #if WINDOWS_BUILD
-            const string keyName = "HKEY_LOCAL_MACHINE\\Software\\Westwood Studios\\Earth and Beyond\\Registration";
-            var current = (int?)Registry.GetValue(keyName, "Registered", 0);
-            if (current != 1)
-                Registry.SetValue(keyName, "Registered", 1, RegistryValueKind.DWord);
+            const string regKey  = "HKEY_LOCAL_MACHINE\\Software\\Westwood Studios\\Earth and Beyond\\Registration";
+            const string authKey = "HKEY_LOCAL_MACHINE\\Software\\EACom\\AuthAuth";
+
+            var currentRegistered = (int?)Registry.GetValue(regKey, "Registered", 0);
+            if (currentRegistered != 1)
+                Registry.SetValue(regKey, "Registered", 1, RegistryValueKind.DWord);
+
+            // AuthLoginServer is HARDCODED to "localhost". authlogin.dll
+            // always dials the in-process LocalAuthRelay on loopback, which
+            // re-wraps the call as TLS to the actual upstream. See
+            // Launcher.PatchRegistry for the WINE-side equivalent and rationale.
+            var currentServer = (string)Registry.GetValue(authKey, "AuthLoginServer", null);
+            if (!string.Equals(currentServer, "localhost", System.StringComparison.OrdinalIgnoreCase))
+                Registry.SetValue(authKey, "AuthLoginServer", "localhost", RegistryValueKind.String);
+
+            var currentBase = (string)Registry.GetValue(authKey, "AuthLoginBaseService", null);
+            if (!string.Equals(currentBase, "AuthLogin", System.StringComparison.Ordinal))
+                Registry.SetValue(authKey, "AuthLoginBaseService", "AuthLogin", RegistryValueKind.String);
 #else
             throw new System.PlatformNotSupportedException(
                 "Built without the Microsoft.Win32.Registry package; rebuild with WINDOWS_BUILD if you need this code path.");

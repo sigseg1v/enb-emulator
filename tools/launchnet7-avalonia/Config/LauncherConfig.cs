@@ -73,13 +73,17 @@ namespace LaunchNet7Avalonia.Config
                         if (h.NodeType != XmlNodeType.Element) continue;
                         if (h.Name != "host") continue;
 
+                        // The launcher always speaks TLS to the upstream auth
+                        // server. `secureAuthenticationPort` is the historical
+                        // attribute name in shipped LaunchNet7.cfg files; we
+                        // accept it for compatibility but it is just *the*
+                        // auth port now. `authenticationPort` (the plain-HTTP
+                        // variant) is ignored — there is no plaintext upstream.
                         var host = new HostConfig
                         {
-                            Hostname = h.Attributes?["hostname"]?.Value ?? "",
+                            Hostname           = h.Attributes?["hostname"]?.Value ?? "",
+                            AuthenticationPort = ParseInt(h.Attributes?["secureAuthenticationPort"]?.Value, 443),
                         };
-                        host.SupportsSecureAuthentication = ParseBool(h.Attributes?["supportSecureAuthentication"]?.Value, true);
-                        host.SecureAuthenticationPort     = ParseInt(h.Attributes?["secureAuthenticationPort"]?.Value, 443);
-                        host.AuthenticationPort           = ParseInt(h.Attributes?["authenticationPort"]?.Value, 80);
                         s.Hosts.Add(host);
                     }
                     cfg.Servers.Add(s);

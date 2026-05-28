@@ -44,7 +44,7 @@
     <!-- Row 2: Authentication -->
     <Border Grid.Row="2" BorderBrush="Gray" BorderThickness="1" Padding="8" CornerRadius="4" Margin="0,8,0,0">
       <Grid ColumnDefinitions="220,*">
-        <TextBlock Grid.Column="0" Text="Authentication Port (HTTPS):" VerticalAlignment="Center" />
+        <TextBlock Grid.Column="0" Text="Upstream Auth Port (TLS):" VerticalAlignment="Center" />
         <TextBox   Grid.Column="1" Name="c_TextBox_Port" Width="80" HorizontalAlignment="Left" />
       </Grid>
     </Border>

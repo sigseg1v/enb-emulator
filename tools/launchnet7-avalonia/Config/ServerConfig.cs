@@ -20,9 +20,7 @@ namespace LaunchNet7Avalonia.Config
     public sealed class HostConfig
     {
         public string Hostname { get; set; } = "";
-        public bool SupportsSecureAuthentication { get; set; } = true;
-        public int SecureAuthenticationPort { get; set; } = 443;
-        public int AuthenticationPort { get; set; } = 80;
+        public int AuthenticationPort { get; set; } = 443;
 
         public override string ToString() => Hostname;
     }
