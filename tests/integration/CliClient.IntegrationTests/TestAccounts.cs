@@ -133,6 +133,7 @@ public static class TestAccounts
             ["HandshakeDoesNotEmitStarbaseSetOnSpaceSectorLogin"]                                      = A(9_000_068, "cli_test68"),
             ["HandshakeDoesNotEmitLoungeNpcOnSpaceSectorLogin"]                                        = A(9_000_069, "cli_test69"),
             ["ForceLogout_TriggeredByDuplicateGlobalConnect_EmitsLogoffWithExactly4BytePayload"]       = A(9_000_070, "cli_test70"),
+            ["Colorization_EmittedDuringStationSectorHandshake_HasExactly134BytePayload"]              = A(9_000_071, "cli_test71"),
         };
 
     /// <summary>
