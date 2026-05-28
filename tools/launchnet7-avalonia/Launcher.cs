@@ -71,10 +71,14 @@ namespace LaunchNet7Avalonia
                     LaunchNet7Server();
                     System.Threading.Thread.Sleep(25000);
                     LaunchNet7Proxy();
+                    System.Threading.Thread.Sleep(2000);
+                    LaunchClient();
                     break;
 
                 case "NET7MP":
                     LaunchNet7Proxy();
+                    System.Threading.Thread.Sleep(2000);
+                    LaunchClient();
                     break;
 
                 default:

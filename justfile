@@ -8,6 +8,12 @@
 IMAGE_REGISTRY := env_var_or_default("IMAGE_REGISTRY", "ghcr.io/anthropics/enb-emulator")
 IMAGE_TAG      := env_var_or_default("IMAGE_TAG", "dev")
 
+# Per-worktree docker compose project name, derived from the current git
+# branch so parallel worktrees don't fight over the same container set.
+# main/master/detached-HEAD collapse to plain `enb-emulator`. Already-prefixed
+# branches (enb-emulator-foo) are used as-is. Override with the env var.
+export COMPOSE_PROJECT_NAME := env_var_or_default("COMPOSE_PROJECT_NAME", `b=$(git branch --show-current 2>/dev/null); if [ -z "$b" ] || [ "$b" = main ] || [ "$b" = master ]; then echo enb-emulator; else s=$(printf '%s' "$b" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9_-' '-' | tr -s '-' | sed 's/^-//;s/-$//'); case "$s" in enb-emulator-*) echo "$s";; *) echo "enb-emulator-$s";; esac; fi`)
+
 # Default: list targets.
 default:
     @just --list
@@ -24,6 +30,40 @@ build:
 # Build the C# tool suite (Net7Tools.slnx, .NET 10).
 build-tools:
     dotnet build tools/Net7Tools.slnx
+
+# Cross-compile Net7Proxy as a Win32 PE binary (MinGW-w64). The launcher
+# spawns this under WINE next to the EnB client — see plans/23-phase-w-proxy-win32-crossbuild.md.
+# Builds OpenSSL 3 statically into proxy/third_party/openssl-mingw64 the
+# first time (idempotent), then cmake-configures + builds, then stages
+# Net7Proxy.exe to ./bin/ where launchnet7-avalonia looks for it.
+build-proxy-win64:
+    @echo ">>> building static OpenSSL 3 for MinGW (idempotent — skip if already built)"
+    ./proxy/scripts/build-openssl-mingw.sh
+    @echo ">>> cmake configure (Win32 cross)"
+    cmake -S proxy -B proxy/build-win64 \
+        -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-x86_64.toolchain.cmake \
+        -DCMAKE_BUILD_TYPE=Release
+    @echo ">>> cmake build"
+    cmake --build proxy/build-win64 -j"$(nproc)"
+    @echo ">>> staging Net7Proxy.exe → bin/"
+    @mkdir -p bin
+    @cp proxy/build-win64/Net7Proxy.exe bin/Net7Proxy.exe
+    @echo ">>> done. bin/Net7Proxy.exe is what 'just launch-net7' will spawn under WINE."
+
+# Smoke-run Net7Proxy.exe under WINE (no game client, just the proxy).
+# Confirms WSAStartup + binds TCP 3801/3805 + opens both UDP planes.
+# Set NET7_UPSTREAM_HOST=<host> in the env to point the proxy at a non-local
+# game server. Ctrl-C to stop.
+run-proxy-wine:
+    @if [ ! -x bin/Net7Proxy.exe ]; then echo "bin/Net7Proxy.exe missing — run 'just build-proxy-win64' first" >&2; exit 1; fi
+    wine bin/Net7Proxy.exe
+
+# Stop the docker proxy container if it's running. The WINE proxy spawned
+# by `just launch-net7` binds the same host port 3801 — they can't both
+# run. `just run-stack-bg` doesn't start the docker proxy in the first
+# place, but `docker compose up` (no-arg) or `just dev-fg` does.
+stop-docker-proxy:
+    -docker compose stop proxy
 
 # ---- launch C# editors (Avalonia ports — Linux native) ----
 #
@@ -100,9 +140,9 @@ init: gen-certs
     @echo ">>> bringing up postgres + applying schema"
     docker compose up -d postgres schema-init
     @echo ">>> waiting for postgres to become healthy"
-    @bash -c 'until [ "$(docker inspect -f {{{{.State.Health.Status}} enb-emulator-postgres-1 2>/dev/null)" = "healthy" ]; do echo "  ...waiting"; sleep 3; done'
+    @bash -c 'until [ "$(docker inspect -f {{{{.State.Health.Status}} ${COMPOSE_PROJECT_NAME}-postgres-1 2>/dev/null)" = "healthy" ]; do echo "  ...waiting"; sleep 3; done'
     @echo ">>> waiting for schema-init to finish"
-    @bash -c 'until docker inspect -f "{{{{.State.Status}}" enb-emulator-schema-init-1 2>/dev/null | grep -q exited; do echo "  ...waiting"; sleep 2; done'
+    @bash -c 'until docker inspect -f "{{{{.State.Status}}" ${COMPOSE_PROJECT_NAME}-schema-init-1 2>/dev/null | grep -q exited; do echo "  ...waiting"; sleep 2; done'
     @echo ">>> verifying net7 + net7_user databases"
     docker compose exec -T -e PGPASSWORD=net7 postgres psql -U net7 -l
     docker compose exec -T -e PGPASSWORD=net7 postgres psql -U net7 -d net7_user -c "SELECT COUNT(*) AS account_rows FROM accounts;"

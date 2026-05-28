@@ -129,6 +129,17 @@ int main(int argc, char* argv[])
         {
             snprintf(g_UpstreamHost, MAX_PATH, "%s", argv[i] + 10);
         }
+        else if (strncmp(argv[i], "/CLIENT:", 8) == 0)
+        {
+            // Legacy launcher arg — accepted for backward compatibility.
+            // The launcher (tools/launchnet7-avalonia) now owns client
+            // spawning, so the proxy ignores this.
+        }
+        else if (strncmp(argv[i], "/L", 2) == 0
+              && strncmp(argv[i], "/LC", 3) != 0)
+        {
+            // Legacy launcher arg paired with /CLIENT: — accept + ignore.
+        }
         else
         {
             printf("Unrecognized switch: '%s'\n", argv[i]);
