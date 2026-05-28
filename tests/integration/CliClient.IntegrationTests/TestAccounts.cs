@@ -122,6 +122,7 @@ public static class TestAccounts
             ["OpenInterfaceSlashCommand_OnSlashOpenif_ReceivesOpenInterfaceEmit"]                     = A(9_000_057, "cli_test57"),
             ["UiTriggerSlashCommand_OnSlashUitrigger_ReceivesUiTriggerEmit"]                          = A(9_000_058, "cli_test58"),
             ["FgpsSlashCommand_OnSlashFgps_ReceivesConfirmedActionOfferAndClientSound"]               = A(9_000_059, "cli_test59"),
+            ["ClientChatRequest_ListFriendsEmptyFriendList_ReceivesClientChatList"]                   = A(9_000_060, "cli_test60"),
         };
 
     /// <summary>

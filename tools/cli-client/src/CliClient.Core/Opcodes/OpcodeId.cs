@@ -100,6 +100,7 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId TriggerEmote                 = new(0x00A1);
         public static readonly OpcodeId NotifyEmote                  = new(0x00A2);
         public static readonly OpcodeId ClientChatRequest            = new(0x00A3);
+        public static readonly OpcodeId ClientChatList               = new(0x00A4);
         public static readonly OpcodeId ClientChatEvent              = new(0x00A5);
         public static readonly OpcodeId GalaxyMap                    = new(0x0097);
         public static readonly OpcodeId NameDecal                    = new(0x00B2);
