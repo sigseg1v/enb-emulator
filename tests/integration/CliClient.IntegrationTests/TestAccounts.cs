@@ -135,6 +135,7 @@ public static class TestAccounts
             ["ForceLogout_TriggeredByDuplicateGlobalConnect_EmitsLogoffWithExactly4BytePayload"]       = A(9_000_070, "cli_test70"),
             ["Colorization_EmittedDuringStationSectorHandshake_HasExactly134BytePayload"]              = A(9_000_071, "cli_test71"),
             ["ClientAvatarAndClientShip_EmittedDuringStationSectorHandshake_HaveExactly4BytePayload"]  = A(9_000_072, "cli_test72"),
+            ["AvatarDescription_EmittedDuringStationSectorHandshake_HasExactly260BytePayload"]         = A(9_000_073, "cli_test73"),
         };
 
     /// <summary>
