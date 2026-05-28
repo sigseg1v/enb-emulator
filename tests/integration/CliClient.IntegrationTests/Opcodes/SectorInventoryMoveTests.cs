@@ -303,4 +303,207 @@ public sealed class SectorInventoryMoveTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// The verbatim ASCII body the retail-faithful HandleInventoryMove
+    /// default-arm passes to <c>SendVaMessage</c> at
+    /// <c>server/src/PlayerConnection.cpp:3242</c>. 56 bytes of payload
+    /// content; <c>SendMessageString</c> appends a NUL terminator and
+    /// emits <c>length = 57</c>.
+    /// </summary>
+    private const string UnrecognisedInventoryMoveLiteral =
+        "UNRECOGNISED INVENTORY MOVE!\nPlease submit a bug report\n";
+
+    /// <summary>
+    /// Wave 109 frame-shape hardening (+0 ratchet, 0x001D): pins the
+    /// byte-exact 60-byte wire-shape of the single 0x001D MESSAGE_STRING
+    /// the server emits in reply to a 0x0027 INVENTORY_MOVE whose
+    /// <c>FromInv</c> field is outside the switch's populated cases.
+    /// Wave 27's existing test
+    /// (<see cref="InventoryMove_UnrecognisedFromInv_ReceivesUnrecognisedErrorString"/>)
+    /// asserts only that the response body <em>contains</em> the
+    /// distinctive substring "UNRECOGNISED INVENTORY MOVE"; the NUL-
+    /// scan is deliberately loose so a punctuation tweak doesn't sink
+    /// it. Wave 109 layers byte-exact pinning on top, locking the full
+    /// 60-byte response shape in place.
+    ///
+    /// <para>
+    /// Backstory. The verbatim 56-byte literal at
+    /// <c>PlayerConnection.cpp:3242</c> ("UNRECOGNISED INVENTORY
+    /// MOVE!\\nPlease submit a bug report\\n") rides
+    /// <c>SendVaMessage</c> → <c>SendMessageString</c> →
+    /// <c>SendOpcode(ENB_OPCODE_001D_MESSAGE_STRING, length+3)</c>
+    /// exactly as the Wave 24 literal does (Wave 108 pinned that one).
+    /// The two literals differ only in body byte count (52 → 56), and
+    /// the entire framing arithmetic flows from <c>length = strlen(msg)
+    /// + 1</c>:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><b>length field</b> = 56 + 1 = <c>57</c></item>
+    ///   <item><b>color byte</b> = <c>5</c> (PlayerClass.h:277 default)</item>
+    ///   <item><b>msg + NUL</b> = 56 + 1 = <c>57 bytes</c></item>
+    ///   <item><b>total payload</b> = <c>length + 3 = 60 bytes</c></item>
+    /// </list>
+    ///
+    /// <para>
+    /// Why a separate test method. Mirrors Wave 92 / 101 / 107 / 108:
+    /// Wave 27's looser substring assertion stays intact (narrow-scope
+    /// failure surface — a wire-shape drift that still produces the
+    /// literal substring would not surface as a Wave 27 failure), Wave
+    /// 109 adds the byte-exact pin as its own discrete test artifact.
+    /// Companion to Wave 108: both pin the same SendMessageString wire
+    /// shape but on different literals, so a regression caught only by
+    /// one (e.g. a "polish UNRECOGNISED ITEM STATE" edit that doesn't
+    /// touch UNRECOGNISED INVENTORY MOVE) still surfaces.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression classes Wave 109 catches beyond what Wave 27 catches
+    /// (mirror of Wave 108's catalogue against the longer literal):
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b><c>SendMessageString</c> length-field width regression at
+    ///     <c>PlayerConnection.cpp:10992</c>.</b> A widening of
+    ///     <c>*((short *) &amp;buffer[0])</c> to int32_t would shift
+    ///     color from offset 2 to offset 4 and grow total payload from
+    ///     60 to 62. Wave 27's NUL-scan still locates a terminator;
+    ///     Wave 109's <c>Assert.Equal(60, span.Length)</c> catches.
+    ///   </item>
+    ///   <item>
+    ///     <b><c>SendMessageString</c> color-default regression at
+    ///     <c>PlayerClass.h:277</c>.</b> Any change to the default
+    ///     would shift wire byte 2 without changing the substring.
+    ///     Wave 109's <c>Assert.Equal(5, span[2])</c> catches.
+    ///   </item>
+    ///   <item>
+    ///     <b>Length-field LE byte-order regression.</b> A
+    ///     hypothetical BE server build would swap the byte pair;
+    ///     Wave 109's
+    ///     <c>BinaryPrimitives.ReadInt16LittleEndian == 57</c> catches.
+    ///   </item>
+    ///   <item>
+    ///     <b><c>SendOpcode</c> trailing-bytes regression at
+    ///     <c>PlayerConnection.cpp:10996</c>.</b> A refactor emitting
+    ///     <c>sizeof(buffer)</c> (512) instead of <c>length + 3</c>
+    ///     (60) leaks 452 trailing zero bytes. Wave 27 silently
+    ///     ignores; Wave 109 catches.
+    ///   </item>
+    ///   <item>
+    ///     <b>Verbatim-literal drift at
+    ///     <c>PlayerConnection.cpp:3242</c>.</b> A refactor that
+    ///     replaces "<c>\\n</c>" with "<c>. </c>", trims the trailing
+    ///     newline, or shortens "INVENTORY MOVE" to "INV MOVE" silently
+    ///     changes wire bytes. Wave 27's <c>Contains</c> on the leading
+    ///     substring still passes for the shortening edge; Wave 109's
+    ///     full-literal <c>Assert.Equal</c> catches.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Per CLAUDE.md server-integrity. 0x001D MESSAGE_STRING is
+    /// server-originated. Wave 109 adds no client stimulus beyond the
+    /// same 24-byte INVENTORY_MOVE Wave 27 already sends, and no server
+    /// change — pure passive-observation tightening of a retail-faithful
+    /// wire shape. The 60-byte response is exactly what the retail
+    /// Win32 client's MESSAGE_STRING decoder was compiled to receive.
+    /// No widened input acceptance, no loosened gating, no fabricated
+    /// replies — server-integrity POSITIVE.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s. Handshake ~2s; INVENTORY_MOVE+REPLY round-trip is
+    /// sub-second.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task InventoryMove_UnrecognisedFromInv_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (57) = 60 bytes.
+        const int ExpectedReplyPayloadLength = 60;
+        // strlen(literal) + 1 NUL = 57.
+        const short ExpectedReplyLengthField = 57;
+        // SendVaMessage → SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 56.
+        const int ExpectedLiteralByteCount = 56;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Mover109", shipName: "Mvr109Ship", cts.Token);
+
+        try
+        {
+            byte[] payload = new byte[24];
+            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(0, 4), 0);
+            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(4, 4), 99);
+            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(8, 4), 0);
+            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(12, 4), 0);
+            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(16, 4), 0);
+            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(20, 4), 0);
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(OpcodeId.Known.InventoryMove.Value, payload),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Contains("UNRECOGNISED INVENTORY MOVE", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(UnrecognisedInventoryMoveLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0027 INVENTORY_MOVE (FromInv=99) " +
+                $"without seeing 0x001D MESSAGE_STRING containing \"UNRECOGNISED INVENTORY MOVE\". " +
+                $"Same drain-loop budget as Wave 27's sibling test; the failure modes are " +
+                $"identical.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
