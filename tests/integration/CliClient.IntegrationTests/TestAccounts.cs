@@ -162,6 +162,7 @@ public static class TestAccounts
             ["ClientType_EmittedExactlyOnceDuringSpaceSectorHandshake_PinsSectorLoginEmit"]            = A(9_000_097, "cli_test97"),
             ["StartAck_AfterSpaceArmHandshake_EmitsCameraControlWithEightBytePayload"]                = A(9_000_098, "cli_test98"),
             ["ServerParameters_EmittedExactlyOnceDuringSpaceSectorHandshake_PinsSelfEmit"]            = A(9_000_099, "cli_test99"),
+            ["ManufactureSetManufactureId_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmit"] = A(9_000_100, "cli_test100"),
         };
 
     /// <summary>

@@ -150,6 +150,7 @@ VALUES
   (9000097, 'cli_test97',         UPPER(encode(digest('testpw', 'md5'), 'hex')), 100, 'cli_test97_form',     'cli_test97@net-7.test',         0),
   (9000098, 'cli_test98',         UPPER(encode(digest('testpw', 'md5'), 'hex')), 100, 'cli_test98_form',     'cli_test98@net-7.test',         0),
   (9000099, 'cli_test99',         UPPER(encode(digest('testpw', 'md5'), 'hex')), 100, 'cli_test99_form',     'cli_test99@net-7.test',         0),
+  (9000100, 'cli_test100',        UPPER(encode(digest('testpw', 'md5'), 'hex')), 100, 'cli_test100_form',    'cli_test100@net-7.test',        0),
   -- Status=0 fixture used by GlobalConnectTests.StressTestClosedAccount_*.
   -- LinuxAuth doesn't check status so login succeeds and the ticket is
   -- issued normally; ProcessTicketInfo on the server side rejects with

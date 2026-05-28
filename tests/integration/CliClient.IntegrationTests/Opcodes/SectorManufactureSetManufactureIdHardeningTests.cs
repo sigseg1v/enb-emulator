@@ -192,4 +192,128 @@ public sealed class SectorManufactureSetManufactureIdHardeningTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 105 frame-count hardening (+0 ratchet, 0x007F): pins the
+    /// exact 1-frame emit-count invariant Wave 68's payload-length
+    /// hardening was structurally blind to. The captured single-player
+    /// station-sector handshake stream emits 0x007F
+    /// MANUFACTURE_SET_MANUFACTURE_ID exactly once — from
+    /// <c>SectorManager::StationLogin</c> at
+    /// <c>server/src/SectorManager.cpp:475</c>
+    /// (<c>player-&gt;SetManufactureID(ntohl(ManuID))</c> for the
+    /// manufacture-lab anchor).
+    ///
+    /// <para>
+    /// Three known call sites — <c>SectorManager::SectorLogin</c> at
+    /// SectorManager.cpp:345 (space-arm, <c>SetManufactureID(0)</c>),
+    /// <c>SectorManager::StationLogin</c> at SectorManager.cpp:475
+    /// (station-arm, <c>SetManufactureID(ntohl(ManuID))</c>), and
+    /// <c>SectorManager::LaunchIntoSpace</c> at SectorManager.cpp:538
+    /// (station-to-space transition, <c>SetManufactureID(0)</c>). For a
+    /// station-only handshake landing on sector 10151
+    /// (<c>sector_id &gt; 9999</c> → StationLogin path per HandleSectorLogin
+    /// at PlayerConnection.cpp:324-336), only the StationLogin
+    /// SectorManager.cpp:475 site fires. SectorLogin never runs because
+    /// the dispatch branch is taken on sector_id, and LaunchIntoSpace
+    /// only fires on an explicit launch request from station to space.
+    /// </para>
+    ///
+    /// <para>
+    /// Structurally distinct from Waves 96/97 — those pin SectorManager
+    /// single-emit invariants for opcodes with NO SendLoginShipData
+    /// self-emit path. Wave 105 is the same shape: SetManufactureID has
+    /// no SendLoginShipData self-emit (the only callers are the three
+    /// SectorManager sites above; grep over server/src for
+    /// <c>SetManufactureID\b</c> verifies). A regression that adds a
+    /// SendLoginShipData self-emit (e.g. mirroring the SendShipInfo
+    /// self-emit pattern) would surface as 2+ frames. Wave 68's
+    /// <c>Assert.NotEmpty</c> still passes (every frame is still 4B).
+    /// Wave 105's <c>Assert.Single</c> catches.
+    /// </para>
+    ///
+    /// <para>
+    /// Why a separate test method, not an in-place assertion. Wave 68's
+    /// existing test caps at <c>Assert.NotEmpty + Assert.All(payload==4)</c>,
+    /// which would still pass if a refactor added a spurious second
+    /// emit. Keeping the count assertion in its own method preserves
+    /// Wave 68's narrow-scope failure surface and gives Wave 105 a
+    /// discrete test artifact for the regression-class catalogue.
+    /// Mirrors the Wave 91/92/93/94/95/96/97/98/99/100/101/102/104
+    /// sibling-method pattern.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression classes this catches (beyond what Wave 68 catches).
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b>Spurious extra <c>SetManufactureID</c> in the chain.</b>
+    ///     A refactor adding a SendLoginShipData self-emit (e.g. for a
+    ///     hypothetical "ship manu-state confirm" step) would produce
+    ///     2+ frames. Wave 68's <c>Assert.NotEmpty</c> still passes
+    ///     (every frame is still 4B). Wave 105's <c>Assert.Single</c>
+    ///     catches.
+    ///   </item>
+    ///   <item>
+    ///     <b>StationLogin refactor that splits the manu-lab emit into
+    ///     pre-/post-handshake emits.</b> A symmetric refactor adding a
+    ///     pre-handshake or post-handshake manu-lab re-anchor would
+    ///     surface as 2+ frames. Wave 105 catches.
+    ///   </item>
+    ///   <item>
+    ///     <b>SectorLogin call site bleeding into the station-arm
+    ///     dispatch.</b> A regression to HandleSectorLogin's branch at
+    ///     PlayerConnection.cpp:324-336 — e.g. dropping the sector_id
+    ///     &gt; 9999 gate — would let the station-arm fall through to
+    ///     SectorLogin (SectorManager.cpp:345 site) on top of the
+    ///     StationLogin emit, producing 2 frames. Wave 105 catches.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Per CLAUDE.md server-integrity. Pure passive-observation
+    /// tightening. No client stimulus, no server change. The 1-frame
+    /// invariant is a retail-faithful invariant of the StationLogin
+    /// manu-lab-anchor-only dispatch pattern (no SendLoginShipData
+    /// self-emit for this opcode).
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task ManufactureSetManufactureId_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmit()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, stationSectorId,
+            firstName: "MfgPin105", shipName: "MfgPin105Ship", cts.Token);
+
+        try
+        {
+            var mfgFrames = session.HandshakeFrames
+                .Where(f => f.Opcode == OpcodeId.Known.ManufactureSetManufactureId.Value)
+                .ToList();
+
+            // Wave 105 pins the 1-frame invariant: StationLogin manu-lab
+            // anchor (SectorManager.cpp:475). Only emit-site reached on the
+            // single-player station-sector handshake dispatch path.
+            var single = Assert.Single(mfgFrames);
+            Assert.Equal(ExpectedMfgIdPayloadLength, single.PayloadLength);
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
