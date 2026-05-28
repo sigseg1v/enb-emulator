@@ -1,0 +1,322 @@
+// SPDX-License-Identifier: CC-BY-NC-SA-3.0
+// Part of the Earth & Beyond preservation project.
+// License: LICENSES/enb-emulator
+
+using System.Buffers.Binary;
+using System.Text;
+using N7.CliClient.Auth;
+using N7.CliClient.Net;
+using N7.CliClient.Opcodes;
+using Xunit;
+
+namespace N7.CliClient.IntegrationTests.Opcodes;
+
+/// <summary>
+/// Wave 64 direct-reply +1 ratchet: client sends a 0x00A3
+/// CLIENT_CHAT_REQUEST on the sector connection with
+/// type=CCE_SPEAK_LOCALLY=1, string1=&quot;Bzqxqxz64&quot; (an impossible-to-create
+/// character name — no vowels — therefore guaranteed not to exist in the
+/// global player list), string2="" (empty channel), string3="hi" (non-slash
+/// message body). Expects the server's
+/// <c>Player::SendClientChatError</c> reply at
+/// <c>server/src/PlayerConnection.cpp:4667-4680</c> emitting opcode 0x00A6
+/// CLIENT_CHAT_ERROR with the recipient-not-found echo.
+///
+/// <para>
+/// Stimulus wire layout (mirror of <c>common/include/net7/PacketStructures.h:669-681</c>):
+/// <code>
+///   [0..4)    int32 PlayerID         = 0   (handler ignores)
+///   [4..8)    int32 type             = 1   (CCE_SPEAK_LOCALLY)
+///   [8..10)   short string_length1   = 9   (length of "Bzqxqxz64")
+///   [10..19)  9B ASCII               = "Bzqxqxz64"
+///   [19..21)  short string_length2   = 0   (no channel)
+///   [21..23)  short string_length3   = 2   (length of "hi")
+///   [23..25)  2B ASCII               = "hi"
+///   [25..29)  int32 data_size        = 0   (no optional trailing data block)
+/// </code>
+/// 29 bytes total, <c>ATTRIB_PACKED</c>.
+/// </para>
+///
+/// <para>
+/// Server dispatch. <c>PlayerConnection.cpp:587</c> routes 0x00A3 to
+/// <c>HandleClientChatRequest</c> at line 1648. The variable-length string
+/// walker at lines 1659-1692 reads string1=9B "Bzqxqxz64", string2 empty,
+/// string3=2B "hi". The switch at line 1695 has no case for type=1 so
+/// default falls through and execution reaches the post-switch if-chain at
+/// line 1731: <c>if (request->type == CCE_SPEAK_LOCALLY)</c> is true,
+/// <c>string3 != NULL</c> is true, <c>string3[0] != '/'</c> (it's 'h') so
+/// the else-branch fires:
+/// <code>
+///   g_ServerMgr->m_PlayerMgr.ChatSendPrivate(GameID(), string1, string3);
+/// </code>
+/// <c>PlayerManager::ChatSendPrivate</c> at
+/// <c>server/src/PlayerManager.cpp:971-1014</c> walks
+/// <c>m_GlobalPlayerList</c> via <c>GetNextPlayerOnList</c> comparing each
+/// player's <c>Name()</c> against <c>nickTrim</c> via <c>strcasecmp</c>;
+/// since "Bzqxqxz64" has no vowel it cannot be a real character name
+/// (character creation enforces <c>G_ERROR_ONE_VOWEL</c> at the global-
+/// plane <c>CreateCharacter</c> handler), so <c>FoundPlayer</c> stays
+/// false. The post-loop branch at line 1008-1011 fires:
+/// <code>
+///   p->SendClientChatError(CHAT_ERROR_INVALID_PERSON, CCE_SPEAK_LOCALLY, Nick);
+/// </code>
+/// </para>
+///
+/// <para>
+/// SendClientChatError emit (<c>PlayerConnection.cpp:4667-4680</c>):
+/// <code>
+///   AddData(packet, reason=4, index);    // 4B int32 LE: CHAT_ERROR_INVALID_PERSON
+///   AddData(packet, type=1,   index);    // 4B int32 LE: CCE_SPEAK_LOCALLY
+///   AddDataLS(packet, player="Bzqxqxz64", index);  // short(9) + 9B ASCII
+///   AddDataLS(packet, channel="",         index);  // short(0)
+///   AddDataLS(packet, other="",           index);  // short(0)
+///   SendOpcode(ENB_OPCODE_00A6_CLIENT_CHAT_ERROR, packet, index);
+/// </code>
+/// Channel and Other default to <c>""</c> (declaration default in
+/// <c>PlayerClass.h:1032</c>). Wire payload total: 4 + 4 + 2 + 9 + 2 + 2 =
+/// <b>23 bytes</b>.
+/// </para>
+///
+/// <para>
+/// Why this wave target. 0x00A6 CLIENT_CHAT_ERROR is a previously-uncovered
+/// server-emit opcode. Closing it makes 0x00A3 CLIENT_CHAT_REQUEST a
+/// **complete triple-fan-out test surface** — three previously-untested
+/// switch/branch arms (CCR_LIST_FRIENDS=24 from Wave 63 → 0x00A4,
+/// CCR_FRIEND_STATUS_ONLY=28 from Wave 32 → 0x00A5, CCE_SPEAK_LOCALLY=1 +
+/// nonexistent recipient from Wave 64 → 0x00A6), each emitting a distinct
+/// server-side opcode from the same single-frame request opcode. The
+/// no-vowel recipient name choice ensures determinism — character creation
+/// rejects names without vowels via <c>G_ERROR_ONE_VOWEL</c>, so the
+/// recipient lookup cannot accidentally collide with a real character even
+/// if other parallel tests are running concurrently.
+/// </para>
+///
+/// <para>
+/// Regression classes this catches.
+/// </para>
+/// <list type="bullet">
+///   <item>
+///     <b>0x00A6 SendOpcode removal at <c>PlayerConnection.cpp:4677</c>.</b>
+///     Drain times out for 0x00A6 — no other code path emits this opcode
+///     for a SpeakLocally-to-nonexistent-recipient flow.
+///   </item>
+///   <item>
+///     <b><c>SendClientChatError</c> wire-shape regression at
+///     <c>PlayerConnection.cpp:4669-4677</c>.</b> Any change to the
+///     AddData/AddDataLS sequence — adding fields, reordering, widening
+///     reason/type to 8B (the <c>AddData&lt;long&gt;</c> specialisation
+///     class), changing the default-argument for channel or other —
+///     surfaces via the 23B length assert or the byte-exact content
+///     assertions on reason/type/player.
+///   </item>
+///   <item>
+///     <b><c>AddData&lt;long&gt;</c> specialisation revert at
+///     <c>server/src/PacketMethods.h:37-42</c>.</b> The specialisation
+///     forces a 4B int32_t write on Linux x86_64. Without it, the generic
+///     template would emit 8B for both <c>reason</c> and <c>type</c>
+///     (both <c>long</c> in the C++ signature). Total wire payload would
+///     balloon to 8+8+2+9+2+2 = 31 bytes instead of 23 — length assertion
+///     catches.
+///   </item>
+///   <item>
+///     <b><c>ChatSendPrivate</c> <c>!FoundPlayer</c> branch removal at
+///     <c>PlayerManager.cpp:1008-1011</c>.</b> If the post-loop emit is
+///     deleted, the recipient-not-found case becomes a silent no-op and
+///     the drain times out.
+///   </item>
+///   <item>
+///     <b><c>ChatSendPrivate</c> <c>Nick &amp;&amp; Message</c> guard
+///     regression at <c>PlayerManager.cpp:973</c>.</b> The function early-
+///     returns if either pointer is null. Our 9B Nick and 2B Message
+///     bypass both null checks and the empty-nick early-return at line
+///     979 (<c>Nick[0] == 0</c>) so the lookup loop is reached. A
+///     regression that widened the guard (e.g. requiring strlen &gt;= 3
+///     for Nick) would silently no-op on our 9B Nick — length assertion
+///     still catches via timeout.
+///   </item>
+///   <item>
+///     <b>Post-switch if-chain regression at <c>PlayerConnection.cpp:1731</c>.</b>
+///     If the <c>request->type == CCE_SPEAK_LOCALLY</c> branch is deleted
+///     or guarded behind an AdminLevel check, ChatSendPrivate never runs
+///     and 0x00A6 never emits.
+///   </item>
+///   <item>
+///     <b>Slash-dispatch over-trigger regression at
+///     <c>PlayerConnection.cpp:1735</c>.</b> The branch tests
+///     <c>string3[0] == '/'</c>. If a regression broadened this to e.g.
+///     <c>string3[0] == 'h'</c> our message "hi" would be routed through
+///     <c>HandleSlashCommands</c> instead of ChatSendPrivate and no
+///     0x00A6 would emit.
+///   </item>
+///   <item>
+///     <b>Variable-length string walker regression at
+///     <c>PlayerConnection.cpp:1659-1692</c>.</b> Same as Waves 32/63 —
+///     a short→int32 revert on string_length fields desyncs the walker
+///     and string1/string3 land at wrong offsets, breaking the echoed
+///     player name in the reply.
+///   </item>
+///   <item>
+///     <b><c>ClientChatRequest</c> layout regression in
+///     <c>PacketStructures.h:669-681</c>.</b> A long→int32 revert on
+///     PlayerID or type shifts the type field to offset 8 — switch reads
+///     type==0 (CCE_SPEAK_ON), falls into the SPEAK_ON branch which
+///     routes to <c>ChatSendChannel</c>, no 0x00A6 emits.
+///   </item>
+///   <item>
+///     <b>Dispatcher mis-route at <c>PlayerConnection.cpp:587</c>.</b>
+///     A copy-paste swap with HandleTriggerEmote (0x00A1) routes our
+///     29B payload through <c>SendNotifyEmote</c> which fans out 0x00A2
+///     to range-list peers and never emits 0x00A6 — drain times out.
+///   </item>
+///   <item>
+///     <b>Proxy default-case ForwardClientOpcode dropping 0x00A3.</b>
+///     0x00A3 is NOT explicitly cased in
+///     <c>proxy/ClientToServer_linux_stubs.cpp</c> — falls through to
+///     bottom-of-switch forward. A regression re-introducing opcode
+///     whitelisting would stop the server from receiving 0x00A3.
+///   </item>
+///   <item>
+///     <b>Proxy <c>SendClientPacketSequence</c> guard at
+///     <c>UDPProxyToClient_linux.cpp:568</c>.</b> Currently passes 0x00A6
+///     (&lt; 0x0FFF). A regression tightening the upper bound silently
+///     drops the reply.
+///   </item>
+///   <item>
+///     <b><c>Player::Name()</c> postfix regression at
+///     <c>PlayerConnection.cpp:10260+</c> (GetPostFix path).</b> The
+///     echoed Player field in 0x00A6 is the Nick we sent verbatim (not
+///     <c>Name()</c>), so this regression doesn't break Wave 64's
+///     assertions — documented to clarify the diagnostic scope.
+///   </item>
+/// </list>
+///
+/// <para>
+/// Server-integrity note (per CLAUDE.md). 0x00A3 with
+/// type=CCE_SPEAK_LOCALLY is what retail Win32 client emits when the user
+/// types a tell ("/tell &lt;nick&gt; &lt;msg&gt;" or via the Friends-tab
+/// quick-tell button). When the recipient nick doesn't match any logged-in
+/// character the retail server's <c>ChatSendPrivate</c> emits 0x00A6
+/// CLIENT_CHAT_ERROR with reason=CHAT_ERROR_INVALID_PERSON=4 and the
+/// recipient-name echo — verbatim retail behaviour. We are not making the
+/// server accept any new input shape, not loosening any security posture,
+/// not fabricating any reply.
+/// </para>
+///
+/// <para>
+/// Budget: 90s. Handshake ~22s; CLIENT_CHAT_REQUEST + 0x00A6 round-trip
+/// sub-second; LOGOFF sub-second.
+/// </para>
+/// </summary>
+[Collection(ServerCollection.Name)]
+public sealed class SectorClientChatErrorTests
+{
+    private const string NonexistentNick = "Bzqxqxz64";
+    private const string Message = "hi";
+    private const int ExpectedPayloadSize = 4 + 4 + 2 + 9 + 2 + 2;  // 23
+
+    private readonly ServerFixture _server;
+    private readonly ClientFixture _client;
+
+    public SectorClientChatErrorTests(ServerFixture server)
+    {
+        _server = server;
+        _client = new ClientFixture(server);
+    }
+
+    [Fact]
+    public async Task ClientChatRequest_SpeakLocallyNonexistentRecipient_ReceivesClientChatError()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Erroria", shipName: "ErroriaShip", cts.Token);
+
+        try
+        {
+            // 0x00A3 CLIENT_CHAT_REQUEST — variable-length 29B layout.
+            byte[] nickBytes = Encoding.ASCII.GetBytes(NonexistentNick);
+            byte[] msgBytes = Encoding.ASCII.GetBytes(Message);
+            int payloadSize = 4 + 4 + 2 + nickBytes.Length + 2 + 2 + msgBytes.Length + 4;
+            byte[] payload = new byte[payloadSize];
+            int o = 0;
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 0); o += 4;             // PlayerID
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 1); o += 4;             // type = CCE_SPEAK_LOCALLY
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), (short)nickBytes.Length); o += 2;
+            nickBytes.CopyTo(payload, o); o += nickBytes.Length;
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), 0); o += 2;             // string_length2 = 0
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), (short)msgBytes.Length); o += 2;
+            msgBytes.CopyTo(payload, o); o += msgBytes.Length;
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 0);                     // data_size
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(OpcodeId.Known.ClientChatRequest.Value, payload),
+                cts.Token);
+
+            // Drain inbound until we see 0x00A6 CLIENT_CHAT_ERROR.
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            var observed = new List<string>();
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+                observed.Add($"0x{reply!.Header.Opcode:X4}/{reply.Payload.Length}");
+
+                if (reply.Header.Opcode != OpcodeId.Known.ClientChatError.Value)
+                    continue;
+
+                // Wire layout (23 bytes):
+                //   bytes [0..4]   int32 LE reason  = 4 (CHAT_ERROR_INVALID_PERSON)
+                //   bytes [4..8]   int32 LE type    = 1 (CCE_SPEAK_LOCALLY)
+                //   bytes [8..10]  int16 LE player_len = 9
+                //   bytes [10..19] 9B ASCII player  = "Bzqxqxz64"
+                //   bytes [19..21] int16 LE channel_len = 0
+                //   bytes [21..23] int16 LE other_len   = 0
+                Assert.Equal(ExpectedPayloadSize, reply.Payload.Length);
+                var span = reply.Payload.Span;
+
+                Assert.Equal(4, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(0, 4)));
+                Assert.Equal(1, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4)));
+                Assert.Equal((short)9, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(8, 2)));
+                Assert.Equal(NonexistentNick, Encoding.ASCII.GetString(span.Slice(10, 9)));
+                Assert.Equal((short)0, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(19, 2)));
+                Assert.Equal((short)0, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(21, 2)));
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x00A3 CLIENT_CHAT_REQUEST " +
+                $"(type=CCE_SPEAK_LOCALLY=1, nick=\"{NonexistentNick}\", msg=\"{Message}\") " +
+                $"without seeing 0x00A6 CLIENT_CHAT_ERROR. Observed [{observed.Count}]: " +
+                $"{string.Join(" | ", observed)}");
+        }
+        finally
+        {
+            try
+            {
+                using var logoffCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                byte[] logoffPayload = new byte[8];
+                await session.Sector.SendAsync(
+                    Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
+                    logoffCts.Token);
+                await SectorHandshake.DrainUntilOpcode(
+                    session.Sector, OpcodeId.Known.LogoffConfirmation.Value, logoffCts.Token);
+            }
+            catch { /* best-effort logoff */ }
+
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+}
