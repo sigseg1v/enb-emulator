@@ -171,6 +171,93 @@ public sealed class SectorClientTypeHardeningTests
         _client = new ClientFixture(server);
     }
 
+    /// <summary>
+    /// Wave 102 frame-count tightening (+0 ratchet, 0x003C): pins the
+    /// 1-frame emit-count invariant the Wave 71 payload-length hardening
+    /// was structurally blind to. Captured space-sector handshake stream
+    /// emits 0x003C CLIENT_TYPE exactly once — from
+    /// <c>SectorManager::SectorLogin</c> at
+    /// <c>server/src/SectorManager.cpp:347</c>
+    /// (<c>player-&gt;SendClientType(m_SectorData-&gt;sector_type)</c>).
+    /// <c>SendClientType</c> has no other invocation site in the server
+    /// (verified via grep) — the only declared call resolves to
+    /// SectorManager.cpp:347. So 0x003C is exactly 1 emit per space-sector
+    /// login. Wave 71's <c>Assert.All</c> + <c>Assert.NotEmpty</c> would
+    /// still pass if a regression duplicated the emit (e.g. a refactor that
+    /// added a confirmation re-send) — every frame would still be 4B. Wave
+    /// 102's <c>Assert.Single</c> catches that.
+    ///
+    /// <para>
+    /// New regression class Wave 71 is structurally blind to: spurious extra
+    /// SendClientType from a SectorLogin split refactor or a
+    /// PostHandshakeConfirm callback. Mirrors the Wave 99/100-style
+    /// space-sector single-emit pinning (now THIRD space-sector-arm
+    /// hardening single-emit pinning).
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity POSITIVE. Pure passive-observation tightening. No
+    /// client stimulus, no server change. The 1-frame invariant is a
+    /// retail-faithful invariant of the single-call SectorLogin dispatch.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task ClientType_EmittedExactlyOnceDuringSpaceSectorHandshake_PinsSectorLoginEmit()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
+        const int spaceSectorId = 1015;     // Luna (space, sector_type=ST_PLANET)
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        var stationSession = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, stationSectorId,
+            firstName: "CtPin102", shipName: "CtPin102Ship", cts.Token);
+
+        try
+        {
+            byte[] logoffPayload = new byte[8];
+            await stationSession.Sector.SendAsync(
+                Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
+                cts.Token);
+            await SectorHandshake.DrainUntilOpcode(
+                stationSession.Sector, OpcodeId.Known.LogoffConfirmation.Value, cts.Token);
+            await stationSession.DisposeAsync();
+
+            await using var spaceSession = await SectorHandshake.ReestablishAsync(
+                _server, login.Ticket!, slot, spaceSectorId, cts.Token);
+
+            var clientTypeFrames = spaceSession.HandshakeFrames
+                .Where(f => f.Opcode == OpcodeId.Known.ClientType.Value)
+                .ToList();
+
+            var single = Assert.Single(clientTypeFrames);
+            Assert.Equal(ExpectedClientTypePayloadLength, single.PayloadLength);
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            try
+            {
+                await using var cleanupGlobal = await EncryptedTcpConnection.ConnectAsync(
+                    _server.GlobalHost, _server.GlobalPort, cleanupCts.Token);
+                await SectorHandshake.SendGlobalConnectAsync(
+                    cleanupGlobal, login.Ticket!, cleanupCts.Token);
+                await SectorHandshake.DrainUntilOpcode(
+                    cleanupGlobal, OpcodeId.Known.GlobalAvatarList.Value, cleanupCts.Token);
+                await SectorHandshake.DeleteCreatedCharacterAsync(
+                    cleanupGlobal, slot, cleanupCts.Token);
+            }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
     [Fact]
     public async Task ClientType_EmittedDuringSpaceSectorHandshake_HasExactly4BytePayload()
     {

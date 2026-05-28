@@ -159,6 +159,7 @@ public static class TestAccounts
             ["Colorization_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmit"]              = A(9_000_094, "cli_test94"),
             ["AvatarDescription_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmit"]          = A(9_000_095, "cli_test95"),
             ["ClientAvatarAndClientShip_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmits"] = A(9_000_096, "cli_test96"),
+            ["ClientType_EmittedExactlyOnceDuringSpaceSectorHandshake_PinsSectorLoginEmit"]            = A(9_000_097, "cli_test97"),
         };
 
     /// <summary>
