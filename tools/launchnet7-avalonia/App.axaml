@@ -3,44 +3,35 @@
              x:Class="LaunchNet7Avalonia.App"
              RequestedThemeVariant="Light">
 
+  <Application.Styles>
+    <!-- enb-theme: purple accent (#5d00cf), off-white light region
+         (#f9ffff), charcoal dark region (#333230). Source palette:
+         ~/Documents/enb-theme. FluentTheme.Palettes.ColorPaletteResources
+         is the supported override hook in Avalonia 11.x — it cascades
+         the Accent into AccentFillColorDefault et al., and RegionColor
+         into SystemRegionColor / window chrome. -->
+    <FluentTheme>
+      <FluentTheme.Palettes>
+        <ColorPaletteResources x:Key="Light"
+                               Accent="#5d00cf"
+                               RegionColor="#f9ffff" />
+        <ColorPaletteResources x:Key="Dark"
+                               Accent="#5d00cf"
+                               RegionColor="#333230" />
+      </FluentTheme.Palettes>
+    </FluentTheme>
+  </Application.Styles>
+
   <Application.Resources>
-    <!-- enb-theme: purple accent (#5d00cf), lavender secondary (#8e8cd8),
-         off-white light background (#f9ffff) / charcoal dark (#333230).
-         Source: ~/Documents/enb-theme (user-supplied palette JSON). -->
     <ResourceDictionary>
       <ResourceDictionary.ThemeDictionaries>
-
         <ResourceDictionary x:Key="Light">
-          <Color x:Key="SystemAccentColor">#5d00cf</Color>
-          <Color x:Key="SystemAccentColorLight1">#7a2adb</Color>
-          <Color x:Key="SystemAccentColorLight2">#9755e6</Color>
-          <Color x:Key="SystemAccentColorLight3">#b380f1</Color>
-          <Color x:Key="SystemAccentColorDark1">#4a00a6</Color>
-          <Color x:Key="SystemAccentColorDark2">#37007d</Color>
-          <Color x:Key="SystemAccentColorDark3">#240054</Color>
-          <Color x:Key="SystemRegionColor">#f9ffff</Color>
           <SolidColorBrush x:Key="SystemRegionBrush" Color="#f9ffff" />
-          <SolidColorBrush x:Key="SystemControlBackgroundAltHighBrush" Color="#f9ffff" />
         </ResourceDictionary>
-
         <ResourceDictionary x:Key="Dark">
-          <Color x:Key="SystemAccentColor">#5d00cf</Color>
-          <Color x:Key="SystemAccentColorLight1">#7a2adb</Color>
-          <Color x:Key="SystemAccentColorLight2">#9755e6</Color>
-          <Color x:Key="SystemAccentColorLight3">#b380f1</Color>
-          <Color x:Key="SystemAccentColorDark1">#4a00a6</Color>
-          <Color x:Key="SystemAccentColorDark2">#37007d</Color>
-          <Color x:Key="SystemAccentColorDark3">#240054</Color>
-          <Color x:Key="SystemRegionColor">#333230</Color>
           <SolidColorBrush x:Key="SystemRegionBrush" Color="#333230" />
-          <SolidColorBrush x:Key="SystemControlBackgroundAltHighBrush" Color="#333230" />
         </ResourceDictionary>
-
       </ResourceDictionary.ThemeDictionaries>
     </ResourceDictionary>
   </Application.Resources>
-
-  <Application.Styles>
-    <FluentTheme />
-  </Application.Styles>
 </Application>
