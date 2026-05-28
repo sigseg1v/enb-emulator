@@ -131,6 +131,7 @@ public static class TestAccounts
             ["GalaxyMapRequest_OnFreshSession_DoesNotBreakConnection_RequestTimeStillRoundTrips"]      = A(9_000_066, "cli_test66"),
             ["ClientType_EmittedDuringSpaceSectorHandshake_HasExactly4BytePayload"]                    = A(9_000_067, "cli_test67"),
             ["HandshakeDoesNotEmitStarbaseSetOnSpaceSectorLogin"]                                      = A(9_000_068, "cli_test68"),
+            ["HandshakeDoesNotEmitLoungeNpcOnSpaceSectorLogin"]                                        = A(9_000_069, "cli_test69"),
         };
 
     /// <summary>

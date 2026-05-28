@@ -1039,4 +1039,160 @@ public sealed class SectorHandshakeFanoutTests
         }
     }
 
+    /// <summary>
+    /// Wave 74 negative-assertion (second negative-assertion wave in
+    /// Phase K after Wave 73's 0x004F STARBASE_SET counterpart): the
+    /// server MUST NOT emit a 0x0052 LOUNGE_NPC frame during a
+    /// SPACE-sector handshake at sector 1015 (Luna space). 0x0052 is a
+    /// strict STATION-only emit — <c>Player::SendLoungeNPC</c> at
+    /// <c>server/src/PlayerConnection.cpp:9721</c> is called solely
+    /// from <c>SectorManager::StationLogin2</c> at
+    /// <c>SectorManager.cpp:520-524</c> with a fallback to
+    /// <c>SendDataFileToClient("LoungeNPC_*.dat")</c> when MySQL
+    /// doesn't have the per-NPC row; SectorLogin2 (the space-arm
+    /// counterpart at SectorManager.cpp:354-384) never calls
+    /// SendLoungeNPC. A regression that leaks the lounge-NPC fan-out
+    /// into the space-arm would emit a spurious 0x0052 mid-space
+    /// handshake — retail Win32 client interprets 0x0052 as
+    /// "starbase-lounge NPC metadata" and would attempt to render a
+    /// non-existent NPC in the space HUD overlay.
+    ///
+    /// <para>
+    /// Why +0 ratchet. 0x0052 is already counted in TestedOpcodes by
+    /// HandshakeEmitsFullSendLoginShipDataFanout (Wave 51 — the
+    /// positive presence assertion in the STATION-sector handshake).
+    /// Wave 74 strengthens the existing coverage with the absence
+    /// invariant on the SPACE-sector branch — same pattern as Wave 73
+    /// (0x004F STARBASE_SET).
+    /// </para>
+    ///
+    /// <para>
+    /// Test structure. Identical to Wave 73: 2-stage station→space
+    /// handshake. Stage 1 EstablishAsync at Luna Station 10151,
+    /// explicit 0x00B9 LOGOFF_REQUEST + drain 0x00BA + DisposeAsync,
+    /// stage 2 ReestablishAsync at sector 1015 (Luna space). Captures
+    /// HandshakeOpcodes and asserts 0x0052 is absent.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression classes this catches.
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b>SendLoungeNPC leak into SectorLogin2 at
+    ///     <c>SectorManager.cpp:354-384</c>.</b> A refactor that
+    ///     copies the StationLogin2:520-524 lounge-NPC block into the
+    ///     space-arm — or moves SendLoungeNPC earlier into the common
+    ///     HandleSectorLogin prologue at SectorManager.cpp:325-352 —
+    ///     would emit a spurious 0x0052 in space.
+    ///   </item>
+    ///   <item>
+    ///     <b>HandleSectorLogin dispatch-branch collapse at
+    ///     <c>SectorManager.cpp:324-336</c>.</b> Same load-bearing
+    ///     dispatch invariant as Wave 73. A collapse of the
+    ///     <c>m_SectorID &gt; 9999</c> guard would re-route sector
+    ///     1015 into StationLogin2 and emit 0x0052.
+    ///   </item>
+    ///   <item>
+    ///     <b>SendDataFileToClient lounge-fallback leak.</b> The
+    ///     fallback path at SectorManager.cpp:522-524 sends
+    ///     <c>LoungeNPC_*.dat</c> when MySQL lacks the per-NPC row —
+    ///     it does NOT emit 0x0052 (it emits 0x0064-class
+    ///     DATA_FILE_FRAGMENT opcodes via SendDataFileToClient). A
+    ///     regression that mis-routes SendDataFileToClient through the
+    ///     0x0052 emit path would surface as a 0x0052 in the space
+    ///     handshake (where neither MySQL row NOR the fallback should
+    ///     fire — SectorLogin2 doesn't call into the lounge block at
+    ///     all).
+    ///   </item>
+    ///   <item>
+    ///     <b>SendOpcode header-width revert at
+    ///     <c>PlayerConnection.cpp:127</c>.</b> Same load-bearing 4B
+    ///     opcode-header invariant — a revert to sizeof(long)==8 would
+    ///     mis-decode opcodes in the 0x2016 PACKET_SEQUENCE parser,
+    ///     potentially fabricating a 0x0052 from a neighbouring
+    ///     opcode's byte slot. Negative assertion catches.
+    ///   </item>
+    ///   <item>
+    ///     <b>DoSectorLoginUntilStartAsync drain-loop capture-path
+    ///     regression.</b> Same as Wave 73 — if the capture loop
+    ///     appends frames after the 0x0005 START terminator, a
+    ///     delayed 0x0052 from post-handshake game-state code (none
+    ///     exists today, but a future refactor could introduce one)
+    ///     would slip into HandshakeOpcodes.
+    ///   </item>
+    ///   <item>
+    ///     <b>Stage 1 → Stage 2 logoff-and-reconnect path
+    ///     regression.</b> Same load-bearing path as Wave 52/54/71/73.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity note (per CLAUDE.md). 0x0052 is
+    /// server-originated. Wave 74 adds no client stimulus and no
+    /// server change — pure passive-observation tightening of a
+    /// retail-faithful invariant (the retail server never emits
+    /// 0x0052 in space because the retail client has no
+    /// space-lounge UI to render the NPC into). Server-integrity
+    /// NEUTRAL/POSITIVE.
+    /// </para>
+    ///
+    /// <para>Budget: 120s (same as Wave 52/54/73).</para>
+    /// </summary>
+    [Fact]
+    public async Task HandshakeDoesNotEmitLoungeNpcOnSpaceSectorLogin()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int stationSectorId = 10151;
+        const int spaceSectorId = 1015;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        var stationSession = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, stationSectorId,
+            firstName: "NoLngLk", shipName: "NoLngLkShip", cts.Token);
+
+        try
+        {
+            byte[] logoffPayload = new byte[8];
+            await stationSession.Sector.SendAsync(
+                Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
+                cts.Token);
+            await SectorHandshake.DrainUntilOpcode(
+                stationSession.Sector, OpcodeId.Known.LogoffConfirmation.Value, cts.Token);
+            await stationSession.DisposeAsync();
+
+            await using var spaceSession = await SectorHandshake.ReestablishAsync(
+                _server, login.Ticket!, slot, spaceSectorId, cts.Token);
+
+            // 0x0052 LOUNGE_NPC is STATION-only — SectorManager.cpp:520
+            // SendLoungeNPC is called only from StationLogin2's
+            // lounge-block (lines 516-524). SectorLogin2 (the space-arm)
+            // never invokes the lounge path.
+            Assert.DoesNotContain(OpcodeId.Known.LoungeNpc.Value, spaceSession.HandshakeOpcodes);
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            try
+            {
+                await using var cleanupGlobal = await N7.CliClient.Net.EncryptedTcpConnection.ConnectAsync(
+                    _server.GlobalHost, _server.GlobalPort, cleanupCts.Token);
+                await SectorHandshake.SendGlobalConnectAsync(
+                    cleanupGlobal, login.Ticket!, cleanupCts.Token);
+                await SectorHandshake.DrainUntilOpcode(
+                    cleanupGlobal, OpcodeId.Known.GlobalAvatarList.Value, cleanupCts.Token);
+                await SectorHandshake.DeleteCreatedCharacterAsync(
+                    cleanupGlobal, slot, cleanupCts.Token);
+            }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
 }
