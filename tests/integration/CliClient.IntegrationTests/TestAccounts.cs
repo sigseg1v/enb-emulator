@@ -125,6 +125,7 @@ public static class TestAccounts
             ["ClientChatRequest_ListFriendsEmptyFriendList_ReceivesClientChatList"]                   = A(9_000_060, "cli_test60"),
             ["ClientChatRequest_SpeakLocallyNonexistentRecipient_ReceivesClientChatError"]            = A(9_000_061, "cli_test61"),
             ["StarbaseJobTerminalAction6_InNet7SolJtSector_ReceivesWellFormedJobList"]                = A(9_000_062, "cli_test62"),
+            ["StarbaseJobTerminalAction7_InNet7SolJtSector_OnSentinelJobId_EchoesJobIdAsJobDescription"] = A(9_000_063, "cli_test63"),
         };
 
     /// <summary>

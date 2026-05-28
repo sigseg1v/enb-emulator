@@ -92,6 +92,7 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId RecustomizeShipStart         = new(0x0081);
         public static readonly OpcodeId RecustomizeAvatarStart       = new(0x0083);
         public static readonly OpcodeId JobList                      = new(0x0093);
+        public static readonly OpcodeId JobDescription               = new(0x0094);
         public static readonly OpcodeId JobAcceptReply               = new(0x0096);
         public static readonly OpcodeId MissionForfeit               = new(0x0086);
         public static readonly OpcodeId MissionDismissal             = new(0x0087);
