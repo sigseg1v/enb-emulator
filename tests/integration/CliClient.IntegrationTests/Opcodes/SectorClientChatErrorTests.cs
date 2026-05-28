@@ -238,6 +238,17 @@ public sealed class SectorClientChatErrorTests
     private const string AbsentIgnoredNick = "Phantom121";
     private const int RemoveIgnoreExpectedPayloadSize = 4 + 4 + 2 + 10 + 2 + 2;  // 24
 
+    // Wave 122 firstName + self-nick: 6B ASCII. Has lowercase vowels 'e'+'o'
+    // (satisfies AccountManager.cpp:1147 G_ERROR_ONE_VOWEL) and no triple-
+    // repeating character (satisfies AccountManager.cpp:1158-1166
+    // G_ERROR_REPEATING_CHAR). Length 6 is above the 3-char minimum at
+    // AccountManager.cpp:1130. The stimulus AddIgnore nick must match the
+    // server-side Name() via strcasecmp (PlayerMisc.cpp:1469) so we send
+    // the exact firstName verbatim; the server echoes the stimulus nick
+    // back unchanged in the 0x00A6 reply.
+    private const string IgnoreSelfNick = "Selfor";
+    private const int AddIgnoreSelfExpectedPayloadSize = 4 + 4 + 2 + 6 + 2 + 2;  // 20
+
     private readonly ServerFixture _server;
     private readonly ClientFixture _client;
 
@@ -977,6 +988,214 @@ public sealed class SectorClientChatErrorTests
                 $"drained {maxFrames} frames after sending 0x00A3 CLIENT_CHAT_REQUEST " +
                 $"(type=CCE_UNIGNORE=11, nick=\"{AbsentIgnoredNick}\") without seeing " +
                 $"0x00A6 CLIENT_CHAT_ERROR. Observed [{observed.Count}]: " +
+                $"{string.Join(" | ", observed)}");
+        }
+        finally
+        {
+            try
+            {
+                using var logoffCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                byte[] logoffPayload = new byte[8];
+                await session.Sector.SendAsync(
+                    Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
+                    logoffCts.Token);
+                await SectorHandshake.DrainUntilOpcode(
+                    session.Sector, OpcodeId.Known.LogoffConfirmation.Value, logoffCts.Token);
+            }
+            catch { /* best-effort logoff */ }
+
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Wave 122 sibling-arm pin on the 0x00A6 CLIENT_CHAT_ERROR emit
+    /// completing the T1 0x00A6 case-label sweep on
+    /// <c>HandleClientChatRequest</c>. Where Wave 120 covered the T1
+    /// <c>case CCE_ADD_FRIEND=8</c> self-name reject branch, this wave
+    /// covers the structurally parallel T1 <c>case CCE_IGNORE=10</c> at
+    /// <c>PlayerConnection.cpp:1700-1702</c> routing to
+    /// <c>Player::AddIgnore</c> at <c>PlayerMisc.cpp:1457-1500</c> with a
+    /// stimulus nick equal to the player's own <c>Name()</c>, hitting the
+    /// self-reject branch at <c>PlayerMisc.cpp:1469-1472</c> which emits
+    /// <c>SendClientChatError(CHAT_ERROR_YOURSELF=17, CCE_IGNORE=10, name)</c>.
+    ///
+    /// <para>
+    /// Stimulus (24B 0x00A3):
+    /// <code>
+    ///   [0..4)    int32 PlayerID         = 0
+    ///   [4..8)    int32 type             = 10  (CCE_IGNORE)
+    ///   [8..10)   short string_length1   = 6
+    ///   [10..16)  6B ASCII               = "Selfor"
+    ///   [16..18)  short string_length2   = 0
+    ///   [18..20)  short string_length3   = 0
+    ///   [20..24)  int32 data_size        = 0
+    /// </code>
+    /// </para>
+    ///
+    /// <para>
+    /// Reply assertion (20B 0x00A6):
+    /// <code>
+    ///   [0..4)   int32 LE reason       = 17 (CHAT_ERROR_YOURSELF)
+    ///   [4..8)   int32 LE type         = 10 (CCE_IGNORE)
+    ///   [8..10)  int16 LE player_len   = 6
+    ///   [10..16) 6B ASCII player       = "Selfor"
+    ///   [16..18) int16 LE channel_len  = 0
+    ///   [18..20) int16 LE other_len    = 0
+    /// </code>
+    /// Total 4+4+2+6+2+2 = 20 bytes.
+    /// </para>
+    ///
+    /// <para>
+    /// Why this wave target. Closes the T1 0x00A6 case-label sweep on
+    /// <c>HandleClientChatRequest</c>. All four friend/ignore T1 arms
+    /// (CCE_ADD_FRIEND=8 / CCE_REMOVE_FRIEND=9 / CCE_IGNORE=10 /
+    /// CCE_UNIGNORE=11) are now byte-exact-pinned: Wave 120 ADD_FRIEND
+    /// self-reject (reason=17), Wave 119 REMOVE_FRIEND empty-list
+    /// fall-through (reason=6), Wave 122 IGNORE self-reject (reason=17),
+    /// Wave 121 UNIGNORE empty-list fall-through (reason=6). Cross-list
+    /// + same-list copy-paste swaps are now structurally pinned on all
+    /// six pairwise combinations.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression classes this catches beyond Waves 119/120/121.
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b>T1 switch arm <c>case CCE_IGNORE=10</c> deletion or
+    ///     copy-paste swap with <c>case CCE_UNIGNORE=11</c> at
+    ///     <c>PlayerConnection.cpp:1700-1705</c>.</b> The
+    ///     IGNORE/UNIGNORE pair is the canonical adjacent-case-label
+    ///     copy-paste target on the ignore list, parallel to the
+    ///     ADD/REMOVE_FRIEND pair on the friend list.
+    ///   </item>
+    ///   <item>
+    ///     <b>AddIgnore self-name guard deletion at
+    ///     <c>PlayerMisc.cpp:1469-1472</c>.</b> Waves 119/120/121 never
+    ///     enter this code path. If the guard is removed, self-ignore
+    ///     falls into the add-to-list branch at line 1473 and emits
+    ///     CHEV_NOW_IGNORING (0x00A5) instead of 0x00A6 — drain-timeout
+    ///     catches.
+    ///   </item>
+    ///   <item>
+    ///     <b><c>CCE_IGNORE=10</c> constant drift at
+    ///     <c>PacketStructures.h:645</c>.</b> Waves 119/120/121 pin
+    ///     type=9/8/11; a renumber on CCE_IGNORE is invisible to them.
+    ///   </item>
+    ///   <item>
+    ///     <b>Cross-list AddIgnore↔AddFriend self-reject body swap.</b>
+    ///     Both functions have the same `strcasecmp(name, Name())` guard
+    ///     and emit reason=CHAT_ERROR_YOURSELF, but with different
+    ///     second arg (CCE_IGNORE vs CCE_ADD_FRIEND). A regression that
+    ///     hardcoded CCE_ADD_FRIEND in AddIgnore's call would emit type=8
+    ///     for a type=10 stimulus — Wave 122's byte[4]==0x0A catches.
+    ///   </item>
+    ///   <item>
+    ///     <b>List-confusion regression at
+    ///     <c>PlayerMisc.cpp:1461-1467</c>.</b> If AddIgnore was
+    ///     refactored to walk <c>m_FriendNames</c> instead of
+    ///     <c>m_IgnoreNames</c>, our fresh-char path stays accidentally-
+    ///     green (both lists are empty) — Wave 122 does NOT catch this.
+    ///     A follow-on wave with a pre-seeded ignore list would close
+    ///     the gap; documented for catalogue completeness.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity note (per CLAUDE.md). 0x00A3 with
+    /// type=CCE_IGNORE is what the retail Win32 client emits when the
+    /// user invokes the <c>/ignore &lt;name&gt;</c> slash command or
+    /// uses the Friends-tab Ignore-list add. When the queried name
+    /// matches the player's own name the retail server emits 0x00A6
+    /// with reason=CHAT_ERROR_YOURSELF — verbatim retail behaviour. We
+    /// are not making the server accept any new input shape, not
+    /// loosening any security posture, not fabricating any reply.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s. Handshake ~22s; CLIENT_CHAT_REQUEST + 0x00A6
+    /// round-trip sub-second; LOGOFF sub-second.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task ClientChatRequest_AddIgnoreSelfName_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: IgnoreSelfNick, shipName: "SelforShip", cts.Token);
+
+        try
+        {
+            // 0x00A3 CLIENT_CHAT_REQUEST — 24B variable-length layout,
+            // type=CCE_IGNORE=10, string1="Selfor" (the player's own
+            // first name — triggers the self-reject branch at
+            // PlayerMisc.cpp:1469-1472 via strcasecmp(name, Name()) == 0).
+            byte[] nickBytes = Encoding.ASCII.GetBytes(IgnoreSelfNick);
+            int payloadSize = 4 + 4 + 2 + nickBytes.Length + 2 + 2 + 4;
+            byte[] payload = new byte[payloadSize];
+            int o = 0;
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 0); o += 4;             // PlayerID
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 10); o += 4;            // type = CCE_IGNORE
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), (short)nickBytes.Length); o += 2;
+            nickBytes.CopyTo(payload, o); o += nickBytes.Length;
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), 0); o += 2;             // string_length2 = 0
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), 0); o += 2;             // string_length3 = 0
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 0);                     // data_size
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(OpcodeId.Known.ClientChatRequest.Value, payload),
+                cts.Token);
+
+            // Drain inbound until we see 0x00A6 CLIENT_CHAT_ERROR.
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            var observed = new List<string>();
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+                observed.Add($"0x{reply!.Header.Opcode:X4}/{reply.Payload.Length}");
+
+                if (reply.Header.Opcode != OpcodeId.Known.ClientChatError.Value)
+                    continue;
+
+                // Wire layout (20 bytes):
+                //   bytes [0..4]   int32 LE reason  = 17 (CHAT_ERROR_YOURSELF)
+                //   bytes [4..8]   int32 LE type    = 10 (CCE_IGNORE)
+                //   bytes [8..10]  int16 LE player_len = 6
+                //   bytes [10..16] 6B ASCII player  = "Selfor"
+                //   bytes [16..18] int16 LE channel_len = 0
+                //   bytes [18..20] int16 LE other_len   = 0
+                Assert.Equal(AddIgnoreSelfExpectedPayloadSize, reply.Payload.Length);
+                var span = reply.Payload.Span;
+
+                Assert.Equal(17, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(0, 4)));
+                Assert.Equal(10, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4)));
+                Assert.Equal((short)6, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(8, 2)));
+                Assert.Equal(IgnoreSelfNick, Encoding.ASCII.GetString(span.Slice(10, 6)));
+                Assert.Equal((short)0, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(16, 2)));
+                Assert.Equal((short)0, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(18, 2)));
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x00A3 CLIENT_CHAT_REQUEST " +
+                $"(type=CCE_IGNORE=10, nick=\"{IgnoreSelfNick}\" matching self Name()) " +
+                $"without seeing 0x00A6 CLIENT_CHAT_ERROR. Observed [{observed.Count}]: " +
                 $"{string.Join(" | ", observed)}");
         }
         finally
