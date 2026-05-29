@@ -179,6 +179,7 @@ public static class TestAccounts
             ["ClientChatRequest_AddFriendSelfName_PinsExactReplyWireShape"]                            = A(9_000_114, "cli_test114"),
             ["ClientChatRequest_RemoveIgnoreNotInList_PinsExactReplyWireShape"]                        = A(9_000_115, "cli_test115"),
             ["ClientChatRequest_AddIgnoreSelfName_PinsExactReplyWireShape"]                            = A(9_000_116, "cli_test116"),
+            ["SlashAuthlevel_OnAdminAccount_PinsExactReplyWireShape"]                                  = A(9_000_117, "cli_test117"),
         };
 
     /// <summary>

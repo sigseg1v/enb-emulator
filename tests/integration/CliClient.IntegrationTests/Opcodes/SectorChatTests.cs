@@ -398,4 +398,296 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// The verbatim ASCII body the retail-faithful HandleSlashCommands
+    /// <c>/authlevel</c> arm passes to <c>SendVaMessage</c> at
+    /// <c>server/src/PlayerConnection.cpp:5457</c>. The format string is
+    /// <c>"Authentication Level - Num: %d"</c> and the substituted value
+    /// is <c>AdminLevel()</c>, which for the seed-sql test accounts is
+    /// <c>ADMIN = 100</c> (<c>server/src/Net7.h:366</c>) — admin_level is
+    /// seeded from the account row's status field
+    /// (<c>login-server/Net7SSL/AccountManager.cpp:950</c>), and every
+    /// non-status0 entry in <c>Fixtures/seed.sql</c> is status=100.
+    /// </summary>
+    private const string AuthLevelLiteral =
+        "Authentication Level - Num: 100";
+
+    /// <summary>
+    /// Wave 123 multi-arm dispatcher sibling-arm pinning (+0 ratchet,
+    /// 0x0033 / 0x001D): pins the byte-exact 35-byte wire-shape of the
+    /// 0x001D MESSAGE_STRING the server emits in reply to a 0x0033
+    /// CLIENT_CHAT whose body starts with '/' — exercising the
+    /// slash-command short-circuit arm of
+    /// <c>Player::HandleClientChat</c> rather than the
+    /// <c>chat->Type == 1</c> no-group arm Wave 8 / Wave 110 pin.
+    ///
+    /// <para>
+    /// Why this arm specifically. <c>Player::HandleClientChat</c> at
+    /// <c>server/src/PlayerConnection.cpp:4594</c> dispatches on the
+    /// <em>first byte</em> of <c>chat-&gt;String</c> ahead of any Type
+    /// check:
+    /// <code>
+    ///     if (this &amp;&amp; chat-&gt;String[0] == '/')
+    ///         HandleSlashCommands(chat-&gt;String);
+    ///     else if (this &amp;&amp; chat-&gt;Type == 1) { ... no-group reply ... }
+    ///     else if (this &amp;&amp; chat-&gt;Type == 2) { ... GuildChat ... }
+    ///     ...
+    /// </code>
+    /// Wave 8's <see cref="GroupChat_WhenUngrouped_ReceivesNotInGroupErrorString"/>
+    /// and Wave 110's <see cref="GroupChat_WhenUngrouped_PinsExactReplyWireShape"/>
+    /// both reach the no-group arm by sending non-slash content. Wave 123
+    /// pins the slash-prefix arm so a refactor that swallows '/' before
+    /// the Type-fanout (e.g. trimming whitespace and stripping '/' as
+    /// part of generic chat sanitisation) would surface as a Wave 123
+    /// failure even when Wave 110 still passes — the no-group arm would
+    /// keep emitting its byte-exact 34-byte reply for non-slash content,
+    /// but the slash arm would silently fall through to one of the
+    /// Type-keyed arms instead of routing into <c>HandleSlashCommands</c>.
+    /// </para>
+    ///
+    /// <para>
+    /// Why <c>/authlevel</c> as the slash-command payload. The
+    /// user-tier slash-command block at
+    /// <c>PlayerConnection.cpp:5434</c> (the second of the two tiers —
+    /// the first is the GM-only <c>//</c>-prefix block at 4716) holds
+    /// the <c>/authlevel</c> arm at lines 5455-5460:
+    /// <code>
+    ///     if (strcmp(pch, "authlevel") == 0)
+    ///     {
+    ///         SendVaMessage("Authentication Level - Num: %d", AdminLevel());
+    ///         msg_sent = true;
+    ///         success = true;
+    ///     }
+    /// </code>
+    /// This arm is uniquely test-friendly: (a) zero-arg, so the codec
+    /// doesn't have to synthesise a parameter list; (b) deterministic
+    /// — output depends only on <c>AdminLevel()</c>, which is sourced
+    /// from the seed.sql status field at character-create time
+    /// (<c>login-server/Net7SSL/AccountManager.cpp:950</c>); (c) emits
+    /// a single SendVaMessage with no side-effects (no group chat
+    /// broadcast, no character-state mutation, no manager-class call);
+    /// (d) does not depend on AdminLevel gating — the strcmp arm runs
+    /// for any user. The neighbouring case-'a' arms (anon, altweapon,
+    /// altname, addbaseore) all either gate on AdminLevel &gt;= DEV or
+    /// use MatchOptWithParam which rejects bare "authlevel" via the
+    /// strncmp-then-first-char-after-prefix-character-class probe at
+    /// <c>PlayerConnection.cpp:4530-4540</c> — so /authlevel emits
+    /// exactly one MESSAGE_STRING and no other arms of the switch
+    /// produce output.
+    /// </para>
+    ///
+    /// <para>
+    /// Why the slash short-circuit fires regardless of chat-&gt;Type.
+    /// The first branch of HandleClientChat's if-else chain is the
+    /// String[0]=='/' check (PlayerConnection.cpp:4614), which is
+    /// type-agnostic. We send Type=Group not because Group has any
+    /// special meaning here, but because (a) the codec needs a Type
+    /// byte, (b) Group is what Wave 8 / Wave 110 already use so the
+    /// stimulus diff is exactly the message body, isolating the
+    /// regression-class surface to the slash-vs-non-slash dispatch
+    /// fork.
+    /// </para>
+    ///
+    /// <para>
+    /// Reply wire shape derivation. <c>SendVaMessage</c> at
+    /// <c>server/src/PlayerClass.cpp:3415-3425</c> formats via
+    /// <c>vsprintf_s</c> and forwards to <c>SendMessageString(pch)</c>
+    /// with the default <c>color = 5</c>
+    /// (<c>server/src/PlayerClass.h:277</c>). <c>SendMessageString</c>
+    /// emits <c>[u16 LE length][u8 color][ASCII msg][NUL]</c> with
+    /// <c>length = strlen(msg) + 1</c>. For the 31-byte body
+    /// "Authentication Level - Num: 100":
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><b>length field</b> = strlen(31) + 1 = <c>32</c></item>
+    ///   <item><b>color byte</b> = <c>5</c></item>
+    ///   <item><b>body + NUL</b> = 31 + 1 = <c>32 bytes</c></item>
+    ///   <item><b>total payload</b> = <c>length + 3 = 35 bytes</c></item>
+    /// </list>
+    ///
+    /// <para>
+    /// Regression classes Wave 123 catches that no prior wave catches.
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b>Slash-prefix dispatch fork at
+    ///     <c>PlayerConnection.cpp:4614</c>.</b> A refactor that moves
+    ///     the slash check inside one of the Type-keyed arms (e.g.
+    ///     "only honour /-commands on Type=Target") would silently
+    ///     drop /authlevel from a Type=Group sender — Wave 110's
+    ///     no-group reply would <em>start</em> firing in its place
+    ///     (different literal, different byte count). Wave 123 catches.
+    ///   </item>
+    ///   <item>
+    ///     <b><c>HandleSlashCommands</c> user-block guard at
+    ///     <c>PlayerConnection.cpp:5434</c>.</b> The guard is
+    ///     <c>(Msg[0] == '/') &amp;&amp; (Msg[1] != 0) &amp;&amp; (!msg_sent || !success)</c>.
+    ///     A regression that flips the last clause to <c>(msg_sent &amp;&amp; success)</c>
+    ///     (an "only fall through after a GM-block emit" misreading)
+    ///     would cause the user-block to skip /authlevel from the
+    ///     first attempt — Wave 123 fails immediately because no
+    ///     MESSAGE_STRING with the expected literal arrives.
+    ///   </item>
+    ///   <item>
+    ///     <b>Case-'a' switch arm at
+    ///     <c>PlayerConnection.cpp:5444-5460</c>.</b> A regression that
+    ///     reshuffles the case labels (e.g. dropping case 'a' fall-
+    ///     through after fall-through-to-default in a switch rewrite)
+    ///     would cause /authlevel to land in default. The default arm
+    ///     ends the routing without emitting "Authentication Level"
+    ///     — Wave 123 catches by literal mismatch.
+    ///   </item>
+    ///   <item>
+    ///     <b>strcmp at <c>PlayerConnection.cpp:5455</c>.</b> A
+    ///     regression to <c>strncmp(pch, "authlevel", N)</c> with N
+    ///     too small (e.g. N=4 matching only "auth") would shotgun
+    ///     /authlevel to match other "auth*" commands, including
+    ///     hypothetical future ones. Wave 123 doesn't catch a
+    ///     shortened-prefix match on the existing arm, but it does
+    ///     catch the inverse: a regression to a tighter
+    ///     <c>strcmp(pch, "AuthLevel")</c> (case sensitivity flip)
+    ///     drops the match and Wave 123 fails on literal absence.
+    ///   </item>
+    ///   <item>
+    ///     <b><c>%d</c> format-specifier width regression in
+    ///     <c>SendVaMessage</c>.</b> AdminLevel returns int; a
+    ///     regression to <c>%ld</c> on a platform where long is 8B
+    ///     while a 4B int sits on the va_list would print garbage.
+    ///     Wave 123's verbatim "100" assertion catches.
+    ///   </item>
+    ///   <item>
+    ///     <b><c>AdminLevel()</c> seeding regression at
+    ///     <c>login-server/Net7SSL/AccountManager.cpp:950</c>.</b> The
+    ///     character-create path sets <c>admin_level =
+    ///     ntohl(GetAccountStatus(username))</c>. A regression that
+    ///     drops the seed (e.g. defaults admin_level to 0) would
+    ///     print "Authentication Level - Num: 0" — Wave 123 catches
+    ///     by literal byte count mismatch (29 vs 31) and the verbatim
+    ///     literal check.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Per CLAUDE.md server-integrity. 0x001D MESSAGE_STRING is
+    /// server-originated; Wave 123's stimulus is a single
+    /// /authlevel slash-command, which is retail-faithful — the
+    /// /authlevel handler has been part of the Net-7 server source
+    /// at this location since the kyp snapshot. No widened input
+    /// acceptance, no loosened gating, no fabricated replies; the
+    /// test relies on the same seed.sql status=100 fixture every other
+    /// admin-flavour test does. Server-integrity POSITIVE.
+    /// </para>
+    ///
+    /// <para>
+    /// Wave classification: NINTH multi-arm dispatcher sibling-arm-
+    /// pinning wave; SEVENTH SendMessageString-flavour byte-exact
+    /// wave (after Waves 108 ItemState, 109 InventoryMove, 110
+    /// GroupChat-no-group, 121 RemoveIgnore, 113 AddFriendSelf — all
+    /// in the SendMessageString family); FIRST byte-exact pin on
+    /// <c>Player::HandleClientChat</c>'s slash-command short-circuit
+    /// arm.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s. Handshake ~2s; CHAT+REPLY round-trip is sub-second.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashAuthlevel_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (32) = 35 bytes.
+        const int ExpectedReplyPayloadLength = 35;
+        // strlen(literal) + 1 NUL = 32.
+        const short ExpectedReplyLengthField = 32;
+        // SendVaMessage → SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 31.
+        const int ExpectedLiteralByteCount = 31;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Authleveler", shipName: "AuthLvlShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/authlevel");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // Filter on the distinctive substring so other
+                // MESSAGE_STRING traffic (motd, NPC chatter, post-
+                // handshake server fan-out) doesn't race ahead of the
+                // /authlevel reply. Once we have the right reply we
+                // pin its full wire shape.
+                if (!text.Contains("Authentication Level", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(AuthLevelLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/authlevel\" without seeing 0x001D MESSAGE_STRING containing " +
+                $"\"Authentication Level\". Likely the slash-prefix short-circuit at " +
+                $"server/src/PlayerConnection.cpp:4614 was bypassed, or the user-block " +
+                $"guard at line 5434 rejected the dispatch, or AdminLevel seeding from " +
+                $"the account status field at AccountManager.cpp:950 regressed.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
