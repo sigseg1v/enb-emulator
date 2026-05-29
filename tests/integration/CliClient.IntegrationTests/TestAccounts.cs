@@ -230,6 +230,7 @@ public static class TestAccounts
             ["SlashRsiMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                              = A(9_000_165, "cli_test165"),
             ["SlashRsaMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                              = A(9_000_166, "cli_test166"),
             ["SlashRsnMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                              = A(9_000_167, "cli_test167"),
+            ["SlashPacketoptMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                        = A(9_000_168, "cli_test168"),
         };
 
     /// <summary>

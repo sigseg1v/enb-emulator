@@ -11235,4 +11235,177 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 176 missing-arg ERROR literal for case-'p' /packetopt.
+    /// Matcher at PlayerConnection.cpp:6960:
+    /// `else if (MatchOptWithParam("packetopt", pch, param, msg_sent))`
+    /// -- pure NO-GUARD-ELSE-IF. FIRST case-'p' user-tier pin --
+    /// opens case-'p' coverage. 9-byte %s width -- TRIPLE-PINNED
+    /// across case-letters (u/s/p) and structural patterns
+    /// (NO-GUARD-ELSE-IF + OUTER-BLOCK-DEV-guard + NO-GUARD-ELSE-IF).
+    /// </summary>
+    private const string MissingArgPacketoptLiteral = "Missing arg for option packetopt";
+
+    /// <summary>
+    /// Wave 176 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the 36-byte wire-shape of the single 0x001D MESSAGE_STRING
+    /// reply to user-tier slash <c>/packetopt</c> (NO param) -- routes
+    /// through user-tier dispatcher entry at 5434, 1-char strip, case-'p'
+    /// user-tier dispatch at line 6948. Wave 176 OPENS case-'p'
+    /// coverage -- FIRST case-'p' pin. Prior /position strcmp at 6949
+    /// MISMATCHES at byte 1 'o' vs 'a'.
+    ///
+    /// <para>
+    /// ELSE-IF at 6960 `MatchOptWithParam("packetopt", pch, param,
+    /// msg_sent)` -- pure NO-GUARD-ELSE-IF. MatchOptWithParam:
+    /// strncmps "packetopt" against "packetopt" (9 byte match),
+    /// arg[9]='\0' -- emits "Missing arg for option packetopt" at
+    /// 4548 COLOR=5. Subsequent case-'p' arms MISMATCH (/panup byte 1
+    /// 'a' match but byte 2 'n' vs 'c' MISMATCH, /panx/pany/panz/
+    /// planetspin similarly MISMATCH). NET RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>
+    /// FORTY-FIFTH pin on the user-tier dispatch path. FIRST pin on
+    /// user-tier case-'p' -- opens case-'p' coverage. FORTY-FOURTH
+    /// pin on the MatchOptWithParam ERROR path. SEVENTEENTH NO-GUARD
+    /// pin -- SEPTENDECUPLE-PINNED across SEVEN case-letters
+    /// (o/s/t/u/w/r/p). THIRD 9-byte %s width pin -- TRIPLE-PINNED
+    /// across THREE case-letters (u/s/p) AND THREE structural
+    /// patterns (Wave 154 /uitrigger NO-GUARD-ELSE-IF + Wave 169
+    /// /signature OUTER-BLOCK-DEV-guard + Wave 176 /packetopt
+    /// NO-GUARD-ELSE-IF).
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three regression classes prior waves are
+    /// blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     FRESH case-'p' user-tier letter-coverage regression at
+    ///     <c>PlayerConnection.cpp:6948-6990</c>. case-'p' was
+    ///     previously UNPINNED; a regression that broke case-'p'
+    ///     entirely (e.g. removed the case label, replaced it with
+    ///     `default`, or made the strip-1-char step skip 'p') would
+    ///     fail Wave 176 while leaving cases o/s/t/u/w/r untouched.
+    ///   </item>
+    ///   <item>
+    ///     case-'p' /position vs /packetopt structural-pattern
+    ///     divergence regression at <c>PlayerConnection.cpp:6949</c>
+    ///     vs <c>6960</c>. /position is a FIRST-IF strcmp (matcher
+    ///     without ELSE), /packetopt is an ELSE-IF MatchOptWithParam;
+    ///     a regression that conflated the two structures (e.g. moved
+    ///     /packetopt before /position, or made /position fall through
+    ///     to /packetopt) would shadow one.
+    ///   </item>
+    ///   <item>
+    ///     9-byte %s width TRIPLE-(case-letter, structural-pattern,
+    ///     literal) divergence regression at <c>PlayerClass.cpp:3422</c>.
+    ///     9-byte %s now pinned at THREE distinct combinations --
+    ///     u/uitrigger NO-GUARD-ELSE-IF + s/signature OUTER-BLOCK-DEV
+    ///     + p/packetopt NO-GUARD-ELSE-IF. A regression in vsprintf_s
+    ///     9-byte path specific to ONE combination would fail one
+    ///     pin but not all three.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). /packetopt is open
+    /// to ALL users -- NO-GUARD-ELSE-IF pattern at 6960. No server
+    /// permissiveness added.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashPacketoptMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (33) = 36 bytes.
+        const int ExpectedReplyPayloadLength = 36;
+        // strlen(literal) + 1 NUL = 33.
+        const short ExpectedReplyLengthField = 33;
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 32.
+        const int ExpectedLiteralByteCount = 32;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Packo", shipName: "PackoShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/packetopt");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals("Missing arg for option packetopt", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgPacketoptLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/packetopt\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option packetopt\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
