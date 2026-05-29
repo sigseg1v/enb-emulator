@@ -17782,4 +17782,126 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 230 literal anchor for "Missing arg for option shieldbuff".
+    /// NINTH user-tier case-'s' arm pin (after script Wave 198, sounds,
+    /// scale, skillpoints, stat, scan, shieldwarnings Wave 200,
+    /// signature); case-'s' user-tier promoted OCTUPLE -&gt; NONUPLE.
+    /// Matcher at PlayerConnection.cpp:7431 -- OUTER-DEV-WRAPPED pattern
+    /// (case-'s' wraps signature/setradius-strcmp/setradius-matcher/
+    /// shutdown/sendp/strings/stats/shieldbuff in `if (AdminLevel() &gt;=
+    /// DEV)` at line 7286). Internal body wraps `if (param &amp;&amp;
+    /// AdminLevel() &gt;= GM)` at 7433 but ERROR fires BEFORE it.
+    /// </summary>
+    private const string MissingArgShieldbuffLiteral = "Missing arg for option shieldbuff";
+
+    /// <summary>
+    /// Wave 230 pins the 37-byte wire-shape for /shieldbuff (NO param).
+    /// SECOND user-tier OUTER-DEV-WRAPPED pin (case-'s' inner DEV gate
+    /// at 7286). Inside the gate is an else-if chain of 8 arms ending
+    /// in shieldbuff.
+    /// <para>Chain for arg "shieldbuff" before reaching 7431: case-'s'
+    /// opens at 7136; strcmp(slaysectormobs) byte 1 'l' vs 'h' MISMATCH;
+    /// script byte 2 'r' vs 'i' MISMATCH SILENT; sounds byte 1 'o' vs
+    /// 'h' MISMATCH SILENT; strcmp(setturrets) byte 1 'e' vs 'h'
+    /// MISMATCH; strcmp(setrespawns) byte 1 'e' vs 'h' MISMATCH; scale
+    /// byte 1 'c' vs 'h' MISMATCH SILENT; skillpoints byte 1 'k' vs 'h'
+    /// MISMATCH SILENT; stat byte 1 't' vs 'h' MISMATCH SILENT; scan
+    /// byte 1 'c' vs 'h' MISMATCH SILENT; shieldwarnings byte 6 'w' vs
+    /// 'b' MISMATCH SILENT; OUTER-DEV gate at 7286 PASSES; signature
+    /// byte 2 'g' vs 'i' MISMATCH SILENT; strcmp(setradius) byte 1 'e'
+    /// vs 'h' MISMATCH; MatchOptWithParam(setradius) byte 1 'e' vs 'h'
+    /// MISMATCH SILENT; strcmp(shutdown) byte 2 'u' vs 'i' MISMATCH;
+    /// strcmp(sendp) byte 1 'e' vs 'h' MISMATCH; strcmp(strings) byte 1
+    /// 't' vs 'h' MISMATCH; strcmp(stats) byte 1 't' vs 'h' MISMATCH;
+    /// shieldbuff at 7431 FULL match -- fires 4548 ERROR. NET: ONE
+    /// emit. NINETY-EIGHTH MatchOptWithParam ERROR pin.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashShieldbuffMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        const int ExpectedReplyPayloadLength = 37;
+        const short ExpectedReplyLengthField = 34;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 33;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Shibua", shipName: "ShibuaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/shieldbuff");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(MissingArgShieldbuffLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgShieldbuffLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/shieldbuff\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{MissingArgShieldbuffLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
