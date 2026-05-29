@@ -2713,4 +2713,206 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Verbatim body of the 0x001D MESSAGE_STRING reply the server emits
+    /// when the GM-block (<c>//</c>-prefix) dispatch at
+    /// <c>server/src/PlayerConnection.cpp:4716</c> strips the leading
+    /// 2 chars and hands <c>pch="adduser"</c> to
+    /// <c>MatchOptWithParam("adduser", pch, param, msg_sent)</c> at
+    /// <c>PlayerConnection.cpp:4728</c>. The matcher's separator-check
+    /// (NUL is not '=', not ' ', not isalpha) hits the else-branch emit
+    /// at <c>PlayerConnection.cpp:4548</c>:
+    /// <c>SendVaMessage("Missing arg for option %s", "adduser")</c>.
+    /// 30 ASCII bytes after %s substitution. Same emit location as
+    /// Waves 131 / 134 / 135; 7-byte option name in %s slot.
+    /// </summary>
+    private const string MissingArgAdduserLiteral = "Missing arg for option adduser";
+
+    /// <summary>
+    /// Wave 136 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 34-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the GM-tier slash
+    /// command <c>//adduser</c> (NO param) -- routes through the
+    /// GM-block (<c>//</c>-prefix) entry guard at
+    /// <c>server/src/PlayerConnection.cpp:4716</c>, the 2-char strip
+    /// (<c>pch = Msg + 2</c>) at line 4719-4721, the case-'a' GM-block
+    /// dispatch at line 4726-4728, and MatchOptWithParam's ERROR fork
+    /// at <c>PlayerConnection.cpp:4548</c> BEFORE control reaches the
+    /// adduser body-block strtok param parsing.
+    ///
+    /// <para>
+    /// FIRST pin on the GM-block (<c>//</c>-prefix) dispatch path.
+    /// Prior Waves 117 / 123 / 125 / 126 / 129 / 130 / 131 / 132 / 133 /
+    /// 134 / 135 (the user-tier slash arms) all entered HandleSlashCommands
+    /// and fell through the GM-block guard at line 4716 (because their
+    /// Msg[1] != '/'). Wave 136 is the FIRST byte-exact pin that EXERCISES
+    /// the GM-block guard's positive path: Msg[0]=='/' AND Msg[1]=='/'
+    /// AND Msg[2]!='\0' AND AdminLevel() &gt;= GM. Status=100 fixture
+    /// account satisfies AdminLevel() == 100 &gt;= 50 (GM).
+    /// </para>
+    ///
+    /// <para>
+    /// Wave 136 also extends the sibling-arm catalogue on
+    /// HandleSlashCommands to ELEVEN byte-exact-pinned arms (Waves
+    /// 117/123/125/126/129/130/131/132/133/134/135 user-tier +
+    /// 136 GM-tier), is the FIRST pin on case-'a' GM-block (vs Wave
+    /// 117's case-'a' user-block /authlevel), and is the FOURTH pin on
+    /// the MatchOptWithParam ERROR path (after Waves 131 /level, 134
+    /// /chjoin, 135 /chleave).
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes Waves 117 /
+    /// 123 / 125 / 126 / 129 / 130 / 131 / 132 / 133 / 134 / 135 are
+    /// structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     GM-block entry-guard regression at
+    ///     <c>server/src/PlayerConnection.cpp:4716</c>. The condition
+    ///     <c>Msg[0]=='/' AND Msg[1]=='/' AND Msg[2]!=0 AND
+    ///     AdminLevel() &gt;= GM</c> must hold. A regression that
+    ///     tightened the AdminLevel cutoff (e.g. raised to DEV=80) for
+    ///     a status=100 account, that mis-indexed Msg[1] vs Msg[0]
+    ///     (would mis-route ALL user-tier slash arms or NONE of the
+    ///     GM-tier ones), or that dropped the GM-block guard entirely
+    ///     would silently fail to dispatch //adduser. Wave 136 pins
+    ///     that the GM-block IS REACHED for status=100.
+    ///   </item>
+    ///   <item>
+    ///     2-char strip regression at
+    ///     <c>server/src/PlayerConnection.cpp:4719-4721</c>. The
+    ///     <c>_alloca(strlen(&amp;Msg[2]) + 1)</c> + <c>strcpy_s(...,
+    ///     &amp;Msg[2])</c> strips the leading <c>//</c> from
+    ///     <c>//adduser</c> leaving <c>pch="adduser"</c>. A regression
+    ///     that mis-offset (e.g. <c>&amp;Msg[1]</c>) would leave
+    ///     <c>pch="/adduser"</c>; the switch(*pch) would land on case
+    ///     '/' (not present in the GM-block switch -- defaults to no
+    ///     match) and emit NOTHING. Wave 136 pins that the strip lands
+    ///     at offset 2 EXACTLY.
+    ///   </item>
+    ///   <item>
+    ///     case-'a' GM-block dispatch regression at
+    ///     <c>server/src/PlayerConnection.cpp:4726-4728</c>. The
+    ///     case-'a' arm contains MatchOptWithParam("adduser", ...) AND
+    ///     a second AdminLevel() &gt;= GM guard inside the matcher's
+    ///     true-branch (defense-in-depth -- redundant with the outer
+    ///     guard at 4716). A regression that swapped the case letter,
+    ///     mis-spelled "adduser" as the matcher's first argument
+    ///     (would emit the wrong %s body), or removed the case-'a' arm
+    ///     entirely would silently drop the //adduser dispatch.
+    ///     Wave 136 pins the case-'a' arm reaches the matcher AND that
+    ///     the matcher emits the missing-arg literal with the EXACT
+    ///     "adduser" %s substitution.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (CLAUDE.md). The MatchOptWithParam missing-arg
+    /// emit is the retail server's documented dispatcher-level error
+    /// path; the GM-block guard at line 4716 enforces the AdminLevel
+    /// &gt;= GM gate the retail server enforced. No server permissiveness
+    /// added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashAdduserMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (31) = 34 bytes.
+        const int ExpectedReplyPayloadLength = 34;
+        // strlen(literal) + 1 NUL = 31.
+        const short ExpectedReplyLengthField = 31;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 30.
+        const int ExpectedLiteralByteCount = 30;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Adduser", shipName: "AdduserShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//adduser");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // Filter on the distinctive "for option adduser" suffix.
+                if (!text.StartsWith("Missing arg for option adduser", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgAdduserLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//adduser\" without seeing 0x001D MESSAGE_STRING starting with " +
+                $"\"Missing arg for option adduser\". Likely the GM-block entry guard at " +
+                $"server/src/PlayerConnection.cpp:4716 stopped admitting status=100 accounts, " +
+                $"the 2-char strip at lines 4719-4721 mis-offset, the case-'a' GM-block " +
+                $"matcher at line 4728 stopped dispatching, or the missing-arg ERROR fork at " +
+                $"PlayerConnection.cpp:4548 changed shape.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }

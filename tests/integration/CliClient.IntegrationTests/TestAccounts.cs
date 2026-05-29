@@ -190,6 +190,7 @@ public static class TestAccounts
             ["SlashBeoff_OnAdminAccount_PinsExactReplyWireShape"]                                      = A(9_000_125, "cli_test125"),
             ["SlashChjoinMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                           = A(9_000_126, "cli_test126"),
             ["SlashChleaveMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                          = A(9_000_127, "cli_test127"),
+            ["SlashSlashAdduserMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                     = A(9_000_128, "cli_test128"),
         };
 
     /// <summary>
