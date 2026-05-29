@@ -5763,4 +5763,217 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 151 missing-arg ERROR literal for case-'o' /orientation. The
+    /// matcher at PlayerConnection.cpp:6881 reads
+    /// `if (MatchOptWithParam("orientation", pch, param, msg_sent))`
+    /// with NEITHER outer-block AdminLevel guard NOR inline AdminLevel
+    /// guard, matcher dispatches unconditionally. With NO param after
+    /// "/orientation", MatchOptWithParam's matcher branch matches 11
+    /// bytes, arg[11]='\0' -- NOT '=' / NOT ' ' / NOT isalpha,
+    /// allowNoParams false, so falls through to else at line 4546 and
+    /// hits the separator-check NUL fall-through. 34 ASCII bytes after
+    /// %s substitution -- 11-byte %s width (FOURTH 11-byte pin: SAME
+    /// width as Waves 138 GM case-g HEAD + 139 GM case-g SECOND + 142
+    /// GM case-s HEAD; Wave 151 is FIRST 11-byte pin at USER-TIER
+    /// providing cross-tier 11-byte structural divergence; deepens
+    /// the NO-GUARD inline matcher coverage to FOUR pins).
+    /// </summary>
+    private const string MissingArgOrientationLiteral = "Missing arg for option orientation";
+
+    /// <summary>
+    /// Wave 151 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 38-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/orientation</c> (NO param) -- routes through the
+    /// user-tier dispatcher entry at line 5434, the 1-char strip, the
+    /// case-'o' user-tier dispatch (NEW case-letter), skips the strcmp
+    /// "ori" bare-if at line 6873 (pch="orientation" != "ori"), then
+    /// hits the NO-GUARD inline matcher at line 6881
+    /// <c>if (MatchOptWithParam("orientation", pch, param, msg_sent))</c>.
+    /// With pch="orientation" and NO param, the matcher matches 11
+    /// bytes, falls through allowNoParams=false to the separator-check
+    /// else, emits "Missing arg for option orientation" via SendVaMessage
+    /// at line 4548, sets msg_sent=true, returns false. Body block
+    /// (HandleOrientationRequest) skipped. else-if oeuler at 6886
+    /// (strncmp mismatch at index 1 'e' vs 'r', false NO emit). else-if
+    /// openif at 6891 (strncmp mismatch at index 1 'p' vs 'r', false NO
+    /// emit). case-'o' breaks at 6946. NET RESULT: ONE emit.
+    ///
+    /// <para>
+    /// TWENTIETH pin on the user-tier (single-slash) dispatch path.
+    /// FIRST pin on user-tier case-'o' -- NEW case-letter extends
+    /// user-tier dispatcher switch coverage to FIFTEEN distinct
+    /// case-letters (a/b/c/d/e/f/h/i/k/l/m/n/o/p/r). NINETEENTH pin on
+    /// the MatchOptWithParam ERROR path. FOURTH 11-byte %s width pin
+    /// (Waves 138 GM case-g HEAD + 139 GM case-g SECOND + 142 GM
+    /// case-s HEAD + 151 user-tier case-o NO-GUARD) -- FIRST user-tier
+    /// 11-byte pin AND cross-tier 11-byte structural divergence at
+    /// NO-GUARD pattern. FOURTH pin on the NO-GUARD inline matcher
+    /// structural pattern (Waves 147 case-'h' 2-byte + 149 case-'i'
+    /// 6-byte + 150 case-'m' 4-byte + 151 case-'o' 11-byte) --
+    /// QUADRUPLE NO-GUARD pin spanning four distinct case-letters at
+    /// four distinct widths (2/4/6/11 bytes) which rules out per-case-
+    /// letter AND per-width regressions within the NO-GUARD pattern.
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes Wave 150
+    /// is structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     user-tier case-'o' dispatch + bare-if "ori" head skip +
+    ///     NO-GUARD inline matcher regression at
+    ///     <c>PlayerConnection.cpp:6872-6885</c>. case-'o' was
+    ///     previously unpinned in the user-tier switch; a regression
+    ///     that dropped case-'o' entirely, reordered case labels, or
+    ///     routed *pch=='o' to the wrong handler would silently
+    ///     swallow /orientation. The HEAD bare-if at 6873 strcmps for
+    ///     exact "ori" which fails against pch="orientation" --
+    ///     control falls through to the matcher at 6881. A regression
+    ///     that converted the bare-if to an else-if or added a return
+    ///     would short-circuit the matcher path. Wave 151 pins case-
+    ///     'o' is REACHABLE via the user-tier switch dispatcher AND
+    ///     the bare-if/matcher fall-through correctly emits.
+    ///   </item>
+    ///   <item>
+    ///     case-'o' matcher-chain fall-through regression at
+    ///     <c>PlayerConnection.cpp:6886-6945</c>. After the orientation
+    ///     matcher emits, execution continues through the else-if
+    ///     chain: oeuler (NO-GUARD MATCHER-FIRST inline at 6886,
+    ///     6-byte strncmp mismatch at index 1 'e' vs 'r'), openif
+    ///     (NO-GUARD MATCHER-FIRST inline at 6891, 6-byte strncmp
+    ///     mismatch at index 1 'p' vs 'r'). NET RESULT: ONE emit. A
+    ///     regression that ADDED a competing matcher anywhere in the
+    ///     chain that matched against pch="orientation" by accident
+    ///     would produce a second message. Wave 151 pins the matcher-
+    ///     chain fall-through as a structural invariant.
+    ///   </item>
+    ///   <item>
+    ///     cross-tier 11-byte structural divergence regression at
+    ///     <c>PlayerClass.cpp:3422</c>. Waves 138/139 pin 11-byte at
+    ///     GM-tier case-'g' HEAD/SECOND (MATCHER-FIRST inline +
+    ///     SDEV-guard); Wave 142 pins 11-byte at GM-tier case-'s'
+    ///     HEAD. Wave 151 pins 11-byte at USER-tier case-'o' NO-
+    ///     GUARD. Same width, FIRST user-tier 11-byte pin, FOURTH
+    ///     11-byte pin overall, NEW NO-GUARD structural pattern at
+    ///     11-byte width. A regression in vsprintf_s with off-by-one
+    ///     at 11-byte width AND a specific tier/case-letter/
+    ///     structural-pattern dispatch path would fail one but not
+    ///     all four; Wave 151 deepens 11-byte to cross-tier coverage.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). The MatchOptWithParam
+    /// missing-arg emit is the retail server's documented dispatcher-
+    /// level error path. /orientation (avatar rotation request) had NO
+    /// AdminLevel guard in the retail server -- baseline user-tier
+    /// command. No server permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashOrientationMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (35) = 38 bytes.
+        const int ExpectedReplyPayloadLength = 38;
+        // strlen(literal) + 1 NUL = 35.
+        const short ExpectedReplyLengthField = 35;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 34.
+        const int ExpectedLiteralByteCount = 34;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Oriento", shipName: "OrientoShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/orientation");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // EXACT equals filter (not StartsWith) -- defensive against
+                // any future sibling "orientation*" option emits in case-'o'.
+                if (!text.Equals("Missing arg for option orientation", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgOrientationLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/orientation\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option orientation\". Likely the user-tier case-'o' " +
+                $"dispatch at line 6872 stopped routing, the bare-if \"ori\" head skip " +
+                $"at line 6873 stopped falling through, the NO-GUARD inline matcher at " +
+                $"line 6881 stopped dispatching, an AdminLevel guard was wrapped around " +
+                $"the matcher (regression), the matcher-chain fall-through to oeuler/" +
+                $"openif produced a competing emit (regression), or the missing-arg " +
+                $"ERROR fork at PlayerConnection.cpp:4548 changed shape.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
