@@ -6463,4 +6463,213 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 154 missing-arg ERROR literal for case-'u' /uitrigger. The
+    /// matcher at PlayerConnection.cpp:7576 reads
+    /// `if (MatchOptWithParam("uitrigger", pch, param, msg_sent))`
+    /// -- NO AdminLevel guard, ELSE-IF chain structural pattern.
+    /// With NO param after "/uitrigger", strncmp matches 9 bytes,
+    /// arg[9]='\0' fails separator-check, allowNoParams=false -- emits
+    /// "Missing arg for option uitrigger", returns false. Body block
+    /// (strtok_s param parse + SendOpcode 0x0065 UI_TRIGGER) SKIPPED.
+    /// 32 ASCII bytes after %s substitution -- 9-byte %s width (FIRST
+    /// 9-byte pin; fills a gap in the MatchOptWithParam ERROR fork
+    /// width coverage which previously spanned 1/2/3/4/5/6/7/11/13/14
+    /// bytes -- Wave 154 adds 9-byte as the ELEVENTH distinct width).
+    /// </summary>
+    private const string MissingArgUitriggerLiteral = "Missing arg for option uitrigger";
+
+    /// <summary>
+    /// Wave 154 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 36-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/uitrigger</c> (NO param) -- routes through the
+    /// user-tier dispatcher entry at line 5434, the 1-char strip, the
+    /// case-'u' user-tier dispatch (NEW case-letter -- 18th user-tier
+    /// case-letter), then hits the NO-GUARD ELSE-IF inline matcher at
+    /// line 7576 <c>if (MatchOptWithParam("uitrigger", pch, param, msg_sent))</c>.
+    /// With pch="uitrigger" and NO param, matcher matches 9 bytes,
+    /// fails separator-check allowNoParams=false, emits "Missing arg
+    /// for option uitrigger" via SendVaMessage at line 4548, sets
+    /// msg_sent=true, returns false. Body block SKIPPED.
+    /// else-if /upgrade at 7593 strncmp("upgrade","uitrigger",7)
+    /// u-u, p-i mismatch idx 1 → false NO emit. else-if
+    /// strcmp(pch,"undockp") at 7607 FAIL. else-if
+    /// strcmp(pch,"uptime") at 7614 FAIL. case-'u' breaks at 7625.
+    /// NET RESULT: ONE emit.
+    ///
+    /// <para>
+    /// TWENTY-THIRD pin on the user-tier (single-slash) dispatch
+    /// path. FIRST pin on user-tier case-'u' -- NEW case-letter
+    /// extends user-tier dispatcher switch coverage to EIGHTEEN
+    /// distinct case-letters (a/b/c/d/e/f/h/i/k/l/m/n/o/p/r/s/t/u).
+    /// TWENTY-SECOND pin on the MatchOptWithParam ERROR path. FIRST
+    /// 9-byte %s width pin -- fills the gap in the ERROR fork width
+    /// coverage which previously spanned 1/2/3/4/5/6/7/11/13/14 bytes;
+    /// Wave 154 adds 9-byte as the ELEVENTH distinct width covered.
+    /// SEVENTH NO-GUARD-family pin (Waves 147 case-'h' 2B + 149
+    /// case-'i' 6B + 150 case-'m' 4B + 151 case-'o' 11B + 153 case-'t'
+    /// 4B-CONSECUTIVE-IF + 154 case-'u' 9B; six ELSE-IF + one
+    /// CONSECUTIVE-IF). FIFTH NO-GUARD-ELSE-IF pin specifically.
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes Wave 153
+    /// is structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     user-tier case-'u' dispatch + NO-GUARD ELSE-IF inline
+    ///     matcher regression at <c>PlayerConnection.cpp:7575-7592</c>.
+    ///     case-'u' was previously unpinned in the user-tier switch;
+    ///     a regression that dropped case-'u' entirely, reordered
+    ///     case labels, or routed *pch=='u' to the wrong handler
+    ///     would silently swallow /uitrigger. The HEAD matcher at
+    ///     7576 is NO-GUARD; a regression that wrapped /uitrigger in
+    ///     any AdminLevel guard would skip the matcher for non-
+    ///     privileged users (or change visibility per tier). Wave 154
+    ///     pins case-'u' is REACHABLE via the user-tier switch
+    ///     dispatcher AND the NO-GUARD HEAD matcher dispatches
+    ///     correctly to emit on missing arg.
+    ///   </item>
+    ///   <item>
+    ///     case-'u' matcher-chain ELSE-IF fall-through regression at
+    ///     <c>PlayerConnection.cpp:7593-7624</c> across 1 sibling
+    ///     matcher + 2 sibling strcmps. After the HEAD matcher
+    ///     emits and msg_sent=true, execution continues through
+    ///     /upgrade (7-byte NO-GUARD ELSE-IF inline with INSIDE-BODY
+    ///     GM-guard, strncmp mismatch idx 1 'p' vs 'i' false NO
+    ///     emit), strcmp "undockp" FAIL, strcmp "uptime" FAIL. NET
+    ///     RESULT: ONE emit. A regression that ADDED a competing
+    ///     matcher anywhere in the chain that matched against
+    ///     pch="uitrigger" by accident would produce a second
+    ///     message; Wave 154 pins the matcher-chain fall-through as
+    ///     a structural invariant.
+    ///   </item>
+    ///   <item>
+    ///     9-byte %s width gap-fill regression at
+    ///     <c>PlayerClass.cpp:3422</c>. Prior to Wave 154 the
+    ///     MatchOptWithParam ERROR fork was pinned at 10 distinct
+    ///     widths (1/2/3/4/5/6/7/11/13/14 bytes) with a gap at 8/9/10
+    ///     /12. Wave 154 fills the 9-byte gap with /uitrigger -- a
+    ///     regression in vsprintf_s with off-by-one at 9-byte width
+    ///     specifically would not be caught by any of the prior 22
+    ///     pins; Wave 154 closes that specific format-substitution
+    ///     blind spot. The 9-byte pin is exercised at user-tier
+    ///     NO-GUARD ELSE-IF structural pattern which deepens both
+    ///     the width and pattern axes simultaneously.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). The MatchOptWithParam
+    /// missing-arg emit is the retail server's documented dispatcher-
+    /// level error path. /uitrigger (UI trigger dispatch) had NO
+    /// AdminLevel guard in the retail server -- baseline user-tier
+    /// command. No server permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashUitriggerMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (33) = 36 bytes.
+        const int ExpectedReplyPayloadLength = 36;
+        // strlen(literal) + 1 NUL = 33.
+        const short ExpectedReplyLengthField = 33;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 32.
+        const int ExpectedLiteralByteCount = 32;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Uitri", shipName: "UitriShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/uitrigger");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // EXACT equals filter (not StartsWith) -- defensive against
+                // any future sibling "uitrigger*" option emits in case-'u'.
+                if (!text.Equals("Missing arg for option uitrigger", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgUitriggerLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/uitrigger\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option uitrigger\". Likely the user-tier case-'u' " +
+                $"dispatch at line 7575 stopped routing, the NO-GUARD ELSE-IF inline " +
+                $"matcher at line 7576 stopped dispatching, an AdminLevel guard was " +
+                $"wrapped around the matcher (regression), the matcher-chain " +
+                $"fall-through to upgrade/undockp/uptime produced a competing emit " +
+                $"(regression), or the missing-arg ERROR fork at PlayerConnection.cpp:4548 " +
+                $"changed shape (esp. vsprintf_s 9-byte %s width).");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
