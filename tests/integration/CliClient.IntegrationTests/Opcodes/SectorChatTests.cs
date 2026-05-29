@@ -14070,4 +14070,121 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 200 missing-arg ERROR literal for case-'f' /faddoretosector.
+    /// Matcher at PlayerConnection.cpp:6436 -- NO-GUARD-ELSE-IF chained
+    /// off /fdelorefromfield at 6431 inside OUTER-BLOCK-DEV-guard.
+    /// NINTH case-'f' user-tier pin -- case-'f' NONUPLE-PINNED.
+    /// </summary>
+    private const string MissingArgFaddoretosectorLiteral = "Missing arg for option faddoretosector";
+
+    /// <summary>
+    /// Wave 200 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 42-byte wire-shape of the single 0x001D MESSAGE_STRING reply to
+    /// user-tier slash <c>/faddoretosector</c> (NO param). Wave 200
+    /// deepens case-'f' to NONUPLE-PINNED.
+    ///
+    /// <para>
+    /// ELSE-IF at 6436 chained off /fdelorefromfield at 6431. Preceding
+    /// f-arms MISMATCH at byte 1 ('h'/'r'/'t'/'l'/'c'). /faddasteroidtype
+    /// strncmp 16B byte 4 'a' vs 'o' MISMATCH; /faddoretofield strncmp
+    /// 14B vs arg 15B with len_arg>len_opt: actually strncmp matches first
+    /// 14 bytes "faddoretofield" -- wait, arg is "faddoretosector":
+    /// matches "faddoreto" (9 bytes), byte 9 arg='s' vs opt='f' MISMATCH;
+    /// /fdelorefromfield byte 1 'd' vs 'a' MISMATCH; /faddoretosector at
+    /// 6436 matches arg="faddoretosector" -- emits "Missing arg for option
+    /// faddoretosector" at 4548 COLOR=5. Subsequent else-if
+    /// /fdelorefromsector byte 1 'd' vs 'a' MISMATCH. case-'f' breaks.
+    /// NET RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashFaddoretosectorMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (39) = 42 bytes.
+        const int ExpectedReplyPayloadLength = 42;
+        const short ExpectedReplyLengthField = 39;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 38;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Faddoreto", shipName: "FaddoretoShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/faddoretosector");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals("Missing arg for option faddoretosector", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgFaddoretosectorLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/faddoretosector\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option faddoretosector\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
