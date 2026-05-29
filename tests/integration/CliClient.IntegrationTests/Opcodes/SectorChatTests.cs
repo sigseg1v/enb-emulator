@@ -9018,4 +9018,205 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 165 missing-arg ERROR literal for case-'s' /shieldwarnings.
+    /// The matcher at PlayerConnection.cpp:7272 reads
+    /// `else if (MatchOptWithParam("shieldwarnings", pch, param, msg_sent))`
+    /// -- pure NO-GUARD ELSE-IF chain arm, NO outer AdminLevel guard,
+    /// NO inside-body guard. THIRD case-'s' user-tier pin (Wave 163
+    /// /sounds 6-byte + Wave 164 /scale 5-byte + Wave 165 /shieldwarnings
+    /// 14-byte). 37 ASCII bytes after %s substitution -- NEW 14-byte
+    /// width pin (no prior 14-byte width); FIRST 14-byte %s pin in
+    /// HandleSlashCommands.
+    /// </summary>
+    private const string MissingArgShieldwarningsLiteral = "Missing arg for option shieldwarnings";
+
+    /// <summary>
+    /// Wave 165 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 41-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/shieldwarnings</c> (NO param) -- routes through the
+    /// user-tier dispatcher entry at line 5434, the 1-char strip, the
+    /// case-'s' user-tier dispatch at line 7136 (Wave 165 deepens case-
+    /// 's' to TRIPLE-PINNED across THREE distinct chain-arm positions).
+    /// All prior strncmp matchers in case-'s' (/script at 7143, /sounds
+    /// at 7179, /scale at 7201, /skillpoints at 7206, /stat at 7219,
+    /// /scan at 7248) MISMATCH against "shieldwarnings" at byte 1
+    /// (c/k/t/o vs 'h'). Intervening strcmp arms at 7137/7189/7195
+    /// strcmp FAIL. ELSE-IF at 7272 `MatchOptWithParam("shieldwarnings",
+    /// pch, param, msg_sent)` -- NO outer AdminLevel guard, NO inside-
+    /// body guard. MatchOptWithParam: strncmps "shieldwarnings" against
+    /// "shieldwarnings" (14 byte match), arg[14]='\0' -- NOT '=', NOT
+    /// ' ', NOT isalpha, allowNoParams=false -- emits "Missing arg for
+    /// option shieldwarnings" via SendVaMessage at 4548 (default
+    /// COLOR=5), sets msg_sent=true, returns false. Body block at
+    /// 7274-7283 SKIPPED (matcher returned false; would have emitted
+    /// via SendVaMessageC with COLOR=13 -- a DIFFERENT color emission
+    /// that Wave 165 implicitly negative-pins). case-'s' breaks.
+    /// Trailing fallback at 7702 SKIPPED (msg_sent=true). NET RESULT:
+    /// ONE emit.
+    ///
+    /// <para>
+    /// THIRTY-FOURTH pin on the user-tier (single-slash) dispatch path.
+    /// THIRD pin on user-tier case-'s' -- case-'s' user-tier now
+    /// TRIPLE-PINNED across THREE ELSE-IF chain positions (Wave 163
+    /// /sounds + Wave 164 /scale + Wave 165 /shieldwarnings). THIRTY-
+    /// THIRD pin on the MatchOptWithParam ERROR path. TENTH NO-GUARD
+    /// pin -- NO-GUARD now DECUPLE-PINNED across 5 case-letters.
+    /// FIRST 14-byte %s width pin -- THIRTEENTH distinct %s-width
+    /// pinned (was 1/2/3/4/5/6/7/8/9/11/13 + Wave 165 14).
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes prior waves
+    /// are structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     case-'s' deep ELSE-IF chain arm regression at
+    ///     <c>PlayerConnection.cpp:7272</c>. /shieldwarnings sits SEVEN
+    ///     arms deep in the case-'s' ELSE-IF chain (after /script,
+    ///     strcmps, /sounds, /scale, /skillpoints, /stat, /scan). A
+    ///     regression that broke the chain at any of those intermediate
+    ///     positions (chain converted to CONSECUTIVE-IF, fall-through
+    ///     introduced, or chain truncated by accidental brace closure)
+    ///     would prevent /shieldwarnings from being reached; Wave 165
+    ///     pins the FULL case-'s' chain depth is preserved.
+    ///   </item>
+    ///   <item>
+    ///     ERROR-fork COLOR=5 vs body-fork COLOR=13 divergence
+    ///     regression at <c>PlayerConnection.cpp:7279</c> vs
+    ///     <c>PlayerConnection.cpp:4548</c>. /shieldwarnings is one of
+    ///     the few arms whose SUCCESS body uses SendVaMessageC with an
+    ///     EXPLICIT COLOR=13 (warning-yellow); a regression that
+    ///     conflated the body-fork color with the ERROR-fork color
+    ///     (e.g. ERROR-fork started using COLOR=13) would produce a
+    ///     COLOR=13 reply instead of COLOR=5. Wave 165 pins the ERROR
+    ///     path emits with COLOR=5 -- implicitly negative-pinning the
+    ///     body-fork COLOR=13 path is NOT engaged on missing-arg.
+    ///   </item>
+    ///   <item>
+    ///     NEW 14-byte %s width pin at <c>PlayerClass.cpp:3422</c>.
+    ///     No prior wave pinned a 14-byte option name through the
+    ///     MatchOptWithParam ERROR fork; Wave 165 establishes the
+    ///     14-byte %s-substitution width as a structural invariant.
+    ///     A regression that introduced off-by-N in vsprintf_s only at
+    ///     longer %s widths (e.g. buffer-resize bug that triggers at
+    ///     >=14 chars) would fail Wave 165 but pass all prior shorter-
+    ///     width pins.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). /shieldwarnings (the
+    /// audio shield-warning level toggle) is OPEN to all users in the
+    /// retail server -- NO outer AdminLevel guard at 7272, NO inside-
+    /// body guard. ERROR path emits regardless of AdminLevel. No
+    /// server permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashShieldwarningsMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (38) = 41 bytes.
+        const int ExpectedReplyPayloadLength = 41;
+        // strlen(literal) + 1 NUL = 38.
+        const short ExpectedReplyLengthField = 38;
+        // SendVaMessage -> SendMessageString default color parameter
+        // (NOT SendVaMessageC(13,...) which is the body-fork color).
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 37.
+        const int ExpectedLiteralByteCount = 37;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Shieldo", shipName: "ShieldoShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/shieldwarnings");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals("Missing arg for option shieldwarnings", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgShieldwarningsLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/shieldwarnings\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option shieldwarnings\". Likely the user-tier case-'s' " +
+                $"dispatch at line 7136 stopped routing, the deep ELSE-IF chain arm at " +
+                $"7272 stopped dispatching (chain truncated, fall-through introduced, " +
+                $"or intermediate arm intercepted), the NO-GUARD structural variant " +
+                $"converted to OUTER-GUARD, the ERROR-fork COLOR=5 conflated with the " +
+                $"body-fork COLOR=13 at SendVaMessageC, the trailing illegal-slash " +
+                $"fallback at 7702 fired as a second emit (msg_sent gate regression), " +
+                $"or the missing-arg ERROR fork at PlayerConnection.cpp:4548 changed " +
+                $"shape (esp. vsprintf_s 14-byte %s width buffer-resize).");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
