@@ -16073,4 +16073,143 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 216 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
+    /// the 36-byte ASCII body "Missing arg for option gmplayerlevel" that the
+    /// server emits when admin-tier double-slash <c>//gmplayerlevel</c>
+    /// arrives with no argument. Matcher at PlayerConnection.cpp:5341 (FIFTH
+    /// MatchOptWithParam arm of case-'g' admin-tier switch opened at 4724).
+    /// FIRST pin on case-'g' admin-tier 5th arm; case-'g' admin-tier promoted
+    /// from QUADRUPLE-PINNED to QUINTUPLE-PINNED.
+    /// </summary>
+    private const string MissingArgGmplayerlevelLiteral = "Missing arg for option gmplayerlevel";
+
+    /// <summary>
+    /// Wave 216 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 40-byte wire-shape of the single 0x001D MESSAGE_STRING reply to
+    /// admin-tier double-slash <c>//gmplayerlevel</c> (NO param). Wave 216
+    /// deepens admin-tier case-'g' to QUINTUPLE-PINNED status.
+    ///
+    /// <para>
+    /// Outer gate at 4716 admits the dispatch (cli_test status=100 &gt;=
+    /// GM=50). Switch at 4724 jumps on *pch='g' -&gt; case-'g' opens at
+    /// 5205. case-'g' has SIX PLAIN if/MatchOptWithParam arms (no
+    /// else-if chain): "gmgetaccess" (5207), "gmsetaccess" (5221, has
+    /// inline SDEV guard for true-branch), "gmskillpoints" (5260),
+    /// "gmenableskills" (5302), "gmplayerlevel" (5341), "gmupgrade"
+    /// (5392). For arg "gmplayerlevel": arms 1-4 all strncmp on a
+    /// distinct mid-name byte ('g'/'s'/'s'/'e' vs 'p' at position 2)
+    /// MISMATCH -- prefix-check fails for each, ERROR fork NOT taken,
+    /// each returns false silently. arm 5 strncmp("gmplayerlevel",
+    /// "gmplayerlevel", 13) == 0; arg[13]='\0' not '=' not ' ' not
+    /// isalpha; allowNoParams=false fires 4548 ERROR fork: "Missing
+    /// arg for option gmplayerlevel" COLOR=5. arm 6 strncmp
+    /// ("gmupgrade", "gmplayerlevel", 9) byte 2 'u' vs 'p' MISMATCH;
+    /// no ERROR. case-'g' breaks. NET RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>
+    /// FIRST admin-tier case-'g' 5th-arm pin; case-'g' admin-tier now
+    /// QUINTUPLE-PINNED. NINTH admin-tier NO-INLINE-GUARD pin.
+    /// EIGHTY-FOURTH MatchOptWithParam ERROR pin. FIRST admin-tier pin
+    /// where the matching arm sits at position 5 of a 6-arm chain --
+    /// catches regression where any matcher's strncmp len shrinks
+    /// below 3 (e.g. matching on a 2-byte "gm" prefix would prefix-
+    /// match every arm and the FIRST matching arm with ERROR fork
+    /// would swallow the actual target). 13-byte option-name width
+    /// pin -- LONGEST in case-'g' so far (gmgetaccess=11,
+    /// gmsetaccess=11, gmskillpoints=13, gmenableskills=14,
+    /// gmplayerlevel=13, gmupgrade=9). Assert.Equal pins the full
+    /// 40-byte response shape.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashGmplayerlevelMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (37) = 40 bytes.
+        const int ExpectedReplyPayloadLength = 40;
+        const short ExpectedReplyLengthField = 37;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 36;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Gmpla", shipName: "GmplaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//gmplayerlevel");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(MissingArgGmplayerlevelLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgGmplayerlevelLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//gmplayerlevel\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{MissingArgGmplayerlevelLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
