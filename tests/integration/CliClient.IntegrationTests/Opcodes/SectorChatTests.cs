@@ -6672,4 +6672,240 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 155 missing-arg ERROR literal for case-'w' /wormhole. The
+    /// matcher at PlayerConnection.cpp:7673 reads
+    /// `if (MatchOptWithParam("wormhole", pch, param, msg_sent))`
+    /// -- NO AdminLevel guard outside, INSIDE-BODY BETA_PLUS-guard
+    /// (which only affects SUCCESS path). Critically this is an
+    /// INDEPENDENT `if` (NOT chained via else-if from preceding
+    /// /who/warp matchers at 7628/7650) -- second CONSECUTIVE-IF
+    /// structural pattern pin in the dispatcher. With NO param after
+    /// "/wormhole", strncmp matches 8 bytes, arg[8]='\0' fails
+    /// separator-check, allowNoParams=false -- emits "Missing arg for
+    /// option wormhole", returns false. Body block (HandleWormholeRequest
+    /// or "/wormhole GM and above only" emit) SKIPPED. 31 ASCII bytes
+    /// after %s substitution -- 8-byte %s width (FIRST 8-byte pin;
+    /// fills another gap in the MatchOptWithParam ERROR fork width
+    /// coverage after Wave 154's 9-byte gap-fill -- Wave 155 adds
+    /// 8-byte as the TWELFTH distinct width).
+    /// </summary>
+    private const string MissingArgWormholeLiteral = "Missing arg for option wormhole";
+
+    /// <summary>
+    /// Wave 155 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 35-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/wormhole</c> (NO param) -- routes through the
+    /// user-tier dispatcher entry at line 5434, the 1-char strip, the
+    /// case-'w' user-tier dispatch (NEW case-letter -- 19th user-tier
+    /// case-letter), then through the ELSE-IF chain head /who at 7628
+    /// (allowNoParams=TRUE, 3-byte strncmp mismatch idx 1 'h' vs 'o'
+    /// false NO emit), else-if /warp at 7650 (4-byte strncmp mismatch
+    /// idx 1 'a' vs 'o' false NO emit), else-if strcmp(pch,"warpreset")
+    /// at 7668 FAIL. Then case-'w' continues with INDEPENDENT
+    /// CONSECUTIVE-IF at 7673 <c>if (MatchOptWithParam("wormhole", pch, param, msg_sent))</c>.
+    /// With pch="wormhole" and NO param, matcher matches 8 bytes, fails
+    /// separator-check allowNoParams=false, emits "Missing arg for
+    /// option wormhole" via SendVaMessage at line 4548, sets
+    /// msg_sent=true, returns false. Body block (BETA_PLUS-guard +
+    /// HandleWormholeRequest or "/wormhole GM and above only" emit)
+    /// SKIPPED. Subsequent CONSECUTIVE-IF at 7691 strcmp(pch,"warpreset")
+    /// FAIL → skip. case-'w' breaks at 7699. The trailing fallback
+    /// `if (!success && !msg_sent) SendVaMessage("Illegal slash command: %s", pch)`
+    /// at 7702 is SKIPPED because msg_sent=true. NET RESULT: ONE emit.
+    ///
+    /// <para>
+    /// TWENTY-FOURTH pin on the user-tier (single-slash) dispatch
+    /// path. FIRST pin on user-tier case-'w' -- NEW case-letter
+    /// extends user-tier dispatcher switch coverage to NINETEEN
+    /// distinct case-letters (a/b/c/d/e/f/h/i/k/l/m/n/o/p/r/s/t/u/w).
+    /// TWENTY-THIRD pin on the MatchOptWithParam ERROR path. FIRST
+    /// 8-byte %s width pin -- fills another gap in ERROR fork width
+    /// coverage after Wave 154's 9-byte gap-fill (prior pins now
+    /// spanned 1/2/3/4/5/6/7/9/11/13/14); Wave 155 adds 8-byte as
+    /// the TWELFTH distinct width covered. Remaining gaps: 10/12
+    /// bytes. EIGHTH NO-GUARD-family pin (now SEVEN ELSE-IF + ONE
+    /// CONSECUTIVE-IF = wait: Waves 147/149/150/151/154 are NO-GUARD-
+    /// ELSE-IF (5 pins), Waves 153 is NO-GUARD-CONSECUTIVE-IF (1 pin),
+    /// Wave 155 is NO-GUARD-CONSECUTIVE-IF (within MIXED case-letter
+    /// ELSE-IF+CONSECUTIVE-IF structure) -- total 5 ELSE-IF + 2
+    /// CONSECUTIVE-IF = 7 distinct NO-GUARD pins. SECOND CONSECUTIVE-IF
+    /// pin (Waves 153 case-t pure-CONSECUTIVE-IF + 155 case-w MIXED
+    /// ELSE-IF+CONSECUTIVE-IF) -- introduces the MIXED case-letter
+    /// dispatcher pattern variant which is structurally distinct from
+    /// both pure ELSE-IF (Waves 147/149/150/151/154) and pure
+    /// CONSECUTIVE-IF (Wave 153).
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes Wave 154
+    /// is structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     user-tier case-'w' dispatch + MIXED ELSE-IF+CONSECUTIVE-IF
+    ///     case-letter structure regression at
+    ///     <c>PlayerConnection.cpp:7627-7699</c>. case-'w' was
+    ///     previously unpinned in the user-tier switch; a regression
+    ///     that dropped case-'w' entirely, reordered case labels, or
+    ///     routed *pch=='w' to the wrong handler would silently
+    ///     swallow /wormhole. The MIXED structure is unique within
+    ///     the user-tier switch: ELSE-IF chain (7628 /who + 7650
+    ///     /warp + 7668 strcmp warpreset) followed by INDEPENDENT
+    ///     CONSECUTIVE-IF (7673 /wormhole + 7691 strcmp warpreset).
+    ///     A regression that converted the CONSECUTIVE-IF arms to
+    ///     ELSE-IF chained off the preceding chain would chain
+    ///     /wormhole's dispatch off /warp's success; a regression
+    ///     that converted ELSE-IF to CONSECUTIVE-IF would change the
+    ///     /who/warp dispatch semantics. Wave 155 pins case-'w' is
+    ///     REACHABLE via the user-tier switch dispatcher AND the
+    ///     MIXED ELSE-IF+CONSECUTIVE-IF structure is preserved.
+    ///   </item>
+    ///   <item>
+    ///     case-'w' matcher-chain fall-through regression at
+    ///     <c>PlayerConnection.cpp:7691-7702</c> including the
+    ///     trailing fallback at 7702. After the /wormhole matcher
+    ///     emits, execution continues through CONSECUTIVE-IF at 7691
+    ///     (strcmp "warpreset" FAIL), case-'w' breaks, and the
+    ///     `if (!success && !msg_sent) SendVaMessage("Illegal slash
+    ///     command: %s", pch)` fallback at 7702 is SKIPPED because
+    ///     msg_sent=true. A regression that flipped the fallback's
+    ///     `!msg_sent` to `msg_sent` or removed the guard entirely
+    ///     would emit a second message ("Illegal slash command:
+    ///     wormhole"). Wave 155 pins the trailing illegal-slash
+    ///     fallback's msg_sent gate as a structural invariant via
+    ///     the EXACT-equals filter (which would mismatch on a
+    ///     spurious "Illegal slash command" second emit).
+    ///   </item>
+    ///   <item>
+    ///     8-byte %s width gap-fill regression at
+    ///     <c>PlayerClass.cpp:3422</c>. Prior to Wave 155 the
+    ///     MatchOptWithParam ERROR fork was pinned at 11 distinct
+    ///     widths (1/2/3/4/5/6/7/9/11/13/14 bytes) after Wave 154's
+    ///     9-byte gap-fill, with gaps remaining at 8/10/12. Wave 155
+    ///     fills the 8-byte gap with /wormhole -- a regression in
+    ///     vsprintf_s with off-by-one at 8-byte width specifically
+    ///     would not be caught by any of the prior 23 pins; Wave 155
+    ///     closes that format-substitution blind spot. The 8-byte
+    ///     pin is exercised at user-tier NO-GUARD CONSECUTIVE-IF
+    ///     within MIXED case-letter structure which deepens both
+    ///     width and pattern axes simultaneously.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). The MatchOptWithParam
+    /// missing-arg emit is the retail server's documented dispatcher-
+    /// level error path. /wormhole (wormhole travel request) had NO
+    /// outer AdminLevel guard in the retail server -- INSIDE-BODY
+    /// BETA_PLUS check gates SUCCESS path only; ERROR path emits
+    /// regardless of AdminLevel. No server permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashWormholeMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (32) = 35 bytes.
+        const int ExpectedReplyPayloadLength = 35;
+        // strlen(literal) + 1 NUL = 32.
+        const short ExpectedReplyLengthField = 32;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 31.
+        const int ExpectedLiteralByteCount = 31;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Wormo", shipName: "WormoShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/wormhole");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // EXACT equals filter (not StartsWith) -- defensive against
+                // any future sibling "wormhole*" option emits or the trailing
+                // "Illegal slash command: wormhole" fallback at line 7702.
+                if (!text.Equals("Missing arg for option wormhole", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgWormholeLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/wormhole\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option wormhole\". Likely the user-tier case-'w' " +
+                $"dispatch at line 7627 stopped routing, the ELSE-IF chain head /who/warp " +
+                $"stopped falling through, the CONSECUTIVE-IF /wormhole matcher at line " +
+                $"7673 stopped dispatching (CONSECUTIVE-IF -> ELSE-IF structural conversion " +
+                $"would chain off /warp), an AdminLevel guard was wrapped around the " +
+                $"matcher (regression), the trailing illegal-slash fallback at 7702 fired " +
+                $"as a second emit (msg_sent gate regression), or the missing-arg ERROR " +
+                $"fork at PlayerConnection.cpp:4548 changed shape (esp. vsprintf_s 8-byte %s width).");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
