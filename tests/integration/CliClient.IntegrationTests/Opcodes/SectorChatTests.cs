@@ -8396,4 +8396,215 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 162 missing-arg ERROR literal for case-'o' /openif.
+    /// The matcher at PlayerConnection.cpp:6891 reads
+    /// `else if (MatchOptWithParam("openif", pch, param, msg_sent))`
+    /// -- ELSE-IF chain arm (chained off /orientation HEAD at 6881
+    /// and /oeuler arm at 6886), NO outer AdminLevel guard, NO
+    /// inside-body guard on matcher. THIRD case-'o' pin (Wave 143
+    /// /orientation ELSE-IF chain HEAD + Wave 161 /oeuler ELSE-IF
+    /// chain arm pos 1 + Wave 162 /openif ELSE-IF chain arm pos 2).
+    /// 29 ASCII bytes after %s substitution -- same width as Wave
+    /// 161 (6-byte) but different arm position; 6-byte %s width
+    /// double-pinned within SAME case-letter, deepening case-'o'
+    /// to ALL THREE ELSE-IF chain positions.
+    /// </summary>
+    private const string MissingArgOpenifLiteral = "Missing arg for option openif";
+
+    /// <summary>
+    /// Wave 162 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 33-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/openif</c> (NO param) -- routes through the user-
+    /// tier dispatcher entry at line 5434, the 1-char strip, the
+    /// case-'o' user-tier dispatch (case-letter already DOUBLE-pinned
+    /// by Wave 143 /orientation ELSE-IF chain HEAD + Wave 161 /oeuler
+    /// ELSE-IF chain arm pos 1; Wave 162 deepens case-'o' to ELSE-IF
+    /// chain arm pos 2 /openif at 6891). Independent CONSECUTIVE-IF
+    /// at 6873 strcmp "ori" FAIL. ELSE-IF chain HEAD at 6881
+    /// MatchOptWithParam("orientation",...): strncmp("orientation",
+    /// "openif",6) o-o, r-p MISMATCH idx 1 false NO emit. else-if at
+    /// 6886 MatchOptWithParam("oeuler",...): strncmp("oeuler",
+    /// "openif",6) o-o, e-p MISMATCH idx 1 false NO emit. else-if at
+    /// 6891 `MatchOptWithParam("openif", pch, param, msg_sent)` --
+    /// NO outer AdminLevel guard, NO inside-body guard. MatchOpt
+    /// WithParam: strncmps "openif" against "openif" (6 byte match),
+    /// arg[6]='\0' -- NOT '=', NOT ' ', NOT isalpha, allowNoParams=
+    /// false -- emits "Missing arg for option openif" via
+    /// SendVaMessage at 4548, sets msg_sent=true, returns false.
+    /// Body block strtok_s + OpenInterface SKIPPED (matcher returned
+    /// false, body block never entered). case-'o' breaks. Trailing
+    /// fallback at 7702 SKIPPED (msg_sent=true). NET RESULT: ONE emit.
+    ///
+    /// <para>
+    /// THIRTY-FIRST pin on the user-tier (single-slash) dispatch path.
+    /// THIRD pin on user-tier case-'o' -- case-'o' now TRIPLE-PINNED
+    /// across ALL THREE ELSE-IF chain positions (HEAD + arm pos 1 +
+    /// arm pos 2). THIRTIETH pin on the MatchOptWithParam ERROR path.
+    /// SEVENTH NO-GUARD pin -- NO-GUARD now SEPTUPLE-PINNED. SECOND
+    /// 6-byte %s width pin at SAME case-letter (case-'o') -- Wave
+    /// 161 /oeuler + Wave 162 /openif -- DOUBLE-PINNED 6-byte width
+    /// within SAME case-letter pinning per-arm-position invariants.
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes Wave 161
+    /// is structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     case-'o' ELSE-IF chain arm pos 2 deepening regression at
+    ///     <c>PlayerConnection.cpp:6891-6901</c>. Wave 143 pinned
+    ///     ELSE-IF chain HEAD /orientation; Wave 161 pinned ELSE-IF
+    ///     chain arm pos 1 /oeuler; case-'o' /openif at 6891 sits
+    ///     on ELSE-IF chain arm pos 2 (chained off /oeuler) and was
+    ///     UNPINNED before Wave 162. A regression that converted
+    ///     ELSE-IF to CONSECUTIVE-IF within case-'o' would change
+    ///     dispatch semantics; a regression that added an outer
+    ///     AdminLevel guard would skip the ERROR-fork emit; Wave
+    ///     162 pins case-'o' /openif ELSE-IF chain arm pos 2 is
+    ///     REACHABLE AND the NO-GUARD structural variant is preserved
+    ///     at the TERMINAL position of the case-'o' ELSE-IF chain.
+    ///   </item>
+    ///   <item>
+    ///     case-'o' ELSE-IF chain TERMINAL-arm regression at
+    ///     <c>PlayerConnection.cpp:6891-6901</c>. /openif is the
+    ///     LAST ELSE-IF arm in case-'o' before the break (the
+    ///     remaining else-if blocks at 6902+ are commented out).
+    ///     After the /openif matcher emits, case-'o' breaks; trailing
+    ///     fallback at 7702 SKIPPED (msg_sent=true). A regression
+    ///     that uncommented the dead else-if blocks or added a
+    ///     competing matcher AFTER /openif matching pch="openif" by
+    ///     accident would produce a second message; Wave 162 pins
+    ///     the case-'o' ELSE-IF chain TERMINAL-arm position as a
+    ///     structural invariant.
+    ///   </item>
+    ///   <item>
+    ///     6-byte %s width within-case-letter double-pin divergence
+    ///     regression at <c>PlayerClass.cpp:3422</c>. Wave 161 pinned
+    ///     6-byte %s width at case-'o' /oeuler ELSE-IF chain arm pos
+    ///     1; Wave 162 pins 6-byte %s width at case-'o' /openif
+    ///     ELSE-IF chain arm pos 2. SAME case-letter, SAME width,
+    ///     DIFFERENT chain-arm position. A regression that broke
+    ///     6-byte %s rendering at one chain-arm position but not the
+    ///     other would fail one pin but not both; Wave 162 deepens
+    ///     6-byte %s coverage to per-chain-arm-position invariance
+    ///     within a single case-letter -- ruling out arm-position-
+    ///     specific format-substitution divergence.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). The MatchOptWithParam
+    /// missing-arg emit is the retail server's documented dispatcher-
+    /// level error path. /openif (open-interface debug command) is
+    /// OPEN to all users in the retail server -- NO outer AdminLevel
+    /// guard at 6891, NO inside-body guard. ERROR path emits
+    /// regardless of AdminLevel. No server permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashOpenifMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (30) = 33 bytes.
+        const int ExpectedReplyPayloadLength = 33;
+        // strlen(literal) + 1 NUL = 30.
+        const short ExpectedReplyLengthField = 30;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 29.
+        const int ExpectedLiteralByteCount = 29;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Openo", shipName: "OpenoShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/openif");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals("Missing arg for option openif", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgOpenifLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/openif\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option openif\". Likely the user-tier case-'o' " +
+                $"dispatch at line 6872 stopped routing, the ELSE-IF chain arm pos 2 at " +
+                $"6891 stopped dispatching, the NO-GUARD structural variant converted " +
+                $"to OUTER-GUARD, the ELSE-IF chain converted to CONSECUTIVE-IF, the " +
+                $"commented-out dead matchers at 6902+ were re-enabled (would change " +
+                $"chain length), the trailing illegal-slash fallback at 7702 fired as " +
+                $"a second emit (msg_sent gate regression), or the missing-arg ERROR " +
+                $"fork at PlayerConnection.cpp:4548 changed shape (esp. vsprintf_s " +
+                $"6-byte %s width).");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
