@@ -9823,4 +9823,231 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 169 missing-arg ERROR literal for case-'s' /signature.
+    /// The matcher at PlayerConnection.cpp:7288 reads
+    /// `if (MatchOptWithParam("signature", pch, param, msg_sent))`
+    /// -- nested INSIDE an OUTER-BLOCK-DEV-guard at line 7286
+    /// (`if (AdminLevel() >= DEV)`) that wraps the matcher AND
+    /// its body. NEW structural pattern: OUTER-BLOCK-DEV-guard
+    /// (distinct from INSIDE-BODY-DEV-guard at Waves 159/167 where
+    /// the matcher runs unconditional and only the body is gated).
+    /// 9 ASCII bytes after %s substitution -- 9-byte width
+    /// DOUBLE-PINNED across 2 case-letters / 2 structural patterns
+    /// after Wave 154 (case-'u' /uitrigger NO-GUARD-ELSE-IF) +
+    /// Wave 169 (case-'s' /signature OUTER-BLOCK-DEV).
+    /// </summary>
+    private const string MissingArgSignatureLiteral = "Missing arg for option signature";
+
+    /// <summary>
+    /// Wave 169 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 36-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/signature</c> (NO param) -- routes through the
+    /// user-tier dispatcher entry at line 5434, the 1-char strip, the
+    /// case-'s' user-tier dispatch at line 7136 (Wave 169 deepens
+    /// case-'s' to SEPTUPLE-PINNED across SEVEN distinct ELSE-IF chain
+    /// positions AND introduces OUTER-BLOCK-DEV-guard structural
+    /// pattern to the HandleSlashCommands catalogue). Prior matchers
+    /// in case-'s' MISMATCH at byte 1 against "signature" (only /scale
+    /// matches byte 1 'c' vs 'i' MISMATCH -- actually 'c' vs 'i' so
+    /// MISMATCH at byte 1; everything else also mismatches by byte 1
+    /// or earlier).
+    ///
+    /// <para>
+    /// The OUTER-BLOCK-DEV-guard at 7286-7457 wraps the entire
+    /// /signature matcher invocation site, /setradius strcmp arm, and
+    /// the /setradius MatchOptWithParam arm, plus the shutdown / sendp
+    /// / strings / stats / shieldbuff arms (the DEV-tier admin block).
+    /// For lower-tier accounts the matcher at 7288 is NEVER INVOKED --
+    /// no ERROR fork emit on /signature. For DEV+ accounts (our admin
+    /// test accounts have AdminLevel=SDEV which is &gt;= DEV) the
+    /// matcher runs: strncmps "signature" against "signature" (9 byte
+    /// match), arg[9]='\0' -- NOT '=', NOT ' ', NOT isalpha,
+    /// allowNoParams=false -- emits "Missing arg for option signature"
+    /// via SendVaMessage at 4548 with default COLOR=5, sets msg_sent=
+    /// true, returns false. Body at 7290 SKIPPED (matcher returned
+    /// false). Falls through OUTER-DEV-block's strcmp/MatchOptWithParam
+    /// /setradius arms (all mismatch /signature). OUTER-DEV-block
+    /// closes at 7457. case-'s' breaks at 7458. Trailing fallback at
+    /// 7702 SKIPPED (msg_sent=true). NET RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>
+    /// THIRTY-EIGHTH pin on the user-tier (single-slash) dispatch
+    /// path. SEVENTH pin on user-tier case-'s' -- case-'s' user-tier
+    /// now SEPTUPLE-PINNED across SEVEN ELSE-IF chain-arm positions.
+    /// THIRTY-SEVENTH pin on the MatchOptWithParam ERROR path. FIRST
+    /// OUTER-BLOCK-DEV-guard pin -- ELEVENTH distinct structural
+    /// dispatcher pattern (MATCHER-FIRST inline / GUARD-FIRST inline /
+    /// OUTER-BLOCK-GUARD / COMBINED / NO-GUARD-ELSE-IF /
+    /// CASE-FALL-THROUGH / CONSECUTIVE-IF / MIXED ELSE-IF+
+    /// CONSECUTIVE-IF / INSIDE-BODY-GM-guard / INSIDE-BODY-DEV-guard /
+    /// INSIDE-BODY-BETA_PLUS-guard / OUTER-BLOCK-DEV-guard). SECOND
+    /// 9-byte %s width pin -- DOUBLE-PINNED across 2 case-letters
+    /// (Wave 154 /uitrigger case-'u' NO-GUARD-ELSE-IF + Wave 169
+    /// /signature case-'s' OUTER-BLOCK-DEV-guard).
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes prior
+    /// waves are structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     NEW OUTER-BLOCK-DEV-guard structural pattern regression at
+    ///     <c>PlayerConnection.cpp:7286-7457</c>. INSIDE-BODY-DEV-guard
+    ///     (Waves 159 /terminate + 167 /stat) pins "matcher runs
+    ///     unconditional, body gated"; OUTER-BLOCK-DEV-guard wraps
+    ///     BOTH matcher AND body. A regression that lifted an
+    ///     INSIDE-BODY guard to OUTER-BLOCK position (or vice versa)
+    ///     would break the ERROR-fork-bypass invariant for
+    ///     INSIDE-BODY-DEV-pinned arms (Waves 159/167) while masking
+    ///     itself at the OUTER-BLOCK-DEV pin. Wave 169 pins the
+    ///     OUTER-BLOCK-DEV emit shape so the DUAL-pattern coverage
+    ///     (INSIDE-BODY-DEV + OUTER-BLOCK-DEV) can detect either
+    ///     direction of structural drift.
+    ///   </item>
+    ///   <item>
+    ///     case-'s' deep ELSE-IF chain SEVENTH-position arm regression
+    ///     at <c>PlayerConnection.cpp:7286</c>. /signature is the
+    ///     SEVENTH case-'s' user-tier arm pinned (/script + /sounds +
+    ///     /scale + /skillpoints + /stat + /scan + /signature). A
+    ///     regression that broke the case-'s' fall-through chain at
+    ///     any intermediate position (CONSECUTIVE-IF conversion,
+    ///     accidental brace closure, swapped order) would prevent
+    ///     /signature from being reachable. Wave 169 pins the FULL
+    ///     case-'s' user-tier chain depth is preserved through SEVEN
+    ///     distinct ELSE-IF arm positions.
+    ///   </item>
+    ///   <item>
+    ///     9-byte %s width cross-case-letter / cross-structural-pattern
+    ///     divergence regression at <c>PlayerClass.cpp:3422</c>. Wave
+    ///     154 pinned 9-byte %s at case-'u' /uitrigger NO-GUARD-ELSE-IF;
+    ///     Wave 169 pins 9-byte %s at case-'s' /signature OUTER-BLOCK-
+    ///     DEV-guard. SAME width, DIFFERENT case-letter AND
+    ///     DIFFERENT structural pattern. A regression that broke
+    ///     vsprintf_s 9-byte %s rendering only on a specific case-
+    ///     letter or under a specific structural-pattern dispatch
+    ///     would fail one pin but not the other; Wave 169 deepens
+    ///     9-byte coverage to DOUBLE-PIN across 2 distinct dispatch
+    ///     paths.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). /signature is
+    /// OUTER-BLOCK-DEV-gated at the dispatcher level -- matcher
+    /// invocation requires AdminLevel &gt;= DEV. For our admin test
+    /// account (AdminLevel=SDEV, satisfies DEV+ tier), the ERROR fork
+    /// at 4548 fires unmodified (same COLOR=5 default; same %s
+    /// substitution path). Pins the tier-gated ERROR fork shape; a
+    /// regression that lowered the OUTER-BLOCK-DEV guard tier (e.g.
+    /// changed to BETA_PLUS or removed the guard entirely) would
+    /// permit the matcher to fire on lower-tier accounts and emit on
+    /// non-DEV accounts -- a server-fidelity regression. No server
+    /// permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSignatureMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (33) = 36 bytes.
+        const int ExpectedReplyPayloadLength = 36;
+        // strlen(literal) + 1 NUL = 33.
+        const short ExpectedReplyLengthField = 33;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 32.
+        const int ExpectedLiteralByteCount = 32;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Signo", shipName: "SignoShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/signature");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals("Missing arg for option signature", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgSignatureLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/signature\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option signature\". Likely the user-tier case-'s' " +
+                $"dispatch at line 7136 stopped routing, the OUTER-BLOCK-DEV-guard " +
+                $"at 7286 gating tier changed (test account AdminLevel may have dropped " +
+                $"below DEV), the matcher at 7288 stopped dispatching, the trailing " +
+                $"illegal-slash fallback at 7702 fired as a second emit, or the " +
+                $"missing-arg ERROR fork at PlayerConnection.cpp:4548 changed shape " +
+                $"(esp. vsprintf_s 9-byte %s width).");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
