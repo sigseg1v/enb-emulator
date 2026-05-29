@@ -14655,4 +14655,123 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 205 missing-arg ERROR literal for user-tier case-'a' /altweapon.
+    /// Matcher at PlayerConnection.cpp:5461 -- GUARD-FIRST-DEV (AdminLevel
+    /// >= DEV THEN MatchOptWithParam). SECOND user-tier case-'a' pin --
+    /// case-'a' now DOUBLE-PINNED. GUARD-FIRST-DEV pattern now DOUBLE-pinned
+    /// within case-'a' (altname + altweapon).
+    /// </summary>
+    private const string MissingArgAltweaponLiteral = "Missing arg for option altweapon";
+
+    /// <summary>
+    /// Wave 205 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 36-byte wire-shape of the single 0x001D MESSAGE_STRING reply to
+    /// user-tier slash <c>/altweapon</c> (NO param). Wave 205 deepens
+    /// case-'a' to DOUBLE-PINNED. GUARD-FIRST-DEV pattern now DOUBLE-pinned
+    /// within case-'a' confirming structural consistency.
+    ///
+    /// <para>
+    /// IF at 5461 chained off strcmp /authlevel at 5455 within case-'a'
+    /// outer block. /anon strcmp 5B byte 1 'l' vs 'n' MISMATCH; /authlevel
+    /// strcmp 10B byte 1 'l' vs 'u' MISMATCH; /altweapon at 5461
+    /// GUARD-FIRST-DEV passes (status=100 >= DEV=80), MatchOptWithParam
+    /// matches arg="altweapon" -- emits "Missing arg for option altweapon"
+    /// at 4548 COLOR=5; /altname GUARD-FIRST-DEV passes, MatchOptWithParam
+    /// strncmp 7B vs arg 9B with len_arg>len_opt: matches "alt" (3 bytes),
+    /// byte 3 arg='w' vs opt='n' MISMATCH -> silent FALSE; /addbaseore
+    /// GUARD-FIRST-DEV passes, MatchOptWithParam strncmp 10B vs arg 9B byte
+    /// 1 'l' vs 'd' MISMATCH -> silent FALSE. case-'a' breaks. NET RESULT:
+    /// ONE emit.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashAltweaponMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (33) = 36 bytes.
+        const int ExpectedReplyPayloadLength = 36;
+        const short ExpectedReplyLengthField = 33;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 32;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Altwo", shipName: "AltwoShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/altweapon");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals("Missing arg for option altweapon", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgAltweaponLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/altweapon\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option altweapon\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
