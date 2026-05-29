@@ -9419,4 +9419,207 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 167 missing-arg ERROR literal for case-'s' /stat.
+    /// The matcher at PlayerConnection.cpp:7219 reads
+    /// `else if (MatchOptWithParam("stat", pch, param, msg_sent))`
+    /// -- NO outer AdminLevel guard, INSIDE-BODY-DEV-guard at 7221
+    /// (`if (AdminLevel() >= DEV)`). FIFTH case-'s' user-tier pin
+    /// (Waves 163 /sounds + 164 /scale + 165 /shieldwarnings + 166
+    /// /skillpoints + 167 /stat). 27 ASCII bytes after %s substitution
+    /// -- 4-byte width matches Waves 146 (/form), 148 (/kick), 150
+    /// (/move), 153 (/tilt), 156 (/warp); 4-byte %s width SEXTUPLE-
+    /// PINNED across 6 case-letters / structural patterns now.
+    /// </summary>
+    private const string MissingArgStatLiteral = "Missing arg for option stat";
+
+    /// <summary>
+    /// Wave 167 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 31-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/stat</c> (NO param) -- routes through the user-tier
+    /// dispatcher entry at line 5434, the 1-char strip, the case-'s'
+    /// user-tier dispatch at line 7136 (Wave 167 deepens case-'s' to
+    /// QUINTUPLE-PINNED across FIVE distinct ELSE-IF chain-arm
+    /// positions AND introduces INSIDE-BODY-DEV-guard pattern to
+    /// case-'s'). Prior matchers in case-'s' MISMATCH at byte 1 against
+    /// "stat" (c/o/c/k MISMATCH). ELSE-IF at 7219 `MatchOptWithParam(
+    /// "stat", pch, param, msg_sent)` -- NO outer AdminLevel guard,
+    /// INSIDE-BODY-DEV-guard at 7221 `if (AdminLevel() >= DEV)`.
+    /// MatchOptWithParam: strncmps "stat" against "stat" (4 byte
+    /// match), arg[4]='\0' -- NOT '=', NOT ' ', NOT isalpha,
+    /// allowNoParams=false -- emits "Missing arg for option stat"
+    /// via SendVaMessage at 4548 with default COLOR=5, sets msg_sent=
+    /// true, returns false. Body block at 7221-7246 SKIPPED (matcher
+    /// returned false; INSIDE-BODY-DEV-guard NEVER EVALUATED -- the
+    /// ERROR-fork-bypass invariant being pinned at DEV tier). case-'s'
+    /// chain continues but no later arm matches "stat"; case-'s'
+    /// breaks. Trailing fallback at 7702 SKIPPED (msg_sent=true).
+    /// NET RESULT: ONE emit.
+    ///
+    /// <para>
+    /// THIRTY-SIXTH pin on the user-tier (single-slash) dispatch path.
+    /// FIFTH pin on user-tier case-'s' -- case-'s' user-tier now
+    /// QUINTUPLE-PINNED across FIVE ELSE-IF chain-arm positions.
+    /// THIRTY-FIFTH pin on the MatchOptWithParam ERROR path. FOURTH
+    /// INSIDE-BODY-guard pin (Waves 156 /warp GM + 159 /terminate
+    /// DEV + 166 /skillpoints GM + 167 /stat DEV) -- INSIDE-BODY-
+    /// guard QUADRUPLE-PINNED with INSIDE-BODY-GM and INSIDE-BODY-DEV
+    /// EACH DOUBLE-PINNED at this point. SIXTH 4-byte %s width pin --
+    /// SEXTUPLE-PINNED across 6 case-letters / structural patterns
+    /// (Waves 146 /form COMBINED-GUARD case-'f' + 148 /kick CASE-
+    /// FALL-THROUGH case-'k' + 150 /move NO-GUARD-ELSE-IF case-'m' +
+    /// 153 /tilt CONSECUTIVE-IF case-'t' + 156 /warp INSIDE-BODY-GM
+    /// case-'w' + 167 /stat INSIDE-BODY-DEV case-'s').
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes prior waves
+    /// are structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     INSIDE-BODY-DEV-guard cross-arm divergence regression at
+    ///     <c>PlayerConnection.cpp:7221</c> vs <c>7501</c>. Wave 159
+    ///     pinned INSIDE-BODY-DEV-guard at /terminate (case-'t');
+    ///     Wave 167 pins INSIDE-BODY-DEV-guard at /stat (case-'s').
+    ///     SAME tier, DIFFERENT case-letter. A regression that broke
+    ///     the ERROR-fork-bypass for one DEV-gated arm but not the
+    ///     other would fail one pin but not both; Wave 167 deepens
+    ///     INSIDE-BODY-DEV ERROR-fork-bypass to DOUBLE-PINNED across
+    ///     2 case-letters -- ruling out case-letter-specific INSIDE-
+    ///     BODY-DEV-guard regressions.
+    ///   </item>
+    ///   <item>
+    ///     INSIDE-BODY-guard tier symmetry regression at <c>PlayerConnection.cpp</c>.
+    ///     After Wave 167, BOTH guard tiers (GM and DEV) have TWO
+    ///     INSIDE-BODY pins each (GM: Waves 156 /warp + 166
+    ///     /skillpoints; DEV: Waves 159 /terminate + 167 /stat).
+    ///     This pins symmetric coverage of the INSIDE-BODY-guard
+    ///     ERROR-fork-bypass invariant across BOTH tier families --
+    ///     a regression that gated the ERROR-fork emit behind ANY
+    ///     AdminLevel tier (GM or DEV) would fail at LEAST 2 of the
+    ///     4 pins.
+    ///   </item>
+    ///   <item>
+    ///     4-byte %s width SIXTH cross-structural-pattern divergence
+    ///     regression at <c>PlayerClass.cpp:3422</c>. 4-byte %s now
+    ///     pinned at SIX distinct (case-letter, structural-pattern)
+    ///     combinations -- f/COMBINED-GUARD, k/CASE-FALL-THROUGH,
+    ///     m/NO-GUARD-ELSE-IF, t/CONSECUTIVE-IF, w/INSIDE-BODY-GM,
+    ///     s/INSIDE-BODY-DEV. A regression in vsprintf_s 4-byte path
+    ///     specific to ONE (case-letter, pattern) combination would
+    ///     fail one pin but not all six; Wave 167 deepens 4-byte
+    ///     coverage to SEXTUPLE-PIN across 6 distinct dispatch paths.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). /stat is open to
+    /// ALL users at the dispatcher level -- the INSIDE-BODY-DEV-guard
+    /// at 7221 restricts the SUCCESS path to DEV+ only, but the ERROR
+    /// fork at 4548 emits for ALL tiers (faithful to retail).
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashStatMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (28) = 31 bytes.
+        const int ExpectedReplyPayloadLength = 31;
+        // strlen(literal) + 1 NUL = 28.
+        const short ExpectedReplyLengthField = 28;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 27.
+        const int ExpectedLiteralByteCount = 27;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Stato", shipName: "StatoShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/stat");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals("Missing arg for option stat", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgStatLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/stat\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option stat\". Likely the user-tier case-'s' " +
+                $"dispatch at line 7136 stopped routing, the ELSE-IF chain arm at " +
+                $"7219 stopped dispatching, the INSIDE-BODY-DEV-guard moved BEFORE " +
+                $"the matcher (gating the ERROR-fork emit behind DEV-tier), the " +
+                $"trailing illegal-slash fallback at 7702 fired as a second emit, " +
+                $"or the missing-arg ERROR fork at PlayerConnection.cpp:4548 changed " +
+                $"shape (esp. vsprintf_s 4-byte %s width).");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
