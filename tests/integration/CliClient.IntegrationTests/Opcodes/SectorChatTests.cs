@@ -5336,4 +5336,216 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 149 missing-arg ERROR literal for case-'i' /invite. The
+    /// matcher at PlayerConnection.cpp:6709 reads
+    /// `if (MatchOptWithParam("invite", pch, param, msg_sent))` with
+    /// NEITHER outer-block AdminLevel guard NOR inline AdminLevel guard
+    /// -- matcher dispatches unconditionally. With NO param after
+    /// "/invite", MatchOptWithParam's matcher branch matches 6 bytes,
+    /// arg[6]='\0' -- NOT '=' / NOT ' ' / NOT isalpha, allowNoParams
+    /// false, so falls through to else at line 4546 and hits the
+    /// separator-check NUL fall-through. 29 ASCII bytes after %s
+    /// substitution -- 6-byte %s width (SAME as Wave 145's user-tier
+    /// case-e effect OUTER-BLOCK-GUARD; Wave 149 provides cross-case-
+    /// letter SAME-WIDTH structural-pattern divergence at 6-byte AND
+    /// deepens the NO-GUARD inline matcher coverage to TWO pins).
+    /// </summary>
+    private const string MissingArgInviteLiteral = "Missing arg for option invite";
+
+    /// <summary>
+    /// Wave 149 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 33-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/invite</c> (NO param) -- routes through the user-tier
+    /// dispatcher entry at line 5434, the 1-char strip, the case-'i'
+    /// user-tier dispatch (NEW case-letter), hits the NO-GUARD inline
+    /// matcher at line 6709 <c>if (MatchOptWithParam("invite", pch,
+    /// param, msg_sent))</c>. With pch="invite" and NO param, the
+    /// matcher matches 6 bytes, falls through allowNoParams=false to
+    /// the separator-check else, emits "Missing arg for option invite"
+    /// via SendVaMessage at line 4548, sets msg_sent=true, returns
+    /// false. Body block (GetGameIDFromName/GroupInvite) skipped.
+    /// Execution then traverses the SECOND structural block at line
+    /// 6730 <c>if (AdminLevel() &gt;= GM) { ... "invisible" ... "invis"
+    /// ... }</c> -- enters because status=100, but strcmp("invite",
+    /// "invisible") != 0 skip, strcmp("invite","invis") != 0 skip,
+    /// outer block ends, case-'i' breaks at 6754. NET RESULT: ONE
+    /// emit.
+    ///
+    /// <para>
+    /// EIGHTEENTH pin on the user-tier (single-slash) dispatch path.
+    /// FIRST pin on user-tier case-'i' -- NEW case-letter extends
+    /// user-tier dispatcher switch coverage to THIRTEEN distinct
+    /// case-letters (a/b/c/d/e/f/h/i/k/l/n/p/r). SEVENTEENTH pin on
+    /// the MatchOptWithParam ERROR path. SAME 6-byte option-name %s
+    /// width as Wave 145 (user-tier case-'e' effect OUTER-BLOCK-GUARD)
+    /// BUT via DIFFERENT case-letter AND DIFFERENT structural pattern
+    /// -- pins cross-case-letter SAME-WIDTH structural-pattern
+    /// divergence at 6-byte. SECOND pin on the NO-GUARD inline matcher
+    /// structural pattern (FIRST was Wave 147 case-'h' /ht); Wave 149
+    /// is the FIRST SAME-STRUCTURAL-PATTERN deepening of NO-GUARD --
+    /// a structural-pattern deepening pin where both pins share the
+    /// SAME pattern but different case-letter, ruling out per-case-
+    /// letter regressions within the NO-GUARD pattern.
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes Wave 148
+    /// is structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     user-tier case-'i' dispatch + NO-GUARD inline matcher
+    ///     regression at <c>PlayerConnection.cpp:6708-6728</c>.
+    ///     case-'i' was previously unpinned in the user-tier switch;
+    ///     a regression that dropped case-'i' entirely, reordered case
+    ///     labels, or routed *pch=='i' to the wrong handler would
+    ///     silently swallow /invite. A regression that wrapped
+    ///     /invite in any AdminLevel guard would skip the matcher for
+    ///     non-privileged users and fail this test. Wave 149 pins
+    ///     case-'i' is REACHABLE via the user-tier switch dispatcher
+    ///     AND the NO-GUARD inline matcher dispatches correctly to
+    ///     emit on missing arg.
+    ///   </item>
+    ///   <item>
+    ///     MIXED structural-pattern within case-'i' regression at
+    ///     <c>PlayerConnection.cpp:6709-6753</c>. case-'i' has TWO
+    ///     different structural patterns coexisting: NO-GUARD inline
+    ///     matcher at 6709 (/invite) AND OUTER-BLOCK-GUARD at 6730
+    ///     wrapping "invisible" + "invis" strcmps. With pch="invite",
+    ///     the first matcher emits and msg_sent=true; the second
+    ///     block enters (status=100 >= GM) but both strcmps fail
+    ///     against pch="invite". NET RESULT: ONE emit. A regression
+    ///     that ADDED a competing matcher in the outer-block-guard
+    ///     section that matched against pch="invite" (e.g. a typo
+    ///     "invit*" matcher) would produce a second message. Wave 149
+    ///     pins the mixed structural-pattern within a single case-
+    ///     letter -- a structural-locality invariant.
+    ///   </item>
+    ///   <item>
+    ///     cross-case-letter SAME-WIDTH structural-pattern divergence
+    ///     regression at <c>PlayerClass.cpp:3422</c>. Wave 145 pins
+    ///     6-byte at user-tier case-'e' OUTER-BLOCK-GUARD; Wave 149
+    ///     pins 6-byte at user-tier case-'i' NO-GUARD inline. Same
+    ///     width, different case-letter, different structural
+    ///     pattern. A regression in vsprintf_s with off-by-one at
+    ///     6-byte width AND a specific case-letter/structural-
+    ///     pattern dispatch path would fail one but not the other;
+    ///     Wave 149 rules out per-case-letter AND per-structural-
+    ///     pattern format-substitution branches at 6-byte width.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). The MatchOptWithParam
+    /// missing-arg emit is the retail server's documented dispatcher-
+    /// level error path; /invite has NO AdminLevel guard in the retail
+    /// server -- it's a "user-tier" command available to all players
+    /// (group invitation is a baseline social feature). No server
+    /// permissiveness added; the pin preserves retail behavior.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashInviteMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (30) = 33 bytes.
+        const int ExpectedReplyPayloadLength = 33;
+        // strlen(literal) + 1 NUL = 30.
+        const short ExpectedReplyLengthField = 30;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 29.
+        const int ExpectedLiteralByteCount = 29;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Invitee", shipName: "InviteeShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/invite");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // EXACT equals filter (not StartsWith) -- defensive against
+                // any future sibling "invite*" option emits in case-'i'.
+                if (!text.Equals("Missing arg for option invite", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgInviteLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/invite\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option invite\". Likely the user-tier case-'i' " +
+                $"dispatch at line 6708 stopped routing, the NO-GUARD inline matcher " +
+                $"at line 6709 stopped dispatching, an AdminLevel guard was wrapped " +
+                $"around the matcher (regression), the second structural block at " +
+                $"line 6730 produced a competing emit (regression), or the missing-arg " +
+                $"ERROR fork at PlayerConnection.cpp:4548 changed shape.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
