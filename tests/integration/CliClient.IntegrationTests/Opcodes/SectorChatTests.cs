@@ -4489,4 +4489,214 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Verbatim body of the 0x001D MESSAGE_STRING reply the server emits
+    /// when the user-tier case-'e' OUTER-AdminLevel-GUARDED matcher at
+    /// <c>PlayerConnection.cpp:6076</c> -- wrapped inside the outer
+    /// <c>if (AdminLevel() &gt;= GM)</c> block at line 6074 --
+    /// passes the OUTER AdminLevel block (status=100 satisfies GM=50),
+    /// then runs MatchOptWithParam("effect", ...) which matches 6 bytes
+    /// and hits the separator-check NUL fall-through. 29 ASCII bytes
+    /// after %s substitution -- 6-byte %s width (SAME as Wave 134's
+    /// user-tier case-c chjoin; Wave 145 provides
+    /// cross-case-letter SAME-WIDTH divergence at 6-byte AND NEW
+    /// outer-AdminLevel-guard structural pattern divergence).
+    /// </summary>
+    private const string MissingArgEffectLiteral = "Missing arg for option effect";
+
+    /// <summary>
+    /// Wave 145 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 33-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/effect</c> (NO param) -- routes through the
+    /// user-tier dispatcher entry at line 5434, the 1-char strip, the
+    /// case-'e' user-tier dispatch (NEW case-letter), traverses the
+    /// case-'e' head matchers (endtalk, enableskills both strcmp-fail),
+    /// then enters the OUTER <c>if (AdminLevel() &gt;= GM)</c> block at
+    /// line 6074, and hits the effect matcher at line 6076 -- the FIRST
+    /// OUTER-AdminLevel-GUARD structural pattern pin in the catalogue
+    /// (matcher NOT inline-guarded; the AdminLevel gate wraps a BLOCK
+    /// containing multiple matchers -- effect, effecto, effects,
+    /// exposedecos, errorson, errorsoff), then the missing-arg ERROR
+    /// fork at <c>PlayerConnection.cpp:4548</c>.
+    ///
+    /// <para>
+    /// FOURTEENTH pin on the user-tier (single-slash) dispatch path.
+    /// FIRST pin on user-tier case-'e' -- NEW case-letter extends
+    /// user-tier dispatcher switch coverage to NINE distinct
+    /// case-letters (a/b/c/d/e/l/n/p/r). THIRTEENTH pin on the
+    /// MatchOptWithParam ERROR path with SAME 6-byte option-name %s
+    /// width as Wave 134 (user-tier case-'c' chjoin) BUT via DIFFERENT
+    /// case-letter -- pins cross-case-letter SAME-WIDTH structural
+    /// divergence. FIRST pin on the OUTER-AdminLevel-GUARD structural
+    /// pattern (NEW structural variant -- prior pins covered
+    /// MATCHER-FIRST inline AdminLevel at Waves 139 case-g SDEV-guard
+    /// 11-byte and 143 user-tier case-d DEV-guard 1-byte; GUARD-FIRST
+    /// inline AdminLevel at Wave 144 case-r DEV-guard 13-byte;
+    /// Wave 145 is the FIRST OUTER-BLOCK-GUARD where the AdminLevel
+    /// gate wraps an entire matcher block rather than a single matcher).
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes Wave 144
+    /// is structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     user-tier case-'e' dispatch + head-matcher chain regression
+    ///     at <c>PlayerConnection.cpp:6045-6076</c>. case-'e' was
+    ///     previously unpinned in the user-tier switch; a regression
+    ///     that dropped case-'e' entirely, reordered case labels, or
+    ///     routed *pch=='e' to the wrong handler would silently
+    ///     swallow /effect (along with /effecto, /effects, /exposedecos,
+    ///     /errorson, /errorsoff, /endtalk, /enableskills). Wave 145
+    ///     pins case-'e' is REACHABLE via the user-tier switch
+    ///     dispatcher AND the head-matcher chain (endtalk strcmp at
+    ///     6047, enableskills strcmp at 6054) fall-through correctly
+    ///     to the outer-guard block at line 6074.
+    ///   </item>
+    ///   <item>
+    ///     OUTER-AdminLevel-GUARD structural regression at
+    ///     <c>PlayerConnection.cpp:6074</c>. The block reads
+    ///     <c>if (AdminLevel() &gt;= GM) { ... if (MatchOptWithParam(
+    ///     "effect", ...)) ... }</c>. The OUTER block-guard wraps SIX
+    ///     matchers (effect, effecto, effects, exposedecos, errorson,
+    ///     errorsoff); a regression that flipped, dropped, or
+    ///     misordered the outer guard would either (a) expose ALL six
+    ///     matchers to low-privilege users (regression dropping outer
+    ///     guard) or (b) deny ALL six matchers to GM-tier users
+    ///     (regression tightening guard). With status=100 (AdminLevel
+    ///     &gt;= GM), guard passes and matcher runs -- emit fires. The
+    ///     structural variant is NEW: prior pins (Waves 139/143/144)
+    ///     all guarded ONE matcher inline; Wave 145 is the FIRST pin
+    ///     where the AdminLevel gate wraps an ENTIRE BLOCK of matchers
+    ///     -- a different breakage class.
+    ///   </item>
+    ///   <item>
+    ///     case-'e' head-matcher fall-through regression at
+    ///     <c>PlayerConnection.cpp:6047-6076</c>. Before the effect
+    ///     matcher, case-'e' has TWO head matchers (endtalk strcmp at
+    ///     6047, enableskills strcmp at 6054 -- note these are NOT
+    ///     else-ifs but bare ifs; both must strcmp-fail for control
+    ///     to reach the outer-guard block). With pch="effect": strcmp(
+    ///     "effect","endtalk") != 0 skips; strcmp("effect",
+    ///     "enableskills") != 0 skips; control reaches line 6074. A
+    ///     regression that made either head matcher emit a competing
+    ///     message or short-circuit case-'e' (e.g. add msg_sent=true
+    ///     in the wrong branch) would silently swallow the /effect
+    ///     emit. Wave 145 pins TWO-step head-matcher fall-through
+    ///     within case-'e' before the outer-guarded matcher block.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). The MatchOptWithParam
+    /// missing-arg emit is the retail server's documented dispatcher-level
+    /// error path; the OUTER AdminLevel &gt;= GM gate enforces the
+    /// retail server's privilege check (low-privilege users do not
+    /// learn that /effect exists). No server permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashEffectMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (30) = 33 bytes.
+        const int ExpectedReplyPayloadLength = 33;
+        // strlen(literal) + 1 NUL = 30.
+        const short ExpectedReplyLengthField = 30;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 29.
+        const int ExpectedLiteralByteCount = 29;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Effecta", shipName: "EffectaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/effect");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // EXACT equals filter (not StartsWith) -- "Missing arg for option effect"
+                // is a prefix of sibling option emits ("effecto", "effects").
+                if (!text.Equals("Missing arg for option effect", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgEffectLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/effect\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option effect\". Likely the user-tier case-'e' " +
+                $"dispatch at line 6045 stopped routing, the head matchers (endtalk/" +
+                $"enableskills) at lines 6047/6054 incorrectly short-circuited, the " +
+                $"OUTER AdminLevel >= GM block at line 6074 failed (status=100 admin " +
+                $"should pass), the effect matcher at line 6076 stopped dispatching, " +
+                $"or the missing-arg ERROR fork at PlayerConnection.cpp:4548 changed shape.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
