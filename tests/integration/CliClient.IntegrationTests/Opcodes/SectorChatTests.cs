@@ -12755,4 +12755,121 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 189 missing-arg ERROR literal for case-'c' /changepassword.
+    /// Matcher at PlayerConnection.cpp:5698 -- NO-GUARD-ELSE-IF
+    /// pattern (chained via `else if` to the /ccamera arm at 5684
+    /// without any outer or inside-body guard around the matcher
+    /// itself). FOURTH case-'c' user-tier pin -- case-'c' user-tier
+    /// now QUADRUPLE-PINNED.
+    /// </summary>
+    private const string MissingArgChangepasswordLiteral = "Missing arg for option changepassword";
+
+    /// <summary>
+    /// Wave 189 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 41-byte wire-shape of the single 0x001D MESSAGE_STRING reply to
+    /// user-tier slash <c>/changepassword</c> (NO param). Wave 189
+    /// deepens case-'c' to QUADRUPLE-PINNED and ratchets 14-byte %s
+    /// width to TRIPLE-PINNED.
+    ///
+    /// <para>
+    /// ELSE-IF at 5698 `MatchOptWithParam("changepassword", pch, param,
+    /// msg_sent)` -- the matcher's missing-arg fork at 4548 fires
+    /// regardless of admin level. Preceding /chjoin at 5633 strncmp
+    /// fails at byte 2 ('j' vs 'a'); /chleave at 5667 strncmp fails at
+    /// byte 2 ('l' vs 'a'); /ccamera at 5684 strncmp fails at byte 1
+    /// ('c' vs 'h'). NET RESULT: ONE emit. CRITICAL safety: the
+    /// matcher's missing-arg ERROR fork emits BEFORE ChangePassword
+    /// is invoked, so no password mutation occurs.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashChangepasswordMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (38) = 41 bytes.
+        const int ExpectedReplyPayloadLength = 41;
+        const short ExpectedReplyLengthField = 38;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 37;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Chango", shipName: "ChangoShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/changepassword");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals("Missing arg for option changepassword", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgChangepasswordLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/changepassword\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option changepassword\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
