@@ -192,6 +192,7 @@ public static class TestAccounts
             ["SlashChleaveMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                          = A(9_000_127, "cli_test127"),
             ["SlashSlashAdduserMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                     = A(9_000_128, "cli_test128"),
             ["SlashSlashBanMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                         = A(9_000_129, "cli_test129"),
+            ["SlashSlashGmgetaccessMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                 = A(9_000_130, "cli_test130"),
         };
 
     /// <summary>
