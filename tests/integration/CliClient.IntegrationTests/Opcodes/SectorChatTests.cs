@@ -13375,4 +13375,120 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 194 missing-arg ERROR literal for case-'f' /ftype.
+    /// Matcher at PlayerConnection.cpp:6406 -- NO-GUARD-ELSE-IF
+    /// pattern chained off /fradius at 6401, inside the
+    /// OUTER-BLOCK-DEV-guard at 6394. THIRD case-'f' user-tier pin --
+    /// case-'f' now TRIPLE-PINNED.
+    /// </summary>
+    private const string MissingArgFtypeLiteral = "Missing arg for option ftype";
+
+    /// <summary>
+    /// Wave 194 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 32-byte wire-shape of the single 0x001D MESSAGE_STRING reply to
+    /// user-tier slash <c>/ftype</c> (NO param). Wave 194 deepens
+    /// case-'f' to TRIPLE-PINNED.
+    ///
+    /// <para>
+    /// ELSE-IF at 6406 `MatchOptWithParam("ftype", pch, param,
+    /// msg_sent)` -- chained off /fradius at 6401 inside the
+    /// OUTER-BLOCK-DEV-guard at 6394. Preceding /fradius at 6401
+    /// strncmp("fradius","ftype",5) byte 1 'r' vs 't' MISMATCH ->
+    /// silent FALSE. /ftype at 6406 matches arg="ftype" -- emits
+    /// "Missing arg for option ftype" at 4548 COLOR=5, returns FALSE.
+    /// Subsequent else-if /flevel /fcount /faddasteroidtype/
+    /// /faddoretofield /fdelorefromfield /faddoretosector/
+    /// /fdelorefromsector all MISMATCH. NET RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashFtypeMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (29) = 32 bytes.
+        const int ExpectedReplyPayloadLength = 32;
+        const short ExpectedReplyLengthField = 29;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 28;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Ftypo", shipName: "FtypoShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/ftype");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals("Missing arg for option ftype", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgFtypeLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/ftype\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option ftype\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
