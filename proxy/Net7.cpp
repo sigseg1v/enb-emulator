@@ -195,7 +195,7 @@ int main(int argc, char* argv[])
         else
         {
             LogMessage("Net7Proxy: NET7_GAME_SERVER_HOST already set to '%s' "
-                       "— keeping it (split-deployment override wins over "
+                       "-- keeping it (split-deployment override wins over "
                        "NET7_UPSTREAM_HOST)\n", env_game_host);
         }
     }
