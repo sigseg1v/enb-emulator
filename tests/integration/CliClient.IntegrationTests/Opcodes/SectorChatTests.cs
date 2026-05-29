@@ -7152,4 +7152,240 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 157 missing-arg ERROR literal for case-'u' /upgrade. The
+    /// matcher at PlayerConnection.cpp:7593 reads
+    /// `else if (MatchOptWithParam("upgrade", pch, param, msg_sent))`
+    /// -- NO outer AdminLevel guard, INSIDE-BODY GM-guard
+    /// (which only affects SUCCESS path; ERROR path emits
+    /// regardless of AdminLevel). SECOND INSIDE-BODY-GUARD
+    /// pin (Wave 156 /warp + Wave 157 /upgrade). With NO param
+    /// after "/upgrade", strncmp matches 7 bytes, arg[7]='\0' fails
+    /// separator-check, allowNoParams=false -- emits "Missing arg
+    /// for option upgrade", returns false. Body block (GM-guard +
+    /// ShipUpgrade) SKIPPED. 30 ASCII bytes after %s substitution
+    /// -- 7-byte %s width deepened to triple-pin via the INSIDE-
+    /// BODY-GUARD structural variant.
+    /// </summary>
+    private const string MissingArgUpgradeLiteral = "Missing arg for option upgrade";
+
+    /// <summary>
+    /// Wave 157 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 34-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/upgrade</c> (NO param) -- routes through the
+    /// user-tier dispatcher entry at line 5434, the 1-char strip, the
+    /// case-'u' user-tier dispatch (case-letter already pinned by
+    /// Wave 154 via /uitrigger HEAD matcher at 7576; Wave 157 deepens
+    /// case-'u' to the ELSE-IF chain arm /upgrade at 7593). HEAD
+    /// matcher at 7576 /uitrigger 9-byte: strncmp("uitrigger","upgrade",9)
+    /// u-u, i-p MISMATCH idx 1 false NO emit. else-if at 7593 /upgrade
+    /// NO-OUTER-GUARD INSIDE-BODY-GM-GUARD: strncmp("upgrade","upgrade",7)
+    /// all match, arg[7]='\0' fails separator-check, allowNoParams=false,
+    /// emits "Missing arg for option upgrade" via SendVaMessage at 4548,
+    /// sets msg_sent=true, returns false. INSIDE-BODY GM-guard
+    /// `if (AdminLevel() >= GM)` at 7596/7598 for SUCCESS path SKIPPED
+    /// (matcher returned false, body block never entered). else-if at
+    /// 7607 `strcmp(pch,"undockp")` FAIL. else-if at 7614
+    /// `strcmp(pch,"uptime")` FAIL. case-'u' breaks at 7625. Trailing
+    /// fallback `if (!success &amp;&amp; !msg_sent) SendVaMessage("Illegal
+    /// slash command: %s", pch)` at 7702 SKIPPED because msg_sent=true.
+    /// NET RESULT: ONE emit.
+    ///
+    /// <para>
+    /// TWENTY-SIXTH pin on the user-tier (single-slash) dispatch path.
+    /// SECOND pin on user-tier case-'u' (Wave 154 pinned the HEAD
+    /// matcher /uitrigger at 7576; Wave 157 deepens case-'u' coverage
+    /// to the ELSE-IF chain arm /upgrade at 7593). TWENTY-FIFTH pin
+    /// on the MatchOptWithParam ERROR path. SECOND INSIDE-BODY-GUARD
+    /// pin -- Wave 156 introduced the structural pattern at case-'w'
+    /// /warp 4-byte; Wave 157 deepens to case-'u' /upgrade 7-byte;
+    /// INSIDE-BODY-GUARD is now DOUBLE-PINNED across TWO distinct
+    /// case-letters AND TWO distinct %s widths. THIRD 7-byte %s
+    /// width pin (Wave 144 /clear at case-'c' GUARD-FIRST inline +
+    /// Wave 154 reference to /upgrade noted; actually wait -- let me
+    /// recount: 7-byte width pins prior to Wave 157 were Wave 144
+    /// case-'c' /clear GUARD-FIRST inline; Wave 157 adds case-'u'
+    /// /upgrade NO-OUTER-GUARD INSIDE-BODY-GM-GUARD ELSE-IF as the
+    /// SECOND 7-byte pin) -- SAME width DIFFERENT case-letter
+    /// DIFFERENT structural pattern.
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes Wave 156
+    /// is structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     case-'u' ELSE-IF chain arm deepening regression at
+    ///     <c>PlayerConnection.cpp:7593-7606</c>. Wave 154 pinned
+    ///     the HEAD matcher /uitrigger at 7576 (NO-GUARD ELSE-IF
+    ///     pattern, no body guard); case-'u' /upgrade at 7593 sits
+    ///     on the ELSE-IF chain arm (chained off /uitrigger) and
+    ///     was UNPINNED before Wave 157. A regression that converted
+    ///     ELSE-IF to CONSECUTIVE-IF within case-'u' would change
+    ///     dispatch semantics (independent CONSECUTIVE-IF would NOT
+    ///     short-circuit when /uitrigger matched); a regression
+    ///     that converted NO-OUTER-GUARD INSIDE-BODY-GM-GUARD to
+    ///     OUTER-GUARD GM-GUARD would skip the ERROR-fork emit for
+    ///     non-GM users (the body GM-guard gates SUCCESS only;
+    ///     pulling it outside the matcher would also gate ERROR);
+    ///     Wave 157 pins case-'u' /upgrade ELSE-IF chain arm is
+    ///     REACHABLE AND the NO-OUTER-GUARD INSIDE-BODY-GM-GUARD
+    ///     structural variant is preserved at this case-letter.
+    ///   </item>
+    ///   <item>
+    ///     case-'u' ELSE-IF chain fall-through regression at
+    ///     <c>PlayerConnection.cpp:7607-7625</c>. After the /upgrade
+    ///     matcher emits, execution leaves the ELSE-IF chain
+    ///     (because /upgrade matched and short-circuited the else-if
+    ///     to /undockp and /uptime at 7607/7614), case-'u' breaks at
+    ///     7625; trailing fallback at 7702 SKIPPED (msg_sent=true).
+    ///     A regression that converted ELSE-IF to CONSECUTIVE-IF
+    ///     would cause /undockp and /uptime strcmps to run after
+    ///     /upgrade emits; both FAIL against pch="upgrade" so no
+    ///     second emit would result, but the structural semantics
+    ///     would have changed; a regression that flipped the
+    ///     trailing fallback's `!msg_sent` to `msg_sent` would emit
+    ///     a second "Illegal slash command: upgrade" message;
+    ///     Wave 157 pins the ELSE-IF chain fall-through as a
+    ///     structural invariant via the EXACT-equals filter.
+    ///   </item>
+    ///   <item>
+    ///     INSIDE-BODY-GUARD pattern + 7-byte %s width cross-case-
+    ///     letter cross-width divergence regression at
+    ///     <c>PlayerClass.cpp:3422</c>. Wave 156 pinned INSIDE-
+    ///     BODY-GUARD at case-'w' /warp 4-byte; Wave 157 pins
+    ///     INSIDE-BODY-GUARD at case-'u' /upgrade 7-byte. SAME
+    ///     structural pattern, DIFFERENT case-letter, DIFFERENT
+    ///     width. A regression that selectively broke INSIDE-BODY-
+    ///     GUARD at one case-letter or one width but not the other
+    ///     would fail one pin but not both; Wave 157 deepens
+    ///     INSIDE-BODY-GUARD to cross-case-letter cross-width
+    ///     coverage. Additionally 7-byte %s width is now DOUBLE-
+    ///     PINNED across TWO distinct case-letters (Wave 144 case-c
+    ///     /clear GUARD-FIRST + Wave 157 case-u /upgrade NO-OUTER-
+    ///     GUARD INSIDE-BODY-GM-GUARD) ruling out per-case-letter
+    ///     AND per-structural-pattern format-substitution branches
+    ///     at 7-byte width.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). The MatchOptWithParam
+    /// missing-arg emit is the retail server's documented dispatcher-
+    /// level error path. /upgrade (ship-upgrade-by-id command) had NO
+    /// outer AdminLevel guard in the retail server -- INSIDE-BODY GM
+    /// check gates SUCCESS path only (ship upgrades are GM-restricted
+    /// because they grant items); ERROR path emits regardless of
+    /// AdminLevel. No server permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashUpgradeMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (31) = 34 bytes.
+        const int ExpectedReplyPayloadLength = 34;
+        // strlen(literal) + 1 NUL = 31.
+        const short ExpectedReplyLengthField = 31;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 30.
+        const int ExpectedLiteralByteCount = 30;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Upgro", shipName: "UpgroShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/upgrade");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // EXACT equals filter (not StartsWith) -- defensive against
+                // any future spurious "Illegal slash command: upgrade" emit
+                // if the trailing fallback at line 7702 msg_sent gate
+                // regresses.
+                if (!text.Equals("Missing arg for option upgrade", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgUpgradeLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/upgrade\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option upgrade\". Likely the user-tier case-'u' " +
+                $"dispatch at line 7575 stopped routing, the HEAD matcher /uitrigger at " +
+                $"7576 stopped falling through to /upgrade at 7593 (ELSE-IF chain " +
+                $"regression), the NO-OUTER-GUARD INSIDE-BODY-GM-GUARD structural variant " +
+                $"converted to OUTER-GM-GUARD (would skip ERROR emit for non-GM), the " +
+                $"INSIDE-BODY GM-guard leaked into the ERROR path (regression), the " +
+                $"trailing illegal-slash fallback at 7702 fired as a second emit " +
+                $"(msg_sent gate regression), or the missing-arg ERROR fork at " +
+                $"PlayerConnection.cpp:4548 changed shape (esp. vsprintf_s 7-byte %s width).");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
