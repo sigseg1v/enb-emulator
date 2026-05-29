@@ -5119,4 +5119,221 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Verbatim body of the 0x001D MESSAGE_STRING reply the server emits
+    /// when the user-tier case-'k' OUTER-AdminLevel-GUARDED matcher at
+    /// <c>PlayerConnection.cpp:6759</c> -- wrapped inside the outer
+    /// <c>if (AdminLevel() &gt;= GM)</c> block at line 6757 --
+    /// passes the OUTER AdminLevel block (status=100 satisfies GM=50),
+    /// then runs MatchOptWithParam("kick", ...) which matches 4 bytes
+    /// and hits the separator-check NUL fall-through. 27 ASCII bytes
+    /// after %s substitution -- 4-byte %s width (SAME as Wave 146's
+    /// user-tier case-f form COMBINED-GUARD; Wave 148 provides
+    /// cross-case-letter SAME-WIDTH structural-pattern divergence at
+    /// 4-byte AND NEW CASE-FALL-THROUGH structural pattern).
+    /// </summary>
+    private const string MissingArgKickLiteral = "Missing arg for option kick";
+
+    /// <summary>
+    /// Wave 148 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 31-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/kick</c> (NO param) -- routes through the user-tier
+    /// dispatcher entry at line 5434, the 1-char strip, the case-'k'
+    /// user-tier dispatch (NEW case-letter), enters the OUTER
+    /// <c>if (AdminLevel() &gt;= GM)</c> block at line 6757, hits the
+    /// kick matcher at line 6759, then -- and this is the key
+    /// structural variant -- FALLS THROUGH to case-'l' at line 6766
+    /// because case-'k' has NO `break` statement at line 6764. The
+    /// fall-through traverses case-'l's matchers (leavegroup, levelout,
+    /// level, lootstats) all of which strcmp/strncmp-fail against
+    /// pch="kick", then case-'l' breaks at line 6822. NET RESULT: ONE
+    /// emit, but a regression that ADDED a competing emit anywhere in
+    /// case-'l' would silently produce a second message after /kick.
+    /// FIRST pin on the CASE-FALL-THROUGH structural pattern in the
+    /// catalogue.
+    ///
+    /// <para>
+    /// SEVENTEENTH pin on the user-tier (single-slash) dispatch path.
+    /// FIRST pin on user-tier case-'k' -- NEW case-letter extends
+    /// user-tier dispatcher switch coverage to TWELVE distinct
+    /// case-letters (a/b/c/d/e/f/h/k/l/n/p/r). SIXTEENTH pin on the
+    /// MatchOptWithParam ERROR path with SAME 4-byte option-name %s
+    /// width as Wave 146 (user-tier case-'f' form COMBINED-GUARD)
+    /// BUT via DIFFERENT case-letter AND DIFFERENT structural pattern
+    /// -- pins cross-case-letter SAME-WIDTH structural-pattern
+    /// divergence at 4-byte. FIRST pin on the CASE-FALL-THROUGH
+    /// structural pattern (NEW structural variant -- prior pins
+    /// covered MATCHER-FIRST inline at Waves 139/143, GUARD-FIRST
+    /// inline at Wave 144, OUTER-BLOCK-GUARD at Wave 145, COMBINED
+    /// outer+inline at Wave 146, and NO-GUARD inline at Wave 147;
+    /// Wave 148 is the FIRST CASE-FALL-THROUGH pin where the case
+    /// statement has NO break and execution traverses INTO the next
+    /// case label's matchers before breaking).
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes Wave 147
+    /// is structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     user-tier case-'k' dispatch + outer-block-guard regression
+    ///     at <c>PlayerConnection.cpp:6756-6764</c>. case-'k' was
+    ///     previously unpinned in the user-tier switch; a regression
+    ///     that dropped case-'k' entirely, reordered case labels, or
+    ///     routed *pch=='k' to the wrong handler would silently
+    ///     swallow /kick. Wave 148 pins case-'k' is REACHABLE via the
+    ///     user-tier switch dispatcher AND the outer AdminLevel >= GM
+    ///     block at line 6757 dispatches correctly to the kick matcher
+    ///     at line 6759.
+    ///   </item>
+    ///   <item>
+    ///     CASE-FALL-THROUGH structural regression at
+    ///     <c>PlayerConnection.cpp:6754-6766</c>. case-'k' has NO
+    ///     break statement after its block ends at line 6764;
+    ///     execution falls through to case-'l' at line 6766. With
+    ///     pch="kick", case-'l' matchers (leavegroup strcmp at 6767,
+    ///     levelout strcmp at 6772, level MatchOptWithParam at 6777,
+    ///     lootstats strcmp at 6812) all fail and case-'l' breaks at
+    ///     6822. NET RESULT: ONE emit. A regression that ADDED a
+    ///     competing emit anywhere in case-'l' (e.g. a new bare-`if`
+    ///     matcher that matches against pch="kick" by accident) would
+    ///     produce a second message. A regression that ADDED a break
+    ///     statement to case-'k' (closing the fall-through) would
+    ///     NOT change behavior for /kick but WOULD change behavior
+    ///     for any future case-'k' command that previously relied on
+    ///     case-'l' fall-through. Wave 148 pins the fall-through as
+    ///     a structural invariant; the inverse-direction sibling to
+    ///     Wave 144's matcher-chain fall-through pin (within a single
+    ///     case) -- Wave 148 pins fall-through ACROSS case labels.
+    ///   </item>
+    ///   <item>
+    ///     cross-case-letter SAME-WIDTH structural-pattern divergence
+    ///     regression at <c>PlayerClass.cpp:3422</c>. Wave 146 pins
+    ///     4-byte at user-tier case-'f' COMBINED-GUARD (outer-block
+    ///     + inline matcher-first); Wave 148 pins 4-byte at user-tier
+    ///     case-'k' OUTER-BLOCK-GUARD (no inline guard). Same width,
+    ///     different case-letter, different structural pattern. A
+    ///     regression in vsprintf_s with off-by-one at 4-byte width
+    ///     AND a specific case-letter/structural-pattern dispatch
+    ///     path would fail one but not the other; Wave 148 rules
+    ///     out per-case-letter AND per-structural-pattern
+    ///     format-substitution branches at 4-byte width.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). The MatchOptWithParam
+    /// missing-arg emit is the retail server's documented dispatcher-level
+    /// error path; the OUTER AdminLevel &gt;= GM gate enforces the
+    /// retail server's privilege check (low-privilege users do not
+    /// learn that /kick exists). The case-'k' fall-through to case-'l'
+    /// preserves retail server behavior (the missing break is in the
+    /// upstream source; Wave 148 pins this as-is). No server
+    /// permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashKickMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (28) = 31 bytes.
+        const int ExpectedReplyPayloadLength = 31;
+        // strlen(literal) + 1 NUL = 28.
+        const short ExpectedReplyLengthField = 28;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 27.
+        const int ExpectedLiteralByteCount = 27;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Kicka", shipName: "KickaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/kick");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // EXACT equals filter (not StartsWith) -- defensive against
+                // any future sibling "kick*" option emits in case-'k'.
+                if (!text.Equals("Missing arg for option kick", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgKickLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/kick\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option kick\". Likely the user-tier case-'k' " +
+                $"dispatch at line 6756 stopped routing, the OUTER AdminLevel >= GM " +
+                $"block at line 6757 failed (status=100 admin should pass), the kick " +
+                $"matcher at line 6759 stopped dispatching, the case-'k' fall-through " +
+                $"to case-'l' at line 6766 produced a competing emit, or the missing-arg " +
+                $"ERROR fork at PlayerConnection.cpp:4548 changed shape.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
