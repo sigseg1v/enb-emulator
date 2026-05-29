@@ -48,7 +48,7 @@
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
-DELETE FROM accounts WHERE id BETWEEN 9000001 AND 9000133;
+DELETE FROM accounts WHERE id BETWEEN 9000001 AND 9000134;
 
 INSERT INTO accounts (id, username, password, status, formname, email, warn_level)
 VALUES
@@ -184,6 +184,7 @@ VALUES
   (9000131, 'cli_test131',        UPPER(encode(digest('testpw', 'md5'), 'hex')), 100, 'cli_test131_form',    'cli_test131@net-7.test',        0),
   (9000132, 'cli_test132',        UPPER(encode(digest('testpw', 'md5'), 'hex')), 100, 'cli_test132_form',    'cli_test132@net-7.test',        0),
   (9000133, 'cli_test133',        UPPER(encode(digest('testpw', 'md5'), 'hex')), 100, 'cli_test133_form',    'cli_test133@net-7.test',        0),
+  (9000134, 'cli_test134',        UPPER(encode(digest('testpw', 'md5'), 'hex')), 100, 'cli_test134_form',    'cli_test134@net-7.test',        0),
   -- Status=0 fixture used by GlobalConnectTests.StressTestClosedAccount_*.
   -- LinuxAuth doesn't check status so login succeeds and the ticket is
   -- issued normally; ProcessTicketInfo on the server side rejects with

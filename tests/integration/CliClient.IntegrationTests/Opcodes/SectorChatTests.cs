@@ -3914,4 +3914,184 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Verbatim body of the 0x001D MESSAGE_STRING reply the server emits
+    /// when the case-'s' GM-block sole matcher at
+    /// <c>PlayerConnection.cpp:5155</c>
+    /// <c>MatchOptWithParam("setpassword", pch, param, msg_sent)</c>
+    /// matches 11 bytes and hits the separator-check NUL fall-through.
+    /// 34 ASCII bytes after %s substitution -- 11-byte %s width
+    /// (SAME as Waves 138/139's gmgetaccess/gmsetaccess but via DIFFERENT
+    /// case-letter, providing cross-case-letter SAME-WIDTH structural
+    /// divergence).
+    /// </summary>
+    private const string MissingArgSetpasswordLiteral = "Missing arg for option setpassword";
+
+    /// <summary>
+    /// Wave 142 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 38-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the GM-tier slash
+    /// command <c>//setpassword</c> (NO param) -- routes through the
+    /// GM-block (<c>//</c>-prefix) entry guard, the 2-char strip, the
+    /// case-'s' GM-block dispatch (NEW case-letter), and the SOLE
+    /// matcher MatchOptWithParam("setpassword", ...) at line 5155
+    /// hitting the missing-arg ERROR fork at
+    /// <c>PlayerConnection.cpp:4548</c>.
+    ///
+    /// <para>
+    /// SEVENTH pin on the GM-block (<c>//</c>-prefix) dispatch path.
+    /// FIRST pin on case-'s' GM-block -- NEW case-letter extends
+    /// HandleSlashCommands GM-block switch coverage to FOUR distinct
+    /// case-letters (case-'a' Wave 136, case-'b' Wave 137, case-'g'
+    /// Waves 138/139/140/141, case-'s' Wave 142). SINGLE-matcher
+    /// case-letter (no fall-through chain, no inner AdminLevel guard).
+    /// TENTH pin on the MatchOptWithParam ERROR path with SAME 11-byte
+    /// option-name %s width as Waves 138/139 BUT via DIFFERENT
+    /// case-letter -- pins cross-case-letter SAME-WIDTH structural
+    /// divergence.
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes Wave 141
+    /// is structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     case-'s' GM-block dispatch regression at
+    ///     <c>PlayerConnection.cpp:5153</c>. case-'s' was previously
+    ///     unpinned in the GM-block switch; a regression that dropped
+    ///     case-'s' entirely (e.g. accidental deletion or fall-through
+    ///     to default), reordered case labels, or routed *pch=='s' to
+    ///     the wrong handler would silently swallow //setpassword
+    ///     (along with any other case-'s' commands). Wave 142 pins
+    ///     case-'s' is REACHABLE via the GM-block switch dispatcher.
+    ///   </item>
+    ///   <item>
+    ///     setpassword opt-name passed-as-second-argument regression
+    ///     at <c>PlayerConnection.cpp:5155</c>. The matcher receives
+    ///     "setpassword" as the option name. A regression that
+    ///     mis-spelled it (e.g. "set_password", "setpass", "setpasswd")
+    ///     would emit the wrong %s body OR fail to match a
+    ///     properly-spelled //setpassword request. Wave 142 pins exact
+    ///     "setpassword".
+    ///   </item>
+    ///   <item>
+    ///     SAME-WIDTH cross-case-letter %s format-substitution
+    ///     structural divergence at PlayerClass.cpp:3422. Waves 138/139
+    ///     pin 11-byte at case-'g' HEAD/SECOND; Wave 142 pins 11-byte
+    ///     at case-'s' HEAD. A regression in vsprintf_s with off-by-one
+    ///     at 11-byte width AND a specific case-letter dispatch path
+    ///     would fail one but not the other. Wave 142 pins SAME-WIDTH
+    ///     cross-case-letter divergence and rules out per-case-letter
+    ///     format-substitution branches.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). The MatchOptWithParam
+    /// missing-arg emit is the retail server's documented dispatcher-level
+    /// error path; the GM-block guard at line 4716 enforces the
+    /// AdminLevel &gt;= GM gate the retail server enforced. No server
+    /// permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashSetpasswordMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (35) = 38 bytes.
+        const int ExpectedReplyPayloadLength = 38;
+        // strlen(literal) + 1 NUL = 35.
+        const short ExpectedReplyLengthField = 35;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 34.
+        const int ExpectedLiteralByteCount = 34;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Setpass", shipName: "SetpassShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//setpassword");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // Filter on the distinctive "for option setpassword" suffix.
+                if (!text.StartsWith("Missing arg for option setpassword", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgSetpasswordLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//setpassword\" without seeing 0x001D MESSAGE_STRING starting with " +
+                $"\"Missing arg for option setpassword\". Likely the case-'s' GM-block " +
+                $"dispatch at line 5153 stopped routing, the sole setpassword matcher at " +
+                $"line 5155 stopped dispatching, or the missing-arg ERROR fork at " +
+                $"PlayerConnection.cpp:4548 changed shape.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
