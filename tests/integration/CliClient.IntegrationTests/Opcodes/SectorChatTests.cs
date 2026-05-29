@@ -3324,4 +3324,221 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Verbatim body of the 0x001D MESSAGE_STRING reply the server emits
+    /// when the GM-block (<c>//</c>-prefix) dispatch at
+    /// <c>server/src/PlayerConnection.cpp:4716</c> strips the leading
+    /// 2 chars and hands <c>pch="gmsetaccess"</c> to
+    /// <c>MatchOptWithParam("gmgetaccess", pch, ...)</c> at line 5207
+    /// (strncmp mismatches "gmget" vs "gmset" at index 2 -- returns
+    /// false WITHOUT emit) which falls through to
+    /// <c>MatchOptWithParam("gmsetaccess", pch, param, msg_sent)</c>
+    /// at <c>PlayerConnection.cpp:5221</c>. The matcher's separator-check
+    /// (NUL is not '=', not ' ', not isalpha) hits the else-branch emit
+    /// at <c>PlayerConnection.cpp:4548</c>:
+    /// <c>SendVaMessage("Missing arg for option %s", "gmsetaccess")</c>.
+    /// 34 ASCII bytes after %s substitution. Same emit location as
+    /// Waves 131 / 134 / 135 / 136 / 137 / 138; SAME 11-byte width as
+    /// Wave 138 BUT exercises the matcher-chain SECOND-position
+    /// fall-through path (Wave 138 pinned matcher-chain HEAD).
+    /// </summary>
+    private const string MissingArgGmsetaccessLiteral = "Missing arg for option gmsetaccess";
+
+    /// <summary>
+    /// Wave 139 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 38-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the GM-tier slash
+    /// command <c>//gmsetaccess</c> (NO param) -- routes through the
+    /// GM-block (<c>//</c>-prefix) entry guard at
+    /// <c>server/src/PlayerConnection.cpp:4716</c>, the 2-char strip,
+    /// the case-'g' GM-block dispatch, the FIRST matcher
+    /// MatchOptWithParam("gmgetaccess", ...) at line 5207 returning
+    /// FALSE on strncmp mismatch (index 2 'g' vs 's'), and the SECOND
+    /// matcher MatchOptWithParam("gmsetaccess", ...) at line 5221
+    /// hitting the missing-arg ERROR fork at
+    /// <c>PlayerConnection.cpp:4548</c> BEFORE control reaches the
+    /// adjacent AdminLevel() &gt;= SDEV guard at line 5221.
+    ///
+    /// <para>
+    /// FOURTH pin on the GM-block (<c>//</c>-prefix) dispatch path
+    /// (after Waves 136/137/138). SECOND pin on case-'g' GM-block --
+    /// TIGHT same-case-letter sibling pair with Wave 138's
+    /// //gmgetaccess pinning the FIRST matcher (HEAD). Wave 139 pins
+    /// the SECOND matcher (after fall-through). This is the FIRST
+    /// matcher-chain fall-through pin within the GM-block (mirrors
+    /// Wave 135's user-tier matcher-chain fall-through within
+    /// case-'c' /chleave after /chjoin).
+    /// </para>
+    ///
+    /// <para>
+    /// Wave 139 also extends the sibling-arm catalogue on
+    /// HandleSlashCommands to FOURTEEN byte-exact-pinned arms across BOTH
+    /// tiers (11 user-tier + 4 GM-tier: Waves 136/137/138/139), is the
+    /// FOURTH pin on the GM-block dispatch path (confirms reliability
+    /// across THREE distinct case letters now with intra-case fall-through
+    /// coverage), and is the SEVENTH pin on the MatchOptWithParam ERROR
+    /// path -- SAME 11-byte %s width as Wave 138 BUT via matcher-chain
+    /// SECOND-position dispatch (NEW structural fan-out on the matcher
+    /// fall-through path within case-'g').
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes Wave 138
+    /// is structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     case-'g' GM-block matcher-chain SECOND-position regression
+    ///     at <c>server/src/PlayerConnection.cpp:5207-5221</c>. After
+    ///     MatchOptWithParam("gmgetaccess", "gmsetaccess", ...) returns
+    ///     false (strncmp mismatches at index 2: 'g' vs 's'), control
+    ///     MUST fall through to MatchOptWithParam("gmsetaccess", ...)
+    ///     at line 5221. A regression that short-circuited the
+    ///     gmgetaccess matcher to NOT return false (e.g. returning true
+    ///     on strncmp mismatch) or that gated the gmsetaccess matcher
+    ///     behind gmgetaccess's success would silently swallow the
+    ///     //gmsetaccess emit. Wave 139 pins the gmsetaccess matcher
+    ///     is REACHED via fall-through.
+    ///   </item>
+    ///   <item>
+    ///     AdminLevel() &gt;= SDEV inner-guard short-circuit ordering
+    ///     regression at <c>server/src/PlayerConnection.cpp:5221</c>.
+    ///     The matcher-and-guard line reads
+    ///     <c>if (MatchOptWithParam("gmsetaccess", pch, param, msg_sent)
+    ///     &amp;&amp; AdminLevel() &gt;= SDEV)</c>. C++ short-circuit
+    ///     order matters: MatchOptWithParam runs FIRST (with side
+    ///     effects -- the missing-arg emit) regardless of the
+    ///     AdminLevel value. Even though status=100 satisfies SDEV=90,
+    ///     the emit happens during the matcher call before the &amp;&amp;
+    ///     evaluates AdminLevel. A regression that reordered the guard
+    ///     to AdminLevel-first (e.g. <c>AdminLevel() &gt;= SDEV
+    ///     &amp;&amp; MatchOptWithParam(...)</c>) would still emit
+    ///     correctly for status=100 BUT would silently skip the emit
+    ///     for status &lt; SDEV. Status=100 doesn't catch that
+    ///     directly, but Wave 139's emit confirms the matcher fires
+    ///     regardless of inner guard ordering, providing structural
+    ///     fan-out vs Wave 138 (case-'g' first matcher with NO inner
+    ///     AdminLevel guard).
+    ///   </item>
+    ///   <item>
+    ///     %s format-substitution SAME-WIDTH structural-divergence
+    ///     regression. Waves 135/136 share 7-byte width across user-tier
+    ///     case-'c' /chleave and GM-tier case-'a' //adduser. Waves
+    ///     138/139 share 11-byte width across case-'g' matcher-chain
+    ///     FIRST and SECOND positions. A regression in vsprintf_s with
+    ///     an off-by-one length bug at a specific width AND a specific
+    ///     dispatch position would fail one but not the other. Wave
+    ///     139 pins SAME-WIDTH cross-position divergence within case-'g'.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). The MatchOptWithParam
+    /// missing-arg emit is the retail server's documented dispatcher-level
+    /// error path; the GM-block guard at line 4716 enforces the
+    /// AdminLevel &gt;= GM gate the retail server enforced. No server
+    /// permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashGmsetaccessMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (35) = 38 bytes.
+        const int ExpectedReplyPayloadLength = 38;
+        // strlen(literal) + 1 NUL = 35.
+        const short ExpectedReplyLengthField = 35;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 34.
+        const int ExpectedLiteralByteCount = 34;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Gmset", shipName: "GmsetShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//gmsetaccess");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // Filter on the distinctive "for option gmsetaccess" suffix.
+                if (!text.StartsWith("Missing arg for option gmsetaccess", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgGmsetaccessLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//gmsetaccess\" without seeing 0x001D MESSAGE_STRING starting with " +
+                $"\"Missing arg for option gmsetaccess\". Likely the case-'g' GM-block " +
+                $"FIRST matcher (gmgetaccess at line 5207) incorrectly returned true " +
+                $"(preventing fall-through), the SECOND matcher (gmsetaccess at line 5221) " +
+                $"stopped dispatching, the AdminLevel() >= SDEV inner-guard short-circuited " +
+                $"before the matcher could emit, or the missing-arg ERROR fork at " +
+                $"PlayerConnection.cpp:4548 changed shape.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
