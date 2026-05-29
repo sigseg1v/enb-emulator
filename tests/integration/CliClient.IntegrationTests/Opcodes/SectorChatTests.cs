@@ -6222,4 +6222,245 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 153 missing-arg ERROR literal for case-'t' /tilt. The
+    /// matcher at PlayerConnection.cpp:7495 reads
+    /// `if (MatchOptWithParam("tilt", pch, param, msg_sent))`
+    /// -- NO AdminLevel guard, but case-'t' is structured as
+    /// CONSECUTIVE-IF statements (NOT an else-if chain) so the matcher
+    /// is independent of preceding /test, /talktree, /testmsg ifs.
+    /// With NO param after "/tilt", strncmp matches 4 bytes,
+    /// arg[4]='\0' fails separator-check, allowNoParams=false -- emits
+    /// "Missing arg for option tilt", returns false. Body block
+    /// (HandleTiltRequest) SKIPPED. 27 ASCII bytes after %s
+    /// substitution -- 4-byte %s width (FIFTH 4-byte pin: Waves 146
+    /// /form COMBINED-GUARD + 148 /kick CASE-FALL-THROUGH + 150
+    /// /move NO-GUARD-ELSE-IF + 153 /tilt NO-GUARD-CONSECUTIVE-IF;
+    /// FIRST CONSECUTIVE-IF structural pattern pin across the entire
+    /// HandleSlashCommands catalogue -- seventh distinct structural
+    /// dispatcher pattern after MATCHER-FIRST inline + GUARD-FIRST
+    /// inline + OUTER-BLOCK-GUARD + COMBINED + NO-GUARD-ELSE-IF +
+    /// CASE-FALL-THROUGH).
+    /// </summary>
+    private const string MissingArgTiltLiteral = "Missing arg for option tilt";
+
+    /// <summary>
+    /// Wave 153 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 31-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/tilt</c> (NO param) -- routes through the user-tier
+    /// dispatcher entry at line 5434, the 1-char strip, the case-'t'
+    /// user-tier dispatch (NEW case-letter -- 17th user-tier
+    /// case-letter), then hits the CONSECUTIVE-IF NO-GUARD matcher at
+    /// line 7495 <c>if (MatchOptWithParam("tilt", pch, param, msg_sent))</c>.
+    /// With pch="tilt" and NO param, matcher matches 4 bytes,
+    /// fails separator-check allowNoParams=false, emits "Missing arg
+    /// for option tilt" via SendVaMessage at line 4548, sets
+    /// msg_sent=true, returns false. Body block (HandleTiltRequest)
+    /// SKIPPED.
+    ///
+    /// <para>
+    /// Crucially, case-'t' uses CONSECUTIVE-IF statements (NOT
+    /// else-if chain). The preceding ifs at 7462 (strcmp "test"
+    /// FAIL), 7471 (strcasecmp "talktree" FAIL), 7486
+    /// (MatchOptWithParam "testmsg" 7-byte strncmp mismatch idx 1
+    /// 'e' vs 'i' false NO emit) all skip their bodies. The
+    /// subsequent ifs at 7501 (MatchOptWithParam "terminate" 9-byte
+    /// strncmp mismatch idx 1 'e' vs 'i' false NO emit) and 7521
+    /// (MatchOptWithParam "trade" 5-byte strncmp mismatch idx 1
+    /// 'r' vs 'i' false NO emit) also skip. case-'t' breaks at 7573.
+    /// NET RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>
+    /// TWENTY-SECOND pin on the user-tier (single-slash) dispatch
+    /// path. FIRST pin on user-tier case-'t' -- NEW case-letter
+    /// extends user-tier dispatcher switch coverage to SEVENTEEN
+    /// distinct case-letters (a/b/c/d/e/f/h/i/k/l/m/n/o/p/r/s/t).
+    /// TWENTY-FIRST pin on the MatchOptWithParam ERROR path. FIRST
+    /// CONSECUTIVE-IF structural pattern pin in the entire
+    /// HandleSlashCommands catalogue -- SEVENTH distinct structural
+    /// dispatcher pattern after MATCHER-FIRST inline + GUARD-FIRST
+    /// inline + OUTER-BLOCK-GUARD + COMBINED outer+inline + NO-GUARD-
+    /// ELSE-IF + CASE-FALL-THROUGH. FIFTH 4-byte %s width pin (Waves
+    /// 146 /form COMBINED-GUARD + 148 /kick CASE-FALL-THROUGH + 150
+    /// /move NO-GUARD-ELSE-IF + 153 /tilt NO-GUARD-CONSECUTIVE-IF) --
+    /// SAME width FOUR distinct case-letters FOUR distinct structural
+    /// patterns, rules out per-case-letter and per-structural-pattern
+    /// format-substitution branches at 4-byte width across FOUR
+    /// distinct structural patterns. SIXTH NO-GUARD pin counting both
+    /// ELSE-IF and CONSECUTIVE-IF variants (Waves 147/149/150/151
+    /// NO-GUARD-ELSE-IF + 153 NO-GUARD-CONSECUTIVE-IF).
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes Wave 152
+    /// is structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     user-tier case-'t' dispatch + CONSECUTIVE-IF independence
+    ///     regression at <c>PlayerConnection.cpp:7461-7572</c>.
+    ///     case-'t' was previously unpinned in the user-tier switch;
+    ///     a regression that dropped case-'t' entirely, reordered
+    ///     case labels, or routed *pch=='t' to the wrong handler
+    ///     would silently swallow /tilt. The CONSECUTIVE-IF structure
+    ///     is unique within the user-tier switch: each `if` is
+    ///     independent rather than chained via `else if`, which
+    ///     means a matcher that emits does NOT short-circuit
+    ///     subsequent matchers; a regression that ADDED `else` keywords
+    ///     converting CONSECUTIVE-IF to ELSE-IF would change
+    ///     fall-through semantics (e.g. if /tilt and /trade both
+    ///     somehow matched, ELSE-IF would emit only one, CONSECUTIVE-
+    ///     IF would emit both). Wave 153 pins case-'t' is REACHABLE
+    ///     via the user-tier switch dispatcher AND the CONSECUTIVE-IF
+    ///     NO-GUARD matcher dispatches correctly to emit on missing
+    ///     arg AND the consecutive-if independence semantic is
+    ///     preserved (no spurious second emit from /terminate or
+    ///     /trade siblings).
+    ///   </item>
+    ///   <item>
+    ///     case-'t' matcher-chain fall-through regression at
+    ///     <c>PlayerConnection.cpp:7501-7572</c> across 2 NO-GUARD
+    ///     CONSECUTIVE-IF siblings (/terminate, /trade). After the
+    ///     /tilt matcher emits, execution continues through 2
+    ///     subsequent independent ifs (NOT chained via else-if).
+    ///     /terminate (9-byte) and /trade (5-byte) both strncmp-
+    ///     mismatch against pch="tilt" at idx 1. A regression that
+    ///     ADDED a competing matcher matching pch="tilt" by accident
+    ///     would produce a second message (and the CONSECUTIVE-IF
+    ///     structure means even an else-clause regression could not
+    ///     suppress that second emit). Wave 153 pins the CONSECUTIVE-
+    ///     IF matcher-chain fall-through as a structural invariant.
+    ///   </item>
+    ///   <item>
+    ///     QUADRUPLE 4-byte cross-case-letter cross-structural-
+    ///     pattern divergence regression at <c>PlayerClass.cpp:3422</c>.
+    ///     Wave 146 pins 4-byte at user-tier case-'f' COMBINED-GUARD;
+    ///     Wave 148 pins 4-byte at user-tier case-'k' CASE-FALL-
+    ///     THROUGH; Wave 150 pins 4-byte at user-tier case-'m'
+    ///     NO-GUARD-ELSE-IF; Wave 153 pins 4-byte at user-tier
+    ///     case-'t' NO-GUARD-CONSECUTIVE-IF. Same width, FOUR
+    ///     different case-letters, FOUR different structural patterns.
+    ///     A regression in vsprintf_s with off-by-one at 4-byte width
+    ///     AND a specific case-letter/structural-pattern dispatch
+    ///     path would fail one but not all four; Wave 153 deepens
+    ///     4-byte to QUADRUPLE-pin which rules out per-case-letter
+    ///     AND per-structural-pattern format-substitution branches
+    ///     at 4-byte width across FOUR structural patterns.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). The MatchOptWithParam
+    /// missing-arg emit is the retail server's documented dispatcher-
+    /// level error path. /tilt (avatar tilt request) had NO AdminLevel
+    /// guard in the retail server -- baseline user-tier command. No
+    /// server permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashTiltMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (28) = 31 bytes.
+        const int ExpectedReplyPayloadLength = 31;
+        // strlen(literal) + 1 NUL = 28.
+        const short ExpectedReplyLengthField = 28;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 27.
+        const int ExpectedLiteralByteCount = 27;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Tilto", shipName: "TiltoShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/tilt");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // EXACT equals filter (not StartsWith) -- defensive against
+                // any future sibling "tilt*" option emits in case-'t'.
+                if (!text.Equals("Missing arg for option tilt", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgTiltLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/tilt\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option tilt\". Likely the user-tier case-'t' " +
+                $"dispatch at line 7461 stopped routing, the CONSECUTIVE-IF " +
+                $"NO-GUARD matcher at line 7495 stopped dispatching, the " +
+                $"CONSECUTIVE-IF structure was changed to ELSE-IF chain (suppressing " +
+                $"the independence semantic), an AdminLevel guard was wrapped around " +
+                $"the matcher (regression), the matcher-chain fall-through to " +
+                $"terminate/trade produced a competing emit (regression), or the " +
+                $"missing-arg ERROR fork at PlayerConnection.cpp:4548 changed shape.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
