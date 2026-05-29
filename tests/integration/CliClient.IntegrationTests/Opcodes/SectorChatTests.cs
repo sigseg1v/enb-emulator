@@ -15930,4 +15930,147 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 215 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
+    /// the 33-byte ASCII body "Missing arg for option bumpaccess" that the
+    /// server emits when admin-tier double-slash <c>//bumpaccess</c> arrives
+    /// with no argument. Matcher at PlayerConnection.cpp:4789 (second arm of
+    /// case-'b' admin-tier switch opened at 4754) -- SAME-LINE-AND-GUARD-DEV
+    /// pattern. SECOND admin-tier case-'b' pin; case-'b' admin-tier now
+    /// DOUBLE-PINNED (Wave 137 pinned //ban, Wave 215 pins //bumpaccess).
+    /// </summary>
+    private const string MissingArgBumpaccessLiteral = "Missing arg for option bumpaccess";
+
+    /// <summary>
+    /// Wave 215 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 37-byte wire-shape of the single 0x001D MESSAGE_STRING reply to
+    /// admin-tier double-slash <c>//bumpaccess</c> (NO param). Wave 215
+    /// deepens admin-tier case-'b' to DOUBLE-PINNED status.
+    ///
+    /// <para>
+    /// Outer gate at 4716 admits the dispatch (cli_test status=100 &gt;=
+    /// GM=50). Switch at 4724 jumps on *pch='b' -&gt; case-'b' opens at
+    /// 4754. arm 1 <c>if MatchOptWithParam("ban", pch, ...)</c> at 4756:
+    /// strncmp("ban", "bumpaccess", 3) -- byte 1 'a' vs 'u' MISMATCH on
+    /// the 3-byte prefix, prefix-check fails, ERROR fork NOT taken,
+    /// returns false silently. arm 2 <c>else if
+    /// MatchOptWithParam("bumpaccess", pch, ...) &amp;&amp; AdminLevel()
+    /// &gt;= DEV</c> at 4789: matcher LHS evaluates first; strncmp
+    /// ("bumpaccess", "bumpaccess", 10) == 0; arg[10]='\0' is not '=' not
+    /// ' ' not isalpha; allowNoParams=false (default) fires the 4548
+    /// ERROR fork: "Missing arg for option bumpaccess" COLOR=5; returns
+    /// false. &amp;&amp; short-circuits, AdminLevel() never evaluated.
+    /// case-'b' breaks. NET RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>
+    /// SECOND admin-tier case-'b' pin; case-'b' admin-tier now
+    /// DOUBLE-PINNED (Wave 137 //ban + Wave 215 //bumpaccess). FIRST
+    /// admin-tier SAME-LINE-AND-GUARD-DEV pin -- catches regression where
+    /// the inline AdminLevel guard is reordered to the LHS of the
+    /// short-circuit (e.g. <c>AdminLevel() &gt;= DEV &amp;&amp;
+    /// MatchOptWithParam(...)</c>), which would skip the matcher's
+    /// internal ERROR side-effect for non-DEV admins (and break
+    /// preservation fidelity for lower-tier admins). EIGHTY-THIRD
+    /// MatchOptWithParam ERROR pin. EIGHTH admin-tier NO-INLINE-GUARD
+    /// pin (where "no inline guard" here means the matcher's internal
+    /// ERROR side-effect is not behind any inline AdminLevel check,
+    /// even though the line carries `&amp;&amp; AdminLevel() &gt;= DEV`
+    /// for the matcher's true-branch body). FIRST admin-tier pin where
+    /// the matcher arm is an <c>else-if</c> chained off a prior PLAIN
+    /// <c>if MatchOptWithParam(...)</c> arm -- structurally distinct
+    /// from Wave 213 (else-if chained off SAME-LINE-AND-GUARD-SDEV
+    /// strcmp) and Wave 214 (two PLAIN <c>if</c> arms, not else-if
+    /// chained). Asserts.Equal pins the full 37-byte response shape.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashBumpaccessMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (34) = 37 bytes.
+        const int ExpectedReplyPayloadLength = 37;
+        const short ExpectedReplyLengthField = 34;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 33;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Bumpa", shipName: "BumpaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//bumpaccess");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(MissingArgBumpaccessLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgBumpaccessLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//bumpaccess\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{MissingArgBumpaccessLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
