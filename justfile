@@ -428,6 +428,64 @@ cli-integration-fast:
     dotnet test tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
         --filter "FullyQualifiedName~Robustness|FullyQualifiedName~Verification|FullyQualifiedName~Smoke"
 
+# Warm-stack iteration workflow. Bring the docker-compose stack up
+# ONCE, then run dotnet test repeatedly against it with
+# CLI_INTEGRATION_SKIP_COMPOSE=1 so the ServerFixture skips its
+# bring-up/tear-down. Cuts a typical wave-loop iteration from
+# ~2-3 minutes (cold `docker compose up --wait` + sector marker poll
+# + `down -v`) to ~10 seconds (just the actual test run).
+#
+# Usage:
+#     just cli-int-up                 # once per session
+#     just cli-int-run "FILTER"       # per wave
+#     just cli-int-run                # all integration tests
+#     just cli-int-down               # cleanup
+cli-int-up:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo ">>> bringing up docker compose stack (warm-iteration mode)"
+    docker compose up -d --wait
+    echo ">>> waiting for server sector 10151 (Luna) marker in logs..."
+    deadline=$(( $(date +%s) + 180 ))
+    while [ "$(date +%s)" -lt "$deadline" ]; do
+        if docker compose logs --no-color --no-log-prefix server 2>/dev/null \
+                | grep -q 'BeginSectorThread sector_id=10151'; then
+            echo ">>> sector 10151 ready; building test assembly"
+            dotnet build tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj --nologo -v quiet
+            echo ">>> stack warm. Use \`just cli-int-run [filter]\` to run waves."
+            exit 0
+        fi
+        sleep 2
+    done
+    echo "ERROR: sector 10151 did not load within 180s." >&2
+    docker compose logs --tail=60 server >&2
+    exit 1
+
+# Run a single wave (or all of them) against the warm stack. Pass a
+# filter expression -- usually a test name -- as the first arg.
+# Empty arg runs the full integration suite.
+cli-int-run FILTER='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! docker compose ps --status running --services 2>/dev/null | grep -q server; then
+        echo "ERROR: docker compose stack is not up. Run \`just cli-int-up\` first." >&2
+        exit 1
+    fi
+    if [ -n "{{FILTER}}" ]; then
+        CLI_INTEGRATION_SKIP_COMPOSE=1 \
+        dotnet test tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
+            --no-build \
+            --filter "{{FILTER}}"
+    else
+        CLI_INTEGRATION_SKIP_COMPOSE=1 \
+        dotnet test tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
+            --no-build
+    fi
+
+# Tear down the warm stack and wipe named volumes.
+cli-int-down:
+    docker compose down -v
+
 # ---- package / release ----
 
 # Build OCI images for server + login locally.
