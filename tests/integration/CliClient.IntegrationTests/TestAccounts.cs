@@ -220,6 +220,7 @@ public static class TestAccounts
             ["SlashSoundsMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                           = A(9_000_155, "cli_test155"),
             ["SlashScaleMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                            = A(9_000_156, "cli_test156"),
             ["SlashShieldwarningsMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                   = A(9_000_157, "cli_test157"),
+            ["SlashSkillpointsMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                      = A(9_000_158, "cli_test158"),
         };
 
     /// <summary>

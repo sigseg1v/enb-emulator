@@ -9219,4 +9219,204 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 166 missing-arg ERROR literal for case-'s' /skillpoints.
+    /// The matcher at PlayerConnection.cpp:7206 reads
+    /// `else if (MatchOptWithParam("skillpoints", pch, param, msg_sent))`
+    /// -- NO outer AdminLevel guard, but INSIDE-BODY-GM-guard at 7208
+    /// (`if (AdminLevel() >= GM)`). FOURTH case-'s' user-tier pin
+    /// (Waves 163 /sounds + 164 /scale + 165 /shieldwarnings + 166
+    /// /skillpoints). 34 ASCII bytes after %s substitution -- 11-byte
+    /// width matches Wave 143 (/orientation); 11-byte %s width
+    /// DOUBLE-PINNED across TWO case-letters now (o/s).
+    /// </summary>
+    private const string MissingArgSkillpointsLiteral = "Missing arg for option skillpoints";
+
+    /// <summary>
+    /// Wave 166 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 38-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/skillpoints</c> (NO param) -- routes through the
+    /// user-tier dispatcher entry at line 5434, the 1-char strip, the
+    /// case-'s' user-tier dispatch at line 7136 (Wave 166 deepens case-
+    /// 's' to QUADRUPLE-PINNED across FOUR distinct ELSE-IF chain-arm
+    /// positions AND introduces INSIDE-BODY-GM-guard pattern to case-
+    /// 's' for the first time). ELSE-IF at 7206 `MatchOptWithParam(
+    /// "skillpoints", pch, param, msg_sent)` -- NO outer AdminLevel
+    /// guard, INSIDE-BODY-GM-guard at 7208 `if (AdminLevel() >= GM)`.
+    /// MatchOptWithParam: strncmps "skillpoints" against "skillpoints"
+    /// (11 byte match), arg[11]='\0' -- NOT '=', NOT ' ', NOT isalpha,
+    /// allowNoParams=false -- emits "Missing arg for option skillpoints"
+    /// via SendVaMessage at 4548 with default COLOR=5, sets msg_sent=
+    /// true, returns false. Body block at 7208-7217 SKIPPED (matcher
+    /// returned false; INSIDE-BODY-GM-guard NEVER EVALUATED -- this is
+    /// the structural invariant being pinned: the ERROR-fork emits
+    /// REGARDLESS of AdminLevel because the body-guard is downstream
+    /// of the matcher). case-'s' chain continues but no later arm
+    /// matches "skillpoints"; case-'s' breaks. Trailing fallback at
+    /// 7702 SKIPPED (msg_sent=true). NET RESULT: ONE emit.
+    ///
+    /// <para>
+    /// THIRTY-FIFTH pin on the user-tier (single-slash) dispatch path.
+    /// FOURTH pin on user-tier case-'s' -- case-'s' user-tier now
+    /// QUADRUPLE-PINNED across FOUR ELSE-IF chain-arm positions. THIRTY-
+    /// FOURTH pin on the MatchOptWithParam ERROR path. SECOND INSIDE-
+    /// BODY-guard pin -- INSIDE-BODY-guard now DOUBLE-PINNED across 2
+    /// guard tiers (Wave 159 /terminate INSIDE-BODY-DEV + Wave 166
+    /// /skillpoints INSIDE-BODY-GM). SECOND 11-byte %s width pin --
+    /// 11-byte width DOUBLE-PINNED across 2 case-letters (Wave 143
+    /// /orientation case-'o' + Wave 166 /skillpoints case-'s').
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes prior waves
+    /// are structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     INSIDE-BODY-GM-guard ERROR-fork-bypass regression at
+    ///     <c>PlayerConnection.cpp:7206-7218</c>. The matcher emits via
+    ///     the SendVaMessage at 4548 (inside MatchOptWithParam) BEFORE
+    ///     control returns to PlayerConnection.cpp:7208's GM-guard
+    ///     evaluation. A regression that moved the AdminLevel check
+    ///     INTO MatchOptWithParam (e.g. as a new parameter), or that
+    ///     wrapped the matcher in an outer guard, would gate the ERROR-
+    ///     fork emit behind GM-tier -- non-GM users would receive NO
+    ///     reply on /skillpoints. Wave 166 pins the ERROR fork emits
+    ///     on a BETA-tier (non-GM) test account, proving the body-
+    ///     guard does NOT gate the missing-arg emit.
+    ///   </item>
+    ///   <item>
+    ///     INSIDE-BODY-guard structural pattern cross-tier divergence
+    ///     regression at <c>PlayerConnection.cpp:7208</c> vs <c>7501</c>.
+    ///     Wave 159 pinned INSIDE-BODY-DEV-guard at /terminate; Wave
+    ///     166 pins INSIDE-BODY-GM-guard at /skillpoints. SAME
+    ///     structural pattern, DIFFERENT tier (DEV=80 vs GM=50). A
+    ///     regression that broke ERROR-fork-bypass at one tier but not
+    ///     the other would fail one pin but not both; Wave 166 pins
+    ///     INSIDE-BODY-guard ERROR-fork-bypass is tier-independent.
+    ///   </item>
+    ///   <item>
+    ///     11-byte %s width cross-case-letter divergence regression
+    ///     at <c>PlayerClass.cpp:3422</c>. Wave 143 pinned 11-byte %s
+    ///     at case-'o' /orientation; Wave 166 pins 11-byte %s at
+    ///     case-'s' /skillpoints. A regression that broke 11-byte %s
+    ///     rendering only on a specific case-letter's dispatch path
+    ///     would fail one pin but not the other; Wave 166 extends
+    ///     11-byte %s coverage cross-case-letter.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). /skillpoints
+    /// (skillpoint-set debug command) is open to ALL users at the
+    /// dispatcher level -- the INSIDE-BODY-GM-guard at 7208 restricts
+    /// the SUCCESS path to GM+ only, but the ERROR fork at 4548 emits
+    /// for ALL tiers (faithful to retail). The MatchOptWithParam
+    /// missing-arg emit is the retail server's documented dispatcher-
+    /// level error path. No server permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSkillpointsMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (35) = 38 bytes.
+        const int ExpectedReplyPayloadLength = 38;
+        // strlen(literal) + 1 NUL = 35.
+        const short ExpectedReplyLengthField = 35;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 34.
+        const int ExpectedLiteralByteCount = 34;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Skilo", shipName: "SkiloShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/skillpoints");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals("Missing arg for option skillpoints", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgSkillpointsLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/skillpoints\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option skillpoints\". Likely the user-tier case-'s' " +
+                $"dispatch at line 7136 stopped routing, the ELSE-IF chain arm at " +
+                $"7206 stopped dispatching, the INSIDE-BODY-GM-guard moved BEFORE the " +
+                $"matcher (gating the ERROR-fork emit behind GM-tier), the matcher's " +
+                $"AdminLevel parameter was added to MatchOptWithParam itself, the " +
+                $"trailing illegal-slash fallback at 7702 fired as a second emit " +
+                $"(msg_sent gate regression), or the missing-arg ERROR fork at " +
+                $"PlayerConnection.cpp:4548 changed shape (esp. vsprintf_s 11-byte %s width).");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
