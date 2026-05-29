@@ -249,10 +249,21 @@ void ServerManager::RunMasterServer()
 
 		//m_SectorCount = i;
 
-		// Wait 2 seconds for the listeners to start before registering
-		for (i = 0; i < 40; i++)
+		// Drive sector assignment to completion before returning to MainLoop.
+		// CheckConnections assigns one sector per ServerCheck tick (with an
+		// internal usleep(100ms)), and BeginSectorThread -- which binds each
+		// sector's UDP port via StartListener -- only fires once, in the same
+		// tick that m_SectorAssignmentsComplete first flips to true. Until
+		// then, GetSectorManager(id) for an assigned-but-not-yet-bound sector
+		// returns a manager whose m_Port is still the -1 initializer value,
+		// and UDP_Master::ProcessHandoff happily emits that -1 in the 0x2009
+		// MASTER_HANDOFF_CONFIRM reply -- the proxy parses it as udp_port=-1,
+		// falls back to a proxy-local ServerRedirect, and the client hangs at
+		// the load screen. Block here until every sector's BeginSectorThread
+		// has bound its port, so by the time MainLoop accepts handoff traffic
+		// the sectors are actually ready.
+		while (!m_SectorAssignmentsComplete)
 		{
-			// Loop 20x per second
 			usleep(50 * 1000);
 			ServerCheck();
 		}

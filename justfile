@@ -249,57 +249,30 @@ play-local CLIENT_PATH='':
     : "${WINEPREFIX:=$HOME/.wine-enb}"
     export WINEPREFIX
 
-    # UDP routing for proxy<->server depends on which docker mode is active.
+    # UDP routing for proxy<->server: always localhost.
     #
-    # ROOTFUL docker: the bridge for our compose network is a real host
-    # interface (br-XXXX). The host has a direct route to 172.x.0.0/16, so
-    # talking to the server container's bridge IP works and avoids the
-    # MASQUERADE conntrack pitfall on the sector reverse-push (server's
-    # MVASauth at 3806 -> proxy ephemeral, a 5-tuple the published-port
-    # DNAT never saw on the outbound TICKET path, so reverse-NAT drops it).
-    # Bridge IP -> server captures the proxy's real source port and the
-    # reverse push back to 172.x.0.1:eph is normal local delivery to the
-    # proxy's INADDR_ANY-bound socket.
+    # The compose stack publishes the server's UDP ports (3501-3800, 3808,
+    # 3810) to the host. Localhost reaches them via docker's port forwarder
+    # in both rootful and rootless modes.
     #
-    # ROOTLESS docker: the compose network's bridge lives INSIDE the
-    # rootless user namespace -- there is no host-side bridge interface,
-    # and `ip route get 172.x.0.4` falls through to the default route
-    # (off-host LAN gateway). Targeting the bridge IP from the host sends
-    # packets out the LAN, where they are dropped. We must fall back to
-    # localhost + the docker-userland-proxy port forwarder. Login
-    # (TICKET -> AVATARLIST) works through the userland proxy because the
-    # request creates a forwarder session. The sector reverse-push from
-    # 3806 may still not survive (different source port than the session
-    # the forwarder tracks). If sector zone-in hangs, run the dockerised
-    # proxy instead via `just dev`.
-    # Detect rootless docker. `docker info` lists "rootless" under
-    # SecurityOptions in rootless mode; the daemon socket path also
-    # encodes it as /run/user/$UID/docker.sock.
-    ROOTLESS=""
-    if docker info 2>/dev/null | grep -qi 'rootless'; then
-        ROOTLESS=1
-    fi
-
-    if [ -n "$ROOTLESS" ]; then
-        echo ">>> detected rootless docker -- using localhost for UDP (bridge IP unreachable from host)"
-        echo "    sector zone-in may hang in rootless mode; if so, use \`just dev\` for the dockerised proxy."
-        SERVER_IP=localhost
-    else
-        SERVER_IP=$(docker inspect "${COMPOSE_PROJECT_NAME:-enb-emulator}-server-1" 2>/dev/null \
-            | grep -m1 '"IPAddress":' \
-            | sed -E 's/.*"IPAddress": "([0-9.]+)".*/\1/')
-        if [ -z "$SERVER_IP" ]; then
-            echo "play-local: WARNING couldn't resolve server container bridge IP." >&2
-            echo "  Falling back to localhost; in-game zone-in will likely time out." >&2
-            echo "  (Check: docker compose ps server)" >&2
-            SERVER_IP=localhost
-        fi
-        echo ">>> resolved server container bridge IP: $SERVER_IP"
-    fi
+    # Earlier this recipe tried to resolve the server container's docker
+    # bridge IP via `docker inspect` in rootful mode -- the theory was that
+    # going direct to the bridge dodges a conntrack pitfall on the sector
+    # reverse-push. In practice the detection was brittle (one bad shell
+    # state and the recipe silently set NET7_GAME_SERVER_HOST to a bridge
+    # IP that's unreachable in rootless), and the localhost path through
+    # the docker forwarder is sufficient for the auth + ticket flow. If
+    # sector zone-in misbehaves on rootful, run `just dev` for the
+    # dockerised proxy (which is in-network and doesn't NAT at all).
+    #
+    # An explicit NET7_GAME_SERVER_HOST in the environment still wins via
+    # the override path in proxy/Net7.cpp; this just provides the default.
+    SERVER_IP=localhost
 
     echo ">>> launching (WINEPREFIX=$WINEPREFIX, NET7_UPSTREAM_HOST=localhost, NET7_GAME_SERVER_HOST=$SERVER_IP) -- click Play in the GUI"
-    NET7_UPSTREAM_HOST=localhost \
-    NET7_GAME_SERVER_HOST="$SERVER_IP" \
+    env -u NET7_GAME_SERVER_HOST -u NET7_UPSTREAM_HOST \
+        NET7_UPSTREAM_HOST=localhost \
+        NET7_GAME_SERVER_HOST="$SERVER_IP" \
         dotnet run --no-build --project tools/launchnet7-avalonia
 
 # Stream all logs in the foreground.
