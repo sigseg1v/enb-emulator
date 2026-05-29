@@ -2915,4 +2915,211 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Verbatim body of the 0x001D MESSAGE_STRING reply the server emits
+    /// when the GM-block (<c>//</c>-prefix) dispatch at
+    /// <c>server/src/PlayerConnection.cpp:4716</c> strips the leading
+    /// 2 chars and hands <c>pch="ban"</c> to
+    /// <c>MatchOptWithParam("ban", pch, param, msg_sent)</c> at
+    /// <c>PlayerConnection.cpp:4756</c>. The matcher's separator-check
+    /// (NUL is not '=', not ' ', not isalpha) hits the else-branch emit
+    /// at <c>PlayerConnection.cpp:4548</c>:
+    /// <c>SendVaMessage("Missing arg for option %s", "ban")</c>.
+    /// 26 ASCII bytes after %s substitution. Same emit location as
+    /// Waves 131 / 134 / 135 / 136; NEW MINIMAL 3-byte option name in %s
+    /// slot (vs prior pins' 5/6/7-byte widths).
+    /// </summary>
+    private const string MissingArgBanLiteral = "Missing arg for option ban";
+
+    /// <summary>
+    /// Wave 137 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 30-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the GM-tier slash
+    /// command <c>//ban</c> (NO param) -- routes through the GM-block
+    /// (<c>//</c>-prefix) entry guard at
+    /// <c>server/src/PlayerConnection.cpp:4716</c>, the 2-char strip at
+    /// lines 4719-4721, the case-'b' GM-block dispatch at line 4754-4756,
+    /// and MatchOptWithParam's ERROR fork at
+    /// <c>PlayerConnection.cpp:4548</c> BEFORE control reaches the
+    /// case-'b' GM-block body-block strtok param parsing.
+    ///
+    /// <para>
+    /// SECOND pin on the GM-block (<c>//</c>-prefix) dispatch path
+    /// (after Wave 136's //adduser). FIRST pin on case-'b' GM-block.
+    /// TIGHT same-case-letter sibling pair with Waves 132 (/beon) and
+    /// 133 (/beoff) which both pinned case-'b' user-block -- Wave 137
+    /// pins the case-'b' GM-block, spanning the TWO TIERS of
+    /// HandleSlashCommands within case-'b' (mirroring Wave 136's
+    /// tier-spanning pair within case-'a' against Wave 117).
+    /// </para>
+    ///
+    /// <para>
+    /// Wave 137 also extends the sibling-arm catalogue on
+    /// HandleSlashCommands to TWELVE byte-exact-pinned arms across BOTH
+    /// tiers (Waves 117/123/125/126/129/130/131/132/133/134/135 user-tier
+    /// + 136/137 GM-tier), is the SECOND pin on the GM-block dispatch
+    /// path (after Wave 136), and is the FIFTH pin on the
+    /// MatchOptWithParam ERROR path (after Waves 131 /level 5-byte,
+    /// 134 /chjoin 6-byte, 135 /chleave 7-byte, 136 //adduser 7-byte) --
+    /// NEW MINIMAL 3-byte option-name width pin.
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes Wave 136
+    /// is structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     %s format-substitution minimal-width regression at
+    ///     PlayerClass.cpp:3422. Wave 131 pins 5-byte ("level"), Wave
+    ///     134 pins 6-byte ("chjoin"), Wave 135 pins 7-byte ("chleave"),
+    ///     Wave 136 pins 7-byte ("adduser"), Wave 137 pins 3-byte ("ban").
+    ///     A regression with off-by-one length accounting at a specific
+    ///     short width (e.g. mishandling option names &lt; 5 bytes) would
+    ///     fail Wave 137 but pass all prior pins. NEW MINIMAL-WIDTH
+    ///     %s-substitution coverage.
+    ///   </item>
+    ///   <item>
+    ///     case-'b' GM-block dispatch regression at
+    ///     <c>server/src/PlayerConnection.cpp:4754-4756</c>. The
+    ///     case-'b' GM-block arm contains MatchOptWithParam("ban", ...)
+    ///     (NO redundant AdminLevel guard inside the matcher's true-branch
+    ///     -- the outer GM-block entry-guard at line 4716 is the only
+    ///     gate). A regression that swapped the case letter, mis-spelled
+    ///     "ban" as the matcher's first argument (would emit the wrong %s
+    ///     body), or removed the case-'b' GM-block arm entirely would
+    ///     silently drop the //ban dispatch. Wave 137 pins case-'b'
+    ///     GM-block reaches the matcher AND that the matcher emits the
+    ///     missing-arg literal with the EXACT "ban" %s substitution.
+    ///   </item>
+    ///   <item>
+    ///     GM-block tier-routing fidelity regression at
+    ///     <c>server/src/PlayerConnection.cpp:4716</c> + line 4754. The
+    ///     case-'b' letter is ALSO present in the user-tier block at
+    ///     line 5519 (/beon) and 5535 (/beoff). A regression that
+    ///     mis-routed //ban through the user-tier dispatcher would land
+    ///     on case-'b' user-block and either emit "Beta channel on."
+    ///     (matching /beon) or fall through case-'b' user-block to no
+    ///     emit -- both would silently swallow the //ban missing-arg
+    ///     emit. Wave 137 pins that //ban routes through the GM-tier,
+    ///     NOT the user-tier, even though case-'b' is reachable from both.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). The MatchOptWithParam
+    /// missing-arg emit is the retail server's documented dispatcher-level
+    /// error path; the GM-block guard at line 4716 enforces the
+    /// AdminLevel &gt;= GM gate the retail server enforced. No server
+    /// permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashBanMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (27) = 30 bytes.
+        const int ExpectedReplyPayloadLength = 30;
+        // strlen(literal) + 1 NUL = 27.
+        const short ExpectedReplyLengthField = 27;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 26.
+        const int ExpectedLiteralByteCount = 26;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Banner", shipName: "BanShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//ban");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // Filter on the distinctive "for option ban" suffix.
+                if (!text.StartsWith("Missing arg for option ban", StringComparison.Ordinal))
+                    continue;
+
+                // Reject longer-suffix collisions (e.g. "Missing arg for
+                // option banaccount" if such an arm ever existed).
+                if (text.Length > "Missing arg for option ban".Length &&
+                    char.IsLetter(text["Missing arg for option ban".Length]))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgBanLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//ban\" without seeing 0x001D MESSAGE_STRING starting with " +
+                $"\"Missing arg for option ban\". Likely the GM-block entry guard at " +
+                $"server/src/PlayerConnection.cpp:4716 stopped admitting status=100 accounts, " +
+                $"the 2-char strip at lines 4719-4721 mis-offset, the case-'b' GM-block " +
+                $"matcher at line 4756 stopped dispatching, the case-'b' tier-routing " +
+                $"mis-routed //ban to the user-tier dispatcher (case-'b' user-block at " +
+                $"line 5519 /beon path), or the missing-arg ERROR fork at " +
+                $"PlayerConnection.cpp:4548 changed shape.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
