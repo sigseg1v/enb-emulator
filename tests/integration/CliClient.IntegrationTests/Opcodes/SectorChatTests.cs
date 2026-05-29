@@ -7647,4 +7647,263 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 159 missing-arg ERROR literal for case-'t' /terminate.
+    /// The matcher at PlayerConnection.cpp:7501 reads
+    /// `if (MatchOptWithParam("terminate", pch, param, msg_sent))`
+    /// -- independent CONSECUTIVE-IF block (NOT chained via else-if),
+    /// NO outer AdminLevel guard, INSIDE-BODY DEV-guard at line
+    /// 7511 (gates SUCCESS path only; ERROR path emits regardless
+    /// of AdminLevel). THIRD INSIDE-BODY-GUARD pin (Wave 156 case-w
+    /// /warp 4-byte ELSE-IF GM + Wave 157 case-u /upgrade 7-byte
+    /// ELSE-IF GM + Wave 159 case-t /terminate 9-byte CONSECUTIVE-
+    /// IF DEV). With NO param after "/terminate", strncmp matches
+    /// 9 bytes, arg[9]='\0' fails separator-check, allowNoParams=
+    /// false -- emits "Missing arg for option terminate", returns
+    /// false. INSIDE-BODY DEV-guard SKIPPED (matcher returned false,
+    /// body block never entered). 32 ASCII bytes after %s
+    /// substitution -- 9-byte %s width SECOND pin (Wave 154
+    /// /uitrigger NO-GUARD ELSE-IF + Wave 159 INSIDE-BODY-DEV-GUARD
+    /// CONSECUTIVE-IF) -- SAME width DIFFERENT case-letter
+    /// DIFFERENT structural pattern.
+    /// </summary>
+    private const string MissingArgTerminateLiteral = "Missing arg for option terminate";
+
+    /// <summary>
+    /// Wave 159 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 36-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/terminate</c> (NO param) -- routes through the
+    /// user-tier dispatcher entry at line 5434, the 1-char strip, the
+    /// case-'t' user-tier dispatch (case-letter already pinned by
+    /// Wave 153 via /tilt CONSECUTIVE-IF NO-GUARD arm AND Wave 158
+    /// via /testmsg CONSECUTIVE-IF DEV-guard MATCHER-FIRST arm; Wave
+    /// 159 deepens case-'t' to the CONSECUTIVE-IF INSIDE-BODY-DEV-
+    /// GUARD arm /terminate at 7501). Independent CONSECUTIVE-IF at
+    /// 7462 strcmp test FAIL. 7471 strcasecmp talktree FAIL. 7486
+    /// MatchOptWithParam("testmsg",...) &amp;&amp; DEV-guard: strncmp
+    /// ("testmsg","terminate",7) t-t, e-e match idx 1, s-r MISMATCH
+    /// idx 2 false NO emit, &amp;&amp; short-circuits. 7495 MatchOptWithParam
+    /// ("tilt",...): strncmp("tilt","terminate",4) t-t, i-e MISMATCH
+    /// idx 1 false NO emit. Independent at 7501 `MatchOptWithParam
+    /// ("terminate", pch, param, msg_sent)` -- NO outer AdminLevel
+    /// guard. MatchOptWithParam: strncmps "terminate" against
+    /// "terminate" (9 byte match), arg[9]='\0' -- NOT '=', NOT ' ',
+    /// NOT isalpha, allowNoParams=false -- emits "Missing arg for
+    /// option terminate" via SendVaMessage at 4548, sets msg_sent=
+    /// true, returns false. INSIDE-BODY DEV-guard
+    /// `if (p &amp;&amp; AdminLevel() >= DEV)` at 7511 for SUCCESS path
+    /// SKIPPED (matcher returned false, body block never entered;
+    /// the GetPlayer(param) call at 7503 is also INSIDE-BODY but
+    /// crashes with param being uninitialized -- wait, MatchOptWithParam
+    /// returning false means msg_sent=true and body never entered).
+    /// 7521 MatchOptWithParam("trade",...): strncmp("trade",
+    /// "terminate",5) t-t, r-e MISMATCH idx 1 false NO emit. case-
+    /// 't' breaks at 7573. Trailing fallback at 7702 SKIPPED
+    /// (msg_sent=true). NET RESULT: ONE emit.
+    ///
+    /// <para>
+    /// TWENTY-EIGHTH pin on the user-tier (single-slash) dispatch
+    /// path. THIRD pin on user-tier case-'t' (Wave 153 pinned pure
+    /// CONSECUTIVE-IF NO-GUARD /tilt + Wave 158 pinned CONSECUTIVE-
+    /// IF DEV-guard MATCHER-FIRST /testmsg + Wave 159 deepens case-
+    /// 't' to CONSECUTIVE-IF INSIDE-BODY-DEV-GUARD /terminate at
+    /// 7501); case-'t' is now TRIPLE-PINNED. TWENTY-SEVENTH pin on
+    /// the MatchOptWithParam ERROR path. THIRD INSIDE-BODY-GUARD
+    /// pin -- Wave 156 case-w /warp 4-byte ELSE-IF GM-guard +
+    /// Wave 157 case-u /upgrade 7-byte ELSE-IF GM-guard + Wave 159
+    /// case-t /terminate 9-byte CONSECUTIVE-IF DEV-guard --
+    /// INSIDE-BODY-GUARD now TRIPLE-PINNED across THREE distinct
+    /// case-letters AND THREE distinct widths AND TWO distinct
+    /// guard tiers (GM=50 + DEV=80) AND TWO distinct block
+    /// structures (ELSE-IF chain + CONSECUTIVE-IF). SECOND 9-byte
+    /// %s width pin (Wave 154 case-u /uitrigger NO-GUARD ELSE-IF +
+    /// Wave 159 case-t /terminate INSIDE-BODY-DEV-GUARD
+    /// CONSECUTIVE-IF) -- SAME width DIFFERENT case-letter DIFFERENT
+    /// structural pattern; remaining %s width gaps: 10/12. FOURTH
+    /// CONSECUTIVE-IF pin (Waves 153 case-t pure NO-GUARD + 155
+    /// case-w MIXED + 158 case-t DEV-guard MATCHER-FIRST + 159
+    /// case-t INSIDE-BODY-DEV-GUARD) -- CONSECUTIVE-IF now
+    /// QUADRUPLE-PINNED.
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes Wave 158
+    /// is structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     case-'t' CONSECUTIVE-IF INSIDE-BODY-DEV-GUARD arm
+    ///     deepening regression at <c>PlayerConnection.cpp:7501-7518</c>.
+    ///     Wave 153 pinned case-'t' /tilt at 7495 (pure CONSECUTIVE-
+    ///     IF NO-GUARD); Wave 158 pinned case-'t' /testmsg at 7486
+    ///     (CONSECUTIVE-IF DEV-guard MATCHER-FIRST); case-'t'
+    ///     /terminate at 7501 sits on yet another CONSECUTIVE-IF
+    ///     variant with INSIDE-BODY DEV-guard and was UNPINNED
+    ///     before Wave 159. A regression that converted INSIDE-BODY-
+    ///     DEV-GUARD to OUTER-GUARD DEV-GUARD would skip the ERROR-
+    ///     fork emit for non-DEV users; a regression that converted
+    ///     CONSECUTIVE-IF to ELSE-IF would change cross-arm dispatch
+    ///     semantics; Wave 159 pins case-'t' /terminate CONSECUTIVE-
+    ///     IF INSIDE-BODY-DEV-GUARD arm is REACHABLE AND the
+    ///     INSIDE-BODY-DEV-GUARD structural variant is preserved
+    ///     at THIS combination of (case-letter, block structure,
+    ///     guard tier).
+    ///   </item>
+    ///   <item>
+    ///     case-'t' CONSECUTIVE-IF cross-arm fall-through regression
+    ///     at <c>PlayerConnection.cpp:7521-7572</c> via 1 sibling
+    ///     CONSECUTIVE-IF matcher (/trade 5B). After the /terminate
+    ///     matcher emits, execution continues through 1 subsequent
+    ///     independent if at 7521 /trade strncmp-mismatch idx 1 'r'
+    ///     vs 'e' false NO emit; case-'t' breaks; trailing fallback
+    ///     SKIPPED (msg_sent=true). A regression that ADDED a
+    ///     competing matcher matching pch="terminate" by accident
+    ///     would produce a second message; the CONSECUTIVE-IF
+    ///     structure means even an else-clause regression could not
+    ///     suppress that second emit; Wave 159 pins the case-'t'
+    ///     CONSECUTIVE-IF cross-arm fall-through as a structural
+    ///     invariant.
+    ///   </item>
+    ///   <item>
+    ///     INSIDE-BODY-GUARD pattern triple-pin cross-tier cross-
+    ///     block-structure divergence regression at
+    ///     <c>PlayerClass.cpp:3422</c>. Wave 156 pinned INSIDE-BODY-
+    ///     GUARD at case-'w' /warp 4-byte ELSE-IF GM-guard;
+    ///     Wave 157 at case-'u' /upgrade 7-byte ELSE-IF GM-guard;
+    ///     Wave 159 at case-'t' /terminate 9-byte CONSECUTIVE-IF
+    ///     DEV-guard. THREE distinct case-letters, THREE distinct
+    ///     widths, TWO distinct guard tiers (GM/DEV), TWO distinct
+    ///     block structures (ELSE-IF/CONSECUTIVE-IF). A regression
+    ///     that selectively broke INSIDE-BODY-GUARD at one (case-
+    ///     letter, width, tier, structure) combination but not the
+    ///     others would fail one pin but not all three; Wave 159
+    ///     deepens INSIDE-BODY-GUARD to cross-tier AND cross-block-
+    ///     structure coverage. Additionally 9-byte %s width is now
+    ///     DOUBLE-PINNED across TWO distinct case-letters (u/t) AND
+    ///     TWO distinct structural patterns (NO-GUARD-ELSE-IF /
+    ///     INSIDE-BODY-DEV-GUARD CONSECUTIVE-IF); the gap in 9-byte
+    ///     coverage is closed AND per-structural-pattern divergence
+    ///     at 9-byte width is ruled out.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). The MatchOptWithParam
+    /// missing-arg emit is the retail server's documented dispatcher-
+    /// level error path. /terminate (kick/disconnect target player
+    /// command) is DEV-restricted in the retail server -- INSIDE-
+    /// BODY DEV-guard at 7511 gates SUCCESS path only (terminating a
+    /// player connection is DEV-restricted because it disrupts other
+    /// players); ERROR path emits regardless of AdminLevel. No server
+    /// permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashTerminateMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (33) = 36 bytes.
+        const int ExpectedReplyPayloadLength = 36;
+        // strlen(literal) + 1 NUL = 33.
+        const short ExpectedReplyLengthField = 33;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 32.
+        const int ExpectedLiteralByteCount = 32;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Termo", shipName: "TermoShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/terminate");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // EXACT equals filter (not StartsWith) -- defensive against
+                // any future spurious "Illegal slash command: terminate" emit
+                // if the trailing fallback at line 7702 msg_sent gate
+                // regresses.
+                if (!text.Equals("Missing arg for option terminate", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgTerminateLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/terminate\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option terminate\". Likely the user-tier case-'t' " +
+                $"dispatch at line 7461 stopped routing, the CONSECUTIVE-IF independent " +
+                $"block at 7501 stopped dispatching, the NO-OUTER-GUARD INSIDE-BODY-DEV-" +
+                $"GUARD structural variant converted to OUTER-DEV-GUARD (would skip ERROR " +
+                $"emit for non-DEV users), the INSIDE-BODY DEV-guard at 7511 leaked into " +
+                $"the ERROR path (regression), the trailing illegal-slash fallback at " +
+                $"7702 fired as a second emit (msg_sent gate regression), or the missing-" +
+                $"arg ERROR fork at PlayerConnection.cpp:4548 changed shape (esp. " +
+                $"vsprintf_s 9-byte %s width).");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
