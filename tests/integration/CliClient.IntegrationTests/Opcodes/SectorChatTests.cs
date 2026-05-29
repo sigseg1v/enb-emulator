@@ -690,4 +690,244 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Verbatim body of the 0x001D MESSAGE_STRING reply the server emits
+    /// in HandleSlashCommands' user-block case 'n' for the
+    /// <c>strcmp(pch, "notells") == 0 &amp;&amp; AdminLevel() &gt;= GM</c>
+    /// arm on FIRST invocation (m_TellsFromFriendsOnly initialised
+    /// false in Player ctor at <c>server/src/PlayerClass.cpp:167</c>).
+    /// The format string is <c>"Allow tells %s"</c> and the substituted
+    /// value is the TERNARY OF THE OLD STATE: <c>m_TellsFromFriendsOnly
+    /// ? "off" : "on"</c>. With initial state false, the substituted
+    /// value is "on" (the message reflects the OLD state, not the new
+    /// one — toggle happens on the line AFTER the SendVaMessageC call,
+    /// see <c>server/src/PlayerConnection.cpp:6863-6868</c>).
+    /// 14 ASCII bytes; SendVaMessageC hands the string to
+    /// SendMessageString with EXPLICIT color=17 (red — see
+    /// <c>server/src/PlayerClass.cpp:3438-3452</c> for the colour code
+    /// table comment).
+    /// </summary>
+    private const string NotellsFirstInvocationLiteral = "Allow tells on";
+
+    /// <summary>
+    /// Wave 125 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT → 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 18-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/notells</c> on FIRST invocation (initial state
+    /// m_TellsFromFriendsOnly=false).
+    ///
+    /// <para>
+    /// Why a +0 ratchet, and why this specific sibling. Wave 123
+    /// (<see cref="SlashAuthlevel_OnAdminAccount_PinsExactReplyWireShape"/>)
+    /// pinned the SAME HandleSlashCommands user-block dispatcher on a
+    /// DIFFERENT case-letter ('a' /authlevel), routing through
+    /// <c>SendVaMessage(...)</c> with DEFAULT color=5. Wave 125 pins a
+    /// DIFFERENT case-letter ('n' /notells) routing through a
+    /// STRUCTURALLY DISTINCT EMIT FN <c>SendVaMessageC(17, ...)</c> with
+    /// EXPLICIT color=17. The two together box in three orthogonal
+    /// fan-outs on the same dispatcher: (a) case-letter routing 'a' vs
+    /// 'n' inside the <c>switch(*pch)</c> at PlayerConnection.cpp:5444;
+    /// (b) emit-fn fork SendVaMessage vs SendVaMessageC at
+    /// PlayerClass.cpp:3415 vs 3443; (c) SendMessageString color-param
+    /// routing — default-arg branch (color=5) vs explicit-arg branch
+    /// (color=17).
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Six concrete regression classes Waves 8/110/123
+    /// (the existing HandleClientChat dispatcher pins) are structurally
+    /// blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     <c>SendVaMessageC</c>→<c>SendMessageString</c> colour-routing
+    ///     regression at <c>server/src/PlayerClass.cpp:3451</c>. The
+    ///     two-arg call <c>SendMessageString(pch, colour)</c> threads
+    ///     the leading colour through; if a refactor dropped the second
+    ///     arg (e.g. consolidated to <c>SendMessageString(pch)</c>) the
+    ///     reply would carry the default color=5 instead of the
+    ///     explicit color=17 from the slash-command site. Wave 125 pins
+    ///     <c>span[2] == 17</c>; Wave 123 pins <c>span[2] == 5</c>;
+    ///     together they nail the colour fork from both sides.
+    ///   </item>
+    ///   <item>
+    ///     <c>SendVaMessageC</c> arg-order regression at
+    ///     <c>server/src/PlayerClass.cpp:3443</c>. The signature is
+    ///     <c>void SendVaMessageC(char colour, char *string, ...)</c>
+    ///     — colour FIRST, format SECOND. A refactor that flipped them
+    ///     to <c>(char *string, char colour, ...)</c> would cause every
+    ///     caller's first arg (often a small int like 17) to be
+    ///     interpreted as a string pointer and crash the server. Wave
+    ///     125 catches by drain-timeout (server crash) or by reading
+    ///     the wrong colour byte.
+    ///   </item>
+    ///   <item>
+    ///     <c>m_TellsFromFriendsOnly</c> ctor-init regression at
+    ///     <c>server/src/PlayerClass.cpp:167</c>. The Player ctor
+    ///     initialises this flag to false; the slash-command emits
+    ///     OLD state via ternary <c>m_TellsFromFriendsOnly ? "off" :
+    ///     "on"</c>. A refactor that flipped the default to true would
+    ///     emit "Allow tells off" (15 bytes literal, 19-byte payload)
+    ///     instead of "Allow tells on" (14 bytes literal, 18-byte
+    ///     payload). Wave 125 pins literal byte-count (14) and
+    ///     payload-length (18) — both fail on the flip.
+    ///   </item>
+    ///   <item>
+    ///     Slash-command toggle-message regression. The message
+    ///     literal pre-existed the toggle line at PlayerConnection.cpp:
+    ///     6865-6866; if a refactor moved the message AFTER the toggle
+    ///     (printing NEW state instead of OLD), the first invocation
+    ///     would emit "Allow tells off" rather than "Allow tells on".
+    ///     Wave 125 pins verbatim "Allow tells on".
+    ///   </item>
+    ///   <item>
+    ///     User-block case-'n' arm AdminLevel-guard regression at
+    ///     <c>server/src/PlayerConnection.cpp:6863</c>. The conjunction
+    ///     <c>strcmp(pch, "notells") == 0 &amp;&amp; AdminLevel() &gt;=
+    ///     GM</c> requires admin-level ≥ 50 (GM). Wave 123 already
+    ///     verifies the seed.sql status=100→admin_level=100 plumbing
+    ///     for the case-'a' /authlevel arm, but /authlevel has NO
+    ///     admin-level guard so a regression that broke
+    ///     <c>AdminLevel()</c> back to 0 would be invisible to Wave
+    ///     123. Wave 125 catches by drain-timeout: case-'n' /notells is
+    ///     SILENT when admin&lt;GM (the branch is gated by &amp;&amp;).
+    ///   </item>
+    ///   <item>
+    ///     User-block case-'n' switch-arm routing at
+    ///     <c>server/src/PlayerConnection.cpp:6855-6870</c>. The
+    ///     case-'n' arm only contains 'noattack' and 'notells'; a
+    ///     copy-paste swap that bound 'notells' to <c>noattack</c>'s
+    ///     body would emit "Combat immunity on" instead of "Allow
+    ///     tells on" — both go through SendVaMessageC(17,...) so colour
+    ///     and length-encoding would still pin, but the literal-body
+    ///     verbatim check catches.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (CLAUDE.md). The case-'n' /notells slash
+    /// command is the retail server's documented chat-flag toggle path
+    /// (admin-only — the retail server gated this with the same
+    /// AdminLevel ≥ GM check). The SendVaMessageC fn and the 0x001D
+    /// MESSAGE_STRING wire shape it travels on are both retail
+    /// behaviour, not test-only artefacts. No server permissiveness is
+    /// added: a real-client /notells from a GM-flagged account lands
+    /// here too. The colour code 17 (red) is also retail behaviour, see
+    /// the colour-table comment at PlayerClass.cpp:3438-3441.
+    /// </para>
+    ///
+    /// <para>
+    /// Why fresh-char first-invocation matters. The message reflects
+    /// the OLD state — true→"off", false→"on" — and toggles AFTER. So
+    /// the test MUST invoke /notells exactly once on a never-before-
+    /// invoked Player object to assert "Allow tells on". A retry harness
+    /// that re-sends /notells on flake would observe "Allow tells off"
+    /// on the second invocation; the per-account isolation (cli_test119
+    /// dedicated, ServerFixture tears down with -v wiping pgdata) makes
+    /// the single-invocation invariant safe.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s. Handshake ~2s; CHAT+REPLY round-trip is sub-second.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashNotells_OnAdminAccountFirstInvocation_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (15) = 18 bytes.
+        const int ExpectedReplyPayloadLength = 18;
+        // strlen(literal) + 1 NUL = 15.
+        const short ExpectedReplyLengthField = 15;
+        // SendVaMessageC explicit colour parameter — red.
+        const byte ExpectedReplyColor = 17;
+        // strlen(literal) = 14.
+        const int ExpectedLiteralByteCount = 14;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Notelle", shipName: "NotellShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/notells");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // Filter on the distinctive substring so handshake-tail
+                // and chatter frames don't race ahead of the /notells
+                // reply. Once we have the right reply we pin its full
+                // wire shape.
+                if (!text.Contains("Allow tells", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(NotellsFirstInvocationLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/notells\" without seeing 0x001D MESSAGE_STRING containing " +
+                $"\"Allow tells\". Likely the user-block case-'n' arm at " +
+                $"server/src/PlayerConnection.cpp:6863 changed shape, the AdminLevel " +
+                $"guard rejected the dispatch (admin_level seeding regression), the " +
+                $"SendVaMessageC→SendMessageString colour-routing was rewired, or the " +
+                $"m_TellsFromFriendsOnly ctor-init at PlayerClass.cpp:167 changed.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }

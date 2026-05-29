@@ -181,6 +181,7 @@ public static class TestAccounts
             ["ClientChatRequest_AddIgnoreSelfName_PinsExactReplyWireShape"]                            = A(9_000_116, "cli_test116"),
             ["SlashAuthlevel_OnAdminAccount_PinsExactReplyWireShape"]                                  = A(9_000_117, "cli_test117"),
             ["Action_JumpStartOnNullTarget_PinsExactReplyWireShape"]                                   = A(9_000_118, "cli_test118"),
+            ["SlashNotells_OnAdminAccountFirstInvocation_PinsExactReplyWireShape"]                     = A(9_000_119, "cli_test119"),
         };
 
     /// <summary>
