@@ -930,4 +930,219 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Verbatim body of the 0x001D MESSAGE_STRING reply the server emits
+    /// in HandleSlashCommands' user-block case 'n' for the
+    /// <c>strcmp(pch, "noattack") == 0 &amp;&amp; AdminLevel() &gt;= GM</c>
+    /// arm on FIRST invocation (m_CombatImmunity initialised false in
+    /// Player ctor at <c>server/src/PlayerClass.cpp:119</c>). The format
+    /// string is <c>"Combat immunity %s"</c> and the substituted value
+    /// is the TERNARY OF THE OLD STATE: <c>m_CombatImmunity ? "off" :
+    /// "on"</c>. With initial state false, the substituted value is
+    /// "on" (the message reflects the OLD state — toggle happens on
+    /// the line AFTER the SendVaMessageC call, see
+    /// <c>server/src/PlayerConnection.cpp:6858-6860</c>). 18 ASCII
+    /// bytes; SendVaMessageC hands the string to SendMessageString with
+    /// EXPLICIT color=17 (red).
+    /// </summary>
+    private const string NoattackFirstInvocationLiteral = "Combat immunity on";
+
+    /// <summary>
+    /// Wave 126 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT → 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 22-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/noattack</c> on FIRST invocation (initial state
+    /// m_CombatImmunity=false).
+    ///
+    /// <para>
+    /// Why a +0 ratchet, and why this specific sibling. Wave 125
+    /// (<see cref="SlashNotells_OnAdminAccountFirstInvocation_PinsExactReplyWireShape"/>)
+    /// pinned the SAME case-'n' arm at PlayerConnection.cpp:6863-6868
+    /// — same case-letter, same emit fn (SendVaMessageC), same explicit
+    /// colour 17, same ctor-init-false flag pattern. Wave 126 is the
+    /// TIGHTEST POSSIBLE sibling pair to Wave 125: structurally
+    /// identical wire-emit path, but with a DIFFERENT internal
+    /// boolean flag (<c>m_CombatImmunity</c> at PlayerClass.cpp:119)
+    /// and DIFFERENT literal body ("Combat immunity on" vs "Allow
+    /// tells on"). The pair pins both arms of the case-'n' sub-switch
+    /// at PlayerConnection.cpp:6855-6870 (noattack at 6856 and notells
+    /// at 6863) — the two if-statements inside the case-'n' arm.
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Five concrete regression classes Wave 125
+    /// alone is blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     Case-'n' sub-switch arm-body swap between /noattack and
+    ///     /notells at <c>server/src/PlayerConnection.cpp:6856-6868</c>.
+    ///     Both arms emit SendVaMessageC(17,...) with structurally
+    ///     identical ternary OLD-state reads on a bool flag; a refactor
+    ///     that copy-pasted the /noattack body into /notells (or
+    ///     vice-versa) would emit "Combat immunity on" instead of
+    ///     "Allow tells on" — Wave 125 catches the wrong-literal in
+    ///     ONE direction (notells→noattack swap); Wave 126 catches the
+    ///     OPPOSITE direction (noattack→notells swap, emitting "Allow
+    ///     tells on" instead of "Combat immunity on"). Without both
+    ///     waves, half the swap surface is uncovered.
+    ///   </item>
+    ///   <item>
+    ///     <c>m_CombatImmunity</c> ctor-init regression at
+    ///     <c>server/src/PlayerClass.cpp:119</c>. The Player ctor
+    ///     initialises this flag to false; a flip to true would emit
+    ///     "Combat immunity off" (19B literal, 23B payload) instead of
+    ///     "Combat immunity on" (18B/22B). Wave 125 only pins
+    ///     m_TellsFromFriendsOnly init at line 167 — these are two
+    ///     separate ctor-init lines and the regression surface is per-
+    ///     line. Wave 126 pins m_CombatImmunity init independently.
+    ///   </item>
+    ///   <item>
+    ///     case-'n' AdminLevel guard regression for the /noattack arm
+    ///     specifically at <c>server/src/PlayerConnection.cpp:6856</c>.
+    ///     The two if-statements in case-'n' have INDEPENDENT
+    ///     AdminLevel guards — `strcmp(...,"noattack")==0 &amp;&amp;
+    ///     AdminLevel()&gt;=GM` and `strcmp(...,"notells")==0
+    ///     &amp;&amp; AdminLevel()&gt;=GM`. A regression that broke
+    ///     just one guard's AdminLevel check (e.g. typo "AdminLevle()")
+    ///     would be invisible to Wave 125 if it broke the noattack
+    ///     guard. Wave 126 pins the /noattack-specific AdminLevel
+    ///     dispatch path.
+    ///   </item>
+    ///   <item>
+    ///     SendVaMessageC literal-substitution arg-marshalling
+    ///     regression. Both /notells and /noattack pass a ternary
+    ///     <c>flag ? "off" : "on"</c> as the va-args %s argument. If
+    ///     the ternary-vs-format coupling broke (e.g. a refactor that
+    ///     passed an int instead of a string pointer), Wave 125 catches
+    ///     for the notells arm; Wave 126 catches for the noattack arm.
+    ///     The va-args marshalling surface is per-callsite.
+    ///   </item>
+    ///   <item>
+    ///     case-'n' switch-arm length-prefix calculation regression
+    ///     for the LONGER literal. The /noattack literal is 18 bytes,
+    ///     LONGER than /notells's 14. SendMessageString writes
+    ///     <c>strlen(msg) + 1</c> as the u16 length prefix; a buffer-
+    ///     overflow / strlen miscalculation that worked for short
+    ///     literals (Wave 125's 14B body) might fail for longer ones
+    ///     (Wave 126's 18B body). Wave 126 pins length=19 specifically.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (CLAUDE.md). The case-'n' /noattack slash
+    /// command is the retail server's documented combat-immunity GM
+    /// toggle path. Both the AdminLevel guard and the emit shape are
+    /// retail behaviour. No server permissiveness added: a real-client
+    /// /noattack from a GM-flagged account lands on the exact same code
+    /// path.
+    /// </para>
+    ///
+    /// <para>
+    /// Why fresh-char first-invocation matters. Same as Wave 125 — the
+    /// message reflects the OLD state via ternary, and toggles AFTER.
+    /// Per-account isolation (cli_test120 dedicated, ServerFixture
+    /// tears down with -v wiping pgdata) makes the single-invocation
+    /// invariant safe.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashNoattack_OnAdminAccountFirstInvocation_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (19) = 22 bytes.
+        const int ExpectedReplyPayloadLength = 22;
+        // strlen(literal) + 1 NUL = 19.
+        const short ExpectedReplyLengthField = 19;
+        // SendVaMessageC explicit colour parameter — red.
+        const byte ExpectedReplyColor = 17;
+        // strlen(literal) = 18.
+        const int ExpectedLiteralByteCount = 18;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Noattacker", shipName: "NoatkShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/noattack");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Contains("Combat immunity", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(NoattackFirstInvocationLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/noattack\" without seeing 0x001D MESSAGE_STRING containing " +
+                $"\"Combat immunity\". Likely the user-block case-'n' arm at " +
+                $"server/src/PlayerConnection.cpp:6856 changed shape, the AdminLevel " +
+                $"guard rejected the dispatch, the SendVaMessageC→SendMessageString " +
+                $"colour-routing was rewired, or the m_CombatImmunity ctor-init at " +
+                $"PlayerClass.cpp:119 changed.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }

@@ -182,6 +182,7 @@ public static class TestAccounts
             ["SlashAuthlevel_OnAdminAccount_PinsExactReplyWireShape"]                                  = A(9_000_117, "cli_test117"),
             ["Action_JumpStartOnNullTarget_PinsExactReplyWireShape"]                                   = A(9_000_118, "cli_test118"),
             ["SlashNotells_OnAdminAccountFirstInvocation_PinsExactReplyWireShape"]                     = A(9_000_119, "cli_test119"),
+            ["SlashNoattack_OnAdminAccountFirstInvocation_PinsExactReplyWireShape"]                    = A(9_000_120, "cli_test120"),
         };
 
     /// <summary>
