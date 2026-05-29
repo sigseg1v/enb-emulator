@@ -9,14 +9,24 @@ using System.Threading.Tasks;
 
 namespace LaunchNet7Avalonia.Network
 {
-    // Plaintext-on-127.0.0.1 -> TLS-to-upstream relay.
+    // Plaintext-on-loopback -> TLS-to-upstream relay.
     //
     // The client's authlogin.dll always talks HTTP to localhost (the
     // launcher patches the dll bytes to make this true regardless of the
     // selected server). This relay terminates that plaintext on loopback
     // and re-wraps each connection as TLS to the actual upstream auth
     // host. Net7SSL stays TLS-only end-to-end on the wire; the plaintext
-    // hop never leaves the box (TcpListener bound to IPAddress.Loopback).
+    // hop never leaves the box (listeners bound to loopback only).
+    //
+    // Dual-family loopback (v4 + v6) is required: WINE's wininet resolves
+    // "localhost" via getaddrinfo, and on most modern distros the v6
+    // address `::1` is returned first. A v4-only listener would refuse
+    // those connections and authlogin.dll would report
+    // ERROR_INTERNET_CANNOT_CONNECT (12029). We bind two listeners —
+    // one on 127.0.0.1, one on [::1] — because TcpListener+DualMode bound
+    // to IPv6Loopback does NOT accept v4 traffic (the bound address has
+    // no v4-mapped equivalent), and IPv6Any+DualMode would expose the
+    // port off-box, which is exactly what the relay exists to prevent.
     //
     // Cert validation policy is split by upstream:
     //   - Loopback upstream (dev stack): skip verification. The cert is
@@ -28,7 +38,8 @@ namespace LaunchNet7Avalonia.Network
     {
         public const int ListenPort = 4180;
 
-        readonly TcpListener _listener;
+        readonly TcpListener _v4;
+        readonly TcpListener _v6;
         readonly string _upstreamHost;
         readonly int _upstreamPort;
         readonly bool _upstreamIsLoopback;
@@ -38,9 +49,11 @@ namespace LaunchNet7Avalonia.Network
         public static LocalAuthRelay Start(string upstreamHost, int upstreamPort, Action<string> log = null)
         {
             var r = new LocalAuthRelay(upstreamHost, upstreamPort, log);
-            r._listener.Start();
-            _ = Task.Run(r.AcceptLoop);
-            r._log($"auth relay: listening on 127.0.0.1:{ListenPort} -> {upstreamHost}:{upstreamPort} (verify={(r._upstreamIsLoopback ? "skip" : "full")})");
+            r._v4.Start();
+            r._v6.Start();
+            _ = Task.Run(() => r.AcceptLoop(r._v4));
+            _ = Task.Run(() => r.AcceptLoop(r._v6));
+            r._log($"auth relay: listening on 127.0.0.1:{ListenPort} and [::1]:{ListenPort} -> {upstreamHost}:{upstreamPort} (verify={(r._upstreamIsLoopback ? "skip" : "full")})");
             return r;
         }
 
@@ -50,17 +63,18 @@ namespace LaunchNet7Avalonia.Network
             _upstreamPort = upstreamPort;
             _upstreamIsLoopback = IsLoopback(upstreamHost);
             _log = log ?? (_ => { });
-            _listener = new TcpListener(IPAddress.Loopback, ListenPort);
+            _v4 = new TcpListener(IPAddress.Loopback,     ListenPort);
+            _v6 = new TcpListener(IPAddress.IPv6Loopback, ListenPort);
         }
 
-        async Task AcceptLoop()
+        async Task AcceptLoop(TcpListener listener)
         {
             while (!_cts.IsCancellationRequested)
             {
                 TcpClient client;
                 try
                 {
-                    client = await _listener.AcceptTcpClientAsync(_cts.Token).ConfigureAwait(false);
+                    client = await listener.AcceptTcpClientAsync(_cts.Token).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) { break; }
                 catch (ObjectDisposedException)    { break; }
@@ -117,7 +131,8 @@ namespace LaunchNet7Avalonia.Network
         public void Dispose()
         {
             _cts.Cancel();
-            try { _listener.Stop(); } catch { }
+            try { _v4.Stop(); } catch { }
+            try { _v6.Stop(); } catch { }
         }
 
         public static bool IsLoopback(string host)
