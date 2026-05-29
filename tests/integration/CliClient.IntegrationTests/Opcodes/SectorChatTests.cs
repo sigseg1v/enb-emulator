@@ -4094,4 +4094,194 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Verbatim body of the 0x001D MESSAGE_STRING reply the server emits
+    /// when the user-tier case-'d' HEAD matcher at
+    /// <c>PlayerConnection.cpp:5903</c>
+    /// <c>MatchOptWithParam("d", pch, param, msg_sent)</c> matches the
+    /// single byte 'd' and hits the separator-check NUL fall-through.
+    /// 24 ASCII bytes after %s substitution -- NEW MINIMAL 1-byte %s
+    /// width (vs Wave 137's 3-byte MINIMAL). The "d" matcher's RHS
+    /// short-circuit `&amp;&amp; AdminLevel() &gt;= DEV` never gates the
+    /// emit because C++ short-circuit order makes MatchOptWithParam
+    /// (LHS) run first with side effects.
+    /// </summary>
+    private const string MissingArgDLiteral = "Missing arg for option d";
+
+    /// <summary>
+    /// Wave 143 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 28-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/d</c> (NO param) -- routes through the user-tier
+    /// dispatcher entry at line 5434 (NOT the GM-block, since Msg[1]
+    /// != '/'), the 1-char strip at line 5438-5440, the case-'d'
+    /// user-tier dispatch (NEW case-letter), and the HEAD matcher
+    /// MatchOptWithParam("d", ...) at line 5903 hitting the missing-arg
+    /// ERROR fork at <c>PlayerConnection.cpp:4548</c>.
+    ///
+    /// <para>
+    /// TWELFTH pin on the user-tier (single-slash) dispatch path
+    /// (Waves 117/123/125/126/129/130/131/132/133/134/135/143).
+    /// FIRST pin on user-tier case-'d' -- NEW case-letter extends
+    /// user-tier dispatcher switch coverage to SEVEN distinct
+    /// case-letters (case-'a' Waves 117/123, case-'b' Waves
+    /// 132/133, case-'c' Waves 134/135, case-'d' Wave 143, case-'l'
+    /// Waves 130/131, case-'n' Waves 125/126, case-'p' Wave 129).
+    /// ELEVENTH pin on the MatchOptWithParam ERROR path with NEW
+    /// MINIMAL 1-byte option-name %s width (vs Wave 137's 3-byte
+    /// MINIMAL).
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes Wave 142
+    /// is structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     user-tier case-'d' dispatch regression at
+    ///     <c>PlayerConnection.cpp:5902</c>. case-'d' was previously
+    ///     unpinned in the user-tier switch; a regression that
+    ///     dropped case-'d' entirely, reordered case labels, or
+    ///     routed *pch=='d' to the wrong handler would silently
+    ///     swallow /d (along with /don, /doff, /dwho, /dialog,
+    ///     /debug, /deco, /dockp, /debugmissions). Wave 143 pins
+    ///     case-'d' is REACHABLE via the user-tier switch dispatcher.
+    ///   </item>
+    ///   <item>
+    ///     %s format-substitution NEW MINIMAL 1-byte width regression
+    ///     at PlayerClass.cpp:3422. Wave 143 pins 1-byte ("d") --
+    ///     extends the catalogue from 3/5/6/7/11/13/14 to
+    ///     1/3/5/6/7/11/13/14 widths. A regression with vsprintf_s
+    ///     mishandling 1-byte %s arguments (e.g. integer-promotion
+    ///     bug, off-by-one on tiny strings, single-char allocation
+    ///     bug) would fail Wave 143 but pass Waves 137-142.
+    ///   </item>
+    ///   <item>
+    ///     AdminLevel() &gt;= DEV short-circuit ordering regression at
+    ///     <c>PlayerConnection.cpp:5903</c>. The matcher-and-guard
+    ///     line reads `if (MatchOptWithParam("d", pch, param,
+    ///     msg_sent) &amp;&amp; AdminLevel() &gt;= DEV)`. C++
+    ///     short-circuit order matters: MatchOptWithParam runs FIRST
+    ///     with side effects -- the missing-arg emit -- regardless of
+    ///     AdminLevel. Even at status=100 admin (AdminLevel &gt;=
+    ///     ADMIN), the emit happens DURING the matcher call before
+    ///     the &amp;&amp; evaluates AdminLevel; a regression
+    ///     reordering the guard to AdminLevel-first would still emit
+    ///     correctly for status=100 BUT would silently skip the emit
+    ///     for status&lt;DEV. Wave 143 confirms the matcher fires
+    ///     regardless of inner guard ordering at NEW MINIMAL width,
+    ///     structurally analogous to Wave 139's case-'g' SDEV-guard
+    ///     pin at 11-byte width.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). The MatchOptWithParam
+    /// missing-arg emit is the retail server's documented dispatcher-level
+    /// error path. No server permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashDMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (25) = 28 bytes.
+        const int ExpectedReplyPayloadLength = 28;
+        // strlen(literal) + 1 NUL = 25.
+        const short ExpectedReplyLengthField = 25;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 24.
+        const int ExpectedLiteralByteCount = 24;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Diota", shipName: "DiotaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/d");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // Filter on EXACT match -- "Missing arg for option d" is a
+                // prefix of "Missing arg for option deco" etc., so use
+                // equals rather than startswith to avoid mis-matching
+                // sibling case-'d' matchers (none of which fire for pch="d"
+                // since their option names are longer, but defensive).
+                if (text != "Missing arg for option d")
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgDLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/d\" without seeing 0x001D MESSAGE_STRING with body " +
+                $"\"Missing arg for option d\". Likely the user-tier case-'d' dispatch " +
+                $"at line 5902 stopped routing, the HEAD \"d\" matcher at line 5903 " +
+                $"stopped dispatching, or the missing-arg ERROR fork at " +
+                $"PlayerConnection.cpp:4548 changed shape.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
