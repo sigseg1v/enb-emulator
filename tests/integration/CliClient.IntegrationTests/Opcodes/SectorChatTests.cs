@@ -10050,4 +10050,219 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 170 missing-arg ERROR literal for case-'r' /rotatex.
+    /// The matcher at PlayerConnection.cpp:7059 reads
+    /// `else if (MatchOptWithParam("rotatex", pch, param, msg_sent))`
+    /// -- NO outer AdminLevel guard, NO inside-body guard
+    /// (pure NO-GUARD-ELSE-IF pattern). SECOND case-'r' user-tier
+    /// pin -- Wave 144 pinned /removebaseore at user-tier case-'r'
+    /// GUARD-FIRST inline (`AdminLevel() >= DEV && MatchOptWith
+    /// Param(...)` short-circuit AND); Wave 170 deepens case-'r' to
+    /// DOUBLE-PINNED with a NO-GUARD-ELSE-IF structural variant.
+    /// 7 ASCII bytes after %s substitution -- 4th 7-byte width pin
+    /// QUADRUPLE-PINNED across 4 case-letters (c/u/t/r) /
+    /// 4 structural patterns.
+    /// </summary>
+    private const string MissingArgRotatexLiteral = "Missing arg for option rotatex";
+
+    /// <summary>
+    /// Wave 170 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 34-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/rotatex</c> (NO param) -- routes through the
+    /// user-tier dispatcher entry at line 5434, the 1-char strip, the
+    /// case-'r' user-tier dispatch at line 6992 (Wave 170 deepens
+    /// case-'r' to DOUBLE-PINNED across TWO distinct structural
+    /// patterns). Prior matchers in case-'r' MISMATCH at byte 1
+    /// against "rotatex" (reffect/rs/release/rsi/rsa/rsn/rsd/range/
+    /// restoreinv MISMATCHES).
+    ///
+    /// <para>
+    /// ELSE-IF at 7059 `MatchOptWithParam("rotatex", pch, param,
+    /// msg_sent)` -- NO outer AdminLevel guard, NO inside-body guard
+    /// (pure NO-GUARD-ELSE-IF pattern, same as Waves 150 /move,
+    /// 154 /uitrigger, 161 /oeuler, 162 /openif, 163 /sounds,
+    /// 164 /scale, 165 /shieldwarnings). MatchOptWithParam: strncmps
+    /// "rotatex" against "rotatex" (7 byte match), arg[7]='\0' --
+    /// NOT '=', NOT ' ', NOT isalpha, allowNoParams=false -- emits
+    /// "Missing arg for option rotatex" via SendVaMessage at 4548
+    /// with default COLOR=5, sets msg_sent=true, returns false.
+    /// Body at 7061 SKIPPED (matcher returned false). case-'r' chain
+    /// continues: /rotatey/rotatez MISMATCH; /removebaseore
+    /// AdminLevel-AND-matcher short-circuit -- AdminLevel passes
+    /// (SDEV) but MatchOptWithParam "removebaseore" vs "rotatex" byte
+    /// 1 'e' vs 'o' MISMATCH NO emit; rest of case-'r' MISMATCH.
+    /// case-'r' breaks. Trailing fallback at 7702 SKIPPED
+    /// (msg_sent=true). NET RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>
+    /// THIRTY-NINTH pin on the user-tier (single-slash) dispatch
+    /// path. SECOND pin on user-tier case-'r' -- case-'r' user-tier
+    /// now DOUBLE-PINNED across TWO ELSE-IF chain-arm positions
+    /// (Wave 144 /removebaseore GUARD-FIRST inline + Wave 170
+    /// /rotatex NO-GUARD-ELSE-IF). THIRTY-EIGHTH pin on the
+    /// MatchOptWithParam ERROR path. ELEVENTH NO-GUARD pin --
+    /// NO-GUARD now UNDECUPLE-PINNED across 6 case-letters
+    /// (o/s/t/u/w/r) AND 6 structural variants. FOURTH 7-byte %s
+    /// width pin -- QUADRUPLE-PINNED across 4 case-letters
+    /// (c/u/t/r) AND 4 structural patterns (c/chjoin GM-block
+    /// MATCHER-FIRST + u/upgrade INSIDE-BODY-GM + t/testmsg
+    /// CONSECUTIVE-IF DEV-guard MATCHER-FIRST + r/rotatex
+    /// NO-GUARD-ELSE-IF).
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes prior
+    /// waves are structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     SECOND case-'r' user-tier ELSE-IF chain arm regression at
+    ///     <c>PlayerConnection.cpp:7059</c>. Wave 144 pinned
+    ///     /removebaseore at case-'r' GUARD-FIRST inline (line 7074
+    ///     with `AdminLevel() >= DEV && MatchOptWithParam(...)`
+    ///     short-circuit AND); Wave 170 pins /rotatex at case-'r'
+    ///     NO-GUARD-ELSE-IF (line 7059, no AdminLevel guard). A
+    ///     regression that wrapped ALL case-'r' arms in a global
+    ///     AdminLevel guard would gate /rotatex behind that tier;
+    ///     Wave 170 pins /rotatex emits on missing-arg without any
+    ///     AdminLevel gating, ruling out spurious case-'r'-wide
+    ///     guards.
+    ///   </item>
+    ///   <item>
+    ///     case-'r' structural-pattern divergence within a single
+    ///     case-letter regression at <c>PlayerConnection.cpp:7059</c>
+    ///     vs <c>PlayerConnection.cpp:7074</c>. case-'r' has TWO
+    ///     different AdminLevel gating structures coexisting:
+    ///     NO-GUARD-ELSE-IF at 7059 (/rotatex) and GUARD-FIRST inline
+    ///     at 7074 (/removebaseore). A regression that conflated the
+    ///     two patterns (e.g. accidentally added an AdminLevel guard
+    ///     to /rotatex, or removed the AdminLevel guard from
+    ///     /removebaseore) would break one pin but not both; Wave
+    ///     170 pins the structural-pattern locality within case-'r'
+    ///     -- ruling out single-case-letter pattern conflation.
+    ///   </item>
+    ///   <item>
+    ///     7-byte %s width FOURTH cross-(case-letter, structural-
+    ///     pattern) divergence regression at <c>PlayerClass.cpp:3422</c>.
+    ///     7-byte %s now pinned at FOUR distinct (case-letter,
+    ///     structural-pattern) combinations -- c/chjoin GM-block
+    ///     MATCHER-FIRST + u/upgrade INSIDE-BODY-GM + t/testmsg
+    ///     CONSECUTIVE-IF DEV-guard MATCHER-FIRST + r/rotatex
+    ///     NO-GUARD-ELSE-IF. A regression in vsprintf_s 7-byte path
+    ///     specific to ONE combination would fail one pin but not
+    ///     all four. Wave 170 deepens 7-byte coverage to QUADRUPLE-PIN.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). /rotatex is open
+    /// to ALL users at the dispatcher level -- the NO-GUARD-ELSE-IF
+    /// pattern at 7059 has no AdminLevel guard at all. ERROR fork at
+    /// 4548 emits for ALL tiers (faithful to retail). No server
+    /// permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashRotatexMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (31) = 34 bytes.
+        const int ExpectedReplyPayloadLength = 34;
+        // strlen(literal) + 1 NUL = 31.
+        const short ExpectedReplyLengthField = 31;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 30.
+        const int ExpectedLiteralByteCount = 30;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Rotaxo", shipName: "RotaxoShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/rotatex");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals("Missing arg for option rotatex", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgRotatexLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/rotatex\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option rotatex\". Likely the user-tier case-'r' " +
+                $"dispatch at line 6992 stopped routing, the NO-GUARD-ELSE-IF arm at " +
+                $"7059 acquired a spurious AdminLevel guard, the trailing illegal-slash " +
+                $"fallback at 7702 fired as a second emit, or the missing-arg ERROR " +
+                $"fork at PlayerConnection.cpp:4548 changed shape (esp. vsprintf_s " +
+                $"7-byte %s width).");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
