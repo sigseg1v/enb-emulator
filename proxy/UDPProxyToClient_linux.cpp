@@ -1,16 +1,16 @@
 // UDPProxyToClient_linux.cpp
 //
-// Phase K Wave 6 — Linux port of the server→client UDP fan-out that lives
+// Phase K Wave 6 -- Linux port of the server→client UDP fan-out that lives
 // in UDPProxyToClient.cpp on Win32. Splits cleanly into three pieces:
 //
-//   1. Direct passthrough — the server has historically sent raw TCP
+//   1. Direct passthrough -- the server has historically sent raw TCP
 //      opcodes wrapped in a UDP frame (EnbUdpHeader prepended). Linux
 //      ProcessClientOpcode strips the UDP header and hands the opcode
 //      straight to the proxy↔client TCP connection via
 //      m_SectorConnection->SendResponse(). Mirrors Win32
 //      UDPProxyToClient.cpp:31-58.
 //
-//   2. Packet sequence reassembly (0x2016 / 0x201A) — the server batches
+//   2. Packet sequence reassembly (0x2016 / 0x201A) -- the server batches
 //      multiple TCP opcodes into a single UDP frame, with sequence numbers
 //      and resend on packet drop. SendPacketSequence reassembles in
 //      m_CurrentPacketNum order, tracks gaps, requests resends via
@@ -23,10 +23,10 @@
 //      Win32 uses Queue*/SendQueuedPacket to batch multiple TCP opcodes
 //      into a single TCP frame. None of those helpers exist on Linux
 //      (they live in ClientToSectorServer.cpp, which is WIN32-walled at
-//      file scope). We use SendResponse per opcode instead — slightly
+//      file scope). We use SendResponse per opcode instead -- slightly
 //      more TCP frames on the wire, but functionally equivalent.
 //
-//   3. Data-file streaming (0x2010) — the server can shove a payload
+//   3. Data-file streaming (0x2010) -- the server can shove a payload
 //      directly at the client, opcode embedded at offset 2. On Linux,
 //      everything except 0x0097 GALAXY_MAP is forwarded raw via
 //      SendResponse; 0x0097 is logged but not acted on because
@@ -40,7 +40,7 @@
 // Win32 HandleCustomOpcode also routes 0x2012-0x2014 (prospect/tractor/
 // loot), 0x2018-0x2019 (static/resource object create), and 0x2011
 // (galaxy map cache request) into Queue* batch builders that depend on
-// the entire ClientToSectorServer.cpp Queue* family — all WIN32-walled.
+// the entire ClientToSectorServer.cpp Queue* family -- all WIN32-walled.
 // On Linux these opcodes are stubbed: HandleCustomOpcode returns false
 // for them, so SendClientPacketSequence's bottom path forwards the raw
 // outer opcode (0x2012/0x2013/etc.) via SendResponse. The Phase K CLI
@@ -76,12 +76,12 @@
 // -------
 // New file authored for the consolidated preservation fork. No Net-7
 // CC BY-NC-SA 3.0 header was carried over from the WIN32 source
-// because none of the code below is a copy — it's a fresh POSIX
+// because none of the code below is a copy -- it's a fresh POSIX
 // re-implementation against the same UDPClient class declaration in
 // UDPClient.h (which retains its original header).
 //
 // New code is contributed under the project default license
-// (CC BY-NC-SA 3.0 — LICENSES/enb-emulator).
+// (CC BY-NC-SA 3.0 -- LICENSES/enb-emulator).
 
 #ifndef NET7_LEGACY_WIN32
 
@@ -143,7 +143,7 @@ void UDPClient::ProcessClientOpcode(char *msg, EnbUdpHeader *header)
 }
 
 // ---------------------------------------------------------------------------
-// IncommingOpcodePreProcessing — connection-state side-effects for the
+// IncommingOpcodePreProcessing -- connection-state side-effects for the
 // three opcodes the proxy intercepts: LOGOFF_CONFIRMATION,
 // SERVER_HANDOFF, START. Mirrors Win32 UDPProxyToClient.cpp:61-95.
 // ---------------------------------------------------------------------------
@@ -197,7 +197,7 @@ void UDPClient::IncommingOpcodePreProcessing(short opcode, char *msg, short byte
 }
 
 // ---------------------------------------------------------------------------
-// SendCachedGalaxyMap — Win32 reads GalaxyMap.dat from disk via
+// SendCachedGalaxyMap -- Win32 reads GalaxyMap.dat from disk via
 // SendDataFileToClient. That helper lives in ClientToSectorServer.cpp
 // (WIN32-walled at file scope) and depends on Connection::SendDataFile,
 // which isn't on the Linux side yet. The Phase K CLI test client does
@@ -206,7 +206,7 @@ void UDPClient::IncommingOpcodePreProcessing(short opcode, char *msg, short byte
 // ---------------------------------------------------------------------------
 void UDPClient::SendCachedGalaxyMap()
 {
-    LogMessage("UDPClient(Linux): SendCachedGalaxyMap requested — not implemented "
+    LogMessage("UDPClient(Linux): SendCachedGalaxyMap requested -- not implemented "
                "on Linux yet (SendDataFileToClient lives in WIN32-walled "
                "ClientToSectorServer.cpp). Resetting packet timer.\n");
     m_PacketDropThisSession = 0;
@@ -214,7 +214,7 @@ void UDPClient::SendCachedGalaxyMap()
 }
 
 // ---------------------------------------------------------------------------
-// SendClientDataFile — opcode 0x2010 DATA_FILE. The payload is a TCP
+// SendClientDataFile -- opcode 0x2010 DATA_FILE. The payload is a TCP
 // frame (size at offset 0, opcode at offset 2, then data). On Win32 the
 // galaxy-map case calls into the on-disk cache; everything else is
 // forwarded verbatim. Linux drops the galaxy-map cache call (see above)
@@ -245,19 +245,19 @@ void UDPClient::SendClientDataFile(char *msg, EnbUdpHeader *header)
 }
 
 // ---------------------------------------------------------------------------
-// Packet-sequence reassembly internals — same sentinels as Win32.
+// Packet-sequence reassembly internals -- same sentinels as Win32.
 // ---------------------------------------------------------------------------
 #define PACKET_BLANK         ((char *) 0)
 #define PACKET_DONE          ((char *) -1)
 #define PACKET_RE_REQUESTED  ((char *) -2)
 
 // ---------------------------------------------------------------------------
-// SendPacketSequence — reliable-delivery reassembly for opcode 0x2016
-// (PACKET_SEQUENCE) and 0x201A (PACKET_C_SEQUENCE — continuation of a
+// SendPacketSequence -- reliable-delivery reassembly for opcode 0x2016
+// (PACKET_SEQUENCE) and 0x201A (PACKET_C_SEQUENCE -- continuation of a
 // split packet). Mirrors Win32 UDPProxyToClient.cpp:138-351 line-for-line
 // but with usleep instead of Sleep and check_memory() instead of
 // _CrtCheckMemory. The Win32 path's _ASSERTE(_CrtCheckMemory()) is
-// preserved structurally — Net7.h defines check_memory() as a Linux
+// preserved structurally -- Net7.h defines check_memory() as a Linux
 // no-op so the sites still annotate intent.
 // ---------------------------------------------------------------------------
 void UDPClient::SendPacketSequence(char *msg, EnbUdpHeader *header, bool continuation)
@@ -317,7 +317,7 @@ void UDPClient::SendPacketSequence(char *msg, EnbUdpHeader *header, bool continu
     }
 
     if (header->packet_sequence > m_CurrentPacketNum) {
-        // Packet arrived early or there is a hole — try to fill the hole.
+        // Packet arrived early or there is a hole -- try to fill the hole.
         m_PacketTimeout++;
         if (m_Packets[m_CurrentPacketNum] == PACKET_BLANK) {
             resend.packet_start = m_CurrentPacketNum;
@@ -465,10 +465,10 @@ void UDPClient::SendLoginPacketSequence(char *msg, EnbUdpHeader *header)
 }
 
 // ---------------------------------------------------------------------------
-// HandleCustomOpcode — Win32 intercepts a small set of UDP-only opcodes
+// HandleCustomOpcode -- Win32 intercepts a small set of UDP-only opcodes
 // here. The Linux subset:
-//   * 0x2020 LOGIN_STAGE_S_C — ACK back to the server with 0x2021
-//   * 0x100A MVAS_TERMINATE_S_C — set g_ShuttingDown so the sequence
+//   * 0x2020 LOGIN_STAGE_S_C -- ACK back to the server with 0x2021
+//   * 0x100A MVAS_TERMINATE_S_C -- set g_ShuttingDown so the sequence
 //                                  walker exits; no engine teardown
 //                                  (launcher-side)
 // Everything else (0x2011 galaxy-map cache, 0x2012-0x2014 prospect /
@@ -490,7 +490,7 @@ bool UDPClient::HandleCustomOpcode(short opcode, char *ptr, u8 *tcp_packet,
         return true;
 
     case ENB_OPCODE_100A_MVAS_TERMINATE_S_C:
-        LogMessage("UDPClient(Linux): MVAS_TERMINATE_S_C — setting g_ShuttingDown\n");
+        LogMessage("UDPClient(Linux): MVAS_TERMINATE_S_C -- setting g_ShuttingDown\n");
         g_ShuttingDown = true;
         // Win32 also enqueues a LOGOFF on the TCP socket and spawns a
         // launcher shutdown thread. The proxy↔client TCP teardown
@@ -508,7 +508,7 @@ bool UDPClient::HandleCustomOpcode(short opcode, char *ptr, u8 *tcp_packet,
         // server-side proxy. The Win32 proxy consumes these locally
         // (UDPProxyToClient.cpp HandleCustomOpcode: SendCachedGalaxyMap,
         // StartProspecting, TractorOre, LootItem, CreateObject,
-        // CreateResource) — it does NOT forward them over the game-
+        // CreateResource) -- it does NOT forward them over the game-
         // protocol TCP channel to the client's game receiver. Returning
         // TRUE marks the opcode as handled-and-dropped so the sequence
         // walker advances normally. Returning false here previously fell
@@ -518,9 +518,9 @@ bool UDPClient::HandleCustomOpcode(short opcode, char *ptr, u8 *tcp_packet,
         // every subsequent server reply queues behind the stuck slot until
         // the test cancellation token fires). That stall was the actual
         // failure mode behind the Wave 70 first attempt on 0x0098
-        // GALAXY_MAP_REQUEST — the survival-probe REQUEST_TIME echo
+        // GALAXY_MAP_REQUEST -- the survival-probe REQUEST_TIME echo
         // could never get past the 0x2011 stuck slot.
-        LogVMessage("UDPClient(Linux): launcher-side opcode 0x%04x — silent drop\n",
+        LogVMessage("UDPClient(Linux): launcher-side opcode 0x%04x -- silent drop\n",
                     (unsigned short) opcode);
         return true;
 
@@ -530,7 +530,7 @@ bool UDPClient::HandleCustomOpcode(short opcode, char *ptr, u8 *tcp_packet,
 }
 
 // ---------------------------------------------------------------------------
-// SendClientPacketSequence — once a full packet (single or reassembled
+// SendClientPacketSequence -- once a full packet (single or reassembled
 // split) is in order, walk its inner [size, opcode, data] tuples and
 // dispatch each one. Returns false if the packet looks malformed (the
 // caller will request a resend of the whole sequence window).
@@ -559,7 +559,7 @@ bool UDPClient::SendClientPacketSequence(char *msg)
                     (unsigned short) opcode, (unsigned) length);
 
         if (length > (bytes - index)) {
-            // Opcode length exceeds remaining packet bytes — match Win32:
+            // Opcode length exceeds remaining packet bytes -- match Win32:
             // log and break out. Caller treats !terminate + index < bytes
             // as a soft error; we still return true so the packet is marked
             // DONE and the sequence advances.
@@ -597,7 +597,7 @@ bool UDPClient::SendClientPacketSequence(char *msg)
 }
 
 // ---------------------------------------------------------------------------
-// HandleStageConfirm — server sent 0x2020 LOGIN_STAGE_S_C with a
+// HandleStageConfirm -- server sent 0x2020 LOGIN_STAGE_S_C with a
 // 4-byte stage ID; we ACK with 0x2021 LOGIN_STAGE_ACK_C_S so the server
 // advances its login state machine. Mirrors Win32
 // UDPProxyToClient.cpp:693-704.
@@ -615,7 +615,7 @@ void UDPClient::HandleStageConfirm(char *ch_msg, u8 *tcp_packet, short &tcp_inde
 
     // Phase K: forward EXACTLY 4 bytes (int32_t stage). sizeof(stage_id)
     // = sizeof(long) is 8 on Linux x86_64, and the server's
-    // HandleLoginAckReturn reads exactly that many bytes — so passing 8
+    // HandleLoginAckReturn reads exactly that many bytes -- so passing 8
     // here would shift every subsequent opcode in the UDP packet by 4
     // bytes. Same long-vs-int32 wire-size class as the server's
     // SendLoginStageConfirm / HandleLoginAckReturn fixes.
@@ -628,7 +628,7 @@ void UDPClient::HandleStageConfirm(char *ch_msg, u8 *tcp_packet, short &tcp_inde
 }
 
 // ---------------------------------------------------------------------------
-// SendCommsAlive — proxy→client keepalive ping over UDP. Win32 invokes
+// SendCommsAlive -- proxy→client keepalive ping over UDP. Win32 invokes
 // this from a periodic timer that we don't have on Linux yet; the method
 // is provided so any future caller links cleanly.
 // ---------------------------------------------------------------------------
@@ -638,7 +638,7 @@ void UDPClient::SendCommsAlive()
 }
 
 // ---------------------------------------------------------------------------
-// RecordLastHandoff — used by IncommingOpcodePreProcessing on
+// RecordLastHandoff -- used by IncommingOpcodePreProcessing on
 // SERVER_HANDOFF. Stash the handoff payload so a subsequent reconnect
 // has the target sector info. Mirrors Win32 UDPClient.cpp:462-466.
 // ---------------------------------------------------------------------------
@@ -653,7 +653,7 @@ void UDPClient::RecordLastHandoff(char *msg, short bytes)
 }
 
 // ---------------------------------------------------------------------------
-// KillTCPConnection — Win32 path tears down the launcher's auth-port
+// KillTCPConnection -- Win32 path tears down the launcher's auth-port
 // TCP socket. On Linux there is no per-UDPClient TCP socket to close;
 // the proxy↔client TCP socket is owned by Connection (m_SectorConnection)
 // and lives until the client drops, the server forces a disconnect, or

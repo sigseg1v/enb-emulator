@@ -2,6 +2,15 @@
 
 > A consolidated, modernised home for the Earth & Beyond MMO server emulator. The goal is to keep the game playable on contemporary hardware; Linux server, Linux or Windows client; and bring the codebase forward enough that contributors can actually work on it again.
 
+## Quick Start
+
+```
+just play-local
+just seed-account testclient testpw
+```
+
+Then click **Play** in LaunchNet7 and log in with username `testclient` / password `testpw`.
+
 ## What this is
 
 Westwood's *Earth & Beyond* (2002) was shut down by EA in 2004. A community team at Net-7 Entertainment reverse-engineered the server protocol and built an open emulator in C++. That code split into multiple forks and drifted; the C# content editors lived in one repo, the server fork with the latest gameplay code lived in another, and a Linux client installer lived in a third.

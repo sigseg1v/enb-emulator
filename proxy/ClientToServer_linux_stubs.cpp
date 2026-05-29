@@ -5,7 +5,7 @@
 // (286 LOC, ~15 handlers) and ClientToSectorServer.cpp (757 LOC, ~50+
 // handlers); both are WIN32-walled today because the full ports depend
 // on the UDP plane, MySQL access from the proxy process, and Player
-// lifecycle — all multi-day items.
+// lifecycle -- all multi-day items.
 //
 // Phase K progressive port: handlers that don't require the per-sector
 // Player state land here as real implementations. The global-plane
@@ -51,7 +51,7 @@
 #include "UDPClient.h"
 
 #include <string.h>
-// arpa/inet.h is redundant — Net7.h provides ntohl on both platforms.
+// arpa/inet.h is redundant -- Net7.h provides ntohl on both platforms.
 
 namespace {
 
@@ -89,7 +89,7 @@ void Connection::ProcessGlobalServerOpcode(short opcode, short bytes)
     case ENB_OPCODE_0035_MASTER_JOIN:
         // The client occasionally sends MasterJoin on the global socket
         // (per the Win32 dispatch's TODO comment in ClientToGlobalServer.cpp:61).
-        // It's harmless — silently drop, matching Win32.
+        // It's harmless -- silently drop, matching Win32.
         break;
 
     case ENB_OPCODE_006D_GLOBAL_CONNECT:
@@ -109,18 +109,18 @@ void Connection::ProcessGlobalServerOpcode(short opcode, short bytes)
         break;
 
     default:
-        LogMessage("Linux stub: ProcessGlobalServerOpcode 0x%04x (%d bytes) — not yet implemented\n",
+        LogMessage("Linux stub: ProcessGlobalServerOpcode 0x%04x (%d bytes) -- not yet implemented\n",
                    (unsigned short) opcode, (int) bytes);
         break;
     }
 }
 
 // ===========================================================================
-// Global plane handlers — Linux ports of ClientToGlobalServer.cpp:124-249
+// Global plane handlers -- Linux ports of ClientToGlobalServer.cpp:124-249
 // ===========================================================================
 //
 // All four route through g_ServerMgr->m_UDPGlobalClient, the dedicated
-// UDPClient connect()'d to UDP_GLOBAL_SERVER_PORT (3810) — see
+// UDPClient connect()'d to UDP_GLOBAL_SERVER_PORT (3810) -- see
 // proxy/Net7.cpp main() and proxy/UDPClient_linux.cpp.
 
 void Connection::HandleGlobalConnect()
@@ -133,7 +133,7 @@ void Connection::HandleGlobalConnect()
 
     UDPClient *gc = g_ServerMgr ? g_ServerMgr->m_UDPGlobalClient : nullptr;
     if (!gc) {
-        LogMessage("HandleGlobalConnect: no global UDP client wired — dropping\n");
+        LogMessage("HandleGlobalConnect: no global UDP client wired -- dropping\n");
         return;
     }
 
@@ -161,7 +161,7 @@ void Connection::HandleDeleteCharacter()
 
     UDPClient *gc = g_ServerMgr ? g_ServerMgr->m_UDPGlobalClient : nullptr;
     if (!gc) {
-        LogMessage("HandleDeleteCharacter: no global UDP client — dropping\n");
+        LogMessage("HandleDeleteCharacter: no global UDP client -- dropping\n");
         return;
     }
 
@@ -179,7 +179,7 @@ void Connection::HandleCreateCharacter()
 
     UDPClient *gc = g_ServerMgr ? g_ServerMgr->m_UDPGlobalClient : nullptr;
     if (!gc) {
-        LogMessage("HandleCreateCharacter: no global UDP client — dropping\n");
+        LogMessage("HandleCreateCharacter: no global UDP client -- dropping\n");
         return;
     }
 
@@ -197,13 +197,13 @@ void Connection::HandleGlobalTicketRequest()
 
     UDPClient *gc = g_ServerMgr ? g_ServerMgr->m_UDPGlobalClient : nullptr;
     if (!gc) {
-        LogMessage("HandleGlobalTicketRequest: no global UDP client — dropping\n");
+        LogMessage("HandleGlobalTicketRequest: no global UDP client -- dropping\n");
         return;
     }
 
     long avatar_id = gc->SendAvatarLogin(char_slot);
     if (avatar_id == -1) {
-        LogMessage("GlobalTicketRequest(): error obtaining slot — galaxy-full reply\n");
+        LogMessage("GlobalTicketRequest(): error obtaining slot -- galaxy-full reply\n");
         SendGlobalTicket(0x40000000, 0, 1002, false);   // 1002 = galaxy full
         return;
     }
@@ -222,7 +222,7 @@ void Connection::HandleGlobalTicketRequest()
 namespace {
 
 // Table indices line up with G_ERROR_* in login-server/Net7SSL/AccountManager.h.
-// Keep all 15 entries in lock-step with that header — when codes get added on
+// Keep all 15 entries in lock-step with that header -- when codes get added on
 // the server/login side, append here in the same order or GlobalError() will
 // silently drop the new code (it bounds-checks against g_GlobalErrorMsgCount).
 static const char *g_GlobalErrorMsg[] = {
@@ -250,7 +250,7 @@ static const int g_GlobalErrorMsgCount =
 void Connection::GlobalError(int Error)
 {
     if (Error < 0 || Error >= g_GlobalErrorMsgCount) {
-        LogMessage("GlobalError: unknown error code %d — dropping\n", Error);
+        LogMessage("GlobalError: unknown error code %d -- dropping\n", Error);
         return;
     }
 
@@ -279,7 +279,7 @@ void Connection::SendGlobalTicket(long avatar_id, long sector_id, long level, bo
 
     // Layout reproduced from Win32 ClientToGlobalServer.cpp:207-238.
     // The first BE32 slot is overloaded: success carries 0; failure
-    // carries the level (re-purposed by the client as an error code —
+    // carries the level (re-purposed by the client as an error code --
     // 1000 / 1002).
     if (issue)
         AddDataFlip4(ptr_ticket, 0, index);
@@ -317,7 +317,7 @@ void Connection::ProcessGlobalTicket(long char_slot)
 
 void Connection::SendAvatarList(long /*account_id*/)
 {
-    // The Win32 body of this is fully commented out — the avatar list
+    // The Win32 body of this is fully commented out -- the avatar list
     // is sent inline from HandleGlobalConnect / HandleCreateCharacter
     // / HandleDeleteCharacter using the buffer returned by SendTicket
     // / CreateCharacter / DeleteCharacter. Preserved here as a no-op
@@ -325,26 +325,26 @@ void Connection::SendAvatarList(long /*account_id*/)
 }
 
 // ===========================================================================
-// ProcessSectorServerOpcode — Linux mirror of ClientToSectorServer.cpp:15-110
+// ProcessSectorServerOpcode -- Linux mirror of ClientToSectorServer.cpp:15-110
 // ===========================================================================
 //
 // Phase K (2026-05-24): now that UDPClient::ForwardClientOpcode is wired on
 // Linux (UDPClient_linux.cpp), the proxy can finally relay client TCP frames
 // onto the sector server's UDP port. The bottom-of-switch ForwardClientOpcode
-// call below mirrors Win32 line 108 — every opcode that doesn't `return`
+// call below mirrors Win32 line 108 -- every opcode that doesn't `return`
 // early gets pushed to the server, including the LOGIN/MOVE/LOGOFF/HANDOFF
-// "no-op" cases (Win32 also forwards those — the proxy doesn't act on them
+// "no-op" cases (Win32 also forwards those -- the proxy doesn't act on them
 // locally but the server does).
 //
 // Per-opcode helpers match Win32:
 //   - ProcessAction:       all 6 Action sub-cases (7/8/18/19/28/29) are
 //                          empty bodies in Win32; ours matches.
 //   - HandleStarbaseRoomChange: Win32 body has the entire interesting block
-//                               commented out — a single `if (NewRoom==-1)`
+//                               commented out -- a single `if (NewRoom==-1)`
 //                               with a `//LogMessage` inside. No-op on Linux.
 //   - HandleWarp:          Win32 calls m_UDPClient->SendPositionIfChanged();
 //                          that helper is WIN32-walled (UDPProxyMVAS.cpp).
-//                          On Linux we skip the position pre-send — the server
+//                          On Linux we skip the position pre-send -- the server
 //                          will handle the absence the same way it would after
 //                          a missed UDP packet. Documented carry-over for the
 //                          eventual full UDPProxyMVAS port.
@@ -363,7 +363,7 @@ void HandleStarbaseRoomChange_Linux(Connection * /*conn*/,
 {
     // Win32 (ClientToSectorServer.cpp:742-750) has only a
     // `if (change->NewRoom == -1) { //LogMessage("Leaving starbase?\n"); }`
-    // with the log line commented out — net no-op. Mirror.
+    // with the log line commented out -- net no-op. Mirror.
 }
 
 void HandleWarp_Linux(Connection * /*conn*/)
@@ -372,7 +372,7 @@ void HandleWarp_Linux(Connection * /*conn*/)
     //     g_ServerMgr->m_UDPClient->SendPositionIfChanged();
     // to flush a positional update before warp so the client doesn't
     // rubber-band. SendPositionIfChanged lives in UDPProxyMVAS.cpp which
-    // is WIN32-walled — porting it is part of the larger UDPProxyMVAS
+    // is WIN32-walled -- porting it is part of the larger UDPProxyMVAS
     // port. Skipping the pre-send means the server may briefly see the
     // client at its pre-warp position; that's a UX nit, not a correctness
     // issue (the WARP opcode itself still forwards below).
@@ -392,7 +392,7 @@ void Connection::ProcessSectorServerOpcode(short opcode, short bytes)
         // it's only consumed by UDPProxyToClient.cpp, which is itself WIN32-walled.
         g_LoggedIn = true;
         g_ServerMgr->m_SectorConnection = this;
-        LogMessage("<client> SectorServer LOGIN — connection active\n");
+        LogMessage("<client> SectorServer LOGIN -- connection active\n");
         g_ServerMgr->m_UDPConnection->SetConnectionActive(true);
         g_ServerMgr->m_UDPClient->SetConnectionActive(true);
         g_ServerMgr->m_UDPConnection->SetLoginComplete(false);
@@ -416,7 +416,7 @@ void Connection::ProcessSectorServerOpcode(short opcode, short bytes)
         // > 9999 = starbase) or 0x3004 PLAYER_SHIP_SENT (in-space) so
         // the server knows the client finished its load. Both branches
         // mark the connection LoginComplete; KillTCPConnection() in the
-        // ship branch closes the temporary auth socket (no-op on Linux —
+        // ship branch closes the temporary auth socket (no-op on Linux --
         // KillTCPConnection lives in UDPProxyToClient.cpp which is
         // WIN32-walled; the equivalent close happens naturally as the
         // server tears the connection state on its side).
@@ -435,7 +435,7 @@ void Connection::ProcessSectorServerOpcode(short opcode, short bytes)
             g_ServerMgr->m_UDPConnection->ForwardClientOpcode(
                 ENB_OPCODE_3004_PLAYER_SHIP_SENT,
                 sizeof(player_id), (char *) &player_id);
-            // Win32 also KillTCPConnection() here — see note above.
+            // Win32 also KillTCPConnection() here -- see note above.
         }
         g_ServerMgr->m_UDPClient->SetLoginComplete(true);
         g_ServerMgr->m_UDPConnection->SetLoginComplete(true);
@@ -451,7 +451,7 @@ void Connection::ProcessSectorServerOpcode(short opcode, short bytes)
     case ENB_OPCODE_0012_TURN:
         // Win32 ClientToSectorServer.cpp:58-66. Rate-limited to 1 per 250ms
         // per connection (m_Turn_Sent is a Connection field set by the
-        // existing Win32 dispatch — also exists on Linux).
+        // existing Win32 dispatch -- also exists on Linux).
         if (tick > (m_Turn_Sent + 250)) {
             g_ServerMgr->m_UDPConnection->ForwardClientOpcode(
                 opcode, bytes, (char *) m_RecvBuffer);
@@ -478,19 +478,19 @@ void Connection::ProcessSectorServerOpcode(short opcode, short bytes)
 
     case ENB_OPCODE_009B_WARP:
         // Win32 ClientToSectorServer.cpp:98-101. HandleWarp pre-sends a
-        // positional update (skipped on Linux — see helper note), then
+        // positional update (skipped on Linux -- see helper note), then
         // falls to the bottom forward.
         HandleWarp_Linux(this);
         m_SectorTCPRequest = false;
         break; // fall through to bottom forward
 
     case ENB_OPCODE_0014_MOVE:
-        // Win32 body is `break;` (line 55-56) — falls to bottom forward.
+        // Win32 body is `break;` (line 55-56) -- falls to bottom forward.
         break;
 
     case ENB_OPCODE_009F_STARBASE_ROOM_CHANGE:
         // Win32 calls HandleStarbaseRoomChange (ClientToSectorServer.cpp:94-96),
-        // whose body is entirely commented out — net no-op. Falls through.
+        // whose body is entirely commented out -- net no-op. Falls through.
         HandleStarbaseRoomChange_Linux(this,
             (StarbaseRoomChange *) m_RecvBuffer);
         break;
@@ -500,7 +500,7 @@ void Connection::ProcessSectorServerOpcode(short opcode, short bytes)
         // g_LoggedIn=true on logoff (counter-intuitive; g_LoggedIn is a
         // connection-active sentinel polled by Net7.cpp:754, not a
         // logged-in/logged-out flag) then drops through to SERVER_HANDOFF.
-        // Both fall through to the bottom forward — the server needs the
+        // Both fall through to the bottom forward -- the server needs the
         // opcode to clean up its side of the connection.
         g_LoggedIn = true;
         LogMessage("<client> SectorServer LOGOFF_REQUEST\n");
@@ -508,16 +508,16 @@ void Connection::ProcessSectorServerOpcode(short opcode, short bytes)
 
     case ENB_OPCODE_003A_SERVER_HANDOFF:
         // Win32 body is `//DumpBuffer(...) //LogMessage(...) //SetConnectionActive(false)`
-        // — all commented out. Falls through to bottom forward.
+        // -- all commented out. Falls through to bottom forward.
         break;
 
     default:
-        LogVMessage("Linux: ProcessSectorServerOpcode 0x%04x (%d bytes) — forwarding to server\n",
+        LogVMessage("Linux: ProcessSectorServerOpcode 0x%04x (%d bytes) -- forwarding to server\n",
                     (unsigned short) opcode, (int) bytes);
         break;
     }
 
-    // Bottom-of-switch forward — Win32 line 108. Every opcode that
+    // Bottom-of-switch forward -- Win32 line 108. Every opcode that
     // doesn't `return` early above ends up here. The server is the
     // authority on whether the opcode is meaningful in this connection
     // state; the proxy's job is just to relay.

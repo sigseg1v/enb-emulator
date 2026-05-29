@@ -99,12 +99,20 @@ services:
       - net7-ipc:/run/net7-ipc
     ports:
       # Net-7 listens on:
-      # - 3501-3800 TCP (sector servers; allocated dynamically)
+      # - 3501-3800 UDP (per-sector UDP_Connection, allocated dynamically
+      #   by SectorManager::BeginSectorThread via GetSectorPort(); starts
+      #   from SECTOR_SERVER_PORT=3501 and increments). The proxy receives
+      #   the chosen sector UDP port in the 0x2009 MASTER_HANDOFF_CONFIRM
+      #   reply and sends sector traffic there for the rest of the
+      #   session. Without exposing this range, the proxy's
+      #   ForwardClientOpcode datagrams (LOGIN, START_ACK, position
+      #   updates, ...) drop on the docker NAT and the sector instance
+      #   idle-times-out the player.
       # - 3808 UDP (master <-> proxy)
       # Note: 3801 (master) and 3805 (global) are owned by the `proxy`
       # service (Net7Proxy), not this server. The server reaches the
       # proxy over the same docker network when needed.
-      - "3501-3550:3501-3550/tcp"
+      - "3501-3800:3501-3800/udp"
       - "3808:3808/udp"
       # Phase K: UDP_GLOBAL_SERVER_PORT — proxy<->server "global" control
       # plane (ticket validation, avatar list, char create/delete). Was TCP

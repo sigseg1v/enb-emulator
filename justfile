@@ -248,8 +248,33 @@ play-local CLIENT_PATH='':
 
     : "${WINEPREFIX:=$HOME/.wine-enb}"
     export WINEPREFIX
-    echo ">>> launching (WINEPREFIX=$WINEPREFIX, NET7_UPSTREAM_HOST=localhost) — click Play in the GUI"
-    NET7_UPSTREAM_HOST=localhost dotnet run --no-build --project tools/launchnet7-avalonia
+
+    # Look up the server container's docker-bridge IP so the proxy can address
+    # it directly for UDP. Talking to "localhost:3808/3810" instead would
+    # route through docker's published-port DNAT, and the docker bridge
+    # MASQUERADE rewrites the proxy's source port; the server captures that
+    # rewritten port as m_Player_Port (server/src/UDP_Global.cpp:227) and then
+    # the sector-side in-game UDP push from MVASauth (server:3806) goes back
+    # to a 5-tuple conntrack never saw (different src port than the original
+    # 3810 reply), so reverse-NAT misses and the packet is dropped on the
+    # host. Targeting the bridge IP directly avoids MASQUERADE -- the server
+    # captures the proxy's real ephemeral port and 172.x.0.1:eph_X is just a
+    # normal local-delivery dst back to the proxy's INADDR_ANY socket.
+    SERVER_IP=$(docker inspect "${COMPOSE_PROJECT_NAME:-enb-emulator}-server-1" 2>/dev/null \
+        | grep -m1 '"IPAddress":' \
+        | sed -E 's/.*"IPAddress": "([0-9.]+)".*/\1/')
+    if [ -z "$SERVER_IP" ]; then
+        echo "play-local: WARNING couldn't resolve server container bridge IP." >&2
+        echo "  Falling back to localhost; in-game zone-in will likely time out." >&2
+        echo "  (Check: docker compose ps server)" >&2
+        SERVER_IP=localhost
+    fi
+    echo ">>> resolved server container bridge IP: $SERVER_IP"
+
+    echo ">>> launching (WINEPREFIX=$WINEPREFIX, NET7_UPSTREAM_HOST=localhost, NET7_GAME_SERVER_HOST=$SERVER_IP) -- click Play in the GUI"
+    NET7_UPSTREAM_HOST=localhost \
+    NET7_GAME_SERVER_HOST="$SERVER_IP" \
+        dotnet run --no-build --project tools/launchnet7-avalonia
 
 # Stream all logs in the foreground.
 dev-fg:

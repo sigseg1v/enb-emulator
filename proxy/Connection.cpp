@@ -1,7 +1,7 @@
 // Connection.cpp
 //
 // Phase J (Linux port): this translation unit is the heavyweight client
-// proxy session handler — TCP recv/send threads, Westwood RSA+RC4 key
+// proxy session handler -- TCP recv/send threads, Westwood RSA+RC4 key
 // exchange, ~150 opcode handlers. Porting it to Linux is a Phase J
 // continuation; for now it is WIN32-only and the Linux net7proxy binary
 // links a TcpListener that accept()s connections and immediately closes
@@ -161,7 +161,7 @@ bool Connection::DoKeyExchange()
 	}
 
     // Phase K Wave 11: wire field is 4B big-endian. `unsigned long *` on
-    // Linux reads 8B (OOB by 4B into the 4-byte recv buffer) — works by
+    // Linux reads 8B (OOB by 4B into the 4-byte recv buffer) -- works by
     // accident because ntohl truncates to uint32_t and the OOB high bytes
     // happen to be zero, but it's UB and asymmetric with the real Win32
     // client (which sends exactly 4B per RsaHandshake.cs:101).
@@ -255,7 +255,7 @@ bool Connection::DoClientKeyExchange()
     // Ignore whatever public key packet we receive
 
 	// Phase K Wave 11: wire prefix is 4B (Win32 sizeof(long)==4). On Linux
-	// sizeof(long)==8 inflated every offset and sent 4 extra zero bytes —
+	// sizeof(long)==8 inflated every offset and sent 4 extra zero bytes --
 	// Linux-to-Linux worked by accident, Linux-to-Win32 would not.
 	// Clear the buffer
 	memset(buffer, 0, WWRSA_BLOCK_SIZE - RC4_KEY_SIZE + sizeof(uint32_t));
@@ -760,7 +760,7 @@ bool Connection::CheckTCPShutdownCycle()
 	return false;
 }
 
-#else // !WIN32 — Linux partial port
+#else // !WIN32 -- Linux partial port
 // Phase J: Linux-side Connection. Runs the Net-7 Westwood RSA+RC4 key
 // exchange in a worker thread, then a framed read loop that mirrors the
 // Win32 RunRecvThread (read 4-byte EnbTcpHeader, RC4-decrypt, read payload,
@@ -851,13 +851,13 @@ bool Connection::CheckTCPShutdownCycle()       { return !m_ConnectionActive; }
 void Connection::TerminateConnection()         { m_ConnectionActive = false; m_TcpThreadRunning = false; }
 
 // Build [size, opcode, payload...] frame, RC4-encrypt the whole thing
-// (size field included — matches the Win32 wire format at Connection.cpp:597-626),
+// (size field included -- matches the Win32 wire format at Connection.cpp:597-626),
 // and send it. Wire layout: size is length + sizeof(EnbTcpHeader) (4 bytes
 // for the header) and lives at offset 0; opcode at offset 2; payload
 // follows at offset sizeof(EnbTcpHeader)=4.
 //
 // Phase K bug-fix: was using sizeof(long), which is 4 on Win32 (matching
-// EnbTcpHeader) but 8 on Linux x86_64 — that put a 4-byte zero gap
+// EnbTcpHeader) but 8 on Linux x86_64 -- that put a 4-byte zero gap
 // between header and payload on the wire and made every Linux→client
 // frame off by 4. RunRecvThread reads with sizeof(EnbTcpHeader) so the
 // recv path was already correct; this aligns the send path with it.
@@ -866,7 +866,7 @@ void Connection::TerminateConnection()         { m_ConnectionActive = false; m_T
 // the RC4 + send. We don't have RunSendThread on Linux yet, so we encrypt
 // + send inline.
 //
-// Phase K Wave 6: this is now multi-producer — the TCP recv thread
+// Phase K Wave 6: this is now multi-producer -- the TCP recv thread
 // (RunRecvThread) and the UDP recv thread (UDPClient::RecvThread, which
 // dispatches into UDPProxyToClient_linux.cpp::ProcessClientOpcode /
 // SendPacketSequence / SendClientDataFile) both call SendResponse on
@@ -874,7 +874,7 @@ void Connection::TerminateConnection()         { m_ConnectionActive = false; m_T
 // keystream state must advance contiguously over the wire) and
 // m_SendBuffer (single shared scratch buffer). The mutex is also held
 // across SendAll so the encrypted bytes leave the socket as a
-// contiguous frame — interleaving partial sends from two threads would
+// contiguous frame -- interleaving partial sends from two threads would
 // produce a frame the client cannot decrypt.
 void Connection::SendResponse(short opcode, unsigned char* data,
                               size_t length, long /*sequence_num*/)
@@ -931,7 +931,7 @@ bool Connection::DoKeyExchange()
         LogMessage("DoKeyExchange: failed to read 4-byte key length\n");
         return false;
     }
-    // Phase K Wave 11: see notes at top DoKeyExchange — wire field is 4B.
+    // Phase K Wave 11: see notes at top DoKeyExchange -- wire field is 4B.
     long key_length = (long) ntohl(*((uint32_t *) buffer));
     if ((key_length < WWRSA_BLOCK_SIZE) || (key_length > (WWRSA_BLOCK_SIZE + 1))) {
         LogMessage("DoKeyExchange: bad key_length = %ld\n", key_length);
@@ -975,7 +975,7 @@ void Connection::RunRecvThread()
         return;
     }
 
-    // Framed reader — mirrors Win32 Connection.cpp:410-545.
+    // Framed reader -- mirrors Win32 Connection.cpp:410-545.
     // Wire: [EnbTcpHeader {short size; short opcode;}][payload bytes].
     // size is total frame length (including the 4-byte header).
     // size and opcode are RC4-encrypted in the same stream as the payload.
@@ -1004,7 +1004,7 @@ void Connection::RunRecvThread()
         int payload_bytes = (int) (unsigned short) header.size - (int) sizeof(EnbTcpHeader);
 
         if (payload_bytes < 0 || payload_bytes >= MAX_BUFFER) {
-            LogMessage("Bad frame on port %d: size=%u opcode=0x%04x — aborting\n",
+            LogMessage("Bad frame on port %d: size=%u opcode=0x%04x -- aborting\n",
                        m_TcpPort, (unsigned short) header.size,
                        (unsigned short) opcode);
             break;
@@ -1052,4 +1052,4 @@ static void* LaunchConnectionWorker(void* arg)
     return nullptr;
 }
 
-#endif // WIN32 — Phase J file-level guard
+#endif // WIN32 -- Phase J file-level guard
