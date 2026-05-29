@@ -262,7 +262,7 @@ void ServerManager::RunMasterServer()
 		// the load screen. Block here until every sector's BeginSectorThread
 		// has bound its port, so by the time MainLoop accepts handoff traffic
 		// the sectors are actually ready.
-		while (!m_SectorAssignmentsComplete)
+		while (!m_SectorAssignmentsComplete && !g_ServerShutdown)
 		{
 			usleep(50 * 1000);
 			ServerCheck();

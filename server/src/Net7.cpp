@@ -24,6 +24,10 @@
 #include <net7/SingleInstance.h>
 //#include "vld.h" // visual leak detector
 
+#ifndef WIN32
+#include <signal.h>
+#endif
+
 //DIMA: I don't think these are needed
 #define MASTER_INSTANCE_MUTEX_NAME	"Net7 Master Server Instance Mutex"
 #define SECTOR_INSTANCE_MUTEX_NAME	"Net7 Sector Server port %d Instance Mutex"
@@ -94,11 +98,66 @@ void Usage()
 	printf("   Net7 /PORT:3500 /ADDRESS:(ip address) /MAX_SECTORS:(num sectors) /ALTSECTORS\n\n");
 }
 
+#ifndef WIN32
+// SIGTERM / SIGINT handler. The Linux kernel does NOT install default
+// signal dispositions for PID 1, so a containerised `docker stop` of an
+// exec-form CMD ends up waiting out the full grace period before SIGKILL
+// even though we have nothing dirty to flush. Flipping g_ServerShutdown
+// lets MainLoop break out of its tick loop normally; the worker threads
+// gating on the same flag (PlayerManager, SaveManager, UDP_Connection,
+// SectorManager) follow suit and join cleanly within a couple of ticks.
+//
+// Two-phase to bound the worst case: phase 1 sets the flag and arms
+// SIGALRM as a backstop; phase 2 (the alarm firing, or a second SIGTERM
+// arriving before MainLoop has even started -- think: signal during the
+// ~30 s boot-time SQL loaders, which don't poll the flag) calls _exit(0)
+// so the container actually goes away rather than waiting out docker's
+// SIGKILL grace period. _exit skips C++ static dtors but the work that
+// matters (SaveManager flushes every 10 ms; postgres is durable) has
+// already crossed the network.
+static const int kShutdownGraceSeconds = 8;
+extern "C" void Net7HandleShutdownSignal(int signo)
+{
+    if (!g_ServerShutdown)
+    {
+        g_ServerShutdown = true;
+        if (signo == SIGTERM || signo == SIGINT)
+            alarm(kShutdownGraceSeconds);
+        return;
+    }
+    // Second SIGTERM / SIGINT, or SIGALRM after the grace expired.
+    _exit(0);
+}
+#endif
+
 int main(int argc, char* argv[])
 {
     // Let the user know when this was compiled for reference purposes
     printf("Net7: Built on %s, at %s\n\n",__DATE__, __TIME__);
     g_StartTick = Net7TickMs();
+
+#ifndef WIN32
+    {
+        struct sigaction sa{};
+        sa.sa_handler = Net7HandleShutdownSignal;
+        sigemptyset(&sa.sa_mask);
+        // SA_RESTART so libpq selects() get auto-resumed across the
+        // graceful-shutdown SIGTERM. Doesn't suppress SIGALRM either:
+        // the handler still runs and the _exit inside it short-circuits
+        // the would-be syscall restart.
+        sa.sa_flags = SA_RESTART;
+        sigaction(SIGTERM, &sa, nullptr);
+        sigaction(SIGINT,  &sa, nullptr);
+        sigaction(SIGALRM, &sa, nullptr);
+        // SIGPIPE on socket writes would otherwise kill the process when
+        // a client goes away mid-send; ignore it and let send() return
+        // EPIPE for the calling thread to handle.
+        struct sigaction sp{};
+        sp.sa_handler = SIG_IGN;
+        sigemptyset(&sp.sa_mask);
+        sigaction(SIGPIPE, &sp, nullptr);
+    }
+#endif
 
     bool standalone = false;
     bool master_server = false;
