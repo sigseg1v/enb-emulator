@@ -15668,4 +15668,137 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 213 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
+    /// the 33-byte ASCII body "Missing arg for option findsector" that the
+    /// server emits when admin-tier double-slash <c>//findsector</c>
+    /// arrives with no argument. Matcher at PlayerConnection.cpp:4921
+    /// (else-if of the case-'f' arm of the admin-tier switch opened at
+    /// 4724) -- NO-INLINE-GUARD pattern (outer GM gate at 4716 is the
+    /// only AdminLevel check on the dispatch path). FIRST admin-tier
+    /// case-'f' pin; case-'f' admin-tier now SINGLE-PINNED.
+    /// </summary>
+    private const string MissingArgFindsectorLiteral = "Missing arg for option findsector";
+
+    /// <summary>
+    /// Wave 213 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 37-byte wire-shape of the single 0x001D MESSAGE_STRING reply to
+    /// admin-tier double-slash <c>//findsector</c> (NO param). Wave 213
+    /// opens admin-tier case-'f' to SINGLE-PINNED status.
+    ///
+    /// <para>
+    /// Outer gate at 4716 (<c>Msg[0]=='/' &amp;&amp; Msg[1]=='/' &amp;&amp;
+    /// AdminLevel() >= GM</c>) admits the dispatch; cli_test status=100
+    /// satisfies GM=50. Switch at 4724 jumps on *pch -> case-'f' opens at
+    /// 4905. case-'f' has three arms: <c>if</c>
+    /// strcmp("floodsave",pch)==0 &amp;&amp; SDEV -- byte 1 'l' vs 'i'
+    /// MISMATCH, AdminLevel check short-circuited away by &amp;&amp; LHS
+    /// false; second `if` strcmp("friends",pch)==0 &amp;&amp; SDEV --
+    /// byte 1 'r' vs 'i' MISMATCH, &amp;&amp; LHS false; else-if
+    /// MatchOptWithParam("findsector",pch) at 4921 -- 10B vs 10B full
+    /// match. NO inline AdminLevel guard. param=NULL; allowNoParams=false
+    /// (default) fires the 4548 ERROR fork: "Missing arg for option
+    /// findsector" COLOR=5. case-'f' breaks. NET RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>
+    /// First admin-tier case-'f' MatchOptWithParam ERROR-fork pin. SIXTH
+    /// admin-tier NO-INLINE-GUARD pin (joins //halloween 4927,
+    /// //restartcomms 5055, //countsp 4831, //displayplayerfaction 4865,
+    /// //editfaction 4892). FIRST admin-tier pin where the matcher arm
+    /// is an else-if branch chained off a SAME-LINE-AND-GUARD-SDEV strcmp
+    /// arm -- catches regression where the matched-arm-followed-by-strcmp
+    /// chain is rewritten and accidentally re-emits via a previously
+    /// short-circuited branch.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashFindsectorMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (34) = 37 bytes.
+        const int ExpectedReplyPayloadLength = 37;
+        const short ExpectedReplyLengthField = 34;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 33;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Find", shipName: "FindShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//findsector");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(MissingArgFindsectorLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgFindsectorLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//findsector\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{MissingArgFindsectorLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
