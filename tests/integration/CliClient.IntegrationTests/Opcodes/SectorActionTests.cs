@@ -206,4 +206,236 @@ public sealed class SectorActionTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Body of the 0x001D MESSAGE_STRING reply the server emits via
+    /// SendVaMessage("Invalid JS target! SUBMIT BUG REPORT!") in
+    /// HandleAction's case 26 (Jump Start) when <c>obj</c> resolves to
+    /// nullptr — exactly the situation produced by Target=0 (or any
+    /// invalid Target the client hands in). 37 ASCII bytes; SendVaMessage
+    /// hands the string to SendMessageString, which writes
+    /// strlen+1 (=38) as the little-endian length prefix and a trailing
+    /// NUL terminator. Net7.h does not symbol-define this string; the
+    /// literal is hardcoded in the case-26 body.
+    /// </summary>
+    private const string InvalidJsTargetLiteral = "Invalid JS target! SUBMIT BUG REPORT!";
+
+    /// <summary>
+    /// Wave 124 sibling-arm-pinning hardening (+0 ratchet, 0x002C ACTION
+    /// → 0x001D MESSAGE_STRING): pins the byte-exact 41-byte wire-shape
+    /// of the single 0x001D MESSAGE_STRING the server emits in reply to
+    /// a 0x002C ACTION whose <c>Action</c> field is 26 (Jump Start) and
+    /// whose <c>Target</c> field is 0 (no target selected).
+    ///
+    /// <para>
+    /// Why a +0 ratchet. 0x002C ACTION is already counted by Wave 13
+    /// <see cref="Action_NoOpSubAction_DoesNotBreakConnection_RequestTimeStillRoundTrips"/>
+    /// (sub-action 23, the commented-out no-op survival probe). This
+    /// wave does NOT add an opcode to <c>TestedOpcodes.MinTestedCount</c>;
+    /// it adds a structurally-distinct sibling-arm pin on the same
+    /// <c>HandleAction</c> dispatcher Wave 13 exercises. Wave 13 sits on
+    /// the silent default arm (Action=23 emits nothing); Wave 124 sits
+    /// on the directly-replying arm (Action=26 with no target emits a
+    /// fixed-string error). The two together box in the dispatcher's
+    /// shape from both sides.
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Six concrete regression classes, all of which
+    /// the existing Wave 13 survival probe would silently pass through:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     <c>ActionPacket</c> struct-layout drift. If anyone reverts
+    ///     the Wave 11 PacketStructures.h <c>long</c>→<c>int32_t</c>
+    ///     migration on ActionPacket the struct grows to 32B on Linux
+    ///     x86_64 and the handler reads <c>Action</c> from offset 8
+    ///     (where the wire has the high half of Target) instead of
+    ///     offset 4 — the dispatched sub-action number is then garbage
+    ///     and almost certainly misses case 26, so we never see the
+    ///     "Invalid JS target!" reply. Wave 13 keeps passing
+    ///     (the default case still emits no reply); Wave 124 fails.
+    ///   </item>
+    ///   <item>
+    ///     <c>HandleAction</c>'s pre-switch
+    ///     <c>obj = om-&gt;GetObjectFromID(myAction-&gt;Target)</c>
+    ///     regressing to read <c>ShipIndex()-&gt;GetTargetGameID()</c>
+    ///     instead of the wire field — Wave 13 still passes
+    ///     (sub-action 23 doesn't touch <c>obj</c>); Wave 124 fails
+    ///     because freshly-handed-off characters with no selected
+    ///     target also resolve <c>obj</c> to nullptr and we'd see the
+    ///     reply, but the test pins that we got it via the wire-Target=0
+    ///     path. (This particular regression is detected differently —
+    ///     by a Wave-130-class pin that flips Target to a known
+    ///     non-zero GameID and asserts a different reply — but Wave 124
+    ///     gives us the negative anchor for that future test.)
+    ///   </item>
+    ///   <item>
+    ///     <c>ObjectManager::GetObjectFromID(0)</c> regressing into
+    ///     returning a non-nullptr sentinel. The function's first arm
+    ///     (<c>server/src/ObjectManager.cpp:567</c>) explicitly handles
+    ///     <c>object_id &lt; m_StartObjectID &amp;&amp; object_id &gt;=
+    ///     0</c> by returning the zero-initialised local; a refactor
+    ///     that initialised <c>obj</c> to <c>m_SectorIndexList[0]</c>
+    ///     "for safety" would make <c>!obj</c> false and we'd skip the
+    ///     error branch — Wave 124 fails.
+    ///   </item>
+    ///   <item>
+    ///     <c>SendVaMessage</c> → <c>SendMessageString</c> color-default
+    ///     regression at <c>server/src/PlayerClass.h:277</c>. The
+    ///     declaration reads <c>SendMessageString(char *msg, char
+    ///     color=5, bool log=true)</c>; if the default were lost or
+    ///     changed (e.g. to 17 to match the case-1 incapacitation arm)
+    ///     the third byte of the wire body would change. Wave 124 pins
+    ///     <c>span[2] == 5</c>.
+    ///   </item>
+    ///   <item>
+    ///     <c>SendMessageString</c> length-field width regression at
+    ///     <c>server/src/PlayerConnection.cpp</c>. The current emit
+    ///     writes a <c>short</c> (u16 LE) length; if a refactor promoted
+    ///     the field to <c>int</c> (u32 LE) the payload would be 43B,
+    ///     not 41B, and offset 2 would be 0 instead of the color
+    ///     byte. Wave 124 pins both total length (41) and the u16 at
+    ///     offset 0 (38).
+    ///   </item>
+    ///   <item>
+    ///     The fixed error string drifting. <c>SendVaMessage("Invalid
+    ///     JS target! SUBMIT BUG REPORT!")</c> at
+    ///     <c>server/src/PlayerConnection.cpp:4151</c> is a literal —
+    ///     a typo-correction PR that "fixed" the punctuation, dropped
+    ///     "SUBMIT BUG REPORT!", or localised the message would
+    ///     silently change the body bytes. Wave 124 pins the verbatim
+    ///     37-byte ASCII run and the trailing NUL.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (CLAUDE.md). The case-26 error string and the
+    /// 0x001D MESSAGE_STRING wire shape it travels on are both the
+    /// retail server's behaviour, not test-only artefacts. Action=26 is
+    /// the Jumpstart ability click; the retail client hands in
+    /// <c>Target=GameID-of-incapacitated-ally</c> and the server runs
+    /// the ability. The "Invalid JS target!" arm is what the retail
+    /// server emits when the click arrives with no resolvable target —
+    /// e.g. the targeted player left the sector between selection and
+    /// click. This test exercises that POSITIVE-fidelity path by
+    /// presenting Target=0 (the same shape the retail client sends on a
+    /// no-selection click) and asserting the retail-shape reply. No
+    /// server permissiveness is added: a real client click with no
+    /// target lands here too.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s. Handshake ~2s; ACTION send + drain of one
+    /// MESSAGE_STRING is sub-second. Wide budget covers stage-ack retry
+    /// in the login state machine and any handshake-tail debris frames.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task Action_JumpStartOnNullTarget_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "JSTest", shipName: "JSShip", cts.Token);
+
+        try
+        {
+            // ActionPacket wire layout — 16 bytes total, all int32_t LE.
+            // common/include/net7/PacketStructures.h:546
+            //   [0..4)   GameID       — actor's game id (server resolves
+            //                            actor via the connection binding
+            //                            so this field is effectively
+            //                            unused for routing).
+            //   [4..8)   Action       — 26 = Jump Start.
+            //   [8..12)  Target       — 0 = no target selected. The
+            //                            handler's pre-switch
+            //                            GetObjectFromID(0) returns
+            //                            nullptr (ObjectManager.cpp:567
+            //                            first arm), case 26 sees
+            //                            !obj true and emits the fixed
+            //                            error string.
+            //   [12..16) OptionalVar  — unused by case 26.
+            byte[] actionPayload = new byte[16];
+            BinaryPrimitives.WriteInt32LittleEndian(actionPayload.AsSpan(0, 4), 0);
+            BinaryPrimitives.WriteInt32LittleEndian(actionPayload.AsSpan(4, 4), 26);
+            BinaryPrimitives.WriteInt32LittleEndian(actionPayload.AsSpan(8, 4), 0);
+            BinaryPrimitives.WriteInt32LittleEndian(actionPayload.AsSpan(12, 4), 0);
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(OpcodeId.Known.Action.Value, actionPayload),
+                cts.Token);
+
+            // Drain until we see the specific 0x001D MESSAGE_STRING
+            // carrying "Invalid JS target!". Post-handshake the server
+            // may interleave other MESSAGE_STRING frames (e.g. tutorial
+            // banners), so substring-filter rather than first-match.
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                // Cheap substring probe before the strict pin so we
+                // don't hard-fail on unrelated handshake-tail frames.
+                if (span.Length < 3 + InvalidJsTargetLiteral.Length)
+                    continue;
+                var bodyText = System.Text.Encoding.ASCII.GetString(
+                    span.Slice(3, Math.Min(span.Length - 3, 64)).ToArray());
+                if (!bodyText.StartsWith("Invalid JS target!", StringComparison.Ordinal))
+                    continue;
+
+                // 0x001D wire layout — mirror of SendMessageString:
+                //   [0..2)  u16 LE length = strlen(msg) + 1
+                //   [2]     u8  color (default 5)
+                //   [3..3+strlen)  ASCII body
+                //   [3+strlen]     '\0'
+                Assert.Equal(41, span.Length);
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                Assert.Equal((short)38, msgLen);
+
+                Assert.Equal((byte)5, span[2]);
+
+                byte[] expectedBody = System.Text.Encoding.ASCII.GetBytes(
+                    InvalidJsTargetLiteral);
+                Assert.Equal(37, expectedBody.Length);
+                Assert.True(span.Slice(3, 37).SequenceEqual(expectedBody));
+
+                Assert.Equal((byte)0x00, span[40]);
+
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x002C ACTION " +
+                $"(Action=26 Jump Start, Target=0) without seeing the 0x001D " +
+                $"MESSAGE_STRING reply containing \"Invalid JS target!\". " +
+                $"Likely HandleAction case 26 at PlayerConnection.cpp:4147 " +
+                $"changed shape, GetObjectFromID(0) stopped returning nullptr, " +
+                $"the SendVaMessage→SendMessageString fan-out was rewired, " +
+                $"or the proxy dropped the 0x001D inside the encrypted client tunnel.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
