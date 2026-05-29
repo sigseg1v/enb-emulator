@@ -16781,4 +16781,143 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 221 sibling-arm-pinning hardening (+0 ratchet) literal anchor
+    /// for the 36-byte ASCII body "Missing arg for option createcredits"
+    /// that the server emits when user-tier single-slash
+    /// <c>/createcredits</c> arrives with no argument. Matcher at
+    /// PlayerConnection.cpp:5800 -- SIXTH user-tier case-'c' arm pin;
+    /// case-'c' user-tier promoted from QUINTUPLE-PINNED to
+    /// SEXTUPLE-PINNED.
+    /// </summary>
+    private const string MissingArgCreatecreditsLiteral = "Missing arg for option createcredits";
+
+    /// <summary>
+    /// Wave 221 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 40-byte wire-shape of the single 0x001D MESSAGE_STRING reply to
+    /// user-tier single-slash <c>/createcredits</c> (NO param). Wave 221
+    /// deepens user-tier case-'c' to SEXTUPLE-PINNED status.
+    ///
+    /// <para>
+    /// ELSE-IF at 5800 `MatchOptWithParam("createcredits", pch, param,
+    /// msg_sent)` -- NO-INLINE-GUARD pattern; the matcher's true-branch
+    /// body wraps an internal `if (AdminLevel() &gt;= GM)` guard at 5803,
+    /// but the matcher's ERROR side-effect at 4548 fires BEFORE the body
+    /// guard evaluates. Chain walk for arg "createcredits": arms 1-4
+    /// (chjoin/chleave/ccamera/changepassword) all byte-1 mismatch. Arm
+    /// 5 MatchOptWithParam("createitem","createcredits",10) byte 6 'i'
+    /// vs 'c' MISMATCH no prefix-match; arm 6 MatchOptWithParam
+    /// ("createcredits","createcredits",13) at 5800 FULL match,
+    /// arg[13]='\0' fires 4548 ERROR fork: "Missing arg for option
+    /// createcredits" COLOR=5; arm 7 MatchOptWithParam("createmission",
+    /// "createcredits",13) byte 6 'm' vs 'c' MISMATCH; arm 8
+    /// MatchOptWithParam("createmob","createcredits",9) byte 6 'm' vs
+    /// 'c' MISMATCH; arm 9 MatchOptWithParam("create","createcredits",
+    /// 6) FULL 6B prefix-match but arg[6]='c' isalpha returns SILENT-
+    /// false (no ERROR); arm 10 MatchOptWithParam("customizeship",
+    /// "createcredits",13) byte 1 'u' vs 'r' MISMATCH. case-'c' breaks.
+    /// NET RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>
+    /// SIXTH user-tier case-'c' pin; case-'c' user-tier now
+    /// SEXTUPLE-PINNED (chjoin Wave 188 + chleave + ccamera +
+    /// changepassword Wave 189 + createitem Wave 220 + createcredits
+    /// Wave 221). SECOND user-tier INTERNAL-BODY-ADMIN-GUARD pin
+    /// (after Wave 220 /createitem). SECOND user-tier
+    /// shorter-prefix-following-arm pin (arm 9 "create" at 5845 still
+    /// follows). 13-byte option-name width pin in user-tier case-'c'.
+    /// EIGHTY-NINTH MatchOptWithParam ERROR pin. Assert.Equal pins the
+    /// full 40-byte response shape.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashCreatecreditsMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (37) = 40 bytes.
+        const int ExpectedReplyPayloadLength = 40;
+        const short ExpectedReplyLengthField = 37;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 36;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Credta", shipName: "CredtaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/createcredits");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(MissingArgCreatecreditsLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgCreatecreditsLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/createcredits\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{MissingArgCreatecreditsLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
