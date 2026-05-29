@@ -9622,4 +9622,205 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 168 missing-arg ERROR literal for case-'s' /scan.
+    /// The matcher at PlayerConnection.cpp:7248 reads
+    /// `else if (MatchOptWithParam("scan", pch, param, msg_sent))`
+    /// -- NO outer AdminLevel guard, INSIDE-BODY-BETA_PLUS-guard at
+    /// 7250 (`if (AdminLevel() >= BETA_PLUS)`). SIXTH case-'s' user-
+    /// tier pin. 27 ASCII bytes after %s substitution -- 4-byte width
+    /// matches Waves 146 (/form) + 148 (/kick) + 150 (/move) + 153
+    /// (/tilt) + 156 (/warp) + 167 (/stat); 4-byte %s width SEPTUPLE-
+    /// PINNED across 7 case-letters / structural patterns now.
+    /// INTRODUCES INSIDE-BODY-BETA_PLUS guard subfamily (NEW tier).
+    /// </summary>
+    private const string MissingArgScanLiteral = "Missing arg for option scan";
+
+    /// <summary>
+    /// Wave 168 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 31-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/scan</c> (NO param) -- routes through the user-tier
+    /// dispatcher entry at line 5434, the 1-char strip, the case-'s'
+    /// user-tier dispatch at line 7136 (Wave 168 deepens case-'s' to
+    /// SEXTUPLE-PINNED across SIX distinct ELSE-IF chain-arm positions
+    /// AND introduces INSIDE-BODY-BETA_PLUS-guard subfamily to the
+    /// HandleSlashCommands catalogue). Prior matchers in case-'s'
+    /// MISMATCH at byte 1 against "scan" (only /scale matches at
+    /// byte 1 'c'='c' but diverges at byte 2 'a'='a' / byte 3 'l' vs
+    /// 'n' MISMATCH). ELSE-IF at 7248 `MatchOptWithParam("scan", pch,
+    /// param, msg_sent)` -- NO outer AdminLevel guard, INSIDE-BODY-
+    /// BETA_PLUS-guard at 7250 `if (AdminLevel() >= BETA_PLUS)`.
+    /// MatchOptWithParam: strncmps "scan" against "scan" (4 byte
+    /// match), arg[4]='\0' -- NOT '=', NOT ' ', NOT isalpha,
+    /// allowNoParams=false -- emits "Missing arg for option scan"
+    /// via SendVaMessage at 4548 with default COLOR=5, sets msg_sent=
+    /// true, returns false. Body block at 7250-7270 SKIPPED (matcher
+    /// returned false; INSIDE-BODY-BETA_PLUS-guard NEVER EVALUATED --
+    /// the ERROR-fork-bypass invariant being pinned at the NEW
+    /// BETA_PLUS tier). case-'s' chain continues but no later arm
+    /// matches "scan"; case-'s' breaks. Trailing fallback at 7702
+    /// SKIPPED (msg_sent=true). NET RESULT: ONE emit.
+    ///
+    /// <para>
+    /// THIRTY-SEVENTH pin on the user-tier (single-slash) dispatch
+    /// path. SIXTH pin on user-tier case-'s' -- case-'s' user-tier now
+    /// SEXTUPLE-PINNED across SIX ELSE-IF chain-arm positions. THIRTY-
+    /// SIXTH pin on the MatchOptWithParam ERROR path. FIFTH INSIDE-
+    /// BODY-guard pin (Waves 156 GM + 159 DEV + 166 GM + 167 DEV + 168
+    /// BETA_PLUS) -- INSIDE-BODY-guard QUINTUPLE-PINNED across THREE
+    /// tier-subfamilies (GM DOUBLE + DEV DOUBLE + BETA_PLUS SINGLE).
+    /// SEVENTH 4-byte %s width pin -- SEPTUPLE-PINNED across 7 case-
+    /// letters / structural patterns.
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes prior waves
+    /// are structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     NEW INSIDE-BODY-BETA_PLUS-guard tier-subfamily regression
+    ///     at <c>PlayerConnection.cpp:7248-7270</c>. Wave 156/166
+    ///     pinned INSIDE-BODY-GM-guard (tier 50); Wave 159/167 pinned
+    ///     INSIDE-BODY-DEV-guard (tier 80); Wave 168 introduces
+    ///     INSIDE-BODY-BETA_PLUS-guard (tier 40 -- LOWER than GM).
+    ///     A regression that introduced a global "if AdminLevel >=
+    ///     SOME_TIER" wrapper around the entire dispatcher (or around
+    ///     each matcher) would gate the ERROR-fork emit behind that
+    ///     tier; Wave 168 pins the ERROR fork emits on a BETA-tier
+    ///     (tier 30, BELOW BETA_PLUS=40) test account, proving the
+    ///     body-guard at BETA_PLUS does NOT gate the missing-arg emit.
+    ///   </item>
+    ///   <item>
+    ///     INSIDE-BODY-guard tier-orthogonality regression -- after
+    ///     Wave 168, THREE distinct tier-subfamilies (BETA_PLUS=40 +
+    ///     GM=50 + DEV=80) are each pinned at INSIDE-BODY-guard
+    ///     positions; if a regression introduced a tier-floor that
+    ///     gated the dispatcher at ANY non-zero AdminLevel, ALL
+    ///     test accounts (status=100 admin) would still pass except
+    ///     for the literal "Missing arg for option" emit being
+    ///     suppressed at the FLOOR tier. Wave 168 pins the orthogonal
+    ///     coverage across THREE tier-subfamilies -- a regression
+    ///     would have to break ALL three to slip past.
+    ///   </item>
+    ///   <item>
+    ///     4-byte %s width SEVENTH cross-structural-pattern divergence
+    ///     regression at <c>PlayerClass.cpp:3422</c>. 4-byte %s now
+    ///     pinned at SEVEN distinct (case-letter, structural-pattern)
+    ///     combinations -- f/COMBINED + k/CASE-FALL-THROUGH +
+    ///     m/NO-GUARD-ELSE-IF + t/CONSECUTIVE-IF + w/INSIDE-BODY-GM +
+    ///     s/INSIDE-BODY-DEV + s/INSIDE-BODY-BETA_PLUS. Wave 168
+    ///     deepens 4-byte coverage to SEPTUPLE-PIN.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). /scan is open to ALL
+    /// users at the dispatcher level -- the INSIDE-BODY-BETA_PLUS-guard
+    /// at 7250 restricts the SUCCESS path to BETA_PLUS+ only, but the
+    /// ERROR fork at 4548 emits for ALL tiers (faithful to retail).
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashScanMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (28) = 31 bytes.
+        const int ExpectedReplyPayloadLength = 31;
+        // strlen(literal) + 1 NUL = 28.
+        const short ExpectedReplyLengthField = 28;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 27.
+        const int ExpectedLiteralByteCount = 27;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Scano", shipName: "ScanoShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/scan");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals("Missing arg for option scan", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgScanLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/scan\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option scan\". Likely the user-tier case-'s' " +
+                $"dispatch at line 7136 stopped routing, the ELSE-IF chain arm at " +
+                $"7248 stopped dispatching, the INSIDE-BODY-BETA_PLUS-guard moved " +
+                $"BEFORE the matcher (gating the ERROR-fork emit behind BETA_PLUS-tier), " +
+                $"the trailing illegal-slash fallback at 7702 fired as a second emit, " +
+                $"or the missing-arg ERROR fork at PlayerConnection.cpp:4548 changed " +
+                $"shape (esp. vsprintf_s 4-byte %s width).");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
