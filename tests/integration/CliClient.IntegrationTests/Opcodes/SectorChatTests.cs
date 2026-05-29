@@ -15801,4 +15801,133 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 214 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
+    /// the 40-byte ASCII body "Missing arg for option editplayerfaction" that
+    /// the server emits when admin-tier double-slash
+    /// <c>//editplayerfaction</c> arrives with no argument. Matcher at
+    /// PlayerConnection.cpp:4897 (second arm of case-'e' admin-tier switch
+    /// opened at 4724) -- NO-INLINE-GUARD pattern. SECOND admin-tier
+    /// case-'e' pin; case-'e' admin-tier now DOUBLE-PINNED.
+    /// </summary>
+    private const string MissingArgEditplayerfactionLiteral = "Missing arg for option editplayerfaction";
+
+    /// <summary>
+    /// Wave 214 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 44-byte wire-shape of the single 0x001D MESSAGE_STRING reply to
+    /// admin-tier double-slash <c>//editplayerfaction</c> (NO param).
+    /// Wave 214 deepens admin-tier case-'e' to DOUBLE-PINNED status.
+    ///
+    /// <para>
+    /// Outer gate at 4716 admits the dispatch (cli_test status=100 &gt;=
+    /// GM=50). Switch at 4724 jumps on *pch='e' -&gt; case-'e' opens at
+    /// 4890. case-'e' has two PLAIN `if` arms: MatchOptWithParam
+    /// ("editfaction", arg="editplayerfaction") at 4892 -- strncmp 11B
+    /// byte 4 'f' vs 'p' MISMATCH -&gt; silent FALSE. if(false) skip.
+    /// MatchOptWithParam("editplayerfaction", arg="editplayerfaction") at
+    /// 4897 -- 17B vs 17B full match. NO inline AdminLevel guard.
+    /// param=NULL; allowNoParams=false (default) fires the 4548 ERROR
+    /// fork: "Missing arg for option editplayerfaction" COLOR=5. case-'e'
+    /// breaks. NET RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>
+    /// SECOND admin-tier case-'e' pin; case-'e' admin-tier now
+    /// DOUBLE-PINNED. SEVENTH admin-tier NO-INLINE-GUARD pin. FIRST
+    /// admin-tier sibling-arm-skip pin where a prior PLAIN `if` matcher
+    /// arm mismatched on the prefix-byte sequence before the matching
+    /// arm fires -- regression coverage for any rewrite that accidentally
+    /// shortens "editfaction" matcher to a prefix that overlaps
+    /// "editplayerfaction".
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashEditplayerfactionMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (41) = 44 bytes.
+        const int ExpectedReplyPayloadLength = 44;
+        const short ExpectedReplyLengthField = 41;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 40;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Epfa", shipName: "EpfaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//editplayerfaction");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(MissingArgEditplayerfactionLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgEditplayerfactionLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//editplayerfaction\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{MissingArgEditplayerfactionLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
