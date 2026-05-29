@@ -114,7 +114,21 @@ What is **NOT** an acceptable justification:
 
 **Process**: if a contributor (human or agent) believes a server change is justified by the escape hatch, the change MUST be accompanied by a commit-message citation of the primary source (capture filename + frame number, decompiled function name, document section). Reviewers reject the change otherwise. If no primary source exists, the answer is "the server stays as-is; the tool adapts."
 
-This rule applies to `server/src/`, `login-server/Net7Mysql/`, `login-server/Net7SSL/`, and `proxy/`. It does NOT restrict changes that *tighten* the server toward greater fidelity (e.g. rejecting an input the real server rejected but we currently accept) — those are always welcome.
+This rule applies to `server/src/`, `login-server/Net7Mysql/`, `login-server/Net7SSL/`, and `proxy/`. It does NOT restrict changes that *tighten* the server toward greater fidelity (e.g. rejecting an input the real server rejected but we currently accept) -- those are always welcome.
+
+## When you implement a new server-side opcode handler
+
+The integration suite tracks opcodes the Net-7 server does NOT implement in `tests/integration/CliClient.IntegrationTests/Coverage/KnownUnimplementedOpcodes.cs`. Each entry has a matching `[Fact(Skip = ...)]` stub in `UnimplementedOpcodeStubTests.cs` whose body throws `NotImplementedException` on the first line.
+
+**When you wire an opcode server-side that was on the unimplemented list, you MUST**:
+
+1. Delete the `[Fact(Skip = ...)]` line on the matching `Opcode_NNNN_*` stub. The throw will now fire, forcing you to replace the body with a real round-trip test rather than silently green-passing.
+2. Replace the stub body with the real test (mirror the shape of existing `Opcodes/*Tests.cs` files in the suite -- send the opcode, drain frames, byte-pin the reply).
+3. Remove the corresponding entry from `KnownUnimplementedOpcodes.Opcodes`.
+4. Add a `new TestedOpcode(...)` entry in `TestedOpcodes.Opcodes` (sorted by opcode value) and bump `TestedOpcodes.MinTestedCount` by one.
+5. The cross-check `UnimplementedOpcodeStubTests.EveryEntry_HasMatchingSkippedStub` and `CoverageRatchetTests.Ratchet_CountEqualsFloor` will both verify the migration was done cleanly -- they're paired by design so you can't half-do it.
+
+The same migration path applies if the upstream protocol catalog adds an opcode that was missed: add a `KnownUnimplementedOpcode` entry first (with a paired Skip stub), then upgrade it to a `TestedOpcode` when the server-side handler lands.
 
 ## Where to put new things
 
