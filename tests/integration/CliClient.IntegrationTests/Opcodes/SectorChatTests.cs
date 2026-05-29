@@ -4284,4 +4284,209 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Verbatim body of the 0x001D MESSAGE_STRING reply the server emits
+    /// when the user-tier case-'r' GUARD-FIRST else-if matcher at
+    /// <c>PlayerConnection.cpp:7074</c>
+    /// <c>AdminLevel() &gt;= DEV &amp;&amp; MatchOptWithParam("removebaseore", pch, param, msg_sent)</c>
+    /// passes the GUARD-FIRST AdminLevel check (status=100 satisfies
+    /// DEV=80), then runs MatchOptWithParam which matches 13 bytes and
+    /// hits the separator-check NUL fall-through. 36 ASCII bytes after
+    /// %s substitution -- 13-byte %s width (SAME as Wave 140's GM-tier
+    /// case-g gmskillpoints THIRD-position; Wave 144 provides cross-tier
+    /// cross-case-letter SAME-WIDTH divergence at 13-byte).
+    /// </summary>
+    private const string MissingArgRemovebaseoreLiteral = "Missing arg for option removebaseore";
+
+    /// <summary>
+    /// Wave 144 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 40-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/removebaseore</c> (NO param) -- routes through the
+    /// user-tier dispatcher entry at line 5434, the 1-char strip, the
+    /// case-'r' user-tier dispatch (NEW case-letter), traverses the
+    /// case-'r' else-if matcher chain (rsi, rsa, rsn, rotatex, rotatey,
+    /// rotatez all strncmp-fail at index 1), and hits the
+    /// removebaseore matcher at line 7074 -- the FIRST GUARD-FIRST
+    /// short-circuit pattern pin in the catalogue
+    /// (<c>AdminLevel() &gt;= DEV &amp;&amp; MatchOptWithParam(...)</c>
+    /// -- AdminLevel evaluated FIRST, matcher SECOND), then the
+    /// missing-arg ERROR fork at <c>PlayerConnection.cpp:4548</c>.
+    ///
+    /// <para>
+    /// THIRTEENTH pin on the user-tier (single-slash) dispatch path.
+    /// FIRST pin on user-tier case-'r' -- NEW case-letter extends
+    /// user-tier dispatcher switch coverage to EIGHT distinct
+    /// case-letters (a/b/c/d/l/n/p/r). TWELFTH pin on the
+    /// MatchOptWithParam ERROR path with SAME 13-byte option-name %s
+    /// width as Wave 140 (GM-tier case-'g' THIRD-position
+    /// gmskillpoints) BUT via DIFFERENT tier AND DIFFERENT case-letter
+    /// -- pins cross-tier cross-case-letter SAME-WIDTH structural
+    /// divergence. FIRST pin on the GUARD-FIRST short-circuit pattern
+    /// (NEW structural variant -- prior pins covered MATCHER-FIRST
+    /// at Waves 139 case-g SDEV-guard 11-byte and 143 user-tier
+    /// case-d DEV-guard 1-byte).
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes Wave 143
+    /// is structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     user-tier case-'r' dispatch + else-if chain regression at
+    ///     <c>PlayerConnection.cpp:6992-7074</c>. case-'r' was
+    ///     previously unpinned in the user-tier switch; a regression
+    ///     that dropped case-'r' entirely, reordered case labels, or
+    ///     routed *pch=='r' to the wrong handler would silently
+    ///     swallow /removebaseore (along with /rs, /rsi, /rsa, /rsn,
+    ///     /rsd, /range, /restoreinv, /rotatex/y/z, /resetchar/mounts/navs,
+    ///     /reffect, /release). Wave 144 pins case-'r' is REACHABLE
+    ///     via the user-tier switch dispatcher AND the else-if chain
+    ///     traverses correctly from line 7000 to line 7074 (6 matchers
+    ///     deep -- rsi/rsa/rsn/rotatex/rotatey/rotatez all
+    ///     strncmp-fail at index 1, then removebaseore matches).
+    ///   </item>
+    ///   <item>
+    ///     GUARD-FIRST short-circuit ordering regression at
+    ///     <c>PlayerConnection.cpp:7074</c>. The matcher-and-guard
+    ///     line reads `else if (AdminLevel() &gt;= DEV &amp;&amp;
+    ///     MatchOptWithParam("removebaseore", pch, param, msg_sent))`.
+    ///     C++ short-circuit order matters: AdminLevel evaluates
+    ///     FIRST -- if status &lt; DEV, MatchOptWithParam NEVER runs
+    ///     and NO emit fires. With status=100 (AdminLevel &gt;= DEV),
+    ///     guard passes and matcher runs -- emit fires. A regression
+    ///     that reordered the guard to MATCHER-FIRST (LHS swap) would
+    ///     emit the missing-arg message for ALL admin levels (even
+    ///     BETA), accidentally exposing /removebaseore's existence to
+    ///     low-privilege users. Wave 144 pins guard-first AdminLevel
+    ///     gates the emit -- the inverse-direction sibling to Wave
+    ///     139's matcher-first AdminLevel-irrelevant pin.
+    ///   </item>
+    ///   <item>
+    ///     case-'r' else-if matcher-chain fall-through regression at
+    ///     <c>PlayerConnection.cpp:7012-7074</c>. After 6 prior
+    ///     matchers (rsi, rsa, rsn, rotatex, rotatey, rotatez) all
+    ///     strncmp-fail at index 1 ('s'/'o' vs 'e' of "removebaseore"),
+    ///     control MUST fall through to removebaseore at line 7074. A
+    ///     regression that short-circuited any prior matcher (e.g.
+    ///     returning true on mismatch) would silently swallow the
+    ///     /removebaseore emit. Wave 144 pins SIX-step matcher-chain
+    ///     fall-through within case-'r' -- ties Wave 141 (case-'g'
+    ///     THREE-step deepest fall-through) for catalogue's deepest
+    ///     fall-through pin (Wave 141 in case-'g', Wave 144 in
+    ///     case-'r', different chain composition).
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). The MatchOptWithParam
+    /// missing-arg emit is the retail server's documented dispatcher-level
+    /// error path; the GUARD-FIRST AdminLevel &gt;= DEV gate enforces
+    /// the retail server's privilege check (low-privilege users do not
+    /// learn that //removebaseore exists). No server permissiveness
+    /// added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashRemovebaseoreMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (37) = 40 bytes.
+        const int ExpectedReplyPayloadLength = 40;
+        // strlen(literal) + 1 NUL = 37.
+        const short ExpectedReplyLengthField = 37;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 36.
+        const int ExpectedLiteralByteCount = 36;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Removeb", shipName: "RemovebShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/removebaseore");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // Filter on the distinctive "for option removebaseore" suffix.
+                if (!text.StartsWith("Missing arg for option removebaseore", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgRemovebaseoreLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/removebaseore\" without seeing 0x001D MESSAGE_STRING starting with " +
+                $"\"Missing arg for option removebaseore\". Likely the user-tier case-'r' " +
+                $"dispatch at line 6992 stopped routing, the else-if chain (rsi/rsa/rsn/" +
+                $"rotatex/y/z) before line 7074 incorrectly short-circuited, the GUARD-FIRST " +
+                $"AdminLevel >= DEV check at line 7074 failed (status=100 admin should pass), " +
+                $"the removebaseore matcher at line 7074 stopped dispatching, or the " +
+                $"missing-arg ERROR fork at PlayerConnection.cpp:4548 changed shape.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
