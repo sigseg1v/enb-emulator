@@ -8812,4 +8812,210 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 164 missing-arg ERROR literal for case-'s' /scale.
+    /// The matcher at PlayerConnection.cpp:7201 reads
+    /// `else if (MatchOptWithParam("scale", pch, param, msg_sent))`
+    /// -- pure NO-GUARD ELSE-IF chain arm, NO outer AdminLevel guard,
+    /// NO inside-body guard. SECOND case-'s' user-tier pin (Wave 163
+    /// /sounds 6-byte + Wave 164 /scale 5-byte); case-'s' user-tier
+    /// now DOUBLE-PINNED across TWO ELSE-IF chain positions. 28 ASCII
+    /// bytes after %s substitution -- 5-byte width matches Waves 158
+    /// (/testmsg) and 160 (/trade); 5-byte %s width TRIPLE-PINNED
+    /// across TWO case-letters now (t/s).
+    /// </summary>
+    private const string MissingArgScaleLiteral = "Missing arg for option scale";
+
+    /// <summary>
+    /// Wave 164 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 32-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/scale</c> (NO param) -- routes through the user-
+    /// tier dispatcher entry at line 5434, the 1-char strip, the
+    /// case-'s' user-tier dispatch at line 7136 (NEWLY pinned by Wave
+    /// 163; Wave 164 deepens user-tier case-'s' to DOUBLE-PINNED across
+    /// TWO ELSE-IF chain positions). HEAD strcmp at 7137 FAIL ("scale"
+    /// != "slaysectormobs"). ELSE-IF at 7143 MatchOptWithParam("script"
+    /// ...): strncmp("script","scale",6) idx 2 'r' vs 'a' MISMATCH
+    /// returns false NO emit. ELSE-IF at 7179 MatchOptWithParam("sounds"
+    /// ...): strncmp("sounds","scale",6) idx 1 'o' vs 'c' MISMATCH
+    /// returns false NO emit. Intervening strcmp arms at 7189/7195
+    /// strcmp FAIL. ELSE-IF at 7201 `MatchOptWithParam("scale", pch,
+    /// param, msg_sent)` -- NO outer AdminLevel guard, NO inside-body
+    /// guard. MatchOptWithParam: strncmps "scale" against "scale" (5
+    /// byte match), arg[5]='\0' -- NOT '=', NOT ' ', NOT isalpha,
+    /// allowNoParams=false -- emits "Missing arg for option scale"
+    /// via SendVaMessage at 4548, sets msg_sent=true, returns false.
+    /// Body block HandleScaleRequest(param) SKIPPED (matcher returned
+    /// false). case-'s' chain continues but no later arm matches
+    /// "scale"; case-'s' breaks. Trailing fallback at 7702 SKIPPED
+    /// (msg_sent=true). NET RESULT: ONE emit.
+    ///
+    /// <para>
+    /// THIRTY-THIRD pin on the user-tier (single-slash) dispatch path.
+    /// SECOND pin on user-tier case-'s' -- case-'s' user-tier now
+    /// DOUBLE-PINNED across TWO ELSE-IF chain positions (Wave 163
+    /// /sounds at 7179 + Wave 164 /scale at 7201). THIRTY-SECOND pin
+    /// on the MatchOptWithParam ERROR path. NINTH NO-GUARD pin --
+    /// NO-GUARD now NONUPLE-PINNED across 5 case-letters (o/s/t/u/w).
+    /// THIRD 5-byte %s width pin -- TRIPLE-PINNED across 2 case-
+    /// letters (Waves 158 /testmsg + 160 /trade case-'t' + Wave 164
+    /// /scale case-'s').
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes prior waves
+    /// are structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     case-'s' ELSE-IF chain arm deepening regression at
+    ///     <c>PlayerConnection.cpp:7201</c>. Wave 163 pinned case-'s'
+    ///     ELSE-IF chain at the /sounds arm (line 7179, 6-byte option);
+    ///     case-'s' /scale at 7201 sits FURTHER DOWN the same ELSE-IF
+    ///     chain (after intervening strcmp arms at 7189/7195) and was
+    ///     UNPINNED before Wave 164. A regression that broke the ELSE-IF
+    ///     chain after /sounds (or before /scale) but kept the earlier
+    ///     arms intact would slip past Wave 163; Wave 164 pins case-'s'
+    ///     /scale is REACHABLE via the deeper chain position AND the
+    ///     NO-GUARD structural variant is preserved at TWO chain-arm
+    ///     positions within case-'s'.
+    ///   </item>
+    ///   <item>
+    ///     case-'s' chain intervening strcmp arms regression at
+    ///     <c>PlayerConnection.cpp:7189-7199</c>. Between /sounds (7179)
+    ///     and /scale (7201) sit TWO strcmp arms (`strcmp(pch,
+    ///     "setturrets")` at 7189 + `strcmp(pch,"setrespawns")` at 7195),
+    ///     both AdminLevel >= SDEV gated. If a regression converted
+    ///     either strcmp arm to a MatchOptWithParam matcher with the
+    ///     same prefix, /scale could be intercepted; if a regression
+    ///     removed the AdminLevel guard, the strcmp bodies could fire
+    ///     for non-SDEV users (server permissiveness). Wave 164 pins
+    ///     the strcmp arms short-circuit correctly on "scale" pch AND
+    ///     /scale is reached as the next MatchOptWithParam arm.
+    ///   </item>
+    ///   <item>
+    ///     5-byte %s width cross-case-letter divergence regression at
+    ///     <c>PlayerClass.cpp:3422</c>. Waves 158 (/testmsg) and 160
+    ///     (/trade) pinned 5-byte %s within case-'t'; Wave 164 pins
+    ///     5-byte %s at case-'s' (DIFFERENT case-letter). A regression
+    ///     that broke 5-byte %s rendering only on a specific case-
+    ///     letter's dispatch path would fail one pin but not the
+    ///     others; Wave 164 extends 5-byte %s coverage cross-case-
+    ///     letter -- ruling out case-letter-specific format-substitution
+    ///     divergence at the 5-byte width.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). The MatchOptWithParam
+    /// missing-arg emit is the retail server's documented dispatcher-
+    /// level error path. /scale (client-side object scale debug command)
+    /// is OPEN to all users in the retail server -- NO outer AdminLevel
+    /// guard at 7201, NO inside-body guard. ERROR path emits regardless
+    /// of AdminLevel. No server permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashScaleMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (29) = 32 bytes.
+        const int ExpectedReplyPayloadLength = 32;
+        // strlen(literal) + 1 NUL = 29.
+        const short ExpectedReplyLengthField = 29;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 28.
+        const int ExpectedLiteralByteCount = 28;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Scalo", shipName: "ScaloShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/scale");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals("Missing arg for option scale", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgScaleLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/scale\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option scale\". Likely the user-tier case-'s' " +
+                $"dispatch at line 7136 stopped routing, the ELSE-IF chain arm at " +
+                $"7201 stopped dispatching, the NO-GUARD structural variant converted " +
+                $"to OUTER-GUARD or INSIDE-BODY-GUARD, the intervening strcmp arms at " +
+                $"7189/7195 changed to matchers that intercept \"scale\", the trailing " +
+                $"illegal-slash fallback at 7702 fired as a second emit (msg_sent gate " +
+                $"regression), or the missing-arg ERROR fork at PlayerConnection.cpp:4548 " +
+                $"changed shape (esp. vsprintf_s 5-byte %s width).");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }

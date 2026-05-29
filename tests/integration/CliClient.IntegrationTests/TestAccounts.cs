@@ -218,6 +218,7 @@ public static class TestAccounts
             ["SlashOeulerMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                           = A(9_000_153, "cli_test153"),
             ["SlashOpenifMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                           = A(9_000_154, "cli_test154"),
             ["SlashSoundsMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                           = A(9_000_155, "cli_test155"),
+            ["SlashScaleMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                            = A(9_000_156, "cli_test156"),
         };
 
     /// <summary>
