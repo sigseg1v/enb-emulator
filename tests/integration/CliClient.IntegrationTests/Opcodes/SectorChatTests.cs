@@ -7906,4 +7906,266 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 160 missing-arg ERROR literal for case-'t' /trade.
+    /// The matcher at PlayerConnection.cpp:7521 reads
+    /// `if (MatchOptWithParam("trade", pch, param, msg_sent))`
+    /// -- independent CONSECUTIVE-IF block (NOT chained via else-if),
+    /// NO outer AdminLevel guard, NO inside-body guard on the outer
+    /// matcher itself (internal `if (!targetp)` at 7526 is a separate
+    /// post-success-match check). FIFTH NO-GUARD pin (Wave 153 case-t
+    /// /tilt pure CONSECUTIVE-IF NO-GUARD + Wave 154 case-u /uitrigger
+    /// NO-GUARD ELSE-IF + Wave 155 case-w /wormhole pure NO-GUARD
+    /// MIXED + Wave 156 case-w /warp NO-OUTER-GUARD INSIDE-BODY-GM
+    /// + Wave 160 case-t /trade pure NO-GUARD CONSECUTIVE-IF).
+    /// With NO param after "/trade", strncmp matches 5 bytes,
+    /// arg[5]='\0' fails separator-check, allowNoParams=false -- emits
+    /// "Missing arg for option trade", returns false. INNER `if
+    /// (!targetp)` body block SKIPPED (matcher returned false, body
+    /// block never entered). 28 ASCII bytes after %s substitution --
+    /// 5-byte %s width SECOND pin (Wave 131 case-l /level NO-GUARD
+    /// ELSE-IF + Wave 160 case-t /trade pure NO-GUARD CONSECUTIVE-IF)
+    /// -- SAME width DIFFERENT case-letter DIFFERENT structural
+    /// pattern.
+    /// </summary>
+    private const string MissingArgTradeLiteral = "Missing arg for option trade";
+
+    /// <summary>
+    /// Wave 160 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 32-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/trade</c> (NO param) -- routes through the user-
+    /// tier dispatcher entry at line 5434, the 1-char strip, the
+    /// case-'t' user-tier dispatch (case-letter already pinned by
+    /// Wave 153 via /tilt CONSECUTIVE-IF NO-GUARD arm + Wave 158 via
+    /// /testmsg CONSECUTIVE-IF DEV-guard MATCHER-FIRST arm + Wave 159
+    /// via /terminate CONSECUTIVE-IF INSIDE-BODY-DEV-GUARD arm; Wave
+    /// 160 deepens case-'t' to a FOURTH CONSECUTIVE-IF variant: pure
+    /// NO-GUARD /trade at 7521 with NO outer guard AND NO inside-
+    /// body guard on the matcher itself). Independent CONSECUTIVE-IF
+    /// at 7462 strcmp test FAIL. 7471 strcasecmp talktree FAIL. 7486
+    /// MatchOptWithParam("testmsg",...) &amp;&amp; DEV-guard: strncmp
+    /// ("testmsg","trade",5) t-t, e-r MISMATCH idx 1 false NO emit,
+    /// &amp;&amp; short-circuits. 7495 MatchOptWithParam("tilt",...):
+    /// strncmp("tilt","trade",4) t-t, i-r MISMATCH idx 1 false NO
+    /// emit. 7501 MatchOptWithParam("terminate",...): strncmp
+    /// ("terminate","trade",5) t-t, e-r MISMATCH idx 1 false NO emit
+    /// (INSIDE-BODY DEV-guard never reached, body block never entered).
+    /// Independent at 7521 `MatchOptWithParam("trade", pch, param,
+    /// msg_sent)` -- NO outer AdminLevel guard, NO inside-body guard
+    /// on the matcher itself. MatchOptWithParam: strncmps "trade"
+    /// against "trade" (5 byte match), arg[5]='\0' -- NOT '=', NOT
+    /// ' ', NOT isalpha, allowNoParams=false -- emits "Missing arg
+    /// for option trade" via SendVaMessage at 4548, sets msg_sent=
+    /// true, returns false. INNER `Player *targetp = GetPlayer(param)`
+    /// at 7524 and subsequent INNER `if (!targetp)` body block
+    /// SKIPPED (matcher returned false, outer body block never
+    /// entered). case-'t' breaks at 7573. Trailing fallback at 7702
+    /// SKIPPED (msg_sent=true). NET RESULT: ONE emit.
+    ///
+    /// <para>
+    /// TWENTY-NINTH pin on the user-tier (single-slash) dispatch
+    /// path. FOURTH pin on user-tier case-'t' (Wave 153 pinned pure
+    /// CONSECUTIVE-IF NO-GUARD /tilt + Wave 158 pinned CONSECUTIVE-
+    /// IF DEV-guard MATCHER-FIRST /testmsg + Wave 159 pinned
+    /// CONSECUTIVE-IF INSIDE-BODY-DEV-GUARD /terminate + Wave 160
+    /// deepens case-'t' to pure CONSECUTIVE-IF NO-GUARD /trade at
+    /// 7521); case-'t' is now QUADRUPLE-PINNED. TWENTY-EIGHTH pin on
+    /// the MatchOptWithParam ERROR path. FIFTH NO-GUARD pin (Wave
+    /// 153 case-t /tilt pure CONSECUTIVE-IF + Wave 154 case-u
+    /// /uitrigger NO-GUARD ELSE-IF + Wave 155 case-w /wormhole pure
+    /// NO-GUARD MIXED + Wave 156 case-w /warp NO-OUTER-GUARD INSIDE-
+    /// BODY-GM + Wave 160 case-t /trade pure NO-GUARD CONSECUTIVE-
+    /// IF). SECOND 5-byte %s width pin (Wave 131 case-l /level
+    /// NO-GUARD ELSE-IF + Wave 160 case-t /trade pure NO-GUARD
+    /// CONSECUTIVE-IF) -- SAME width DIFFERENT case-letter DIFFERENT
+    /// structural pattern; remaining %s width gaps: 10/12. FIFTH
+    /// CONSECUTIVE-IF pin (Waves 153 case-t pure NO-GUARD + 155
+    /// case-w MIXED + 158 case-t DEV-guard MATCHER-FIRST + 159
+    /// case-t INSIDE-BODY-DEV-GUARD + 160 case-t pure NO-GUARD) --
+    /// CONSECUTIVE-IF now QUINTUPLE-PINNED.
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes Wave 159
+    /// is structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     case-'t' CONSECUTIVE-IF pure NO-GUARD arm deepening
+    ///     regression at <c>PlayerConnection.cpp:7521-7572</c>.
+    ///     Wave 153 pinned case-'t' /tilt at 7495 (pure CONSECUTIVE-
+    ///     IF NO-GUARD); Wave 158 pinned case-'t' /testmsg at 7486
+    ///     (CONSECUTIVE-IF DEV-guard MATCHER-FIRST); Wave 159 pinned
+    ///     case-'t' /terminate at 7501 (CONSECUTIVE-IF INSIDE-BODY-
+    ///     DEV-GUARD); case-'t' /trade at 7521 sits on yet another
+    ///     CONSECUTIVE-IF variant -- pure NO-GUARD with NO outer
+    ///     guard AND NO inside-body guard on the matcher itself --
+    ///     and was UNPINNED before Wave 160. A regression that
+    ///     converted pure NO-GUARD to OUTER-GUARD or INSIDE-BODY-
+    ///     GUARD would either skip the ERROR-fork emit (OUTER-GUARD)
+    ///     or change SUCCESS-path semantics (INSIDE-BODY-GUARD);
+    ///     Wave 160 pins case-'t' /trade pure NO-GUARD CONSECUTIVE-
+    ///     IF arm is REACHABLE AND the pure NO-GUARD structural
+    ///     variant is preserved at THIS combination of (case-letter,
+    ///     block structure, guard pattern).
+    ///   </item>
+    ///   <item>
+    ///     case-'t' CONSECUTIVE-IF terminal-arm regression at
+    ///     <c>PlayerConnection.cpp:7521-7573</c>. /trade is the LAST
+    ///     CONSECUTIVE-IF independent block in case-'t' before the
+    ///     break at 7573. After the /trade matcher emits, execution
+    ///     immediately hits the case-'t' break; no further matchers
+    ///     run; trailing fallback at 7702 SKIPPED (msg_sent=true). A
+    ///     regression that ADDED a competing matcher AFTER /trade
+    ///     matching pch="trade" by accident would produce a second
+    ///     message; the CONSECUTIVE-IF structure means even an else-
+    ///     clause regression could not suppress that second emit;
+    ///     Wave 160 pins the case-'t' CONSECUTIVE-IF terminal-arm
+    ///     position as a structural invariant.
+    ///   </item>
+    ///   <item>
+    ///     NO-GUARD pattern quintuple-pin cross-case-letter cross-
+    ///     block-structure divergence regression at
+    ///     <c>PlayerConnection.cpp:5434+</c>. Wave 153 pinned NO-
+    ///     GUARD at case-'t' /tilt pure CONSECUTIVE-IF; Wave 154 at
+    ///     case-'u' /uitrigger NO-GUARD ELSE-IF; Wave 155 at case-
+    ///     'w' /wormhole pure NO-GUARD MIXED; Wave 156 at case-'w'
+    ///     /warp NO-OUTER-GUARD INSIDE-BODY-GM; Wave 160 at case-'t'
+    ///     /trade pure NO-GUARD CONSECUTIVE-IF. FIVE distinct NO-
+    ///     GUARD pins across THREE distinct case-letters (t/u/w) AND
+    ///     THREE distinct block structures (pure CONSECUTIVE-IF /
+    ///     NO-GUARD ELSE-IF / MIXED / NO-OUTER-GUARD INSIDE-BODY-GM).
+    ///     A regression that selectively broke NO-GUARD at one
+    ///     (case-letter, structure) combination but not the others
+    ///     would fail one pin but not all five; Wave 160 deepens NO-
+    ///     GUARD to QUINTUPLE-PIN coverage. Additionally 5-byte %s
+    ///     width is now DOUBLE-PINNED across TWO distinct case-
+    ///     letters (l/t) AND TWO distinct structural patterns (NO-
+    ///     GUARD-ELSE-IF / pure NO-GUARD CONSECUTIVE-IF); the gap in
+    ///     5-byte coverage is closed AND per-structural-pattern
+    ///     divergence at 5-byte width is ruled out.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). The MatchOptWithParam
+    /// missing-arg emit is the retail server's documented dispatcher-
+    /// level error path. /trade (initiate trade with target player
+    /// command) is OPEN to all users in the retail server (no outer
+    /// AdminLevel guard at 7521; range check at 7533 only requires
+    /// BETA_PLUS to bypass distance check, and self-trade check at
+    /// 7542 only requires GM to bypass self-trade-block -- both are
+    /// SUCCESS-path checks AFTER the matcher succeeds, so they do NOT
+    /// gate the ERROR-fork). ERROR path emits regardless of AdminLevel.
+    /// No server permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashTradeMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (29) = 32 bytes.
+        const int ExpectedReplyPayloadLength = 32;
+        // strlen(literal) + 1 NUL = 29.
+        const short ExpectedReplyLengthField = 29;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 28.
+        const int ExpectedLiteralByteCount = 28;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Trado", shipName: "TradoShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/trade");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // EXACT equals filter (not StartsWith) -- defensive against
+                // any future spurious "Illegal slash command: trade" emit if
+                // the trailing fallback at line 7702 msg_sent gate regresses.
+                if (!text.Equals("Missing arg for option trade", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgTradeLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/trade\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option trade\". Likely the user-tier case-'t' " +
+                $"dispatch at line 7461 stopped routing, the CONSECUTIVE-IF independent " +
+                $"block at 7521 stopped dispatching, the pure NO-GUARD structural variant " +
+                $"converted to OUTER-GUARD (would skip ERROR emit for non-privileged " +
+                $"users) or INSIDE-BODY-GUARD (would skip ERROR emit if matcher ran but " +
+                $"body block gate failed), the case-'t' break at 7573 moved before 7521 " +
+                $"(would skip /trade arm entirely), the trailing illegal-slash fallback " +
+                $"at 7702 fired as a second emit (msg_sent gate regression), or the " +
+                $"missing-arg ERROR fork at PlayerConnection.cpp:4548 changed shape " +
+                $"(esp. vsprintf_s 5-byte %s width).");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
