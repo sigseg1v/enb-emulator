@@ -6908,4 +6908,248 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 156 missing-arg ERROR literal for case-'w' /warp. The
+    /// matcher at PlayerConnection.cpp:7650 reads
+    /// `else if (MatchOptWithParam("warp", pch, param, msg_sent))`
+    /// -- NO outer AdminLevel guard, INSIDE-BODY GM-guard
+    /// (which only affects SUCCESS path; ERROR path emits
+    /// regardless of AdminLevel). FIRST INSIDE-BODY GM-guard
+    /// ELSE-IF pin in the dispatcher catalogue. With NO param
+    /// after "/warp", strncmp matches 4 bytes, arg[4]='\0' fails
+    /// separator-check, allowNoParams=false -- emits "Missing arg
+    /// for option warp", returns false. Body block (GM-guard +
+    /// SetWarpSpeed / "Warp limits ..." emit) SKIPPED. 27 ASCII
+    /// bytes after %s substitution -- 4-byte %s width SIXTH pin
+    /// across FIVE distinct structural patterns (146 COMBINED +
+    /// 148 CASE-FALL-THROUGH + 150 NO-GUARD-ELSE-IF + 153
+    /// NO-GUARD-CONSECUTIVE-IF + 156 NO-OUTER-GUARD INSIDE-BODY-
+    /// GM-GUARD ELSE-IF).
+    /// </summary>
+    private const string MissingArgWarpLiteral = "Missing arg for option warp";
+
+    /// <summary>
+    /// Wave 156 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 31-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/warp</c> (NO param) -- routes through the
+    /// user-tier dispatcher entry at line 5434, the 1-char strip, the
+    /// case-'w' user-tier dispatch (case-letter already pinned by
+    /// Wave 155 via /wormhole CONSECUTIVE-IF arm; Wave 156 deepens
+    /// case-'w' to the ELSE-IF chain arm /warp). ELSE-IF chain head
+    /// /who at 7628 (allowNoParams=TRUE, 3-byte strncmp mismatch idx
+    /// 1 'h' vs 'a' false NO emit). else-if /warp at 7650 NO-OUTER-
+    /// GUARD INSIDE-BODY-GM-GUARD: strncmp("warp","warp",4) all match,
+    /// arg[4]='\0' fails separator-check, allowNoParams=false, emits
+    /// "Missing arg for option warp" via SendVaMessage at 4548, sets
+    /// msg_sent=true, returns false. INSIDE-BODY GM-guard
+    /// `if (AdminLevel() >= GM)` for SUCCESS path SKIPPED (matcher
+    /// returned false, body block never entered). else-if strcmp
+    /// warpreset at 7668 SKIPPED (chained via else-if; preceding
+    /// /warp branch was taken). Then case-'w' continues with
+    /// INDEPENDENT CONSECUTIVE-IF at 7673 /wormhole: strncmp
+    /// ("wormhole","warp",8) w-w, o-a MISMATCH idx 1 false NO emit.
+    /// Independent CONSECUTIVE-IF at 7691 strcmp warpreset FAIL.
+    /// case-'w' breaks at 7699. Trailing fallback at 7702 SKIPPED
+    /// (msg_sent=true). NET RESULT: ONE emit.
+    ///
+    /// <para>
+    /// TWENTY-FIFTH pin on the user-tier (single-slash) dispatch
+    /// path. SECOND pin on user-tier case-'w' (Wave 155 pinned the
+    /// CONSECUTIVE-IF arm /wormhole at 7673; Wave 156 deepens case-
+    /// 'w' coverage to the ELSE-IF chain arm /warp at 7650). TWENTY-
+    /// FOURTH pin on the MatchOptWithParam ERROR path. SIXTH 4-byte
+    /// %s width pin -- 4-byte was QUINTUPLE-pinned after Wave 153
+    /// (146 COMBINED + 148 CASE-FALL-THROUGH + 150 NO-GUARD-ELSE-IF +
+    /// 153 NO-GUARD-CONSECUTIVE-IF) but actually that's only FOUR
+    /// before Wave 156; with Wave 156's NO-OUTER-GUARD INSIDE-BODY-
+    /// GM-GUARD ELSE-IF this becomes the FIFTH 4-byte structural-
+    /// pattern variant. NINTH NO-GUARD-FAMILY pin (counting NO-outer-
+    /// guard variants only; Wave 156 specifically introduces the
+    /// INSIDE-BODY-GUARD sub-variant that was unpinned before).
+    /// FIRST INSIDE-BODY-GUARD pin in the entire HandleSlashCommands
+    /// catalogue -- structurally distinct from both NO-GUARD (no
+    /// guard anywhere) and outer-GUARD variants (guard wraps the
+    /// matcher invocation itself). The INSIDE-BODY guard variant
+    /// gates only the SUCCESS path; the ERROR path emits regardless,
+    /// so a regression that swapped INSIDE-BODY-GUARD to OUTER-GUARD
+    /// would skip the ERROR-fork emit for non-GM users.
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes Wave 155
+    /// is structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     case-'w' ELSE-IF chain dispatch + NO-OUTER-GUARD INSIDE-
+    ///     BODY-GM-GUARD ELSE-IF matcher regression at
+    ///     <c>PlayerConnection.cpp:7650-7667</c>. Wave 155 pinned the
+    ///     CONSECUTIVE-IF arm /wormhole at 7673; case-'w' /warp at
+    ///     7650 sits on the ELSE-IF chain head/arm sequence (chained
+    ///     off /who at 7628) and was UNPINNED before Wave 156. A
+    ///     regression that converted ELSE-IF to CONSECUTIVE-IF (or
+    ///     vice versa) within case-'w' would change dispatch
+    ///     semantics; a regression that converted NO-OUTER-GUARD
+    ///     INSIDE-BODY-GM-GUARD to OUTER-GUARD GM-GUARD would skip
+    ///     the ERROR-fork emit for non-GM users (the body GM-guard
+    ///     gates SUCCESS only; pulling it outside the matcher would
+    ///     also gate ERROR); Wave 156 pins case-'w' /warp ELSE-IF
+    ///     chain arm is REACHABLE AND the NO-OUTER-GUARD INSIDE-
+    ///     BODY-GM-GUARD structural variant is preserved.
+    ///   </item>
+    ///   <item>
+    ///     case-'w' ELSE-IF chain fall-through + cross-pattern
+    ///     interleave regression at <c>PlayerConnection.cpp:7668-7702</c>.
+    ///     After the /warp matcher emits, execution leaves the
+    ///     ELSE-IF chain (because /warp matched and short-circuited
+    ///     the else-if to /warpreset at 7668), then enters the
+    ///     INDEPENDENT CONSECUTIVE-IF block at 7673 (/wormhole
+    ///     strncmp 8B mismatch idx 1 false NO emit), then 7691
+    ///     (strcmp warpreset FAIL). case-'w' breaks; trailing
+    ///     fallback at 7702 SKIPPED (msg_sent=true). A regression
+    ///     that converted CONSECUTIVE-IF to ELSE-IF chained off the
+    ///     /warp branch would skip the /wormhole/warpreset block
+    ///     entirely; a regression that flipped the trailing
+    ///     fallback's `!msg_sent` to `msg_sent` would emit a second
+    ///     "Illegal slash command: warp" message. Wave 156 pins the
+    ///     cross-pattern interleave (ELSE-IF chain followed by
+    ///     INDEPENDENT CONSECUTIVE-IF block) as a structural
+    ///     invariant via the EXACT-equals filter.
+    ///   </item>
+    ///   <item>
+    ///     6th 4-byte %s width cross-structural-pattern divergence
+    ///     regression at <c>PlayerClass.cpp:3422</c>. Wave 146 pinned
+    ///     4-byte at case-'f' /form COMBINED-GUARD; Wave 148 at
+    ///     case-'k' /kick CASE-FALL-THROUGH; Wave 150 at case-'m'
+    ///     /move NO-GUARD-ELSE-IF; Wave 153 at case-'t' /tilt NO-
+    ///     GUARD-CONSECUTIVE-IF; Wave 156 at case-'w' /warp NO-OUTER-
+    ///     GUARD INSIDE-BODY-GM-GUARD ELSE-IF. SAME width, FIVE
+    ///     different case-letters, FIVE different structural
+    ///     patterns. A regression in vsprintf_s with off-by-one at
+    ///     4-byte width AND specific case-letter/structural-pattern
+    ///     dispatch path would fail one but not all five; Wave 156
+    ///     deepens 4-byte to QUINTUPLE-pin ruling out per-case-
+    ///     letter AND per-structural-pattern format-substitution
+    ///     branches at 4-byte width across FIVE structural patterns.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). The MatchOptWithParam
+    /// missing-arg emit is the retail server's documented dispatcher-
+    /// level error path. /warp (warp-speed-set command) had NO outer
+    /// AdminLevel guard in the retail server -- INSIDE-BODY GM check
+    /// gates SUCCESS path only (setting warp speed is GM-restricted
+    /// because it edits ship stats); ERROR path emits regardless of
+    /// AdminLevel. No server permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashWarpMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (28) = 31 bytes.
+        const int ExpectedReplyPayloadLength = 31;
+        // strlen(literal) + 1 NUL = 28.
+        const short ExpectedReplyLengthField = 28;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 27.
+        const int ExpectedLiteralByteCount = 27;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Warpo", shipName: "WarpoShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/warp");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // EXACT equals filter (not StartsWith) -- defensive against
+                // any future sibling "warp*" option emits (warpreset, etc.)
+                // or the trailing "Illegal slash command: warp" fallback at
+                // line 7702.
+                if (!text.Equals("Missing arg for option warp", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgWarpLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/warp\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option warp\". Likely the user-tier case-'w' " +
+                $"dispatch at line 7627 stopped routing, the ELSE-IF chain head /who " +
+                $"stopped falling through, the /warp ELSE-IF arm at line 7650 stopped " +
+                $"dispatching (NO-OUTER-GUARD INSIDE-BODY-GM-GUARD -> OUTER-GM-GUARD " +
+                $"regression would skip ERROR emit for non-GM), the INSIDE-BODY GM-guard " +
+                $"leaked into the ERROR path (regression), the trailing illegal-slash " +
+                $"fallback at 7702 fired as a second emit (msg_sent gate regression), " +
+                $"or the missing-arg ERROR fork at PlayerConnection.cpp:4548 changed " +
+                $"shape (esp. vsprintf_s 4-byte %s width).");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }

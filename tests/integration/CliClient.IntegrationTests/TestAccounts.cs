@@ -210,6 +210,7 @@ public static class TestAccounts
             ["SlashTiltMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                             = A(9_000_145, "cli_test145"),
             ["SlashUitriggerMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                        = A(9_000_146, "cli_test146"),
             ["SlashWormholeMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                         = A(9_000_147, "cli_test147"),
+            ["SlashWarpMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                             = A(9_000_148, "cli_test148"),
         };
 
     /// <summary>
