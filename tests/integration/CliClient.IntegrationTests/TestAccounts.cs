@@ -246,6 +246,7 @@ public static class TestAccounts
             ["SlashChangepasswordMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                   = A(9_000_181, "cli_test181"),
             ["SlashDecoMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                             = A(9_000_182, "cli_test182"),
             ["SlashEffectoMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                          = A(9_000_183, "cli_test183"),
+            ["SlashFindMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                             = A(9_000_184, "cli_test184"),
         };
 
     /// <summary>

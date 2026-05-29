@@ -13123,4 +13123,130 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 192 missing-arg ERROR literal for case-'f' /find.
+    /// Matcher at PlayerConnection.cpp:6345 -- NO-GUARD-IF pattern
+    /// inside the SECOND OUTER-BLOCK-GM-guard at 6337 ("GM to Admin").
+    /// FIRST case-'f' user-tier pin -- OPENS case-'f' coverage.
+    /// </summary>
+    private const string MissingArgFindLiteral = "Missing arg for option find";
+
+    /// <summary>
+    /// Wave 192 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 31-byte wire-shape of the single 0x001D MESSAGE_STRING reply to
+    /// user-tier slash <c>/find</c> (NO param). Wave 192 OPENS case-'f'
+    /// user-tier coverage.
+    ///
+    /// <para>
+    /// NO-GUARD-IF at 6345 `MatchOptWithParam("find", pch, param,
+    /// msg_sent)` -- inside the SECOND OUTER-BLOCK-GM-guard at 6337.
+    /// Preceding case-'f' arms: /form at 6283 SAME-LINE-AND-GUARD
+    /// strncmp("form","find",4) byte 1 'o' vs 'i' MISMATCH -> silent
+    /// FALSE; /flushinv strcmp MISMATCH; /factionset strcmp MISMATCH;
+    /// /factionoverride strcmp MISMATCH; /fetch strcmp at 6339
+    /// MISMATCH. /find at 6345 matches -- emits "Missing arg for
+    /// option find" at 4548 COLOR=5, returns FALSE. Subsequent /face
+    /// /faceme /fgps /fireweapon strcmp MISMATCH; /fhelp /fradius
+    /// /ftype /flevel /fcount /faddasteroidtype /faddoretofield
+    /// /fdelorefromfield /faddoretosector /fdelorefromsector all gated
+    /// by `AdminLevel() >= DEV` (cli_test184 status=100 does NOT meet
+    /// DEV-tier; block short-circuits). NET RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity: the matcher's missing-arg ERROR fork is
+    /// behaviour the real server exhibited. cli_test184 status=100
+    /// satisfies AdminLevel >= GM so the outer block enters. No
+    /// permissiveness added.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashFindMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (28) = 31 bytes.
+        const int ExpectedReplyPayloadLength = 31;
+        const short ExpectedReplyLengthField = 28;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 27;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Findo", shipName: "FindoShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/find");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals("Missing arg for option find", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgFindLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/find\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option find\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
