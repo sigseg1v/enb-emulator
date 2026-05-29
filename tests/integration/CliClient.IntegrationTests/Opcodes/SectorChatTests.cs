@@ -15014,4 +15014,135 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 208 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
+    /// the 32-byte ASCII body "Missing arg for option halloween" that the
+    /// server emits when admin-tier double-slash <c>//halloween</c> arrives
+    /// with no argument. Matcher at PlayerConnection.cpp:4927 (case-'h'
+    /// arm of the admin-tier switch opened at 4724) -- NO-INLINE-GUARD
+    /// pattern (the outer GM gate at 4716 guards the whole switch; this
+    /// arm has no additional AdminLevel check, so any GM+ caller reaches
+    /// the ERROR fork on missing param). FIRST admin-tier case-'h' pin;
+    /// the prior case-'h' pin /ht at 6647 is in the user-tier switch at
+    /// 5442. case-'h' is now BOTH-TIER-PINNED.
+    /// </summary>
+    private const string MissingArgHalloweenLiteral = "Missing arg for option halloween";
+
+    /// <summary>
+    /// Wave 208 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 36-byte wire-shape of the single 0x001D MESSAGE_STRING reply to
+    /// admin-tier double-slash <c>//halloween</c> (NO param). Wave 208
+    /// extends case-'h' coverage across BOTH tiers (user-tier /ht at
+    /// 6647 + admin-tier //halloween at 4927).
+    ///
+    /// <para>
+    /// Outer gate at 4716 (<c>Msg[0]=='/' &amp;&amp; Msg[1]=='/' &amp;&amp;
+    /// AdminLevel() >= GM</c>) admits the dispatch; cli_test status=100
+    /// satisfies GM=50. Switch at 4724 jumps on *pch (the post-"//" tail).
+    /// case-'h' arm at 4926 evaluates MatchOptWithParam("halloween",
+    /// arg="halloween") -- 9B vs 9B full match. NO inline AdminLevel
+    /// guard on the if condition. param=NULL so no setting strtok branch
+    /// enters; allowNoParams=false (default) so the 4548 ERROR fork fires:
+    /// "Missing arg for option halloween" COLOR=5. case-'h' lacks a
+    /// `break;` at 4949 so execution falls through to case 'k' at 4950,
+    /// but strcmp(pch,"killfactions") with pch="halloween" -- byte 0 'h'
+    /// vs 'k' MISMATCH -> silent FALSE. case-'k' breaks at 4960. NET
+    /// RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>
+    /// 9-byte option width joins six prior 9-byte pins (/altweapon,
+    /// /gwormhole, /packetopt, /signature, /terminate, /uitrigger).
+    /// First admin-tier case-'h' MatchOptWithParam ERROR-fork pin.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashHalloweenMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (33) = 36 bytes.
+        const int ExpectedReplyPayloadLength = 36;
+        const short ExpectedReplyLengthField = 33;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 32;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Halo", shipName: "HaloShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//halloween");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals("Missing arg for option halloween", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgHalloweenLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//halloween\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option halloween\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
