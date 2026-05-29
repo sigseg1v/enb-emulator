@@ -2525,4 +2525,192 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Verbatim body of the 0x001D MESSAGE_STRING reply the server emits
+    /// when <c>MatchOptWithParam("chleave", "chleave", ...)</c> at
+    /// <c>server/src/PlayerConnection.cpp:5667</c> falls through the
+    /// separator-check (NUL is not '=', not ' ', not isalpha) and hits
+    /// the else-branch emit at <c>PlayerConnection.cpp:4548</c>:
+    /// <c>SendVaMessage("Missing arg for option %s", "chleave")</c>.
+    /// 30 ASCII bytes after %s substitution. Same emit location as
+    /// Wave 131 (/level) and Wave 134 (/chjoin); 7-byte option name
+    /// substituted into %s slot.
+    /// </summary>
+    private const string MissingArgChleaveLiteral = "Missing arg for option chleave";
+
+    /// <summary>
+    /// Wave 135 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 34-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/chleave</c> (NO param) -- routes into
+    /// MatchOptWithParam's ERROR fork at PlayerConnection.cpp:4548
+    /// BEFORE control reaches the case-'c' body-block AdminLevel guard.
+    ///
+    /// <para>
+    /// TIGHT same-case-letter sibling pair with Wave 134's /chjoin. Both
+    /// arms are in the SAME case-'c' block, share IDENTICAL dispatch
+    /// path (MatchOptWithParam -&gt; strncmp pass -&gt; NUL arg[len]
+    /// -&gt; fall-through to else-branch emit), IDENTICAL emit fork
+    /// (SendVaMessage default-colour=5), IDENTICAL AdminLevel
+    /// non-gating, IDENTICAL %s format-substitution shape. The ONLY
+    /// differences are the option-name passed to the matcher
+    /// (/chjoin's "chjoin" 6 bytes vs /chleave's "chleave" 7 bytes)
+    /// AND the matcher's position in the case-'c' arm (chjoin is the
+    /// FIRST matcher at line 5633; chleave is the SECOND at line
+    /// 5667 -- exercising the matcher fall-through path that chjoin
+    /// does NOT). This SECOND-matcher pinning is the new structural
+    /// fan-out Wave 135 brings.
+    /// </para>
+    ///
+    /// <para>
+    /// Wave 135 also extends the sibling-arm catalogue on the
+    /// HandleSlashCommands user-tier dispatcher to TEN byte-exact-
+    /// pinned arms (Waves 123/125/126/129/130/131/132/133/134/135),
+    /// is the SECOND pin on case-'c', and is the THIRD pin on the
+    /// MatchOptWithParam ERROR path (after Waves 131 /level and 134
+    /// /chjoin).
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes Wave 134
+    /// is structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     case-'c' matcher fall-through regression at
+    ///     <c>server/src/PlayerConnection.cpp:5633-5667</c>. After
+    ///     MatchOptWithParam("chjoin", "chleave", ...) returns false
+    ///     (strncmp mismatches at index 2: 'j' vs 'l'), control must
+    ///     fall through to MatchOptWithParam("chleave", ...) at line
+    ///     5667. A regression that short-circuited the chjoin matcher
+    ///     to NOT return false (e.g. returning true on strncmp
+    ///     mismatch) or that gated the chleave matcher behind chjoin's
+    ///     success would silently swallow the /chleave emit. Wave 135
+    ///     pins that the chleave matcher is REACHED.
+    ///   </item>
+    ///   <item>
+    ///     %s format-substitution length-variability regression
+    ///     (extends Wave 134's coverage) at PlayerClass.cpp:3422.
+    ///     Wave 131 pins 5-byte ("level"); Wave 134 pins 6-byte
+    ///     ("chjoin"); Wave 135 pins 7-byte ("chleave"). A regression
+    ///     in vsprintf_s with an off-by-one length bug at a specific
+    ///     width would fail one test but not the others.
+    ///   </item>
+    ///   <item>
+    ///     /chleave opt-name passed-as-second-argument regression at
+    ///     <c>server/src/PlayerConnection.cpp:5667</c>. The matcher
+    ///     receives "chleave" as the option name. A regression that
+    ///     mis-spelled it as "chleve" (or swapped with /chjoin's
+    ///     "chjoin") would emit the wrong %s body. Wave 135 pins
+    ///     exact "chleave".
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (CLAUDE.md). The MatchOptWithParam missing-arg
+    /// emit is the retail server's documented dispatcher-level error
+    /// path; fires for any user (no admin gating). No server
+    /// permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashChleaveMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (31) = 34 bytes.
+        const int ExpectedReplyPayloadLength = 34;
+        // strlen(literal) + 1 NUL = 31.
+        const short ExpectedReplyLengthField = 31;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 30.
+        const int ExpectedLiteralByteCount = 30;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Chleaver", shipName: "ChleaveShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/chleave");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // Filter on the distinctive "for option chleave" suffix.
+                if (!text.StartsWith("Missing arg for option chleave", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgChleaveLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/chleave\" without seeing 0x001D MESSAGE_STRING starting with " +
+                $"\"Missing arg for option chleave\". Likely the case-'c' chleave " +
+                $"matcher at server/src/PlayerConnection.cpp:5667 stopped dispatching, or " +
+                $"the chjoin matcher at line 5633 incorrectly returned true (preventing " +
+                $"fall-through), or the missing-arg ERROR fork at PlayerConnection.cpp:4548 " +
+                $"changed shape.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
