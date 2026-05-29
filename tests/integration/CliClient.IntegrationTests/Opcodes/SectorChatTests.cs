@@ -7388,4 +7388,263 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 158 missing-arg ERROR literal for case-'t' /testmsg. The
+    /// matcher at PlayerConnection.cpp:7486 reads
+    /// `if (MatchOptWithParam("testmsg", pch, param, msg_sent) &amp;&amp; (AdminLevel() >= DEV))`
+    /// -- CONSECUTIVE-IF independent block (NOT chained via else-if),
+    /// MATCHER-FIRST short-circuit-direction (matcher evaluated
+    /// before the DEV-guard), inline DEV-guard. With pch="testmsg"
+    /// and NO param, MatchOptWithParam runs FIRST: strncmp matches
+    /// 7 bytes, arg[7]='\0' fails separator-check, allowNoParams=
+    /// false -- emits "Missing arg for option testmsg", returns
+    /// false. &amp;&amp; short-circuits, DEV-guard SKIPPED, body block
+    /// (timed B_TEST_MESSAGE) SKIPPED. 30 ASCII bytes after %s
+    /// substitution -- 7-byte %s width triple-pinned via a NEW
+    /// structural variant (CONSECUTIVE-IF DEV-guard MATCHER-FIRST,
+    /// tenth distinct dispatcher pattern).
+    /// </summary>
+    private const string MissingArgTestmsgLiteral = "Missing arg for option testmsg";
+
+    /// <summary>
+    /// Wave 158 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 34-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/testmsg</c> (NO param) -- routes through the
+    /// user-tier dispatcher entry at line 5434, the 1-char strip, the
+    /// case-'t' user-tier dispatch (case-letter already pinned by
+    /// Wave 153 via /tilt CONSECUTIVE-IF NO-GUARD arm; Wave 158
+    /// deepens case-'t' to the CONSECUTIVE-IF DEV-guard MATCHER-FIRST
+    /// arm /testmsg at 7486). Independent CONSECUTIVE-IF at 7462
+    /// `strcmp(pch,"test")==0` FAIL → skip. Independent at 7471
+    /// `strcasecmp(pch,"talktree")==0` FAIL → skip. Independent at
+    /// 7486 `MatchOptWithParam("testmsg", pch, param, msg_sent) &amp;&amp;
+    /// AdminLevel() >= DEV`: MATCHER-FIRST short-circuit-direction
+    /// -- matcher evaluated BEFORE the guard. MatchOptWithParam:
+    /// strncmps "testmsg" against "testmsg" (7 byte match), arg[7]
+    /// ='\0' fails separator-check, allowNoParams=false, emits
+    /// "Missing arg for option testmsg" via SendVaMessage at 4548,
+    /// sets msg_sent=true, returns false. &amp;&amp; short-circuits,
+    /// DEV-guard `(AdminLevel() >= DEV)` SKIPPED (matcher returned
+    /// false; short-circuit boolean evaluation), body block (timed
+    /// B_TEST_MESSAGE) SKIPPED. Independent at 7495
+    /// `MatchOptWithParam("tilt",...)`: strncmp("tilt","testmsg",4)
+    /// t-t, i-e MISMATCH idx 1 false NO emit. Independent at 7501
+    /// `MatchOptWithParam("terminate",...)`: strncmp("terminate",
+    /// "testmsg",9) t-t, e-e match idx 1, r-s MISMATCH idx 2 false
+    /// NO emit. Independent at 7521 `MatchOptWithParam("trade",...)`:
+    /// strncmp("trade","testmsg",5) t-t, r-e MISMATCH idx 1 false
+    /// NO emit. case-'t' breaks at 7573. Trailing fallback at 7702
+    /// SKIPPED (msg_sent=true). NET RESULT: ONE emit.
+    ///
+    /// <para>
+    /// TWENTY-SEVENTH pin on the user-tier (single-slash) dispatch
+    /// path. SECOND pin on user-tier case-'t' (Wave 153 pinned the
+    /// CONSECUTIVE-IF NO-GUARD arm /tilt at 7495; Wave 158 deepens
+    /// case-'t' to the CONSECUTIVE-IF DEV-guard MATCHER-FIRST arm
+    /// /testmsg at 7486). TWENTY-SIXTH pin on the MatchOptWithParam
+    /// ERROR path. TENTH distinct structural dispatcher pattern --
+    /// CONSECUTIVE-IF DEV-guard MATCHER-FIRST (combines the
+    /// MATCHER-FIRST short-circuit-direction (3rd pin: Waves 139
+    /// GM case-g SDEV + 143 user-tier case-d + 152 user-tier case-s
+    /// SDEV + 158 user-tier case-t DEV) with the CONSECUTIVE-IF
+    /// block structure (3rd pin: Waves 153 case-t pure NO-GUARD +
+    /// 155 case-w MIXED + 158 case-t DEV-guard MATCHER-FIRST) at a
+    /// NEW guard tier (FIRST inline DEV-guard pin -- prior DEV-guards
+    /// only pinned via case-'s' OUTER-BLOCK-GUARD shell at 7286,
+    /// never as inline matcher guard; SDEV-guards pinned at Waves
+    /// 139 GM case-g HEAD and 152 user-tier case-s but DEV-guard
+    /// is a strictly lower tier (80 vs 90) and was unpinned until
+    /// Wave 158)). THIRD 7-byte %s width pin (Waves 144 case-c
+    /// /clear GUARD-FIRST inline + 157 case-u /upgrade NO-OUTER-
+    /// GUARD INSIDE-BODY-GM-GUARD ELSE-IF + 158 case-t /testmsg
+    /// CONSECUTIVE-IF DEV-guard MATCHER-FIRST) -- SAME width,
+    /// THREE distinct case-letters, THREE distinct structural
+    /// patterns. THIRD MATCHER-FIRST pin AT USER-TIER (Waves 143
+    /// case-d 1-byte + 152 case-s SDEV 6-byte + 158 case-t DEV
+    /// 7-byte).
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes Wave 157
+    /// is structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     case-'t' CONSECUTIVE-IF DEV-guard MATCHER-FIRST arm
+    ///     deepening regression at <c>PlayerConnection.cpp:7486-7493</c>.
+    ///     Wave 153 pinned case-'t' /tilt at 7495 (pure CONSECUTIVE-
+    ///     IF NO-GUARD); case-'t' /testmsg at 7486 sits on a
+    ///     different CONSECUTIVE-IF block with DEV-guard MATCHER-
+    ///     FIRST and was UNPINNED before Wave 158. A regression
+    ///     that converted MATCHER-FIRST to GUARD-FIRST (inverting
+    ///     to `if (AdminLevel() >= DEV &amp;&amp; MatchOptWithParam(...))`)
+    ///     would block the ERROR-fork emit for non-DEV users
+    ///     (the matcher would NOT execute when guard fails);
+    ///     a regression that lowered the DEV-guard tier (e.g. to
+    ///     GM=50) would change SUCCESS-path eligibility but not
+    ///     ERROR (which short-circuits before guard); Wave 158
+    ///     pins case-'t' /testmsg CONSECUTIVE-IF DEV-guard
+    ///     MATCHER-FIRST arm is REACHABLE AND the MATCHER-FIRST
+    ///     short-circuit direction is preserved (matcher runs
+    ///     BEFORE guard, so ERROR emits independent of AdminLevel).
+    ///   </item>
+    ///   <item>
+    ///     case-'t' CONSECUTIVE-IF cross-arm fall-through regression
+    ///     at <c>PlayerConnection.cpp:7495-7572</c> across 3 sibling
+    ///     CONSECUTIVE-IF matchers (/tilt 4B, /terminate 9B,
+    ///     /trade 5B). After the /testmsg matcher emits, execution
+    ///     continues through 3 subsequent independent ifs; each
+    ///     strncmp-mismatches against pch="testmsg" at idx 1 or 2;
+    ///     case-'t' breaks; trailing fallback SKIPPED (msg_sent=
+    ///     true). A regression that ADDED a competing matcher
+    ///     matching pch="testmsg" by accident would produce a
+    ///     second message; the CONSECUTIVE-IF structure means even
+    ///     an else-clause regression could not suppress that second
+    ///     emit; Wave 158 pins the CONSECUTIVE-IF cross-arm fall-
+    ///     through as a structural invariant.
+    ///   </item>
+    ///   <item>
+    ///     TENTH distinct structural dispatcher pattern + DEV-guard
+    ///     tier introduction regression at <c>PlayerClass.cpp:3422</c>.
+    ///     Prior to Wave 158 NINE distinct dispatcher patterns were
+    ///     pinned (MATCHER-FIRST inline, GUARD-FIRST inline, OUTER-
+    ///     BLOCK-GUARD, COMBINED outer+inline, NO-GUARD-ELSE-IF,
+    ///     CASE-FALL-THROUGH, pure CONSECUTIVE-IF, MIXED ELSE-IF+
+    ///     CONSECUTIVE-IF case-letter, INSIDE-BODY-GUARD); Wave 158
+    ///     adds CONSECUTIVE-IF DEV-guard MATCHER-FIRST as the TENTH.
+    ///     Additionally DEV-guard tier (admin level 80) was unpinned
+    ///     as an inline matcher guard (only pinned via OUTER-BLOCK-
+    ///     GUARD shell at case-'s' 7286); a regression that
+    ///     selectively broke DEV-guard inline behaviour would not
+    ///     be caught by the OUTER-BLOCK-GUARD pins; Wave 158
+    ///     introduces inline DEV-guard coverage. 7-byte %s width
+    ///     is now TRIPLE-PINNED across THREE distinct case-letters
+    ///     (c/u/t) and THREE distinct structural patterns (GUARD-
+    ///     FIRST inline / NO-OUTER-GUARD INSIDE-BODY-GM-GUARD
+    ///     ELSE-IF / CONSECUTIVE-IF DEV-guard MATCHER-FIRST) ruling
+    ///     out per-case-letter, per-structural-pattern, AND per-
+    ///     guard-tier format-substitution branches at 7-byte width.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). The MatchOptWithParam
+    /// missing-arg emit is the retail server's documented dispatcher-
+    /// level error path. /testmsg (timed test message debug command)
+    /// is DEV-restricted in the retail server -- MATCHER-FIRST short-
+    /// circuit-direction means the missing-arg ERROR emit happens
+    /// FOR ALL users (matcher runs before guard), but the SUCCESS
+    /// path is DEV-gated. This is a deliberate retail server pattern:
+    /// disclose the option name on missing-arg while still gating
+    /// execution by AdminLevel. No server permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashTestmsgMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (31) = 34 bytes.
+        const int ExpectedReplyPayloadLength = 34;
+        // strlen(literal) + 1 NUL = 31.
+        const short ExpectedReplyLengthField = 31;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 30.
+        const int ExpectedLiteralByteCount = 30;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Testo", shipName: "TestoShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/testmsg");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // EXACT equals filter (not StartsWith) -- defensive against
+                // any future spurious "Illegal slash command: testmsg" emit
+                // if the trailing fallback at line 7702 msg_sent gate
+                // regresses.
+                if (!text.Equals("Missing arg for option testmsg", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgTestmsgLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/testmsg\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option testmsg\". Likely the user-tier case-'t' " +
+                $"dispatch at line 7461 stopped routing, the CONSECUTIVE-IF independent " +
+                $"block at 7486 stopped dispatching, the MATCHER-FIRST short-circuit " +
+                $"direction inverted to GUARD-FIRST (would block ERROR emit for non-DEV " +
+                $"users), the DEV-guard tier changed (would not affect ERROR emit due " +
+                $"to MATCHER-FIRST short-circuit), the trailing illegal-slash fallback " +
+                $"at 7702 fired as a second emit (msg_sent gate regression), or the " +
+                $"missing-arg ERROR fork at PlayerConnection.cpp:4548 changed shape " +
+                $"(esp. vsprintf_s 7-byte %s width).");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }

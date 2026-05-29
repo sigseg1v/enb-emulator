@@ -212,6 +212,7 @@ public static class TestAccounts
             ["SlashWormholeMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                         = A(9_000_147, "cli_test147"),
             ["SlashWarpMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                             = A(9_000_148, "cli_test148"),
             ["SlashUpgradeMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                          = A(9_000_149, "cli_test149"),
+            ["SlashTestmsgMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                          = A(9_000_150, "cli_test150"),
         };
 
     /// <summary>
