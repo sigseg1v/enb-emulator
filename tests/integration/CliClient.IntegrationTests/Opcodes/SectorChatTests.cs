@@ -8607,4 +8607,209 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 163 missing-arg ERROR literal for case-'s' /sounds.
+    /// The matcher at PlayerConnection.cpp:7179 reads
+    /// `else if (MatchOptWithParam("sounds", pch, param, msg_sent))`
+    /// -- ELSE-IF chain arm (chained off strcmp("slaysectormobs")
+    /// HEAD at 7137 + tail-guarded /script arm at 7143). NO outer
+    /// AdminLevel guard, NO inside-body guard on matcher. FIRST
+    /// case-'s' user-tier pin (case-'s' previously pinned only in
+    /// admin double-slash GM-block via Wave 142 /setpassword).
+    /// 29 ASCII bytes after %s substitution -- 6-byte width matches
+    /// Waves 161 (/oeuler) and 162 (/openif); 6-byte %s width
+    /// TRIPLE-PINNED across THREE case-letters now (o/s).
+    /// </summary>
+    private const string MissingArgSoundsLiteral = "Missing arg for option sounds";
+
+    /// <summary>
+    /// Wave 163 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 33-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/sounds</c> (NO param) -- routes through the user-
+    /// tier dispatcher entry at line 5434, the 1-char strip, the
+    /// case-'s' user-tier dispatch at line 7136 (NEW case-letter for
+    /// user-tier NO-GUARD pattern; case-'s' was previously pinned only
+    /// in the admin double-slash GM-block via Wave 142 /setpassword).
+    /// HEAD strcmp at 7137 `strcmp(pch,"slaysectormobs") == 0 &amp;&amp;
+    /// AdminLevel() >= SDEV` FAIL ("sounds" != "slaysectormobs"). ELSE-IF
+    /// at 7143 `MatchOptWithParam("script", pch, param, msg_sent) &amp;&amp;
+    /// AdminLevel() >= SDEV` MATCHER-FIRST + tail-guard: strncmp
+    /// ("script","sounds",6) idx 1 'c' vs 'o' MISMATCH, returns false
+    /// without emit; short-circuit AND skips tail guard. ELSE-IF at
+    /// 7179 `MatchOptWithParam("sounds", pch, param, msg_sent)` -- NO
+    /// outer AdminLevel guard, NO inside-body guard. MatchOptWithParam:
+    /// strncmp "sounds" against "sounds" (6 byte match), arg[6]='\0'
+    /// -- NOT '=', NOT ' ', NOT isalpha, allowNoParams=false -- emits
+    /// "Missing arg for option sounds" via SendVaMessage at 4548, sets
+    /// msg_sent=true, returns false. Body block SendClientSound(param)
+    /// SKIPPED (matcher returned false). case-'s' chain continues
+    /// through remaining else-if arms but they all evaluate strncmp
+    /// MISMATCHES against "sounds"; case-'s' breaks. Trailing fallback
+    /// at 7702 SKIPPED (msg_sent=true). NET RESULT: ONE emit.
+    ///
+    /// <para>
+    /// THIRTY-SECOND pin on the user-tier (single-slash) dispatch path.
+    /// FIRST pin on user-tier case-'s' -- NEW case-letter extends
+    /// user-tier coverage to 5 case-letters (o/s/t/u/w). THIRTY-FIRST
+    /// pin on the MatchOptWithParam ERROR path. EIGHTH NO-GUARD pin --
+    /// NO-GUARD now OCTUPLE-PINNED across 5 case-letters AND 5
+    /// structural variants. THIRD 6-byte %s width pin -- TRIPLE-PINNED
+    /// across 2 case-letters (Waves 161 /oeuler arm pos 1 + Wave 162
+    /// /openif arm pos 2 + Wave 163 /sounds new case-letter).
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes prior waves
+    /// are structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     case-'s' user-tier dispatch regression at
+    ///     <c>PlayerConnection.cpp:7136</c>. case-'s' was previously
+    ///     pinned ONLY at the admin double-slash GM-block (Wave 142
+    ///     /setpassword at line 5153); the user-tier case-'s' at 7136
+    ///     was UNPINNED before Wave 163. A regression that broke the
+    ///     user-tier switch dispatch case-letter 's' but kept the GM-
+    ///     block intact (or vice versa) would slip past Wave 142;
+    ///     Wave 163 pins user-tier case-'s' is REACHABLE via the user-
+    ///     tier switch dispatcher and the NO-GUARD structural variant
+    ///     is preserved within case-'s'.
+    ///   </item>
+    ///   <item>
+    ///     case-'s' MATCHER-FIRST tail-guard /script arm short-circuit
+    ///     regression at <c>PlayerConnection.cpp:7143</c>. The /script
+    ///     arm has condition `MatchOptWithParam("script",...) &amp;&amp;
+    ///     AdminLevel() >= SDEV` -- if a regression reordered the
+    ///     guard before the matcher, the matcher would never run and
+    ///     the chain would still proceed to /sounds; if a regression
+    ///     converted the AND short-circuit ordering, the /script body
+    ///     could fire on non-SDEV users. Wave 163 pins the chain
+    ///     SUCCEEDS at the /sounds arm (proving /script arm short-
+    ///     circuited correctly on "sounds" pch without emitting).
+    ///   </item>
+    ///   <item>
+    ///     6-byte %s width cross-case-letter divergence regression at
+    ///     <c>PlayerClass.cpp:3422</c>. Waves 161/162 pinned 6-byte %s
+    ///     within case-'o' (arms pos 1 + pos 2); Wave 163 pins 6-byte
+    ///     %s at a DIFFERENT case-letter (case-'s'). A regression that
+    ///     broke 6-byte %s rendering only on a specific case-letter's
+    ///     dispatch path (e.g. case-letter-specific buffer corruption)
+    ///     would fail one pin but not the other; Wave 163 extends
+    ///     6-byte %s coverage cross-case-letter -- ruling out case-
+    ///     letter-specific format-substitution divergence.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). The MatchOptWithParam
+    /// missing-arg emit is the retail server's documented dispatcher-
+    /// level error path. /sounds (client-side sound trigger debug
+    /// command) is OPEN to all users in the retail server -- NO outer
+    /// AdminLevel guard at 7179, NO inside-body guard. ERROR path emits
+    /// regardless of AdminLevel. No server permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSoundsMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (30) = 33 bytes.
+        const int ExpectedReplyPayloadLength = 33;
+        // strlen(literal) + 1 NUL = 30.
+        const short ExpectedReplyLengthField = 30;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 29.
+        const int ExpectedLiteralByteCount = 29;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Sounos", shipName: "SounosShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/sounds");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals("Missing arg for option sounds", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgSoundsLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/sounds\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option sounds\". Likely the user-tier case-'s' " +
+                $"dispatch at line 7136 stopped routing, the ELSE-IF chain arm at " +
+                $"7179 stopped dispatching, the NO-GUARD structural variant converted " +
+                $"to OUTER-GUARD or INSIDE-BODY-GUARD, the /script tail-guard short-" +
+                $"circuit at 7143 changed semantics, the trailing illegal-slash " +
+                $"fallback at 7702 fired as a second emit (msg_sent gate regression), " +
+                $"or the missing-arg ERROR fork at PlayerConnection.cpp:4548 changed " +
+                $"shape (esp. vsprintf_s 6-byte %s width).");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
