@@ -13249,4 +13249,130 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 193 missing-arg ERROR literal for case-'f' /fradius.
+    /// Matcher at PlayerConnection.cpp:6401 -- NO-GUARD-IF pattern
+    /// inside the OUTER-BLOCK-DEV-guard at 6394 (`if (AdminLevel() >=
+    /// DEV)`). cli_test185 status=100 satisfies DEV (80). SECOND
+    /// case-'f' user-tier pin -- case-'f' now DOUBLE-PINNED.
+    /// </summary>
+    private const string MissingArgFradiusLiteral = "Missing arg for option fradius";
+
+    /// <summary>
+    /// Wave 193 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 34-byte wire-shape of the single 0x001D MESSAGE_STRING reply to
+    /// user-tier slash <c>/fradius</c> (NO param). Wave 193 deepens
+    /// case-'f' to DOUBLE-PINNED.
+    ///
+    /// <para>
+    /// NO-GUARD-IF at 6401 `MatchOptWithParam("fradius", pch, param,
+    /// msg_sent)` -- inside the OUTER-BLOCK-DEV-guard at 6394.
+    /// Preceding case-'f' arms all MISMATCH on byte 1 ('o'/'l'/'a'/'i'/
+    /// 'e' vs 'r'). /fhelp at 6396 has allowNoParams=true and does NOT
+    /// emit missing-arg (matcher returns true with param=NULL); but
+    /// /fhelp's strncmp on "fradius" mismatches at byte 1 'h' vs 'r'
+    /// anyway. /fradius at 6401 matches arg="fradius" -- emits
+    /// "Missing arg for option fradius" at 4548 COLOR=5, returns
+    /// FALSE. Subsequent /ftype /flevel /fcount /faddasteroidtype/
+    /// /faddoretofield /fdelorefromfield /faddoretosector/
+    /// /fdelorefromsector all MISMATCH at byte 1. NET RESULT: ONE
+    /// emit.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity: cli_test185 status=100 satisfies AdminLevel
+    /// >= DEV (DEV=80). The matcher's missing-arg ERROR fork fires
+    /// within the DEV-block; pinning its wire shape ratchets fidelity.
+    /// No server permissiveness added.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashFradiusMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (31) = 34 bytes.
+        const int ExpectedReplyPayloadLength = 34;
+        const short ExpectedReplyLengthField = 31;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 30;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Fradio", shipName: "FradioShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/fradius");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals("Missing arg for option fradius", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgFradiusLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/fradius\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option fradius\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
