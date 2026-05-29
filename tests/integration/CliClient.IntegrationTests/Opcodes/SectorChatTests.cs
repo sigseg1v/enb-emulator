@@ -16212,4 +16212,143 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 217 sibling-arm-pinning hardening (+0 ratchet) literal anchor
+    /// for the 32-byte ASCII body "Missing arg for option gmupgrade" that
+    /// the server emits when admin-tier double-slash <c>//gmupgrade</c>
+    /// arrives with no argument. Matcher at PlayerConnection.cpp:5392
+    /// (SIXTH and LAST MatchOptWithParam arm of case-'g' admin-tier switch
+    /// opened at 5205). FIRST pin on case-'g' admin-tier 6th arm;
+    /// case-'g' admin-tier promoted from QUINTUPLE-PINNED to
+    /// SEXTUPLE-PINNED -- case-'g' is now FULLY PINNED across all six arms.
+    /// </summary>
+    private const string MissingArgGmupgradeLiteral = "Missing arg for option gmupgrade";
+
+    /// <summary>
+    /// Wave 217 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 36-byte wire-shape of the single 0x001D MESSAGE_STRING reply to
+    /// admin-tier double-slash <c>//gmupgrade</c> (NO param). Wave 217
+    /// completes admin-tier case-'g' SEXTUPLE-PINNED coverage.
+    ///
+    /// <para>
+    /// Outer gate at 4716 admits the dispatch (cli_test status=100 &gt;=
+    /// GM=50). Switch at 4724 jumps on *pch='g' -&gt; case-'g' opens at
+    /// 5205. For arg "gmupgrade": arms 1-5 (gmgetaccess/gmsetaccess/
+    /// gmskillpoints/gmenableskills/gmplayerlevel) all strncmp on byte 2
+    /// against 'u' MISMATCH; prefix-check fails for each, ERROR fork NOT
+    /// taken, each returns false. arm 6 at 5392
+    /// MatchOptWithParam("gmupgrade", pch, ...): strncmp("gmupgrade",
+    /// "gmupgrade", 9) == 0; arg[9]='\0' not '=' not ' ' not isalpha;
+    /// allowNoParams=false fires the 4548 ERROR fork: "Missing arg for
+    /// option gmupgrade" COLOR=5; returns false. The matcher's
+    /// true-branch body (line 5393-5428) wraps everything in an internal
+    /// <c>if (AdminLevel() &gt;= GM)</c> guard at 5394, but the
+    /// MatchOptWithParam ERROR side-effect fires BEFORE that body block
+    /// is entered. case-'g' breaks. NET RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>
+    /// FIRST admin-tier case-'g' 6th-arm pin; **case-'g' admin-tier now
+    /// SEXTUPLE-PINNED (COMPLETE COVERAGE on all six arms)**. TENTH
+    /// admin-tier NO-INLINE-GUARD pin. EIGHTY-FIFTH MatchOptWithParam
+    /// ERROR pin. FIRST admin-tier pin where the matcher fires at the
+    /// LAST arm of a multi-arm chain -- catches regression where the
+    /// chain is rewritten and arm 6 is dropped (silent loss of the
+    /// option). FIRST admin-tier pin where the matcher's true-branch
+    /// body wraps an INTERNAL AdminLevel guard around the body (not on
+    /// the matcher line) -- structurally distinct from
+    /// SAME-LINE-AND-GUARD (Wave 215 //bumpaccess) and from pure
+    /// NO-INLINE-GUARD (Waves 213/214/216). 9-byte option-name width
+    /// pin. Assert.Equal pins the full 36-byte response shape.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashGmupgradeMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (33) = 36 bytes.
+        const int ExpectedReplyPayloadLength = 36;
+        const short ExpectedReplyLengthField = 33;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 32;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Gmuga", shipName: "GmugaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//gmupgrade");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(MissingArgGmupgradeLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgGmupgradeLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//gmupgrade\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{MissingArgGmupgradeLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
