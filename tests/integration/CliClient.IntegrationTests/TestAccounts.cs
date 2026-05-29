@@ -187,6 +187,7 @@ public static class TestAccounts
             ["SlashLevelOutOfRange_OnAdminAccount_PinsExactReplyWireShape"]                            = A(9_000_122, "cli_test122"),
             ["SlashLevelMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                            = A(9_000_123, "cli_test123"),
             ["SlashBeon_OnAdminAccount_PinsExactReplyWireShape"]                                       = A(9_000_124, "cli_test124"),
+            ["SlashBeoff_OnAdminAccount_PinsExactReplyWireShape"]                                      = A(9_000_125, "cli_test125"),
         };
 
     /// <summary>

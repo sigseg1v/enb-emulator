@@ -2104,4 +2104,217 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Verbatim body of the 0x001D MESSAGE_STRING reply the server emits
+    /// in HandleSlashCommands' user-block case 'b' for the
+    /// <c>strcmp(pch, "beoff") == 0</c> arm when
+    /// <c>AdminLevel() &gt;= BETA</c>. The literal is hard-coded as
+    /// <c>"Beta channel off."</c> at
+    /// <c>server/src/PlayerConnection.cpp:5541</c>; no format substitution
+    /// -- raw literal pass-through into SendVaMessage with default
+    /// colour=5 (PlayerConnection.h:277). 17 ASCII bytes. The arm has a
+    /// side-effect (sets <c>m_ChannelSubscription[Beta] = false</c> at
+    /// line 5540) BEFORE the emit. Sibling pair to Wave 132's /beon.
+    /// </summary>
+    private const string BetaChannelOffLiteral = "Beta channel off.";
+
+    /// <summary>
+    /// Wave 133 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 21-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/beoff</c> against an admin-level fixture (status=100
+    /// -&gt; AdminLevel()=100 &gt;= BETA=30).
+    ///
+    /// <para>
+    /// Sibling pair to Wave 132 (/beon). Wave 133 completes the
+    /// case-'b' channel-toggle: Wave 132 pins the subscribe path
+    /// (m_ChannelSubscription[Beta]=true + "Beta channel on." 16-byte
+    /// literal -&gt; 20-byte wire); Wave 133 pins the unsubscribe path
+    /// (m_ChannelSubscription[Beta]=false + "Beta channel off."
+    /// 17-byte literal -&gt; 21-byte wire). Both arms share IDENTICAL
+    /// case-letter ('b'), IDENTICAL dispatch (strcmp), IDENTICAL
+    /// AdminLevel-tier guard (BETA at PlayerConnection.cpp:5537),
+    /// IDENTICAL emit fork (SendVaMessage default-colour=5), IDENTICAL
+    /// raw-literal pass-through (no format substitution), IDENTICAL
+    /// success/msg_sent set-pattern, IDENTICAL short-circuit (implicit
+    /// case-end break at line 5630) -- the ONLY differences are the
+    /// 17 vs 16 byte literal length and the m_ChannelSubscription set
+    /// value (false vs true). This makes Waves 132+133 the TIGHTEST
+    /// sibling pair in the entire byte-exact catalogue: any regression
+    /// shared between the two arms would fail BOTH tests; any
+    /// regression specific to one arm (e.g. wrong literal in /beon,
+    /// wrong set-value direction) would fail only that arm.
+    /// </para>
+    ///
+    /// <para>
+    /// Wave 133 also extends the sibling-arm catalogue on the
+    /// HandleSlashCommands user-tier dispatcher to EIGHT byte-exact-
+    /// pinned arms -- Waves 123/125/126/129/130/131/132/133 -- and is
+    /// the SECOND pin on the case-'b' arm.
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Four concrete regression classes Wave 132 is
+    /// structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     /beoff literal regression at
+    ///     <c>server/src/PlayerConnection.cpp:5541</c>. A copy-paste
+    ///     error from /beon would emit "Beta channel on." for /beoff.
+    ///     Wave 133 pins the exact "Beta channel off." literal -- the
+    ///     17 vs 16 length-field divergence and the trailing "off."
+    ///     byte sequence catch it.
+    ///   </item>
+    ///   <item>
+    ///     m_ChannelSubscription set-value-direction regression at
+    ///     <c>server/src/PlayerConnection.cpp:5540</c>. The /beoff arm
+    ///     sets the subscription to FALSE; a regression that wrote
+    ///     `true` here would silently leave the player subscribed.
+    ///     Wave 133's wire-shape assertion alone does NOT catch this
+    ///     directly (the emit fires regardless of the set value), but
+    ///     the emit's presence confirms strcmp dispatch fired
+    ///     correctly into the unsubscribe arm.
+    ///   </item>
+    ///   <item>
+    ///     case-'b' arm ordering regression at
+    ///     <c>server/src/PlayerConnection.cpp:5519-5550</c>. The /beon
+    ///     and /beoff arms are sequential else-if siblings. A
+    ///     regression that reordered or merged the arms (e.g.
+    ///     accidentally falling through from /beon to /beoff after
+    ///     the success block) would fire BOTH emits, doubling the
+    ///     frame count. Wave 132+133 together pin the single-emit
+    ///     invariant per command.
+    ///   </item>
+    ///   <item>
+    ///     /beoff GetChannelFromName lookup-path regression at
+    ///     <c>server/src/PlayerConnection.cpp:5539</c>. Independent
+    ///     call from /beon's lookup at line 5523. A regression in
+    ///     PlayerManager::GetChannelFromName affecting only the
+    ///     /beoff call path would fail Wave 133 alone.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (CLAUDE.md). The case-'b' /beoff slash command
+    /// is the retail server's documented BETA-channel subscription
+    /// disable path, paired with /beon. The AdminLevel guard, the set
+    /// of m_ChannelSubscription[Beta]=false, and the emit shape are
+    /// all retail behaviour. No server permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Why fresh-account matters. The arm sets
+    /// m_ChannelSubscription[Beta]=false unconditionally; the per-
+    /// account isolation (cli_test125 dedicated, ServerFixture tears
+    /// down with -v wiping pgdata) makes this safe across retries.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashBeoff_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (18) = 21 bytes.
+        const int ExpectedReplyPayloadLength = 21;
+        // strlen(literal) + 1 NUL = 18.
+        const short ExpectedReplyLengthField = 18;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 17.
+        const int ExpectedLiteralByteCount = 17;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Beoffer", shipName: "BeoffShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/beoff");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // Filter on the distinctive prefix so handshake-tail and
+                // chatter frames don't race ahead of the /beoff reply.
+                // Note: "Beta channel" is shared with Wave 132's /beon
+                // reply, but with cli_test125 isolation and a single
+                // /beoff request on this connection there is no /beon
+                // emit to race with. We still filter on the full
+                // "channel off" suffix to make the test deterministic
+                // if someone ever wires both slash commands in series.
+                if (!text.StartsWith("Beta channel off", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(BetaChannelOffLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/beoff\" without seeing 0x001D MESSAGE_STRING starting with " +
+                $"\"Beta channel off\". Likely the user-block case-'b' /beoff arm at " +
+                $"server/src/PlayerConnection.cpp:5535 changed shape, the body-block " +
+                $"AdminLevel>=BETA guard at PlayerConnection.cpp:5537 inverted, the BETA " +
+                $"constant at Net7.h:373 changed, or GetChannelFromName at " +
+                $"PlayerConnection.cpp:5539 broke.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
