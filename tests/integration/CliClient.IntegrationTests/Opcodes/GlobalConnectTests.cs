@@ -68,7 +68,7 @@ public sealed class GlobalConnectTests
     [Fact]
     public async Task ValidTicket_RoundTripsThroughUdpGlobalPlane_ReturnsAvatarList()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
 
         // 30s budget: TLS login + RSA handshake + the proxy's UDP round-trip
         // to the server (sub-second in the happy path; the proxy's
@@ -223,7 +223,7 @@ public sealed class GlobalConnectTests
     [Fact]
     public async Task StressTestClosedAccount_GlobalConnect_ReturnsGlobalErrorCode12()
     {
-        var account = TestAccounts.StressTestClosed;
+        var account = TestAccounts.New(_server, status: 0);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
@@ -430,7 +430,7 @@ public sealed class GlobalConnectTests
     [Fact]
     public async Task StressTestClosedAccount_GlobalConnect_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.StressTestClosed;
+        var account = TestAccounts.New(_server, status: 0);
 
         const string ExpectedLiteral =
             "Sorry, the server is not currently accepting new logins.  Please try again later.";

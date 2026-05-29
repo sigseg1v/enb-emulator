@@ -46,9 +46,8 @@ tests/integration/CliClient.IntegrationTests/
 ├── ServerCollection.cs                 [CollectionDefinition("ServerCollection")]
 ├── ClientFixture.cs                    per-test seam: builds OpcodeRegistry + AuthLoginClient
 ├── RepoRoot.cs                         walks up from bin/ to find docker-compose.yml
-├── TestAccounts.cs                     5-account pool (cli_test01..05 / "testpw")
+├── TestAccounts.cs                     on-demand Npgsql INSERT per test
 ├── Fixtures/
-│   ├── seed.sql                        idempotent DELETE BETWEEN + INSERT into accounts
 │   └── Captures/                       hex-with-comments extracts from retail captures
 │       ├── README.md
 │       ├── masterjoin_packet220.hex
@@ -68,7 +67,7 @@ The folder names match xUnit's discovery — `dotnet test --filter
 
 | Category | What it asserts | Needs docker? |
 |---|---|---|
-| Smoke | Project loads, RepoRoot resolves, seed copied to bin/, OpcodeRegistry constructs | No |
+| Smoke | Project loads, RepoRoot resolves, OpcodeRegistry constructs | No |
 | Handshake | `/AuthLogin` returns valid+invalid tickets correctly; RSA+RC4 handshake completes on global/master/sector | Yes |
 | Opcodes | Single-opcode round-trip: send typed packet, drain for the typed reply, assert decoded fields | Yes |
 | Workflows | Composite operations like ConnectAndLogin — HealthGuard not tripped, stage transitions correct, abort surfaces login rejection | Yes |
@@ -77,19 +76,32 @@ The folder names match xUnit's discovery — `dotnet test --filter
 
 ## Fixture accounts
 
-`Fixtures/seed.sql` seeds 5 deterministic accounts —
-`cli_test01..cli_test05` at IDs 9_000_001..9_000_005 — well clear of
-the dump's `AUTO_INCREMENT=15965` so seed and real data never
-collide. Password hash is `UPPER(MD5('testpw'))` per
-`login-server/Net7SSL/LinuxAuth.cpp:227` (Linux auth path); same
-plaintext for every account so tests don't track per-account
-secrets. Reference accounts via `TestAccounts.Pool[N]`.
+Tests provision their own accounts on demand. `TestAccounts.New(_server)`
+opens an Npgsql connection to net7_user (host port 5434) and does an
+INSERT against the accounts table, returning a `TestAccount` record
+with the freshly-allocated id, username, and password.
 
-ServerFixture seeds these via `docker compose exec -T mysql mysql
--unet7 -pnet7 net7_user < seed.sql` after the TCP probes succeed
-(i.e. after MySQL is genuinely up). The seed is idempotent inside a
-compose lifetime; cross-run isolation comes from `down -v` in
-DisposeAsync.
+IDs start at 9_000_001 and increment per call (atomic counter), well
+clear of the dump's `AUTO_INCREMENT=15965` so per-test accounts never
+collide with real data. Usernames have the shape
+`t_<8-hex-process-id>_<6-hex-counter>` (17 chars, comfortably under
+the accounts.username varchar(40) limit). The 8-hex process-id prefix
+is drawn once per test run, so two concurrent test runs against the
+same database do not collide.
+
+Password is the literal string "testpw" for every account; the hash
+stored in accounts.password is `UPPER(encode(digest('testpw', 'md5'),
+'hex'))`, matching the login server's expectation
+(login-server/Net7SSL/LinuxAuth.cpp).
+
+For STRESS_TEST_CLOSED accounts (rejected at the global UDP plane
+with G_ERROR 12, per server/src/UDP_Global.cpp:ProcessTicketInfo),
+pass `status: 0`. Default is status=100 (ACTIVE/admin) which matches
+what real accounts use.
+
+ServerFixture installs the pgcrypto extension at startup (needed for
+the digest() call in the INSERT). Cross-run isolation comes from
+`down -v` in DisposeAsync.
 
 ## ScriptedServer (Robustness)
 

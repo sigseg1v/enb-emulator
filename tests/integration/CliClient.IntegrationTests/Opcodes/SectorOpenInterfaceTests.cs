@@ -221,7 +221,7 @@ public sealed class SectorOpenInterfaceTests
     [Fact]
     public async Task OpenInterfaceSlashCommand_OnSlashOpenif_ReceivesOpenInterfaceEmit()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 

@@ -108,7 +108,7 @@ public sealed class SectorActionTests
     [Fact]
     public async Task Action_NoOpSubAction_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -334,7 +334,7 @@ public sealed class SectorActionTests
     [Fact]
     public async Task Action_JumpStartOnNullTarget_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 

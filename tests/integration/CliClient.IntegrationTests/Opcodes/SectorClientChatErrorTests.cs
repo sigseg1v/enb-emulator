@@ -261,7 +261,7 @@ public sealed class SectorClientChatErrorTests
     [Fact]
     public async Task ClientChatRequest_SpeakLocallyNonexistentRecipient_ReceivesClientChatError()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -468,7 +468,7 @@ public sealed class SectorClientChatErrorTests
     [Fact]
     public async Task ClientChatRequest_RemoveFriendNotInList_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -698,7 +698,7 @@ public sealed class SectorClientChatErrorTests
     [Fact]
     public async Task ClientChatRequest_AddFriendSelfName_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -915,7 +915,7 @@ public sealed class SectorClientChatErrorTests
     [Fact]
     public async Task ClientChatRequest_RemoveIgnoreNotInList_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -1123,7 +1123,7 @@ public sealed class SectorClientChatErrorTests
     [Fact]
     public async Task ClientChatRequest_AddIgnoreSelfName_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 

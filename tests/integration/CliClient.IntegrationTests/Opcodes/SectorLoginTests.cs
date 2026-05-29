@@ -61,7 +61,7 @@ public sealed class SectorLoginTests
     [Fact]
     public async Task FullSectorLogin_ReceivesStart()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
 
         // Terran Warrior starting sector from avatar_base

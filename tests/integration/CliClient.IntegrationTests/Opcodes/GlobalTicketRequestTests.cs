@@ -108,7 +108,7 @@ public sealed class GlobalTicketRequestTests
     [Fact]
     public async Task ValidSlot_ReturnsSuccessTicketWithGameId()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
 
         // 40s budget: TLS login + RC4+RSA handshake + GlobalConnect
         // round-trip (sub-second) + the proxy's SendAvatarLogin UDP

@@ -178,7 +178,7 @@ public sealed class SectorRelationshipHardeningTests
     [Fact]
     public async Task Relationship_EmittedDuringStationSectorHandshake_HasExactly9BytePayload()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -282,7 +282,7 @@ public sealed class SectorRelationshipHardeningTests
     [Fact]
     public async Task Relationship_EmittedExactlyTwiceDuringStationSectorHandshake_PinsSelfAndManuLabEmits()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
 

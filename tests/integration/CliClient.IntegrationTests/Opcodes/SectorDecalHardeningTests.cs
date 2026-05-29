@@ -243,7 +243,7 @@ public sealed class SectorDecalHardeningTests
     [Fact]
     public async Task Decal_EmittedDuringStationSectorHandshake_HasExactly54BytePayload()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -340,7 +340,7 @@ public sealed class SectorDecalHardeningTests
     [Fact]
     public async Task Decal_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmit()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
 

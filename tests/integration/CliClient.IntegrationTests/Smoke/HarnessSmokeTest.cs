@@ -39,27 +39,4 @@ public sealed class HarnessSmokeTest
         Assert.Equal(207, added);
     }
 
-    [Fact]
-    public void SeedSql_IsCopiedToOutput_AndMentionsEveryPooledAccount()
-    {
-        var seedPath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "seed.sql");
-        Assert.True(File.Exists(seedPath),
-            $"Fixtures/seed.sql not next to the test assembly at '{seedPath}'");
-
-        var seed = File.ReadAllText(seedPath);
-        foreach (var account in TestAccounts.All)
-        {
-            Assert.Contains(account.Username, seed);
-            Assert.Contains(account.Id.ToString(), seed);
-        }
-        // The out-of-pool STRESS_TEST_CLOSED fixture must also be
-        // present — GlobalConnectTests.StressTestClosedAccount_* fails
-        // mysteriously (LinuxAuth refuses the login) if seed.sql drifts.
-        Assert.Contains(TestAccounts.StressTestClosed.Username, seed);
-        Assert.Contains(TestAccounts.StressTestClosed.Id.ToString(), seed);
-        // Phase N: was UPPER(MD5('testpw')) under MySQL; Postgres uses
-        // pgcrypto digest() since MySQL's MD5() was dropped with the
-        // libpqxx migration.
-        Assert.Contains("UPPER(encode(digest('testpw', 'md5'), 'hex'))", seed);
-    }
 }

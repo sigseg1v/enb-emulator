@@ -205,7 +205,7 @@ public sealed class SectorInventoryMoveTests
     [Fact]
     public async Task InventoryMove_UnrecognisedFromInv_ReceivesUnrecognisedErrorString()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -419,7 +419,7 @@ public sealed class SectorInventoryMoveTests
     [Fact]
     public async Task InventoryMove_UnrecognisedFromInv_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 

@@ -173,7 +173,7 @@ public sealed class SectorStarbaseAcceptJob8Tests
     [Fact]
     public async Task StarbaseAcceptJobAction8_OnSentinelJobId_ReceivesByteExact4ByteJobAcceptReply()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int startSector = 10151;
         const int jtSector = 10711;

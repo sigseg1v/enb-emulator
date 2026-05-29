@@ -217,7 +217,7 @@ public sealed class SectorTalkTreeTests
     [Fact]
     public async Task StarbaseTalkAction4_OnUnknownNpc_ReceivesFallbackTalkTree()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 

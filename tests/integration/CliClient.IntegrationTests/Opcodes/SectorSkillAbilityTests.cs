@@ -200,7 +200,7 @@ public sealed class SectorSkillAbilityTests
     [Fact]
     public async Task SkillAbility_OnUnknownAbilityIndex_ReceivesPriorityMessageNotYetWorking()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -385,7 +385,7 @@ public sealed class SectorSkillAbilityTests
     [Fact]
     public async Task SkillAbility_OnUnknownAbilityIndex_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 

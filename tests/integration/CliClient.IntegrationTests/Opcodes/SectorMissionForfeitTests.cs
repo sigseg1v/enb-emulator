@@ -227,7 +227,7 @@ public sealed class SectorMissionForfeitTests
     [Fact]
     public async Task MissionForfeit_EmptySlotZero_ReceivesNonForfeitableErrorString()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -446,7 +446,7 @@ public sealed class SectorMissionForfeitTests
     [Fact]
     public async Task MissionForfeit_EmptySlotZero_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 

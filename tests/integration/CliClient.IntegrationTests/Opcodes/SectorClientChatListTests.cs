@@ -322,7 +322,7 @@ public sealed class SectorClientChatListTests
     [Fact]
     public async Task ClientChatRequest_ListFriendsEmptyFriendList_ReceivesClientChatList()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -425,7 +425,7 @@ public sealed class SectorClientChatListTests
     [Fact]
     public async Task ClientChatRequest_ListIgnoresEmptyIgnoreList_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 

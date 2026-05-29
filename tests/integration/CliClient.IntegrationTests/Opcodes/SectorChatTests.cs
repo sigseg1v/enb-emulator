@@ -77,7 +77,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task GroupChat_WhenUngrouped_ReceivesNotInGroupErrorString()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -307,7 +307,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task GroupChat_WhenUngrouped_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -596,7 +596,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashAuthlevel_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -836,7 +836,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashNotells_OnAdminAccountFirstInvocation_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -1055,7 +1055,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashNoattack_OnAdminAccountFirstInvocation_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -1302,7 +1302,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashPosition_OnFreshCharNoTarget_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -1553,7 +1553,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashLevelOutOfRange_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -1786,7 +1786,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashLevelMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -2011,7 +2011,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashBeon_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -2219,7 +2219,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashBeoff_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -2431,7 +2431,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashChjoinMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -2622,7 +2622,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashChleaveMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -2824,7 +2824,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashSlashAdduserMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -3023,7 +3023,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashSlashBanMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -3233,7 +3233,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashSlashGmgetaccessMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -3449,7 +3449,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashSlashGmsetaccessMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -3636,7 +3636,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashSlashGmskillpointsMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -3822,7 +3822,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashSlashGmenableskillsMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -4004,7 +4004,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashSlashSetpasswordMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -4190,7 +4190,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashDMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -4397,7 +4397,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashRemovebaseoreMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -4606,7 +4606,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashEffectMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -4819,7 +4819,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashFormMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -5026,7 +5026,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashHtMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -5243,7 +5243,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashKickMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -5455,7 +5455,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashInviteMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -5670,7 +5670,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashMoveMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -5882,7 +5882,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashOrientationMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -6126,7 +6126,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashScriptMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -6368,7 +6368,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashTiltMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -6578,7 +6578,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashUitriggerMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -6812,7 +6812,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashWormholeMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -7054,7 +7054,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashWarpMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -7290,7 +7290,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashUpgradeMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -7549,7 +7549,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashTestmsgMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -7808,7 +7808,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashTerminateMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -8070,7 +8070,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashTradeMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -8302,7 +8302,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashOeulerMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -8513,7 +8513,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashOpenifMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -8719,7 +8719,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashSoundsMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -8925,7 +8925,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashScaleMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -9124,7 +9124,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashShieldwarningsMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -9326,7 +9326,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashSkillpointsMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -9530,7 +9530,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashStatMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -9731,7 +9731,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashScanMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -9958,7 +9958,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashSignatureMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -10174,7 +10174,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashRotatexMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -10384,7 +10384,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashRotateyMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -10591,7 +10591,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashRotatezMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -10804,7 +10804,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashRsiMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -10988,7 +10988,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashRsaMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -11153,7 +11153,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashRsnMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -11323,7 +11323,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashPacketoptMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -11445,7 +11445,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashPanupMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -11553,7 +11553,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashPanxMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -11661,7 +11661,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashPanyMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -11769,7 +11769,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashPanzMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -11877,7 +11877,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashPlanetspinMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -11989,7 +11989,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashGmMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -12101,7 +12101,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashGwormholeMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -12213,7 +12213,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashGetstatMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -12324,7 +12324,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashGformMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -12441,7 +12441,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashBuffMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -12556,7 +12556,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashBassetMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -12672,7 +12672,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashCcameraMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -12789,7 +12789,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashChangepasswordMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -12907,7 +12907,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashDecoMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -13036,7 +13036,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashEffectoMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -13166,7 +13166,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashFindMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -13292,7 +13292,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashFradiusMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -13408,7 +13408,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashFtypeMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -13521,7 +13521,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashFlevelMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -13635,7 +13635,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashFcountMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -13756,7 +13756,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashFaddasteroidtypeMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -13872,7 +13872,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashFaddoretofieldMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -13987,7 +13987,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashFdelorefromfieldMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -14104,7 +14104,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashFaddoretosectorMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -14222,7 +14222,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashFdelorefromsectorMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -14337,7 +14337,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashMobaggroMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -14452,7 +14452,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashMusicMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -14572,7 +14572,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashAltnameMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -14691,7 +14691,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashAltweaponMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -14811,7 +14811,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashAddbaseoreMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -14931,7 +14931,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashBeMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -15062,7 +15062,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashHalloweenMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -15193,7 +15193,7 @@ public sealed class SectorChatTests
     [Fact]
     public async Task SlashRestartcommsMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 

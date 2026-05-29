@@ -242,7 +242,7 @@ public sealed class SectorSubpartsHardeningTests
     [Fact]
     public async Task Subparts_EmittedDuringStationSectorHandshake_HasExactly54BytePayloadForTerranWarrior()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -331,7 +331,7 @@ public sealed class SectorSubpartsHardeningTests
     [Fact]
     public async Task Subparts_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmit()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
 

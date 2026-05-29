@@ -28,7 +28,7 @@ public sealed class TlsLoginTests
     [Fact]
     public async Task ValidAccount_ReturnsValidTicket()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
         var response = await _client.AuthLogin.LoginAsync(
@@ -53,7 +53,7 @@ public sealed class TlsLoginTests
     [Fact]
     public async Task WrongPassword_ReturnsInvalid()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
         var response = await _client.AuthLogin.LoginAsync(

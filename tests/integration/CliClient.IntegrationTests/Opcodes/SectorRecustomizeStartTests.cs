@@ -227,7 +227,7 @@ public sealed class SectorRecustomizeStartTests
     [Fact]
     public async Task StarbaseRecustomizeActions_ReceivesShipAndAvatarStartFrames()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 

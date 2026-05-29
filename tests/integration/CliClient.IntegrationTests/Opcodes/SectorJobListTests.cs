@@ -267,7 +267,7 @@ public sealed class SectorJobListTests
     [Fact]
     public async Task StarbaseJobTerminalAction6_InNet7SolJtSector_ReceivesWellFormedJobList()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int startSector = 10151;  // Terran Warrior start: Luna Station
         const int jtSector = 10711;     // Net-7 SOL: the only JT-terminal starbase in the seed

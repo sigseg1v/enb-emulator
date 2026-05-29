@@ -99,7 +99,7 @@ public sealed class GlobalCreateCharacterTests
     [Fact]
     public async Task ValidAvatar_AppearsInRefreshedAvatarList_AndCleanlyDeletes()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
 
         const string CharacterFirstName = "Testavus";  // 8 chars, has 'e','a','u' vowels, no 3-repeating
         const string ShipName = "TestShip";

@@ -218,7 +218,7 @@ public sealed class SectorServerParametersHardeningTests
     [Fact]
     public async Task ServerParameters_EmittedDuringSpaceSectorHandshake_HasExactly70BytePayload()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
         const int spaceSectorId = 1015;     // Luna (space, sector_type=ST_PLANET)
@@ -390,7 +390,7 @@ public sealed class SectorServerParametersHardeningTests
     [Fact]
     public async Task ServerParameters_EmittedExactlyOnceDuringSpaceSectorHandshake_PinsSelfEmit()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
         const int spaceSectorId = 1015;     // Luna (space, sector_type=ST_PLANET)

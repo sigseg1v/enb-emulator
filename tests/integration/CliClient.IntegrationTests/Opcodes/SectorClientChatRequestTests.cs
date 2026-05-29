@@ -255,7 +255,7 @@ public sealed class SectorClientChatRequestTests
     [Fact]
     public async Task ClientChatRequest_FriendStatusOnlyBranch_ReceivesClientChatEvent()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -546,7 +546,7 @@ public sealed class SectorClientChatRequestTests
     [Fact]
     public async Task ClientChatRequest_FriendStatusOnlyBranch_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -796,7 +796,7 @@ public sealed class SectorClientChatRequestTests
     [Fact]
     public async Task ClientChatRequest_AnyoneStatusBranch_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -1019,7 +1019,7 @@ public sealed class SectorClientChatRequestTests
     [Fact]
     public async Task ClientChatRequest_ListChannelsBranch_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -1195,7 +1195,7 @@ public sealed class SectorClientChatRequestTests
     [Fact]
     public async Task ClientChatRequest_ListAllChannelsBranch_PinsExactReplyWireShape()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 

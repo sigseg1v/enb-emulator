@@ -238,7 +238,7 @@ public sealed class SectorForceLogoutTests
     [Fact]
     public async Task ForceLogout_TriggeredByDuplicateGlobalConnect_EmitsLogoffWithExactly4BytePayload()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Luna Station
 

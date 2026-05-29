@@ -234,7 +234,7 @@ public sealed class SectorTriggerEmoteTests
     [Fact]
     public async Task TriggerEmote_DefaultPayload_ReceivesNotifyEmoteEchoed()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
         const int emoteSentinel = 0x4D454D45;  // "EMEM" LE — distinct from any retail emote ID and from zero.

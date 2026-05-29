@@ -168,7 +168,7 @@ public sealed class SectorClientAvatarShipHardeningTests
     [Fact]
     public async Task ClientAvatarAndClientShip_EmittedDuringStationSectorHandshake_HaveExactly4BytePayload()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -241,7 +241,7 @@ public sealed class SectorClientAvatarShipHardeningTests
     [Fact]
     public async Task ClientAvatarAndClientShip_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmits()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
 

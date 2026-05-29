@@ -22,9 +22,9 @@ namespace N7.CliClient.IntegrationTests;
 /// </para>
 ///
 /// <para>
-/// The fixture does NOT seed fixture player accounts — that's Phase T
-/// Item 2's job. Today the stack comes up empty; tests that need an
-/// account will fail until Item 2 lands.
+/// Tests provision their own accounts via <see cref="TestAccounts.New"/>,
+/// which inserts a fresh row into net7_user.accounts with a process-unique
+/// username on each call. No upfront seed step.
 /// </para>
 ///
 /// <para>
@@ -53,7 +53,22 @@ public sealed class ServerFixture : IAsyncLifetime
     public int    SectorPort { get; } = 3500;   // proxy SECTOR_SERVER_PORT
     public int    PostgresPort  { get; } = 5434;   // host-side remap of 5432
 
+    /// <summary>
+    /// Connection string for the net7_user database (accounts +
+    /// avatars). Reachable from the test process because docker-compose
+    /// publishes 5434:5432. Used by <see cref="TestAccounts.New"/> to
+    /// provision per-test accounts on demand.
+    /// </summary>
+    public string PostgresConnectionString { get; }
+
     private bool _ownsCompose;
+
+    public ServerFixture()
+    {
+        PostgresConnectionString =
+            $"Host={LoginHost};Port={PostgresPort};Username=net7;Password=net7;" +
+            "Database=net7_user;Pooling=true;MaxPoolSize=20";
+    }
 
     public async Task InitializeAsync()
     {
@@ -79,10 +94,23 @@ public sealed class ServerFixture : IAsyncLifetime
         // We poll for sector 10151 (Luna Station) because every current
         // sector-login test enters via the warrior starting station. If
         // a future test enters a different sector first, add its id to
-        // the list — or generalise this to per-test parameters.
+        // the list -- or generalise this to per-test parameters.
         await WaitForServerSectorAsync(10151, TimeSpan.FromMinutes(3));
 
-        await SeedFixtureAccountsAsync(TimeSpan.FromMinutes(1));
+        // pgcrypto is needed for TestAccounts.New's INSERT (UPPER(MD5(...))
+        // via digest()). The schema-init service does not install it
+        // because the dump didn't either; do it here so the per-test
+        // account provisioning works.
+        await EnsurePgcryptoAsync();
+    }
+
+    private async Task EnsurePgcryptoAsync()
+    {
+        await using var conn = new Npgsql.NpgsqlConnection(PostgresConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = new Npgsql.NpgsqlCommand(
+            "CREATE EXTENSION IF NOT EXISTS pgcrypto", conn);
+        await cmd.ExecuteNonQueryAsync();
     }
 
     private static async Task WaitForServerSectorAsync(int sectorId, TimeSpan timeout)
@@ -136,63 +164,6 @@ public sealed class ServerFixture : IAsyncLifetime
             // -v wipes the named volumes (pgdata, net7-ipc). Faster
             // than tearing down without; per-test-run isolation.
             await RunComposeAsync("down -v", TimeSpan.FromMinutes(2));
-        }
-    }
-
-    /// <summary>
-    /// Apply <c>Fixtures/seed.sql</c> against the postgres container via
-    /// <c>docker compose exec -T postgres psql ...</c>. Idempotent
-    /// (seed.sql does DELETE + INSERT on a fixed ID range, so a re-run
-    /// inside the same compose lifetime resets the seed pool cleanly).
-    ///
-    /// Phase N: switched from <c>mysql</c> to <c>postgres</c> (libpqxx
-    /// migration). The seed file itself was ported from MySQL syntax
-    /// (USE / backticks / MD5()) to Postgres (no USE, no backticks,
-    /// pgcrypto digest()) at the same time.
-    /// </summary>
-    private async Task SeedFixtureAccountsAsync(TimeSpan timeout)
-    {
-        var seedPath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "seed.sql");
-        if (!File.Exists(seedPath))
-            throw new FileNotFoundException(
-                "Could not find Fixtures/seed.sql next to the test assembly. " +
-                "Did the csproj <None Include=\"Fixtures/**/*\" CopyToOutputDirectory> entry survive?",
-                seedPath);
-
-        var psi = new ProcessStartInfo("docker",
-            "compose exec -T -e PGPASSWORD=net7 postgres psql -U net7 -d net7_user -v ON_ERROR_STOP=1")
-        {
-            WorkingDirectory = RepoRoot.Path,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-
-        using var p = Process.Start(psi) ?? throw new InvalidOperationException(
-            "Failed to launch 'docker compose exec postgres' for seed.");
-
-        var seedSql = await File.ReadAllTextAsync(seedPath);
-        await p.StandardInput.WriteAsync(seedSql);
-        p.StandardInput.Close();
-
-        using var cts = new CancellationTokenSource(timeout);
-        try
-        {
-            await p.WaitForExitAsync(cts.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            try { p.Kill(entireProcessTree: true); } catch { /* best effort */ }
-            throw new TimeoutException(
-                $"Fixture seed exceeded {timeout.TotalSeconds:F0}s.");
-        }
-
-        if (p.ExitCode != 0)
-        {
-            var stderr = await p.StandardError.ReadToEndAsync();
-            throw new InvalidOperationException(
-                $"Fixture seed exited with code {p.ExitCode}.\n--- stderr ---\n{stderr}");
         }
     }
 

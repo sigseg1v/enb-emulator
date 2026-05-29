@@ -240,7 +240,7 @@ public sealed class SectorFgpsTests
     [Fact]
     public async Task FgpsSlashCommand_OnSlashFgps_ReceivesConfirmedActionOfferAndClientSound()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 

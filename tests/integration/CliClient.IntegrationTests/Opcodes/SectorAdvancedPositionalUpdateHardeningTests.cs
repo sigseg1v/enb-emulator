@@ -281,7 +281,7 @@ public sealed class SectorAdvancedPositionalUpdateHardeningTests
     [Fact]
     public async Task AdvancedPositionalUpdate_EmittedDuringStationSectorHandshake_HasExactly42BytePayload()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -388,7 +388,7 @@ public sealed class SectorAdvancedPositionalUpdateHardeningTests
     [Fact]
     public async Task AdvancedPositionalUpdate_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmit()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
 

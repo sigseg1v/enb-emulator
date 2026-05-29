@@ -180,7 +180,7 @@ public sealed class SectorStartHardeningTests
     [Fact]
     public async Task Start_TerminatorOfStationSectorHandshake_HasExactly4BytePayload()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
 

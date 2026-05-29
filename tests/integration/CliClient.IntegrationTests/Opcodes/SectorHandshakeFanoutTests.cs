@@ -149,7 +149,7 @@ public sealed class SectorHandshakeFanoutTests
     [Fact]
     public async Task HandshakeEmitsClientShipAndAvatarDescription()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -219,7 +219,7 @@ public sealed class SectorHandshakeFanoutTests
     [Fact]
     public async Task HandshakeEmitsFullSendLoginShipDataFanout()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;
 
@@ -409,7 +409,7 @@ public sealed class SectorHandshakeFanoutTests
     [Fact]
     public async Task HandshakeEmitsClientTypeAndGalaxyMapOnSpaceSectorLogin()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
         const int spaceSectorId = 1015;     // Luna (space, sector_type=ST_PLANET)
@@ -600,7 +600,7 @@ public sealed class SectorHandshakeFanoutTests
     [Fact]
     public async Task HandshakeEmitsServerParametersOnSpaceSectorLogin()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int stationSectorId = 10151;
         const int spaceSectorId = 1015;
@@ -800,7 +800,7 @@ public sealed class SectorHandshakeFanoutTests
     [Fact]
     public async Task HandshakeEmitsPlanetPositionalUpdateAndNavigationOnSpaceSectorLogin()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int stationSectorId = 10151;
         const int spaceSectorId = 1015;
@@ -984,7 +984,7 @@ public sealed class SectorHandshakeFanoutTests
     [Fact]
     public async Task HandshakeDoesNotEmitStarbaseSetOnSpaceSectorLogin()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int stationSectorId = 10151;
         const int spaceSectorId = 1015;
@@ -1142,7 +1142,7 @@ public sealed class SectorHandshakeFanoutTests
     [Fact]
     public async Task HandshakeDoesNotEmitLoungeNpcOnSpaceSectorLogin()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int stationSectorId = 10151;
         const int spaceSectorId = 1015;

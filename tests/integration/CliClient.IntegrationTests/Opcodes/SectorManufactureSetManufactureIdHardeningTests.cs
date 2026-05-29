@@ -157,7 +157,7 @@ public sealed class SectorManufactureSetManufactureIdHardeningTests
     [Fact]
     public async Task ManufactureSetManufactureId_EmittedDuringHandshake_HasExactly4BytePayload()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -283,7 +283,7 @@ public sealed class SectorManufactureSetManufactureIdHardeningTests
     [Fact]
     public async Task ManufactureSetManufactureId_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmit()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -406,7 +406,7 @@ public sealed class SectorManufactureSetManufactureIdHardeningTests
     [Fact]
     public async Task ManufactureSetManufactureId_EmittedExactlyOnceDuringSpaceSectorHandshake_PinsSelfEmit()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
         const int spaceSectorId = 1015;     // Luna (space, sector_type=ST_PLANET)

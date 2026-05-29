@@ -36,7 +36,7 @@ public sealed class ConnectAndLoginTests
     [Fact]
     public async Task ValidAccount_LandsInGlobalStage_NoHealthTrip()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
         var workflow = new ConnectAndLogin(
@@ -72,7 +72,7 @@ public sealed class ConnectAndLoginTests
     [Fact]
     public async Task WrongPassword_AbortsWithLoginRejection()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
         var workflow = new ConnectAndLogin(

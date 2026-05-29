@@ -238,7 +238,7 @@ public sealed class SectorSelectTalkTreeTests
     [Fact]
     public async Task SelectTalkTree_NoCurrentNpc_ReceivesTalkTreeActionCloseSentinel()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 

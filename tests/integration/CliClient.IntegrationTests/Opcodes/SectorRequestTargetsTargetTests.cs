@@ -194,7 +194,7 @@ public sealed class SectorRequestTargetsTargetTests
     [Fact]
     public async Task RequestTargetsTarget_OnUnknownPlayer_ReceivesSetTargetWithLiteralZeroGameId()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int sectorId = 10151;  // Terran Warrior start: Luna Station
 

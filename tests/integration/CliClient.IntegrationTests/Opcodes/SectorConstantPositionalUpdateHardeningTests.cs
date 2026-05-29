@@ -182,7 +182,7 @@ public sealed class SectorConstantPositionalUpdateHardeningTests
     [Fact]
     public async Task ConstantPositionalUpdate_EmittedDuringStationSectorHandshake_HasExactly32BytePayload()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
 
@@ -285,7 +285,7 @@ public sealed class SectorConstantPositionalUpdateHardeningTests
     [Fact]
     public async Task ConstantPositionalUpdate_EmittedExactlyOnceDuringStationSectorHandshake_PinsManuLabEmit()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
 

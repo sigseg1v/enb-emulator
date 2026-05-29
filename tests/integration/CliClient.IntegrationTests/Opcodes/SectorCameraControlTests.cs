@@ -199,7 +199,7 @@ public sealed class SectorCameraControlTests
     [Fact]
     public async Task StartAck_AfterSpaceArmHandshake_EmitsCameraControlWithEightBytePayload()
     {
-        var account = TestAccounts.For();
+        var account = TestAccounts.New(_server);
         const int slot = 0;
         const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
         const int spaceSectorId = 1015;     // Luna (space, sector_type=ST_PLANET)

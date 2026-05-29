@@ -10,6 +10,7 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="Npgsql" Version="8.0.3" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
   </ItemGroup>
@@ -17,7 +18,7 @@
     <ProjectReference Include="..\..\..\tools\cli-client\src\CliClient.Core\CliClient.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="Fixtures/**/*">
+    <None Include="Fixtures/Captures/**/*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
