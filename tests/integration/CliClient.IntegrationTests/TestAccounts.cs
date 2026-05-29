@@ -201,6 +201,7 @@ public static class TestAccounts
             ["SlashRemovebaseoreMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                    = A(9_000_136, "cli_test136"),
             ["SlashEffectMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                           = A(9_000_137, "cli_test137"),
             ["SlashFormMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                             = A(9_000_138, "cli_test138"),
+            ["SlashHtMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                               = A(9_000_139, "cli_test139"),
         };
 
     /// <summary>

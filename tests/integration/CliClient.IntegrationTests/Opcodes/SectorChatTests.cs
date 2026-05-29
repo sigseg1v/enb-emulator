@@ -4912,4 +4912,211 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Verbatim body of the 0x001D MESSAGE_STRING reply the server emits
+    /// when the user-tier case-'h' NO-GUARD matcher at
+    /// <c>PlayerConnection.cpp:6647</c> -- <c>MatchOptWithParam("ht",
+    /// pch, param, msg_sent)</c> with NO AdminLevel guard (neither
+    /// outer-block nor inline) -- runs and matches 2 bytes, then hits
+    /// the separator-check NUL fall-through. 25 ASCII bytes after %s
+    /// substitution -- NEW MIDDLE 2-byte %s width (fills the gap
+    /// between Wave 143's 1-byte MINIMAL and Wave 137's 3-byte;
+    /// catalogue now spans TEN distinct widths
+    /// 1/2/3/4/5/6/7/11/13/14).
+    /// </summary>
+    private const string MissingArgHtLiteral = "Missing arg for option ht";
+
+    /// <summary>
+    /// Wave 147 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 29-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/ht</c> (NO param) -- routes through the user-tier
+    /// dispatcher entry at line 5434, the 1-char strip, the case-'h'
+    /// user-tier dispatch (NEW case-letter), traverses the case-'h'
+    /// head matchers (hijack strcmp+target-check, heading strcmp both
+    /// fail), and hits the ht matcher at line 6647 -- the FIRST
+    /// NO-GUARD inline matcher pattern pin in the catalogue
+    /// (<c>MatchOptWithParam("ht", ...)</c> with NEITHER outer-block
+    /// guard NOR inline AdminLevel guard; the matcher dispatches
+    /// unconditionally regardless of AdminLevel), then the missing-arg
+    /// ERROR fork at <c>PlayerConnection.cpp:4548</c>.
+    ///
+    /// <para>
+    /// SIXTEENTH pin on the user-tier (single-slash) dispatch path.
+    /// FIRST pin on user-tier case-'h' -- NEW case-letter extends
+    /// user-tier dispatcher switch coverage to ELEVEN distinct
+    /// case-letters (a/b/c/d/e/f/h/l/n/p/r). FIFTEENTH pin on the
+    /// MatchOptWithParam ERROR path with NEW MIDDLE 2-byte %s width
+    /// (fills the gap between Wave 143's 1-byte MINIMAL and Wave
+    /// 137's 3-byte; catalogue now spans TEN distinct widths
+    /// 1/2/3/4/5/6/7/11/13/14). FIRST pin on the NO-GUARD inline
+    /// matcher structural pattern (NEW structural variant -- prior
+    /// pins covered MATCHER-FIRST inline at Waves 139/143,
+    /// GUARD-FIRST inline at Wave 144, OUTER-BLOCK-GUARD at Wave 145,
+    /// and COMBINED outer+inline at Wave 146; Wave 147 is the FIRST
+    /// NO-GUARD pin where the matcher dispatches unconditionally
+    /// regardless of AdminLevel -- inverse-direction sibling that
+    /// rules out spurious AdminLevel gating).
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes Wave 146
+    /// is structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     user-tier case-'h' dispatch + head-matcher chain regression
+    ///     at <c>PlayerConnection.cpp:6627-6705</c>. case-'h' was
+    ///     previously unpinned in the user-tier switch; a regression
+    ///     that dropped case-'h' entirely, reordered case labels, or
+    ///     routed *pch=='h' to the wrong handler would silently
+    ///     swallow /ht (along with /hijack, /heading, /helpedit,
+    ///     /helpfield). Wave 147 pins case-'h' is REACHABLE via the
+    ///     user-tier switch dispatcher AND the head-matcher chain
+    ///     (hijack strcmp+target-check at 6628, heading strcmp at
+    ///     6640 -- both bare ifs not else-ifs) fall-through correctly
+    ///     to the ht matcher at line 6647.
+    ///   </item>
+    ///   <item>
+    ///     NO-GUARD inline matcher structural regression at
+    ///     <c>PlayerConnection.cpp:6647</c>. The line reads
+    ///     <c>if (MatchOptWithParam("ht", pch, param, msg_sent))</c>
+    ///     -- NEITHER outer-block AdminLevel guard NOR inline
+    ///     AdminLevel guard. The matcher dispatches unconditionally.
+    ///     A regression that ADDED an AdminLevel guard (e.g.
+    ///     `if (AdminLevel() &gt;= GM &amp;&amp; MatchOptWithParam(
+    ///     "ht", ...))`) would NOT detect at status=100 (would still
+    ///     emit) -- so Wave 147 is NOT a direct guard-presence
+    ///     detector. What it DOES detect: the matcher dispatches AT
+    ///     ALL (a regression that wrapped /ht in any guard at
+    ///     SDEV-tighter threshold would skip the matcher and fail
+    ///     this test); also, the OUTER block-guard pattern of Wave
+    ///     145 IS NOT present at /ht (a regression that wrapped
+    ///     /ht in an outer-block-guard at SDEV would break this).
+    ///     Wave 147 is the inverse-direction sibling to Wave 145's
+    ///     outer-block-guard pin.
+    ///   </item>
+    ///   <item>
+    ///     %s format-substitution NEW MIDDLE 2-byte width regression
+    ///     at <c>PlayerClass.cpp:3422</c>. Catalogue had 9 distinct
+    ///     widths (1/3/4/5/6/7/11/13/14) -- Wave 147 adds 2-byte,
+    ///     filling the gap between 1 and 3 to give 10 widths; a
+    ///     regression in vsprintf_s with off-by-one at 2-byte width
+    ///     specifically would fail Wave 147 but pass prior pins.
+    ///     Pins format-substitution stability at NEW MIDDLE width
+    ///     adjacent to MINIMAL (1-byte).
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). The MatchOptWithParam
+    /// missing-arg emit is the retail server's documented dispatcher-level
+    /// error path. /ht (head/body/gender selector) had NO AdminLevel
+    /// guard in the retail server -- it's a "user-tier" command
+    /// regardless of privilege. No server permissiveness added; the
+    /// pin preserves retail behavior.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashHtMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (26) = 29 bytes.
+        const int ExpectedReplyPayloadLength = 29;
+        // strlen(literal) + 1 NUL = 26.
+        const short ExpectedReplyLengthField = 26;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 25.
+        const int ExpectedLiteralByteCount = 25;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Hta", shipName: "HtaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/ht");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // EXACT equals filter (not StartsWith) -- defensive against
+                // future sibling "ht*" option emits in case-'h'.
+                if (!text.Equals("Missing arg for option ht", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgHtLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/ht\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option ht\". Likely the user-tier case-'h' " +
+                $"dispatch at line 6627 stopped routing, the head matchers (hijack/" +
+                $"heading) at lines 6628/6640 incorrectly emitted competing messages, " +
+                $"the ht matcher at line 6647 was wrapped in a spurious AdminLevel " +
+                $"guard at SDEV-tighter threshold, or the missing-arg ERROR fork at " +
+                $"PlayerConnection.cpp:4548 changed shape.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
