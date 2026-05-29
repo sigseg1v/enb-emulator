@@ -8168,4 +8168,232 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 161 missing-arg ERROR literal for case-'o' /oeuler.
+    /// The matcher at PlayerConnection.cpp:6886 reads
+    /// `else if (MatchOptWithParam("oeuler", pch, param, msg_sent))`
+    /// -- ELSE-IF chain arm (chained off /orientation HEAD at 6881),
+    /// NO outer AdminLevel guard, NO inside-body guard. SECOND case-
+    /// 'o' pin (Wave 143 pinned /orientation HEAD matcher at 6881
+    /// 11-byte; Wave 161 deepens case-'o' to ELSE-IF chain arm at
+    /// 6886). With NO param after "/oeuler", strncmp matches 6
+    /// bytes, arg[6]='\0' fails separator-check, allowNoParams=false
+    /// -- emits "Missing arg for option oeuler", returns false. 29
+    /// ASCII bytes after %s substitution -- 6-byte %s width
+    /// deepening pin (prior 6-byte pins at GM-tier; THIRD user-tier
+    /// 6-byte width pin or deepening).
+    /// </summary>
+    private const string MissingArgOeulerLiteral = "Missing arg for option oeuler";
+
+    /// <summary>
+    /// Wave 161 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 33-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/oeuler</c> (NO param) -- routes through the user-
+    /// tier dispatcher entry at line 5434, the 1-char strip, the
+    /// case-'o' user-tier dispatch (case-letter already pinned by
+    /// Wave 143 via /orientation HEAD matcher at 6881; Wave 161
+    /// deepens case-'o' to the ELSE-IF chain arm /oeuler at 6886).
+    /// Independent CONSECUTIVE-IF at 6873 strcmp "ori" FAIL (strcmp
+    /// "ori" vs "oeuler" o-o, r-e MISMATCH idx 1). ELSE-IF chain
+    /// HEAD at 6881 MatchOptWithParam("orientation",...): strncmp
+    /// ("orientation","oeuler",6) o-o, r-e MISMATCH idx 1 false NO
+    /// emit. else-if at 6886 `MatchOptWithParam("oeuler", pch,
+    /// param, msg_sent)` -- NO outer AdminLevel guard, NO inside-
+    /// body guard. MatchOptWithParam: strncmps "oeuler" against
+    /// "oeuler" (6 byte match), arg[6]='\0' -- NOT '=', NOT ' ',
+    /// NOT isalpha, allowNoParams=false -- emits "Missing arg for
+    /// option oeuler" via SendVaMessage at 4548, sets msg_sent=
+    /// true, returns false. Body block `success = HandleEuler
+    /// OrientationRequest(param)` at 6888 SKIPPED (matcher returned
+    /// false, body block never entered). else-if at 6891 /openif
+    /// SKIPPED (chained via else-if; preceding /oeuler branch was
+    /// taken). case-'o' breaks. Trailing fallback at 7702 SKIPPED
+    /// (msg_sent=true). NET RESULT: ONE emit.
+    ///
+    /// <para>
+    /// THIRTIETH pin on the user-tier (single-slash) dispatch path.
+    /// SECOND pin on user-tier case-'o' (Wave 143 pinned /orientation
+    /// HEAD matcher 11-byte ELSE-IF chain HEAD; Wave 161 deepens
+    /// case-'o' to ELSE-IF chain arm /oeuler 6-byte at 6886); case-
+    /// 'o' is now DOUBLE-PINNED across BOTH ELSE-IF chain HEAD AND
+    /// ELSE-IF chain arm positions. TWENTY-NINTH pin on the
+    /// MatchOptWithParam ERROR path. SIXTH NO-GUARD pin (Wave 153
+    /// case-t /tilt + Wave 154 case-u /uitrigger + Wave 155 case-w
+    /// /wormhole + Wave 156 case-w /warp + Wave 160 case-t /trade +
+    /// Wave 161 case-o /oeuler ELSE-IF chain arm) -- NO-GUARD now
+    /// SEXTUPLE-PINNED across FOUR distinct case-letters (o/t/u/w)
+    /// AND FOUR distinct block structures (pure CONSECUTIVE-IF /
+    /// NO-GUARD ELSE-IF / MIXED / NO-OUTER-GUARD INSIDE-BODY-GM /
+    /// ELSE-IF chain arm).
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes Wave 160
+    /// is structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     case-'o' ELSE-IF chain arm deepening regression at
+    ///     <c>PlayerConnection.cpp:6886-6890</c>. Wave 143 pinned
+    ///     case-'o' /orientation HEAD matcher at 6881 (ELSE-IF chain
+    ///     HEAD, 11-byte width); case-'o' /oeuler at 6886 sits on
+    ///     the ELSE-IF chain arm (chained off /orientation) and was
+    ///     UNPINNED before Wave 161. A regression that converted
+    ///     ELSE-IF to CONSECUTIVE-IF within case-'o' would change
+    ///     dispatch semantics (independent CONSECUTIVE-IF would NOT
+    ///     short-circuit when /orientation matched); a regression
+    ///     that added an outer AdminLevel guard would skip the ERROR-
+    ///     fork emit; Wave 161 pins case-'o' /oeuler ELSE-IF chain
+    ///     arm is REACHABLE AND the NO-GUARD structural variant is
+    ///     preserved at this case-letter / chain-arm position.
+    ///   </item>
+    ///   <item>
+    ///     case-'o' ELSE-IF chain fall-through regression at
+    ///     <c>PlayerConnection.cpp:6891+</c>. After the /oeuler
+    ///     matcher emits, execution leaves the ELSE-IF chain because
+    ///     /oeuler matched and short-circuited the else-if to
+    ///     /openif at 6891; case-'o' breaks; trailing fallback at
+    ///     7702 SKIPPED (msg_sent=true). A regression that converted
+    ///     ELSE-IF to CONSECUTIVE-IF would cause /openif strtok_s to
+    ///     run after /oeuler emits (strncmp would FAIL against pch=
+    ///     "oeuler" but structural semantics change); a regression
+    ///     that flipped the trailing fallback's `!msg_sent` to
+    ///     `msg_sent` would emit a second "Illegal slash command:
+    ///     oeuler" message; Wave 161 pins the ELSE-IF chain fall-
+    ///     through as a structural invariant via the EXACT-equals
+    ///     filter.
+    ///   </item>
+    ///   <item>
+    ///     NO-GUARD pattern sextuple-pin cross-case-letter cross-
+    ///     block-structure divergence regression at
+    ///     <c>PlayerConnection.cpp:5434+</c>. Wave 153 pinned NO-
+    ///     GUARD at case-'t' /tilt pure CONSECUTIVE-IF; Wave 154 at
+    ///     case-'u' /uitrigger NO-GUARD ELSE-IF; Wave 155 at case-
+    ///     'w' /wormhole pure NO-GUARD MIXED; Wave 156 at case-'w'
+    ///     /warp NO-OUTER-GUARD INSIDE-BODY-GM; Wave 160 at case-'t'
+    ///     /trade pure NO-GUARD CONSECUTIVE-IF; Wave 161 at case-'o'
+    ///     /oeuler ELSE-IF chain arm NO-GUARD. SIX distinct NO-GUARD
+    ///     pins across FOUR distinct case-letters (o/t/u/w) AND
+    ///     FOUR distinct block structures. A regression that
+    ///     selectively broke NO-GUARD at one (case-letter, structure)
+    ///     combination but not the others would fail one pin but
+    ///     not all six; Wave 161 deepens NO-GUARD to SEXTUPLE-PIN
+    ///     coverage.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). The MatchOptWithParam
+    /// missing-arg emit is the retail server's documented dispatcher-
+    /// level error path. /oeuler (Euler-angle orientation debug
+    /// command) is OPEN to all users in the retail server -- NO
+    /// outer AdminLevel guard at 6886, NO inside-body guard. ERROR
+    /// path emits regardless of AdminLevel. No server permissiveness
+    /// added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashOeulerMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (30) = 33 bytes.
+        const int ExpectedReplyPayloadLength = 33;
+        // strlen(literal) + 1 NUL = 30.
+        const short ExpectedReplyLengthField = 30;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 29.
+        const int ExpectedLiteralByteCount = 29;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Eulro", shipName: "EulroShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/oeuler");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals("Missing arg for option oeuler", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgOeulerLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/oeuler\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option oeuler\". Likely the user-tier case-'o' " +
+                $"dispatch at line 6872 stopped routing, the ELSE-IF chain arm at " +
+                $"6886 stopped dispatching, the NO-GUARD structural variant " +
+                $"converted to OUTER-GUARD (would skip ERROR emit for non-privileged " +
+                $"users), the ELSE-IF chain converted to CONSECUTIVE-IF (would change " +
+                $"cross-arm dispatch semantics), the trailing illegal-slash fallback " +
+                $"at 7702 fired as a second emit (msg_sent gate regression), or the " +
+                $"missing-arg ERROR fork at PlayerConnection.cpp:4548 changed shape " +
+                $"(esp. vsprintf_s 6-byte %s width).");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
