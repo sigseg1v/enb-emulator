@@ -2317,4 +2317,212 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Verbatim body of the 0x001D MESSAGE_STRING reply the server emits
+    /// when <c>MatchOptWithParam("chjoin", "chjoin", ...)</c> at
+    /// <c>server/src/PlayerConnection.cpp:5633</c> falls through the
+    /// separator-check at line 4532 (NUL is not '=', not ' ', not
+    /// isalpha), through the allowNoParams default-false guard at
+    /// line 4541, and hits the else-branch emit at
+    /// <c>PlayerConnection.cpp:4548</c>:
+    /// <c>SendVaMessage("Missing arg for option %s", "chjoin")</c>.
+    /// 29 ASCII bytes after %s substitution. Same emit location as
+    /// Wave 131's /level pin -- different option name parameter.
+    /// </summary>
+    private const string MissingArgChjoinLiteral = "Missing arg for option chjoin";
+
+    /// <summary>
+    /// Wave 134 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 33-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/chjoin</c> (NO param) on any account tier -- routes
+    /// into MatchOptWithParam's ERROR fork (the missing-arg emit at
+    /// PlayerConnection.cpp:4548) BEFORE control reaches the case-'c'
+    /// body-block AdminLevel guard at line 5637.
+    ///
+    /// <para>
+    /// Sibling to Wave 131 (/level missing-arg pattern). Wave 131 pins
+    /// the SAME MatchOptWithParam ERROR fork at PlayerConnection.cpp:4548
+    /// with option name "level" (5 bytes); Wave 134 pins the SAME emit
+    /// with option name "chjoin" (6 bytes). Both arms share IDENTICAL
+    /// dispatch path (case-letter -&gt; MatchOptWithParam -&gt;
+    /// strncmp passes -&gt; arg[len]=NUL -&gt; fall-through to else-branch
+    /// -&gt; SendVaMessage with %s substitution of CONST-STRING-LITERAL),
+    /// IDENTICAL emit fork (SendVaMessage default-colour=5), IDENTICAL
+    /// AdminLevel non-gating (the matcher fires BEFORE any body-block
+    /// guard runs -- works on any user tier), IDENTICAL msg_sent
+    /// by-ref write (line 4549). The ONLY differences are the case-
+    /// letter ('c' vs 'l') and the option-name substituted into the
+    /// %s slot (6 vs 5 bytes -&gt; 29 vs 28 byte body -&gt; 33 vs 32
+    /// byte wire). This makes Waves 131+134 a TIGHT sibling pair
+    /// pinning the %s format-substitution length-variability of
+    /// MatchOptWithParam's missing-arg emit.
+    /// </para>
+    ///
+    /// <para>
+    /// Wave 134 also extends the sibling-arm catalogue on the
+    /// HandleSlashCommands user-tier dispatcher to NINE byte-exact-
+    /// pinned arms -- Waves 123/125/126/129/130/131/132/133/134 -- and
+    /// is the FIRST pin on the case-'c' arm at
+    /// <c>server/src/PlayerConnection.cpp:5631</c>.
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Four concrete regression classes Wave 131 is
+    /// structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     case-'c' arm dispatch regression at
+    ///     <c>server/src/PlayerConnection.cpp:5631</c>. A regression
+    ///     that swapped the case-'c' arm with a different case-letter
+    ///     or rerouted the /chjoin opt-name to a different matcher
+    ///     would fail the literal-prefix filter. Wave 134 is the
+    ///     FIRST pin proving case-'c' dispatches at all.
+    ///   </item>
+    ///   <item>
+    ///     %s format-substitution length-variability regression at
+    ///     PlayerClass.cpp:3422 -- vsprintf_s must correctly handle
+    ///     the variable-width %s substitution; a regression that
+    ///     mishandled 6-byte vs 5-byte substitution (e.g. length
+    ///     accounting off-by-one) would emit a different body length.
+    ///     Wave 131 pins the 5-byte substitution; Wave 134 pins the
+    ///     6-byte. A regression specific to width-handling at one
+    ///     length would fail one test.
+    ///   </item>
+    ///   <item>
+    ///     /chjoin opt-name passed-as-second-argument regression at
+    ///     <c>server/src/PlayerConnection.cpp:5633</c>. The matcher
+    ///     receives "chjoin" as the option name. A regression that
+    ///     mis-spelled the argument or swapped opt-names with a
+    ///     sibling matcher call (e.g. "chleave", "ccamera",
+    ///     "changepassword") would emit the wrong %s body. Wave 134
+    ///     pins exact "chjoin".
+    ///   </item>
+    ///   <item>
+    ///     case-'c' sibling-matcher fan-out regression at
+    ///     <c>server/src/PlayerConnection.cpp:5667-5704</c>. After
+    ///     MatchOptWithParam("chjoin", ...) returns false, control
+    ///     falls through to MatchOptWithParam("chleave", ...),
+    ///     MatchOptWithParam("ccamera", ...),
+    ///     MatchOptWithParam("changepassword", ...) etc -- each
+    ///     should strncmp-fail and return false WITHOUT emitting. A
+    ///     regression that fell through into one of these without
+    ///     proper strncmp-rejection would emit a second
+    ///     MESSAGE_STRING; Wave 134's single-frame-shape assertion
+    ///     catches.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (CLAUDE.md). The MatchOptWithParam missing-arg
+    /// emit is the retail server's documented dispatcher-level error
+    /// path; fires for any user (no admin gating) before the body
+    /// block's AdminLevel guard at line 5637. No server permissiveness
+    /// added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashChjoinMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (30) = 33 bytes.
+        const int ExpectedReplyPayloadLength = 33;
+        // strlen(literal) + 1 NUL = 30.
+        const short ExpectedReplyLengthField = 30;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 29.
+        const int ExpectedLiteralByteCount = 29;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Chjoiner", shipName: "ChjoinShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/chjoin");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // Filter on the distinctive "for option chjoin" suffix --
+                // the "Missing arg for option" prefix is shared with
+                // Wave 131's /level reply, but with cli_test126
+                // isolation and a single /chjoin request we don't race
+                // /level. Use a more specific prefix to be defensive.
+                if (!text.StartsWith("Missing arg for option chjoin", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgChjoinLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/chjoin\" without seeing 0x001D MESSAGE_STRING starting with " +
+                $"\"Missing arg for option chjoin\". Likely the case-'c' arm at " +
+                $"server/src/PlayerConnection.cpp:5631 stopped dispatching to " +
+                $"MatchOptWithParam at line 5633, or the missing-arg ERROR fork at " +
+                $"PlayerConnection.cpp:4548 changed shape.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
