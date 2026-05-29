@@ -255,6 +255,7 @@ public static class TestAccounts
             ["SlashFaddoretofieldMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                   = A(9_000_190, "cli_test190"),
             ["SlashFdelorefromfieldMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                 = A(9_000_191, "cli_test191"),
             ["SlashFaddoretosectorMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                  = A(9_000_192, "cli_test192"),
+            ["SlashFdelorefromsectorMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                = A(9_000_193, "cli_test193"),
         };
 
     /// <summary>
