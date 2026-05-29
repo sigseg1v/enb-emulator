@@ -12524,4 +12524,119 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 187 missing-arg ERROR literal for case-'b' /basset.
+    /// Matcher at PlayerConnection.cpp:5573 -- NO-GUARD-ELSE-IF
+    /// pattern (chained via `else if` to the /bwho SAME-LINE-AND-GUARD
+    /// arm at 5551 without any outer or inside-body guard around the
+    /// matcher itself). SECOND case-'b' user-tier pin -- case-'b' now
+    /// DOUBLE-PINNED.
+    /// </summary>
+    private const string MissingArgBassetLiteral = "Missing arg for option basset";
+
+    /// <summary>
+    /// Wave 187 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 33-byte wire-shape of the single 0x001D MESSAGE_STRING reply to
+    /// user-tier slash <c>/basset</c> (NO param). Wave 187 deepens
+    /// case-'b' to DOUBLE-PINNED and re-pins NO-GUARD-ELSE-IF.
+    ///
+    /// <para>
+    /// ELSE-IF at 5573 `MatchOptWithParam("basset", pch, param,
+    /// msg_sent)` -- the matcher's missing-arg fork at 4548 fires
+    /// regardless of admin level. Preceding /bwho at 5551 has
+    /// allowNoParams=true and `&amp;&amp; AdminLevel() &gt;= BETA`,
+    /// but its strncmp ("bwho" vs "basset") fails at byte 1 ('w' vs
+    /// 'a') so /bwho returns false without emitting and the else-if
+    /// reaches /basset. NET RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashBassetMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (30) = 33 bytes.
+        const int ExpectedReplyPayloadLength = 33;
+        const short ExpectedReplyLengthField = 30;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 29;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Basso", shipName: "BassoShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/basset");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals("Missing arg for option basset", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgBassetLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/basset\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option basset\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }

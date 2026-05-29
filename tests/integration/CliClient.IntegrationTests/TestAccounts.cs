@@ -241,6 +241,7 @@ public static class TestAccounts
             ["SlashGetstatMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                          = A(9_000_176, "cli_test176"),
             ["SlashGformMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                            = A(9_000_177, "cli_test177"),
             ["SlashBuffMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                             = A(9_000_178, "cli_test178"),
+            ["SlashBassetMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                           = A(9_000_179, "cli_test179"),
         };
 
     /// <summary>
