@@ -1145,4 +1145,253 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Verbatim body of the 0x001D MESSAGE_STRING reply the server emits
+    /// in HandleSlashCommands' user-block case 'p' for the
+    /// <c>strcmp(pch, "position") == 0</c> arm on a freshly-entered sector
+    /// with no target acquired. Format string is
+    /// <c>"ObjectID = 0x%08x"</c>; substituted value is
+    /// <c>ShipIndex()-&gt;GetTargetGameID()</c>, which
+    /// <c>Player::SendShipInfo</c> seeds to <c>-1</c> at
+    /// <c>server/src/PlayerClass.cpp:1085</c> during sector entry. The
+    /// printf cast <c>%08x</c> renders int -1 as its unsigned bit-pattern
+    /// "ffffffff", so the body is "ObjectID = 0xffffffff" -- 21 ASCII
+    /// bytes. The arm uses the DEFAULT-colour <c>SendVaMessage</c> (no
+    /// explicit colour arg), which threads through
+    /// <c>SendMessageString(pch)</c> picking up the default-arg
+    /// <c>colour=5</c> from the header declaration at
+    /// <c>server/src/PlayerConnection.h:277</c>.
+    /// </summary>
+    private const string PositionNoTargetLiteral = "ObjectID = 0xffffffff";
+
+    /// <summary>
+    /// Wave 129 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -> 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 25-byte wire-shape of the FIRST 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/position</c> on a freshly-entered sector with no
+    /// target acquired (GetTargetGameID() == -1, the
+    /// <c>Player::SendShipInfo</c> seed at PlayerClass.cpp:1085).
+    ///
+    /// <para>
+    /// Why a +0 ratchet, and why this specific sibling. Wave 123
+    /// (<see cref="SlashAuthlevel_OnAdminAccount_PinsExactReplyWireShape"/>)
+    /// pinned the HandleSlashCommands user-block case-'a' /authlevel arm
+    /// routing through default-colour <c>SendVaMessage(...)</c> (colour=5
+    /// via the header default arg). Wave 129 pins a DIFFERENT case-letter
+    /// ('p' /position) routing through the SAME default-colour
+    /// <c>SendVaMessage</c> emit fn -- but with a DIFFERENT format
+    /// substitution shape: Wave 123 uses <c>"%d"</c> with the per-account
+    /// <c>AdminLevel()</c> int, while Wave 129 uses <c>"%08x"</c> with the
+    /// per-ship <c>GetTargetGameID()</c> int. The pair pins two
+    /// orthogonal fan-outs on the default-colour fork of
+    /// HandleSlashCommands: (a) case-letter routing 'a' vs 'p' inside the
+    /// <c>switch(*pch)</c> at PlayerConnection.cpp:5442; (b) printf
+    /// format-string substitution decimal vs hex-with-fill.
+    /// </para>
+    ///
+    /// <para>
+    /// Wave 129 also extends the sibling-arm catalogue on the
+    /// HandleSlashCommands user-tier dispatcher to FOUR byte-exact-pinned
+    /// arms -- Wave 123 case-'a' /authlevel (SendVaMessage default-
+    /// colour, %d format); Wave 125 case-'n' /notells (SendVaMessageC
+    /// explicit-colour 17, %s ternary); Wave 126 case-'n' /noattack
+    /// (SendVaMessageC explicit-colour 17, %s ternary); Wave 129 case-'p'
+    /// /position (SendVaMessage default-colour, %08x format).
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Five concrete regression classes the existing
+    /// HandleSlashCommands pins (Waves 123/125/126) are structurally blind
+    /// to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     Case-letter mis-dispatch between case-'a' and case-'p' at
+    ///     <c>server/src/PlayerConnection.cpp:5442</c>. The switch
+    ///     dispatches on the first byte after the slash. A refactor that
+    ///     coalesced or swapped case-arm bodies would emit the wrong
+    ///     literal -- e.g. <c>/position</c> hitting the /authlevel body
+    ///     would produce "Authentication Level - Num: %d" instead of
+    ///     "ObjectID = 0x%08x". Wave 129's literal-prefix filter
+    ///     ("ObjectID =") catches this fail-direction; Wave 123 catches
+    ///     the reverse.
+    ///   </item>
+    ///   <item>
+    ///     <c>Player::SendShipInfo</c> target-seeding regression at
+    ///     <c>server/src/PlayerClass.cpp:1085</c>. The line
+    ///     <c>ShipIndex()-&gt;SetTargetGameID(-1)</c> resets the player's
+    ///     locked target to -1 on every sector-entry SendShipInfo call.
+    ///     A regression that dropped this reset, or changed -1 to 0 or
+    ///     some other sentinel, would substitute a different value into
+    ///     <c>"ObjectID = 0x%08x"</c>: 0 yields "ObjectID = 0x00000000"
+    ///     (same length), some other id yields a random hex string.
+    ///     Wave 129 pins the EXACT substituted body, which fails for any
+    ///     deviation from -1.
+    ///   </item>
+    ///   <item>
+    ///     <c>printf %08x</c> formatting regression at
+    ///     <c>server/src/PlayerClass.cpp:3422</c>
+    ///     (<c>vsprintf_s</c> in SendVaMessage). The %08x specifier
+    ///     zero-pads to a minimum of 8 hex digits. A vsprintf_s
+    ///     implementation regression that dropped the zero-pad, or
+    ///     widened the field, would change the body length: "ffffffff" is
+    ///     8 chars padded; without the pad a small target id like 0xff
+    ///     would render as "ff" (2 chars) -- but on -1 (all bits set) the
+    ///     observable would only catch the >=8-char path. Wave 129 pins
+    ///     the full 21-byte body including the leading "0x" prefix from
+    ///     the format string, which fails if the printf machinery
+    ///     swallows the literal prefix or rewrites the hex digits.
+    ///   </item>
+    ///   <item>
+    ///     <c>SendVaMessage</c> default-colour routing regression at
+    ///     <c>server/src/PlayerConnection.h:277</c>. The header declares
+    ///     <c>SendMessageString(char *msg, char color=5, bool log=true)</c>;
+    ///     <c>SendVaMessage</c>'s body at PlayerClass.cpp:3423 calls
+    ///     <c>SendMessageString(pch)</c> with NO explicit colour, picking
+    ///     up the default-arg 5. A header refactor that flipped the
+    ///     default to a different value would change the on-wire colour
+    ///     byte for every default-colour caller. Wave 129 pins
+    ///     <c>span[2] == 5</c>; Wave 123 pins the same byte on a
+    ///     different case-letter; together they nail the default-colour
+    ///     fork.
+    ///   </item>
+    ///   <item>
+    ///     <c>HandleSlashCommands</c> case-'p' second-emit suppression at
+    ///     <c>server/src/PlayerConnection.cpp:6952-6956</c>. The arm
+    ///     guards a SECOND <c>SendVaMessage("%s @ %.2f %.2f %.2f", ...)</c>
+    ///     behind <c>if (GetTargetGameID() != -1)</c>. A regression that
+    ///     swapped the comparison sense (== -1) or dropped the guard
+    ///     would emit a second MESSAGE_STRING. The test does not pin a
+    ///     single-frame count (other MESSAGE_STRING traffic is filtered
+    ///     out via the "ObjectID =" prefix), but a typical regression
+    ///     would also dereference a null obj-from-id and likely crash --
+    ///     so the drain-timeout / server-crash signal lights up first.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (CLAUDE.md). The case-'p' /position slash command
+    /// is the retail server's documented user-tier target-debug path.
+    /// Note this arm is NOT AdminLevel-gated -- any user can type
+    /// <c>/position</c> and read back their currently-locked target's id
+    /// and (if locked) its name and world coords. No server permissiveness
+    /// added: a real-client /position from any account lands on the exact
+    /// same code path. The test uses a non-admin cli_test account; the
+    /// retail server permits this.
+    /// </para>
+    ///
+    /// <para>
+    /// Why fresh-char no-target matters. The TargetGameID seeds to -1 on
+    /// EVERY <c>SendShipInfo</c> call (sector entry), so the test is
+    /// stable across retries provided no auto-target acquisition fires
+    /// between the handshake-complete signal and the /position dispatch.
+    /// Targeting only fires via explicit
+    /// <c>SetTargetGameID(obj-&gt;GameID())</c> at PlayerClass.cpp:2444
+    /// and 2474 -- both routed off opcode handlers the cli client never
+    /// invokes during this test. Per-account isolation (cli_test121
+    /// dedicated, ServerFixture tears down with -v wiping pgdata) makes
+    /// the no-target invariant safe.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s. Handshake ~2s; CHAT+REPLY round-trip is sub-second.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashPosition_OnFreshCharNoTarget_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (22) = 25 bytes.
+        const int ExpectedReplyPayloadLength = 25;
+        // strlen(literal) + 1 NUL = 22.
+        const short ExpectedReplyLengthField = 22;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 21.
+        const int ExpectedLiteralByteCount = 21;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Positioner", shipName: "PosShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/position");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // Filter on the distinctive prefix so handshake-tail and
+                // chatter frames don't race ahead of the /position reply.
+                // Once we have the right reply we pin its full wire shape.
+                if (!text.StartsWith("ObjectID =", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(PositionNoTargetLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/position\" without seeing 0x001D MESSAGE_STRING starting with " +
+                $"\"ObjectID =\". Likely the user-block case-'p' arm at " +
+                $"server/src/PlayerConnection.cpp:6948 changed shape, the " +
+                $"SendVaMessage default-colour routing was rewired, or the " +
+                $"SendShipInfo target-seed at PlayerClass.cpp:1085 changed.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
