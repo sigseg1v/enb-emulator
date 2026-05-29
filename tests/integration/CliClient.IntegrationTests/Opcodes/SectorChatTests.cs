@@ -16492,4 +16492,142 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 219 sibling-arm-pinning hardening (+0 ratchet) literal anchor
+    /// for the 29-byte ASCII body "Missing arg for option respec" that
+    /// the server emits when admin-tier double-slash <c>//respec</c>
+    /// arrives with no argument. Matcher at PlayerConnection.cpp:5090
+    /// -- TENTH and LAST arm of case-'r' admin-tier else-if chain
+    /// opened at 4962. THIRD case-'r' admin-tier pin; case-'r'
+    /// admin-tier promoted from DOUBLE-PINNED to TRIPLE-PINNED.
+    /// </summary>
+    private const string MissingArgRespecLiteral = "Missing arg for option respec";
+
+    /// <summary>
+    /// Wave 219 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 33-byte wire-shape of the single 0x001D MESSAGE_STRING reply to
+    /// admin-tier double-slash <c>//respec</c> (NO param). Wave 219
+    /// deepens admin-tier case-'r' to TRIPLE-PINNED status.
+    ///
+    /// <para>
+    /// Outer gate at 4716 admits the dispatch (cli_test status=100 &gt;=
+    /// GM=50). Switch at 4724 jumps on *pch='r' -&gt; case-'r' opens at
+    /// 4962. For arg "respec": arms 1-6 strcmp (rstations, rsectors,
+    /// rsectorall, ritems, rmissions, resetmymissions) all differ; arm
+    /// 7 MatchOptWithParam("restartcomms", "respec", 12) -- strncmp
+    /// reads past end of arg "respec\0" (6 bytes + NUL) before reaching
+    /// 12 bytes; byte 1 'e' vs 'e' match, byte 2 's' vs 's' match, byte
+    /// 3 't' vs 'p' MISMATCH -- no prefix-match, no ERROR; arm 8
+    /// strcmp(rfactions) differs; arm 9 MatchOptWithParam("replaceship",
+    /// "respec", 11) byte 2 'p' vs 's' MISMATCH no prefix-match no
+    /// ERROR; arm 10 MatchOptWithParam("respec", "respec", 6) at 5090
+    /// FULL match, arg[6]='\0' not '=' not ' ' not isalpha;
+    /// allowNoParams=false fires 4548 ERROR fork: "Missing arg for
+    /// option respec" COLOR=5. case-'r' breaks. NET RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>
+    /// THIRD admin-tier case-'r' pin; case-'r' admin-tier now
+    /// TRIPLE-PINNED (//restartcomms Wave 131 + //replaceship Wave
+    /// 218 + //respec Wave 219). TWELFTH admin-tier NO-INLINE-GUARD
+    /// pin. EIGHTY-SEVENTH MatchOptWithParam ERROR pin. FIRST
+    /// admin-tier pin where the matching arm is the LAST arm of a
+    /// long (10-arm) else-if chain AND has a SHORT 6-byte option name
+    /// -- catches regression where short option names are dropped to
+    /// truncated length matchers or where the last arm is silently
+    /// removed. 6-byte option-name width pin -- SHORTEST admin-tier
+    /// MatchOptWithParam ERROR-fork pin to date (prior shortest was
+    /// 9-byte gmupgrade Wave 217). Assert.Equal pins the full 33-byte
+    /// response shape.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashRespecMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (30) = 33 bytes.
+        const int ExpectedReplyPayloadLength = 33;
+        const short ExpectedReplyLengthField = 30;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 29;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Respa", shipName: "RespaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//respec");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(MissingArgRespecLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgRespecLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//respec\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{MissingArgRespecLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
