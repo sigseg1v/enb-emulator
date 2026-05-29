@@ -12407,4 +12407,121 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 186 missing-arg ERROR literal for case-'b' /buff.
+    /// Matcher at PlayerConnection.cpp:5579 -- NO-GUARD-IF pattern
+    /// (independent if-chain, no surrounding outer or inside-body
+    /// guard around the MatchOptWithParam call). FIRST case-'b' pin
+    /// for the BUFF-family. THIRD case-'b' pin overall (after the
+    /// Ban GM-tier pin from prior waves).
+    /// </summary>
+    private const string MissingArgBuffLiteral = "Missing arg for option buff";
+
+    /// <summary>
+    /// Wave 186 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 31-byte wire-shape of the single 0x001D MESSAGE_STRING reply to
+    /// user-tier slash <c>/buff</c> (NO param). Wave 186 deepens
+    /// case-'b' user-tier coverage and pins the 4-byte %s width column
+    /// of the "Missing arg for option %s" template.
+    ///
+    /// <para>
+    /// NO-GUARD-IF at 5579 `MatchOptWithParam("buff", pch, param,
+    /// msg_sent)` -- the matcher's missing-arg fork at 4548 fires
+    /// regardless of admin level. Preceding arms in case-'b' that
+    /// could potentially match "buff" as a prefix all fail
+    /// MatchOptWithParam's strncmp ("be" matches first 2 bytes then
+    /// sees alpha 'f' at arg[2] -> silent false return; "bwho" /
+    /// "basset" mismatch on byte 1) and the strcmp arms ("beon",
+    /// "beoff") differ in body. NET RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashBuffMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (28) = 31 bytes.
+        const int ExpectedReplyPayloadLength = 31;
+        const short ExpectedReplyLengthField = 28;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 27;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Buffo", shipName: "BuffoShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/buff");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals("Missing arg for option buff", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgBuffLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/buff\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option buff\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }

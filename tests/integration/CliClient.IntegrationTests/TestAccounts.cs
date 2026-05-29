@@ -240,6 +240,7 @@ public static class TestAccounts
             ["SlashGwormholeMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                        = A(9_000_175, "cli_test175"),
             ["SlashGetstatMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                          = A(9_000_176, "cli_test176"),
             ["SlashGformMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                            = A(9_000_177, "cli_test177"),
+            ["SlashBuffMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                             = A(9_000_178, "cli_test178"),
         };
 
     /// <summary>
