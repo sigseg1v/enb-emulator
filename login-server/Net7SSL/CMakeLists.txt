@@ -59,7 +59,12 @@ find_package(Threads REQUIRED)
 find_package(PostgreSQL REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBPQXX REQUIRED IMPORTED_TARGET libpqxx)
-message(STATUS "net7ssl: libpqxx ${LIBPQXX_VERSION} — ${LIBPQXX_LINK_LIBRARIES}")
+message(STATUS "net7ssl: libpqxx ${LIBPQXX_VERSION} -- ${LIBPQXX_LINK_LIBRARIES}")
+
+# Phase X: libsodium for Argon2id password hashing. Replaces the
+# MD5-via-SQL `digest()` comparison that LinuxAuth.cpp shipped with.
+pkg_check_modules(LIBSODIUM REQUIRED IMPORTED_TARGET libsodium)
+message(STATUS "net7ssl: libsodium ${LIBSODIUM_VERSION} -- ${LIBSODIUM_LINK_LIBRARIES}")
 
 # --------------------------------------------------------------------------
 # Target
@@ -105,6 +110,7 @@ target_link_libraries(net7ssl PRIVATE
 )
 
 target_link_libraries(net7ssl PRIVATE PkgConfig::LIBPQXX PostgreSQL::PostgreSQL)
+target_link_libraries(net7ssl PRIVATE PkgConfig::LIBSODIUM)
 
 # --------------------------------------------------------------------------
 # Install

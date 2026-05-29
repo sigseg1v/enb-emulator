@@ -64,6 +64,7 @@
 #include <net7/Mutex.h>
 
 #include <pqxx/pqxx>
+#include <sodium.h>
 
 #include <ctime>
 #include <cstdio>
@@ -203,23 +204,49 @@ bool EnsureDbConnectedLocked()
     return true;
 }
 
-// Returns true if (username, UPPER(MD5(password))) matches a row in
-// net7_user.accounts. Mirrors AccountManager::ValidateAccount; preserves
-// the wave-2 prepared-statement / parameter-binding pattern so hostile
-// input rounds-trips as literal data and never gets concatenated into SQL.
-//
-// The stored password column is the upper-cased MD5 hex of the
-// plaintext. MySQL's MD5() returned lowercase hex; pgcrypto's digest()
-// returns bytea, so we encode to hex first then upper-case for parity
-// with whatever legacy data was migrated from net7_user.sql.
+// Phase X: sodium_init() is idempotent across threads -- returns 0 on
+// first success, 1 if already initialized, -1 on failure. Called once
+// per process from the first ValidateAccountLinux invocation under the
+// same mutex that guards the connection pool. Wrapping a static bool
+// inside the lock keeps the success/failure check race-free.
+bool g_SodiumReady = false;
+
+static bool EnsureSodiumReadyLocked()
+{
+    if (g_SodiumReady) return true;
+    if (sodium_init() < 0) {
+        LogMessage("LinuxAuth: sodium_init() failed -- password "
+                   "verification cannot proceed\n");
+        return false;
+    }
+    g_SodiumReady = true;
+    return true;
+}
+
+// Returns true if (username, password) verifies against the stored
+// Argon2id PHC string in net7_user.accounts. Phase X replaced the
+// `digest('md5')` SQL comparison: the plaintext now never leaves the
+// login-server process address space -- the query reads back the stored
+// PHC string and libsodium's crypto_pwhash_str_verify() does the
+// constant-time comparison locally. Hostile input still binds as a
+// parameter; pqxx + libpqxx prevent SQL injection. The username
+// existence (positive result row) is intentionally not distinguished
+// from a password mismatch in the return value, to deny user-enumeration
+// via timing differences.
 bool ValidateAccountLinux(const char *username, const char *password)
 {
     if (!username || !password || !*username || !*password) return false;
 
     bool ok = false;
+    std::string stored_phc;
+    bool have_row = false;
 
     g_DbMutex.Lock();
 
+    if (!EnsureSodiumReadyLocked()) {
+        g_DbMutex.Unlock();
+        return false;
+    }
     if (!EnsureDbConnectedLocked()) {
         g_DbMutex.Unlock();
         return false;
@@ -228,19 +255,14 @@ bool ValidateAccountLinux(const char *username, const char *password)
     try {
         pqxx::work tx(*g_DbConn);
 
-        // pgcrypto's digest() lives in the pgcrypto extension. seed.sql
-        // (Fixtures/seed.sql and db/postgres/schema bootstrap) does
-        // CREATE EXTENSION IF NOT EXISTS pgcrypto so this function is
-        // always available against any dev/prod schema we ship.
         pqxx::result r = tx.exec_params(
-            "SELECT id FROM accounts "
-            "WHERE username = $1 "
-            "AND password = UPPER(encode(digest($2, 'md5'), 'hex'))",
-            username, password);
+            "SELECT password_phc FROM accounts WHERE username = $1",
+            username);
 
-        ok = !r.empty();
-        // Commit isn't strictly needed for a SELECT but is cheap and
-        // releases the snapshot quickly.
+        if (!r.empty()) {
+            stored_phc = r[0][0].as<std::string>();
+            have_row = true;
+        }
         tx.commit();
     } catch (const pqxx::broken_connection &e) {
         LogMessage("LinuxAuth: ValidateAccount lost connection: %s\n", e.what());
@@ -259,6 +281,17 @@ bool ValidateAccountLinux(const char *username, const char *password)
     }
 
     g_DbMutex.Unlock();
+
+    if (!have_row) return false;
+    if (stored_phc.empty()) return false;
+
+    // crypto_pwhash_str_verify returns 0 on success. The stored string
+    // is NUL-terminated PHC; libsodium parses the algorithm + params out
+    // of the string itself, so future scheme bumps don't need new code
+    // paths here.
+    ok = crypto_pwhash_str_verify(stored_phc.c_str(),
+                                  password,
+                                  strlen(password)) == 0;
     return ok;
 }
 

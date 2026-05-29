@@ -148,59 +148,21 @@ Out-of-scope MD5 occurrences:
 
 ## Waves
 
-- [ ] **W1: dependency + build wiring.**
-  - Pick Argon2id-via-libsodium vs bcrypt-via-crypt_blowfish based on
-    vendoring effort. Default: libsodium static into
-    `login-server/third_party/libsodium/`. Add a `THIRD_PARTY_BINARIES.md`
-    if the source build is non-trivial, but prefer a from-source build
-    in CMake.
-  - Wire into `login-server/Net7SSL/CMakeLists.txt`.
-  - Add to MinGW cross-build (Phase W) if the proxy ever needs the same
-    primitive — currently only the login-server validates passwords, so
-    proxy stays out of scope.
+- [x] **W1: dependency + build wiring.** Chose Argon2id via libsodium (memory-hard; PHC self-describes; simpler API than crypt_blowfish). Vendored via Debian apt — `libsodium-dev` build / `libsodium23` runtime — in `login-server/Dockerfile` and `server/Dockerfile`. `pkg_check_modules(LIBSODIUM REQUIRED IMPORTED_TARGET libsodium)` + `target_link_libraries(... PkgConfig::LIBSODIUM)` in `login-server/Net7SSL/CMakeLists.txt` and `server/CMakeLists.txt`. Proxy out of scope.
 
-- [ ] **W2: column rename + migration.**
-  - `db/postgres/schema.sql`: drop `password varchar(40)`, add
-    `password_phc text NOT NULL`.
-  - Write a one-shot migration script that drops the column and re-adds
-    it (per "no back-compat") — explicitly does NOT preserve the existing
-    MD5 hashes. Document this destructive step in `db/postgres/README.md`
-    and in the migration comment.
+- [x] **W2: column rename + migration.** `db/mysql/net7_user.sql` (source of truth for `convert.sh`) renames `accounts.password varchar(40)` -> `accounts.password_phc varchar(128)`. Auto-converted to `text` in `db/postgres/seed.sql`. Dev admin row carries Argon2id PHC for plaintext `'devadmin'`. Documented in `db/postgres/README.md` "Phase X: password storage" section. Destructive -- no MD5 preservation.
 
-- [ ] **W3: server-side rewrite.**
-  - `LinuxAuth.cpp::ValidateAccountLinux` — replace the SQL `digest()`
-    comparison with `SELECT password_phc FROM accounts WHERE username =
-    $1`, then call `crypto_pwhash_str_verify(stored.c_str(),
-    password, plaintext_len) == 0`.
-  - `server/src/AccountManager.cpp::AddUser` — compute the PHC string
-    in-process (`crypto_pwhash_str`) before any SQL bind. Stored value
-    is the entire PHC string verbatim. **Delete the `sprintf(pass,
-    "MD5('%s')", password)` line** — the plaintext-in-SQL pattern is a
-    primary motivation for this phase.
-  - `server/src/AccountManager.cpp::ChangePassword` — same pattern.
-  - `server/src/AccountManager.cpp::ValidateAccount` — if still reachable,
-    bind the stored PHC + the plaintext and call `crypto_pwhash_str_verify`.
-    If not reachable on the Linux server (LinuxAuth takes precedence),
-    delete the function rather than leaving a dead MD5 path.
+- [x] **W3: server-side rewrite.**
+  - `login-server/Net7SSL/LinuxAuth.cpp::ValidateAccountLinux` reads `password_phc` via `exec_params("... WHERE username = $1", username)`, runs `crypto_pwhash_str_verify` in-process. `sodium_init()` gated by `EnsureSodiumReadyLocked()` under the existing `g_DbMutex`.
+  - `server/src/AccountManager.cpp::ValidateAccount` reads `password_phc`, calls `crypto_pwhash_str_verify`. `AddUser` and `ChangePassword` compute PHC via static `HashPasswordToPhc()` (libsodium INTERACTIVE: m=64MiB, t=2, p=1) before binding as `password_phc`. The `sprintf(pass, "MD5('%s')", password)` line is gone. Static `EnsureAccountSodiumReady()` shared across all three.
+  - Both processes verified to compile clean (`docker compose build server`, `docker compose build login`).
 
-- [ ] **W4: test fixture regeneration.**
-  - `tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql` —
-    replace `UPPER(encode(digest('testpw', 'md5'), 'hex'))` with a
-    pre-computed Argon2id PHC string for `'testpw'`, or better, with a
-    PL/pgSQL helper function the fixture calls per-row (so adding
-    `cli_testNN` rows doesn't require running argon2 by hand each time).
-  - Update `docs/16-integration-tests.md:83` accordingly.
+- [x] **W4: test fixture regeneration.** `TestAccounts.cs` inserts a precomputed Argon2id PHC constant for SharedPassword "testpw" (avoids pulling a C# Argon2 NuGet -- server's `crypto_pwhash_str_verify` accepts any conforming PHC). Dead `ServerFixture.EnsurePgcryptoAsync()` deleted (pgcrypto no longer needed). `convert.sh` now appends a `DO $reset_identity$` block that `setval`s every IDENTITY sequence past its column's MAX(id) -- needed because explicit `id=1` admin row doesn't advance GENERATED-BY-DEFAULT sequences, so `TestAccounts.New`'s `RETURNING id` collided with admin PK on clean rebuilds. `docs/16-integration-tests.md` Password section rewritten. Verified end-to-end: `TlsLoginTests` (Valid/Wrong/Nonexistent) all pass against the rebuilt stack.
 
-- [ ] **W5: secondary cleanups.**
-  - Delete or rewrite `login-server/Net7SSL/AccountManager.cpp` (the
-    legacy MySQL-flavoured methods). If kept, they call the same
-    `crypto_pwhash_str` path as LinuxAuth.
-  - Audit `pg_stat_statements` redaction docs — even after the migration,
-    `LinuxAuth.cpp` should bind the stored PHC as `$1` (not concatenate
-    it), so the plan plus the verify-against-stored-PHC pattern keeps
-    plaintext entirely client-side of Postgres.
-  - Note in the decisions log that Phase X chose Argon2id over bcrypt
-    (or vice versa) with the rationale.
+- [x] **W5: secondary cleanups.**
+  - `login-server/Net7SSL/AccountManager.cpp` (1028 lines, 100% `#ifdef WIN32`) deleted. Held the last `WHERE password = MD5(...)` and `password = MD5(...)` patterns in tree. Phase J Linux path goes through `LinuxAuth.cpp` exclusively; this file was build-time-excluded dead weight. `login-server/Net7Mysql/Tab2.cpp` MFC dialogs remain out of scope (Phase Q deletion radar).
+  - LinuxAuth.cpp confirmed: `exec_params(... "$1", username)` parameterized, PHC never wire-bound, plaintext never crosses the Postgres wire.
+  - Decisions-log entry appended (2026-05-29 -- Phase X).
 
 ## Non-goals (deliberately deferred)
 

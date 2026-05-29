@@ -27,8 +27,46 @@
 #include "StringManager.h"
 #include "StaticData.h"
 #include <time.h>
+#include <string>
+#include <sodium.h>
 #include "mysql/mysqlplus.h"
 #include "SaveManager.h"
+
+#ifdef USE_MYSQL_ACCOUNT_DATA
+// Phase X: lazy one-shot libsodium init. sodium_init() is thread-safe
+// and idempotent. Lives outside any single AccountManager method so
+// both ValidateAccount and the mutating paths share it.
+static bool g_AccountSodiumReady = false;
+static bool EnsureAccountSodiumReady()
+{
+    if (g_AccountSodiumReady) return true;
+    if (sodium_init() < 0) {
+        LogMessage("AccountManager: sodium_init() failed -- account "
+                   "operations cannot proceed\n");
+        return false;
+    }
+    g_AccountSodiumReady = true;
+    return true;
+}
+
+// Phase X: compute an Argon2id PHC string for the given plaintext. The
+// INTERACTIVE profile is calibrated for ~70ms per call on a modern CPU,
+// which matches the wire-facing /AuthLogin request latency budget.
+// Returns empty string on failure; caller treats empty as a hard fail.
+static std::string HashPasswordToPhc(const char *plaintext)
+{
+    if (!plaintext || !*plaintext) return std::string();
+    if (!EnsureAccountSodiumReady()) return std::string();
+    char out[crypto_pwhash_STRBYTES];
+    if (crypto_pwhash_str(out, plaintext, strlen(plaintext),
+                          crypto_pwhash_OPSLIMIT_INTERACTIVE,
+                          crypto_pwhash_MEMLIMIT_INTERACTIVE) != 0) {
+        LogMessage("AccountManager: crypto_pwhash_str failed (out of memory?)\n");
+        return std::string();
+    }
+    return std::string(out);
+}
+#endif
 
 #ifdef USE_MYSQL_ACCOUNT_DATA
 sql_connection_c m_SQL_Conn;
@@ -162,17 +200,22 @@ void AccountManager::SetupTickets()
         return account_row[0];
     }
 
-    //Validates the username/password set, returns the account if valid
+    //Validates the username/password set, returns the account if valid.
+    //Phase X: reads back the stored Argon2id PHC string and runs
+    //crypto_pwhash_str_verify in-process. Plaintext never leaves the
+    //server's address space.
     long AccountManager::ValidateAccount(char *username, char *password)
     {
+        if (!username || !password) return -1;
+        if (!EnsureAccountSodiumReady()) return -1;
+
 	    sql_query_c account_query(&m_SQL_Conn);
 	    sql_result_c account_result;
         sql_row_c account_row;
 
         account_query.AddParam(username);
-        account_query.AddParam(password);
         if (!account_query.run_query_params(
-                "SELECT `id` FROM `accounts` WHERE `username` = ? AND `password` = ?")
+                "SELECT `id`, `password_phc` FROM `accounts` WHERE `username` = ?")
             || account_query.n_rows() == 0)
         {
             return -1;
@@ -181,6 +224,14 @@ void AccountManager::SetupTickets()
 	    account_query.store(&account_result);
         account_result.fetch_row(&account_row);
 
+        const char *stored_phc = (const char *)account_row[1];
+        if (!stored_phc || !*stored_phc) return -1;
+
+        if (crypto_pwhash_str_verify(stored_phc, password, strlen(password)) != 0)
+        {
+            return -1;
+        }
+
         return account_row[0];
     }
 
@@ -188,23 +239,23 @@ void AccountManager::SetupTickets()
     {
         LogMessage("Adding new user `%s`\n", username);
 
+        std::string phc = HashPasswordToPhc(password);
+        if (phc.empty()) return false;
+
 	    sql_query_c account_query(&m_SQL_Conn);
         sql_query account_buider;
 
-		char pass[128];
-		sprintf(pass, "MD5('%s')", password);
-
         account_buider.SetTable("accounts");
         account_buider.AddData("username", username);
-        account_buider.AddDataNQ("password", password);
+        account_buider.AddData("password_phc", (char *)phc.c_str());
         account_buider.AddData("status", access);
         account_buider.AddData("last_login", "1989-12-30 00:00:00"); // "never" isnt a valid date
-    
+
         if (!account_query.run_query(account_buider.CreateQuery()))
         {
             return false;
         }
-    
+
         return true;
     }
 
@@ -228,13 +279,14 @@ void AccountManager::SetupTickets()
     {
 	    LogMessage("Changing password on %s\n", username);
 
+        std::string phc = HashPasswordToPhc(password);
+        if (phc.empty()) return false;
+
 	    sql_query_c account_query(&m_SQL_Conn);
-	    // MD5() runs server-side over the bound literal — bind value never
-	    // escapes the parameter slot.
-	    account_query.AddParam(password);
+	    account_query.AddParam(phc.c_str());
 	    account_query.AddParam(username);
         if (!account_query.run_query_params(
-                "UPDATE `accounts` SET `password`= MD5(?) WHERE `username`=?"))
+                "UPDATE `accounts` SET `password_phc` = ? WHERE `username` = ?"))
         {
             return false;
         }

@@ -121,7 +121,12 @@ endif()
 find_package(PostgreSQL REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBPQXX REQUIRED IMPORTED_TARGET libpqxx)
-message(STATUS "net7: libpqxx ${LIBPQXX_VERSION} — ${LIBPQXX_LINK_LIBRARIES}")
+message(STATUS "net7: libpqxx ${LIBPQXX_VERSION} -- ${LIBPQXX_LINK_LIBRARIES}")
+
+# Phase X: libsodium for Argon2id password hashing. Replaces the
+# MD5() SQL function calls in AccountManager.cpp AddUser/ChangePassword.
+pkg_check_modules(LIBSODIUM REQUIRED IMPORTED_TARGET libsodium)
+message(STATUS "net7: libsodium ${LIBSODIUM_VERSION} -- ${LIBSODIUM_LINK_LIBRARIES}")
 
 # --------------------------------------------------------------------------
 # Target
@@ -181,6 +186,7 @@ target_link_libraries(net7 PRIVATE
 )
 
 target_link_libraries(net7 PRIVATE PkgConfig::LIBPQXX PostgreSQL::PostgreSQL)
+target_link_libraries(net7 PRIVATE PkgConfig::LIBSODIUM)
 
 if(TinyXML_FOUND)
     target_link_libraries(net7 PRIVATE ${TinyXML_LIBRARIES})

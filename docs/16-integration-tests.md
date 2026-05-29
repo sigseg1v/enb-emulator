@@ -89,19 +89,20 @@ the accounts.username varchar(40) limit). The 8-hex process-id prefix
 is drawn once per test run, so two concurrent test runs against the
 same database do not collide.
 
-Password is the literal string "testpw" for every account; the hash
-stored in accounts.password is `UPPER(encode(digest('testpw', 'md5'),
-'hex'))`, matching the login server's expectation
-(login-server/Net7SSL/LinuxAuth.cpp).
+Password is the literal string "testpw" for every account; the value
+stored in `accounts.password_phc` is a precomputed Argon2id PHC string
+(libsodium's INTERACTIVE profile -- m=64MiB, t=2, p=1), held as a
+constant in TestAccounts. The login server verifies via
+`crypto_pwhash_str_verify` (LinuxAuth.cpp) which accepts any conforming
+Argon2id PHC regardless of the implementation that produced it. If
+`SharedPassword` changes, the constant PHC must be regenerated.
 
 For STRESS_TEST_CLOSED accounts (rejected at the global UDP plane
 with G_ERROR 12, per server/src/UDP_Global.cpp:ProcessTicketInfo),
 pass `status: 0`. Default is status=100 (ACTIVE/admin) which matches
 what real accounts use.
 
-ServerFixture installs the pgcrypto extension at startup (needed for
-the digest() call in the INSERT). Cross-run isolation comes from
-`down -v` in DisposeAsync.
+Cross-run isolation comes from `down -v` in DisposeAsync.
 
 ## ScriptedServer (Robustness)
 

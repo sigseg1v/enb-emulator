@@ -52,6 +52,16 @@ public static class TestAccounts
 {
     public const string SharedPassword = "testpw";
 
+    // Phase X: Argon2id PHC string for SharedPassword ("testpw"), produced
+    // with libsodium's INTERACTIVE profile (m=64MiB, t=2, p=1). Stored as
+    // a constant so the test suite doesn't need to pull a C# Argon2
+    // implementation -- the server verifies via crypto_pwhash_str_verify,
+    // which accepts any conforming Argon2id PHC regardless of the
+    // implementation that produced it. If SharedPassword changes, this
+    // string must be regenerated (see plans/24-phase-x-password-hash-modernization.md).
+    private const string SharedPasswordPhc =
+        "$argon2id$v=19$m=65536,t=2,p=1$yJ6EvyLVw7FE954o5j2knA$WbzKh+x/BRJdTBcaMBhR3Wo5JhbcYJIzierKkVOrFzE";
+
     // 8 hex digits drawn once per test process. The whole point is to
     // keep usernames stable across one run (so retries / log scraping
     // work) while preventing collisions across runs that race on the
@@ -100,14 +110,12 @@ public static class TestAccounts
         using var conn = new NpgsqlConnection(server.PostgresConnectionString);
         conn.Open();
         using var cmd = new NpgsqlCommand(@"
-            INSERT INTO accounts (username, password, status, formname, email, warn_level)
-            VALUES (@username,
-                    UPPER(encode(digest(@password, 'md5'), 'hex')),
-                    @status, @formname, @email, 0)
+            INSERT INTO accounts (username, password_phc, status, formname, email, warn_level)
+            VALUES (@username, @password_phc, @status, @formname, @email, 0)
             RETURNING id",
             conn);
         cmd.Parameters.AddWithValue("username", username);
-        cmd.Parameters.AddWithValue("password", SharedPassword);
+        cmd.Parameters.AddWithValue("password_phc", SharedPasswordPhc);
         cmd.Parameters.AddWithValue("status", status);
         cmd.Parameters.AddWithValue("formname", formname);
         cmd.Parameters.AddWithValue("email", $"{username}@net-7.test");

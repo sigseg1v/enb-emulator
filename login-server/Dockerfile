@@ -26,6 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ninja-build \
         pkg-config \
         libssl-dev \
+        libsodium-dev \
         libpq-dev \
         libpqxx-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -48,6 +49,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         libssl3 \
+        libsodium23 \
         libpqxx-7.8t64 \
         iproute2 \
     && rm -rf /var/lib/apt/lists/* \

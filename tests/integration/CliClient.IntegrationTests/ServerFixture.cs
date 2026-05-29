@@ -96,21 +96,6 @@ public sealed class ServerFixture : IAsyncLifetime
         // a future test enters a different sector first, add its id to
         // the list -- or generalise this to per-test parameters.
         await WaitForServerSectorAsync(10151, TimeSpan.FromMinutes(3));
-
-        // pgcrypto is needed for TestAccounts.New's INSERT (UPPER(MD5(...))
-        // via digest()). The schema-init service does not install it
-        // because the dump didn't either; do it here so the per-test
-        // account provisioning works.
-        await EnsurePgcryptoAsync();
-    }
-
-    private async Task EnsurePgcryptoAsync()
-    {
-        await using var conn = new Npgsql.NpgsqlConnection(PostgresConnectionString);
-        await conn.OpenAsync();
-        await using var cmd = new Npgsql.NpgsqlCommand(
-            "CREATE EXTENSION IF NOT EXISTS pgcrypto", conn);
-        await cmd.ExecuteNonQueryAsync();
     }
 
     private static async Task WaitForServerSectorAsync(int sectorId, TimeSpan timeout)

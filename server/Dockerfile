@@ -23,6 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ninja-build \
         pkg-config \
         libssl-dev \
+        libsodium-dev \
         liblua5.4-dev \
         liblua5.4-0 \
         libtinyxml-dev \
@@ -49,6 +50,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         libssl3 \
+        libsodium23 \
         liblua5.4-0 \
         libtinyxml2.6.2v5 \
         libcrypto++8t64 \

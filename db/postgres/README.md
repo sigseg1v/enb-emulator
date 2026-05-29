@@ -8,6 +8,16 @@ schema (`db/mysql/net7.sql`) and seed data (`db/mysql/net7_user.sql`).
 Run `bash db/postgres/convert.sh` to regenerate `schema.sql` and
 `seed.sql` from the MySQL source.
 
+## Phase X: password storage
+
+The `accounts.password` column was renamed to `accounts.password_phc text`
+in Phase X. The column now stores Argon2id PHC strings (libsodium's
+`crypto_pwhash_str` output, ~96 chars) instead of `UPPER(MD5(plaintext))`.
+This change is **destructive** -- existing MD5 hashes are NOT preserved;
+they are dropped at migration time, and every account either rotates via
+the normal `ChangePassword` path or is re-provisioned. The dev admin
+row in `seed.sql` carries the Argon2id PHC for the plaintext `'devadmin'`.
+
 ## How to apply
 
 Against a local Postgres 16:
