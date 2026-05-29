@@ -12990,4 +12990,137 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 191 missing-arg ERROR literal for case-'e' /effecto.
+    /// Matcher at PlayerConnection.cpp:6120 -- INSIDE-BODY pattern
+    /// inside the OUTER-BLOCK-GM-guard at 6074 (`if (AdminLevel() >=
+    /// GM)`). cli_test1xx accounts have status=100 which satisfies
+    /// AdminLevel >= GM, so the outer block enters and the matcher's
+    /// missing-arg fork at 4548 fires. SECOND case-'e' user-tier pin
+    /// (after /effect) -- case-'e' user-tier now DOUBLE-PINNED.
+    /// </summary>
+    private const string MissingArgEffectoLiteral = "Missing arg for option effecto";
+
+    /// <summary>
+    /// Wave 191 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 34-byte wire-shape of the single 0x001D MESSAGE_STRING reply to
+    /// user-tier slash <c>/effecto</c> (NO param). Wave 191 deepens
+    /// case-'e' to DOUBLE-PINNED.
+    ///
+    /// <para>
+    /// ELSE-IF at 6120 `MatchOptWithParam("effecto", pch, param,
+    /// msg_sent)` -- inside the OUTER-BLOCK-GM-guard at 6074. /effect
+    /// at 6076 strncmp("effect","effecto",6)=match, arg[6]='o' is
+    /// alpha -> silent FALSE (no emit). /effecto at 6120 matches,
+    /// arg[7]=NUL not '=' not ' ' not alpha -> param=NULL fork ->
+    /// emits "Missing arg for option effecto". /effects at 6193
+    /// strncmp("effects","effecto",6)=match, byte 6='s' vs 'o'
+    /// MISMATCH -> silent FALSE. Preceding /endtalk strcmp at 6047
+    /// MISMATCH, /enableskills strcmp at 6054 MISMATCH. NET RESULT:
+    /// ONE emit.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity: the matcher's missing-arg ERROR fork is
+    /// behaviour the real server exhibited; pinning the wire shape
+    /// ratchets fidelity without weakening any security posture.
+    /// CRITICAL safety regression: if a future refactor weakened the
+    /// OUTER-BLOCK-GM-guard at 6074 so /effecto became reachable
+    /// without GM, this test would still pass (status=100 already has
+    /// GM), but a sibling /effecto-on-non-GM test would catch it.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashEffectoMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (31) = 34 bytes.
+        const int ExpectedReplyPayloadLength = 34;
+        const short ExpectedReplyLengthField = 31;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 30;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Effecto", shipName: "EffectoShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/effecto");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // EXACT equals filter -- "Missing arg for option effecto"
+                // is itself a prefix-free string under the case-'e' family
+                // (/effect emits a shorter literal; /effects a different
+                // longer one).
+                if (!text.Equals("Missing arg for option effecto", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgEffectoLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/effecto\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option effecto\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
