@@ -10265,4 +10265,214 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 171 missing-arg ERROR literal for case-'r' /rotatey.
+    /// The matcher at PlayerConnection.cpp:7064 reads
+    /// `else if (MatchOptWithParam("rotatey", pch, param, msg_sent))`
+    /// -- NO outer AdminLevel guard, NO inside-body guard
+    /// (pure NO-GUARD-ELSE-IF pattern, same shape as Wave 170
+    /// /rotatex at 7059). THIRD case-'r' user-tier pin -- Wave 144
+    /// /removebaseore GUARD-FIRST inline at 7074 + Wave 170
+    /// /rotatex NO-GUARD-ELSE-IF at 7059 + Wave 171 /rotatey
+    /// NO-GUARD-ELSE-IF at 7064 = TRIPLE-PINNED case-'r' user-tier
+    /// across THREE ELSE-IF positions. NO-GUARD-ELSE-IF within
+    /// case-'r' DOUBLE-PINNED. 7 ASCII bytes after %s substitution
+    /// -- 5th 7-byte width pin QUINTUPLE-PINNED across 4
+    /// case-letters (c/u/t/r) and case-'r' double-instance.
+    /// </summary>
+    private const string MissingArgRotateyLiteral = "Missing arg for option rotatey";
+
+    /// <summary>
+    /// Wave 171 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 34-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/rotatey</c> (NO param) -- routes through the
+    /// user-tier dispatcher entry at line 5434, the 1-char strip, the
+    /// case-'r' user-tier dispatch at line 6992. Wave 171 deepens
+    /// case-'r' to TRIPLE-PINNED across THREE ELSE-IF positions
+    /// (Wave 144 /removebaseore at 7074, Wave 170 /rotatex at 7059,
+    /// Wave 171 /rotatey at 7064). Prior matchers in case-'r' MISMATCH
+    /// at byte 1 against "rotatey" (reffect/rs/release/rsi/rsa/rsn/
+    /// rsd/range/restoreinv MISMATCHES); /rotatex MISMATCH at byte 6
+    /// ('x' vs 'y').
+    ///
+    /// <para>
+    /// ELSE-IF at 7064 `MatchOptWithParam("rotatey", pch, param,
+    /// msg_sent)` -- NO outer AdminLevel guard, NO inside-body guard
+    /// (pure NO-GUARD-ELSE-IF pattern). MatchOptWithParam: strncmps
+    /// "rotatey" against "rotatey" (7 byte match), arg[7]='\0' --
+    /// NOT '=', NOT ' ', NOT isalpha, allowNoParams=false -- emits
+    /// "Missing arg for option rotatey" via SendVaMessage at 4548
+    /// with default COLOR=5, sets msg_sent=true, returns false.
+    /// Body at 7066 SKIPPED (matcher returned false). case-'r' chain
+    /// continues: /rotatez MISMATCH at byte 6 ('z' vs 'y');
+    /// /removebaseore AdminLevel-AND-matcher short-circuit --
+    /// AdminLevel passes (SDEV) but MatchOptWithParam "removebaseore"
+    /// vs "rotatey" byte 1 'e' vs 'o' MISMATCH NO emit; rest of
+    /// case-'r' MISMATCH. case-'r' breaks. Trailing fallback at 7702
+    /// SKIPPED (msg_sent=true). NET RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>
+    /// FORTIETH pin on the user-tier (single-slash) dispatch path.
+    /// THIRD pin on user-tier case-'r' -- case-'r' user-tier now
+    /// TRIPLE-PINNED across THREE ELSE-IF chain-arm positions
+    /// (Wave 144 /removebaseore GUARD-FIRST inline at 7074 + Wave 170
+    /// /rotatex NO-GUARD-ELSE-IF at 7059 + Wave 171 /rotatey
+    /// NO-GUARD-ELSE-IF at 7064). THIRTY-NINTH pin on the
+    /// MatchOptWithParam ERROR path. TWELFTH NO-GUARD pin --
+    /// NO-GUARD now DUODECUPLE-PINNED across 6 case-letters
+    /// (o/s/t/u/w/r) with case-'r' now DOUBLE-instance within the
+    /// pattern. FIFTH 7-byte %s width pin -- QUINTUPLE-PINNED across
+    /// 4 case-letters (c/u/t/r) AND 5 structural-pattern instances
+    /// (case-'r' now double-instance: /rotatex + /rotatey).
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes prior
+    /// waves are structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     THIRD case-'r' user-tier ELSE-IF chain arm regression at
+    ///     <c>PlayerConnection.cpp:7064</c>. A regression that wrapped
+    ///     ALL case-'r' arms in a global AdminLevel guard would gate
+    ///     /rotatey behind that tier; Wave 171 pins /rotatey emits on
+    ///     missing-arg without any AdminLevel gating, ruling out
+    ///     spurious case-'r'-wide guards even after the existing
+    ///     Wave 170 /rotatex pin (locality: 5-line ELSE-IF stride
+    ///     7059 vs 7064 within the same case body).
+    ///   </item>
+    ///   <item>
+    ///     NO-GUARD-ELSE-IF intra-case-letter locality regression at
+    ///     <c>PlayerConnection.cpp:7059</c> vs <c>7064</c>. case-'r'
+    ///     has TWO consecutive NO-GUARD-ELSE-IF arms emitting
+    ///     identical 7-byte %s width missing-arg ERRORS that differ
+    ///     only in the last literal byte ('x' vs 'y'). A regression
+    ///     in the ELSE-IF chain order (e.g. accidentally moved the
+    ///     /rotatey arm out of case-'r', or fell through to /rotatex
+    ///     for /rotatey input) would break one pin but not the other;
+    ///     Wave 171 fixes the intra-arm position.
+    ///   </item>
+    ///   <item>
+    ///     7-byte %s width FIFTH (case-letter, structural-pattern,
+    ///     literal) divergence regression at <c>PlayerClass.cpp:3422</c>.
+    ///     7-byte %s now pinned at FIVE distinct (case-letter,
+    ///     structural-pattern, literal) combinations -- c/chjoin
+    ///     GM-block MATCHER-FIRST + u/upgrade INSIDE-BODY-GM +
+    ///     t/testmsg CONSECUTIVE-IF DEV-guard MATCHER-FIRST +
+    ///     r/rotatex NO-GUARD-ELSE-IF + r/rotatey NO-GUARD-ELSE-IF.
+    ///     A regression in the vsprintf_s 7-byte path specific to ONE
+    ///     literal would fail one pin but not the other four.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). /rotatey is open
+    /// to ALL users at the dispatcher level -- the NO-GUARD-ELSE-IF
+    /// pattern at 7064 has no AdminLevel guard at all. ERROR fork at
+    /// 4548 emits for ALL tiers (faithful to retail). No server
+    /// permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashRotateyMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (31) = 34 bytes.
+        const int ExpectedReplyPayloadLength = 34;
+        // strlen(literal) + 1 NUL = 31.
+        const short ExpectedReplyLengthField = 31;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 30.
+        const int ExpectedLiteralByteCount = 30;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Rotyo", shipName: "RotyoShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/rotatey");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals("Missing arg for option rotatey", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgRotateyLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/rotatey\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option rotatey\". Likely the user-tier case-'r' " +
+                $"dispatch at line 6992 stopped routing, the NO-GUARD-ELSE-IF arm at " +
+                $"7064 acquired a spurious AdminLevel guard, the trailing illegal-slash " +
+                $"fallback at 7702 fired as a second emit, or the missing-arg ERROR " +
+                $"fork at PlayerConnection.cpp:4548 changed shape (esp. vsprintf_s " +
+                $"7-byte %s width).");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
