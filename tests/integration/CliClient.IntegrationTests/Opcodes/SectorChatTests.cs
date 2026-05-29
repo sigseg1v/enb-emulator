@@ -15403,4 +15403,136 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 211 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
+    /// the 43-byte ASCII body "Missing arg for option displayplayerfaction"
+    /// that the server emits when admin-tier double-slash
+    /// <c>//displayplayerfaction</c> arrives with no argument. Matcher at
+    /// PlayerConnection.cpp:4865 (case-'d' arm of the admin-tier switch
+    /// opened at 4724) -- NO-INLINE-GUARD pattern (outer GM gate at 4716
+    /// is the only AdminLevel check on the dispatch path). FIRST admin-tier
+    /// case-'d' pin; case-'d' admin-tier now SINGLE-PINNED. FIRST 20-byte
+    /// option-width pin in the catalogue (existing pins span 1..17 bytes;
+    /// 20 was unpinned, leaving a structural blind spot for strncmp
+    /// length=20 regressions).
+    /// </summary>
+    private const string MissingArgDisplayplayerfactionLiteral =
+        "Missing arg for option displayplayerfaction";
+
+    /// <summary>
+    /// Wave 211 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 47-byte wire-shape of the single 0x001D MESSAGE_STRING reply to
+    /// admin-tier double-slash <c>//displayplayerfaction</c> (NO param).
+    /// Wave 211 opens admin-tier case-'d' to SINGLE-PINNED status.
+    ///
+    /// <para>
+    /// Outer gate at 4716 (<c>Msg[0]=='/' &amp;&amp; Msg[1]=='/' &amp;&amp;
+    /// AdminLevel() >= GM</c>) admits the dispatch; cli_test status=100
+    /// satisfies GM=50. Switch at 4724 jumps on *pch -> case-'d' opens at
+    /// 4858. case-'d' has three arms: strcmp("displayfactions", pch)
+    /// 15B byte 7 'f' vs 'p' MISMATCH; else-if MatchOptWithParam
+    /// ("displayplayerfaction", pch) at 4865 -- 20B vs 20B full match.
+    /// NO inline AdminLevel guard. param=NULL so the strtok_s body branch
+    /// is not reached; allowNoParams=false (default) fires the 4548 ERROR
+    /// fork: "Missing arg for option displayplayerfaction" COLOR=5.
+    /// Subsequent strcmp("destroyobject", pch) 13B byte 0 'd' match byte 1
+    /// 'e' vs 'i' MISMATCH. case-'d' breaks. NET RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>
+    /// FIRST 20-byte option-width pin in the catalogue. First admin-tier
+    /// case-'d' MatchOptWithParam ERROR-fork pin. FOURTH admin-tier
+    /// NO-INLINE-GUARD pin (joins //halloween 4927, //restartcomms 5055,
+    /// //countsp 4831).
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashDisplayplayerfactionMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (44) = 47 bytes.
+        const int ExpectedReplyPayloadLength = 47;
+        const short ExpectedReplyLengthField = 44;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 43;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Dia", shipName: "DiaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//displayplayerfaction");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(MissingArgDisplayplayerfactionLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgDisplayplayerfactionLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//displayplayerfaction\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{MissingArgDisplayplayerfactionLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
