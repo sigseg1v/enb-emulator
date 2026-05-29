@@ -227,6 +227,7 @@ public static class TestAccounts
             ["SlashRotatexMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                          = A(9_000_162, "cli_test162"),
             ["SlashRotateyMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                          = A(9_000_163, "cli_test163"),
             ["SlashRotatezMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                          = A(9_000_164, "cli_test164"),
+            ["SlashRsiMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                              = A(9_000_165, "cli_test165"),
         };
 
     /// <summary>

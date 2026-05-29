@@ -10682,4 +10682,218 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 173 missing-arg ERROR literal for case-'r' /rsi.
+    /// The matcher at PlayerConnection.cpp:7012 reads
+    /// `else if (MatchOptWithParam("rsi", pch, param, msg_sent))`
+    /// -- NO outer AdminLevel guard, NO inside-body guard
+    /// (pure NO-GUARD-ELSE-IF pattern). FIFTH case-'r' user-tier
+    /// pin. FIRST 3-byte %s width pin within case-'r' -- 3-byte
+    /// %s now pinned across MULTIPLE case-letters. /rsi is 3 ASCII
+    /// bytes after %s substitution; SHORTEST literal pinned within
+    /// case-'r'.
+    /// </summary>
+    private const string MissingArgRsiLiteral = "Missing arg for option rsi";
+
+    /// <summary>
+    /// Wave 173 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 30-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/rsi</c> (NO param) -- routes through the user-tier
+    /// dispatcher entry at line 5434, the 1-char strip, the case-'r'
+    /// user-tier dispatch at line 6992. Wave 173 deepens case-'r' to
+    /// QUINTUPLE-PINNED across FIVE ELSE-IF positions (Wave 144
+    /// /removebaseore at 7074, Wave 170 /rotatex at 7059, Wave 171
+    /// /rotatey at 7064, Wave 172 /rotatez at 7069, Wave 173 /rsi at
+    /// 7012). Prior case-'r' matchers MISMATCH at byte 1 against "rsi"
+    /// (reffect MISMATCH byte 1 'e' vs 's'); /rs MISMATCH at byte 2
+    /// (3rd byte present, /rs is 2-byte strcmp); /release MISMATCH
+    /// byte 1 'e' vs 's'.
+    ///
+    /// <para>
+    /// ELSE-IF at 7012 `MatchOptWithParam("rsi", pch, param,
+    /// msg_sent)` -- NO outer AdminLevel guard, NO inside-body guard
+    /// (pure NO-GUARD-ELSE-IF pattern). MatchOptWithParam: strncmps
+    /// "rsi" against "rsi" (3 byte match), arg[3]='\0' -- NOT '=',
+    /// NOT ' ', NOT isalpha, allowNoParams=false -- emits
+    /// "Missing arg for option rsi" via SendVaMessage at 4548 with
+    /// default COLOR=5, sets msg_sent=true, returns false. Body at
+    /// 7014 SKIPPED (matcher returned false). case-'r' chain
+    /// continues: /rsa MISMATCH byte 2 'a' vs 'i'; /rsn MISMATCH byte
+    /// 2 'n' vs 'i'; /rsd strcmp MISMATCH; /range/restoreinv/rotatex/
+    /// rotatey/rotatez MISMATCH at byte 1 ('a'/'e'/'o'/'o'/'o' vs
+    /// 's'); /removebaseore AdminLevel-AND-matcher short-circuit --
+    /// MatchOptWithParam "removebaseore" vs "rsi" byte 1 'e' vs 's'
+    /// MISMATCH NO emit. case-'r' breaks. Trailing fallback at 7702
+    /// SKIPPED (msg_sent=true). NET RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>
+    /// Important: /rs at line 7000 is a 2-byte strcmp (NOT
+    /// MatchOptWithParam) -- /rs receives bare command "/rs" and is
+    /// dispatched IMMEDIATELY without ERROR fork; /rsi sends through
+    /// MatchOptWithParam where ERROR fork emits on missing-arg. The
+    /// case-'r' body at 6993-7124 has a structurally mixed pattern:
+    /// FIRST-IF (strcmp /reffect at 6993, NO closing brace before
+    /// 7000 /rs), then ELSE-IF chain. Wave 173 verifies that /rsi at
+    /// 7012 is reachable through the chain even though /rs at 7000
+    /// is structurally a CONSECUTIVE-IF (parallel-IF) rather than
+    /// ELSE-IF (a regression that converted /rs to ELSE-IF or moved
+    /// it would shadow /rsi by prefix match if MatchOptWithParam used
+    /// substring -- it doesn't; strncmp respects length argument).
+    /// </para>
+    ///
+    /// <para>
+    /// FORTY-SECOND pin on the user-tier (single-slash) dispatch path.
+    /// FIFTH pin on user-tier case-'r' -- case-'r' user-tier now
+    /// QUINTUPLE-PINNED across FIVE ELSE-IF chain-arm positions.
+    /// FORTY-FIRST pin on the MatchOptWithParam ERROR path.
+    /// FOURTEENTH NO-GUARD pin -- NO-GUARD now QUATTUORDECUPLE-PINNED
+    /// across 6 case-letters with case-'r' QUADRUPLE-instance
+    /// (rotatex+rotatey+rotatez+rsi). FIRST 3-byte %s width pin in
+    /// case-'r' -- 3-byte %s coverage extended to case-'r'.
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes prior
+    /// waves are structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     FIFTH case-'r' user-tier ELSE-IF chain arm regression at
+    ///     <c>PlayerConnection.cpp:7012</c>. A regression that moved
+    ///     /rsi out of case-'r', or wrapped it in an AdminLevel
+    ///     guard, would break Wave 173 pin while leaving Waves 170/171
+    ///     /172 intact (locality: 47-line ELSE-IF stride 7012 vs 7059
+    ///     within the same case body).
+    ///   </item>
+    ///   <item>
+    ///     case-'r' /rs vs /rsi prefix-shadowing regression at
+    ///     <c>PlayerConnection.cpp:7000</c> vs <c>7012</c>. /rs is a
+    ///     2-byte strcmp at 7000; /rsi is a 3-byte MatchOptWithParam
+    ///     at 7012. A regression that converted /rs to a prefix-match
+    ///     or substring-match would shadow /rsi (because "rsi" starts
+    ///     with "rs"); Wave 173 pins /rsi reachable through the
+    ///     case-'r' chain so /rs cannot accidentally shadow /rsi.
+    ///   </item>
+    ///   <item>
+    ///     3-byte %s width fresh-case-letter cross-(case-letter,
+    ///     structural-pattern, literal) divergence regression at
+    ///     <c>PlayerClass.cpp:3422</c>. Wave 173 extends 3-byte %s
+    ///     coverage to case-'r' /rsi -- a regression in the
+    ///     vsprintf_s 3-byte path specific to the case-'r' dispatch
+    ///     would fail Wave 173 pin while leaving previously-pinned
+    ///     3-byte pins (e.g. via case-'p' or earlier) intact.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). /rsi is open to ALL
+    /// users at the dispatcher level -- the NO-GUARD-ELSE-IF pattern
+    /// at 7012 has no AdminLevel guard at all. ERROR fork at 4548
+    /// emits for ALL tiers (faithful to retail). No server
+    /// permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashRsiMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (27) = 30 bytes.
+        const int ExpectedReplyPayloadLength = 30;
+        // strlen(literal) + 1 NUL = 27.
+        const short ExpectedReplyLengthField = 27;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 26.
+        const int ExpectedLiteralByteCount = 26;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Rsio", shipName: "RsioShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/rsi");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals("Missing arg for option rsi", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgRsiLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/rsi\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option rsi\". Likely the user-tier case-'r' " +
+                $"dispatch at line 6992 stopped routing, the NO-GUARD-ELSE-IF arm at " +
+                $"7012 acquired a spurious AdminLevel guard, /rs at 7000 acquired a " +
+                $"prefix-match that shadowed /rsi, the trailing illegal-slash fallback " +
+                $"at 7702 fired as a second emit, or the missing-arg ERROR fork at " +
+                $"PlayerConnection.cpp:4548 changed shape (esp. vsprintf_s 3-byte %s " +
+                $"width).");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
