@@ -1879,4 +1879,229 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Verbatim body of the 0x001D MESSAGE_STRING reply the server emits
+    /// in HandleSlashCommands' user-block case 'b' for the
+    /// <c>strcmp(pch, "beon") == 0</c> arm when
+    /// <c>AdminLevel() &gt;= BETA</c>. The literal is hard-coded as
+    /// <c>"Beta channel on."</c> at
+    /// <c>server/src/PlayerConnection.cpp:5525</c>; no format substitution
+    /// -- raw literal pass-through into SendVaMessage, which threads the
+    /// default colour=5 via the header default arg at
+    /// PlayerConnection.h:277. 16 ASCII bytes. The arm has a side-effect
+    /// (sets <c>m_ChannelSubscription[Beta] = true</c> at line 5524)
+    /// BEFORE the emit; the per-account isolation (cli_test124
+    /// dedicated, ServerFixture tears down with -v wiping pgdata) makes
+    /// this safe.
+    /// </summary>
+    private const string BetaChannelOnLiteral = "Beta channel on.";
+
+    /// <summary>
+    /// Wave 132 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -> 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 20-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/beon</c> against an admin-level fixture (status=100
+    /// -&gt; AdminLevel()=100 &gt;= BETA=30).
+    ///
+    /// <para>
+    /// Why a +0 ratchet, and why this specific sibling. Wave 130
+    /// (<see cref="SlashLevelOutOfRange_OnAdminAccount_PinsExactReplyWireShape"/>)
+    /// pinned a 20-byte wire-shape on the SendVaMessage default-colour
+    /// fork via a raw-literal pass-through ("0 &lt;= Level &lt;= 50")
+    /// gated on AdminLevel &gt;= GM (50) via a body-block guard, with
+    /// MatchOptWithParam dispatch and early `return`. Wave 132 pins the
+    /// SAME 20-byte wire-shape and the SAME default-colour raw-literal
+    /// pass-through, but with FOUR orthogonal differences: (a) case-
+    /// letter 'b' vs 'l'; (b) dispatch via strcmp (Wave 132) vs
+    /// MatchOptWithParam (Wave 130); (c) AdminLevel threshold BETA=30
+    /// (Wave 132) vs GM=50 (Wave 130) -- pinning two different rungs of
+    /// the access-control ladder defined at Net7.h:367-373; (d) `break`
+    /// (Wave 132 implicit via case-fall-through to break at 5630) vs
+    /// early `return` (Wave 130 explicit at 6788). The identical wire-
+    /// shape between Wave 130 and Wave 132 is intentional -- it
+    /// guarantees that a regression that affects the SendMessageString
+    /// length-prefix or color-byte routing would fail BOTH tests in the
+    /// same way, while a regression that affects only ONE arm's
+    /// dispatch/guard/threshold would fail only that arm's test.
+    /// </para>
+    ///
+    /// <para>
+    /// Wave 132 also extends the sibling-arm catalogue on the
+    /// HandleSlashCommands user-tier dispatcher to SEVEN byte-exact-
+    /// pinned arms -- Waves 123/125/126/129/130/131/132 -- and is the
+    /// FIRST pin on the case-'b' arm.
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Five concrete regression classes Waves
+    /// 123/125/126/129/130/131 are structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     AdminLevel BETA tier regression at
+    ///     <c>server/src/Net7.h:373</c>. The constant <c>BETA = 30</c>
+    ///     defines the lowest admin tier. A regression that flipped BETA
+    ///     to a higher value (e.g. 50 collapsing into GM) would gate the
+    ///     /beon emit out for status=100-but-below-new-BETA accounts.
+    ///     Wave 130 pins GM=50; Wave 132 pins BETA=30; together they nail
+    ///     two rungs of the access-control ladder. A regression in the
+    ///     ladder ordering would fail one or both tests.
+    ///   </item>
+    ///   <item>
+    ///     Body-block <c>if (AdminLevel() &gt;= BETA)</c> guard regression
+    ///     at <c>server/src/PlayerConnection.cpp:5521</c>. The comment on
+    ///     the line itself reads "low right now for zapgun's loot
+    ///     builders" -- indicating the threshold is intentionally lowered
+    ///     for tooling. A regression that raised the threshold would gate
+    ///     out the BETA-tier emit silently. Wave 132 catches.
+    ///   </item>
+    ///   <item>
+    ///     m_ChannelSubscription side-effect regression at
+    ///     <c>server/src/PlayerConnection.cpp:5524</c>. The arm sets
+    ///     <c>m_ChannelSubscription[channel_id] = true</c> BEFORE the
+    ///     emit. A regression that swapped the order (or dropped the
+    ///     set) would still emit the "Beta channel on." literal but
+    ///     would silently leave the player unsubscribed. Wave 132's
+    ///     wire-shape assertion alone does NOT catch this directly --
+    ///     but the emit's existence at all confirms the strcmp arm
+    ///     dispatched correctly, which is the minimum invariant.
+    ///   </item>
+    ///   <item>
+    ///     <c>GetChannelFromName("Beta")</c> regression at
+    ///     <c>server/src/PlayerConnection.cpp:5523</c>. A regression in
+    ///     PlayerManager::GetChannelFromName that returned -1 or an
+    ///     out-of-bounds index would not affect the emit (the call
+    ///     result is only used to index m_ChannelSubscription), but a
+    ///     buffer-overflow regression could corrupt subsequent state.
+    ///     Wave 132's PASSED state implies the call returns a valid
+    ///     index that doesn't immediately crash.
+    ///   </item>
+    ///   <item>
+    ///     Implicit-`break` regression at
+    ///     <c>server/src/PlayerConnection.cpp:5630</c>. Unlike Wave 130's
+    ///     early `return` short-circuit, Wave 132 relies on falling
+    ///     through to the case-'b' implicit `break` at the end of the
+    ///     case. A regression that added a follow-up emit between
+    ///     /beon's body and the case-end would fail Wave 132's single-
+    ///     frame-shape assertion.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (CLAUDE.md). The case-'b' /beon slash command is
+    /// the retail server's documented BETA-channel subscription enable
+    /// path. The AdminLevel guard (lowered to BETA per the in-code
+    /// comment for zapgun's loot builders) and the emit shape are retail
+    /// behaviour. No server permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Why fresh-account matters. The arm sets
+    /// m_ChannelSubscription[Beta]=true unconditionally; the per-account
+    /// isolation (cli_test124 dedicated, ServerFixture tears down with
+    /// -v wiping pgdata) makes this safe across retries.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashBeon_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (17) = 20 bytes.
+        const int ExpectedReplyPayloadLength = 20;
+        // strlen(literal) + 1 NUL = 17.
+        const short ExpectedReplyLengthField = 17;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 16.
+        const int ExpectedLiteralByteCount = 16;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Beoner", shipName: "BeonShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/beon");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // Filter on the distinctive prefix so handshake-tail and
+                // chatter frames don't race ahead of the /beon reply.
+                // Once we have the right reply we pin its full wire shape.
+                if (!text.StartsWith("Beta channel on", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(BetaChannelOnLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/beon\" without seeing 0x001D MESSAGE_STRING starting with " +
+                $"\"Beta channel on\". Likely the user-block case-'b' arm at " +
+                $"server/src/PlayerConnection.cpp:5519 changed shape, the body-block " +
+                $"AdminLevel>=BETA guard at PlayerConnection.cpp:5521 inverted, the BETA " +
+                $"constant at Net7.h:373 changed, or GetChannelFromName at " +
+                $"PlayerConnection.cpp:5523 broke.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
