@@ -127,6 +127,7 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId GlobalError            = new(0x0075);
         public static readonly OpcodeId StarbaseAvatarChange   = new(0x009D);
         public static readonly OpcodeId StarbaseRoomChange     = new(0x009F);
+        public static readonly OpcodeId StarbaseRoomChangeServerToClient = new(0x00A0);
         public static readonly OpcodeId ResendPacketSequence   = new(0x2017);
         public static readonly OpcodeId LoginStage             = new(0x2020);
         public static readonly OpcodeId LoginStageAck          = new(0x2021);
