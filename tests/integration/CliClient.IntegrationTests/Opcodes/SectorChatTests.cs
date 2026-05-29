@@ -4699,4 +4699,217 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Verbatim body of the 0x001D MESSAGE_STRING reply the server emits
+    /// when the user-tier case-'f' COMBINED-GUARD matcher at
+    /// <c>PlayerConnection.cpp:6283</c> -- wrapped inside the outer
+    /// <c>if (AdminLevel() &gt;= GM)</c> block at line 6281 AND
+    /// inline-guarded with <c>&amp;&amp; AdminLevel() &gt;= 50</c> --
+    /// passes BOTH guards (status=100 satisfies GM=50 and the literal
+    /// 50 threshold), then runs MatchOptWithParam("form", ...) MATCHER-
+    /// FIRST which matches 4 bytes and hits the separator-check NUL
+    /// fall-through. 27 ASCII bytes after %s substitution -- NEW
+    /// MIDDLE 4-byte %s width (fills the gap between Wave 137's 3-byte
+    /// MINIMAL and the 5/6/7/11/13/14-byte widths).
+    /// </summary>
+    private const string MissingArgFormLiteral = "Missing arg for option form";
+
+    /// <summary>
+    /// Wave 146 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 31-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/form</c> (NO param) -- routes through the user-tier
+    /// dispatcher entry at line 5434, the 1-char strip, the case-'f'
+    /// user-tier dispatch (NEW case-letter), enters the OUTER
+    /// <c>if (AdminLevel() &gt;= GM)</c> block at line 6281, and hits
+    /// the form matcher at line 6283 -- the FIRST COMBINED-GUARD
+    /// (outer-block + inline-matcher-first) structural pattern pin in
+    /// the catalogue (matcher is OUTER-block-guarded AND
+    /// inline-matcher-first-guarded with literal 50 threshold;
+    /// MatchOptWithParam runs FIRST with side effect emit, &amp;&amp;
+    /// AdminLevel never evaluated because matcher returns false), then
+    /// the missing-arg ERROR fork at
+    /// <c>PlayerConnection.cpp:4548</c>.
+    ///
+    /// <para>
+    /// FIFTEENTH pin on the user-tier (single-slash) dispatch path.
+    /// FIRST pin on user-tier case-'f' -- NEW case-letter extends
+    /// user-tier dispatcher switch coverage to TEN distinct
+    /// case-letters (a/b/c/d/e/f/l/n/p/r). FOURTEENTH pin on the
+    /// MatchOptWithParam ERROR path with NEW MIDDLE 4-byte %s width
+    /// (fills the gap between Wave 137's 3-byte and Wave 131's 5-byte
+    /// to give EIGHT distinct widths: 1/3/4/5/6/7/11/13/14 -- now NINE
+    /// widths). FIRST pin on the COMBINED-GUARD structural pattern
+    /// (NEW structural variant -- prior pins covered MATCHER-FIRST
+    /// inline at Waves 139/143, GUARD-FIRST inline at Wave 144, and
+    /// OUTER-BLOCK-GUARD at Wave 145 -- Wave 146 is the FIRST
+    /// COMBINED-GUARD where OUTER-block-guard AND
+    /// INLINE-matcher-first-guard with literal 50 threshold BOTH
+    /// apply).
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes Wave 145
+    /// is structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     user-tier case-'f' dispatch + multi-block fall-through
+    ///     regression at <c>PlayerConnection.cpp:6280-6398</c>.
+    ///     case-'f' was previously unpinned in the user-tier switch;
+    ///     a regression that dropped case-'f' entirely, reordered
+    ///     case labels, or routed *pch=='f' to the wrong handler
+    ///     would silently swallow /form (along with /flushinv,
+    ///     /factionset, /factionoverride, /fetch, /find, /face,
+    ///     /faceme, /fgps, /fireweapon, /fhelp). Wave 146 pins
+    ///     case-'f' is REACHABLE via the user-tier switch dispatcher
+    ///     AND the FIRST inner block (lines 6281-6335 outer
+    ///     AdminLevel >= GM) dispatches correctly to the form
+    ///     matcher at line 6283.
+    ///   </item>
+    ///   <item>
+    ///     COMBINED-GUARD structural regression at
+    ///     <c>PlayerConnection.cpp:6281-6283</c>. The line reads
+    ///     <c>if (AdminLevel() &gt;= GM) { if (MatchOptWithParam(
+    ///     "form", ...) &amp;&amp; AdminLevel() &gt;= 50) ... }</c>.
+    ///     TWO guards apply: OUTER block-guard wraps the form matcher
+    ///     (and 3 sibling matchers); INNER matcher-first inline
+    ///     guard with LITERAL 50 (semantically equivalent to GM but
+    ///     textually distinct -- a regression that switched GM=50 to
+    ///     a different value would break the GM constant but the
+    ///     literal 50 inline guard would still gate at 50). With
+    ///     status=100, both guards pass; MatchOptWithParam runs
+    ///     FIRST, matches 4 bytes, emits, returns false; &amp;&amp;
+    ///     AdminLevel skipped. A regression that dropped EITHER
+    ///     guard would still emit (since both pass at status=100),
+    ///     but a regression that switched the inline guard from
+    ///     literal 50 to a tighter threshold (e.g. SDEV=90) would
+    ///     still emit at status=100 (BOTH still pass) -- the pin
+    ///     does NOT detect that. What it DOES detect: outer-block
+    ///     traversal from line 6281 reaches line 6283, and matcher
+    ///     runs (rather than the matcher being skipped via outer
+    ///     block-guard tightening).
+    ///   </item>
+    ///   <item>
+    ///     %s format-substitution NEW MIDDLE 4-byte width regression
+    ///     at <c>PlayerClass.cpp:3422</c>. Catalogue had 7 distinct
+    ///     widths (1/3/5/6/7/11/13/14) -- Wave 146 adds 4-byte,
+    ///     filling the gap between 3 and 5; a regression in
+    ///     vsprintf_s with off-by-one at 4-byte width specifically
+    ///     would fail Wave 146 but pass prior pins. Pins
+    ///     format-substitution stability at NEW MIDDLE width.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). The MatchOptWithParam
+    /// missing-arg emit is the retail server's documented dispatcher-level
+    /// error path; BOTH the OUTER AdminLevel &gt;= GM and INLINE
+    /// AdminLevel &gt;= 50 gates enforce the retail server's privilege
+    /// check (low-privilege users do not learn that /form exists). No
+    /// server permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashFormMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (28) = 31 bytes.
+        const int ExpectedReplyPayloadLength = 31;
+        // strlen(literal) + 1 NUL = 28.
+        const short ExpectedReplyLengthField = 28;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 27.
+        const int ExpectedLiteralByteCount = 27;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Forma", shipName: "FormaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/form");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // EXACT equals filter (not StartsWith) -- defensive against
+                // future sibling "form*" option emits in case-'f'.
+                if (!text.Equals("Missing arg for option form", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgFormLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/form\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option form\". Likely the user-tier case-'f' " +
+                $"dispatch at line 6280 stopped routing, the OUTER AdminLevel >= GM " +
+                $"block at line 6281 failed (status=100 admin should pass), the form " +
+                $"matcher at line 6283 stopped dispatching, the inline AdminLevel >= 50 " +
+                $"guard at line 6283 was reordered to GUARD-FIRST and short-circuited, " +
+                $"or the missing-arg ERROR fork at PlayerConnection.cpp:4548 changed shape.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
