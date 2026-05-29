@@ -15276,4 +15276,131 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 210 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
+    /// the 30-byte ASCII body "Missing arg for option countsp" that the
+    /// server emits when admin-tier double-slash <c>//countsp</c> arrives
+    /// with no argument. Matcher at PlayerConnection.cpp:4831 (case-'c' arm
+    /// of the admin-tier switch opened at 4724) -- NO-INLINE-GUARD pattern
+    /// (outer GM gate at 4716 is the only AdminLevel check on the dispatch
+    /// path). FIRST admin-tier case-'c' pin; case-'c' admin-tier now
+    /// SINGLE-PINNED.
+    /// </summary>
+    private const string MissingArgCountspLiteral = "Missing arg for option countsp";
+
+    /// <summary>
+    /// Wave 210 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 34-byte wire-shape of the single 0x001D MESSAGE_STRING reply to
+    /// admin-tier double-slash <c>//countsp</c> (NO param). Wave 210
+    /// opens admin-tier case-'c' to SINGLE-PINNED status.
+    ///
+    /// <para>
+    /// Outer gate at 4716 (<c>Msg[0]=='/' &amp;&amp; Msg[1]=='/' &amp;&amp;
+    /// AdminLevel() >= GM</c>) admits the dispatch; cli_test status=100
+    /// satisfies GM=50. Switch at 4724 jumps on *pch -> case-'c' opens at
+    /// 4829. case-'c' has a SINGLE arm: MatchOptWithParam("countsp",
+    /// arg="countsp") at 4831 -- 7B vs 7B full match. NO inline AdminLevel
+    /// guard. param=NULL so the strtok_s body branch is not reached;
+    /// allowNoParams=false (default) fires the 4548 ERROR fork: "Missing
+    /// arg for option countsp" COLOR=5. case-'c' breaks at 4856.
+    /// NET RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>
+    /// First admin-tier case-'c' MatchOptWithParam ERROR-fork pin. THIRD
+    /// admin-tier NO-INLINE-GUARD pin (joins //halloween at 4927 and
+    /// //restartcomms at 5055) -- structural-consistency check that the
+    /// NO-INLINE-GUARD pattern reliably reaches the 4548 ERROR fork
+    /// across at least three distinct admin-tier case letters.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashCountspMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (31) = 34 bytes.
+        const int ExpectedReplyPayloadLength = 34;
+        const short ExpectedReplyLengthField = 31;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 30;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Cole", shipName: "CoreShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//countsp");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals("Missing arg for option countsp", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgCountspLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//countsp\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option countsp\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
