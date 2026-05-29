@@ -11079,4 +11079,160 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 175 missing-arg ERROR literal for case-'r' /rsn.
+    /// Matcher at PlayerConnection.cpp:7020:
+    /// `else if (MatchOptWithParam("rsn", pch, param, msg_sent))`
+    /// -- pure NO-GUARD-ELSE-IF. SEVENTH case-'r' user-tier pin.
+    /// THIRD 3-byte %s width pin within case-'r' -- case-'r' 3-byte
+    /// TRIPLE-PINNED (rsi + rsa + rsn).
+    /// </summary>
+    private const string MissingArgRsnLiteral = "Missing arg for option rsn";
+
+    /// <summary>
+    /// Wave 175 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the 30-byte wire-shape of the single 0x001D MESSAGE_STRING
+    /// reply to user-tier slash <c>/rsn</c> (NO param). Wave 175
+    /// deepens case-'r' to SEPTUPLE-PINNED. Sibling pin to Waves 173
+    /// /rsi and 174 /rsa -- all three are 3-byte MatchOptWithParam
+    /// ELSE-IF arms in case-'r' that share the 2-byte prefix "rs" and
+    /// differ only in byte 2 ('i'/'a'/'n').
+    ///
+    /// <para>
+    /// ELSE-IF at 7020 `MatchOptWithParam("rsn", pch, param,
+    /// msg_sent)` -- pure NO-GUARD-ELSE-IF. MatchOptWithParam:
+    /// strncmps "rsn" against "rsn", arg[3]='\0' -- emits "Missing
+    /// arg for option rsn" at 4548 COLOR=5. Prior case-'r' matchers
+    /// MISMATCH against "rsn" (/rsi byte 2 'i' vs 'n', /rsa byte 2
+    /// 'a' vs 'n'). NET RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>
+    /// FORTY-FOURTH pin on the user-tier dispatch path. SEVENTH pin on
+    /// user-tier case-'r' -- SEPTUPLE-PINNED. FORTY-THIRD pin on the
+    /// MatchOptWithParam ERROR path. SIXTEENTH NO-GUARD pin --
+    /// SEXDECUPLE-PINNED. THIRD 3-byte %s width pin within case-'r'
+    /// -- case-'r' 3-byte TRIPLE-PINNED.
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three regression classes prior waves are
+    /// blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     SEVENTH case-'r' user-tier ELSE-IF chain arm regression at
+    ///     <c>PlayerConnection.cpp:7020</c>. Locality: 4-line stride
+    ///     7016 vs 7020.
+    ///   </item>
+    ///   <item>
+    ///     case-'r' /rsi vs /rsa vs /rsn TRIPLE intra-arm
+    ///     prefix-shadowing regression at <c>PlayerConnection.cpp:7012</c>
+    ///     vs <c>7016</c> vs <c>7020</c>. Three 3-byte MatchOptWithParam
+    ///     arms sharing 2-byte prefix "rs"; a truncated-strncmp
+    ///     regression would shadow some but not all three.
+    ///   </item>
+    ///   <item>
+    ///     3-byte %s width TRIPLE-case-'r' intra-pattern regression at
+    ///     <c>PlayerClass.cpp:3422</c>. case-'r' now has THREE 3-byte
+    ///     %s pins; a vsprintf_s 3-byte regression specific to ONE
+    ///     literal would fail one but not the other two.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). /rsn is open to ALL
+    /// users -- NO-GUARD-ELSE-IF pattern at 7020. No server
+    /// permissiveness added.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashRsnMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        const int ExpectedReplyPayloadLength = 30;
+        const short ExpectedReplyLengthField = 27;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 26;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Rsno", shipName: "RsnoShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/rsn");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals("Missing arg for option rsn", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgRsnLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/rsn\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option rsn\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
