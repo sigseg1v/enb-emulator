@@ -234,6 +234,7 @@ public static class TestAccounts
             ["SlashPanupMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                            = A(9_000_169, "cli_test169"),
             ["SlashPanxMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                             = A(9_000_170, "cli_test170"),
             ["SlashPanyMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                             = A(9_000_171, "cli_test171"),
+            ["SlashPanzMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                             = A(9_000_172, "cli_test172"),
         };
 
     /// <summary>
