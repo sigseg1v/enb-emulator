@@ -16630,4 +16630,155 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 220 sibling-arm-pinning hardening (+0 ratchet) literal anchor
+    /// for the 33-byte ASCII body "Missing arg for option createitem" that
+    /// the server emits when user-tier single-slash <c>/createitem</c>
+    /// arrives with no argument. Matcher at PlayerConnection.cpp:5704
+    /// -- FIFTH user-tier case-'c' arm pin (after chjoin, chleave,
+    /// ccamera, changepassword); case-'c' user-tier promoted from
+    /// QUADRUPLE-PINNED to QUINTUPLE-PINNED.
+    /// </summary>
+    private const string MissingArgCreateitemLiteral = "Missing arg for option createitem";
+
+    /// <summary>
+    /// Wave 220 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 37-byte wire-shape of the single 0x001D MESSAGE_STRING reply to
+    /// user-tier single-slash <c>/createitem</c> (NO param). Wave 220
+    /// deepens user-tier case-'c' to QUINTUPLE-PINNED status and
+    /// pivots back to user-tier after eight straight admin-tier waves
+    /// (Waves 210-219).
+    ///
+    /// <para>
+    /// ELSE-IF at 5704 `MatchOptWithParam("createitem", pch, param,
+    /// msg_sent)` -- NO-INLINE-GUARD pattern (the matcher's true-branch
+    /// body wraps an internal `AdminLevel() &gt;= GM` guard at 5711-5713,
+    /// but the matcher's ERROR side-effect at 4548 fires BEFORE the body
+    /// guard evaluates). Chain walk for arg "createitem": arm 1
+    /// MatchOptWithParam("chjoin","createitem",6) byte 1 'h' vs 'r'
+    /// MISMATCH no prefix-match; arm 2 MatchOptWithParam("chleave",
+    /// "createitem",7) byte 1 'h' vs 'r' MISMATCH; arm 3
+    /// MatchOptWithParam("ccamera","createitem",7) byte 1 'c' vs 'r'
+    /// MISMATCH; arm 4 MatchOptWithParam("changepassword",
+    /// "createitem",14) byte 1 'h' vs 'r' MISMATCH; arm 5
+    /// MatchOptWithParam("createitem","createitem",10) at 5704 FULL
+    /// match, arg[10]='\0' not '=' not ' ' not isalpha; allowNoParams=
+    /// false fires 4548 ERROR fork: "Missing arg for option createitem"
+    /// COLOR=5; returns false; else-if continues. Arm 6 MatchOptWithParam
+    /// ("createcredits","createitem",13) strncmp byte 6 'c' vs 'i'
+    /// MISMATCH no prefix-match no ERROR; arm 7 MatchOptWithParam
+    /// ("createmission","createitem",13) byte 6 'm' vs 'i' MISMATCH;
+    /// arm 8 MatchOptWithParam("createmob","createitem",9) byte 6 'm'
+    /// vs 'i' MISMATCH; arm 9 MatchOptWithParam("create","createitem",
+    /// 6) FULL prefix-match but arg[6]='i' isalpha returns false
+    /// SILENT (no ERROR sent); arm 10 MatchOptWithParam("customizeship",
+    /// "createitem",13) byte 1 'u' vs 'r' MISMATCH. case-'c' breaks.
+    /// NET RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>
+    /// FIFTH user-tier case-'c' pin; case-'c' user-tier now
+    /// QUINTUPLE-PINNED (chjoin Wave 188 + chleave + ccamera +
+    /// changepassword Wave 189 + createitem Wave 220). FIRST user-tier
+    /// case-'c' pin where the matcher's BODY wraps an INTERNAL admin
+    /// guard (5711 `if (AdminLevel() &gt;= GM)`) but the ERROR fires
+    /// BEFORE that guard -- structurally identical to admin-tier Wave
+    /// 217 //gmupgrade. FIRST user-tier pin where the chain has a
+    /// following SHORTER-PREFIX arm (arm 9 "create" at 5845) that
+    /// prefix-matches arg but returns SILENT-false via isalpha branch
+    /// at 4533 -- catches regression where arm 5's strncmp length=10
+    /// shrinks (e.g. to 6) and silently swallows /createitem via the
+    /// shorter "create" overlap. EIGHTY-EIGHTH MatchOptWithParam ERROR
+    /// pin. Assert.Equal pins the full 37-byte response shape.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashCreateitemMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (34) = 37 bytes.
+        const int ExpectedReplyPayloadLength = 37;
+        const short ExpectedReplyLengthField = 34;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 33;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Createi", shipName: "CreateiShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/createitem");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(MissingArgCreateitemLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgCreateitemLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/createitem\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{MissingArgCreateitemLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
