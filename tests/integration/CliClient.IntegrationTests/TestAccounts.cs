@@ -204,6 +204,7 @@ public static class TestAccounts
             ["SlashHtMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                               = A(9_000_139, "cli_test139"),
             ["SlashKickMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                             = A(9_000_140, "cli_test140"),
             ["SlashInviteMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                           = A(9_000_141, "cli_test141"),
+            ["SlashMoveMissingArg_OnAdminAccount_PinsExactReplyWireShape"]                             = A(9_000_142, "cli_test142"),
         };
 
     /// <summary>

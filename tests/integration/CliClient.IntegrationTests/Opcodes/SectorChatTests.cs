@@ -5548,4 +5548,219 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 150 missing-arg ERROR literal for case-'m' /move. The matcher
+    /// at PlayerConnection.cpp:6825 reads
+    /// `if (MatchOptWithParam("move", pch, param, msg_sent))` -- HEAD
+    /// position in case-'m' with NEITHER outer-block AdminLevel guard
+    /// NOR inline AdminLevel guard, matcher dispatches unconditionally.
+    /// With NO param after "/move", MatchOptWithParam's matcher branch
+    /// matches 4 bytes, arg[4]='\0' -- NOT '=' / NOT ' ' / NOT isalpha,
+    /// allowNoParams false, so falls through to else at line 4546 and
+    /// hits the separator-check NUL fall-through. 27 ASCII bytes after
+    /// %s substitution -- 4-byte %s width (TRIPLE 4-byte pin: SAME as
+    /// Waves 146 case-'f' form COMBINED-GUARD and 148 case-'k' kick
+    /// CASE-FALL-THROUGH; Wave 150 provides cross-case-letter SAME-
+    /// WIDTH triple structural-pattern divergence at 4-byte AND
+    /// deepens the NO-GUARD inline matcher coverage to THREE pins).
+    /// </summary>
+    private const string MissingArgMoveLiteral = "Missing arg for option move";
+
+    /// <summary>
+    /// Wave 150 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 31-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/move</c> (NO param) -- routes through the user-tier
+    /// dispatcher entry at line 5434, the 1-char strip, the case-'m'
+    /// user-tier dispatch (NEW case-letter), hits the NO-GUARD HEAD
+    /// matcher at line 6825 <c>if (MatchOptWithParam("move", pch,
+    /// param, msg_sent))</c>. With pch="move" and NO param, the matcher
+    /// matches 4 bytes, falls through allowNoParams=false to the
+    /// separator-check else, emits "Missing arg for option move" via
+    /// SendVaMessage at line 4548, sets msg_sent=true, returns false.
+    /// Body block (HandleMoveRequest) skipped. Execution traverses the
+    /// remaining else-if chain at line 6830 (mobaggro 8-byte strncmp
+    /// mismatch at index 2 'b' vs 'v', returns false NO emit) and line
+    /// 6835 (music 5-byte strncmp mismatch at index 1 'u' vs 'o',
+    /// returns false NO emit). case-'m' breaks at line 6853. NET
+    /// RESULT: ONE emit.
+    ///
+    /// <para>
+    /// NINETEENTH pin on the user-tier (single-slash) dispatch path.
+    /// FIRST pin on user-tier case-'m' -- NEW case-letter extends
+    /// user-tier dispatcher switch coverage to FOURTEEN distinct
+    /// case-letters (a/b/c/d/e/f/h/i/k/l/m/n/p/r). EIGHTEENTH pin on
+    /// the MatchOptWithParam ERROR path. THIRD 4-byte %s width pin
+    /// (Waves 146 case-'f' form COMBINED-GUARD + 148 case-'k' kick
+    /// CASE-FALL-THROUGH + 150 case-'m' move NO-GUARD) -- TRIPLE
+    /// cross-case-letter SAME-WIDTH structural-pattern divergence at
+    /// 4-byte. THIRD pin on the NO-GUARD inline matcher structural
+    /// pattern (Waves 147 case-'h' /ht + 149 case-'i' /invite + 150
+    /// case-'m' /move) -- TRIPLE NO-GUARD pin, a structural-pattern
+    /// triple-deepening across three distinct case-letters at three
+    /// distinct widths (2/6/4 bytes) which rules out per-case-letter
+    /// AND per-width regressions within the NO-GUARD pattern.
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes Wave 149
+    /// is structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     user-tier case-'m' dispatch + NO-GUARD HEAD matcher
+    ///     regression at <c>PlayerConnection.cpp:6824-6829</c>.
+    ///     case-'m' was previously unpinned in the user-tier switch;
+    ///     a regression that dropped case-'m' entirely, reordered
+    ///     case labels, or routed *pch=='m' to the wrong handler
+    ///     would silently swallow /move. A regression that wrapped
+    ///     /move in any AdminLevel guard would skip the matcher for
+    ///     non-privileged users and fail this test. Wave 150 pins
+    ///     case-'m' is REACHABLE via the user-tier switch dispatcher
+    ///     AND the NO-GUARD HEAD matcher dispatches correctly to
+    ///     emit on missing arg.
+    ///   </item>
+    ///   <item>
+    ///     case-'m' matcher-chain fall-through regression at
+    ///     <c>PlayerConnection.cpp:6830-6852</c>. After the HEAD
+    ///     matcher emits and returns false, execution continues
+    ///     through the else-if chain: mobaggro (DEV-guard MATCHER-
+    ///     FIRST inline at 6830, 8-byte strncmp mismatch at index 2
+    ///     'b' vs 'v'), music (DEV-guard MATCHER-FIRST inline at
+    ///     6835, 5-byte strncmp mismatch at index 1 'u' vs 'o').
+    ///     NET RESULT: ONE emit. A regression that ADDED a competing
+    ///     matcher anywhere in the chain that matched against
+    ///     pch="move" by accident would produce a second message.
+    ///     Wave 150 pins the matcher-chain fall-through as a
+    ///     structural invariant.
+    ///   </item>
+    ///   <item>
+    ///     TRIPLE 4-byte cross-case-letter SAME-WIDTH structural-
+    ///     pattern divergence regression at <c>PlayerClass.cpp:3422</c>.
+    ///     Wave 146 pins 4-byte at user-tier case-'f' COMBINED-GUARD
+    ///     (outer-block + inline matcher-first); Wave 148 pins 4-byte
+    ///     at user-tier case-'k' CASE-FALL-THROUGH (OUTER-BLOCK-GUARD
+    ///     + no break); Wave 150 pins 4-byte at user-tier case-'m'
+    ///     NO-GUARD (no guards anywhere). Same width, THREE different
+    ///     case-letters, THREE different structural patterns. A
+    ///     regression in vsprintf_s with off-by-one at 4-byte width
+    ///     AND a specific case-letter/structural-pattern dispatch path
+    ///     would fail one but not all three; Wave 150 completes the
+    ///     4-byte triple-pin which rules out per-case-letter AND
+    ///     per-structural-pattern format-substitution branches at
+    ///     4-byte width across THREE structural patterns.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). The MatchOptWithParam
+    /// missing-arg emit is the retail server's documented dispatcher-
+    /// level error path. /move (avatar position request) had NO
+    /// AdminLevel guard in the retail server -- baseline user-tier
+    /// command. No server permissiveness added; the pin preserves
+    /// retail behavior.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashMoveMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (28) = 31 bytes.
+        const int ExpectedReplyPayloadLength = 31;
+        // strlen(literal) + 1 NUL = 28.
+        const short ExpectedReplyLengthField = 28;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 27.
+        const int ExpectedLiteralByteCount = 27;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Movee", shipName: "MoveeShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/move");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // EXACT equals filter (not StartsWith) -- defensive against
+                // any future sibling "move*" option emits in case-'m'.
+                if (!text.Equals("Missing arg for option move", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgMoveLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/move\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option move\". Likely the user-tier case-'m' " +
+                $"dispatch at line 6824 stopped routing, the NO-GUARD HEAD matcher " +
+                $"at line 6825 stopped dispatching, an AdminLevel guard was wrapped " +
+                $"around the matcher (regression), the matcher-chain fall-through " +
+                $"to mobaggro/music produced a competing emit (regression), or the " +
+                $"missing-arg ERROR fork at PlayerConnection.cpp:4548 changed shape.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
