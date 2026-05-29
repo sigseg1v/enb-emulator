@@ -183,8 +183,8 @@ namespace LaunchNet7Avalonia
 
         void PatchNetworkIniFile()
         {
-            var file       = Path.Combine(_setting.CommonDirectoryName, "Network.ini");
-            var backup     = Path.Combine(_setting.CommonDirectoryName, "Network.ini.orig");
+            var file       = Path.Combine(_setting.CommonDirectoryName, "network.ini");
+            var backup     = Path.Combine(_setting.CommonDirectoryName, "network.ini.orig");
 
             if (!File.Exists(file) && File.Exists(backup)) File.Copy(backup, file);
 
@@ -212,8 +212,8 @@ namespace LaunchNet7Avalonia
 
         void PatchAuthIniFile()
         {
-            var file   = Path.Combine(_setting.IniDirectoryName, "Auth.ini");
-            var backup = Path.Combine(_setting.IniDirectoryName, "Auth.ini.orig");
+            var file   = Path.Combine(_setting.IniDirectoryName, "auth.ini");
+            var backup = Path.Combine(_setting.IniDirectoryName, "auth.ini.orig");
             if (!File.Exists(file) && File.Exists(backup)) File.Copy(backup, file);
 
             var regHost = _setting.EffectiveRegistrationHostname;
