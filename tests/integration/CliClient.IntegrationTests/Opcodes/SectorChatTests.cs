@@ -1646,4 +1646,237 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Verbatim body of the 0x001D MESSAGE_STRING reply the server emits
+    /// from INSIDE <c>Player::MatchOptWithParam</c> at
+    /// <c>server/src/PlayerConnection.cpp:4548</c> on the missing-arg
+    /// error path. When a slash command matches an option name (strncmp
+    /// passes) but supplies no '=' / ' ' separator AND the matcher was
+    /// invoked with the default <c>allowNoParams = false</c>, the matcher
+    /// emits <c>SendVaMessage("Missing arg for option %s", option)</c>
+    /// with the option name substituted, then sets <c>msg_sent = true</c>
+    /// and returns false. For <c>"/level"</c> (no trailing space or '='),
+    /// the substituted body is "Missing arg for option level" -- 28
+    /// ASCII bytes. SendVaMessage forwards to SendMessageString with the
+    /// default colour=5 from the header default arg at
+    /// PlayerConnection.h:277.
+    /// </summary>
+    private const string MissingArgLevelLiteral = "Missing arg for option level";
+
+    /// <summary>
+    /// Wave 131 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -> 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 32-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/level</c> with no param -- which routes into
+    /// <c>MatchOptWithParam</c>'s ERROR fork (the "Missing arg" emit at
+    /// PlayerConnection.cpp:4548) rather than its SUCCESS fork (the
+    /// param-extraction path Wave 130 exercised).
+    ///
+    /// <para>
+    /// Why a +0 ratchet, and why this specific sibling. Wave 130
+    /// (<see cref="SlashLevelOutOfRange_OnAdminAccount_PinsExactReplyWireShape"/>)
+    /// pinned MatchOptWithParam's SUCCESS path: strncmp matched,
+    /// arg[len]==' ' set param, returned true, body-block AdminLevel
+    /// guard passed, atoi out-of-range triggered the "0 &lt;= Level
+    /// &lt;= 50" emit at PlayerConnection.cpp:6787. Wave 131 pins the
+    /// SAME MatchOptWithParam function from the SAME slash dispatcher
+    /// call site (case-'l' /level at PlayerConnection.cpp:6777) but via
+    /// the ERROR fork instead -- the missing-separator branch at
+    /// PlayerConnection.cpp:4548. The pair pins both forks of
+    /// MatchOptWithParam's separator-check fan-out at
+    /// PlayerConnection.cpp:4532 (`arg[len] == '=' || arg[len] == ' '`).
+    /// </para>
+    ///
+    /// <para>
+    /// Wave 131 also extends the sibling-arm catalogue on the
+    /// HandleSlashCommands user-tier dispatcher to SIX byte-exact-pinned
+    /// arms -- Waves 123/125/126/129/130/131 -- and is the SECOND pin on
+    /// the case-'l' arm (sibling to Wave 130).
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Five concrete regression classes Wave 130 is
+    /// structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     MatchOptWithParam separator-check regression at
+    ///     <c>server/src/PlayerConnection.cpp:4532</c>. The check is
+    ///     <c>arg[len] == '=' || arg[len] == ' '</c>. A regression that
+    ///     widened the accepted separators (e.g. <c>|| arg[len] ==
+    ///     '\0'</c>) would let /level (no param) into the SUCCESS path,
+    ///     where atoi("") would coerce to 0 and pass the range check,
+    ///     setting combat/trade/explore levels to 0 -- a corrupting
+    ///     side-effect. Wave 131 pins the missing-arg body specifically;
+    ///     a regression that bypassed this body and hit the success
+    ///     path would fail the prefix filter.
+    ///   </item>
+    ///   <item>
+    ///     MatchOptWithParam <c>isalpha</c> guard regression at
+    ///     <c>server/src/PlayerConnection.cpp:4537</c>. The guard
+    ///     suppresses dispatch when arg[len] is a letter (so "/leveling"
+    ///     doesn't match "/level"). For "/level" arg[len]='\0' which is
+    ///     NOT isalpha, so this guard does NOT short-circuit -- control
+    ///     falls through to the missing-arg emit. A regression that
+    ///     widened isalpha to include '\0' (e.g. via a faulty
+    ///     <c>iscntrl</c> swap) would short-circuit the missing-arg emit
+    ///     entirely and return false silently. Wave 131's drain-timeout
+    ///     catches this.
+    ///   </item>
+    ///   <item>
+    ///     MatchOptWithParam <c>allowNoParams</c> default regression at
+    ///     <c>server/src/PlayerConnection.cpp:4541</c>. The
+    ///     <c>allowNoParams = false</c> default at the function
+    ///     signature (PlayerConnection.cpp:4526) drives /level into the
+    ///     error fork. A regression flipping the default to true would
+    ///     set <c>param = NULL</c> and return true; the case-'l' arm
+    ///     would then dereference <c>atoi(NULL)</c> -- undefined
+    ///     behaviour, likely crash. Wave 131's PASSED state implies the
+    ///     default is still false; a future regression that flipped it
+    ///     would either crash the server or skip the missing-arg emit.
+    ///   </item>
+    ///   <item>
+    ///     SendVaMessage %s format-substitution regression at
+    ///     <c>server/src/PlayerClass.cpp:3422</c>. Wave 131 exercises a
+    ///     %s substitution with a CONST-STRING-LITERAL option name
+    ///     ("level") -- structurally distinct from Wave 125/126's %s
+    ///     substitution with a TERNARY ("off"/"on") and Wave 129's %08x
+    ///     substitution with an INT (-1). A regression in vsprintf_s's
+    ///     handling of %s with a literal-string-from-caller would change
+    ///     the body length or content. Wave 131 pins the exact 28-byte
+    ///     body including the substituted option name.
+    ///   </item>
+    ///   <item>
+    ///     MatchOptWithParam <c>msg_sent</c> by-ref write regression at
+    ///     <c>server/src/PlayerConnection.cpp:4549</c>. The matcher sets
+    ///     <c>msg_sent = true</c> before returning false. A regression
+    ///     that dropped this assignment would leave msg_sent at its
+    ///     previous state -- if false, the downstream HandleSlashCommands
+    ///     post-switch tail (PlayerConnection.cpp:7060+ "unknown slash
+    ///     command" path or similar) might emit a SECOND
+    ///     MESSAGE_STRING. Wave 131's single-frame-shape assertion
+    ///     would catch a second emit.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (CLAUDE.md). The MatchOptWithParam missing-arg
+    /// emit is the retail server's documented dispatcher-level error
+    /// path; it fires for any user (no admin gating -- the emit happens
+    /// BEFORE control returns to the case-'l' body-block AdminLevel
+    /// guard). No server permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Why no admin gating matters. The missing-arg emit is inside
+    /// MatchOptWithParam itself, so it fires before the case-'l' body-
+    /// block <c>if (AdminLevel() &gt;= GM)</c> guard at line 6782.
+    /// Wave 131 uses the admin-level fixture for consistency with the
+    /// rest of the slash-command suite, but the test would also pass
+    /// against a non-admin account -- a useful invariant in its own
+    /// right.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashLevelMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (29) = 32 bytes.
+        const int ExpectedReplyPayloadLength = 32;
+        // strlen(literal) + 1 NUL = 29.
+        const short ExpectedReplyLengthField = 29;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 28.
+        const int ExpectedLiteralByteCount = 28;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Missarg", shipName: "MissArgShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/level");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // Filter on the distinctive prefix so handshake-tail and
+                // chatter frames don't race ahead of the /level reply.
+                // Once we have the right reply we pin its full wire shape.
+                if (!text.StartsWith("Missing arg", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgLevelLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/level\" without seeing 0x001D MESSAGE_STRING starting with " +
+                $"\"Missing arg\". Likely MatchOptWithParam's missing-arg branch at " +
+                $"server/src/PlayerConnection.cpp:4548 changed shape, the separator " +
+                $"check at line 4532 widened to accept no-separator, the isalpha guard " +
+                $"at line 4537 widened to include NUL, or the allowNoParams default at " +
+                $"line 4526 flipped to true.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
