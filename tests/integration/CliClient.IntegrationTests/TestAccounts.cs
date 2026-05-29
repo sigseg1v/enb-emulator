@@ -184,6 +184,7 @@ public static class TestAccounts
             ["SlashNotells_OnAdminAccountFirstInvocation_PinsExactReplyWireShape"]                     = A(9_000_119, "cli_test119"),
             ["SlashNoattack_OnAdminAccountFirstInvocation_PinsExactReplyWireShape"]                    = A(9_000_120, "cli_test120"),
             ["SlashPosition_OnFreshCharNoTarget_PinsExactReplyWireShape"]                              = A(9_000_121, "cli_test121"),
+            ["SlashLevelOutOfRange_OnAdminAccount_PinsExactReplyWireShape"]                            = A(9_000_122, "cli_test122"),
         };
 
     /// <summary>

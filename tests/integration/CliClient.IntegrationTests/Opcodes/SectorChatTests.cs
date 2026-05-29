@@ -1394,4 +1394,256 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Verbatim body of the 0x001D MESSAGE_STRING reply the server emits
+    /// in HandleSlashCommands' user-block case 'l' for the
+    /// <c>MatchOptWithParam("level", pch, param, msg_sent)</c> arm when
+    /// the param is out of range (atoi(param) &lt; 0 || atoi(param) &gt;
+    /// 50) AND <c>AdminLevel() &gt;= GM</c>. The literal is hard-coded as
+    /// <c>"0 &lt;= Level &lt;= 50"</c> at
+    /// <c>server/src/PlayerConnection.cpp:6787</c>; no format
+    /// substitution -- raw literal pass-through into
+    /// <c>SendVaMessage</c>, which threads the default colour=5 via the
+    /// header default arg at PlayerConnection.h:277. 16 ASCII bytes;
+    /// after the emit the arm <c>return</c>s at line 6788 (NOT
+    /// <c>break</c>), short-circuiting the rest of the case-'l' arm and
+    /// every later case-letter -- the only emit reaching the wire.
+    /// </summary>
+    private const string LevelOutOfRangeLiteral = "0 <= Level <= 50";
+
+    /// <summary>
+    /// Wave 130 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -> 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 20-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/level 99</c> -- an out-of-range param (atoi("99")=99
+    /// &gt; 50) against an admin-level fixture (status=100 -&gt;
+    /// AdminLevel()=100 &gt;= GM=50).
+    ///
+    /// <para>
+    /// Why a +0 ratchet, and why this specific sibling. Wave 129
+    /// (<see cref="SlashPosition_OnFreshCharNoTarget_PinsExactReplyWireShape"/>)
+    /// and Wave 123
+    /// (<see cref="SlashAuthlevel_OnAdminAccount_PinsExactReplyWireShape"/>)
+    /// pinned two arms on the SendVaMessage default-colour fork with
+    /// format-substitution. Wave 130 is the FIRST byte-exact pin on a
+    /// MatchOptWithParam-dispatched arm (vs strcmp-dispatched arms in
+    /// Waves 123/125/126/129) AND the FIRST on a raw-literal-pass-through
+    /// path (no %d/%s/%08x format substitution -- the arg to
+    /// SendVaMessage is a string literal with no variable arguments).
+    /// The pair pins four orthogonal fan-outs on the user-tier
+    /// dispatcher: (a) case-letter routing 'a'/'n'/'p'/'l' inside the
+    /// switch at PlayerConnection.cpp:5442; (b) dispatch mechanism
+    /// strcmp (Waves 123/125/126/129) vs MatchOptWithParam (Wave 130) at
+    /// PlayerConnection.cpp:4526; (c) admin-gating placement -- in the
+    /// if-condition (`&amp;&amp; AdminLevel() &gt;= GM` Waves 125/126)
+    /// vs in a body-block guard (`if (AdminLevel() &gt;= GM) { ... }`
+    /// Wave 130 at PlayerConnection.cpp:6782); (d) post-emit
+    /// short-circuit -- early <c>return</c> (Wave 130 at line 6788) vs
+    /// <c>break</c>+msg_sent=true (Waves 123/125/126/129).
+    /// </para>
+    ///
+    /// <para>
+    /// Wave 130 also extends the sibling-arm catalogue on the
+    /// HandleSlashCommands user-tier dispatcher to FIVE byte-exact-pinned
+    /// arms -- Wave 123 case-'a' /authlevel; Wave 125 case-'n' /notells;
+    /// Wave 126 case-'n' /noattack; Wave 129 case-'p' /position; Wave 130
+    /// case-'l' /level out-of-range.
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Six concrete regression classes Waves
+    /// 123/125/126/129 are structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     <c>MatchOptWithParam</c> dispatch regression at
+    ///     <c>server/src/PlayerConnection.cpp:4526</c>. The matcher
+    ///     accepts "name=value" or "name value" forms, sets <c>param</c>
+    ///     by ref, and returns true. Waves 123/125/126/129 use plain
+    ///     <c>strcmp(pch, literal) == 0</c> dispatch. A regression that
+    ///     broke MatchOptWithParam's param-extraction (e.g. off-by-one
+    ///     on the <c>arg + len + 1</c> calculation) would silently route
+    ///     /level 99 into a different arm or short-circuit with the
+    ///     "Missing arg" emit at line 4548. Wave 130 pins the
+    ///     out-of-range body specifically, which fails if the matcher
+    ///     short-circuits or routes incorrectly.
+    ///   </item>
+    ///   <item>
+    ///     atoi out-of-range comparison regression at
+    ///     <c>server/src/PlayerConnection.cpp:6785</c>. The check is
+    ///     <c>atoi(param) &lt; 0 || atoi(param) &gt; 50</c>. A regression
+    ///     flipping the bounds (e.g. &gt;=50, or 100 instead of 50) or
+    ///     dropping a clause would change which paths emit the
+    ///     out-of-range body. Wave 130 sends 99 -- a value that's
+    ///     unambiguously &gt; 50 but well below any plausible mis-typed
+    ///     bound like 1000.
+    ///   </item>
+    ///   <item>
+    ///     Body-block AdminLevel guard regression at
+    ///     <c>server/src/PlayerConnection.cpp:6782</c>. Unlike Waves
+    ///     125/126's in-condition guards, /level wraps its body in
+    ///     <c>if (AdminLevel() &gt;= GM) { ... } else { ... }</c>. The
+    ///     else-branch emits a different literal ("/level not available
+    ///     at [BETA] and below") -- which Wave 130 would catch if a
+    ///     regression broke the AdminLevel comparison sense and dropped
+    ///     admin accounts into the BETA-and-below path.
+    ///   </item>
+    ///   <item>
+    ///     Early-<c>return</c> short-circuit regression at
+    ///     <c>server/src/PlayerConnection.cpp:6788</c>. The out-of-range
+    ///     arm calls SendVaMessage and immediately <c>return</c>s --
+    ///     skipping the SetCombatLevel/SetTradeLevel/SetExploreLevel
+    ///     side-effects and the follow-up "Combat, Explore and Trade
+    ///     LVLs set to %d" emit at line 6802. A regression that swapped
+    ///     <c>return</c> for <c>break</c> would NOT execute the level-
+    ///     setting code (atoi check still passes 99 as out-of-range), but
+    ///     fall-through to the lootstats strcmp at 6812 then to case-'m'
+    ///     -- but the wire-shape stays the same. The more subtle
+    ///     regression: dropping the <c>return</c> entirely would let the
+    ///     out-of-range body's emit follow through into the success path
+    ///     and corrupt player state. Wave 130 pins ONLY the single emit;
+    ///     a regression that added a second emit on the out-of-range
+    ///     path would fail the test's single-frame-shape assertion (the
+    ///     filter is on the prefix "0 &lt;= Level", which is distinctive
+    ///     enough to skip the rare follow-up cases).
+    ///   </item>
+    ///   <item>
+    ///     Raw-literal SendVaMessage path regression at
+    ///     <c>server/src/PlayerClass.cpp:3415</c>. Waves 123/125/126/129
+    ///     all exercise va-args format substitution; Wave 130 passes a
+    ///     literal string with no format specifiers. A regression in
+    ///     vsprintf_s that mis-handled the empty-va_args case (e.g.
+    ///     spurious "%" emission or terminator handling) would change
+    ///     the body length or content. Wave 130 pins the exact 16-byte
+    ///     literal pass-through.
+    ///   </item>
+    ///   <item>
+    ///     Case-letter mis-dispatch between case-'l' and case-'a'/'n'/'p'.
+    ///     A switch-arm copy-paste swap that bound /level's body to a
+    ///     different case-letter (or vice-versa) emits the wrong literal.
+    ///     Wave 130's "0 &lt;=" prefix is distinctive enough to detect
+    ///     mis-routing; Waves 123/125/126/129's prefixes are equally
+    ///     distinctive in the opposite direction.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (CLAUDE.md). The case-'l' /level slash command
+    /// is the retail server's documented admin level-set debug path. The
+    /// AdminLevel guard, range check, and out-of-range message are all
+    /// retail behaviour. No server permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Why out-of-range matters. The valid-range path (atoi(param) in
+    /// 0..50) emits TWO MESSAGE_STRING replies and mutates player state
+    /// (combat/trade/explore levels + skill points + saved-advance
+    /// rows). Both emits use format substitution with atoi(param), so
+    /// the wire-shape varies with the param. Pinning the out-of-range
+    /// arm gives byte-exact stability with no state mutation -- a clean
+    /// hardening pin.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashLevelOutOfRange_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (17) = 20 bytes.
+        const int ExpectedReplyPayloadLength = 20;
+        // strlen(literal) + 1 NUL = 17.
+        const short ExpectedReplyLengthField = 17;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 16.
+        const int ExpectedLiteralByteCount = 16;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Leveler", shipName: "LvlShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/level 99");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // Filter on the distinctive prefix so handshake-tail and
+                // chatter frames don't race ahead of the /level reply.
+                // Once we have the right reply we pin its full wire shape.
+                if (!text.StartsWith("0 <= Level", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(LevelOutOfRangeLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/level 99\" without seeing 0x001D MESSAGE_STRING starting with " +
+                $"\"0 <= Level\". Likely the user-block case-'l' arm at " +
+                $"server/src/PlayerConnection.cpp:6777 changed shape, MatchOptWithParam " +
+                $"at PlayerConnection.cpp:4526 broke param extraction, the AdminLevel " +
+                $"body-block guard at PlayerConnection.cpp:6782 inverted, or the atoi " +
+                $"out-of-range check at PlayerConnection.cpp:6785 changed bounds.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
