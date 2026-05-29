@@ -17348,4 +17348,438 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 226 literal anchor for "Missing arg for option dialog".
+    /// THIRD user-tier case-'d' arm pin (after /d Wave 174 and /deco
+    /// Wave 190); case-'d' user-tier promoted DOUBLE -&gt; TRIPLE.
+    /// Matcher at PlayerConnection.cpp:5966 -- SAME-LINE-AND-GUARD-DEV
+    /// pattern (`MatchOptWithParam("dialog",...) && AdminLevel() >= DEV`).
+    /// Matcher LHS evaluates first, fires the internal 4548 ERROR
+    /// side-effect, returns false; && short-circuits AdminLevel.
+    /// </summary>
+    private const string MissingArgDialogLiteral = "Missing arg for option dialog";
+
+    /// <summary>
+    /// Wave 226 pins the 33-byte wire-shape for /dialog (NO param).
+    /// <para>Chain for arg "dialog": arm 1 `MatchOptWithParam("d",pch,1)
+    /// && DEV` at 5903 -- strncmp 1B FULL, arg[1]='i' isalpha returns
+    /// SILENT-false; arm 2 `MatchOptWithParam("dwho",pch,4,true)` at
+    /// 5944 -- byte 1 'w' vs 'i' MISMATCH; arm 3 dialog at 5966 FULL
+    /// match -- fires 4548 ERROR. NET: ONE emit. NINETY-FOURTH
+    /// MatchOptWithParam ERROR pin. SECOND user-tier
+    /// SAME-LINE-AND-GUARD-DEV pin (after Wave 174 /d).
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashDialogMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        const int ExpectedReplyPayloadLength = 33;
+        const short ExpectedReplyLengthField = 30;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 29;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Dialoa", shipName: "DialoaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/dialog");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(MissingArgDialogLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgDialogLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/dialog\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{MissingArgDialogLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Wave 227 literal anchor for "Missing arg for option debugmissions".
+    /// FOURTH user-tier case-'d' arm pin; case-'d' TRIPLE -&gt; QUADRUPLE.
+    /// Matcher at PlayerConnection.cpp:6021 -- NO-INLINE-GUARD pattern.
+    /// </summary>
+    private const string MissingArgDebugmissionsLiteral = "Missing arg for option debugmissions";
+
+    /// <summary>
+    /// Wave 227 pins the 40-byte wire-shape for /debugmissions (NO
+    /// param).
+    /// <para>Chain for arg "debugmissions": arm 1 `d` strncmp 1B
+    /// arg[1]='e' isalpha SILENT-false; arm 2 dwho byte 1 'w' vs 'e'
+    /// MISMATCH; arm 3 dialog byte 1 'i' vs 'e' MISMATCH; arm 4
+    /// strcmp("debug","debugmissions") -- 5B match then '\0' vs 'm'
+    /// MISMATCH so strcmp non-zero, &amp;&amp; DEV short-circuits, false;
+    /// arm 5 deco byte 2 'c' vs 'b' MISMATCH; arm 6 strcmp(dockp) byte
+    /// 1 'o' vs 'e' MISMATCH; arm 7 debugmissions at 6021 FULL match
+    /// -- fires 4548 ERROR. NET: ONE emit. NINETY-FIFTH
+    /// MatchOptWithParam ERROR pin.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashDebugmissionsMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        const int ExpectedReplyPayloadLength = 40;
+        const short ExpectedReplyLengthField = 37;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 36;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Debmis", shipName: "DebmisShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/debugmissions");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(MissingArgDebugmissionsLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgDebugmissionsLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/debugmissions\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{MissingArgDebugmissionsLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Wave 228 literal anchor for "Missing arg for option effects".
+    /// THIRD user-tier case-'e' arm pin (after /effect Wave 191 and
+    /// /effecto Wave 192); case-'e' user-tier promoted DOUBLE -&gt;
+    /// TRIPLE. Matcher at PlayerConnection.cpp:6194 -- OUTER-GM-WRAPPED
+    /// pattern (case-'e' wraps the matcher chain in `if (AdminLevel()
+    /// &gt;= GM)` at line 6074); inside the gate, this is an else-if
+    /// chain. FIRST user-tier OUTER-GM-WRAPPED pin.
+    /// </summary>
+    private const string MissingArgEffectsLiteral = "Missing arg for option effects";
+
+    /// <summary>
+    /// Wave 228 pins the 34-byte wire-shape for /effects (NO param).
+    /// <para>Chain for arg "effects": preamble strcmp(endtalk) byte 1
+    /// 'n' vs 'f' MISMATCH; strcmp(enableskills) byte 1 'n' vs 'f'
+    /// MISMATCH; outer `if (AdminLevel() &gt;= GM)` at 6074 PASSES; arm
+    /// 1 effect strncmp 6B "effect"=="effect" FULL, arg[6]='s' isalpha
+    /// SILENT-false; arm 2 effecto strncmp 7B byte 6 'o' vs 's'
+    /// MISMATCH SILENT-false; arm 3 effects at 6194 FULL match,
+    /// arg[7]='\0' fires 4548 ERROR; arm 4 exposedecos byte 1 'f' vs
+    /// 'x' wait -- arg starts "effects" byte 1='f', option exposedecos
+    /// byte 1='x' MISMATCH SILENT. NET: ONE emit. NINETY-SIXTH
+    /// MatchOptWithParam ERROR pin.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashEffectsMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        const int ExpectedReplyPayloadLength = 34;
+        const short ExpectedReplyLengthField = 31;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 30;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Effesa", shipName: "EffesaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/effects");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(MissingArgEffectsLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgEffectsLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/effects\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{MissingArgEffectsLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Wave 229 literal anchor for "Missing arg for option exposedecos".
+    /// FOURTH user-tier case-'e' arm pin (and LAST MatchOptWithParam
+    /// arm in case-'e'); case-'e' user-tier promoted TRIPLE -&gt;
+    /// QUADRUPLE -- COMPLETE COVERAGE on all 4 MatchOptWithParam arms.
+    /// Matcher at PlayerConnection.cpp:6204 -- OUTER-GM-WRAPPED pattern.
+    /// </summary>
+    private const string MissingArgExposedecosLiteral = "Missing arg for option exposedecos";
+
+    /// <summary>
+    /// Wave 229 pins the 38-byte wire-shape for /exposedecos (NO param).
+    /// case-'e' user-tier MatchOptWithParam coverage COMPLETE (4/4).
+    /// <para>Chain for arg "exposedecos": strcmp(endtalk) byte 1 'n'
+    /// vs 'x' MISMATCH; strcmp(enableskills) byte 1 'n' vs 'x'
+    /// MISMATCH; outer GM gate PASSES; arm 1 effect byte 1 'f' vs 'x'
+    /// MISMATCH; arm 2 effecto byte 1 'f' vs 'x' MISMATCH; arm 3
+    /// effects byte 1 'f' vs 'x' MISMATCH; arm 4 exposedecos at 6204
+    /// FULL match, arg[11]='\0' fires 4548 ERROR. NET: ONE emit.
+    /// NINETY-SEVENTH MatchOptWithParam ERROR pin. LAST-ARM-OF-CHAIN
+    /// pin in case-'e' user-tier.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashExposedecosMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        const int ExpectedReplyPayloadLength = 38;
+        const short ExpectedReplyLengthField = 35;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 34;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Expoda", shipName: "ExpodaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/exposedecos");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(MissingArgExposedecosLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgExposedecosLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/exposedecos\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{MissingArgExposedecosLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
