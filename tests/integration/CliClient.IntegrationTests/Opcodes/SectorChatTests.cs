@@ -3727,4 +3727,191 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Verbatim body of the 0x001D MESSAGE_STRING reply the server emits
+    /// when the case-'g' GM-block matcher chain reaches its FOURTH matcher
+    /// at <c>PlayerConnection.cpp:5302</c>:
+    /// <c>MatchOptWithParam("gmenableskills", pch, param, msg_sent)</c>.
+    /// FIRST matcher gmgetaccess (line 5207) strncmp mismatches at index 2
+    /// ('g' vs 'e'); SECOND matcher gmsetaccess (line 5221) strncmp
+    /// mismatches at index 2 ('s' vs 'e'); THIRD matcher gmskillpoints
+    /// (line 5260) strncmp mismatches at index 2 ('s' vs 'e'); FOURTH
+    /// matcher gmenableskills matches all 14 bytes and hits the
+    /// separator-check NUL fall-through. 37 ASCII bytes after %s
+    /// substitution -- NEW WIDEST %s pin (was Wave 140 13-byte).
+    /// </summary>
+    private const string MissingArgGmenableskillsLiteral = "Missing arg for option gmenableskills";
+
+    /// <summary>
+    /// Wave 141 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 41-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the GM-tier slash
+    /// command <c>//gmenableskills</c> (NO param) -- routes through the
+    /// GM-block (<c>//</c>-prefix) entry guard, the 2-char strip, the
+    /// case-'g' GM-block dispatch, three matcher-chain fall-throughs
+    /// (gmgetaccess at 5207, gmsetaccess at 5221, gmskillpoints at 5260),
+    /// and the FOURTH matcher MatchOptWithParam("gmenableskills", ...)
+    /// at line 5302 hitting the missing-arg ERROR fork at
+    /// <c>PlayerConnection.cpp:4548</c>.
+    ///
+    /// <para>
+    /// SIXTH pin on the GM-block (<c>//</c>-prefix) dispatch path.
+    /// FOURTH pin on case-'g' GM-block -- TIGHT same-case-letter
+    /// sibling quadruple with Waves 138 (HEAD gmgetaccess), 139 (SECOND
+    /// gmsetaccess), and 140 (THIRD gmskillpoints). Wave 141 pins the
+    /// FOURTH matcher in the chain, exercising THREE consecutive
+    /// fall-through steps -- the deepest case-'g' fall-through pin so
+    /// far. NINTH pin on the MatchOptWithParam ERROR path with NEW
+    /// WIDEST 14-byte option-name %s width (vs Wave 140 13-byte WIDEST,
+    /// Waves 138/139 11-byte, Waves 135/136 7-byte, Wave 134 6-byte,
+    /// Wave 131 5-byte, Wave 137 3-byte MINIMAL).
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes Wave 140
+    /// is structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     case-'g' GM-block matcher-chain FOURTH-position fall-through
+    ///     regression at <c>PlayerConnection.cpp:5207-5302</c>. After
+    ///     FIRST matcher gmgetaccess returns false (strncmp mismatch
+    ///     index 2), SECOND matcher gmsetaccess returns false (strncmp
+    ///     mismatch index 2), and THIRD matcher gmskillpoints returns
+    ///     false (strncmp mismatch index 2), control MUST fall through
+    ///     to FOURTH matcher gmenableskills at line 5302. A regression
+    ///     that short-circuited any earlier matcher (e.g. returning true
+    ///     on mismatch) or that gated gmenableskills behind earlier
+    ///     matchers' success would silently swallow the //gmenableskills
+    ///     emit. Wave 141 pins THREE-step matcher fall-through within
+    ///     case-'g' -- the deepest matcher-chain pin in the catalogue.
+    ///   </item>
+    ///   <item>
+    ///     %s format-substitution NEW WIDEST 14-byte width regression
+    ///     at PlayerClass.cpp:3422. Wave 141 pins 14-byte
+    ///     ("gmenableskills") -- extends the catalogue from 3/5/6/7/11/13
+    ///     to 3/5/6/7/11/13/14 widths. A regression with a fixed-size
+    ///     vsprintf_s buffer truncating at 13 bytes would fail Wave 141
+    ///     but pass Wave 140 (13-byte).
+    ///   </item>
+    ///   <item>
+    ///     gmenableskills opt-name passed-as-second-argument regression
+    ///     at <c>PlayerConnection.cpp:5302</c>. The matcher receives
+    ///     "gmenableskills" as the option name. A regression that
+    ///     mis-spelled it (e.g. "gmenableskill" singular, "gmenable",
+    ///     "gm_enable_skills") would emit the wrong %s body OR fail to
+    ///     match a properly-spelled //gmenableskills request. Wave 141
+    ///     pins exact "gmenableskills".
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). The MatchOptWithParam
+    /// missing-arg emit is the retail server's documented dispatcher-level
+    /// error path; the GM-block guard at line 4716 enforces the
+    /// AdminLevel &gt;= GM gate the retail server enforced. No server
+    /// permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashGmenableskillsMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (38) = 41 bytes.
+        const int ExpectedReplyPayloadLength = 41;
+        // strlen(literal) + 1 NUL = 38.
+        const short ExpectedReplyLengthField = 38;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 37.
+        const int ExpectedLiteralByteCount = 37;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Gmenable", shipName: "GmenableShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//gmenableskills");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // Filter on the distinctive "for option gmenableskills" suffix.
+                if (!text.StartsWith("Missing arg for option gmenableskills", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgGmenableskillsLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//gmenableskills\" without seeing 0x001D MESSAGE_STRING starting with " +
+                $"\"Missing arg for option gmenableskills\". Likely the case-'g' GM-block " +
+                $"FIRST matcher (gmgetaccess at line 5207), SECOND matcher (gmsetaccess " +
+                $"at line 5221), or THIRD matcher (gmskillpoints at line 5260) incorrectly " +
+                $"returned true (preventing fall-through), the FOURTH matcher " +
+                $"(gmenableskills at line 5302) stopped dispatching, or the missing-arg " +
+                $"ERROR fork at PlayerConnection.cpp:4548 changed shape.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
