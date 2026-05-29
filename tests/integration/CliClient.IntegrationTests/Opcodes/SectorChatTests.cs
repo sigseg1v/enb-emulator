@@ -5976,4 +5976,250 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 152 missing-arg ERROR literal for case-'s' /script. The
+    /// matcher at PlayerConnection.cpp:7143 reads
+    /// `else if (MatchOptWithParam("script", pch, param, msg_sent) &amp;&amp; AdminLevel() &gt;= SDEV)`
+    /// -- SDEV-guarded MATCHER-FIRST inline (matcher emits via
+    /// SendVaMessage regardless of the &amp;&amp; short-circuit because
+    /// SendVaMessage runs INSIDE MatchOptWithParam before return).
+    /// With admin status=100 (AdminLevel=100 &gt;= SDEV=90) the guard
+    /// passes; with NO param after "/script", strncmp matches 6 bytes,
+    /// arg[6]='\0' fails separator-check, allowNoParams=false -- emits
+    /// "Missing arg for option script", returns false, &amp;&amp;
+    /// short-circuits body block (lua dofile / "Lua removed until
+    /// build warnings fixed" message) SKIPPED. 29 ASCII bytes after %s
+    /// substitution -- 6-byte %s width (FIRST user-tier 6-byte
+    /// SDEV-guard MATCHER-FIRST pin; deepens MATCHER-FIRST inline
+    /// structural pattern coverage to a THIRD pin; FIRST user-tier
+    /// SDEV-guard pin in the entire HandleSlashCommands catalogue --
+    /// previously SDEV-guards were only pinned at the GM-tier
+    /// dispatcher in Wave 139's case-g HEAD/SECOND).
+    /// </summary>
+    private const string MissingArgScriptLiteral = "Missing arg for option script";
+
+    /// <summary>
+    /// Wave 152 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 33-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/script</c> (NO param) -- routes through the
+    /// user-tier dispatcher entry at line 5434, the 1-char strip, the
+    /// case-'s' user-tier dispatch (NEW case-letter -- 16th user-tier
+    /// case-letter), skips the strcmp "slaysectormobs" head at line
+    /// 7137, then hits the SDEV-guard MATCHER-FIRST inline matcher at
+    /// line 7143
+    /// <c>else if (MatchOptWithParam("script", pch, param, msg_sent) &amp;&amp; AdminLevel() &gt;= SDEV)</c>.
+    /// With pch="script" and NO param, matcher matches 6 bytes,
+    /// fails separator-check allowNoParams=false, emits "Missing arg
+    /// for option script" via SendVaMessage at line 4548, sets
+    /// msg_sent=true, returns false. && short-circuits body block.
+    /// Subsequent sibling matchers (sounds 6B mismatch idx 1 'o'/'c',
+    /// strcmp setturrets/setrespawns FAIL, scale 5B mismatch idx 2,
+    /// skillpoints 11B mismatch idx 1, stat 4B mismatch idx 1, scan
+    /// 4B mismatch idx 2, shieldwarnings 14B mismatch idx 1) all
+    /// return false NO emit. Outer DEV-guard block at 7286 enters
+    /// (AdminLevel=100 >= DEV=80) but signature/setradius/setradius/
+    /// shutdown/sendp/strings/stats/shieldbuff all mismatch against
+    /// pch="script". case-'s' breaks at 7458. NET RESULT: ONE emit.
+    ///
+    /// <para>
+    /// TWENTY-FIRST pin on the user-tier (single-slash) dispatch path.
+    /// FIRST pin on user-tier case-'s' -- NEW case-letter extends
+    /// user-tier dispatcher switch coverage to SIXTEEN distinct
+    /// case-letters (a/b/c/d/e/f/h/i/k/l/m/n/o/p/r/s). TWENTIETH pin
+    /// on the MatchOptWithParam ERROR path. FIRST user-tier SDEV-guard
+    /// MATCHER-FIRST inline pin in the entire HandleSlashCommands
+    /// catalogue (previously SDEV-guards were only pinned at the
+    /// GM-tier dispatcher via Wave 139 case-g HEAD/SECOND) --
+    /// cross-tier SDEV-guard structural deepening. THIRD MATCHER-FIRST
+    /// inline pin (Waves 139 GM case-g + 143 user-tier case-d + 152
+    /// user-tier case-s) -- deepens MATCHER-FIRST inline to THREE
+    /// distinct case-letters across BOTH tiers at THREE distinct widths
+    /// (11/1/6 bytes). SECOND 6-byte user-tier %s width pin (Wave 149
+    /// /invite case-i NO-GUARD + Wave 152 /script case-s SDEV-guard
+    /// MATCHER-FIRST) -- SAME width DIFFERENT case-letter DIFFERENT
+    /// structural pattern, ruling out per-case-letter and
+    /// per-structural-pattern format-substitution branches at 6-byte
+    /// width within the user-tier dispatcher.
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes Wave 151
+    /// is structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     user-tier case-'s' dispatch + strcmp head skip +
+    ///     SDEV-guard MATCHER-FIRST inline matcher regression at
+    ///     <c>PlayerConnection.cpp:7136-7178</c>. case-'s' was
+    ///     previously unpinned in the user-tier switch (only pinned
+    ///     at GM-tier via Wave 142); a regression that dropped
+    ///     user-tier case-'s' entirely, reordered case labels, or
+    ///     routed *pch=='s' to the wrong handler would silently
+    ///     swallow /script. The strcmp head at 7137 checks for
+    ///     "slaysectormobs" (FAIL against "script"); a regression
+    ///     that made the strcmp lossy (e.g. strncmp-like prefix
+    ///     match) would cause head to enter and produce a different
+    ///     emit. The SDEV-guard MATCHER-FIRST matcher at 7143 is the
+    ///     FIRST inline SDEV-guard at user-tier; a regression that
+    ///     swapped the guard tier (SDEV -&gt; GM, DEV, or NO-GUARD)
+    ///     would change emit visibility per tier; a regression that
+    ///     swapped MATCHER-FIRST -&gt; GUARD-FIRST would short-circuit
+    ///     the matcher emit when AdminLevel &lt; SDEV (admin sees
+    ///     emit, non-admin does not). Wave 152 pins case-'s' is
+    ///     REACHABLE via user-tier switch AND SDEV-guard MATCHER-
+    ///     FIRST emits correctly on missing arg.
+    ///   </item>
+    ///   <item>
+    ///     case-'s' matcher-chain fall-through regression at
+    ///     <c>PlayerConnection.cpp:7179-7457</c> spanning 9 sibling
+    ///     matchers + 8 sibling strcmps across BOTH the inline arm
+    ///     AND the outer DEV-guard block at 7286. After the script
+    ///     matcher emits and msg_sent=true, execution continues
+    ///     through the entire else-if chain plus the OUTER DEV-guard
+    ///     block which enters because AdminLevel=100 &gt;= DEV=80.
+    ///     NONE of the 9 MatchOptWithParam siblings or 8 strcmp
+    ///     siblings match against pch="script" -- ONE emit. A
+    ///     regression that ADDED a competing matcher matching pch=
+    ///     "script" by accident would produce a second message;
+    ///     a regression that ACCIDENTALLY entered the DEV-guard block
+    ///     content with the wrong AdminLevel threshold would not be
+    ///     caught by this pin alone but the matcher-chain
+    ///     fall-through invariant is preserved. Wave 152 pins the
+    ///     largest matcher-chain fall-through in the user-tier
+    ///     dispatcher (17 sibling arms) as a structural invariant.
+    ///   </item>
+    ///   <item>
+    ///     cross-tier SDEV-guard structural divergence regression
+    ///     at <c>PlayerClass.cpp:3422</c>. Wave 139 pins GM-tier
+    ///     case-'g' SDEV-guard MATCHER-FIRST at 11-byte width; Wave
+    ///     152 pins user-tier case-'s' SDEV-guard MATCHER-FIRST at
+    ///     6-byte width. SAME structural pattern, DIFFERENT tier,
+    ///     DIFFERENT case-letter, DIFFERENT %s width. A regression
+    ///     that selectively broke SDEV-guard at one tier but not
+    ///     the other would fail one pin but not both; Wave 152
+    ///     deepens SDEV-guard to cross-tier coverage. Additionally:
+    ///     FIRST user-tier 6-byte SDEV-guard pin paired with Wave
+    ///     149 user-tier 6-byte NO-GUARD pin -- same tier, same
+    ///     width, DIFFERENT structural pattern (SDEV-guard vs
+    ///     NO-GUARD) -- rules out per-structural-pattern format-
+    ///     substitution branches at 6-byte width within user-tier.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). The MatchOptWithParam
+    /// missing-arg emit is the retail server's documented dispatcher-
+    /// level error path. /script (lua scripting dispatch, retail had
+    /// SDEV-guard inline) emits "Missing arg" regardless of guard
+    /// pass/fail because SendVaMessage executes inside
+    /// MatchOptWithParam before the && return-value short-circuit
+    /// rejects the body. No server permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashScriptMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (30) = 33 bytes.
+        const int ExpectedReplyPayloadLength = 33;
+        // strlen(literal) + 1 NUL = 30.
+        const short ExpectedReplyLengthField = 30;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 29.
+        const int ExpectedLiteralByteCount = 29;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Scripto", shipName: "ScriptoShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/script");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                // EXACT equals filter (not StartsWith) -- defensive against
+                // any future sibling "script*" option emits in case-'s'.
+                if (!text.Equals("Missing arg for option script", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgScriptLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/script\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option script\". Likely the user-tier case-'s' " +
+                $"dispatch at line 7136 stopped routing, the strcmp \"slaysectormobs\" " +
+                $"head at line 7137 stopped failing through, the SDEV-guard MATCHER-FIRST " +
+                $"inline matcher at line 7143 stopped emitting (guard regression: tier " +
+                $"swap SDEV -> GM/DEV/NO-GUARD changed visibility; structural swap " +
+                $"MATCHER-FIRST -> GUARD-FIRST would block matcher emit when AdminLevel " +
+                $"< SDEV), the matcher-chain fall-through across 17 sibling arms " +
+                $"produced a competing emit (regression), or the missing-arg ERROR fork " +
+                $"at PlayerConnection.cpp:4548 changed shape.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
