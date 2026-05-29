@@ -10475,4 +10475,211 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 172 missing-arg ERROR literal for case-'r' /rotatez.
+    /// The matcher at PlayerConnection.cpp:7069 reads
+    /// `else if (MatchOptWithParam("rotatez", pch, param, msg_sent))`
+    /// -- NO outer AdminLevel guard, NO inside-body guard
+    /// (pure NO-GUARD-ELSE-IF pattern, same shape as Waves 170
+    /// /rotatex at 7059 and 171 /rotatey at 7064). FOURTH case-'r'
+    /// user-tier pin -- case-'r' user-tier now QUADRUPLE-PINNED
+    /// across FOUR ELSE-IF chain positions. NO-GUARD-ELSE-IF
+    /// within case-'r' TRIPLE-PINNED at three consecutive
+    /// 5-line-stride positions (7059/7064/7069). 7 ASCII bytes after
+    /// %s substitution -- 6th 7-byte width pin SEXTUPLE-PINNED.
+    /// </summary>
+    private const string MissingArgRotatezLiteral = "Missing arg for option rotatez";
+
+    /// <summary>
+    /// Wave 172 sibling-arm-pinning hardening (+0 ratchet, 0x0033
+    /// CLIENT_CHAT -&gt; 0x001D MESSAGE_STRING via slash short-circuit):
+    /// pins the byte-exact 34-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING the server emits in reply to the user-tier slash
+    /// command <c>/rotatez</c> (NO param) -- routes through the
+    /// user-tier dispatcher entry at line 5434, the 1-char strip, the
+    /// case-'r' user-tier dispatch at line 6992. Wave 172 deepens
+    /// case-'r' to QUADRUPLE-PINNED across FOUR ELSE-IF positions
+    /// (Wave 144 /removebaseore at 7074, Wave 170 /rotatex at 7059,
+    /// Wave 171 /rotatey at 7064, Wave 172 /rotatez at 7069). Prior
+    /// matchers in case-'r' MISMATCH at byte 1 against "rotatez"
+    /// (reffect/rs/release/rsi/rsa/rsn/rsd/range/restoreinv
+    /// MISMATCHES); /rotatex MISMATCH at byte 6 ('x' vs 'z');
+    /// /rotatey MISMATCH at byte 6 ('y' vs 'z').
+    ///
+    /// <para>
+    /// ELSE-IF at 7069 `MatchOptWithParam("rotatez", pch, param,
+    /// msg_sent)` -- NO outer AdminLevel guard, NO inside-body guard
+    /// (pure NO-GUARD-ELSE-IF pattern). MatchOptWithParam: strncmps
+    /// "rotatez" against "rotatez" (7 byte match), arg[7]='\0' --
+    /// NOT '=', NOT ' ', NOT isalpha, allowNoParams=false -- emits
+    /// "Missing arg for option rotatez" via SendVaMessage at 4548
+    /// with default COLOR=5, sets msg_sent=true, returns false.
+    /// Body at 7071 SKIPPED (matcher returned false). case-'r' chain
+    /// continues: /removebaseore AdminLevel-AND-matcher short-circuit
+    /// -- AdminLevel passes (SDEV) but MatchOptWithParam
+    /// "removebaseore" vs "rotatez" byte 1 'e' vs 'o' MISMATCH NO
+    /// emit; rest of case-'r' MISMATCH. case-'r' breaks. Trailing
+    /// fallback at 7702 SKIPPED (msg_sent=true). NET RESULT: ONE
+    /// emit.
+    /// </para>
+    ///
+    /// <para>
+    /// FORTY-FIRST pin on the user-tier (single-slash) dispatch path.
+    /// FOURTH pin on user-tier case-'r' -- case-'r' user-tier now
+    /// QUADRUPLE-PINNED across FOUR ELSE-IF chain-arm positions.
+    /// FORTIETH pin on the MatchOptWithParam ERROR path. THIRTEENTH
+    /// NO-GUARD pin -- NO-GUARD now TREDECUPLE-PINNED across 6
+    /// case-letters (o/s/t/u/w/r) with case-'r' TRIPLE-instance
+    /// (rotatex+rotatey+rotatez) within the pattern. SIXTH 7-byte %s
+    /// width pin -- SEXTUPLE-PINNED across 4 case-letters (c/u/t/r)
+    /// AND 6 structural-pattern instances (case-'r' now
+    /// triple-instance: /rotatex + /rotatey + /rotatez).
+    /// </para>
+    ///
+    /// <para>
+    /// What this catches. Three concrete regression classes prior
+    /// waves are structurally blind to:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     FOURTH case-'r' user-tier ELSE-IF chain arm regression at
+    ///     <c>PlayerConnection.cpp:7069</c>. A regression that
+    ///     wrapped ALL case-'r' arms in a global AdminLevel guard
+    ///     would gate /rotatez behind that tier; Wave 172 pins
+    ///     /rotatez emits on missing-arg without any AdminLevel
+    ///     gating, ruling out spurious case-'r'-wide guards even
+    ///     after the Wave 170 /rotatex and Wave 171 /rotatey pins
+    ///     (locality: 10-line ELSE-IF stride 7059 vs 7069 within the
+    ///     same case body).
+    ///   </item>
+    ///   <item>
+    ///     NO-GUARD-ELSE-IF intra-case-letter TRIPLE-locality
+    ///     regression at <c>PlayerConnection.cpp:7059</c> vs
+    ///     <c>7064</c> vs <c>7069</c>. case-'r' has THREE consecutive
+    ///     NO-GUARD-ELSE-IF arms emitting identical 7-byte %s width
+    ///     missing-arg ERRORS that differ only in the last literal
+    ///     byte ('x' vs 'y' vs 'z'). A regression in the ELSE-IF
+    ///     chain order (e.g. accidentally moved the /rotatez arm out
+    ///     of case-'r', or fell through to /rotatex or /rotatey for
+    ///     /rotatez input) would break one pin but not the others;
+    ///     Wave 172 fixes the intra-arm position TRIPLE.
+    ///   </item>
+    ///   <item>
+    ///     7-byte %s width SIXTH (case-letter, structural-pattern,
+    ///     literal) divergence regression at <c>PlayerClass.cpp:3422</c>.
+    ///     7-byte %s now pinned at SIX distinct (case-letter,
+    ///     structural-pattern, literal) combinations -- c/chjoin +
+    ///     u/upgrade + t/testmsg + r/rotatex + r/rotatey + r/rotatez.
+    ///     A regression in the vsprintf_s 7-byte path specific to
+    ///     ONE literal would fail one pin but not the other five.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). /rotatez is open
+    /// to ALL users at the dispatcher level -- the NO-GUARD-ELSE-IF
+    /// pattern at 7069 has no AdminLevel guard at all. ERROR fork at
+    /// 4548 emits for ALL tiers (faithful to retail). No server
+    /// permissiveness added.
+    /// </para>
+    ///
+    /// <para>
+    /// Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SlashRotatezMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.For();
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (31) = 34 bytes.
+        const int ExpectedReplyPayloadLength = 34;
+        // strlen(literal) + 1 NUL = 31.
+        const short ExpectedReplyLengthField = 31;
+        // SendVaMessage -> SendMessageString default color parameter.
+        const byte ExpectedReplyColor = 5;
+        // strlen(literal) = 30.
+        const int ExpectedLiteralByteCount = 30;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Rotzo", shipName: "RotzoShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/rotatez");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals("Missing arg for option rotatez", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgRotatezLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/rotatez\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"Missing arg for option rotatez\". Likely the user-tier case-'r' " +
+                $"dispatch at line 6992 stopped routing, the NO-GUARD-ELSE-IF arm at " +
+                $"7069 acquired a spurious AdminLevel guard, the trailing illegal-slash " +
+                $"fallback at 7702 fired as a second emit, or the missing-arg ERROR " +
+                $"fork at PlayerConnection.cpp:4548 changed shape (esp. vsprintf_s " +
+                $"7-byte %s width).");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
