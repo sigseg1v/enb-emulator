@@ -1114,4 +1114,10 @@ struct RecustomizeAvatarDone
 	char _unknown[11];
 } ATTRIB_PACKED;
 
+// Close the push from net7/Packing.h so we don't leak pack(1) into any
+// header included after this one in the same TU.
+#ifdef WIN32
+#pragma pack(pop)
+#endif
+
 #endif // _PACKET_STRUCTURES_H_INCLUDED_

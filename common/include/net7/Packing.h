@@ -21,8 +21,19 @@
 
 // MSVC uses #pragma pack(1) globally + an empty macro on each struct;
 // gcc/clang use __attribute__((packed)) at struct close.
+//
+// WIN32 path: push/pop pair. We push here so PacketStructures.h's struct
+// definitions are pack(1); the matching pop at the end of
+// PacketStructures.h restores the surrounding TU's pack state. The
+// historical `#pragma pack(1)` (no push) leaked pack(1) into every
+// subsequent header in the same TU — and TUs that included
+// PacketStructures.h *before* unrelated class headers (e.g.
+// ServerManager.h) got those classes laid out packed while other TUs
+// laid them out unpacked, causing per-field offsets to diverge between
+// the writer and the reader. (Symptom: garbage pointer reads from
+// g_ServerMgr->m_UDPGlobalClient on the client→global TCP path.)
 #ifdef WIN32
-#pragma pack(1)
+#pragma pack(push, 1)
 #define ATTRIB_PACKED
 #else
 #define ATTRIB_PACKED __attribute__((packed))
