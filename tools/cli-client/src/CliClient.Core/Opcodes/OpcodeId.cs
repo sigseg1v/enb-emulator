@@ -90,7 +90,9 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId ManufactureAction            = new(0x007E);
         public static readonly OpcodeId ManufactureTechLevelFilter   = new(0x0080);
         public static readonly OpcodeId RecustomizeShipStart         = new(0x0081);
+        public static readonly OpcodeId RecustomizeShipDone          = new(0x0082);
         public static readonly OpcodeId RecustomizeAvatarStart       = new(0x0083);
+        public static readonly OpcodeId RecustomizeAvatarDone        = new(0x0084);
         public static readonly OpcodeId JobList                      = new(0x0093);
         public static readonly OpcodeId JobDescription               = new(0x0094);
         public static readonly OpcodeId JobAcceptReply               = new(0x0096);
@@ -98,9 +100,11 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId MissionDismissal             = new(0x0087);
         public static readonly OpcodeId PetitionStuck                = new(0x0088);
         public static readonly OpcodeId Relationship                 = new(0x0089);
+        public static readonly OpcodeId IncapacitanceRequest         = new(0x008D);
         public static readonly OpcodeId CameraControl                = new(0x0092);
         public static readonly OpcodeId GalaxyMapRequest             = new(0x0098);
         public static readonly OpcodeId Navigation                   = new(0x0099);
+        public static readonly OpcodeId Warp                         = new(0x009B);
         public static readonly OpcodeId TriggerEmote                 = new(0x00A1);
         public static readonly OpcodeId NotifyEmote                  = new(0x00A2);
         public static readonly OpcodeId ClientChatRequest            = new(0x00A3);
@@ -116,6 +120,8 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId CtaResponse                  = new(0x00BD);
         public static readonly OpcodeId ConfirmedActionOffer         = new(0x00BE);
         public static readonly OpcodeId ConfirmedActionResponse      = new(0x00C0);
+        public static readonly OpcodeId GuildLeaderAcceptClient      = new(0x00C5);
+        public static readonly OpcodeId GuildRecruitAcceptClient     = new(0x00C9);
         public static readonly OpcodeId GuildSimpleClientSector      = new(0x00CD);
         public static readonly OpcodeId GuildRankNamesRequestClient  = new(0x00D4);
         public static readonly OpcodeId GlobalConnect          = new(0x006D);
