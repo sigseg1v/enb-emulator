@@ -16351,4 +16351,145 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 218 sibling-arm-pinning hardening (+0 ratchet) literal anchor
+    /// for the 34-byte ASCII body "Missing arg for option replaceship"
+    /// that the server emits when admin-tier double-slash
+    /// <c>//replaceship</c> arrives with no argument. Matcher at
+    /// PlayerConnection.cpp:5068 -- NINTH arm of case-'r' admin-tier
+    /// switch opened at 4962 (six prior strcmp arms + one prior
+    /// MatchOptWithParam(restartcomms) + one prior strcmp(rfactions)
+    /// before the matching arm fires). SECOND case-'r' admin-tier pin;
+    /// case-'r' admin-tier promoted from SINGLE-PINNED to DOUBLE-PINNED.
+    /// </summary>
+    private const string MissingArgReplaceshipLiteral = "Missing arg for option replaceship";
+
+    /// <summary>
+    /// Wave 218 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 38-byte wire-shape of the single 0x001D MESSAGE_STRING reply to
+    /// admin-tier double-slash <c>//replaceship</c> (NO param). Wave 218
+    /// deepens admin-tier case-'r' to DOUBLE-PINNED status.
+    ///
+    /// <para>
+    /// Outer gate at 4716 admits the dispatch (cli_test status=100 &gt;=
+    /// GM=50). Switch at 4724 jumps on *pch='r' -&gt; case-'r' opens at
+    /// 4962. case-'r' has TEN arms in an else-if chain (6 strcmp +
+    /// MatchOptWithParam(restartcomms) + strcmp(rfactions) +
+    /// MatchOptWithParam(replaceship) + MatchOptWithParam(respec)). For
+    /// arg "replaceship": arms 1-6 strcmp against literals (rstations,
+    /// rsectors, rsectorall, ritems, rmissions, resetmymissions) all
+    /// differ; arm 7 MatchOptWithParam("restartcomms", "replaceship",
+    /// 12) byte 2 's' vs 'p' MISMATCH no prefix-match no ERROR; arm 8
+    /// strcmp(rfactions) differs; arm 9 MatchOptWithParam("replaceship",
+    /// "replaceship", 11) full match, arg[11]='\0' fires 4548 ERROR
+    /// fork: "Missing arg for option replaceship" COLOR=5; arm 10
+    /// MatchOptWithParam("respec", "replaceship", 6) byte 2 's' vs 'p'
+    /// MISMATCH no ERROR. case-'r' breaks. NET RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>
+    /// SECOND admin-tier case-'r' pin; case-'r' admin-tier now
+    /// DOUBLE-PINNED. ELEVENTH admin-tier NO-INLINE-GUARD pin.
+    /// EIGHTY-SIXTH MatchOptWithParam ERROR pin. FIRST admin-tier pin
+    /// where the matching MatchOptWithParam arm is preceded by MULTIPLE
+    /// strcmp arms AND a prior MatchOptWithParam arm that prefix-
+    /// mismatches -- Wave 213 //findsector case-'f' had only 2 strcmp
+    /// arms preceding (no prior MatchOptWithParam); Wave 218 case-'r'
+    /// //replaceship has 6 strcmp + 1 MatchOptWithParam-skip + 1 strcmp
+    /// before the matching arm. Catches regression where the
+    /// else-if chain's order is rearranged and a prior arm accidentally
+    /// matches "replaceship" (e.g. broadening "respec" to a prefix
+    /// match would swallow //replaceship). 11-byte option-name width
+    /// pin. Assert.Equal pins the full 38-byte response shape.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashReplaceshipMissingArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (35) = 38 bytes.
+        const int ExpectedReplyPayloadLength = 38;
+        const short ExpectedReplyLengthField = 35;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 34;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Repla", shipName: "ReplaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//replaceship");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(MissingArgReplaceshipLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissingArgReplaceshipLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//replaceship\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{MissingArgReplaceshipLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
