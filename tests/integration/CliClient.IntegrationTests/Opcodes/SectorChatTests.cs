@@ -17153,6 +17153,172 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 250 sibling-arm-pinning hardening (+0 ratchet): pins the 63-byte
+    /// wire-shape of the single 0x001D MESSAGE_STRING reply to user-tier
+    /// single-slash <c>/rs</c> on a fresh cli_test character. SECOND case-'r'
+    /// user-tier pin overall (after Wave 249 /reffect) -- case-'r' user-tier
+    /// promoted from SINGLE-PINNED to DOUBLE-PINNED. PAIR-COMPLETES the
+    /// PLAIN-`if` arm coverage Wave 249 opened: arm 1 (/reffect) and arm 2
+    /// (/rs) at PlayerConnection.cpp:6993 / 7000 are the two plain `if`s
+    /// that precede the chained else-if cascade starting at /release at
+    /// 7005. FOURTH handler-side NULL-target FALLBACK pin in the
+    /// HandleSlashCommands catalogue -- joins Wave 243 /face
+    /// (HandleFaceRequest 8453), Wave 244 /faceme (HandleFaceMeRequest
+    /// 8474), and Wave 247 /levelout (HandleLevelOutRequest 8964) with a
+    /// FOURTH distinct handler (HandleRenderStateRequest at
+    /// PlayerConnection.cpp:9467) reached via case-'r' arm 2 at 7000.
+    /// The emit body matches Waves 243/244/247 EXACTLY ("Unable to access
+    /// selected object - could not find object ID", 59B) but originates
+    /// from a DIFFERENT handler under a DIFFERENT switch-case letter --
+    /// SECOND cross-case-letter handler-fallback literal-consistency pin
+    /// (after Wave 247 extended case-'f' to case-'l'; Wave 250 extends to
+    /// case-'r'). ONE-HUNDRED-NINTH overall byte-exact dispatch pin.
+    /// Assert.Equal pins the full 63-byte response shape.
+    ///
+    /// <para>
+    /// User-tier outer gate at 5434 admits. Switch at 5442 jumps on
+    /// *pch='r' -&gt; case-'r' opens at PlayerConnection.cpp:6992.
+    /// case-'r' walk for pch="rs":
+    ///   arm 1 `if strcmp(pch, "reffect")` at 6993: 7B vs 2B; byte 1
+    ///     'e' vs 's' MISMATCH. Skip. msg_sent stays false, success
+    ///     stays false.
+    ///   arm 2 `if strcmp(pch, "rs")` at 7000: 2B vs 2B FULL match
+    ///     -&gt; success = HandleRenderStateRequest() at 7002;
+    ///     msg_sent = true at 7003.
+    ///     HandleRenderStateRequest at 9467: obj = GetObjectFromID(
+    ///     ShipIndex()-&gt;GetTargetGameID()); target=-1 (post-login
+    ///     default) -&gt; obj=NULL -&gt; else-branch at 9479-9482 fires
+    ///     SendVaMessage("Unable to access selected object - could
+    ///     not find object ID") COLOR=5 default. Returns false (success
+    ///     stays false; msg_sent already true from caller at 7003).
+    ///   arms 3-16 chain off arm 2 as else-if at 7005 onward: arm 2's
+    ///     `if` was TRUE so the entire else-if cascade is skipped.
+    /// case-'r' breaks at 7134. NET RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 3 NEW classes prior waves are structurally
+    /// blind to: (a) FIRST PLAIN-`if` PAIR-arm pin in case-'r' -- Wave 249
+    /// pinned arm 1 (/reffect); Wave 250 pins arm 2 (/rs). PAIR-COMPLETES
+    /// the two-plain-`if`s structural surface. A regression that turned
+    /// arm 2 into else-if (`else if strcmp(pch, "rs")`) would make this
+    /// test silently fail because arm 1's match for /reffect would skip
+    /// arm 2 entirely -- but the test sends "/rs" not "/reffect" so it
+    /// arrives at arm 2 directly via byte-1 MISMATCH on arm 1. The pair
+    /// of Wave 249 + Wave 250 catches any collapse of the two plain `if`s
+    /// into a single else-if cascade; (b) FOURTH handler-side NULL-target
+    /// fallback pin via a DISTINCT handler -- the same 59B literal now
+    /// lives at FOUR source sites (8466 face, 8487 faceme, 8981 levelout,
+    /// 9481 rs). A refactor that edits the literal in only ONE handler
+    /// would silently diverge wire shape only on that path, and the
+    /// FOUR-WAY pin set catches divergence in any direction; (c) SECOND
+    /// CROSS-CASE-LETTER handler-fallback literal-consistency pin -- Wave
+    /// 247 extended consistency across case-'f' and case-'l'; Wave 250
+    /// extends to case-'r' (THREE distinct case-letters now covered).
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. The /rs arm is a retail-faithful slash-command dispatch;
+    /// the NULL-target fallback is the natural error-emit path the real
+    /// server's HandleRenderStateRequest already takes. cli_test=100
+    /// satisfies the outer user-tier gate at 5434 unconditionally; no
+    /// inner AdminLevel guard exists on this arm (the inner branches of
+    /// HandleRenderStateRequest itself are GM-gated for state-mutation
+    /// arms /rsi /rsa /rsn /rsd, but /rs is read-only on the target's
+    /// RenderState int and emits regardless of tier).
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashRs_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (60) = 63 bytes.
+        const int ExpectedReplyPayloadLength = 63;
+        const short ExpectedReplyLengthField = 60;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 59;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Rsa", shipName: "RsaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/rs");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(FaceNoTargetLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(FaceNoTargetLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/rs\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{FaceNoTargetLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
