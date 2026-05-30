@@ -22322,6 +22322,8 @@ public sealed class SectorChatTests
 
     private const string BanPlayerBacktickGhostfooNotFoundLiteral = "Player `ghostfoo` not found";
 
+    private const string GmgetaccessPlayerBacktickGhostfooNotFoundLiteral = "Player `ghostfoo` not found";
+
     /// <summary>
     /// Wave 278 sibling-arm-pinning hardening (+0 ratchet): pins the
     /// 47-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
@@ -24251,6 +24253,141 @@ public sealed class SectorChatTests
                 $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
                 $"\"//ban ghostfoo\" without seeing 0x001D MESSAGE_STRING " +
                 $"equal to \"{BanPlayerBacktickGhostfooNotFoundLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Wave 93 sibling-arm-pinning hardening (+0 ratchet): pins the 31-byte
+    /// wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to admin-tier
+    /// <c>//gmgetaccess ghostfoo</c> (Username present, GetPlayer returns
+    /// NULL) on a fresh cli_test character. FIRST case-'g' admin arm 1
+    /// (//gmgetaccess) BODY pin -- prior coverage (Wave 65/66/67/68/88) was
+    /// across arms 2-6; arm 1 had ONLY MISSING-ARG-helper coverage (the
+    /// "Missing arg for option gmgetaccess" pin from a prior wave reached
+    /// the MatchOptWithParam helper but not the arm body). Wave 93 reaches
+    /// the BODY: post-MatchOptWithParam success, GetPlayer-NULL branch,
+    /// emits "Player `ghostfoo` not found" (27B, COLOR=5 default) and
+    /// returns. case-'g' admin block ALL ARM BODIES now pinned. THIRD
+    /// BACKTICK "Player `%s` not found" pin overall (Wave 73 //bumpaccess
+    /// DEV-gated case-'b' arm 2, Wave 92 //ban NO-INLINE-GATE case-'b'
+    /// arm 1, Wave 93 //gmgetaccess NO-INLINE-GATE case-'g' arm 1).
+    /// SECOND NO-INLINE-GATE BACKTICK Player-not-found pin (Wave 92 was
+    /// first). SAME-WIRE-SHAPE-DIFFERENT-DISPATCH pin -- Wave 92 and
+    /// Wave 93 emit IDENTICAL 31-byte wire content but via case-'b' arm 1
+    /// vs case-'g' arm 1; a regression that conflated the dispatchers
+    /// would pass byte-equality but fail the dispatch-path pin. ONE-
+    /// HUNDRED-FIFTIETH overall byte-exact dispatch pin. Assert.Equal
+    /// pins the full 31-byte response shape AND the literal content.
+    ///
+    /// <para>
+    /// Outer admin gate at PlayerConnection.cpp:4716 admits (cli_test
+    /// ADMIN=100 >= GM=50). pch="gmgetaccess ghostfoo". Switch on 'g'.
+    /// case-'g' opens at 5205. Arm 1 at 5207: MatchOptWithParam(
+    /// "gmgetaccess", "gmgetaccess ghostfoo", ...) strncmp 11B matches;
+    /// arg[11]=' '; param="ghostfoo"; returns true. Body at 5209:
+    /// target=g_PlayerMgr->GetPlayer("ghostfoo")=NULL. if(!target) TRUE
+    /// at 5210 -- emits SendVaMessage("Player `%s` not found", "ghostfoo")
+    /// at 5212 (DEFAULT COLOR=5; 27B body); return at 5213. Arms 2-6
+    /// NEVER REACHED. NET RESULT: exactly 1 0x001D emit. Wire:
+    /// [u16 LE 28][u8 5][27B][NUL] = 31 bytes.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. //gmgetaccess is admin-tier with NO inline AdminLevel gate
+    /// -- the admin-tier outer gate at 4716 is the only access check --
+    /// retail-faithful as preserved in source. The post-MatchOptWithParam
+    /// GetPlayer-NULL early-return chain is the upstream-preserved input-
+    /// validation path. The pin DOCUMENTS the case-'g' arm 1 BACKTICK-
+    /// quoted player-not-found invariant byte-for-byte.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashGmgetaccessOfflineTarget_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (28) = 31 bytes.
+        const int ExpectedReplyPayloadLength = 31;
+        const short ExpectedReplyLengthField = 28;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 27;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Gepa", shipName: "GepaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//gmgetaccess ghostfoo");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(GmgetaccessPlayerBacktickGhostfooNotFoundLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(GmgetaccessPlayerBacktickGhostfooNotFoundLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//gmgetaccess ghostfoo\" without seeing 0x001D MESSAGE_STRING " +
+                $"equal to \"{GmgetaccessPlayerBacktickGhostfooNotFoundLiteral}\".");
         }
         finally
         {
