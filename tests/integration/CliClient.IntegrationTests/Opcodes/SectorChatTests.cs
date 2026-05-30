@@ -17500,6 +17500,178 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 252 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
+    /// the 16-byte ASCII body "Test Successful!" that the server emits when
+    /// user-tier single-slash <c>/test</c> arrives. Matcher at
+    /// PlayerConnection.cpp:7462 (arm 1 of case-'t' user-tier opened at
+    /// 7461). FIRST case-'t' user-tier pin.
+    /// </summary>
+    private const string TestSuccessfulLiteral = "Test Successful!";
+
+    /// <summary>
+    /// Wave 252 sibling-arm-pinning hardening (+0 ratchet): pins the 20-byte
+    /// wire-shape of the 0x001D MESSAGE_STRING reply to user-tier single-slash
+    /// <c>/test</c> on a fresh cli_test character. FIRST case-'t' user-tier
+    /// pin overall, case-'t' user-tier promoted from UNPINNED to SINGLE-PINNED.
+    /// case-'t' is STRUCTURALLY UNIQUE among case-letters: it has NO else-if
+    /// cascade at all -- ALL arms are PLAIN-`if` (test/talktree/testmsg/tilt/
+    /// terminate/trade/...). Wave 252 lands the FIRST pin on the leading
+    /// PLAIN-`if` arm 1. ONE-HUNDRED-ELEVENTH overall byte-exact dispatch pin.
+    /// Assert.Equal pins the full 20-byte response shape.
+    ///
+    /// <para>
+    /// User-tier outer gate at 5434 admits. Switch at 5442 jumps on
+    /// *pch='t' -&gt; case-'t' opens at PlayerConnection.cpp:7461.
+    /// case-'t' walk for pch="test":
+    ///   arm 1 `if strcmp(pch, "test")` at 7462: 4B vs 4B FULL match
+    ///     -&gt; SendVaMessage("Test Successful!") at 7465 COLOR=5 default;
+    ///     SetAllowGroupInvite(true) at 7466 (per-character flag mutation,
+    ///     retail-faithful); SendAuxPlayer() at 7467 (sends a separate
+    ///     0x0017 AUX_PLAYER opcode, not MESSAGE_STRING); msg_sent=true.
+    ///     success stays false (this arm does NOT set success).
+    ///   arm 2 `if strcasecmp(pch, "talktree")` at 7471 PLAIN-`if`: evaluated
+    ///     because all case-'t' arms are PLAIN-`if`. 8B vs 4B; strcasecmp
+    ///     returns NON-ZERO (lengths differ); skip.
+    ///   arm 3 `if MatchOptWithParam("testmsg", pch="test")` at 7486:
+    ///     strncmp("testmsg","test",7) reads past pch's NUL terminator,
+    ///     'm' vs 0x00 NON-ZERO -&gt; false.
+    ///   arm 4 `if MatchOptWithParam("tilt", pch="test")` at 7495:
+    ///     strncmp("tilt","test",4) byte 1 'i' vs 'e' NON-ZERO -&gt; false.
+    ///   arm 5 `if MatchOptWithParam("terminate", pch="test")` at 7501:
+    ///     strncmp("terminate","test",9) reads past pch's NUL, NON-ZERO -&gt;
+    ///     false.
+    ///   arm 6 `if MatchOptWithParam("trade", pch="test")` at 7521:
+    ///     strncmp("trade","test",5) byte 1 'r' vs 'e' NON-ZERO -&gt; false.
+    ///   remaining case-'t' PLAIN-`if` arms (touchaux/transferadmin/etc) all
+    ///     reject via strncmp byte-1 mismatch on pch="test".
+    /// case-'t' breaks. NET RESULT: ONE MESSAGE_STRING emit (+ a separate
+    /// AUX_PLAYER fanout that the test filter ignores).
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 3 NEW classes prior waves are structurally
+    /// blind to: (a) FIRST case-'t' user-tier pin overall -- extends
+    /// case-letter coverage to include 't' (catches regression where the
+    /// case-'t' label at PlayerConnection.cpp:7461 is deleted, mis-cased,
+    /// or its dispatch table entry collides with another letter); (b)
+    /// FIRST NO-ELSE-IF-CASCADE case-letter pin -- case-'t' is STRUCTURALLY
+    /// UNIQUE: its body is a SERIES of PLAIN-`if`s with NO else-if at all,
+    /// meaning every arm is evaluated independently. A regression that
+    /// added an else-if between arm 1 and arm 2 would short-circuit later
+    /// arms when arm 1 matches, silently changing fanout semantics. Wave
+    /// 252's choice to pin via a body whose unique discriminator is byte
+    /// 1 'e' (vs 'a' talktree, 'i' tilt, 'e' but-shorter testmsg/terminate,
+    /// 'r' trade) catches collapse-into-else-if regression because arm 1
+    /// still wins on strcmp equality; (c) FIRST "PLAIN-`if`-with-side-
+    /// emit-fanout" pin -- arm 1 emits ONE MESSAGE_STRING AND fires
+    /// SendAuxPlayer which sends a separate AUX_PLAYER opcode in the same
+    /// dispatch. A regression that swapped SendAuxPlayer for a different
+    /// opcode or removed it entirely would not affect this test (the test
+    /// filters by 0x001D opcode) but a regression that swapped the
+    /// MESSAGE_STRING literal would fire. This is the first "single-emit-
+    /// + side-fanout-opcode" pin.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. The /test arm is a retail-faithful slash-command dispatch.
+    /// The SetAllowGroupInvite(true) mutation is per-character flag state
+    /// matching the existing server behaviour; the test does NOT toggle
+    /// admin levels or unlock any server-wide gate. cli_test=100 satisfies
+    /// the outer user-tier gate at 5434 unconditionally; no inner
+    /// AdminLevel guard exists on this arm.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashTest_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (17) = 20 bytes.
+        const int ExpectedReplyPayloadLength = 20;
+        const short ExpectedReplyLengthField = 17;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 16;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Testa", shipName: "TestaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/test");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(TestSuccessfulLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(TestSuccessfulLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/test\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{TestSuccessfulLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
