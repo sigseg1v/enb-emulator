@@ -15845,6 +15845,161 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 242 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
+    /// the 21-byte ASCII body "Not yet implemented.\n" (20 visible chars +
+    /// LF) that the server emits when user-tier single-slash <c>/anon</c>
+    /// arrives on a cli_test account (AdminLevel=100 >= GM=50). Matcher at
+    /// PlayerConnection.cpp:5446 (arm 1 of case-'a' user-tier opened at
+    /// 5444) -- INTERNAL-BODY-GM-GUARD pattern, structurally distinct from
+    /// Wave 123 /authlevel (case-'a' arm 2, NO inner guard) and Wave 241
+    /// /doff (case-'d' arm 3, INTERNAL DEV guard). FIRST internal GM-guard
+    /// pin on a user-tier strcmp body-emit arm.
+    /// </summary>
+    private const string AnonNotYetImplementedLiteral = "Not yet implemented.\n";
+
+    /// <summary>
+    /// Wave 242 sibling-arm-pinning hardening (+0 ratchet): pins the 25-byte
+    /// wire-shape of the single 0x001D MESSAGE_STRING reply to user-tier
+    /// single-slash <c>/anon</c> on a cli_test account (AdminLevel=100).
+    /// SECOND user-tier case-'a' pin (after Wave 123 /authlevel) -- case-'a'
+    /// user-tier promoted from SINGLE-PINNED to DOUBLE-PINNED. FIRST
+    /// user-tier strcmp body-emit pin gated by an INTERNAL `AdminLevel() >=
+    /// GM` guard (Wave 241 /doff had an inner DEV guard; Wave 123
+    /// /authlevel had no inner guard).
+    ///
+    /// <para>
+    /// User-tier outer gate at 5434 admits. Switch at 5442 jumps on
+    /// *pch='a' -> case-'a' opens at 5444. case-'a' walk for pch="anon":
+    /// arm 1 strcmp("anon", "anon") at 5446: FULL match. Inner
+    ///   `if (AdminLevel() >= GM)` at 5448 admits (cli_test=100 >= 50) ->
+    ///   `SendVaMessage("Not yet implemented.\n")` COLOR=5 default,
+    ///   msg_sent=true, success=true.
+    /// arm 2 `if strcmp("authlevel", pch)` at 5455 (plain `if`, NOT
+    ///   else-if -- evaluates AFTER arm 1 matched): byte 1 'u' vs 'n'
+    ///   MISMATCH. Skip.
+    /// arm 3 `if AdminLevel() >= DEV && MatchOptWithParam("altweapon", pch)`
+    ///   at 5461: DEV gate true (100>=80); MatchOptWithParam("altweapon"(9),
+    ///   "anon"(4)) -- strncmp 9B over 4B+NUL, byte 1 'l' vs 'n' MISMATCH
+    ///   SILENT (msg_sent unchanged).
+    /// arm 4 `if AdminLevel() >= DEV && MatchOptWithParam("altname", pch)`
+    ///   at 5480: byte 1 'l' vs 'n' MISMATCH SILENT.
+    /// arm 5 `if AdminLevel() >= DEV && MatchOptWithParam("addbaseore", pch)`
+    ///   at 5500: byte 1 'd' vs 'n' MISMATCH SILENT.
+    /// case-'a' breaks at 5506. NET RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>
+    /// FIRST internal GM-guard pin on a user-tier strcmp body-emit arm.
+    /// Catches regression where the inner GM gate at 5448 is REMOVED (the
+    /// emit would still fire from a non-GM account, leaking the "Not yet
+    /// implemented" placeholder to plain users) OR TIGHTENED (cli_test
+    /// would silently fall to the implicit else and emit nothing -- test
+    /// fails by drainage). Distinguishes from Wave 241 /doff's DEV gate
+    /// and Wave 123 /authlevel's no-gate by exercising the GM gate
+    /// level specifically. SECOND emit-body containing an embedded LF
+    /// (0x0A) after Wave 240 //destroyobject -- pins the trailing-LF
+    /// literal at index `literalEnd-1`.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). The /anon arm is a
+    /// retail-faithful stub the real server already accepts; pinning
+    /// it does not widen any acceptance. The "Not yet implemented"
+    /// placeholder is the verbatim Net-7 source text -- we preserve
+    /// the wire shape exactly, not relax it.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashAnon_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (22) = 25 bytes.
+        const int ExpectedReplyPayloadLength = 25;
+        const short ExpectedReplyLengthField = 22;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 21;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Anona", shipName: "AnonaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/anon");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(AnonNotYetImplementedLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(AnonNotYetImplementedLiteral, fullBody);
+                Assert.Equal((byte)0x0A, span[literalEnd - 1]);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/anon\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{AnonNotYetImplementedLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
