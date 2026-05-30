@@ -22332,6 +22332,8 @@ public sealed class SectorChatTests
 
     private const string GmskillpointsNotOnlineLiteral = "Player ghostfoo is not online";
 
+    private const string GmupgradeUsageSyntaxLiteral = "Syntax: //gmupgrade <playername>";
+
     /// <summary>
     /// Wave 278 sibling-arm-pinning hardening (+0 ratchet): pins the
     /// 47-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
@@ -24985,6 +24987,159 @@ public sealed class SectorChatTests
                 $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
                 $"\"//gmskillpoints ghostfoo 5\" without seeing 0x001D MESSAGE_STRING " +
                 $"equal to \"{GmskillpointsNotOnlineLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Wave 98 sibling-arm-pinning hardening (+0 ratchet): pins the 36-byte
+    /// wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to admin-tier
+    /// <c>//gmupgrade </c> (TRAILING SPACE, empty param, Username strtok_s
+    /// returns NULL) on a fresh cli_test character. FIRST case-'g' admin
+    /// arm 6 BODY-PAST-NESTED-INLINE-GATE Username-NULL ELSE-BRANCH pin --
+    /// Wave 68 //gmupgrade foo pinned the Username-PRESENT TargetP-NULL
+    /// branch ("Player foo not online."); Wave 98 walks the SAME arm into
+    /// the Username-NULL ELSE branch at PlayerConnection.cpp:5423 emitting
+    /// "Syntax: //gmupgrade &lt;playername&gt;" (32B, COLOR=5 default).
+    /// case-'g' arm 6 now DOUBLY-PINNED across BOTH Username polarities
+    /// (Wave 68 NON-NULL-then-TargetP-NULL + Wave 98 NULL-Syntax-emit).
+    /// FIRST UNCONDITIONAL-PRE-IF MSG_SENT/SUCCESS pin in HandleSlashCommands
+    /// -- the msg_sent=true and success=true assignments at 5397-5398 fire
+    /// UNCONDITIONALLY BEFORE the if(Username) branch decision; a regression
+    /// that conditionalized those assignments under if(Username)-TRUE would
+    /// change behaviour when Username=NULL (msg_sent would stay false, the
+    /// user-tier fallback at 5434 would fire) but the Syntax-emit would
+    /// still appear; this pin's REGRESSION-MAGNET is the wire-shape
+    /// invariant -- if user-tier fallback fires it'd add OTHER 0x001D
+    /// emits, breaking the SINGLE-FRAME pin. FIRST 32-byte LITERAL pin
+    /// extends per-literal-length spectrum (24B W283 / 25B W277 / 26B
+    /// W288 / 27B W289 / 29B W285/W96/W97 / 30B W282 / 32B W98 / 35B
+    /// W280 / 43B W278 / 48B W279 / 51B W281 / 56B W292 / 62B W284).
+    /// FIRST EMBEDDED `&lt;...&gt;` placeholder-token-after-DOUBLE-SLASH-COMMAND
+    /// pin -- prior `&lt;playername&gt;` placeholder pins (W91 //ban Syntax,
+    /// W67 //gmplayerlevel Syntax) used Different surrounding syntax;
+    /// W98 //gmupgrade Syntax is the THIRD occurrence of the
+    /// `&lt;playername&gt;` placeholder token but with DIFFERENT length-class
+    /// (32B vs 26B vs 47B). ONE-HUNDRED-FIFTY-FIFTH overall byte-exact
+    /// dispatch pin. Assert.Equal pins the full 36-byte response shape
+    /// AND the literal content.
+    ///
+    /// <para>
+    /// Outer admin gate at PlayerConnection.cpp:4716 admits (cli_test
+    /// ADMIN=100 &gt;= GM=50). pch="gmupgrade ". Switch on 'g'. case-'g'
+    /// opens at 5205. Arms 1-5 strncmp-mismatch on prefix-length comparisons
+    /// against "gmgetaccess"/"gmsetaccess"/"gmskillpoints"/"gmenableskills"
+    /// /"gmplayerlevel" -- each fails at the first differing byte after
+    /// "gm". Arm 6 at 5392: MatchOptWithParam("gmupgrade", "gmupgrade ",
+    /// ...) strncmp 9B matches; arg[9]=' '; param=""; returns true. Inline
+    /// gate at 5394: AdminLevel()=100 &gt;= GM=50 TRUE. Body at 5396:
+    /// Username=strtok_s("", " ", &amp;next_token)=NULL (empty string returns
+    /// NULL). UNCONDITIONAL at 5397-5398: msg_sent=true, success=true.
+    /// if(Username) FALSE at 5399 → else at 5423: SendVaMessage(
+    /// "Syntax: //gmupgrade &lt;playername&gt;") (DEFAULT COLOR=5; 32B body).
+    /// case-'g' closes at 5429. User-tier fallback at 5434 is skipped
+    /// (!msg_sent=false || !success=false → false). NET RESULT: exactly
+    /// 1 0x001D emit. Wire: [u16 LE 33][u8 5][32B][NUL] = 36 bytes.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. //gmupgrade has INLINE GM gate at 5394 -- the SECOND inline
+    /// gate of case-'g' (the FIRST is //gmsetaccess SDEV at 5221).
+    /// cli_test (ADMIN=100) passes GM=50. strtok_s on empty string
+    /// returning NULL is the standard C-runtime semantics; the if(Username)
+    /// FALSE branch's else-emit is the upstream-preserved usage-message
+    /// invariant. The pin DOCUMENTS the Username-NULL ELSE-branch admin
+    /// path byte-for-byte; TIGHTENS toward preservation. NO state
+    /// mutation occurs (strtok_s on empty input, no GetPlayer call, no
+    /// ShipUpgrade call, no database write).
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashGmupgradeTrailingSpace_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (33) = 36 bytes.
+        const int ExpectedReplyPayloadLength = 36;
+        const short ExpectedReplyLengthField = 33;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 32;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Vola", shipName: "VolaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//gmupgrade ");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(GmupgradeUsageSyntaxLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(GmupgradeUsageSyntaxLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//gmupgrade \" without seeing 0x001D MESSAGE_STRING " +
+                $"equal to \"{GmupgradeUsageSyntaxLiteral}\".");
         }
         finally
         {
