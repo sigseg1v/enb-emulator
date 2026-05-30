@@ -25950,6 +25950,169 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 301 (commit-counter Wave 104) sibling-arm-pinning hardening
+    /// (+0 ratchet): pins the 47-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING reply to admin-tier <c>//setpassword </c> (trailing
+    /// space, EMPTY post-MatchOpt param) on a cli_test account with
+    /// AdminLevel=ADMIN (100 >= GM=50). Triggers the FIRST-DISJUNCT
+    /// polarity of the disjunctive predicate at PlayerConnection.cpp:5160
+    /// (<c>!Username=TRUE</c> short-circuits before <c>!Password</c> is
+    /// evaluated). Wave 81 already pinned the SECOND-DISJUNCT polarity
+    /// (Username="foo", Password=NULL via <c>//setpassword foo</c>);
+    /// Wave 104 completes the FIRST-DISJUNCT polarity (Username=NULL via
+    /// trailing space).
+    ///
+    /// <para>
+    /// Dispatch flow:
+    /// <list type="number">
+    /// <item>Client sends 16-byte 0x0033 CLIENT_CHAT body=<c>"//setpassword \0"</c>.</item>
+    /// <item>Admin outer gate at 4716 admits (cli_test ADMIN=100 &gt;= GM=50).</item>
+    /// <item><c>pch="setpassword "</c>. case-'s' opens at 5153. Arm 1 at
+    ///       5155: <c>MatchOptWithParam("setpassword", "setpassword ",
+    ///       param, msg_sent)</c> strncmp 11B matches; arg[11]=' ';
+    ///       param=&amp;arg[12]="" (empty). Returns true.</item>
+    /// <item>Body at 5157: <c>Username=strtok_s("", " ", &amp;next_token)
+    ///       =NULL</c>. <c>Password=strtok_s(NULL, ...)=NULL</c>.</item>
+    /// <item>Disjunctive predicate at 5160: <c>if (!Username || !Password)
+    ///       </c>. <c>!Username=TRUE</c> SHORT-CIRCUITS at FIRST disjunct;
+    ///       <c>!Password</c> NEVER evaluated.</item>
+    /// <item>Emit at 5162: <c>SendVaMessage("Syntax: //setpassword
+    ///       &lt;username&gt; &lt;password&gt;")</c> (DEFAULT COLOR=5;
+    ///       43B body). HARD-RETURN at 5163.</item>
+    /// </list>
+    /// </para>
+    ///
+    /// <para>
+    /// NET RESULT: exactly 1 0x001D emit. Wire:
+    /// <c>[u16 LE 44][u8 5][43B][NUL]</c> = 47 bytes. <c>+0 ratchet</c>.
+    /// </para>
+    ///
+    /// <para>
+    /// Critical safety note: a regression that hoisted
+    /// <c>g_AccountMgr-&gt;ChangePassword(Username, Password)</c> BEFORE
+    /// the disjunctive predicate would attempt to dereference NULL pointers
+    /// and crash; this pin guards the short-circuit ordering.
+    /// </para>
+    ///
+    /// <para>Novel structural axes vs prior waves:</para>
+    /// <list type="bullet">
+    ///   <item><b>FIRST FIRST-DISJUNCT polarity pin</b> of case-'s' arm 1
+    ///     setpassword disjunctive predicate. W81 pinned SECOND-DISJUNCT
+    ///     (!Password=TRUE via Username="foo", Password=NULL); W104 pins
+    ///     FIRST-DISJUNCT (!Username=TRUE via empty param).</item>
+    ///   <item>case-'s' admin arm 1 //setpassword now <b>DOUBLY-PINNED</b>
+    ///     across BOTH polarities of its disjunctive predicate.</item>
+    ///   <item><b>FIRST EMPTY-PARAM polarity</b> of case-'s' arm 1 (W81 had
+    ///     ONE-ARG POPULATED param).</item>
+    ///   <item><b>FIRST 11-CHARACTER COMMAND-NAME-PREFIX trailing-space</b>
+    ///     pin -- the //setpassword command name is 11 characters; trailing
+    ///     space at offset 11 exercises a longer command-name path than
+    ///     prior trailing-space pins (W91 //ban 3B, W95 //replaceship 11B,
+    ///     W98 //gmupgrade 9B, W102 //adduser 7B).</item>
+    ///   <item><b>SAME 43B literal as W81</b> reached by BOTH polarities;
+    ///     a regression that altered the literal would break both pins;
+    ///     the PAIR ensures both short-circuit paths reach the emit.</item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md): no permissiveness added.
+    /// //setpassword is admin-tier gated by AdminLevel() &gt;= GM at the
+    /// outer case-'s' arm. The strtok_s-NULL emit is upstream-preserved
+    /// diagnostic invariant; the HARD-RETURN before ChangePassword ensures
+    /// no DB mutation occurs on bad input. The pin DOCUMENTS the FIRST-
+    /// DISJUNCT polarity byte-for-byte; TIGHTENS toward preservation.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashSetpasswordTrailingSpace_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (44) = 47 bytes.
+        const int ExpectedReplyPayloadLength = 47;
+        const short ExpectedReplyLengthField = 44;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 43;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Sopo", shipName: "SopoShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//setpassword ");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(SetpasswordSyntaxLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(SetpasswordSyntaxLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//setpassword \" (trailing space) without seeing 0x001D MESSAGE_STRING " +
+                $"equal to \"{SetpasswordSyntaxLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
