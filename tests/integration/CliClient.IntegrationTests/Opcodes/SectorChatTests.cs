@@ -17319,6 +17319,187 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 251 sibling-arm-pinning hardening (+0 ratchet): pins the 63-byte
+    /// wire-shape of the single 0x001D MESSAGE_STRING reply to user-tier
+    /// single-slash <c>/rsd</c> on a fresh cli_test character. THIRD case-'r'
+    /// user-tier pin overall (after Wave 249 /reffect and Wave 250 /rs) --
+    /// case-'r' user-tier promoted from DOUBLE-PINNED to TRIPLE-PINNED.
+    /// FIRST case-'r' else-if-cascade-arm pin: Waves 249/250 covered the
+    /// two PLAIN-`if` arms 1/2 at PlayerConnection.cpp:6993 / 7000;
+    /// Wave 251 lands the FIRST pin inside the chained else-if cascade
+    /// (arm 7 at 7024). FIFTH handler-side NULL-target FALLBACK pin in
+    /// the HandleSlashCommands catalogue -- joins Wave 243 /face
+    /// (HandleFaceRequest 8453), Wave 244 /faceme (HandleFaceMeRequest
+    /// 8474), Wave 247 /levelout (HandleLevelOutRequest 8964), and Wave
+    /// 250 /rs (HandleRenderStateRequest 9467) with a FIFTH distinct
+    /// handler (HandleRenderStateDeactivate at PlayerConnection.cpp:9813)
+    /// reached via case-'r' arm 7 at 7024. The emit body matches Waves
+    /// 243/244/247/250 EXACTLY ("Unable to access selected object - could
+    /// not find object ID", 59B) but originates from a DIFFERENT handler
+    /// under the same switch-case letter as Wave 250 -- this is the FIRST
+    /// intra-case-letter handler-fallback literal-consistency pin (Waves
+    /// 250/251 both live in case-'r' but hit DIFFERENT handlers reached
+    /// via DIFFERENT arms). ONE-HUNDRED-TENTH overall byte-exact dispatch
+    /// pin. Assert.Equal pins the full 63-byte response shape.
+    ///
+    /// <para>
+    /// User-tier outer gate at 5434 admits. Switch at 5442 jumps on
+    /// *pch='r' -&gt; case-'r' opens at PlayerConnection.cpp:6992.
+    /// case-'r' walk for pch="rsd":
+    ///   arm 1 `if strcmp(pch, "reffect")` at 6993: 7B vs 3B; byte 1
+    ///     'e' vs 's' MISMATCH. Skip.
+    ///   arm 2 `if strcmp(pch, "rs")` at 7000: 2B vs 3B; lengths differ,
+    ///     PLAIN-`if` so cascade starting at arm 3 is evaluated regardless.
+    ///   arm 3 else-if /release at 7005 (chained to arm 2; arm 2 FALSE
+    ///     so evaluated): 7B vs 3B; byte 1 'e' vs 's' MISMATCH. Skip.
+    ///   arm 4 else-if MatchOptWithParam("rsi", pch="rsd") at 7012:
+    ///     strncmp("rsi","rsd",3) byte 2 'i' vs 'd' NON-ZERO -&gt; false.
+    ///   arm 5 else-if MatchOptWithParam("rsa", pch="rsd") at 7016:
+    ///     strncmp("rsa","rsd",3) byte 2 'a' vs 'd' NON-ZERO -&gt; false.
+    ///   arm 6 else-if MatchOptWithParam("rsn", pch="rsd") at 7020:
+    ///     strncmp("rsn","rsd",3) byte 2 'n' vs 'd' NON-ZERO -&gt; false.
+    ///   arm 7 else-if /rsd at 7024: 3B vs 3B FULL match
+    ///     -&gt; success = HandleRenderStateDeactivate() at 7026;
+    ///     msg_sent = true at 7027.
+    ///     HandleRenderStateDeactivate at 9813: obj = GetObjectFromID(
+    ///     ShipIndex()-&gt;GetTargetGameID()); target=-1 (post-login
+    ///     default) -&gt; obj=NULL -&gt; else-branch at 9830-9833 fires
+    ///     SendVaMessage("Unable to access selected object - could
+    ///     not find object ID") COLOR=5 default. Returns false (success
+    ///     stays false; msg_sent already true from caller at 7027).
+    ///   arms 8-16 chain off arm 2 as else-if at 7029 onward: arm 7's
+    ///     else-if was TRUE so the rest of the cascade is skipped.
+    /// case-'r' breaks at 7134. NET RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 3 NEW classes prior waves are structurally
+    /// blind to: (a) FIRST else-if-cascade-arm pin in case-'r' -- Waves
+    /// 249/250 pinned the two leading PLAIN-`if` arms 1/2; Wave 251 lands
+    /// the FIRST pin inside the chained else-if cascade. A regression that
+    /// reordered arms inside the cascade (e.g. moving /rsd before /release)
+    /// would not affect this test because /rsd reaches HandleRenderState
+    /// Deactivate regardless of cascade position, but a regression that
+    /// collapsed /rsd into MatchOptWithParam (treating it like /rsi /rsa
+    /// /rsn) would silently fail this test because pch="rsd" has no '='
+    /// so MatchOptWithParam returns false; (b) FIFTH handler-side NULL-
+    /// target fallback pin via a DISTINCT handler -- the same 59B literal
+    /// now lives at FIVE source sites (8466 face, 8487 faceme, 8981
+    /// levelout, 9481 rs, 9832 rsd). A refactor that edits the literal in
+    /// only ONE handler would silently diverge wire shape only on that
+    /// path, and the FIVE-WAY pin set catches divergence in any direction;
+    /// (c) FIRST INTRA-CASE-LETTER handler-fallback literal-consistency
+    /// pin -- Waves 250 and 251 both live in case-'r' but reach DIFFERENT
+    /// handlers (HandleRenderStateRequest vs HandleRenderStateDeactivate)
+    /// via DIFFERENT arms (arm 2 plain-if vs arm 7 else-if). Catches a
+    /// regression where the two handlers' fallback bodies drift apart
+    /// while preserving cross-case-letter consistency with face/faceme/
+    /// levelout. Cross-case-letter coverage remains THREE distinct
+    /// case-letters (case-'f', case-'l', case-'r').
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. The /rsd arm is a retail-faithful slash-command dispatch;
+    /// the NULL-target fallback is the natural error-emit path the real
+    /// server's HandleRenderStateDeactivate already takes. cli_test=100
+    /// satisfies the outer user-tier gate at 5434 unconditionally; no
+    /// inner AdminLevel guard exists on this arm. HandleRenderStateDeactivate
+    /// mutates obj-&gt;RenderState only on the SUCCESS branch (target
+    /// found); on NULL-target it is read-only and emits the fallback --
+    /// the test exercises the read-only NULL path.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashRsd_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (60) = 63 bytes.
+        const int ExpectedReplyPayloadLength = 63;
+        const short ExpectedReplyLengthField = 60;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 59;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Rsda", shipName: "RsdaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/rsd");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(FaceNoTargetLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(FaceNoTargetLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/rsd\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{FaceNoTargetLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
