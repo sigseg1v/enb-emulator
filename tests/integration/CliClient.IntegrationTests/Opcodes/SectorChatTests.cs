@@ -16321,6 +16321,177 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 245 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
+    /// the 53-byte ASCII body "You can now use all class &amp; faction
+    /// restricted gates." that the server emits when user-tier single-slash
+    /// <c>/factionoverride</c> arrives on a fresh cli_test character
+    /// (AdminLevel=100 &gt;= GM=50, m_Faction_Override=false default at
+    /// PlayerClass.cpp:118). Matcher at PlayerConnection.cpp:6313 (block A
+    /// arm 4 of case-'f' user-tier opened at 6280) -- INNER-GM-GUARD pattern
+    /// with COLOR=12 (SendVaMessageC). FIRST case-'f' arm 4 pin and FIRST
+    /// non-COLOR=5 emit pin in the entire HandleSlashCommands catalogue.
+    /// </summary>
+    private const string FactionOverrideOnLiteral = "You can now use all class & faction restricted gates.";
+
+    /// <summary>
+    /// Wave 245 sibling-arm-pinning hardening (+0 ratchet): pins the 57-byte
+    /// wire-shape of the single 0x001D MESSAGE_STRING reply to user-tier
+    /// single-slash <c>/factionoverride</c> on a fresh cli_test character
+    /// (AdminLevel=100, m_Faction_Override=false post-construction). THIRD
+    /// case-'f' user-tier pin (after Wave 243 /face arm 7 and Wave 244
+    /// /faceme arm 8) -- case-'f' user-tier promoted from DOUBLE-PINNED to
+    /// TRIPLE-PINNED. FIRST inner-GM-guard COLOR=12 emit pin in the entire
+    /// HandleSlashCommands catalogue -- previously-pinned emits all use
+    /// SendVaMessage (default COLOR=5); this pin exercises SendVaMessageC
+    /// with the explicit COLOR=12 (light green per
+    /// PlayerClass.cpp:3440-3441 documentation).
+    ///
+    /// <para>
+    /// User-tier outer gate at 5434 admits. Switch at 5442 jumps on
+    /// *pch='f' -> case-'f' opens at 6280. case-'f' walk for
+    /// pch="factionoverride":
+    /// block A `if AdminLevel() &gt;= GM` at 6281 admits:
+    ///   arm 1 `MatchOptWithParam("form", pch, ...) &amp;&amp; GM` at 6283:
+    ///     strncmp byte 1 'o' vs 'a' MISMATCH SILENT.
+    ///   arm 2 `if strcmp("flushinv", pch)` at 6291: byte 1 'l' vs 'a'
+    ///     MISMATCH. Skip.
+    ///   arm 3 `else if strcmp("factionset", pch)` at 6309: bytes 0-6
+    ///     match ("faction"), byte 7 's' vs 'o' MISMATCH. Skip.
+    ///   arm 4 `else if strcmp("factionoverride", pch)` at 6313: 15B vs
+    ///     15B FULL match. Inner `if (AdminLevel() &gt;= GM)` at 6315
+    ///     admits (cli_test=100 >= 50). `if (!GetOverrideFaction())` at
+    ///     6317 true on fresh char (m_Faction_Override=false default at
+    ///     PlayerClass.cpp:118) -> `SendVaMessageC(12, "You can now use
+    ///     all class &amp; faction restricted gates.")` at 6319 ->
+    ///     SendMessageString with COLOR=12 (NOT default 5). `SetOverride
+    ///     Faction(true)` mutates state. success=true, msg_sent=true.
+    /// block B `if AdminLevel() &gt;= GM` at 6337 admits: fetch and find
+    ///   silent (byte 1 mismatch).
+    /// block C (no inner guard): face, faceme, fgps, fireweapon strcmp
+    ///   byte 1 or 3 mismatch.
+    /// block D `if AdminLevel() &gt;= DEV` at 6394 admits: all MatchOpt
+    ///   WithParam arms strncmp byte 1 mismatch SILENT.
+    /// case-'f' breaks. NET RESULT: ONE emit (with COLOR=12).
+    /// </para>
+    ///
+    /// <para>
+    /// FIRST non-COLOR=5 emit pin in HandleSlashCommands catalogue.
+    /// Catches regression where (a) SendVaMessageC's color arg is dropped
+    /// (Wave 243+244 pins would still pass since they're COLOR=5; only a
+    /// COLOR-12 pin catches a "default-color" regression that overwrites
+    /// the explicit color); (b) the inner GM gate at 6315 is removed
+    /// (the emit would still fire from a sub-GM account, but COLOR=12
+    /// would leak the GM-only visual styling -- this pin would still
+    /// pass on a regression; the inner-gate pin pair would catch by
+    /// also adding a non-admin variant -- documented for future work);
+    /// (c) the toggle's mutation-vs-emit ordering is reversed (mutation
+    /// precedes emit in source; a future refactor that emits first
+    /// would not visibly change the wire shape but would corrupt
+    /// state-recovery on emit failure -- out of scope; documented).
+    /// FIRST `m_Faction_Override=false` default-state implicit pin.
+    /// SECOND state-mutation-before-emit pin after Wave 241 /doff's
+    /// m_ChannelSubscription[]=false pre-emit mutation.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). The /factionoverride
+    /// arm is a retail-faithful slash-command dispatch the real server
+    /// already accepts on GM+ accounts; the wire shape (COLOR=12,
+    /// SendVaMessageC) is preserved exactly. No permissiveness added.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashFactionoverride_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (54) = 57 bytes.
+        // COLOR=12 (light green) via SendVaMessageC -- distinct from
+        // default COLOR=5 used by SendVaMessage in Waves 241-244.
+        const int ExpectedReplyPayloadLength = 57;
+        const short ExpectedReplyLengthField = 54;
+        const byte ExpectedReplyColor = 12;
+        const int ExpectedLiteralByteCount = 53;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Factia", shipName: "FactiaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/factionoverride");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(FactionOverrideOnLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(FactionOverrideOnLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/factionoverride\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{FactionOverrideOnLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
