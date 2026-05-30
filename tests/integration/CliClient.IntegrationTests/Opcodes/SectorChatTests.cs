@@ -29211,4 +29211,209 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 306 (commit-counter Wave 109) sibling-arm-pinning hardening
+    /// (+0 ratchet): pins the 41-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING reply to user-tier <c>/warp 500</c> on a fresh
+    /// cli_test character -- FIRST CONSTANT-%d-SUBSTITUTION pin in
+    /// HandleSlashCommands. The format string at
+    /// PlayerConnection.cpp:7658 reads
+    /// <c>SendVaMessage("Warp limits are between 1000 and %d!", limit)</c>
+    /// where <c>limit=6000</c> is a function-local constant declared one
+    /// line above the bounds-check, so the %d substitution always yields
+    /// the literal "6000" and the emit is effectively static at the wire
+    /// level despite using a printf format. Wave 109 is the FIRST pin in
+    /// HandleSlashCommands where the %d substitution evaluates to a
+    /// compile-time-constant baked into the dispatch (not derived from
+    /// user input or runtime state).
+    ///
+    /// <para>
+    /// Dispatch flow:
+    /// <list type="number">
+    /// <item>Client sends 9-byte 0x0033 CLIENT_CHAT body=<c>"/warp 500\0"</c>.</item>
+    /// <item>User-tier dispatch entered at 5434 (Msg[0]='/', Msg[1]='w'
+    ///       non-zero, !msg_sent=true).</item>
+    /// <item><c>pch=&amp;Msg[1]="warp 500"</c>. case-'w' user-tier opens at
+    ///       7627.</item>
+    /// <item>Arm 1 at 7628: <c>MatchOptWithParam("who", "warp 500", ...,
+    ///       true)</c> strncmp 3B: byte 0 'w' matches; byte 1 'h' vs 'a'
+    ///       MISMATCH -- silent FALSE.</item>
+    /// <item>Arm 2 at 7650: <c>MatchOptWithParam("warp", "warp 500", ...)</c>
+    ///       strncmp 4B matches; arg[4]=' '; param=&amp;arg[5]="500";
+    ///       returns true. <c>msg_sent</c> NOT YET set by MatchOpt
+    ///       (returns true via SUCCESS path).</item>
+    /// <item>Body at 7652-7667: <c>limit=6000</c>. AdminLevel() &gt;= GM
+    ///       gate at 7654 passes (cli_test ADMIN=100 &gt;= GM=50).
+    ///       Bounds check at 7656: <c>atoi("500")=500</c>;
+    ///       <c>500 &gt; 6000 = FALSE</c>; SECOND disjunct
+    ///       <c>500 &lt; 1000 = TRUE</c> SHORT-CIRCUITS.</item>
+    /// <item>Emit at 7658: <c>SendVaMessage("Warp limits are between
+    ///       1000 and %d!", 6000)</c> (DEFAULT COLOR=5; 37B body
+    ///       "Warp limits are between 1000 and 6000!"). <c>msg_sent=true</c>
+    ///       at 7666. <c>success</c> NOT set in this path (stays
+    ///       false).</item>
+    /// <item>Arm 3 at 7668: <c>strcmp(pch, "warpreset")</c> -- but
+    ///       chained via <c>else if</c> after arm 2; arm 2 matched so
+    ///       arm 3 SKIPPED. Independent <c>if</c> at 7673
+    ///       MatchOptWithParam("wormhole", "warp 500", ...) strncmp
+    ///       differs byte 1 'o' vs 'a' -- silent FALSE. Independent
+    ///       <c>if</c> at 7691 strcmp(pch, "warpreset") FAIL -- skip.
+    ///       case-'w' breaks at 7699.</item>
+    /// <item>Trailing fallback at 7702: <c>if(!success &amp;&amp; !msg_sent)</c>;
+    ///       !success=true && !msg_sent=false -- short-circuits FALSE.
+    ///       NO illegal-slash emit.</item>
+    /// </list>
+    /// </para>
+    ///
+    /// <para>
+    /// NET RESULT: exactly 1 0x001D emit. Wire:
+    /// <c>[u16 LE 39][u8 5][38B][NUL]</c> = 42 bytes. <c>+0 ratchet</c>.
+    /// </para>
+    ///
+    /// <para>Novel structural axes vs prior waves:</para>
+    /// <list type="bullet">
+    ///   <item><b>FIRST CONSTANT-%d-SUBSTITUTION pin</b> -- the %d in
+    ///     the format string substitutes the function-local constant
+    ///     <c>limit=6000</c>, not user input. The wire is fully
+    ///     deterministic despite using a printf format. A regression
+    ///     that changed <c>limit</c> from 6000 to a different cap (e.g.
+    ///     7000) would break this pin byte-exactly via the literal
+    ///     digits in the emit; a regression that swapped the %d to %u
+    ///     or %ld would also break this pin via the digit
+    ///     formatting.</item>
+    ///   <item><b>FIRST SUCCESS-PATH-EMIT pin in case-'w' user-tier</b>
+    ///     -- W155 (/wormhole) pinned MatchOpt ERROR-fork; W156 (/warp
+    ///     no-param) pinned the SAME ERROR-fork. Wave 306 is the FIRST
+    ///     pin in case-'w' user-tier where MatchOpt returns TRUE and
+    ///     the body block is entered (msg_sent set INSIDE the body at
+    ///     7666, not by MatchOpt). case-'w' user-tier now
+    ///     TRIPLY-PINNED across THREE distinct dispatch outcomes (W155
+    ///     wormhole ERROR + W156 warp ERROR + W306 warp BODY-EMIT).</item>
+    ///   <item><b>FIRST DISJUNCTIVE-BOUNDS-CHECK polarity pin</b> --
+    ///     the predicate at 7656 is <c>atoi(param) &gt; limit ||
+    ///     atoi(param) &lt; 1000</c>. Wave 306 pins the FIRST-DISJUNCT-
+    ///     FALSE / SECOND-DISJUNCT-TRUE polarity (atoi(500)&gt;6000=FALSE
+    ///     short-circuits to SECOND disjunct atoi(500)&lt;1000=TRUE).
+    ///     The complementary FIRST-DISJUNCT-TRUE polarity (e.g. /warp
+    ///     99999) would also reach the SAME emit but via different
+    ///     short-circuit path -- natural candidate for Wave 110 to
+    ///     close the 2-cell polarity matrix.</item>
+    ///   <item><b>FIRST GM-INLINE-GUARD-PASSED + BOUNDS-CHECK-FAILED
+    ///     pin in case-'w' user-tier</b> -- W156 pinned the case where
+    ///     AdminLevel() check NEVER reached (MatchOpt ERROR-fork
+    ///     bypasses body). Wave 306 walks PAST the GM gate (cli_test
+    ///     passes) and INTO the bounds check, where it FAILS the
+    ///     bounds check. A regression that hoisted the bounds check
+    ///     BEFORE the AdminLevel gate would change observable
+    ///     semantics for sub-GM accounts; this pin documents the
+    ///     ordering invariant.</item>
+    ///   <item><b>FIRST FAILED-PARAM-VALIDATION pin in case-'w' arm 2
+    ///     SUCCESS path</b> -- the MatchOpt SUCCESS path enters the
+    ///     body but the bounds check rejects the value; emit fires
+    ///     without SetWarpSpeed/SendAuxShip side-effects. A regression
+    ///     that ran SetWarpSpeed BEFORE the bounds check (or in
+    ///     parallel) would corrupt ship state on invalid input.</item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md): no permissiveness
+    /// added. /warp body GM-gated inline; bounds-check rejects values
+    /// outside [1000, 6000] BEFORE mutating ship state. The 6000 cap is
+    /// the upstream-preserved warp-speed invariant. Pin DOCUMENTS the
+    /// bounds-rejection path byte-for-byte; TIGHTENS toward
+    /// preservation by guarding the cap value (6000) against silent
+    /// inflation.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    private const string WarpLimitsLiteral = "Warp limits are between 1000 and 6000!";
+
+    [Fact]
+    public async Task SlashWarpBelowMinimum_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (39) = 42 bytes.
+        const int ExpectedReplyPayloadLength = 42;
+        const short ExpectedReplyLengthField = 39;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 38;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Wapo", shipName: "WapoShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/warp 500");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(WarpLimitsLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(WarpLimitsLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/warp 500\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{WarpLimitsLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
