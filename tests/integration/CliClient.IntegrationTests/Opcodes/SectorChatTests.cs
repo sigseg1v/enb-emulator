@@ -19385,6 +19385,188 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 262 sibling-arm-pinning hardening (+0 ratchet) literal anchor
+    /// for the 45-byte ASCII body "Syntax: //gmsetaccess &lt;playername&gt;
+    /// &lt;password&gt;" emitted by the admin-tier case-'g' arm at
+    /// PlayerConnection.cpp:5228 when <c>//gmsetaccess foo</c> arrives
+    /// with EXACTLY ONE space-separated arg. Distinct from Wave 139's
+    /// "Missing arg for option gmsetaccess" pin -- Wave 139 fires the
+    /// MatchOptWithParam ERROR fork at 4548 (NO param at all); Wave 262
+    /// fires the POST-MATCH handler-body syntax-error fork at 5228 (matcher
+    /// passes, but body's strtok_s for the SECOND token returns NULL).
+    /// FIRST POST-MATCH-SYNTAX-VALIDATION pin in the HandleSlashCommands
+    /// catalogue.
+    /// </summary>
+    private const string SyntaxGmsetaccessLiteral = "Syntax: //gmsetaccess <playername> <password>";
+
+    /// <summary>
+    /// Wave 262 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 49-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
+    /// admin-tier <c>//gmsetaccess foo</c> on a fresh cli_test character.
+    /// FIRST POST-MATCH-SYNTAX-VALIDATION pin in the HandleSlashCommands
+    /// catalogue -- distinct from ALL prior MissingArg/Syntax pins by
+    /// (a) the matcher returns true (param consumed), (b) the handler
+    /// body runs and performs its OWN argument-count validation, and
+    /// (c) the syntax-error emit fires from the HANDLER BODY (not the
+    /// MatchOptWithParam shared error path at 4548). ONE-HUNDRED-TWENTY-
+    /// SECOND overall byte-exact dispatch pin. Assert.Equal pins the
+    /// full 49-byte response shape.
+    ///
+    /// <para>
+    /// Admin-tier outer gate at PlayerConnection.cpp:4716 (<c>Msg[0]=='/'
+    /// &amp;&amp; Msg[1]=='/' &amp;&amp; AdminLevel() &gt;= GM</c>)
+    /// admits; Msg="//gmsetaccess foo" satisfies both slash bytes,
+    /// cli_test=100 vs GM=50 satisfies the AdminLevel gate. pch is
+    /// computed from <c>&amp;Msg[2]</c> at 4720 yielding pch="gmsetaccess
+    /// foo". Switch at 4724 jumps on *pch='g'. case-'g' arm opens at
+    /// 5205. Inside case-'g' the matcher MatchOptWithParam("gmsetaccess",
+    /// pch, param, msg_sent) at 5221 evaluates: strncmp("gmsetaccess",
+    /// pch, 11) returns 0; pch[11]=' ' satisfies the space-delimiter
+    /// branch at 4532; param = pch + 12 = "foo"; matcher returns true.
+    /// AdminLevel() &gt;= SDEV (90) gate is satisfied (cli_test=100).
+    /// </para>
+    ///
+    /// <para>
+    /// Handler body at 5223-5230 runs: <c>strtok_s(param, " ", &amp;
+    /// next_token)</c> returns "foo" (Username); <c>strtok_s(NULL, " ",
+    /// &amp;next_token)</c> returns NULL (Access -- no more tokens).
+    /// The <c>if (!Username || !Access)</c> check at 5226 evaluates
+    /// !Username=false, !Access=true -- short-circuit OR fires.
+    /// SendVaMessage("Syntax: //gmsetaccess &lt;playername&gt;
+    /// &lt;password&gt;") at 5228 (NO format args -- literal string).
+    /// COLOR=5 default (SendVaMessage without explicit color). <c>return;</c>
+    /// at 5229 exits HandleSlashCommands ENTIRELY (not just the case
+    /// arm) -- no further matchers in case-'g' run. NET RESULT:
+    /// exactly 1 emit "Syntax: //gmsetaccess &lt;playername&gt;
+    /// &lt;password&gt;" (45B, COLOR=5). Wire: `[u16 LE 46][u8 5][45B
+    /// ASCII "Syntax: //gmsetaccess &lt;playername&gt; &lt;password&gt;"]
+    /// [NUL]` = 49 bytes.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 4 NEW classes prior waves are structurally
+    /// blind to: (a) FIRST POST-MATCH-SYNTAX-VALIDATION pin -- exercises
+    /// the matcher-true-then-body-validation-fail path. A regression
+    /// that moved syntax validation INTO MatchOptWithParam (e.g. counting
+    /// required args) would shift this emit to a different literal and
+    /// fail; (b) FIRST HANDLER-BODY-strtok_s pin -- pins the strtok_s
+    /// delimiter (" "), the token order (Username first, Access second),
+    /// and the short-circuit OR evaluation. A regression that swapped
+    /// the strtok_s order (Access first) or changed the delimiter would
+    /// produce different downstream behavior; (c) FIRST early-RETURN-
+    /// FROM-HANDLER-BODY pin -- the <c>return;</c> at 5229 exits
+    /// HandleSlashCommands without setting msg_sent OR success. A
+    /// regression that converted <c>return</c> to <c>msg_sent = true</c>
+    /// + fall-through would expose subsequent case-'g' matchers (gmskillpoints
+    /// etc.) to evaluation -- this test would still pass but a
+    /// secondary trailing-fallback test would not; (d) FIRST POST-
+    /// MATCH-SDEV-GATE pin -- the AdminLevel() &gt;= SDEV gate at 5221
+    /// is checked SHORT-CIRCUIT AFTER the matcher (matcher first, gate
+    /// second) per `&amp;&amp;` left-to-right evaluation. cli_test=100
+    /// satisfies SDEV=90. A regression that reordered the gate before
+    /// the matcher would skip param consumption on non-SDEV accounts;
+    /// this test pins the SDEV-OR-HIGHER POST-MATCH path explicitly.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. The post-match syntax-error path is retail-faithful behavior --
+    /// the handler body's strtok_s-then-validate pattern is the
+    /// canonical shape for two-arg admin commands and the syntax-error
+    /// literal is verbatim from the server source. cli_test=100 satisfies
+    /// the outer GM gate at 4716 AND the inner SDEV gate at 5221.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashGmsetaccessOneArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (46) = 49 bytes.
+        const int ExpectedReplyPayloadLength = 49;
+        const short ExpectedReplyLengthField = 46;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 45;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Greta", shipName: "GretaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//gmsetaccess foo");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(SyntaxGmsetaccessLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(SyntaxGmsetaccessLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//gmsetaccess foo\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{SyntaxGmsetaccessLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
