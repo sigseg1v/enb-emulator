@@ -22300,6 +22300,8 @@ public sealed class SectorChatTests
 
     private const string SetpasswordSyntaxLiteral = "Syntax: //setpassword <username> <password>";
 
+    private const string AdduserSyntaxLiteral = "Syntax: //adduser <username> <password> <access>";
+
     /// <summary>
     /// Wave 278 sibling-arm-pinning hardening (+0 ratchet): pins the
     /// 47-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
@@ -22463,6 +22465,178 @@ public sealed class SectorChatTests
                 $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
                 $"\"//setpassword foo\" without seeing 0x001D MESSAGE_STRING equal to " +
                 $"\"{SetpasswordSyntaxLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Wave 279 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 52-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
+    /// admin-tier <c>//adduser foo bar</c> (TWO post-MatchOptWithParam
+    /// params, access level missing) on a fresh cli_test character.
+    /// FIRST TRIPLE-STRTOK_S third-NULL EARLY-RETURN pin in the
+    /// HandleSlashCommands catalogue. Structurally distinct from Wave 278
+    /// //setpassword (DOUBLE-STRTOK_S second-NULL -- first succeeds,
+    /// second fails): Wave 279 exercises the THIRD-of-three position of
+    /// the disjunction `!Username || !Password || !Access` -- first
+    /// strtok_s succeeds capturing "foo", second succeeds capturing
+    /// "bar", third returns NULL for Access. The disjunction
+    /// short-circuit walks past the first TWO falsy operands before
+    /// firing on the third. FIRST ADMIN-TIER CASE-'a' ARM-BODY pin --
+    /// admin case-'a' opens at 4726 and has only one arm (//adduser at
+    /// 4728). SINGLE-PINS the entire admin case-'a' branch. FIRST 48-
+    /// BYTE LITERAL admin pin. ONE-HUNDRED-THIRTY-NINTH overall byte-
+    /// exact dispatch pin. Assert.Equal pins the full 52-byte response
+    /// shape.
+    ///
+    /// <para>
+    /// Admin outer gate at PlayerConnection.cpp:4716 admits (cli_test
+    /// ADMIN=100 satisfies GM=50). pch=&amp;Msg[2]="adduser foo bar".
+    /// Switch on 'a'. case-'a' opens at 4726. Arm at 4728:
+    /// MatchOptWithParam("adduser", pch, param, msg_sent) AND
+    /// AdminLevel()&gt;=GM. strncmp matches 7B; arg[7]=' '; param=
+    /// &amp;arg[8]="foo bar"; returns true. AdminLevel()=100&gt;=GM=50
+    /// TRUE. Body at 4730: Username = strtok_s("foo bar", " ",
+    /// &amp;next_token) returns "foo" (writes NUL at pos 3, advances
+    /// next_token to "bar"). Body at 4731: Password = strtok_s(NULL,
+    /// " ", &amp;next_token) returns "bar" (writes NUL at pos 7,
+    /// advances next_token past). Body at 4732: Access = strtok_s(NULL,
+    /// " ", &amp;next_token) returns NULL (no more tokens). Predicate
+    /// at 4734: !Username=false || !Password=false || !Access=true.
+    /// SendVaMessage("Syntax: //adduser &lt;username&gt; &lt;password&gt;
+    /// &lt;access&gt;") at 4736 emits SINGLE 0x001D MESSAGE_STRING with
+    /// body (48B, COLOR=5 -- SendVaMessage default). `return;` at 4737
+    /// exits HandleSlashCommands ENTIRELY -- skips the account-creation
+    /// side-effects (g_AccountMgr-&gt;AddUser at 4740 and the success/
+    /// failure emits at 4742/4746). NET RESULT: exactly 1 0x001D emit
+    /// "Syntax: //adduser &lt;username&gt; &lt;password&gt; &lt;access&gt;"
+    /// (48B, COLOR=5). Wire: `[u16 LE 49][u8 5][48B][NUL]` = 52 bytes.
+    /// **+0 ratchet.**
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 5 NEW classes prior waves are structurally
+    /// blind to: (a) FIRST TRIPLE-STRTOK_S third-NULL pin -- Wave 278
+    /// only exercised the SECOND position of a 2-strtok_s disjunction;
+    /// Wave 279 confirms validation iterates through ALL THREE strtok_s
+    /// calls before emitting. A regression that short-circuited after
+    /// two successful strtok_s calls would silently accept
+    /// "//adduser foo bar" and call AddUser(foo, bar, NULL) -- a
+    /// critical security bug (NULL-deref or NULL-access-level account
+    /// creation); (b) FIRST ADMIN-TIER CASE-'a' arm-body pin -- adds
+    /// case-'a' to the dispatcher-coverage set and SINGLE-PINS the
+    /// entire admin case-'a' branch; (c) FIRST ACCOUNT-CREATION SECURITY-
+    /// CRITICAL USAGE-EMIT pin -- /adduser creates accounts via
+    /// g_AccountMgr-&gt;AddUser. A regression that emitted usage AND
+    /// attempted AddUser(Username, Password, NULL) would crash or create
+    /// an unbounded-privilege account; (d) FIRST 48-BYTE ADMIN LITERAL
+    /// pin -- extends per-literal-length coverage spectrum (Wave 277=25B,
+    /// Wave 276=35B, Wave 278=43B, Wave 279=48B); (e) FIRST DISJUNCTION-
+    /// THIRD-POSITION pin -- documents that the C operator-precedence/
+    /// short-circuit semantics of `!a || !b || !c` correctly walk past
+    /// !a=false AND !b=false before firing on !c=true. A regression to
+    /// `if (!Username || !Password &amp;&amp; !Access)` (typo) would
+    /// produce different behaviour and break this pin.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. //adduser is admin-tier with an inline AdminLevel()&gt;=GM
+    /// gate at 4728 -- DOUBLE-GATED (outer 4716 + inline 4728). cli_test
+    /// (ADMIN=100) satisfies both. The TRIPLE-strtok_s validation pattern
+    /// is preserved byte-for-byte from upstream; the pin DOCUMENTS the
+    /// all-three-fields-required invariant (calling //adduser with two
+    /// arguments MUST NOT create an account). The NO-ACCESS-NO-CREATE
+    /// invariant is the security property: any regression that relaxed
+    /// this would allow accidental account creation by GMs typing the
+    /// command incorrectly.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashAdduserTwoArgs_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (49) = 52 bytes.
+        const int ExpectedReplyPayloadLength = 52;
+        const short ExpectedReplyLengthField = 49;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 48;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Adda", shipName: "AddaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//adduser foo bar");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(AdduserSyntaxLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(AdduserSyntaxLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//adduser foo bar\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{AdduserSyntaxLiteral}\".");
         }
         finally
         {
