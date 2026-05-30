@@ -20297,6 +20297,187 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 267 sibling-arm-pinning hardening (+0 ratchet) literal anchor
+    /// for the 50-byte ASCII body "Unable to move selected object -
+    /// move amount: 5.50" emitted by Player::HandlePanRequest at
+    /// PlayerConnection.cpp:8888 when user-tier <c>/panup 5.5</c>
+    /// arrives WITHOUT a selected target object. FIRST DELEGATE-
+    /// FUNCTION-CALL pin (the dispatcher's case-'p' arm at 6965
+    /// calls HandlePanRequest which then emits). FIRST NULL-TARGET
+    /// error-path pin. FIRST atof()/%.2f float-format substitution
+    /// pin.
+    /// </summary>
+    private const string UnableToMovePanup55Literal = "Unable to move selected object - move amount: 5.50";
+
+    /// <summary>
+    /// Wave 267 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 54-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
+    /// user-tier <c>/panup 5.5</c> on a fresh cli_test character with
+    /// NO selected target. FIRST DELEGATE-FUNCTION-CALL pin in the
+    /// HandleSlashCommands catalogue -- distinct from all prior
+    /// in-line-emit pins by routing the emit through a separate
+    /// method (Player::HandlePanRequest at 8856), demonstrating that
+    /// the byte-exact emit literal is preserved across the call
+    /// boundary. ONE-HUNDRED-TWENTY-SEVENTH overall byte-exact
+    /// dispatch pin. Assert.Equal pins the full 54-byte response
+    /// shape.
+    ///
+    /// <para>
+    /// User-tier outer gate at PlayerConnection.cpp:5434 admits;
+    /// both flags false. pch=&amp;Msg[1]="panup 5.5". Switch jumps
+    /// on 'p'. case-'p' at 6948. Arm 1 strcmp("position") false.
+    /// Arm 2 MatchOptWithParam("packetopt", ...) strncmp 'c'!='n'
+    /// at index 2 -- false. Arm 3 else-if MatchOptWithParam("panup",
+    /// "panup 5.5", ...): strncmp matches 5B; pch[5]=' '; param="5.5";
+    /// returns true. Body at 6967: <c>success = HandlePanRequest(
+    /// "5.5", 3)</c>. msg_sent=true at 6968.
+    /// </para>
+    ///
+    /// <para>
+    /// Inside HandlePanRequest at 8856: <c>obj = GetObjectManager()-&gt;
+    /// GetObjectFromID(ShipIndex()-&gt;GetTargetGameID())</c>. For a
+    /// fresh cli_test character with NO target selected,
+    /// GetTargetGameID() returns 0 (or -1); GetObjectFromID returns
+    /// NULL. <c>value = (float)atof("5.5")</c> = 5.5f. Compound
+    /// check at 8863 <c>if (obj &amp;&amp; value != 0.0f)</c>
+    /// evaluates: obj=NULL (falsy), short-circuits AND on FIRST
+    /// operand. Else at 8886 fires: <c>SendVaMessage("Unable to move
+    /// selected object - move amount: %.2f", 5.5f)</c> at 8888
+    /// (COLOR=5 default). %.2f of 5.5f = "5.50" (4 chars). HandlePanRequest
+    /// returns false. NET RESULT: exactly 1 0x001D emit "Unable to
+    /// move selected object - move amount: 5.50" (50B, COLOR=5).
+    /// Wire: `[u16 LE 51][u8 5][50B][NUL]` = 54 bytes. Subsequent
+    /// case-'p' matchers (panx/pany/panz/planetspin) fail strncmp.
+    /// case-'p' break at 6990. User-tier trailing fallback at 7702
+    /// suppressed by msg_sent=true.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 4 NEW classes prior waves are
+    /// structurally blind to: (a) FIRST DELEGATE-FUNCTION-CALL pin
+    /// -- the emit lives in HandlePanRequest at 8888 (not in the
+    /// dispatcher arm itself). A regression that inlined the
+    /// not-found check into the dispatcher arm would not change
+    /// the visible bytes but would lose the delegate-function
+    /// pattern -- this test catches changes to the delegate's
+    /// emit literal; (b) FIRST NULL-TARGET ERROR-PATH pin -- prior
+    /// post-match pins (262-266) all fire from validation paths
+    /// that don't depend on target state. A regression that
+    /// changed the target-NULL handling (e.g. silently no-op
+    /// instead of emitting) would suppress this emit; (c) FIRST
+    /// atof()/%.2f FLOAT-FORMAT SUBSTITUTION pin -- pins both
+    /// the atof() parsing of "5.5" and the %.2f formatting yielding
+    /// "5.50". A regression that changed precision to %.1f would
+    /// emit "5.5" (3 chars) and change byte count. The atof->float
+    /// cast at 8861 preserves "5.5" -&gt; 5.5f exactly because 5.5
+    /// is representable; (d) FIRST AND-SHORT-CIRCUIT-NULL-FIRST-
+    /// OPERAND pin in the post-match catalogue -- the
+    /// `obj &amp;&amp; value != 0.0f` check at 8863 short-circuits
+    /// on obj=NULL. A regression that swapped operand order
+    /// (value != 0.0f &amp;&amp; obj) would not change visible
+    /// behavior for this test but would change behavior when
+    /// value=0 with obj non-NULL (silent no-op vs error-emit).
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. /panup is user-tier with NO inline AdminLevel gate --
+    /// retail-faithful as preserved in source. The NULL-target
+    /// error-emit path is the canonical safety pattern for dev/edit
+    /// commands that operate on the player's currently-targeted
+    /// object.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashPanup55_NoTarget_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (51) = 54 bytes.
+        const int ExpectedReplyPayloadLength = 54;
+        const short ExpectedReplyLengthField = 51;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 50;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Petra", shipName: "PetraShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/panup 5.5");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(UnableToMovePanup55Literal, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(UnableToMovePanup55Literal, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/panup 5.5\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{UnableToMovePanup55Literal}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
