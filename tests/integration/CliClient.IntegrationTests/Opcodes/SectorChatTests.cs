@@ -19194,6 +19194,197 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 261 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
+    /// the 30-byte ASCII body "Illegal slash command: /zzzzzz" emitted by the
+    /// trailing fallback at PlayerConnection.cpp:7702-7705 when an admin-tier
+    /// (double-slash) command's first character matches NO case-letter in
+    /// EITHER tier's dispatcher switch. FIRST CROSS-TIER-FALLBACK pin --
+    /// the admin-tier outer gate at 4716 admits, admin-tier switch on
+    /// *pch='z' has no case (no emit), then control falls through to
+    /// the user-tier outer gate at 5434 with pch="/zzzzzz" (leading slash
+    /// preserved). The user-tier switch on *pch='/' has no case, and
+    /// the trailing fallback fires with the leading slash visible in
+    /// the %s substitution.
+    /// </summary>
+    private const string IllegalSlashSlashZzzzzzLiteral = "Illegal slash command: /zzzzzz";
+
+    /// <summary>
+    /// Wave 261 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 34-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
+    /// admin-tier <c>//zzzzzz</c> on a fresh cli_test character. FIRST
+    /// CROSS-TIER-FALLBACK pin in the HandleSlashCommands catalogue --
+    /// distinct from Wave 260 by (a) entering the admin-tier outer
+    /// gate first (admin-tier 'z' has no case so no emit, exits with
+    /// success=msg_sent=false), (b) falling through to user-tier with
+    /// pch="/zzzzzz" (LEADING SLASH preserved from &amp;Msg[1]), and
+    /// (c) the SAME trailing fallback emit firing with a different
+    /// %s substitution (30B body including leading slash vs Wave 260's
+    /// 29B body without). ONE-HUNDRED-TWENTY-FIRST overall byte-exact
+    /// dispatch pin. Assert.Equal pins the full 34-byte response shape.
+    ///
+    /// <para>
+    /// Admin-tier outer gate at PlayerConnection.cpp:4716 (<c>Msg[0]=='/'
+    /// &amp;&amp; Msg[1]=='/' &amp;&amp; AdminLevel() &gt;= GM</c>)
+    /// admits; Msg="//zzzzzz" satisfies both slash bytes, cli_test=100
+    /// vs GM=50 satisfies the AdminLevel gate. pch is computed from
+    /// <c>&amp;Msg[2]</c> at 4720 yielding pch="zzzzzz". Switch at 4724
+    /// jumps on *pch='z'. NO admin-tier case matches 'z' (cases cover
+    /// a/b/c/d/e/f/h/k/r/s/w/g only). Admin-tier block exits at 5431
+    /// with success=false and msg_sent=false. NO admin-tier trailing
+    /// fallback exists (distinct from user-tier).
+    /// </para>
+    ///
+    /// <para>
+    /// Control continues to the user-tier outer gate at 5434
+    /// (<c>Msg[0]=='/' &amp;&amp; Msg[1]!=0 &amp;&amp; (!msg_sent ||
+    /// !success)</c>). Msg[0]='/' true, Msg[1]='/' non-zero (true),
+    /// both flags false so (!msg_sent || !success) true -- gate admits.
+    /// pch is recomputed from <c>&amp;Msg[1]</c> at 5438 yielding
+    /// pch="/zzzzzz" (LEADING SLASH preserved -- THIS IS THE KEY
+    /// STRUCTURAL DIFFERENCE from Wave 260's single-slash path).
+    /// Switch at 5442 jumps on *pch='/'. NO user-tier case matches
+    /// '/' (cases cover a/b/c/f/g/h/i/k/l/m/n/o/p/r/t/u/w only).
+    /// Control exits the user-tier switch at 7700 with both flags
+    /// still false. Trailing fallback at 7702 evaluates
+    /// <c>!success &amp;&amp; !msg_sent</c> -- both negations true --
+    /// fires SendVaMessage("Illegal slash command: %s", pch="/zzzzzz")
+    /// at 7704 (COLOR=5 default). NET RESULT: exactly 1 emit "Illegal
+    /// slash command: /zzzzzz" (30B, COLOR=5). Wire: `[u16 LE 31][u8 5]
+    /// [30B ASCII "Illegal slash command: /zzzzzz"][NUL]` = 34 bytes.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 4 NEW classes prior waves (incl. Wave 260)
+    /// are structurally blind to: (a) FIRST CROSS-TIER-FALLBACK pin --
+    /// exercises the admin-tier-MISS-then-user-tier-FALLBACK sequence.
+    /// A regression that added an admin-tier `default:` arm (e.g. one
+    /// that emitted "Unknown admin command" and set msg_sent=true)
+    /// would skip the user-tier fallback (msg_sent gate would block
+    /// at 5434's !msg_sent||!success check). Wave 261 pins that NO
+    /// admin-tier fallback exists; (b) FIRST LEADING-SLASH-IN-pch pin
+    /// -- Wave 260 emits with pch="zzzzzz" (no leading slash). Wave 261
+    /// emits with pch="/zzzzzz" (leading slash from &amp;Msg[1] copy).
+    /// A regression that stripped leading slashes before %s substitution
+    /// would change the emit body from "...command: /zzzzzz" to
+    /// "...command: zzzzzz" and fail this test while still passing
+    /// Wave 260; (c) FIRST DUAL-SWITCH-EXIT pin -- /zzzzzz traverses
+    /// ONE switch (user-tier) and exits without case match; //zzzzzz
+    /// traverses TWO switches (admin-tier then user-tier) and exits
+    /// BOTH without case match. A regression that re-ordered the
+    /// admin/user-tier gates (e.g. moved user-tier check before admin-
+    /// tier) would still fire Wave 260's emit but produce a different
+    /// pch for Wave 261 (would emit "...command: /zzzzzz" with
+    /// admin-tier never entered -- effectively the same emit but via
+    /// a different code path); (d) FIRST ADMIN-TIER NO-CASE-FOR-LETTER
+    /// pin -- exercises the admin-tier switch entering and exiting
+    /// without any case match. A regression that added a corrupt
+    /// jump-table entry for 'z' in admin-tier would fire only on
+    /// this test. Admin-tier dispatcher's empty-fall-through is now
+    /// pinned structurally.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. The cross-tier fallback path is retail-faithful behavior --
+    /// the admin-tier dispatcher legitimately has no default arm, and
+    /// the user-tier fallback handles ALL unmatched slash commands
+    /// (single- and double-slash) uniformly. The leading slash preserved
+    /// in pch reflects the user-tier's <c>&amp;Msg[1]</c> copy semantics
+    /// at 5438; pinning this preserves the emit-body shape that the
+    /// retail client sees. cli_test=100 satisfies BOTH the admin-tier
+    /// gate at 4716 (GM=50) and the implicit user-tier floor at 5434.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashZzzzzz_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (31) = 34 bytes.
+        const int ExpectedReplyPayloadLength = 34;
+        const short ExpectedReplyLengthField = 31;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 30;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Zorba", shipName: "ZorbaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//zzzzzz");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(IllegalSlashSlashZzzzzzLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(IllegalSlashSlashZzzzzzLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//zzzzzz\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{IllegalSlashSlashZzzzzzLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
