@@ -29416,4 +29416,228 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 307 (commit-counter Wave 110) sibling-arm-pinning hardening
+    /// (+0 ratchet): pins the 42-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING reply to user-tier <c>/warp 99999</c> on a fresh
+    /// cli_test character -- FIRST-DISJUNCT-TRUE polarity of the
+    /// DISJUNCTIVE-BOUNDS-CHECK predicate at PlayerConnection.cpp:7656,
+    /// closing the 2-cell {FIRST-DISJUNCT-FALSE/SECOND-DISJUNCT-TRUE,
+    /// FIRST-DISJUNCT-TRUE/SHORT-CIRCUIT} polarity matrix established
+    /// by Wave 306 (/warp 500 below-minimum).
+    ///
+    /// <para>
+    /// The predicate is <c>atoi(param) &gt; limit || atoi(param) &lt; 1000</c>
+    /// with <c>limit=6000</c>. Wave 306 pinned the FIRST-DISJUNCT-FALSE
+    /// branch (atoi(500)&gt;6000=FALSE evaluates SECOND disjunct
+    /// atoi(500)&lt;1000=TRUE). Wave 307 pins the FIRST-DISJUNCT-TRUE
+    /// branch (atoi(99999)&gt;6000=TRUE SHORT-CIRCUITS without evaluating
+    /// SECOND disjunct). Both polarities reach the SAME emit at 7658 but
+    /// via observably different control-flow paths: short-circuit
+    /// evaluation order is a load-bearing semantic property of C/C++
+    /// <c>||</c> and a regression that re-ordered the disjuncts (e.g. to
+    /// <c>atoi(param)&lt;1000 || atoi(param)&gt;limit</c>) would change
+    /// evaluation order without changing wire output, but a regression
+    /// that swapped <c>||</c> to <c>&amp;&amp;</c> would split the cells:
+    /// FIRST-DISJUNCT-TRUE (Wave 307) would fall through to the SUCCESS
+    /// branch (no emit), while SECOND-DISJUNCT-TRUE (Wave 306) would
+    /// likewise fall through; both pins would break simultaneously and
+    /// distinguish the regression from a literal-character regression.
+    /// </para>
+    ///
+    /// <para>
+    /// Dispatch flow:
+    /// <list type="number">
+    /// <item>Client sends 11-byte 0x0033 CLIENT_CHAT body=<c>"/warp 99999\0"</c>.</item>
+    /// <item>User-tier dispatch entered at 5434 (Msg[0]='/', Msg[1]='w'
+    ///       non-zero, !msg_sent=true).</item>
+    /// <item><c>pch=&amp;Msg[1]="warp 99999"</c>. case-'w' user-tier
+    ///       opens at 7627.</item>
+    /// <item>Arm 1 at 7628: <c>MatchOptWithParam("who", "warp 99999", ...,
+    ///       true)</c> strncmp 3B: byte 1 'h' vs 'a' MISMATCH -- silent
+    ///       FALSE.</item>
+    /// <item>Arm 2 at 7650: <c>MatchOptWithParam("warp", "warp 99999", ...)</c>
+    ///       strncmp 4B matches; arg[4]=' '; param=&amp;arg[5]="99999";
+    ///       returns true.</item>
+    /// <item>Body at 7652-7667: <c>limit=6000</c>. AdminLevel() &gt;= GM
+    ///       gate at 7654 passes (cli_test ADMIN=100 &gt;= GM=50).
+    ///       Bounds check at 7656: <c>atoi("99999")=99999</c>;
+    ///       <c>99999 &gt; 6000 = TRUE</c> SHORT-CIRCUITS the SECOND
+    ///       disjunct. Emit branch entered with the SAME format string
+    ///       and SAME constant <c>limit=6000</c> as Wave 306.</item>
+    /// <item>Emit at 7658: <c>SendVaMessage("Warp limits are between
+    ///       1000 and %d!", 6000)</c> (DEFAULT COLOR=5; 38B body
+    ///       "Warp limits are between 1000 and 6000!"). <c>msg_sent=true</c>
+    ///       at 7666.</item>
+    /// <item>Arm 3 at 7668: chained via <c>else if</c>; SKIPPED.
+    ///       Independent <c>if</c> at 7673
+    ///       MatchOptWithParam("wormhole", "warp 99999", ...) byte 1 'o'
+    ///       vs 'a' MISMATCH -- silent FALSE. Independent <c>if</c> at
+    ///       7691 strcmp(pch, "warpreset") FAIL. case-'w' breaks at
+    ///       7699.</item>
+    /// <item>Trailing fallback at 7702: <c>!success &amp;&amp; !msg_sent</c>
+    ///       short-circuits FALSE. NO illegal-slash emit.</item>
+    /// </list>
+    /// </para>
+    ///
+    /// <para>
+    /// NET RESULT: exactly 1 0x001D emit, bit-identical to Wave 306's
+    /// wire but reached via distinct control flow. Wire:
+    /// <c>[u16 LE 39][u8 5][38B][NUL]</c> = 42 bytes. <c>+0 ratchet</c>.
+    /// </para>
+    ///
+    /// <para>Novel structural axes vs prior waves:</para>
+    /// <list type="bullet">
+    ///   <item><b>FIRST-DISJUNCT-TRUE polarity pin closing 2-cell
+    ///     DISJUNCTIVE-BOUNDS-CHECK matrix</b> -- W306 pinned
+    ///     {FIRST-FALSE, SECOND-TRUE} via /warp 500; Wave 307 pins
+    ///     {FIRST-TRUE, SHORT-CIRCUITED} via /warp 99999. Closes the
+    ///     2-cell polarity matrix for the <c>||</c> predicate at 7656,
+    ///     mirroring the 2-cell {site, polarity} closure pattern from
+    ///     W302/W303/W65/W304 (case-'b'/case-'g') and W64/W107
+    ///     (case-'b'). A regression that altered the short-circuit
+    ///     evaluation order would not affect either pin's WIRE output
+    ///     but a regression that changed <c>||</c> to <c>&amp;&amp;</c>
+    ///     would break BOTH pins simultaneously, distinguishing
+    ///     operator regressions from literal regressions.</item>
+    ///   <item><b>FIRST OUT-OF-RANGE-ABOVE-MAXIMUM pin in
+    ///     HandleSlashCommands</b> -- prior bounds-check pins covered
+    ///     below-minimum (W306 /warp 500&lt;1000) and below-zero edge
+    ///     cases. Wave 307 covers above-maximum (99999&gt;6000), a
+    ///     distinct semantic class: tests UPPER-BOUND validation
+    ///     independent of LOWER-BOUND. A regression that removed only
+    ///     the upper-bound disjunct (e.g. left only
+    ///     <c>atoi(param)&lt;1000</c>) would silently accept
+    ///     /warp 99999 and break this pin via missing emit, while Wave
+    ///     306 would continue to pass.</item>
+    ///   <item><b>FIRST SAME-WIRE-DIFFERENT-INPUT pin in case-'w'
+    ///     user-tier</b> -- W306 and W307 produce byte-identical replies
+    ///     from semantically different inputs (500 vs 99999). The pin
+    ///     thereby asserts that the emit literal is DECOUPLED from the
+    ///     param value, validating the format-string indirection at
+    ///     7658 substitutes only the function-local <c>limit</c>, never
+    ///     the user-supplied param. A regression that accidentally
+    ///     interpolated the param (e.g. <c>SendVaMessage("Warp limits
+    ///     are between %d and %d!", atoi(param), limit)</c>) would
+    ///     break both pins with DIFFERENT wire outputs, distinguishing
+    ///     this class of regression from a uniform literal change.</item>
+    ///   <item><b>FIRST 5-DIGIT-PARAM pin in case-'w' user-tier</b> --
+    ///     W306 used 3-digit param "500"; Wave 307 uses 5-digit param
+    ///     "99999". A regression that truncated param to a fixed buffer
+    ///     (e.g. snprintf with size-too-small) could silently corrupt
+    ///     longer inputs; this pin guards against latent buffer-size
+    ///     regressions in the param-extraction path at MatchOpt 7650.</item>
+    ///   <item><b>FIRST SHORT-CIRCUIT-EVALUATION pin</b> -- prior
+    ///     disjunctive pins (W295/W288) pinned predicates where BOTH
+    ///     disjuncts evaluated (no short-circuit possible because both
+    ///     were false). Wave 307 pins a case where the SECOND disjunct
+    ///     is GUARANTEED NOT EVALUATED due to FIRST=TRUE
+    ///     short-circuiting; a regression that hoisted a side-effect
+    ///     into the SECOND disjunct (e.g.
+    ///     <c>atoi(param)&gt;limit || (counter++, atoi(param)&lt;1000)</c>)
+    ///     would change observable counter state for Wave 306 but not
+    ///     Wave 307 because Wave 307 short-circuits PAST the
+    ///     side-effect.</item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md): no permissiveness
+    /// added. /warp body GM-gated inline at 7654; bounds-check at 7656
+    /// rejects above-maximum values BEFORE mutating ship state via
+    /// SetWarpSpeed/SendAuxShip. The 6000 upper cap is the
+    /// upstream-preserved warp-speed invariant. Pin DOCUMENTS the
+    /// upper-bounds-rejection path byte-for-byte; TIGHTENS toward
+    /// preservation by guarding the cap value (6000) and the
+    /// <c>||</c> operator against silent regression.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashWarpAboveMaximum_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (39) = 42 bytes.
+        const int ExpectedReplyPayloadLength = 42;
+        const short ExpectedReplyLengthField = 39;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 38;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Wahi", shipName: "WahiShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/warp 99999");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(WarpLimitsLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(WarpLimitsLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/warp 99999\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{WarpLimitsLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
