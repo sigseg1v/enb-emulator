@@ -21005,6 +21005,186 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 271 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
+    /// the 50-byte ASCII body "Unable to move selected object - move amount: 7.50"
+    /// that the HandleRotateRequest delegate emits at
+    /// PlayerConnection.cpp:8958 when the player has no selected target.
+    /// NOTE: source copy-paste duplication -- HandleRotateRequest uses the
+    /// SAME literal "Unable to move selected object - move amount: %.2f"
+    /// as HandlePanRequest at 8888, even though the operation is rotation.
+    /// Pinning the literal value here documents the duplicate.
+    /// </summary>
+    private const string UnableToMoveRotatex75Literal = "Unable to move selected object - move amount: 7.50";
+
+    /// <summary>
+    /// Wave 271 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 54-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
+    /// user-tier <c>/rotatex 7.5</c> on a fresh cli_test character with
+    /// NO selected target. SECOND DELEGATE-FUNCTION-CALL pin in the
+    /// HandleSlashCommands catalogue (after Wave 267's /panup via
+    /// HandlePanRequest). Distinct delegate function (HandleRotateRequest
+    /// at PlayerConnection.cpp:8894 vs HandlePanRequest at 8856).
+    /// IDENTICAL emit literal (modulo the value) -- the source contains
+    /// a COPY-PASTE DUPLICATION at 8958 and 8888 of "Unable to move
+    /// selected object - move amount: %.2f", even though one delegate
+    /// rotates and the other moves. This pin DOCUMENTS the copy-paste
+    /// while ensuring both delegate code paths preserve the literal
+    /// byte-for-byte. ONE-HUNDRED-THIRTY-FIRST overall byte-exact
+    /// dispatch pin. Assert.Equal pins the full 54-byte response shape.
+    ///
+    /// <para>
+    /// User-tier outer gate at PlayerConnection.cpp:5434 admits. pch=
+    /// &amp;Msg[1]="rotatex 7.5". Switch jumps on 'r'. case-'r'.
+    /// Cascade walks past arms (reffect, regenstat, ... ) reaching
+    /// MatchOptWithParam("rotatex", "rotatex 7.5", param, msg_sent)
+    /// at 7059: strncmp matches 7B; pch[7]=' '; param="7.5"; returns
+    /// true. Body at 7061: <c>success = HandleRotateRequest("7.5", 1)</c>.
+    /// msg_sent=true at 7062.
+    /// </para>
+    ///
+    /// <para>
+    /// Inside HandleRotateRequest at 8894: <c>obj = GetObjectManager()-&gt;
+    /// GetObjectFromID(ShipIndex()-&gt;GetTargetGameID())</c>. For fresh
+    /// cli_test character with NO target, GetTargetGameID() returns 0
+    /// (or -1); GetObjectFromID returns NULL. <c>value = (float)atof("7.5")
+    /// </c> = 7.5f. Compound check at 8901 <c>if (obj &amp;&amp;
+    /// value != 0.0f)</c> short-circuits FALSE on obj=NULL.
+    /// IMPORTANTLY: the radian conversion at 8903 (<c>value = value * PI
+    /// / 180.0f</c>) lives INSIDE the if-true branch, so value remains
+    /// in DEGREES (7.5) when the else branch fires. Else at 8956 emits
+    /// <c>SendVaMessage("Unable to move selected object - move amount:
+    /// %.2f", 7.5f)</c> at 8958 (COLOR=5). %.2f of 7.5f = "7.50".
+    /// HandleRotateRequest returns false. NET RESULT: exactly 1 0x001D
+    /// emit "Unable to move selected object - move amount: 7.50" (50B,
+    /// COLOR=5). Wire: `[u16 LE 51][u8 5][50B][NUL]` = 54 bytes.
+    /// IDENTICAL wire-shape to Wave 267's /panup 5.5 modulo the value
+    /// (5.50 vs 7.50).
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 4 NEW classes prior waves are structurally
+    /// blind to: (a) SECOND DELEGATE-FUNCTION-CALL pin -- the emit lives
+    /// in HandleRotateRequest, NOT HandlePanRequest (Wave 267) or the
+    /// dispatcher arm itself. A regression that changed the
+    /// HandleRotateRequest else-branch emit literal (e.g. corrected
+    /// the copy-paste to say "rotate" instead of "move") would be
+    /// caught here but NOT by Wave 267. The two delegate functions
+    /// share the literal-base by copy-paste accident; this pin ensures
+    /// both stay in lockstep; (b) FIRST DEGREE-VALUE-PRESERVED pin --
+    /// the radian conversion at 8903 lives INSIDE the if-true branch,
+    /// so value passed to %.2f stays in DEGREES when the else fires.
+    /// A regression that hoisted the conversion above the if (e.g. as
+    /// an "optimization") would change the printed value from "7.50"
+    /// (degrees) to "0.13" (radians, 7.5 * PI / 180) -- byte-count
+    /// preserved but content differs; (c) FIRST CASE-'r' DELEGATE-
+    /// FUNCTION-CALL POST-MATCH pin -- prior waves covered case-'r'
+    /// arms with INLINE emits (Wave 54 /rsd); this pin covers a
+    /// case-'r' arm that routes through a delegate; (d) FIRST FLOAT-
+    /// FORMAT-VALUE-DIFFERS-FROM-INPUT-LITERAL pin -- the input "7.5"
+    /// (3 chars) becomes "7.50" (4 chars) after %.2f formatting. A
+    /// regression that changed the format to "%g" or "%f" would
+    /// preserve the float value but change the byte representation.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. /rotatex is user-tier with NO inline AdminLevel gate --
+    /// retail-faithful as preserved in source. The literal duplication
+    /// between HandlePanRequest and HandleRotateRequest is a source-code
+    /// artifact preserved as-is; pinning it ensures any future cleanup
+    /// remains byte-exact.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashRotatex75_NoTarget_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (51) = 54 bytes.
+        const int ExpectedReplyPayloadLength = 54;
+        const short ExpectedReplyLengthField = 51;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 50;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Rena", shipName: "RenaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/rotatex 7.5");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(UnableToMoveRotatex75Literal, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(UnableToMoveRotatex75Literal, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/rotatex 7.5\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{UnableToMoveRotatex75Literal}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
