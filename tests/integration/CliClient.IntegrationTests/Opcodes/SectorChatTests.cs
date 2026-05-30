@@ -15537,6 +15537,157 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 240 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
+    /// the 62-byte ASCII body "You can only destroy objects while you're
+    /// Hijacking something\n" (61 visible chars + LF) that the server emits
+    /// when admin-tier double-slash <c>//destroyobject</c> arrives on a
+    /// freshly-spawned character whose Hijackee()==0 (the default --
+    /// PlayerClass.cpp:82 sets m_Hijackee=0 in the constructor). Matcher at
+    /// PlayerConnection.cpp:4884 (case-'d' arm 3 of the admin-tier switch
+    /// opened at 4724) -- NO-INLINE-GUARD pattern (outer GM gate at 4716 is
+    /// the only AdminLevel check on the dispatch path). SECOND admin-tier
+    /// case-'d' pin; case-'d' admin-tier now DOUBLE-PINNED (joins
+    /// //displayplayerfaction Wave 211 at 4865). FIRST admin-tier strcmp
+    /// BODY-EMIT pin in the catalogue -- existing admin-tier pins all hit
+    /// the MatchOptWithParam allowNoParams=false ERROR fork (4548); this pin
+    /// exercises the alternate dispatch shape where the arm body actually
+    /// runs and the emit comes from the handler (HandleObjectDestruction's
+    /// Hijackee()==0 early-return at PlayerConnection.cpp:8097-8101).
+    /// </summary>
+    private const string HijackingRequiredLiteral =
+        "You can only destroy objects while you're Hijacking something\n";
+
+    /// <summary>
+    /// Wave 240 sibling-arm-pinning hardening (+0 ratchet): pins the 66-byte
+    /// wire-shape of the single 0x001D MESSAGE_STRING reply to admin-tier
+    /// double-slash <c>//destroyobject</c> sent by a freshly-spawned
+    /// character (Hijackee()==0). Wave 240 opens admin-tier case-'d' to
+    /// DOUBLE-PINNED status and introduces the FIRST strcmp BODY-EMIT pin
+    /// (vs the saturated MatchOptWithParam ERROR-fork pattern).
+    ///
+    /// <para>
+    /// Outer gate at 4716 (<c>Msg[0]=='/' &amp;&amp; Msg[1]=='/' &amp;&amp;
+    /// AdminLevel() >= GM</c>) admits the dispatch; cli_test status=100
+    /// satisfies GM=50. Switch at 4724 jumps on *pch -> case-'d' opens at
+    /// 4858. case-'d' has three arms: arm 1 strcmp("displayfactions", pch)
+    /// at 4859 -- 15B vs 13B; byte 1 'i' vs 'e' MISMATCH. arm 2
+    /// MatchOptWithParam("displayplayerfaction", pch) at 4865 -- strncmp
+    /// length=20 over arg "destroyobject" (13B); byte 1 'i' vs 'e' MISMATCH
+    /// at strncmp level -> returns FALSE silently (msg_sent NOT set; no
+    /// 4548 ERROR fork). arm 3 strcmp("destroyobject", pch) at 4884 -- 13B
+    /// vs 13B FULL match -> HandleObjectDestruction() at 8092. NO inline
+    /// AdminLevel guard. m_Hijackee==0 (constructor default at
+    /// PlayerClass.cpp:82) takes the early-return at 8097-8101:
+    /// SendVaMessage("You can only destroy objects while you're Hijacking
+    /// something\n") COLOR=5 (default), success=false, msg_sent=true.
+    /// case-'d' breaks. NET RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>
+    /// FIRST admin-tier strcmp BODY-EMIT pin (vs the previously-saturated
+    /// MatchOptWithParam allowNoParams=false ERROR-fork pattern at 4548).
+    /// Catches regression where a maintainer rewrites
+    /// HandleObjectDestruction's early-return guard, alters Hijackee()
+    /// semantics, or changes the default constructor value of m_Hijackee.
+    /// FIRST 62-byte body-emit pin (existing emit-body sizes span 30..43
+    /// bytes for the ERROR fork; 62 was unpinned). FIRST emit-body
+    /// containing an embedded LF (existing pins are all single-line). The
+    /// LF is part of the wire payload (one byte 0x0A immediately before the
+    /// NUL), pinned explicitly so a future refactor that trims/normalizes
+    /// trailing whitespace is caught.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashDestroyobjectNotHijacking_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (63) = 66 bytes.
+        const int ExpectedReplyPayloadLength = 66;
+        const short ExpectedReplyLengthField = 63;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 62;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Destra", shipName: "DestraShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//destroyobject");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(HijackingRequiredLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(HijackingRequiredLiteral, fullBody);
+                Assert.Equal((byte)0x0A, span[literalEnd - 1]);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//destroyobject\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{HijackingRequiredLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
