@@ -19020,6 +19020,180 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 260 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
+    /// the 29-byte ASCII body "Illegal slash command: zzzzzz" emitted by the
+    /// trailing fallback at PlayerConnection.cpp:7702-7705 when a user-tier
+    /// slash command's first character matches NO case-letter in the
+    /// dispatcher switch at PlayerConnection.cpp:5442. FIRST direct pin
+    /// on the trailing fallback emit -- Waves 155+ referenced this emit
+    /// only as a SKIPPED-WHEN-msg_sent invariant (asserted absent when
+    /// the matched arm already emitted). Wave 260 EXERCISES the fallback
+    /// itself.
+    /// </summary>
+    private const string IllegalSlashZzzzzzLiteral = "Illegal slash command: zzzzzz";
+
+    /// <summary>
+    /// Wave 260 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 33-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
+    /// user-tier <c>/zzzzzz</c> on a fresh cli_test character. FIRST
+    /// direct pin on the trailing illegal-slash-command fallback emit
+    /// in the HandleSlashCommands user-tier dispatcher. FIRST NO-MATCH-
+    /// CASE-LETTER pin overall -- the user-tier switch at 5442 has cases
+    /// {a,b,c,f,g,h,i,k,l,m,n,o,p,r,t,u,w}; 'z' is NOT in that set, so
+    /// the switch exits with neither <c>success</c> nor <c>msg_sent</c>
+    /// set, and the trailing `if (!success &amp;&amp; !msg_sent)` at
+    /// 7702 fires the fallback. ONE-HUNDRED-TWENTIETH overall byte-exact
+    /// dispatch pin. Assert.Equal pins the full 33-byte response shape.
+    ///
+    /// <para>
+    /// User-tier outer gate at 5434 (<c>Msg[0]=='/' &amp;&amp;
+    /// Msg[1]!=0 &amp;&amp; (!msg_sent || !success)</c>) admits the
+    /// dispatch; Msg="/zzzzzz" satisfies Msg[0]='/', Msg[1]='z' non-zero,
+    /// both flags false on entry. pch is copied from <c>&amp;Msg[1]</c>
+    /// at 5438 yielding pch="zzzzzz". Switch at 5442 jumps on *pch='z'.
+    /// No case label matches 'z' (the switch covers a/b/c/f/g/h/i/k/l/
+    /// m/n/o/p/r/t/u/w). There is NO `default:` label. Control exits
+    /// the switch at 7700 with success=false and msg_sent=false. The
+    /// trailing fallback at 7702 evaluates `if (!success &amp;&amp;
+    /// !msg_sent)` -- both negations are true -- and fires
+    /// SendVaMessage("Illegal slash command: %s", pch="zzzzzz") at 7704
+    /// (COLOR=5 default). NET RESULT: exactly 1 emit "Illegal slash
+    /// command: zzzzzz" (29B, COLOR=5). Wire: `[u16 LE 30][u8 5][29B
+    /// ASCII "Illegal slash command: zzzzzz"][NUL]` = 33 bytes.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 4 NEW classes prior waves are structurally
+    /// blind to: (a) FIRST direct pin on the trailing illegal-slash-
+    /// command fallback at 7702-7705. Every prior slash test verifies a
+    /// matched arm fired, with the fallback IMPLICITLY skipped via the
+    /// msg_sent gate. A regression that removed the fallback entirely
+    /// would slip through every other slash test (they all see their
+    /// expected emit FIRST and stop looking). Wave 260 fires the
+    /// fallback DIRECTLY; (b) FIRST NO-MATCH-CASE-LETTER pin -- every
+    /// prior user-tier pin hits a defined case-letter. A regression
+    /// that added an unintended `default:` arm (e.g. one that emitted
+    /// a different fallback message, or one that silently swallowed
+    /// the dispatch) would fire ONLY this test. Wave 260 anchors the
+    /// "no default case" structural invariant; (c) FIRST EMPTY-SWITCH-
+    /// PATH pin -- prior tests exercise the switch entering and
+    /// branching into a case body; this test exercises the switch
+    /// entering AND exiting WITHOUT ANY case match. The jump-table
+    /// generation path through the switch is structurally distinct
+    /// from the case-body path; a compiler-level regression that
+    /// mishandled empty-switch dispatch (e.g. a corrupt jump table)
+    /// would fire only on no-match inputs; (d) FIRST FALLBACK-GATE
+    /// pin on the `!success &amp;&amp; !msg_sent` guard at 7702. A
+    /// regression that flipped EITHER negation (e.g. `success ||
+    /// msg_sent` or `!success || !msg_sent`) would change the
+    /// fallback's fire-condition. For /zzzzzz both flags are false so
+    /// the AND of negations is true and the fallback fires; a flip
+    /// to `success &amp;&amp; msg_sent` would skip (both false). The
+    /// EXACT-equals literal filter would also catch any regression
+    /// that changed the format string "Illegal slash command: %s".
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. The trailing illegal-slash-command emit is the retail
+    /// server's documented error response to unknown slash commands;
+    /// the absence of a `default:` case in the dispatcher switch is
+    /// retail-faithful behavior. The test exercises an unmatched input
+    /// path that the retail server handles identically. cli_test=100
+    /// satisfies the implicit user-tier floor at 5434 (no AdminLevel
+    /// gate on the fallback itself).
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashZzzzzz_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (30) = 33 bytes.
+        const int ExpectedReplyPayloadLength = 33;
+        const short ExpectedReplyLengthField = 30;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 29;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Zara", shipName: "ZaraShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/zzzzzz");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(IllegalSlashZzzzzzLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(IllegalSlashZzzzzzLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/zzzzzz\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{IllegalSlashZzzzzzLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
