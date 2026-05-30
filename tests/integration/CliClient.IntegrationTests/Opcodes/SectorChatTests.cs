@@ -18484,6 +18484,174 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 257 sibling-arm-pinning hardening (+0 ratchet) literal anchor
+    /// for the 15-byte ASCII body "GM channel off." that the server
+    /// emits when user-tier <c>/gmoff</c> (SINGLE slash, NO param)
+    /// arrives on a cli_test (AdminLevel=100) account. Matcher at
+    /// PlayerConnection.cpp:6509 (arm 7 of case-'g' user-tier opened at
+    /// 6449); emit at PlayerConnection.cpp:6515 via default SendVaMessage
+    /// (COLOR=5). SECOND case-'g' user-tier SUCCESS-BODY pin, sibling
+    /// to Wave 256 /gmon (arm 6 at 6493). Promotes case-'g' user-tier
+    /// from QUADRUPLE to QUINTUPLE-PINNED.
+    /// </summary>
+    private const string GmoffLiteral = "GM channel off.";
+
+    /// <summary>
+    /// Wave 257 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 19-byte wire-shape of the single 0x001D MESSAGE_STRING reply to
+    /// user-tier <c>/gmoff</c> on a fresh cli_test character. SECOND
+    /// case-'g' user-tier SUCCESS-BODY pin (sibling to Wave 256 /gmon).
+    /// FIRST cross-arm intra-letter SUCCESS-BODY consistency pin: Waves
+    /// 256 and 257 sit on adjacent else-if arms (arm 6 /gmon, arm 7
+    /// /gmoff) inside case-'g' user-tier, both gated by inner
+    /// AdminLevel()&gt;=GM, both emitting via default SendVaMessage
+    /// (COLOR=5), both flipping m_ChannelSubscription[GM] (on vs off).
+    /// The pair anchors the SAME-CASE-LETTER SAME-COLOR ADJACENT-ARM
+    /// pattern. ONE-HUNDRED-SIXTEENTH overall byte-exact dispatch pin.
+    /// Assert.Equal pins the full 19-byte response shape.
+    ///
+    /// <para>
+    /// User-tier outer gate at 5434 admits. Switch at 5442 jumps on
+    /// *pch='g' -&gt; case-'g' opens at PlayerConnection.cpp:6449.
+    /// case-'g' walk for pch="gmoff":
+    ///   arms 1-5 (gc / gmgc / getgmitems / global / gm) all reject by
+    ///     prefix-byte mismatch or by isalpha-fallthrough on /gm at 6484
+    ///     (arg[2]='o' alpha -&gt; matcher false NO emit, identical to
+    ///     Wave 256 traversal).
+    ///   arm 6 else-if strcmp(pch, "gmon") at 6493 -- 4B "gmon" vs 5B
+    ///     "gmoff"; strcmp NON-ZERO at byte 2 'o' vs 'o' -- wait, byte 2
+    ///     'o' == 'o', byte 3 'n' vs 'f' NON-ZERO -&gt; skip; else-if
+    ///     false; cascade falls to arm 7.
+    ///   arm 7 else-if strcmp(pch, "gmoff") at 6509 -- 5B vs 5B FULL
+    ///     match -&gt; enter. Inner gate AdminLevel()=100 &gt;= GM=50
+    ///     at 6511 admits. channel_id = g_PlayerMgr-&gt;GetChannelFromName
+    ///     ("GM") at 6513; m_ChannelSubscription[channel_id] = false at
+    ///     6514 (flip OFF); SendVaMessage("GM channel off.") at 6515
+    ///     emits body "GM channel off." 15B COLOR=5 default; msg_sent=
+    ///     true; success=true.
+    ///   arms 8+ short-circuited by arm 7's else-if match. case-'g'
+    ///     breaks.
+    /// NET RESULT: ONE 0x001D MESSAGE_STRING emit. Wire: `[u16 LE 16]
+    /// [u8 5][15B ASCII "GM channel off."][NUL]` = 19 bytes.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 3 NEW classes prior waves are structurally
+    /// blind to: (a) SECOND case-'g' user-tier SUCCESS-BODY pin --
+    /// paired with Wave 256 /gmon. A regression that swapped the two
+    /// arms' bodies ("GM channel on." -&gt; "GM channel off." and
+    /// vice versa) would fire BOTH literal assertions across the
+    /// pair; a regression touching only one arm would slip past one
+    /// test but fire the other; (b) FIRST cross-arm intra-letter
+    /// SAME-COLOR ADJACENT-ARM pattern pin -- Waves 256 and 257 are
+    /// the FIRST adjacent else-if arms inside case-'g' user-tier
+    /// pinned with happy-path bodies. Anchors the SAME-CASE-LETTER
+    /// SAME-COLOR ADJACENT-ARM pattern; (c) FIRST channel-subscription
+    /// OFF-flip pin -- Wave 256 pins the ON-flip path; Wave 257 pins
+    /// the OFF-flip path. A regression that swapped the flip target
+    /// (e.g. m_ChannelSubscription[wrong_channel]) would not break
+    /// the wire-shape but would break dispatch semantics; acknowledged
+    /// limitation as in Wave 256.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. The /gmoff arm is a retail-faithful slash-command
+    /// dispatch. m_ChannelSubscription[GM] flips false (mirror of
+    /// /gmon's true flip) matching the existing server behaviour.
+    /// cli_test=100 satisfies the inner GM gate at 6511.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashGmoff_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (16) = 19 bytes.
+        const int ExpectedReplyPayloadLength = 19;
+        const short ExpectedReplyLengthField = 16;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 15;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Gmoffa", shipName: "GmoffaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/gmoff");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(GmoffLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(GmoffLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/gmoff\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{GmoffLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
