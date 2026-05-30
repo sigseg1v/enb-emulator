@@ -22298,6 +22298,180 @@ public sealed class SectorChatTests
         }
     }
 
+    private const string SetpasswordSyntaxLiteral = "Syntax: //setpassword <username> <password>";
+
+    /// <summary>
+    /// Wave 278 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 47-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
+    /// admin-tier <c>//setpassword foo</c> (ONE post-MatchOptWithParam
+    /// param) on a fresh cli_test character. FIRST DOUBLE-STRTOK_S-NULL
+    /// EARLY-RETURN pin in the HandleSlashCommands catalogue -- prior
+    /// post-MatchOptWithParam strtok_s-NULL pins (Wave 276
+    /// //displayplayerfaction, Wave 277 //halloween) both failed on the
+    /// FIRST strtok_s with empty param. Wave 278 is structurally distinct:
+    /// the first strtok_s SUCCEEDS capturing Username="foo"; the SECOND
+    /// strtok_s fails returning NULL for Password; the disjunctive
+    /// `if (!Username || !Password)` predicate evaluates !Username=false,
+    /// short-circuits to !Password=true, and fires the usage emit. This
+    /// pins the SECOND-OF-TWO strtok_s validation path. FIRST ADMIN-TIER
+    /// CASE-'s' arm pin. FIRST 43-BYTE-LITERAL admin pin. ONE-HUNDRED-
+    /// THIRTY-EIGHTH overall byte-exact dispatch pin. Assert.Equal pins
+    /// the full 47-byte response shape.
+    ///
+    /// <para>
+    /// Admin outer gate at PlayerConnection.cpp:4716 admits (cli_test
+    /// ADMIN=100 satisfies GM=50). pch=&amp;Msg[2]="setpassword foo".
+    /// Switch on 's'. case-'s' opens at 5153. Arm at 5155:
+    /// MatchOptWithParam("setpassword", pch, param, msg_sent): strncmp
+    /// matches 11B; arg[11]=' '; param=&amp;arg[12]="foo"; returns true.
+    /// Body at 5157: char *Username = strtok_s("foo", " ", &amp;next_token)
+    /// returns "foo" (advances next_token past the NUL). Body at 5158:
+    /// char *Password = strtok_s(NULL, " ", &amp;next_token) returns NULL
+    /// (no more tokens in the buffer after "foo" consumed). Predicate at
+    /// 5160: !Username=false || !Password=true. SendVaMessage("Syntax:
+    /// //setpassword &lt;username&gt; &lt;password&gt;") at 5162 emits
+    /// SINGLE 0x001D MESSAGE_STRING (43B, COLOR=5 -- SendVaMessage default).
+    /// `return;` at 5163 exits HandleSlashCommands ENTIRELY -- skips the
+    /// password-change side-effects (ChatSendChannel x3 at 5168-5170,
+    /// ChangePassword at 5172, success emit at 5173). The `break;` at
+    /// 5177 is also skipped. NET RESULT: exactly 1 0x001D emit
+    /// "Syntax: //setpassword &lt;username&gt; &lt;password&gt;" (43B,
+    /// COLOR=5). Wire: `[u16 LE 44][u8 5][43B][NUL]` = 47 bytes.
+    /// **+0 ratchet.**
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 5 NEW classes prior waves are structurally
+    /// blind to: (a) FIRST DOUBLE-STRTOK_S-NULL pin -- prior strtok_s-NULL
+    /// pins all failed on the first call; Wave 278 confirms that the
+    /// validation predicate iterates through BOTH strtok_s calls before
+    /// emitting. A regression that short-circuited validation after the
+    /// first successful strtok_s would silently accept "//setpassword foo"
+    /// and call ChangePassword(foo, NULL) -- a critical security bug
+    /// (NULL-deref or empty-password account corruption). The pin
+    /// prevents this; (b) FIRST ADMIN-TIER CASE-'s' pin -- adds case-'s'
+    /// to the dispatcher-coverage set. case-'s' admin-tier is single-arm
+    /// (//setpassword only) so this also SINGLE-PINS the entire admin
+    /// case-'s' branch; (c) FIRST SECURITY-CRITICAL USAGE-EMIT pin --
+    /// /setpassword changes account credentials. The usage path is the
+    /// NO-SIDE-EFFECT branch; the byte-shape pin confirms the usage emit
+    /// fires WITHOUT calling g_AccountMgr-&gt;ChangePassword. A regression
+    /// that emitted usage AND attempted ChangePassword(Username, NULL)
+    /// would crash or corrupt the account row; (d) FIRST 43-BYTE ADMIN
+    /// LITERAL pin -- Wave 277's halloween usage was 25B; Wave 276's
+    /// displayplayerfaction was 35B; Wave 278's setpassword is 43B,
+    /// extending the per-literal-length coverage spectrum; (e) FIRST
+    /// ADMIN-TIER COLOR=5 PIN ON A USAGE-EMIT -- prior admin COLOR=5
+    /// usage pins (Wave 65 //gmsetaccess) used MatchOptWithParam Missing-
+    /// arg helper; Wave 278 uses the SendVaMessage default-color path
+    /// from inside the arm body. A regression that switched
+    /// SendVaMessage default color (from 5 to anything else) would break
+    /// this pin and many others.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. //setpassword is admin-tier with NO inline AdminLevel gate
+    /// -- the admin-tier outer gate at 4716 is the only access check --
+    /// retail-faithful as preserved in source. cli_test (ADMIN=100)
+    /// passes the gate. The DOUBLE-strtok_s validation pattern is
+    /// preserved byte-for-byte from upstream; the pin DOCUMENTS the
+    /// password-required invariant (calling //setpassword with one
+    /// argument MUST NOT modify the account). The NO-PASSWORD-NO-CHANGE
+    /// invariant is the security property: any regression that relaxed
+    /// this would allow accidental password wipes by GMs typing the
+    /// command incorrectly.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashSetpasswordOneArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (44) = 47 bytes.
+        const int ExpectedReplyPayloadLength = 47;
+        const short ExpectedReplyLengthField = 44;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 43;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Sapa", shipName: "SapaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//setpassword foo");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(SetpasswordSyntaxLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(SetpasswordSyntaxLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//setpassword foo\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{SetpasswordSyntaxLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
     /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
