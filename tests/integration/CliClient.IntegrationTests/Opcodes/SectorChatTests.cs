@@ -21219,9 +21219,13 @@ public sealed class SectorChatTests
     /// <para>
     /// User-tier outer gate at PlayerConnection.cpp:5434 admits. pch=
     /// &amp;Msg[1]="factionoverride". Switch jumps on 'f'. case-'f' at
-    /// 6280. strcmp(pch, "factionset") at 6309 false. strcmp(pch,
-    /// "factionoverride") at 6313 true. Body at 6315: AdminLevel()=100
-    /// &gt;= GM=50 admits. Body at 6317: GetOverrideFaction() returns
+    /// 6280 opens with an OUTER GM GATE at 6281
+    /// (<c>if (AdminLevel() &gt;= GM)</c>) that wraps the entire case-'f'
+    /// body (closes at 6446); cli_test (ADMIN=100) satisfies. strcmp(pch,
+    /// "factionset") at 6309 false. strcmp(pch, "factionoverride") at
+    /// 6313 true. Body at 6315: a SECOND, redundant GM check
+    /// (<c>AdminLevel() &gt;= GM</c>) admits a second time. Body at 6317:
+    /// GetOverrideFaction() returns
     /// false (default for fresh character). !false = true. Enters
     /// if-true branch. SendVaMessageC(12, "You can now use all class
     /// &amp; faction restricted gates.") at 6319 emits SINGLE 0x001D
@@ -21259,9 +21263,11 @@ public sealed class SectorChatTests
     ///
     /// <para>
     /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
-    /// added. /factionoverride is user-tier with GM inline gate at 6315 --
-    /// retail-faithful as preserved in source. The GM gate is the
-    /// canonical guard for class &amp; faction restriction bypass.
+    /// added. /factionoverride is user-tier but the entire case-'f'
+    /// user-tier body is wrapped in an outer GM gate at 6281, and the
+    /// /factionoverride arm itself has a second redundant GM gate at
+    /// 6315 -- both retail-faithful as preserved in source. The GM gates
+    /// are the canonical guards for class &amp; faction restriction bypass.
     /// Per-character flag (SetOverrideFaction on the Player instance)
     /// means no global state pollution; the flag dies with the
     /// character at test cleanup.
@@ -21393,10 +21399,14 @@ public sealed class SectorChatTests
     ///
     /// <para>
     /// User-tier outer gate at PlayerConnection.cpp:5434 admits. pch=
-    /// &amp;Msg[1]="flushinv". Switch jumps on 'f'. case-'f' at 6280.
-    /// Cascade walks: strcmp(pch, "form") false (6283), strcmp(pch,
-    /// "flushinv") at 6291 TRUE. Enters strcmp-equal arm body. For-loop
-    /// at 6294: walks slots 0..CargoSpace-1. Each iteration: if-guard
+    /// &amp;Msg[1]="flushinv". Switch jumps on 'f'. case-'f' at 6280
+    /// opens with an INLINE GM GATE at 6281
+    /// (<c>if (AdminLevel() &gt;= GM)</c>) that wraps the ENTIRE
+    /// case-'f' body (closes at 6446); cli_test (ADMIN=100) satisfies
+    /// the gate (GM=50). Cascade walks: strcmp(pch, "form") false
+    /// (6283), strcmp(pch, "flushinv") at 6291 TRUE. Enters
+    /// strcmp-equal arm body. For-loop at 6294: walks slots
+    /// 0..CargoSpace-1. Each iteration: if-guard
     /// at 6296 <c>ShipIndex()-&gt;Inventory.CargoInv.Item[Slot].
     /// GetItemTemplateID() != -1</c> evaluates FALSE on a fresh
     /// character (every cargo slot is default-constructed with
@@ -21443,8 +21453,9 @@ public sealed class SectorChatTests
     ///
     /// <para>
     /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
-    /// added. /flushinv is user-tier with NO inline AdminLevel gate --
-    /// retail-faithful as preserved in source. The cargo-inventory walk
+    /// added. /flushinv is user-tier but the entire case-'f' user-tier
+    /// body is wrapped in an outer GM gate at 6281 -- retail-faithful as
+    /// preserved in source. The cargo-inventory walk
     /// is the canonical "wipe my own cargo" idiom; SaveInventoryChange
     /// persists per-slot DB writes only for non-empty slots (zero writes
     /// on a fresh character). Character is destroyed at test cleanup so
