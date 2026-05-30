@@ -22334,6 +22334,8 @@ public sealed class SectorChatTests
 
     private const string GmupgradeUsageSyntaxLiteral = "Syntax: //gmupgrade <playername>";
 
+    private const string DisplayPlayerFactionCouldntLiteral = "Couldnt list faction for 'ghostfoo' !";
+
     /// <summary>
     /// Wave 278 sibling-arm-pinning hardening (+0 ratchet): pins the
     /// 47-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
@@ -25140,6 +25142,173 @@ public sealed class SectorChatTests
                 $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
                 $"\"//gmupgrade \" without seeing 0x001D MESSAGE_STRING " +
                 $"equal to \"{GmupgradeUsageSyntaxLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Wave 99 sibling-arm-pinning hardening (+0 ratchet): pins the 41-byte
+    /// wire-shape of the CALLER-SIDE-FALSE-RETURN 0x001D MESSAGE_STRING reply
+    /// to admin-tier <c>//displayplayerfaction ghostfoo</c> (p_name="ghostfoo"
+    /// non-NULL passes first early-return, DisplayPlayerFactionStanding
+    /// delegate emits its OWN intermediate "Player ghostfoo is not online."
+    /// 30B COLOR=5 frame then returns FALSE, caller fires the COLOR=17
+    /// "Couldnt list faction for 'ghostfoo' !" emit) on a fresh cli_test
+    /// character. FIRST case-'d' admin arm 2 BODY-PAST-FIRST-PREDICATE pin
+    /// -- Wave 79 //displayplayerfaction (no param) pinned the !p_name
+    /// FIRST-predicate early-return (COLOR=17 35B Syntax-emit); Wave 99
+    /// walks past with p_name set into the !DisplayPlayerFactionStanding
+    /// SECOND-predicate TRUE branch at PlayerConnection.cpp:4878 emitting
+    /// "Couldnt list faction for 'ghostfoo' !" (37B, COLOR=17). case-'d'
+    /// arm 2 now DOUBLY-PINNED across BOTH early-return predicates (Wave 79
+    /// FIRST !p_name + Wave 99 SECOND !DisplayPlayerFactionStanding).
+    /// THIRD COLOR=17 pin overall (Wave 56 /invisible user-tier was first;
+    /// Wave 79 //displayplayerfaction admin-tier was second; Wave 99
+    /// //displayplayerfaction admin-tier with p_name is third). FIRST
+    /// CALLER-SIDE FALSE-RETURN COLOR=17 pin in HandleSlashCommands
+    /// (Wave 56 was user-tier success; Wave 79 was first-predicate
+    /// early-return). FIRST DELEGATE-INTERNAL-EMIT-THEN-CALLER-EMIT
+    /// dual-emit pin -- DisplayPlayerFactionStanding emits "Player
+    /// ghostfoo is not online." (30B COLOR=5) internally at PlayerMisc.cpp
+    /// :1159 BEFORE returning false; caller emits the 37B COLOR=17
+    /// frame in the !result branch; both reach the wire. FIRST
+    /// COLOR-SHIFTING DUAL-EMIT pin -- the two 0x001D frames have
+    /// DIFFERENT colors (5 then 17) from the same dispatch arm; a
+    /// regression that conflated the two SendVaMessage/SendVaMessageC
+    /// calls into a single helper would break either the color or the
+    /// content. FIRST 37-byte COLOR=17 literal pin extends per-color-class
+    /// per-literal-length spectrum. FIRST EMBEDDED SINGLE-QUOTE in COLOR=17
+    /// pin (Wave 85 had single-quote in COLOR=5). FIRST EMBEDDED "!" in
+    /// COLOR=17 pin (Wave 80 //halloween had embedded ! in COLOR=12).
+    /// ONE-HUNDRED-FIFTY-SIXTH overall byte-exact dispatch pin.
+    /// Assert.Equal pins the full 41-byte response shape AND the literal
+    /// content.
+    ///
+    /// <para>
+    /// Outer admin gate at PlayerConnection.cpp:4716 admits (cli_test
+    /// ADMIN=100 &gt;= GM=50). pch="displayplayerfaction ghostfoo". Switch
+    /// on 'd'. case-'d' opens at 4858. Arm 1 strcmp("displayfactions")
+    /// fails (length mismatch). Arm 2 at 4865: MatchOptWithParam(
+    /// "displayplayerfaction", "displayplayerfaction ghostfoo", ...)
+    /// strncmp 20B matches; arg[20]=' '; param="ghostfoo"; returns true.
+    /// Body at 4868: p_name=strtok_s("ghostfoo", " ", &amp;next_token)="ghostfoo";
+    /// p_faction_id=strtok_s(NULL, " ", &amp;next_token)=NULL. if(!p_name)
+    /// FALSE at 4871; skip first early-return. Call to
+    /// DisplayPlayerFactionStanding("ghostfoo") at 4876: inside delegate,
+    /// TargetP=g_ServerMgr-&gt;m_PlayerMgr.GetPlayer("ghostfoo")=NULL;
+    /// if(!TargetP) TRUE; emits SendVaMessage("Player %s is not online.",
+    /// "ghostfoo") at PlayerMisc.cpp:1159 (DEFAULT COLOR=5; 30B body
+    /// PERIOD-terminated); returns false. Back at PlayerConnection.cpp
+    /// :4876: !DisplayPlayerFactionStanding=true; enter block. At 4878:
+    /// SendVaMessageC(17, "Couldnt list faction for '%s' !", "ghostfoo")
+    /// (EXPLICIT COLOR=17; 37B body EXCLAMATION-terminated SINGLE-QUOTED).
+    /// return at 4879 (HARD-RETURN from HandleSlashCommands). Arm 3
+    /// //destroyobject NEVER REACHED. NET RESULT: exactly 2 0x001D
+    /// emits. Wire for second frame: [u16 LE 38][u8 17][37B][NUL] = 41
+    /// bytes. The test pins the SECOND frame's wire shape (the FIRST
+    /// frame's existence is also asserted by virtue of frame-iteration
+    /// past it within the drain loop).
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. //displayplayerfaction is admin-tier with NO inline AdminLevel
+    /// gate -- the admin-tier outer gate at 4716 is the only access check
+    /// -- retail-faithful as preserved in source.
+    /// DisplayPlayerFactionStanding is a read-only inspector (no state
+    /// mutation, no database write). The delegate's INTERNAL emit on
+    /// TargetP-NULL is the upstream-preserved offline-check invariant;
+    /// the caller's `if (!DisplayPlayerFactionStanding(...))` branch is
+    /// the upstream-preserved failure-handling invariant. The pin
+    /// DOCUMENTS the dual-emit COLOR-shifting admin path byte-for-byte;
+    /// TIGHTENS toward preservation. No state mutation occurs.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashDisplayPlayerFactionOfflineTarget_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (38) = 41 bytes.
+        const int ExpectedReplyPayloadLength = 41;
+        const short ExpectedReplyLengthField = 38;
+        const byte ExpectedReplyColor = 17;
+        const int ExpectedLiteralByteCount = 37;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Doly", shipName: "DolyShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//displayplayerfaction ghostfoo");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(DisplayPlayerFactionCouldntLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(DisplayPlayerFactionCouldntLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//displayplayerfaction ghostfoo\" without seeing 0x001D MESSAGE_STRING " +
+                $"equal to \"{DisplayPlayerFactionCouldntLiteral}\".");
         }
         finally
         {
