@@ -22312,6 +22312,8 @@ public sealed class SectorChatTests
 
     private const string DestroyobjectHijackeeLiteral = "You can only destroy objects while you're Hijacking something\n";
 
+    private const string GmenableskillsNotOnlineLiteral = "Player ghostfoo is not online";
+
     /// <summary>
     /// Wave 278 sibling-arm-pinning hardening (+0 ratchet): pins the
     /// 47-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
@@ -23465,6 +23467,172 @@ public sealed class SectorChatTests
                 $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
                 $"\"//destroyobject\" without seeing 0x001D MESSAGE_STRING " +
                 $"equal to \"{DestroyobjectHijackeeLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Wave 285 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 33-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
+    /// admin-tier <c>//gmenableskills ghostfoo</c> (target player not
+    /// online) on a fresh cli_test character. THIRD AND FINAL DISTINCT
+    /// QUOTING-STYLE for player-not-found-class literals in the
+    /// HandleSlashCommands catalogue: Wave 73 //bumpaccess pinned the
+    /// BACKTICK pattern "Player `foo` not found"; Wave 282 //editplayer
+    /// faction pinned the SINGLE-QUOTE pattern "Player 'foo' not found";
+    /// Wave 285 //gmenableskills pins the NO-QUOTES pattern "Player foo
+    /// is not online" (also a different VERB -- "is not online" vs "not
+    /// found"). A regression that unified player-name quoting style
+    /// would break ONE of the three pins. FIRST case-'g' admin arm 4
+    /// (//gmenableskills) pin (case-'g' admin previously had Wave 65
+    /// //gmsetaccess, Wave 66 //gmskillpoints, Wave 67 //gmplayerlevel,
+    /// Wave 68 //gmupgrade pinned; arm 4 //gmenableskills was the only
+    /// remaining unpinned MatchOptWithParam arm in the block). FIRST
+    /// IF-NOT-TARGETP NO-QUOTES emit pin -- the inner-else success path
+    /// with TargetP-NULL check. FIRST GMENABLESKILLS code-path pin.
+    /// FIRST 29-BYTE LITERAL pin. ONE-HUNDRED-FORTY-FIFTH overall byte-
+    /// exact dispatch pin. Assert.Equal pins the full 33-byte response
+    /// shape AND the literal content.
+    ///
+    /// <para>
+    /// Admin outer gate at PlayerConnection.cpp:4716 admits (cli_test
+    /// ADMIN=100 satisfies GM=50). pch=&amp;Msg[2]="gmenableskills
+    /// ghostfoo". Switch on 'g'. case-'g' opens at 5205. Arms 1-3
+    /// (//gmgetaccess, //gmsetaccess, //gmskillpoints) all strncmp-
+    /// mismatch on "gmenableskills " at byte 2 ('g'/'s'/'s' vs 'e').
+    /// Arm 4 at 5302: MatchOptWithParam("gmenableskills", "gmenableskills
+    /// ghostfoo", ...) strncmp matches 14B; arg[14]=' '; param=
+    /// &amp;arg[15]="ghostfoo"; returns true. PlayerName=strtok_s
+    /// ("ghostfoo", " ") returns "ghostfoo". if(!PlayerName) FALSE at
+    /// 5306; dispatches to else at 5312. TargetP=GetPlayer("ghostfoo")
+    /// returns NULL (no such player online). if(!TargetP) TRUE at 5316
+    /// -- emits SendVaMessage("Player %s is not online", "ghostfoo")
+    /// at 5318 (DEFAULT COLOR=5; 29-byte body "Player ghostfoo is not
+    /// online"). msg_sent=true and success=true at 5319-5320. Arm 5
+    /// //gmplayerlevel and remaining case-'g' arms strncmp-mismatch.
+    /// case-'g' breaks (end of switch in admin block).
+    /// </para>
+    ///
+    /// <para>
+    /// 0x001D MESSAGE_STRING wire shape (33 bytes total):
+    /// <list type="bullet">
+    /// <item><description>length field (LE u16, value 30) -- offset 0..1
+    /// </description></item>
+    /// <item><description>color byte (0x05 -- SendVaMessage default) --
+    /// offset 2</description></item>
+    /// <item><description>29-byte ASCII body "Player ghostfoo is not
+    /// online" -- offset 3..31</description></item>
+    /// <item><description>NUL terminator (0x00) -- offset 32
+    /// </description></item>
+    /// </list>
+    /// Length field = body bytes (29) + NUL (1) = 30.
+    /// </para>
+    ///
+    /// <para>
+    /// Coverage delta vs prior pins -- this pin is byte-exact for things
+    /// the rest of the suite is blind to: (a) FIRST NO-QUOTES player-
+    /// name pin -- combined with Wave 73 BACKTICK and Wave 282 SINGLE-
+    /// QUOTE, all THREE distinct quoting styles in the codebase are now
+    /// pinned. A regression that unified quoting style would break
+    /// exactly ONE of the three pins; (b) FIRST case-'g' admin arm 4
+    /// (//gmenableskills) pin -- combined with Waves 65, 66, 67, 68
+    /// the case-'g' admin block is now PENTUPLY-PINNED across 5 of 5
+    /// MatchOptWithParam arms (//gmgetaccess remains as the only
+    /// case-'g' admin arm with no direct pin -- Wave 73 //bumpaccess
+    /// indirectly covers the BACKTICK literal pattern shared with
+    /// //gmgetaccess); (c) FIRST IF-NOT-TARGETP NO-QUOTES emit pin --
+    /// the inner-else success path's TargetP-NULL check; (d) FIRST 29-
+    /// BYTE LITERAL pin; (e) FIRST "is not online" SUFFIX pin -- prior
+    /// player-not-found literals all used "not found" suffix; "is not
+    /// online" is a distinct verb-phrase indicating in-memory online
+    /// status check vs persistent storage check.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashGmenableskillsOfflineTarget_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (30) = 33 bytes.
+        const int ExpectedReplyPayloadLength = 33;
+        const short ExpectedReplyLengthField = 30;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 29;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Gora", shipName: "GoraShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//gmenableskills ghostfoo");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(GmenableskillsNotOnlineLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(GmenableskillsNotOnlineLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//gmenableskills ghostfoo\" without seeing 0x001D MESSAGE_STRING " +
+                $"equal to \"{GmenableskillsNotOnlineLiteral}\".");
         }
         finally
         {
