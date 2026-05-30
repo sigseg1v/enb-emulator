@@ -26458,6 +26458,186 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 304 (commit-counter Wave 107) sibling-arm-pinning hardening
+    /// (+0 ratchet): pins the 49-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING reply to admin-tier <c>//bumpaccess foo</c> (ONE-ARG,
+    /// Username="foo" non-NULL, Access=NULL) on a cli_test account with
+    /// AdminLevel=ADMIN (100 &gt;= DEV=80). Triggers the SECOND-DISJUNCT
+    /// polarity of the disjunctive predicate at PlayerConnection.cpp:4794
+    /// (<c>!Username=FALSE</c>; <c>!Access=TRUE</c> SHORT-CIRCUITS at
+    /// SECOND disjunct) which emits the literal at line 4796 -- the SAME
+    /// emit site as W302 (W105 commit-counter) but DIFFERENT polarity
+    /// (W302 pinned FIRST-DISJUNCT via "//bumpaccess " trailing space).
+    /// Completes the 2x2 {dispatch-site, disjunct-polarity} coverage
+    /// matrix for the 45B "Syntax: //gmsetaccess &lt;playername&gt;
+    /// &lt;password&gt;" literal across both call sites in HandleSlashCommands:
+    /// <list type="bullet">
+    ///   <item>site 4796 (case-'b' //bumpaccess body) FIRST-DISJUNCT -- W302</item>
+    ///   <item>site 4796 (case-'b' //bumpaccess body) SECOND-DISJUNCT -- W304</item>
+    ///   <item>site 5228 (case-'g' //gmsetaccess body) FIRST-DISJUNCT -- W303</item>
+    ///   <item>site 5228 (case-'g' //gmsetaccess body) SECOND-DISJUNCT -- W65</item>
+    /// </list>
+    ///
+    /// <para>
+    /// Dispatch flow:
+    /// <list type="number">
+    /// <item>Client sends 18-byte 0x0033 CLIENT_CHAT body=<c>"//bumpaccess foo\0"</c>.</item>
+    /// <item>Admin outer gate at 4716 admits (cli_test ADMIN=100 &gt;= GM=50).</item>
+    /// <item><c>pch="bumpaccess foo"</c>. case-'b' opens at 4754. Arm 1
+    ///       //ban MatchOptWithParam fails (strncmp prefix mismatch at byte
+    ///       3: 'm' vs 'n'). Arm 2 at 4789:
+    ///       <c>MatchOptWithParam("bumpaccess", "bumpaccess foo", ...)
+    ///       &amp;&amp; AdminLevel() &gt;= DEV</c>. strncmp 10B matches;
+    ///       arg[10]=' '; param=&amp;arg[11]="foo"; returns true. DEV gate
+    ///       (ADMIN=100&gt;=DEV=80) admits.</item>
+    /// <item>Body at 4791: <c>Username=strtok_s("foo", " ", &amp;next_token)
+    ///       ="foo"</c>. <c>Access=strtok_s(NULL, ...)=NULL</c>.</item>
+    /// <item>Disjunctive predicate at 4794: <c>if (!Username || !Access)</c>.
+    ///       <c>!"foo"=FALSE</c>; SECOND disjunct <c>!Access=TRUE</c>
+    ///       SHORT-CIRCUITS.</item>
+    /// <item>Emit at 4796: <c>SendVaMessage("Syntax: //gmsetaccess
+    ///       &lt;playername&gt; &lt;password&gt;")</c> (DEFAULT COLOR=5;
+    ///       45B body -- LITERAL says //gmsetaccess despite //bumpaccess
+    ///       dispatch; LITERAL-NAMING-DIVERGENCE preserved as-is).
+    ///       HARD-RETURN at 4797.</item>
+    /// </list>
+    /// </para>
+    ///
+    /// <para>
+    /// NET RESULT: exactly 1 0x001D emit. Wire:
+    /// <c>[u16 LE 46][u8 5][45B][NUL]</c> = 49 bytes. <c>+0 ratchet</c>.
+    /// </para>
+    ///
+    /// <para>Novel structural axes vs prior waves:</para>
+    /// <list type="bullet">
+    ///   <item><b>CLOSES the 2x2 {dispatch-site, disjunct-polarity} coverage
+    ///     matrix</b> for the 45B //gmsetaccess literal: ALL FOUR cells
+    ///     now pinned (W302+W303+W65+W304). FIRST 4-WAY {site, polarity}
+    ///     COVERAGE for any literal in HandleSlashCommands.</item>
+    ///   <item><b>FIRST SAME-DISPATCH-SITE-DIFFERENT-DISJUNCT-POLARITY pin
+    ///     in case-'b'</b> (W303 was the analogous pattern in case-'g').
+    ///     case-'b' admin arm 2 //bumpaccess now TRIPLY-PINNED across THREE
+    ///     distinct invocations: W73 (two-arg POPULATED reaches GetPlayer-
+    ///     NULL backtick body), W302 (empty-param FIRST-DISJUNCT), W304
+    ///     (one-arg SECOND-DISJUNCT). All three reach distinct literals
+    ///     within the same arm body.</item>
+    ///   <item><b>FIRST POPULATED-FIRST-NULL-SECOND strtok_s chain pin in
+    ///     case-'b'</b> -- the FIRST strtok_s returns "foo", the SECOND
+    ///     returns NULL (different chain than W82's POPULATED-POPULATED-
+    ///     NULL triple-chain in case-'a' //adduser body).</item>
+    ///   <item><b>SECOND DEV-COMPOUND-GATE polarity pin</b> (W302 was FIRST-
+    ///     DISJUNCT; W304 is SECOND-DISJUNCT). Different polarity through
+    ///     the same DEV=80 inline gate. A regression that confused DEV/SDEV
+    ///     gates would break W302/W304 but NOT W303 (SDEV).</item>
+    ///   <item><b>SECOND LITERAL-NAMING-DIVERGENCE polarity pin</b> -- W302
+    ///     pinned //bumpaccess body emitting //gmsetaccess literal on
+    ///     FIRST-DISJUNCT; W304 pins SAME divergence on SECOND-DISJUNCT.
+    ///     A regression that "fixed" the upstream literal at 4796 would
+    ///     break BOTH W302 and W304 simultaneously, but the PAIR-PIN
+    ///     ensures both polarities preserve the upstream invariant.</item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md): no permissiveness added.
+    /// //bumpaccess is admin-tier compound-gated by AdminLevel() &gt;=
+    /// DEV (80) inline. The strtok_s-NULL emit is upstream-preserved
+    /// diagnostic invariant. HARD-RETURN at 4797 ensures dangerous
+    /// SetAdminLevel call later in the body is NEVER REACHED on bad
+    /// input. LITERAL-NAMING-DIVERGENCE preserved as-is per upstream
+    /// fidelity. Pin DOCUMENTS the SECOND-DISJUNCT polarity byte-for-byte;
+    /// TIGHTENS toward preservation.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashBumpaccessOneArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (46) = 49 bytes.
+        const int ExpectedReplyPayloadLength = 49;
+        const short ExpectedReplyLengthField = 46;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 45;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Buma", shipName: "BumaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//bumpaccess foo");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(SyntaxGmsetaccessLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(SyntaxGmsetaccessLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//bumpaccess foo\" (one arg) without seeing 0x001D MESSAGE_STRING " +
+                $"equal to \"{SyntaxGmsetaccessLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
