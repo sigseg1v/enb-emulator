@@ -22326,6 +22326,8 @@ public sealed class SectorChatTests
 
     private const string GmsetaccessPlayerBacktickGhostfooNotFoundLiteral = "Player `ghostfoo` not found";
 
+    private const string ReplaceshipUsageLiteral = "usage: //replaceship <asset> <scale>  (asset=0 to reset)";
+
     /// <summary>
     /// Wave 278 sibling-arm-pinning hardening (+0 ratchet): pins the
     /// 47-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
@@ -24540,6 +24542,153 @@ public sealed class SectorChatTests
                 $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
                 $"\"//gmsetaccess ghostfoo bar\" without seeing 0x001D MESSAGE_STRING " +
                 $"equal to \"{GmsetaccessPlayerBacktickGhostfooNotFoundLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Wave 95 sibling-arm-pinning hardening (+0 ratchet): pins the 60-byte
+    /// wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to admin-tier
+    /// <c>//replaceship </c> (TRAILING SPACE, ZERO-LENGTH PARAM, NO ASSET)
+    /// on a fresh cli_test character. FIRST case-'r' admin arm 9
+    /// (//replaceship) pin. case-'r' admin block previously DOUBLY-PINNED
+    /// on //respec arm 10 (Waves 89, 90); Wave 95 pins arm 9 (//replaceship)
+    /// so case-'r' admin is now TRIPLY-PINNED across THREE distinct arm
+    /// bodies. FIRST UNCONDITIONAL POST-INNER-IF EMIT pin -- distinct from
+    /// Wave 86 //countsp (EXPLICIT if/else) and Waves 91, 65 (if(!arg)
+    /// HARD-RETURN): //replaceship has `if (asset) { side effects }` then
+    /// UNCONDITIONAL `SendVaMessage("usage: ...")` after the if block
+    /// (NOT in else, NOT in if). When asset=NULL the side-effect block is
+    /// SKIPPED but the emit STILL FIRES. A regression that converted the
+    /// emit into an else-branch would NOT change the wire when asset=NULL
+    /// (this test path) BUT WOULD change the wire when asset is non-NULL
+    /// (a different code path). FIRST 56-byte LITERAL pin extends per-
+    /// literal-length spectrum. FIRST EMBEDDED PARENTHESES `()` pin in
+    /// HandleSlashCommands -- a regression that smart-paired or escaped
+    /// parentheses would break this pin AND ONLY this pin. FIRST EMBEDDED
+    /// `=` (ASCII 0x3D) pin -- distinct from prior pinned punctuation
+    /// (`|`, `&lt;`, `&gt;`, `,`, `.`, ` `, `:`, ``` ` ```, `'`). FIRST
+    /// EMBEDDED DOUBLE-SPACE (two consecutive ASCII 0x20) pin -- a
+    /// regression that collapsed runs of spaces would break this pin AND
+    /// ONLY this pin. ONE-HUNDRED-FIFTY-SECOND overall byte-exact dispatch
+    /// pin. Assert.Equal pins the full 60-byte response shape AND the
+    /// literal content.
+    ///
+    /// <para>
+    /// Outer admin gate at PlayerConnection.cpp:4716 admits (cli_test
+    /// ADMIN=100 >= GM=50). pch="replaceship ". Switch on 'r'. case-'r'
+    /// opens at 4962. Arms 1-6 strcmp-exact-match arms (//rstations,
+    /// //rsectors, //rsectorall, //ritems, //rmissions, //resetmymissions)
+    /// all fail length/content. Arm 7 MatchOptWithParam("restartcomms",
+    /// "replaceship ", ...) strncmp 12B fails at byte 3 ('s' vs 'p').
+    /// Arm 8 strcmp("rfactions") fails. Arm 9 at 5068: MatchOptWithParam(
+    /// "replaceship", "replaceship ", ...) strncmp 11B matches; arg[11]
+    /// =' '; param=""; returns true. Body at 5070: asset=strtok_s("", " ",
+    /// &amp;next_token) returns NULL. if(asset) FALSE at 5071 -- SKIP
+    /// side-effect block (no RemoveObject, no SendShipData, no state
+    /// mutation). At 5086: SendVaMessage("usage: //replaceship &lt;asset&gt;
+    /// &lt;scale&gt;  (asset=0 to reset)") (DEFAULT COLOR=5; 56B body
+    /// INCLUDING the embedded double-space and parentheses). msg_sent=true
+    /// success=true at 5087-5088. Arm 10 //respec NEVER REACHED (else-if).
+    /// case-'r' breaks. NET RESULT: exactly 1 0x001D emit. Wire:
+    /// [u16 LE 57][u8 5][56B][NUL] = 60 bytes.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. //replaceship is admin-tier with NO inline AdminLevel gate
+    /// -- the admin-tier outer gate at 4716 is the only access check --
+    /// retail-faithful as preserved in source. The trailing-space-empty-
+    /// param path SKIPS the side-effect block (no RemoveObject call) so
+    /// the test causes NO state mutation. The pin DOCUMENTS the
+    /// UNCONDITIONAL POST-INNER-IF emit semantics byte-for-byte.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashReplaceshipTrailingSpace_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (57) = 60 bytes.
+        const int ExpectedReplyPayloadLength = 60;
+        const short ExpectedReplyLengthField = 57;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 56;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Repa", shipName: "RepaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//replaceship ");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(ReplaceshipUsageLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(ReplaceshipUsageLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//replaceship \" without seeing 0x001D MESSAGE_STRING " +
+                $"equal to \"{ReplaceshipUsageLiteral}\".");
         }
         finally
         {
