@@ -174,7 +174,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             g++ cmake ninja-build pkg-config libpq-dev libssl-dev
       - name: Configure
-        run: cmake -S tests -B build/tests -G Ninja
+        run: cmake -S tests/server -B build/tests -G Ninja
       - name: Build
         run: cmake --build build/tests -j"$(nproc)"
       - name: Test
@@ -229,7 +229,7 @@ jobs:
           exit 1
       - name: Build tests
         run: |
-          cmake -S tests -B build/tests -G Ninja
+          cmake -S tests/server -B build/tests -G Ninja
           cmake --build build/tests --target handshake_live_test replay_test -j"$(nproc)"
       - name: Run live ctest (proxy-only — handshake + reply path only)
         # NOTE: This job runs the proxy in isolation, with no MVAS / sector
@@ -288,7 +288,7 @@ jobs:
         # MVAS, so the proxy's UDPConnection::SendMasterLogin can reach
         # a real server and the strict response-opcode round-trip is
         # meaningful. Setting NET7_TEST_REAL_MVAS=1 enables that strict
-        # assertion in tests/client/replay_test.cpp.
+        # assertion in tests/server/client/replay_test.cpp.
         env:
           NET7_TEST_PROXY_HOST: 127.0.0.1
           NET7_TEST_PROXY_PORT: "3801"
@@ -297,7 +297,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             g++ cmake ninja-build pkg-config libssl-dev
-          cmake -S tests -B build/tests -G Ninja
+          cmake -S tests/server -B build/tests -G Ninja
           cmake --build build/tests --target handshake_live_test replay_test -j"$(nproc)"
           ctest --test-dir build/tests --output-on-failure -R 'Replay\.LivePostHandshakeReplay'
       - name: Run integration suite

@@ -1,4 +1,4 @@
-# tests/CMakeLists.txt
+# tests/server/CMakeLists.txt
 #
 # GoogleTest harness for the Net-7 server. Phase G adds a protocol layout
 # test and a (env-gated) Postgres smoke test; real subsystem tests grow
@@ -84,13 +84,13 @@ endif()
 if(LIBPQXX_FOUND)
     add_executable(mysqlplus_wrapper_test
         db/mysqlplus_wrapper_test.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/../server/src/mysql/mysqlplus.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/../server/src/Mutex.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../server/src/mysql/mysqlplus.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../server/src/Mutex.cpp
         db/wrapper_test_stubs.cpp
     )
     target_include_directories(mysqlplus_wrapper_test PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/../server/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/../common/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../server/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../common/include
     )
     target_compile_definitions(mysqlplus_wrapper_test PRIVATE LINUX __linux__)
     target_compile_options(mysqlplus_wrapper_test PRIVATE

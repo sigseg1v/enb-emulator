@@ -259,5 +259,6 @@ ScriptedServer scenarios).
 - **Not a UI test.** The CLI client doesn't render; there are no
   Avalonia tests in here.
 - **Not the only test harness in the repo.** The C++ gtest
-  binaries (`tests/`) cover the server-internal paths the CLI
-  client never reaches. See `docs/08-build.md` § "Running tests".
+  binaries (`tests/server/`) cover the server-internal paths the
+  CLI client never reaches. See `docs/08-build.md` § "Running
+  tests".

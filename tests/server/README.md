@@ -1,6 +1,9 @@
-# tests/
+# tests/server/
 
-GoogleTest harness for the Net-7 server.
+GoogleTest harness for the Net-7 C++ server. Sits alongside `tests/integration/`
+(the C# xUnit suite that drives `CliClient.Core` against the live docker-compose
+stack -- see `docs/16-integration-tests.md`). Server unit/smoke tests live here;
+end-to-end opcode round-trips live in the integration suite.
 
 ## Status
 
@@ -15,7 +18,7 @@ Scaffolding plus first real tests.
 | `handshake_live_test` | Two cases: (1) loopback — spawns a thread playing the server side on an ephemeral port and verifies the client-chosen RC4 key matches what the server decoded; (2) live — runs the 4-step handshake against `$NET7_TEST_PROXY_HOST:$NET7_TEST_PROXY_PORT` (default 3801) and asserts ACK2 returns a non-zero CORD port. Live case is skipped unless `NET7_TEST_PROXY_HOST` is set. |
 | `replay_test` | Two offline cases (port-filter and post-handshake opcode pinning) plus a live env-gated replay that walks the captured post-handshake packets through the same RC4 stream the handshake produced. Live case skipped unless `NET7_TEST_PROXY_HOST` is set. |
 
-## Test client architecture (`tests/client/`)
+## Test client architecture (`tests/server/client/`)
 
 The handshake / replay binaries above are built from a small standalone C++ client that knows nothing about `Net7.h`. Three layers:
 
@@ -38,7 +41,7 @@ Honest status note: as of Phase J, the live handshake test will fail against the
 ## Build & run
 
 ```sh
-cmake -S tests -B build/tests -G Ninja
+cmake -S tests/server -B build/tests -G Ninja
 cmake --build build/tests -j"$(nproc)"
 ctest --test-dir build/tests --output-on-failure
 ```
@@ -55,28 +58,28 @@ CI runs the harness with a sidecar Postgres service (see `.github/workflows/buil
 
 ## What Phase G continuation will add
 
-- `tests/abilities/`  — per-ability unit tests against the abilities
+- `tests/server/abilities/`  -- per-ability unit tests against the abilities
   engine, isolated from the network and DB layers. **Blocker:** the
   abilities engine doesn't isolate cleanly from `ServerManager` /
   `Player`. Phase H is documenting the boundaries; once that's done,
   picking one ability to isolate is the first cut.
-- `tests/protocol/`   — golden-file round-trip tests for the packet
+- `tests/server/protocol/`   -- golden-file round-trip tests for the packet
   encoders/decoders (uses the captures in
   `archive/kyp-snapshot/capturedPackets/`). Today only the wire-layout
   pins live here.
-- `tests/db/`         — schema + DAO tests against a per-test database
+- `tests/server/db/`         -- schema + DAO tests against a per-test database
   (the Postgres smoke is the first member; real DAO tests need the
-  `mysqlplus.cpp` → libpqxx rewrite to finish).
-- `tests/integration/` — small end-to-end flows (login →
-  character-select → sector handoff). Needs a fake client harness;
-  significant work.
+  `mysqlplus.cpp` -> libpqxx rewrite to finish).
+- `tests/integration/` is the C# xUnit suite (already live, separate scope)
+  that drives `CliClient.Core` against the docker-compose stack -- see
+  `docs/16-integration-tests.md`.
 
 ## How to add a test
 
 1. Put the `.cpp` under the right subdirectory:
-   `tests/<area>/<thing>_test.cpp`.
+   `tests/server/<area>/<thing>_test.cpp`.
 2. Add an `add_executable` + `gtest_discover_tests` entry in
-   `tests/CMakeLists.txt`.
+   `tests/server/CMakeLists.txt`.
 3. Link against `GTest::gtest_main`.
 4. If the test needs an external service (DB, network), gate it on an
    env var and `GTEST_SKIP()` when absent so offline builds stay green.

@@ -160,9 +160,9 @@ startup. Per-sector reload at runtime via the GM
   `common/include/net7/PosixIpc.h` / `SingleInstance.h` / `Ticks.h`.
 - **New documentation page** — `docs/<NN-topic>.md`, then link
   from `docs/README.md`.
-- **New test** — `tests/<area>/`, then add an
+- **New server-side gtest** -- `tests/server/<area>/`, then add an
   `add_executable` + `gtest_discover_tests` block in
-  `tests/CMakeLists.txt`. See `tests/README.md` for the
+  `tests/server/CMakeLists.txt`. See `tests/server/README.md` for the
   pattern. CLI-client-driven integration tests live in
-  `tests/integration/CliClient.IntegrationTests/` (xUnit, .NET) —
+  `tests/integration/CliClient.IntegrationTests/` (xUnit, .NET) --
   see `docs/16-integration-tests.md`.

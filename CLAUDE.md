@@ -57,9 +57,11 @@ The source of truth for "what's done / what's next" across invocations is the `p
 ├── db/
 │   ├── mysql/         original MySQL dumps
 │   └── postgres/      converted Postgres schema (new)
-├── tests/             gtest harness + smoke tests (new)
+├── tests/
+│   ├── server/        gtest harness + smoke tests (new) for the C++ server
+│   │                  -- build with `cmake -S tests/server -B build/tests`
 │   └── integration/CliClient.IntegrationTests/  Phase T xUnit suite that drives CliClient.Core
-│                      against the live docker-compose stack — see docs/16-integration-tests.md
+│                      against the live docker-compose stack -- see docs/16-integration-tests.md
 ├── vendor/            third-party binaries without source (with THIRD_PARTY_BINARIES.md notes)
 ├── archive/           historical material — old snapshots, packet captures, original docs
 ├── justfile           build / lint / test / dev / package targets
@@ -140,7 +142,8 @@ The same migration path applies if the upstream protocol catalog adds an opcode 
 | A POSIX shim for a Win32 API | `server/compat/` |
 | A new C# editor or tool | `tools/<kebab-name>/` |
 | A new documentation page | `docs/<NN-topic>.md` (numbered) |
-| A new test | `tests/<area>/` |
+| A new server-side gtest | `tests/server/<area>/` |
+| A new CLI/integration xUnit test | `tests/integration/CliClient.IntegrationTests/<area>/` |
 | A new third-party C++ dep | `server/third_party/<name>/` |
 | A precompiled binary we can't rebuild | `vendor/<name>/` with `THIRD_PARTY_BINARIES.md` |
 | A new plan/sub-plan | `plans/<NN-phase>.md`, update `plans/00-master.md` |
