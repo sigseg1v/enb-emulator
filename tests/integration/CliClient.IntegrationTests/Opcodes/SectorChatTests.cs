@@ -18838,6 +18838,188 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 259 sibling-arm-pinning hardening (+0 ratchet) literal anchor
+    /// for the 35-byte ASCII body "/fradius xxxx - adjust field radius"
+    /// -- the FIRST of 10 SendVaMessage emits fired by user-tier
+    /// <c>/helpfield</c> at PlayerConnection.cpp:6693 (arm 5 of case-'h'
+    /// user-tier opened at 6627). SECOND case-'h' user-tier pin (sibling
+    /// to Wave 258 /helpedit at arm 4); promotes case-'h' user-tier
+    /// from SINGLE to DOUBLE-PINNED. SECOND MULTI-EMIT FANOUT pin in
+    /// the HandleSlashCommands catalogue.
+    /// </summary>
+    private const string HelpfieldFradiusLineLiteral = "/fradius xxxx - adjust field radius";
+
+    /// <summary>
+    /// Wave 259 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 39-byte wire-shape of the FIRST 0x001D MESSAGE_STRING reply
+    /// (lexically matching "/fradius xxxx - adjust field radius") from
+    /// the user-tier <c>/helpfield</c> 10-emit fanout on a fresh
+    /// cli_test character. SECOND case-'h' user-tier pin (sibling to
+    /// Wave 258 /helpedit); case-'h' user-tier DOUBLE-PINNED. SECOND
+    /// MULTI-EMIT FANOUT pin overall, paired with Wave 258. FIRST
+    /// STRNCMP-PREFIX matcher pin in case-'h' user-tier -- /helpfield
+    /// uses `strncmp(pch, "helpfield", 9) == 0` at 6691, a PREFIX
+    /// matcher that accepts ANY trailing data (e.g. "helpfieldxyz"
+    /// would also match), distinct from the STRCMP-EXACT matchers
+    /// used elsewhere in the case-letter. ONE-HUNDRED-NINETEENTH
+    /// overall byte-exact dispatch pin. Assert.Equal pins the full
+    /// 39-byte response shape.
+    ///
+    /// <para>
+    /// User-tier outer gate at 5434 admits. Switch at 5442 jumps on
+    /// *pch='h' -&gt; case-'h' opens at PlayerConnection.cpp:6627.
+    /// case-'h' walk for pch="helpfield":
+    ///   arm 1 PLAIN-if (strcmp(pch,"hijack")==0 &amp;&amp;
+    ///     ShipIndex()-&gt;GetTargetGameID()&gt;0) at 6628 -- 6B vs 9B
+    ///     differ; strcmp NON-ZERO; skip.
+    ///   arm 2 PLAIN-if strcmp(pch,"heading")==0 at 6640 -- 7B vs 9B
+    ///     differ; byte 2 'a' vs 'l' NON-ZERO; skip.
+    ///   arm 3 PLAIN-if MatchOptWithParam("ht",pch) at 6647 -- strncmp
+    ///     ("ht","helpfield",2) byte 1 't' vs 'e' NON-ZERO -&gt; matcher
+    ///     false; no emit; PLAIN-`if` so cascade continues.
+    ///   arm 4 else-if strcmp(pch,"helpedit")==0 at 6661 -- 8B vs 9B;
+    ///     byte 4 'e' vs 'f' NON-ZERO; skip; cascade continues.
+    ///   arm 5 else-if strncmp(pch,"helpfield",9)==0 at 6691 -- 9B
+    ///     prefix match against "helpfield" -&gt; enter. Body 6693-6702
+    ///     fires 10 sequential SendVaMessage calls: "/fradius xxxx -
+    ///     adjust field radius" (FIRST, 35B), "/ftype &lt;0-5&gt; -
+    ///     change the field spread type" (43B), "/flevel &lt;1-8&gt;"
+    ///     (15B), "/fcount xxxx - adjust field asteroid count" (42B),
+    ///     "/faddasteroidtype &lt;roid basset&gt; - add additional
+    ///     asteroid type" (62B), "/faddore ..." (62B), "/fremoveore
+    ///     ..." (66B), "/addbaseore ..." (82B), "/removebaseore ..."
+    ///     (89B), " note that field ore choices ..." (118B). All
+    ///     COLOR=5 default. success=true; msg_sent=true at 6703-6704.
+    ///   case-'h' breaks at 6706.
+    /// NET RESULT: 10 0x001D MESSAGE_STRING emits. Wave 259 pins the
+    /// FIRST emit's wire-shape. Wire: `[u16 LE 36][u8 5][35B ASCII
+    /// "/fradius xxxx - adjust field radius"][NUL]` = 39 bytes.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 4 NEW classes prior waves are structurally
+    /// blind to: (a) SECOND case-'h' user-tier pin -- paired with Wave
+    /// 258 /helpedit. The case-'h' user-tier walk-validation is now
+    /// DOUBLE-PINNED with adjacent else-if arms (4 and 5); (b) SECOND
+    /// MULTI-EMIT FANOUT pin overall, paired with Wave 258. /helpfield's
+    /// 10 emits exercise the same fanout machinery as /helpedit's 25
+    /// emits; a regression that broke the bulk-emit path would fire
+    /// BOTH tests; (c) FIRST STRNCMP-PREFIX matcher pin in case-'h'
+    /// user-tier -- /helpfield uses `strncmp(pch, "helpfield", 9) == 0`
+    /// (PREFIX matcher, accepts trailing data), distinct from the
+    /// strcmp-exact matchers in arms 1/2/4 and the MatchOptWithParam
+    /// matcher in arm 3. A regression that changed the strncmp length
+    /// from 9 to a different value would still match "helpfield" exactly
+    /// but might widen/narrow the prefix; Wave 259 anchors the 9-byte
+    /// prefix length structurally; (d) FIRST adjacent-arm CASCADE-TAIL
+    /// pin in case-'h' -- Waves 258/259 cover the two trailing else-if
+    /// arms (4 helpedit, 5 helpfield) chained off the arm 3 PLAIN-if.
+    /// A regression that converted arm 5 to a PLAIN-if would still
+    /// fire this test (still reachable) but a regression that swapped
+    /// the order of arms 4 and 5 would not (both still reachable on
+    /// their respective inputs); the primary structural value is the
+    /// PAIRED ADJACENT-ELSE-IF coverage of arms 4 and 5.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. /helpfield is a retail-faithful developer help dispatch
+    /// emitting 10 informational lines about field-editing slash
+    /// commands. cli_test=100 satisfies the outer user-tier gate at
+    /// 5434 unconditionally; no inner AdminLevel guard exists on this
+    /// arm.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashHelpfield_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (36) = 39 bytes.
+        const int ExpectedReplyPayloadLength = 39;
+        const short ExpectedReplyLengthField = 36;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 35;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Helfia", shipName: "HelfiaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/helpfield");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(HelpfieldFradiusLineLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(HelpfieldFradiusLineLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/helpfield\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{HelpfieldFradiusLineLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
