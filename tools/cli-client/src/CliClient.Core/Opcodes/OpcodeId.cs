@@ -139,6 +139,7 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId ResendPacketSequence   = new(0x2017);
         public static readonly OpcodeId LoginStage             = new(0x2020);
         public static readonly OpcodeId LoginStageAck          = new(0x2021);
+        public static readonly OpcodeId PlayerShipSent         = new(0x3004);
         public static readonly OpcodeId StarbaseLoginComplete  = new(0x3008);
     }
 }
