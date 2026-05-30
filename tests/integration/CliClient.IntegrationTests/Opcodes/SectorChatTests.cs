@@ -16492,6 +16492,180 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 246 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
+    /// the 28-byte ASCII body "Mission debugging activated." that the server
+    /// emits when user-tier single-slash <c>/debugmissions on</c> arrives on
+    /// a cli_test account. Matcher at PlayerConnection.cpp:6021 (case-'d'
+    /// user-tier arm 9, MatchOptWithParam body-emit path with param="on").
+    /// SECOND COLOR=12 emit pin in the catalogue (after Wave 245
+    /// /factionoverride) -- COLOR=12 coverage promoted from SINGLE-PINNED
+    /// to DOUBLE-PINNED. FIRST COLOR=12 pin via MatchOptWithParam
+    /// param-bearing branch (Wave 245 was strcmp body-emit; this is a
+    /// DISTINCT dispatch shape).
+    /// </summary>
+    private const string MissionDebuggingActivatedLiteral = "Mission debugging activated.";
+
+    /// <summary>
+    /// Wave 246 sibling-arm-pinning hardening (+0 ratchet): pins the 32-byte
+    /// wire-shape of the single 0x001D MESSAGE_STRING reply to user-tier
+    /// single-slash <c>/debugmissions on</c> on a cli_test account
+    /// (AdminLevel=100). SECOND COLOR=12 emit pin in the entire
+    /// HandleSlashCommands catalogue (after Wave 245 /factionoverride).
+    /// FIRST COLOR=12 pin via MatchOptWithParam param-bearing branch --
+    /// Wave 245 was a strcmp body-emit; this pin exercises the DISTINCT
+    /// MatchOptWithParam-with-param dispatch shape. Promotes COLOR=12
+    /// coverage from SINGLE-DISPATCH-SHAPE to DUAL-DISPATCH-SHAPE.
+    /// CROSS-CASE COLOR=12 pair pin (case-'f' Wave 245 vs case-'d' Wave
+    /// 246).
+    ///
+    /// <para>
+    /// User-tier outer gate at 5434 admits. Switch at 5442 jumps on
+    /// *pch='d' -> case-'d' user-tier opens at 5902. case-'d' walk for
+    /// pch="debugmissions on":
+    /// arm 1 `MatchOptWithParam("d", pch) &amp;&amp; DEV` at 5903: strncmp 1B
+    ///   match; arg[1]='e' isalpha=true -> returns FALSE silently. NOT
+    ///   taken.
+    /// arm 2 `else if strcmp("don", pch)` at 5912: byte 1 'o' vs 'e'
+    ///   MISMATCH. Skip.
+    /// arm 3 `else if strcmp("doff", pch)` at 5928: byte 1 'o' vs 'e'
+    ///   MISMATCH. Skip.
+    /// arm 4 `if MatchOptWithParam("dwho", pch, allowNoParams=true)` at
+    ///   5944 (plain `if`): strncmp("dwho","debugmissions on",4) byte 1
+    ///   'w' vs 'e' MISMATCH -> returns FALSE silently.
+    /// arm 5 `else if MatchOptWithParam("dialog", pch) &amp;&amp; DEV` at 5966:
+    ///   strncmp byte 1 'i' vs 'e' MISMATCH SILENT.
+    /// arm 6 `else if strcmp("debug", pch) &amp;&amp; DEV` at 5976: strcmp
+    ///   bytes 0-4 match ("debug"), byte 5 NUL vs 'm' MISMATCH. Skip.
+    /// arm 7 `else if MatchOptWithParam("deco", pch)` at 5984: strncmp
+    ///   byte 2 'c' vs 'b' MISMATCH SILENT.
+    /// arm 8 `else if strcmp("dockp", pch)` at 6014: byte 1 'o' vs 'e'
+    ///   MISMATCH. Skip.
+    /// arm 9 `else if MatchOptWithParam("debugmissions", pch)` at 6021:
+    ///   strncmp 13B FULL match; arg[13]=' ' -> param = arg+14 = "on",
+    ///   returns TRUE. setting = strtok_s("on", " ", ...) = "on";
+    ///   strcasecmp("on", "on") == 0 -> m_DebugMissions=true;
+    ///   `SendVaMessageC(12, "Mission debugging activated.")` at 6029 ->
+    ///   SendMessageString COLOR=12. msg_sent=true, success=true (set at
+    ///   6041-6042).
+    /// case-'d' breaks at 6044. NET RESULT: ONE emit (COLOR=12).
+    /// </para>
+    ///
+    /// <para>
+    /// CROSS-DISPATCH-SHAPE COLOR=12 pin -- Wave 245 /factionoverride
+    /// pinned COLOR=12 emit via strcmp body-emit in case-'f'; this wave
+    /// pins COLOR=12 emit via MatchOptWithParam param-bearing branch in
+    /// case-'d'. Together they catch (a) regression where SendVaMessageC
+    /// downgrades to SendVaMessage on the strcmp-body path only (Wave
+    /// 245 catches), the MatchOptWithParam-body path only (Wave 246
+    /// catches), or BOTH (both catch -- pair-redundancy by design); (b)
+    /// FIRST `strcasecmp("on", ...)` deterministic-branch implicit pin
+    /// at PlayerConnection.cpp:6026 -- catches regression where
+    /// strcasecmp is replaced with strcmp (case sensitivity bug) or
+    /// the comparison literal is altered; (c) FIRST param-strtok-then-
+    /// emit-COLOR=12 ordering pin -- the body parses the param BEFORE
+    /// emitting; a refactor that emits before parsing would still hit
+    /// the same wire shape but would corrupt error handling on bad
+    /// params -- documented for future work.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). The /debugmissions arm
+    /// is a retail-faithful slash-command dispatch. Sending the "on"
+    /// param exercises the natural admit path; the COLOR=12 emit is
+    /// the genuine server response. No permissiveness added.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashDebugmissionsOn_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (29) = 32 bytes.
+        // COLOR=12 via SendVaMessageC -- SECOND COLOR=12 pin after Wave 245.
+        const int ExpectedReplyPayloadLength = 32;
+        const short ExpectedReplyLengthField = 29;
+        const byte ExpectedReplyColor = 12;
+        const int ExpectedLiteralByteCount = 28;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Debuga", shipName: "DebugaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/debugmissions on");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(MissionDebuggingActivatedLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(MissionDebuggingActivatedLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/debugmissions on\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{MissionDebuggingActivatedLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
