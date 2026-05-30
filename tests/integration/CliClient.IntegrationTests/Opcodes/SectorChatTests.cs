@@ -22320,6 +22320,8 @@ public sealed class SectorChatTests
 
     private const string BanSyntaxLiteral = "Syntax: //ban <playername>";
 
+    private const string BanPlayerBacktickGhostfooNotFoundLiteral = "Player `ghostfoo` not found";
+
     /// <summary>
     /// Wave 278 sibling-arm-pinning hardening (+0 ratchet): pins the
     /// 47-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
@@ -24116,6 +24118,139 @@ public sealed class SectorChatTests
                 $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
                 $"\"//ban \" without seeing 0x001D MESSAGE_STRING " +
                 $"equal to \"{BanSyntaxLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Wave 92 sibling-arm-pinning hardening (+0 ratchet): pins the 31-byte
+    /// wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to admin-tier
+    /// <c>//ban ghostfoo</c> (Username present, GetPlayer returns NULL) on a
+    /// fresh cli_test character. Walks PAST the if(!Username) syntax-emit
+    /// path pinned by Wave 91 into the next code path: the GetPlayer-NULL
+    /// branch emitting "Player `ghostfoo` not found" (27B, COLOR=5 default).
+    /// case-'b' arm 1 (//ban) was SINGLE-PINNED by Wave 91 on the
+    /// if(!Username)-TRUE branch; Wave 92 pins the if(!Username)-FALSE then
+    /// if(!target)-TRUE branch. case-'b' arm 1 now DOUBLY-PINNED across BOTH
+    /// post-MatchOptWithParam early-return paths. SECOND BACKTICK
+    /// "Player `%s` not found" pin -- Wave 73 //bumpaccess was first via
+    /// case-'b' arm 2 (DEV-gated); Wave 92 is FIRST NO-INLINE-GATE BACKTICK
+    /// Player-not-found pin. FIRST 27-byte literal pin. FIRST POST-STRTOK_S-
+    /// SUCCESS GetPlayer-NULL admin pin. case-'b' admin block now
+    /// TRIPLY-PINNED (Wave 91 arm-1 syntax + Wave 92 arm-1 body +
+    /// Wave 73 arm-2 BACKTICK). ONE-HUNDRED-FORTY-NINTH overall byte-exact
+    /// dispatch pin. Assert.Equal pins the full 31-byte response shape
+    /// AND the literal content.
+    ///
+    /// <para>
+    /// Outer admin gate at PlayerConnection.cpp:4716 admits (cli_test
+    /// ADMIN=100 >= GM=50). pch="ban ghostfoo". Switch on 'b'. case-'b'
+    /// opens at 4754. Arm 1 at 4756: MatchOptWithParam("ban", "ban ghostfoo",
+    /// ...) strncmp 3B matches; arg[3]=' '; param="ghostfoo"; returns true.
+    /// Body at 4758: Username=strtok_s("ghostfoo", " ")="ghostfoo". if
+    /// (!Username) FALSE at 4760; proceed. target=GetPlayer("ghostfoo")=NULL.
+    /// if(!target) TRUE at 4767 -- emits SendVaMessage("Player `%s` not
+    /// found", "ghostfoo") at 4769 (DEFAULT COLOR=5; 27B literal "Player
+    /// `ghostfoo` not found"); return at 4770 (HARD-RETURN from
+    /// HandleSlashCommands). Arm 2 //bumpaccess NEVER REACHED. NET RESULT:
+    /// exactly 1 0x001D emit. Wire: [u16 LE 28][u8 5][27B][NUL] = 31 bytes.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. //ban is admin-tier with NO inline AdminLevel gate -- the
+    /// admin-tier outer gate at 4716 is the only access check --
+    /// retail-faithful as preserved in source. The post-MatchOptWithParam
+    /// strtok_s-success GetPlayer-NULL early-return chain is the upstream-
+    /// preserved input-validation path. The pin DOCUMENTS the BACKTICK-
+    /// quoted player-not-found invariant in //ban byte-for-byte.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashBanOfflineTarget_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (28) = 31 bytes.
+        const int ExpectedReplyPayloadLength = 31;
+        const short ExpectedReplyLengthField = 28;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 27;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Bepa", shipName: "BepaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//ban ghostfoo");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(BanPlayerBacktickGhostfooNotFoundLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(BanPlayerBacktickGhostfooNotFoundLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//ban ghostfoo\" without seeing 0x001D MESSAGE_STRING " +
+                $"equal to \"{BanPlayerBacktickGhostfooNotFoundLiteral}\".");
         }
         finally
         {
