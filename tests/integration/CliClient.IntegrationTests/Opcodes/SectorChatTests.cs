@@ -21761,6 +21761,194 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 275 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
+    /// the 59-byte ASCII body "Unable to access selected object - could not find
+    /// object ID" emitted by HandleFaceRequest at PlayerConnection.cpp:8468 when
+    /// GetObjectFromID(Target) returns NULL. Pinned via user-tier <c>/face</c>
+    /// command (case-'f' arm at 6360, UNGATED block) on a fresh character with
+    /// no target selected -- GetTargetGameID() returns 0 and GetObjectFromID(0)
+    /// resolves to NULL.
+    /// </summary>
+    private const string UnableToAccessSelectedObjectLiteral =
+        "Unable to access selected object - could not find object ID";
+
+    /// <summary>
+    /// Wave 275 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 63-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
+    /// user-tier <c>/face</c> on a fresh cli_test character with NO target
+    /// selected. THIRD DELEGATE-FUNCTION-CALL pin in the HandleSlashCommands
+    /// catalogue -- joins Wave 70 (/panup via HandlePanRequest) and Wave 74
+    /// (/rotatex via HandleRotateRequest). DISTINCT axes from prior delegate
+    /// pins: (a) DIFFERENT delegate function -- HandleFaceRequest at
+    /// PlayerConnection.cpp:8453 vs HandlePanRequest at 8856 vs
+    /// HandleRotateRequest at 8894; (b) DIFFERENT literal -- "Unable to
+    /// ACCESS selected object - could not find object ID" vs prior delegates'
+    /// "Unable to MOVE selected object - move amount: %.2f" (different verb
+    /// AND different error tail); (c) FIRST PARAMETERLESS DELEGATE pin --
+    /// /face takes NO parameter (the matcher is strcmp not MatchOptWithParam);
+    /// HandleFaceRequest is called with ONLY a target-id, no atof-parsed
+    /// value; this exercises a delegate-error path that does not depend on
+    /// any param string at all. ONE-HUNDRED-THIRTY-FIFTH overall byte-exact
+    /// dispatch pin. Assert.Equal pins the full 63-byte response shape.
+    ///
+    /// <para>
+    /// User-tier outer gate at PlayerConnection.cpp:5434 admits. pch=
+    /// &amp;Msg[1]="face". Switch on 'f'. case-'f' opens at 6280.
+    /// CRITICAL STRUCTURE: case-'f' body is split into THREE blocks --
+    /// GM-gated block 1 (6281-6335) containing /form, /flushinv, /factionset,
+    /// /factionoverride; GM-gated block 2 (6337-6358) containing /fetch,
+    /// /find; UNGATED block (6360-6388) containing /face, /faceme, /fgps,
+    /// /fireweapon; DEV-gated block (6394-6446) containing /fhelp + field
+    /// commands. /face at 6360 is the FIRST UNGATED arm reachable to a
+    /// user-tier caller with no AdminLevel privileges. Walk: pch="face".
+    /// First GM block (6281-6335) probes /form, /flushinv, /factionset,
+    /// /factionoverride -- all strcmp false. (cli_test has ADMIN=100 so
+    /// the gate at 6281 admits anyway, but no arm matches.) Second GM block
+    /// (6337-6358) probes /fetch then /find -- both false (strcmp / MatchOpt
+    /// reject). Ungated block at 6360: strcmp(pch, "face") == 0 TRUE.
+    /// Body at 6362: <c>success = HandleFaceRequest(ShipIndex()-&gt;
+    /// GetTargetGameID())</c>. Fresh char has no target selected so
+    /// GetTargetGameID() returns 0. Inside HandleFaceRequest at 8453:
+    /// <c>obj = om-&gt;GetObjectFromID(0)</c> returns NULL. Enters else
+    /// branch at 8466: SendVaMessage("Unable to access selected object -
+    /// could not find object ID") at 8468 emits SINGLE 0x001D MESSAGE_STRING
+    /// with body (59B, COLOR=5 default). Returns success=false. msg_sent=
+    /// true at 6363 regardless. Remaining case-'f' arms (/faceme, /fgps,
+    /// /fireweapon, DEV block) NOT walked because /face strcmp matched.
+    /// Trailing illegal-command fallback at 7702-7705 suppressed by
+    /// msg_sent=true.
+    /// </para>
+    ///
+    /// <para>
+    /// Wire: `[u16 LE 60][u8 5][59B][NUL]` = 63 bytes. length field = 59
+    /// (body) + 1 (NUL) = 60. Total payload = 2 (length prefix) + 1 (color)
+    /// + 59 (body) + 1 (NUL) = 63.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 4 NEW classes prior waves are structurally
+    /// blind to: (a) THIRD DELEGATE-FUNCTION-CALL pin (joins Waves 70/74)
+    /// covering a THIRD distinct delegate function (HandleFaceRequest);
+    /// (b) FIRST UNGATED case-'f' arm pin -- /face is the first user-tier
+    /// case-'f' arm reachable without GM (block 3 at 6360). All prior
+    /// case-'f' pins (Wave 75 /factionoverride, Wave 76 /flushinv) lived
+    /// in the GM-gated block 1. A regression that moved /face behind a GM
+    /// gate would suppress the emit for non-admin callers, but cli_test
+    /// (ADMIN=100) still passes the gate; the regression coverage value
+    /// is the POSITIVE assertion that the UNGATED block exists and is
+    /// reachable from a user-tier dispatch path; (c) FIRST PARAMETERLESS
+    /// DELEGATE pin -- prior delegate pins (Waves 70/74/77) all routed
+    /// through MatchOptWithParam and supplied a string param to the
+    /// delegate's atof/strtok_s. /face uses strcmp (no param) and the
+    /// delegate accepts only a target-id; a regression that switched
+    /// /face to a parameterized form (MatchOptWithParam) would change
+    /// the matcher path; (d) FIRST "access" (not "move") delegate-error
+    /// literal pin -- documents that the HandleFaceRequest delegate uses
+    /// a DIFFERENT error verb ("access") than HandlePanRequest /
+    /// HandleRotateRequest ("move"); a regression that consolidated the
+    /// three delegate error emits behind a shared helper would need to
+    /// preserve all three distinct literals byte-for-byte.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. /face is user-tier with NO inline AdminLevel gate at the
+    /// case-'f' arm level (block 3, ungated) -- retail-faithful as
+    /// preserved in source. The NULL-target error-emit path is the
+    /// canonical safety pattern for ship-orient operations when no
+    /// target is selected.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashFaceNoTarget_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (60) = 63 bytes.
+        const int ExpectedReplyPayloadLength = 63;
+        const short ExpectedReplyLengthField = 60;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 59;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Facera", shipName: "FaceraShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/face");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(UnableToAccessSelectedObjectLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(UnableToAccessSelectedObjectLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/face\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{UnableToAccessSelectedObjectLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
