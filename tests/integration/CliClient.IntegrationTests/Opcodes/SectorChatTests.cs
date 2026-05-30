@@ -21552,6 +21552,215 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 274 sibling-arm-pinning hardening (+0 ratchet) literal anchors
+    /// for the TWO MESSAGE_STRING replies the user-tier <c>/move</c> arm
+    /// (case-'m' arm 1 at PlayerConnection.cpp:6825) emits via the
+    /// HandleMoveRequest delegate at 8335. When the comma-separated x,y,z
+    /// param resolves to ONLY-DELIMITERS (e.g. ",,,") the strtok_s at
+    /// 8340 returns NULL, hitting the (a==NULL) syntax-error fork at
+    /// 8346 which emits TWO consecutive SendVaMessage frames:
+    /// "/move: syntax: x,y,z" at 8348 and
+    /// "/move: all parameters float type" at 8349. FIRST DUAL-EMIT-FROM-
+    /// DELEGATE pin -- prior delegate pins (Wave 70 panup, Wave 74
+    /// rotatex) emitted single frames.
+    /// </summary>
+    private const string MoveSyntaxLiteral = "/move: syntax: x,y,z";
+
+    /// <summary>
+    /// Second of two MESSAGE_STRING literals emitted by the user-tier
+    /// <c>/move ,,,</c> dispatch via HandleMoveRequest's syntax-error fork
+    /// at PlayerConnection.cpp:8349. Pinned together with
+    /// <see cref="MoveSyntaxLiteral"/>.
+    /// </summary>
+    private const string MoveAllParametersFloatLiteral = "/move: all parameters float type";
+
+    /// <summary>
+    /// Wave 274 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 24-byte AND 36-byte wire-shapes of the TWO 0x001D MESSAGE_STRING
+    /// replies to user-tier <c>/move ,,,</c> on a fresh cli_test
+    /// character. FIRST DUAL-EMIT-FROM-DELEGATE pin in the
+    /// HandleSlashCommands catalogue -- prior delegate pins (Wave 70
+    /// /panup via HandlePanRequest, Wave 74 /rotatex via
+    /// HandleRotateRequest) emitted a SINGLE MESSAGE_STRING each from
+    /// inside the delegate's error path. Wave 274 exercises a delegate
+    /// whose error path emits TWO consecutive SendVaMessage calls
+    /// (one syntax line + one "all parameters float type" hint),
+    /// producing two MESSAGE_STRING frames in sequence on the wire.
+    /// FIRST ONLY-DELIMITERS PARAM pin -- the param ",,," is composed
+    /// entirely of strtok_s delimiters; strtok_s at 8340 returns NULL
+    /// because every position in the string is a delimiter; a
+    /// regression that changed the strtok_s delimiter set (e.g. to
+    /// "; ") would let "a" capture the literal ",,," and skip the
+    /// syntax-error fork. FIRST CASE-'m' USER-TIER POST-MATCH pin --
+    /// case-'m' is currently unpinned in either tier. ONE-HUNDRED-
+    /// THIRTY-FOURTH overall byte-exact dispatch pin. Assert.Equal
+    /// pins BOTH frames' full wire-shapes.
+    ///
+    /// <para>
+    /// User-tier outer gate at PlayerConnection.cpp:5434 admits. pch=
+    /// &amp;Msg[1]="move ,,,". Switch jumps on 'm'. case-'m' at 6824.
+    /// MatchOptWithParam("move", "move ,,,", param, msg_sent) at 6825:
+    /// strncmp matches 4B; pch[4]=' '; param=&amp;pch[5]=",,,";
+    /// returns true. Body at 6827: success = HandleMoveRequest(",,,").
+    /// msg_sent=true at 6828. Inside HandleMoveRequest at 8335: a =
+    /// strtok_s(",,,", ",", &amp;next_token) returns NULL (string is
+    /// composed entirely of delimiters). Enters (a == NULL) branch at
+    /// 8346. SendVaMessage("/move: syntax: x,y,z") at 8348 emits
+    /// FIRST 0x001D MESSAGE_STRING (20B body, COLOR=5 default).
+    /// SendVaMessage("/move: all parameters float type") at 8349 emits
+    /// SECOND 0x001D MESSAGE_STRING (32B body, COLOR=5 default).
+    /// Returns success=false. Outer at 6828 sets msg_sent=true
+    /// regardless. Trailing illegal-command fallback at 7702-7705
+    /// suppressed by msg_sent=true.
+    /// </para>
+    ///
+    /// <para>
+    /// Wire frame A: `[u16 LE 21][u8 5][20B][NUL]` = 24 bytes.
+    /// Wire frame B: `[u16 LE 33][u8 5][32B][NUL]` = 36 bytes.
+    /// Total emit-byte budget = 60 bytes across two frames.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 4 NEW classes prior waves are structurally
+    /// blind to: (a) FIRST DUAL-EMIT-FROM-DELEGATE pin -- a regression
+    /// that collapsed the two SendVaMessage calls into one (or dropped
+    /// one) would change the on-wire frame count for this command; the
+    /// dual-pin catches loss of either frame; (b) FIRST ONLY-DELIMITERS
+    /// PARAM pin -- exercises strtok_s's "all delimiters" return path
+    /// which is a distinct edge case from prior delegate-error paths
+    /// (Waves 70/74 used numeric-but-no-target params); (c) FIRST CASE-
+    /// 'm' USER-TIER POST-MATCH pin -- brings case-'m' into the
+    /// dispatcher-coverage set; (d) FIRST SEQUENTIAL-TWO-FRAME EXPECT
+    /// pattern -- the test drains the receive stream looking for BOTH
+    /// literals before completing; a regression that re-ordered the
+    /// emits or inserted a third frame between them would be caught
+    /// by the order-aware drain loop.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. /move is user-tier with NO inline AdminLevel gate at the
+    /// case-'m' opening or on the matcher arm itself -- retail-faithful
+    /// as preserved in source (compare case-'f' at 6280 which DOES have
+    /// an outer GM gate at 6281 wrapping its arms). The syntax-error
+    /// fork at 8346 is the canonical "param parse failed" path; both
+    /// emit literals are preserved byte-for-byte.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashMoveOnlyDelimiters_NoTarget_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (21) = 24 bytes (frame A).
+        const int ExpectedFrameAPayloadLength = 24;
+        const short ExpectedFrameALengthField = 21;
+        const int ExpectedFrameALiteralByteCount = 20;
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (33) = 36 bytes (frame B).
+        const int ExpectedFrameBPayloadLength = 36;
+        const short ExpectedFrameBLengthField = 33;
+        const int ExpectedFrameBLiteralByteCount = 32;
+        const byte ExpectedReplyColor = 5;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Movera", shipName: "MoveraShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/move ,,,");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            bool sawFrameA = false;
+            bool sawFrameB = false;
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames && !(sawFrameA && sawFrameB))
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!sawFrameA && text.Equals(MoveSyntaxLiteral, StringComparison.Ordinal))
+                {
+                    Assert.Equal(ExpectedFrameAPayloadLength, span.Length);
+                    Assert.Equal(ExpectedFrameALengthField, msgLen);
+                    Assert.Equal(ExpectedReplyColor, span[2]);
+                    int literalEnd = 3 + ExpectedFrameALiteralByteCount;
+                    string fullBody = Encoding.ASCII.GetString(
+                        span.Slice(3, ExpectedFrameALiteralByteCount));
+                    Assert.Equal(MoveSyntaxLiteral, fullBody);
+                    Assert.Equal((byte)0x00, span[literalEnd]);
+                    sawFrameA = true;
+                    continue;
+                }
+
+                if (!sawFrameB && text.Equals(MoveAllParametersFloatLiteral, StringComparison.Ordinal))
+                {
+                    Assert.Equal(ExpectedFrameBPayloadLength, span.Length);
+                    Assert.Equal(ExpectedFrameBLengthField, msgLen);
+                    Assert.Equal(ExpectedReplyColor, span[2]);
+                    int literalEnd = 3 + ExpectedFrameBLiteralByteCount;
+                    string fullBody = Encoding.ASCII.GetString(
+                        span.Slice(3, ExpectedFrameBLiteralByteCount));
+                    Assert.Equal(MoveAllParametersFloatLiteral, fullBody);
+                    Assert.Equal((byte)0x00, span[literalEnd]);
+                    sawFrameB = true;
+                    continue;
+                }
+            }
+
+            if (!sawFrameA || !sawFrameB)
+            {
+                throw new Xunit.Sdk.XunitException(
+                    $"drained {framesSeen} frames after sending 0x0033 CLIENT_CHAT with body " +
+                    $"\"/move ,,,\" without seeing BOTH 0x001D MESSAGE_STRING frames " +
+                    $"\"{MoveSyntaxLiteral}\" (sawFrameA={sawFrameA}) and " +
+                    $"\"{MoveAllParametersFloatLiteral}\" (sawFrameB={sawFrameB}).");
+            }
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
