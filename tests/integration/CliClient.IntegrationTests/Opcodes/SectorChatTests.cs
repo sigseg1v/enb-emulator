@@ -22310,6 +22310,8 @@ public sealed class SectorChatTests
 
     private const string CountspUsageLiteral = "Usage: /countsp <player>";
 
+    private const string DestroyobjectHijackeeLiteral = "You can only destroy objects while you're Hijacking something\n";
+
     /// <summary>
     /// Wave 278 sibling-arm-pinning hardening (+0 ratchet): pins the
     /// 47-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
@@ -23293,6 +23295,176 @@ public sealed class SectorChatTests
                 $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
                 $"\"//countsp \" without seeing 0x001D MESSAGE_STRING " +
                 $"equal to \"{CountspUsageLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Wave 284 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 66-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
+    /// admin-tier <c>//destroyobject</c> on a fresh cli_test character
+    /// (Hijackee()==0 -- not hijacking anything). FIRST CASE-'d' admin
+    /// ARM-BODY pin in the HandleSlashCommands catalogue (Wave 79
+    /// covered Arm 2 //displayplayerfaction NULL-name; Wave 280/281
+    /// covered case-'e' which is sibling; case-'d' arm 3 was unpinned).
+    /// case-'d' admin else-if cascade now has Arm 3 pinned (3 of 3 arms
+    /// total: Arm 1 //displayfactions, Arm 2 //displayplayerfaction,
+    /// Arm 3 //destroyobject). FIRST EMBEDDED-LF (0x0A) BYTE pin in any
+    /// HandleSlashCommands literal -- prior pins all had pure-ASCII
+    /// printable bodies with NUL-terminator only; Wave 284's body
+    /// includes a literal 0x0A LF byte between "something" and the NUL.
+    /// FIRST HandleObjectDestruction delegate code-path pin. FIRST
+    /// strcmp(pch, "...")==0 EXACT-MATCH admin-tier arm pin -- prior
+    /// admin arms used MatchOptWithParam or specific else-if chains;
+    /// Wave 284 fires the strcmp-exact path. FIRST APOSTROPHE-INSIDE-
+    /// WORD pin (you're) -- distinct from prior single-quote-AROUND-
+    /// name (Wave 282) and backtick-AROUND-name (Wave 73). ONE-HUNDRED-
+    /// FORTY-FOURTH overall byte-exact dispatch pin. Assert.Equal pins
+    /// the full 66-byte response shape.
+    ///
+    /// <para>
+    /// Admin outer gate at PlayerConnection.cpp:4716 admits (cli_test
+    /// ADMIN=100 satisfies GM=50). pch=&amp;Msg[2]="destroyobject".
+    /// Switch on 'd'. case-'d' opens at 4858. Arm 1 at 4859: strcmp
+    /// (pch, "displayfactions") != 0 (lengths/content differ). Arm 2
+    /// at 4865: MatchOptWithParam("displayplayerfaction", "destroyobject"
+    /// , ...) -- strncmp 20B fails at byte 3 ('p' vs 't'); returns
+    /// false. Arm 3 at 4884: strcmp(pch, "destroyobject") == 0 TRUE.
+    /// Body at 4886: success = HandleObjectDestruction(). Inside the
+    /// delegate at 8092: ObjectManager *om = GetObjectManager(); Object
+    /// *obj = NULL. Hijackee() == 0 evaluates TRUE for a fresh character
+    /// that has not hijacked anything -- emits SendVaMessage("You can
+    /// only destroy objects while you're Hijacking something\n") at
+    /// 8099 (DEFAULT COLOR=5; 62-byte body INCLUDING the trailing LF
+    /// 0x0A); return false at 8100. Back in case-'d' at 4887: msg_sent
+    /// =true. case-'d' breaks at 4889. NET: exactly 1 0x001D emit.
+    /// </para>
+    ///
+    /// <para>
+    /// 0x001D MESSAGE_STRING wire shape (66 bytes total):
+    /// <list type="bullet">
+    /// <item><description>length field (LE u16, value 63) -- offset 0..1
+    /// </description></item>
+    /// <item><description>color byte (0x05 -- SendVaMessage default) --
+    /// offset 2</description></item>
+    /// <item><description>62-byte ASCII body "You can only destroy
+    /// objects while you're Hijacking something\n" INCLUDING the
+    /// embedded 0x0A LF as byte 61 of body -- offset 3..64
+    /// </description></item>
+    /// <item><description>NUL terminator (0x00) -- offset 65
+    /// </description></item>
+    /// </list>
+    /// Length field = body bytes (62) + NUL (1) = 63.
+    /// </para>
+    ///
+    /// <para>
+    /// Coverage delta vs prior pins -- this pin is byte-exact for things
+    /// the rest of the suite is blind to: (a) FIRST CASE-'d' ADMIN ARM
+    /// 3 pin -- combined with Wave 79 (Arm 2), case-'d' admin now has
+    /// 2 of 3 cascade arms pinned (Arm 1 //displayfactions still
+    /// unpinned -- requires non-empty faction database); (b) FIRST
+    /// EMBEDDED-LF BYTE pin -- a regression that stripped trailing
+    /// whitespace from SendVaMessage outputs or normalized LF to NUL
+    /// would break this pin AND ONLY this pin in the entire suite;
+    /// (c) FIRST HandleObjectDestruction delegate code-path pin --
+    /// delegate now in dispatcher-coverage set; (d) FIRST strcmp(pch,
+    /// "...")==0 EXACT-MATCH admin pin -- prior admin arms used
+    /// MatchOptWithParam (Waves 80-86) or case-internal else-if-strcmp
+    /// chains -- the strcmp-exact-match dispatch primitive is itself
+    /// now pinned; (e) FIRST 62-BYTE LITERAL pin extends the literal-
+    /// length spectrum (24B/25B/30B/35B/43B/48B/51B prior; 62B now);
+    /// (f) FIRST APOSTROPHE-INSIDE-WORD pin -- Wave 73 backtick-AROUND-
+    /// name, Wave 282 single-quote-AROUND-name, Wave 284 apostrophe-
+    /// INSIDE-word (you're); a regression that smart-quoted apostrophes
+    /// to typographic quotes would break this pin.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashDestroyobjectFreshChar_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (63) = 66 bytes.
+        const int ExpectedReplyPayloadLength = 66;
+        const short ExpectedReplyLengthField = 63;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 62;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Dapa", shipName: "DapaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//destroyobject");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(DestroyobjectHijackeeLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(DestroyobjectHijackeeLiteral, fullBody);
+                Assert.Equal((byte)0x0A, span[literalEnd - 1]);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//destroyobject\" without seeing 0x001D MESSAGE_STRING " +
+                $"equal to \"{DestroyobjectHijackeeLiteral}\".");
         }
         finally
         {
