@@ -16666,6 +16666,163 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 247 sibling-arm-pinning hardening (+0 ratchet): pins the 63-byte
+    /// wire-shape of the single 0x001D MESSAGE_STRING reply to user-tier
+    /// single-slash <c>/levelout</c> on a fresh cli_test character with no
+    /// selected target (ShipIndex()-&gt;SetTargetGameID(-1) at
+    /// PlayerClass.cpp:1085 is set during post-login). FIRST case-'l'
+    /// user-tier pin and THIRD handler-side NULL-target fallback pin --
+    /// promotes case-'l' user-tier from UNPINNED to SINGLE-PINNED. The
+    /// emit body matches Wave 243 /face / Wave 244 /faceme EXACTLY
+    /// ("Unable to access selected object - could not find object ID")
+    /// but originates from a DIFFERENT handler (HandleLevelOutRequest at
+    /// PlayerConnection.cpp:8964) reached via a DIFFERENT dispatch arm
+    /// (case-'l' arm 2 at PlayerConnection.cpp:6772) under a DIFFERENT
+    /// switch-case letter. ONE-HUNDRED-SIXTH overall byte-exact dispatch
+    /// pin. Assert.Equal pins the full 63-byte response shape.
+    ///
+    /// <para>
+    /// User-tier outer gate at 5434 admits. Switch at 5442 jumps on
+    /// *pch='l' -&gt; case-'l' opens at PlayerConnection.cpp:6766.
+    /// case-'l' walk for pch="levelout":
+    ///   arm 1 `if strcmp(pch, "leavegroup")` at 6767: bytes 0-1 match
+    ///     ("le"), byte 2 'v' vs 'a' MISMATCH. Skip.
+    ///   arm 2 `else if strcmp(pch, "levelout")` at 6772: 8B vs 8B FULL
+    ///     match -&gt; `HandleLevelOutRequest(ShipIndex()-&gt;
+    ///     GetTargetGameID())` at PlayerConnection.cpp:8964. Target=-1
+    ///     (post-login default) -&gt; `om-&gt;GetObjectFromID(-1)` returns
+    ///     NULL -&gt; else-branch at PlayerConnection.cpp:8980-8983 fires:
+    ///     `SendVaMessage("Unable to access selected object - could not
+    ///     find object ID")` COLOR=5 default. Handler returns false;
+    ///     msg_sent=true (set at 6775 after handler returns).
+    ///   arm 3 `else if MatchOptWithParam("level", pch, ...)` at 6777:
+    ///     NOT entered (chain short-circuits on arm 2 match).
+    ///   arm 4 `else if strcmp("lootstats", pch)` at 6812: NOT entered.
+    /// case-'l' breaks at 6822. NET RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 3 NEW classes prior waves are structurally
+    /// blind to: (a) FIRST case-'l' user-tier pin overall -- extends
+    /// case-letter coverage to include 'l' (catches regression where the
+    /// case-'l' label at PlayerConnection.cpp:6766 is deleted, mis-cased,
+    /// or its dispatch table entry collides with another letter); (b)
+    /// THIRD handler-side NULL-target fallback pin via a DISTINCT handler
+    /// (HandleLevelOutRequest 8964 vs HandleFaceRequest 8453 vs
+    /// HandleFaceMeRequest 8474) -- the same 59-byte literal lives at
+    /// THREE source sites (8466-8469 face, 8487-8490 faceme, 8980-8983
+    /// levelout); a refactor that edits the literal in only ONE handler
+    /// would silently diverge wire shape only on that path, and the
+    /// THREE-WAY pin set catches the divergence in any direction; (c)
+    /// FIRST CROSS-CASE-LETTER handler-fallback literal-consistency pin
+    /// -- Waves 243/244 paired within case-'f'; Wave 247 extends the
+    /// consistency check across case-'f' and case-'l', catching a future
+    /// "literal pulled into a private constant" refactor where one site
+    /// references the constant and another inlines a near-duplicate.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). The /levelout arm is a
+    /// retail-faithful slash-command dispatch; the NULL-target fallback
+    /// is the natural error-emit path the real server's
+    /// HandleLevelOutRequest already takes. Pinning preserves the wire
+    /// shape exactly; no permissiveness is added. cli_test=100 satisfies
+    /// the outer user-tier gate at 5434 unconditionally; no inner
+    /// AdminLevel guard exists on this arm.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashLevelout_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (60) = 63 bytes.
+        // Same literal/shape as Waves 243/244; DIFFERENT case-letter and
+        // DIFFERENT handler.
+        const int ExpectedReplyPayloadLength = 63;
+        const short ExpectedReplyLengthField = 60;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 59;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Levela", shipName: "LevelaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/levelout");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(FaceNoTargetLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(FaceNoTargetLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/levelout\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{FaceNoTargetLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
