@@ -20478,6 +20478,183 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 268 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
+    /// the 25-byte ASCII body "Could not find player foo" that the user-tier
+    /// /trade arm emits when the named target player is not online. Matcher
+    /// at PlayerConnection.cpp:7521; NULL-targetp guard at 7526-7530 with
+    /// SendVaMessage at 7528 and early `return;` at 7529.
+    /// </summary>
+    private const string CouldNotFindPlayerFooLiteral = "Could not find player foo";
+
+    /// <summary>
+    /// Wave 268 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 29-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
+    /// user-tier <c>/trade foo</c> on a fresh cli_test character with
+    /// no online player named "foo". FIRST USER-TIER INLINE-EMIT EARLY-
+    /// RETURN pin in the post-match catalogue -- distinct from Wave 262
+    /// (gmsetaccess one-arg, admin-tier post-match return), Wave 263
+    /// (gmskillpoints fall-through, admin-tier), Wave 264 (gmplayerlevel
+    /// bounds, admin-tier), Wave 265 (gmupgrade nested-gate, admin-tier),
+    /// Wave 266 (openif comma-dual-%d, admin-tier), and Wave 267 (panup
+    /// delegate-function-call, user-tier but routed through
+    /// HandlePanRequest). ONE-HUNDRED-TWENTY-EIGHTH overall byte-exact
+    /// dispatch pin. Assert.Equal pins the full 29-byte response shape.
+    ///
+    /// <para>
+    /// User-tier outer gate at PlayerConnection.cpp:5434 admits; both
+    /// flags false. pch=&amp;Msg[1]="trade foo". Switch jumps on 't'.
+    /// case-'t' at 7461. Arm 1 strcmp("test") false. Arm 2
+    /// MatchOptWithParam("talktree", ...) strncmp 'r'!='a' at index 2
+    /// -- false. Arm 3 MatchOptWithParam("testmsg", ...) strncmp 'r'!='e'
+    /// at index 1 -- false. Arm 4 MatchOptWithParam("tilt", ...) strncmp
+    /// 'r'!='i' at index 1 -- false. Arm 5 strcmp("terminate") false.
+    /// Arm 6 MatchOptWithParam("trade", "trade foo", param, msg_sent):
+    /// strncmp matches 5B; pch[5]=' '; param="foo"; returns true. Body
+    /// at 7523: <c>targetp = g_ServerMgr-&gt;m_PlayerMgr.GetPlayer("foo")</c>.
+    /// No online player named "foo" -- returns NULL. if-guard at 7526:
+    /// <c>if (!targetp)</c> evaluates true. <c>SendVaMessage("Could not
+    /// find player %s", "foo")</c> at 7528 emits a SINGLE 0x001D MESSAGE_STRING
+    /// with body "Could not find player foo" (25B, COLOR=5 default).
+    /// `return;` at 7529 exits HandleSlashCommands ENTIRELY -- skips all
+    /// remaining case-'t' arms (panic-button at 7531+ if any, etc.) AND
+    /// skips the trailing user-tier illegal-command fallback at 7702-7705
+    /// AND the success/msg_sent post-processing at the function tail.
+    /// </para>
+    ///
+    /// <para>
+    /// Wire: `[u16 LE 26][u8 5][25B][NUL]` = 29 bytes. length field = 25
+    /// (body) + 1 (NUL) = 26 (color is read separately from span[2]).
+    /// Total payload = 2 (length prefix) + 1 (color) + 25 (body) + 1
+    /// (NUL) = 29.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 4 NEW classes prior waves are structurally
+    /// blind to: (a) FIRST USER-TIER INLINE-EMIT EARLY-RETURN pin -- all
+    /// prior post-match early-return pins (262 gmsetaccess, 265 gmupgrade)
+    /// fired from ADMIN-tier arms gated by AdminLevel checks. /trade is
+    /// user-tier with no admin gate. A regression that accidentally moved
+    /// /trade behind an admin gate would suppress this emit for non-admin
+    /// callers; (b) FIRST USER-TIER PLAYER-NAME-IN-%s SUB pin -- Wave 265's
+    /// gmupgrade emit was in an admin-tier arm. This pin exercises the
+    /// SendVaMessage("...%s", param) format in the user-tier catalogue.
+    /// A regression that changed %s to %d or stripped the substitution
+    /// would change visible bytes; (c) FIRST "Could not find player %s"
+    /// LITERAL pin -- this exact format string is also used by the /invite
+    /// arm at 6714. A consolidation refactor that unified the two emit
+    /// sites behind a helper would need to preserve the literal byte-
+    /// for-byte for this test to pass. The /trade arm is the second of
+    /// two sites; pinning it from /trade ensures the /trade dispatch
+    /// path -- not just /invite's -- continues to emit it; (d) FIRST
+    /// EARLY-RETURN-EXITS-CASE-AND-FUNCTION pin in user-tier -- the
+    /// `return;` at 7529 not only breaks out of the case but exits
+    /// HandleSlashCommands entirely. A regression that changed `return;`
+    /// to `break;` would preserve the visible emit but would then fall
+    /// through to the trailing illegal-command fallback at 7702 (which
+    /// would emit a SECOND MESSAGE_STRING). The single-frame assertion
+    /// (the test exits after seeing exactly one matching emit) plus the
+    /// reply wire-shape pin catches such a regression because the second
+    /// frame's body would not match the expected literal.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. /trade is user-tier with NO inline AdminLevel gate --
+    /// retail-faithful as preserved in source. The NULL-targetp error-emit
+    /// path is the canonical safety pattern for player-targeted operations
+    /// when the supplied name does not resolve to an online player.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashTradeUnknownPlayer_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (26) = 29 bytes.
+        const int ExpectedReplyPayloadLength = 29;
+        const short ExpectedReplyLengthField = 26;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 25;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Tania", shipName: "TaniaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/trade foo");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(CouldNotFindPlayerFooLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(CouldNotFindPlayerFooLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/trade foo\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{CouldNotFindPlayerFooLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
