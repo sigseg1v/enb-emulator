@@ -160,8 +160,16 @@ bool SectorManager::StartListener(short port)
 	if (m_SectorConnection->GetError())
 	{
 		delete m_SectorConnection;
+		m_Port = -1;
 		return false;
 	}
+
+	// Receiver thread is no longer auto-started in the constructor; start
+	// it now that the per-sector socket is confirmed bound. Per-sector
+	// listeners have no ordering constraint vs the master plane -- by the
+	// time we get here the only way a client reaches us is via a sector
+	// redirect that already named this port.
+	m_SectorConnection->StartReceiver();
 
 	return true;
 }

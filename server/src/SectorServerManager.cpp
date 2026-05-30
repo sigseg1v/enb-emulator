@@ -14,7 +14,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -91,8 +91,23 @@ bool SectorServerManager::LookupSectorServer(ServerRedirect & redirect)
 
 	if (sector_manager)
 	{
+		short port = sector_manager->GetPort();
+		// Defense in depth: SectorManager::m_Port is initialised to -1 and
+		// only set to a real value once StartListener() has bound the UDP
+		// socket. Returning success=true with port=-1 here used to feed a
+		// sentinel into MASTER_HANDOFF_CONFIRM (0x2009) and hang the client
+		// at the loading screen. The primary fix is to defer the master
+		// listener's recv thread until sectors are bound (see
+		// ServerManager::Run), but if any future code path manages to look
+		// up an unbound sector we want a clean failure here instead.
+		if (port <= 0)
+		{
+			LogMessage("!!! LookupSectorServer sector_id=%d: manager exists but port=%d (not yet bound); refusing handoff.\n",
+				sector_id, (int) port);
+			return false;
+		}
 		redirect.ip_address = sector_manager->GetIPAddr();
-		redirect.port = sector_manager->GetPort();
+		redirect.port = port;
 		success = true;
 	}
 	else

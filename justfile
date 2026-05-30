@@ -242,6 +242,15 @@ play-local CLIENT_PATH='':
     fi
 
     echo ">>> bringing up local stack (postgres + server + login + proxy)"
+    # Always rebuild proxy + server + login images first. `docker compose
+    # up` on its own reuses existing images and silently masks source
+    # changes -- we used to debug "fix didn't work" symptoms that were
+    # really "fix never reached the running container" (see the wire-
+    # format byte-order rules in CLAUDE.md "Wire format & byte order").
+    # `build` invalidates the image; the subsequent `up -d` in run-stack-
+    # bg detects the new image-id and recreates the affected containers
+    # automatically, so no separate --force-recreate pass is needed.
+    docker compose build proxy server login
     just run-stack-bg
 
     echo ">>> building launcher (so its output dir exists for settings.json)"
@@ -268,8 +277,42 @@ play-local CLIENT_PATH='':
     : "${WINEPREFIX:=$HOME/.wine-enb}"
     export WINEPREFIX
 
-    echo ">>> launching (WINEPREFIX=$WINEPREFIX) -- click Play in the GUI"
+    # Default play-local is quiet -- no WINEDEBUG overrides, so the console
+    # only carries the launcher + proxy + server logs. For SEH / module
+    # tracing on a crash, use `just debug-local` instead (it sets
+    # WINEDEBUG=+seh,+module,err+module and then calls this recipe).
+    echo ">>> launching (WINEPREFIX=$WINEPREFIX WINEDEBUG=${WINEDEBUG:-<unset>}) -- click Play in the GUI"
     dotnet run --no-build --project tools/launchnet7-avalonia
+
+# Same as `play-local`, but with WINEDEBUG=+seh,+module,err+module so
+# wine prints the structured-exception backtrace (module + function
+# names) to stderr on unhandled page faults. Override WINEDEBUG=... in
+# the env to pick different channels.
+#
+# Use this when chasing a client crash; `just play-local` stays quiet.
+debug-local CLIENT_PATH='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${WINEDEBUG:=+seh,+module,err+module}"
+    export WINEDEBUG
+    just play-local {{CLIENT_PATH}}
+
+# Drop into the enb-cli REPL pointed at the running local stack.
+# Assumes the stack is already up (`just dev` / `just run-stack-bg`); does
+# not start anything. Useful for reproducing client-side crashes from the
+# launcher path -- the CLI walks the same connect/login/create/enter
+# sequence but is more permissive than the Win32 client at decode time, so
+# CLI-completes != WINE-completes (it's a triage tool, not a proof of
+# correctness).
+#
+# Once in the prompt:
+#     connect 127.0.0.1
+#     login <user> <pass>
+#     create JE Aevin       (firstname must contain a vowel)
+#     enter Aevin
+#     quit
+launch-cli:
+    dotnet run --project tools/cli-client/src/CliClient.App -- start
 
 # Stream all logs in the foreground.
 dev-fg:

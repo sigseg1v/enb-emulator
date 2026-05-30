@@ -13,7 +13,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -53,6 +53,14 @@ public:
 	virtual ~UDP_Connection();
 
 	bool				GetError()	{ return m_Socket == INVALID_SOCKET; };
+	// Start the receiver pthread. The constructor binds the socket but does
+	// NOT spawn the recv thread -- callers must invoke StartReceiver()
+	// explicitly. This split exists so the master-plane listener can be
+	// constructed early (so other code can call ValidateSectorServer() on
+	// the object pointer) yet not begin dispatching MASTER_HANDOFF packets
+	// until every sector's UDP port has been bound -- see
+	// ServerManager::Run for the deferred-start sequence.
+	void				StartReceiver();
     void				RunRecvThread();
     void				RunSendThread();
 	void				AddConnection(long ip_addr);

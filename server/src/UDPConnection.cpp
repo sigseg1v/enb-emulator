@@ -63,7 +63,20 @@ UDP_Connection::UDP_Connection(unsigned short port, ServerManager *server_mgr, i
 
 	m_ThreadRunning = false;
 
-	// Launch the Receiver thread
+	// NOTE: the receiver thread is intentionally NOT spawned here. Callers
+	// must invoke StartReceiver() once they are ready to dispatch packets.
+	// See class doc-comment in UDPConnection.h and the deferred-start
+	// sequence in ServerManager::Run.
+}
+
+void UDP_Connection::StartReceiver()
+{
+	if (m_Socket == INVALID_SOCKET)
+	{
+		LogMessage("UDP_Connection::StartReceiver: socket invalid, not starting recv thread.\n");
+		return;
+	}
+
 	pthread_create(&m_Thread, NULL, &LaunchUDPRecvThread, (void *) this);
 }
 

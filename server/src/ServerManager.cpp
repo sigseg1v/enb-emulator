@@ -159,6 +159,16 @@ void ServerManager::RunMasterServer()
 	// Instantiate the TCP Listener object for the Master (galaxy) Server
 	//TcpListener proxy_tcp_listener(m_IpAddressInternal, PROXY_SERVER_PORT, *this, CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY);
     //UdpListener master_tcp_listener(m_IpAddressInternal, MASTER_SERVER_PORT, *this, CONNECTION_TYPE_CLIENT_TO_MASTER_SERVER);
+    // The master listener OBJECT is constructed early so other code paths
+    // (notably SectorServerManager::AssignSectorToAvailableServer) can call
+    // ValidateSectorServer() on m_UDPMasterConnection during the sector-
+    // assignment loop below. The RECEIVER THREAD is deferred (see
+    // StartReceiver() call after the assignment wait): if it starts now, the
+    // proxy's MASTER_HANDOFF (0x2008) packets get serviced before any
+    // sector's UDP port has been bound, so ProcessHandoff returns the
+    // sentinel port=-1 in MASTER_HANDOFF_CONFIRM (0x2009), the proxy parses
+    // that as "no sector", falls back to a proxy-local ServerRedirect, and
+    // the client hangs at the loading screen.
     UDP_Connection master_udp_listener(UDP_MASTER_SERVER_PORT, this, CONNECTION_TYPE_MASTER_SERVER_TO_PROXY);
     m_UDPMasterConnection = &master_udp_listener;
 
@@ -167,9 +177,13 @@ void ServerManager::RunMasterServer()
     // the server-side TCP cluster so we bind UDP_GLOBAL_SERVER_PORT here and
     // the proxy gets a second UDPClient pointed at it. Server dispatcher
     // routes CONNECTION_TYPE_GLOBAL_SERVER_TO_PROXY into HandleGlobalOpcode
-    // (server/src/UDPConnection.cpp:203, handlers in UDP_Global.cpp).
+    // (server/src/UDPConnection.cpp:203, handlers in UDP_Global.cpp). The
+    // global plane carries pre-sector account/ticket traffic, so its
+    // receiver thread starts immediately -- only the master plane needs the
+    // deferred-start guard.
     UDP_Connection global_udp_listener(UDP_GLOBAL_SERVER_PORT, this, CONNECTION_TYPE_GLOBAL_SERVER_TO_PROXY);
     m_UDPGlobalConnection = &global_udp_listener;
+    global_udp_listener.StartReceiver();
 
 	g_MailMgr = new MailManager();
 
@@ -256,17 +270,23 @@ void ServerManager::RunMasterServer()
 		// tick that m_SectorAssignmentsComplete first flips to true. Until
 		// then, GetSectorManager(id) for an assigned-but-not-yet-bound sector
 		// returns a manager whose m_Port is still the -1 initializer value,
-		// and UDP_Master::ProcessHandoff happily emits that -1 in the 0x2009
-		// MASTER_HANDOFF_CONFIRM reply -- the proxy parses it as udp_port=-1,
-		// falls back to a proxy-local ServerRedirect, and the client hangs at
-		// the load screen. Block here until every sector's BeginSectorThread
-		// has bound its port, so by the time MainLoop accepts handoff traffic
-		// the sectors are actually ready.
+		// and UDP_Master::ProcessHandoff would happily emit that -1 in the
+		// 0x2009 MASTER_HANDOFF_CONFIRM reply. The master listener's recv
+		// thread is therefore NOT started yet (see StartReceiver() call
+		// below) -- the master_udp_listener constructor only bound the
+		// socket so SectorServerManager::AssignSectorToAvailableServer can
+		// still call ValidateSectorServer() through m_UDPMasterConnection
+		// during this wait.
 		while (!m_SectorAssignmentsComplete && !g_ServerShutdown)
 		{
 			usleep(50 * 1000);
 			ServerCheck();
 		}
+
+		// Sectors are bound; safe to begin dispatching master-plane
+		// MASTER_HANDOFF (0x2008) packets -- ProcessHandoff will now find
+		// real sector ports instead of -1.
+		master_udp_listener.StartReceiver();
 
 		LogMessage("Registering sector server: port=%d, max_sectors=%d\n", m_Port, m_MaxSectors);
 		//RegisterSectorServer(m_Port, m_MaxSectors);
