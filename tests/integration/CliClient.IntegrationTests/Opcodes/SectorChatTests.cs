@@ -22119,6 +22119,186 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 277 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
+    /// the 25-byte ASCII body "usage: //halloween ON/OFF" that admin-tier
+    /// <c>//halloween</c> with TRAILING SPACE emits at PlayerConnection.cpp:4945
+    /// when the post-MatchOptWithParam param resolves to NULL via strtok_s.
+    /// Pinned with COLOR=12 (FIRST ADMIN-TIER COLOR=12 pin overall; Wave 272
+    /// /factionoverride was user-tier COLOR=12).
+    /// </summary>
+    private const string HalloweenUsageLiteral = "usage: //halloween ON/OFF";
+
+    /// <summary>
+    /// Wave 277 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 29-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
+    /// admin-tier <c>//halloween</c> with a TRAILING SPACE (no on/off
+    /// param) on a fresh cli_test character. SECOND POST-MATCH STRTOK_S-
+    /// NULL pin (joins Wave 276 //displayplayerfaction), but distinct
+    /// across THREE structural axes from Wave 276: (a) DIFFERENT COLOR --
+    /// COLOR=12 vs Wave 276's COLOR=17; (b) DIFFERENT CASE-LETTER --
+    /// case-'h' vs case-'d'; (c) NO `return;` EARLY-EXIT after the emit
+    /// -- the usage emit at 4945 is followed by msg_sent=true and
+    /// success=true at 4947-4948 with no return, and case-'h' has NO
+    /// break before case-'k' at 4950 (a missing-break in source). The
+    /// dispatch FALLS THROUGH into case-'k', tries strcmp(pch="halloween ",
+    /// "killfactions") at 4952 -- mismatches at byte 0 ('h' vs 'k') -- and
+    /// breaks at 4960. NET emit count remains 1 because case-'k' doesn't
+    /// match, BUT a regression that added a new case-'k' arm matching
+    /// any "h*" prefix would produce a SECOND emit on this dispatch path.
+    /// FIRST FALL-THROUGH-INTO-NEXT-CASE INVARIANT pin. FIRST ADMIN-TIER
+    /// COLOR=12 pin. ONE-HUNDRED-THIRTY-SEVENTH overall byte-exact dispatch
+    /// pin. Assert.Equal pins the full 29-byte response shape.
+    ///
+    /// <para>
+    /// Admin outer gate at PlayerConnection.cpp:4716 admits. pch=&amp;Msg[2]=
+    /// "halloween ". Switch on 'h'. case-'h' opens at 4926. Arm at 4927:
+    /// MatchOptWithParam("halloween", pch, param, msg_sent): strncmp matches
+    /// 9B; arg[9]=' '; param=&amp;arg[10]="" (empty string after the
+    /// matched space); returns true. Body at 4929: char *setting =
+    /// strtok_s("", " ", &amp;next_token) returns NULL on empty-string
+    /// input. !setting TRUE at 4943. SendVaMessageC(12, "usage:
+    /// //halloween ON/OFF") at 4945 emits SINGLE 0x001D MESSAGE_STRING
+    /// (25B, COLOR=12). msg_sent=true at 4947, success=true at 4948. NO
+    /// `return;` -- execution continues to the case-'h' close-brace at
+    /// 4949, but there is NO `break;` before case-'k' at 4950. Falls
+    /// THROUGH into case-'k': strcmp(pch="halloween ", "killfactions") at
+    /// 4952 -- byte 0 'h'!='k' mismatch, false. Body NOT entered. case-'k'
+    /// `break;` at 4960. Trailing illegal-command fallback at 5318 NOT
+    /// reached because msg_sent=true.
+    /// </para>
+    ///
+    /// <para>
+    /// Wire: `[u16 LE 26][u8 12][25B][NUL]` = 29 bytes. length field = 25
+    /// (body) + 1 (NUL) = 26. Total payload = 2 (length prefix) + 1 (color)
+    /// + 25 (body) + 1 (NUL) = 29.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 4 NEW classes prior waves are structurally
+    /// blind to: (a) FIRST ADMIN-TIER COLOR=12 pin -- prior COLOR=12
+    /// coverage (Wave 272 /factionoverride) was user-tier. A regression
+    /// that consolidated COLOR=12 emits behind a shared admin/user helper
+    /// would need to preserve both byte-shapes; (b) FIRST FALL-THROUGH-
+    /// INTO-NEXT-CASE INVARIANT pin -- the case-'h' to case-'k' missing-
+    /// break in source is intentional-or-bug behavior preserved from
+    /// upstream. The single-frame assertion confirms that despite the
+    /// fall-through, only ONE emit occurs because case-'k' arm content
+    /// (strcmp killfactions) does not match "halloween "; a regression
+    /// that added a new case-'k' arm matching the "halloween " prefix
+    /// would produce a SECOND emit and break this pin; (c) FIRST GLOBAL-
+    /// SERVER-FLAG USAGE-EMIT pin -- /halloween is a global-server-state
+    /// command (g_ServerMgr-&gt;SetHalloween). The usage emit path is
+    /// the no-side-effect branch; the byte-shape pin confirms the usage
+    /// emit fires WITHOUT toggling the flag (a regression that emitted
+    /// usage AND set the flag would corrupt global state); (d) SECOND
+    /// POST-MATCH STRTOK_S-NULL pin -- joins Wave 276; documents that
+    /// the strtok_s-NULL idiom is used in MULTIPLE admin-tier commands;
+    /// a refactor that unified them behind a shared helper would need
+    /// to preserve both byte-shapes (COLOR=12 + COLOR=17, two different
+    /// literals).
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. //halloween is admin-tier with NO inline AdminLevel gate --
+    /// the admin-tier outer gate at 4716 is the only access check --
+    /// retail-faithful as preserved in source. cli_test (ADMIN=100)
+    /// passes the gate. The fall-through-into-case-k pattern is preserved
+    /// byte-for-byte from upstream; we DOCUMENT it (the pin is the
+    /// documentation) rather than "fix" it. Global server flag is NOT
+    /// toggled by the usage path.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashHalloweenNoArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (26) = 29 bytes.
+        const int ExpectedReplyPayloadLength = 29;
+        const short ExpectedReplyLengthField = 26;
+        const byte ExpectedReplyColor = 12;
+        const int ExpectedLiteralByteCount = 25;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Hala", shipName: "HalaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//halloween ");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(HalloweenUsageLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(HalloweenUsageLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//halloween \" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{HalloweenUsageLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
