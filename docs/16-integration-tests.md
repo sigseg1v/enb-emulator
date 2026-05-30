@@ -174,9 +174,16 @@ reference material.
    without primary-source corroboration. Flag it in the fixture
    comment, the codec doc comment, and the test comment, and
    assert the current codec behaviour so a regression in the
-   codec breaks the build either way. See the sector_id BE-vs-LE
-   discussion in `Fixtures/Captures/serverredirect_packet222.hex`
-   for the canonical example.
+   codec breaks the build either way. Once you DO have primary-
+   source corroboration (typically: the same field decoded the
+   same way across multiple independent capture frames), update
+   the codec, the fixture, and the assertions together in one
+   change and cite every frame in the commit message. The
+   `ServerRedirect` sector_id endianness fix is the canonical
+   example -- four capture frames (`capture_1` frames 222/656/
+   1062 and `capture_2` frame 222) all agreed the field is LE-
+   on-wire, so the codec, the proxy emitter, and the tests were
+   all updated in lockstep.
 
 ## How to add a new opcode test
 

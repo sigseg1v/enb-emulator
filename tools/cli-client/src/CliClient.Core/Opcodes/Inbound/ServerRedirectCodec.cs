@@ -8,7 +8,7 @@ using System.Net;
 namespace N7.CliClient.Opcodes.Inbound;
 
 /// <summary>
-/// 0x0036 SERVER_REDIRECT — Master server tells the client which
+/// 0x0036 SERVER_REDIRECT -- Master server tells the client which
 /// sector server (IP + port) to TCP-connect to next.
 /// </summary>
 /// <param name="SectorId">Target sector ID.</param>
@@ -22,22 +22,31 @@ public sealed record ServerRedirect(int SectorId, IPEndPoint ServerEndPoint);
 /// <remarks>
 /// <para>
 /// Wire format (mirrors <c>struct ServerRedirect</c> in
-/// <c>common/include/net7/PacketStructures.h:298-304</c> as built by
+/// <c>common/include/net7/PacketStructures.h:350-356</c> as built by
 /// <c>proxy/ClientToMasterServer.cpp::SendServerRedirect</c>):
 /// </para>
 /// <code>
 ///   offset  type    field        endianness
-///   0       int32   sector_id    big-endian  (server uses ntohl-of-host-value)
-///   4       int32   ip_address   big-endian  (same; conveniently network byte order)
+///   0       int32   sector_id    little-endian (host-order int memcpy'd on x86)
+///   4       int32   ip_address   little-endian (int whose host value is the
+///                                 network-order IP -- inet_ntoa(s_addr=value)
+///                                 prints the right dotted form)
 ///   8       int16   port         little-endian (HOST order; no htons)
 ///   total: 10 bytes
 /// </code>
 /// <para>
-/// The port field is a known asymmetry — every other multi-byte field
-/// in this struct is big-endian, but the C++ code does NOT call
-/// <c>htons</c> on port. So on the wire, port stays in x86 little-endian.
-/// If we ever see a big-endian server we'll need to revisit this, but
-/// for now matching the C++ byte-for-byte is the only thing that works.
+/// All three fields are little-endian on the wire because the C++
+/// server memcpy's a packed <c>struct ServerRedirect</c> directly. The
+/// fields' int values are pre-byte-swapped where the source was in
+/// network order (ip_address), and passed straight through where the
+/// source was already host order (sector_id, port).
+/// </para>
+/// <para>
+/// Real-server confirmation (LE on wire for all three fields):
+/// <c>archive/kyp-snapshot/capturedPackets/capture_1.rar</c> frames
+/// 222 / 656 / 1062 and <c>capture_2.rar</c> frame 222. Each shows a
+/// destination IP / sector / port whose decoded value matches the
+/// client's follow-up TCP connect only when the bytes are read LE.
 /// </para>
 /// </remarks>
 public sealed class ServerRedirectCodec : IOpcodeCodec
@@ -55,15 +64,20 @@ public sealed class ServerRedirectCodec : IOpcodeCodec
                 $"ServerRedirect payload is {payload.Length} bytes, expected {WireSize}");
         }
 
-        int sectorId = BinaryPrimitives.ReadInt32BigEndian(payload[..4]);
-        int ipNetOrder = BinaryPrimitives.ReadInt32BigEndian(payload[4..8]);
+        int sectorId = BinaryPrimitives.ReadInt32LittleEndian(payload[..4]);
+        // ip_address: the wire bytes are the LE storage of a 32-bit int
+        // whose VALUE, fed into a Win32 sockaddr_in.s_addr, prints the
+        // right dotted-IP via inet_ntoa. inet_ntoa internally ntohl's
+        // s_addr to print high-octet first; on a little-endian client
+        // that gives bytes-as-read-from-wire reversed. To recover the
+        // human-readable IP here we read LE -> int -> write BE bytes ->
+        // hand to IPAddress (which treats input as network order). The
+        // net effect is "reverse the four wire bytes."
+        int ipValue = BinaryPrimitives.ReadInt32LittleEndian(payload[4..8]);
         ushort port = BinaryPrimitives.ReadUInt16LittleEndian(payload[8..10]);
 
-        // ipNetOrder is the raw 32-bit address read in network byte
-        // order (same order IPAddress(byte[]) expects, which is also
-        // network order). Pulling it back to bytes preserves that.
         Span<byte> ipBytes = stackalloc byte[4];
-        BinaryPrimitives.WriteInt32BigEndian(ipBytes, ipNetOrder);
+        BinaryPrimitives.WriteInt32BigEndian(ipBytes, ipValue);
 
         var endpoint = new IPEndPoint(new IPAddress(ipBytes.ToArray()), port);
         return new ServerRedirect(sectorId, endpoint);

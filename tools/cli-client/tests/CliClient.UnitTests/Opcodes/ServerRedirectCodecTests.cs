@@ -19,15 +19,21 @@ public sealed class ServerRedirectCodecTests
         Assert.Equal(0x0036, codec.Opcode.Value);
     }
 
+    /// <summary>
+    /// Synthetic round-trip: sector_id, ip_address, and port all read as
+    /// little-endian on the wire (the proxy memcpy's a packed struct
+    /// whose ints are already in the form the client expects).
+    /// </summary>
     [Fact]
-    public void Decode_ParsesSectorIdBigEndian()
+    public void Decode_ParsesAllFieldsLittleEndian()
     {
-        // sector_id = 0x12345678, ip_address = 10.0.0.1 (0x0A000001), port = 3500 (0x0DAC)
+        // sector_id = 0x12345678, ip = 10.0.0.1, port = 3500.
+        // Bytes laid out as the wire memcpy would store them on x86 LE.
         byte[] payload = new byte[]
         {
-            0x12, 0x34, 0x56, 0x78,             // sector_id (big-endian)
-            0x0A, 0x00, 0x00, 0x01,             // ip_address (big-endian = network order)
-            0xAC, 0x0D                          // port (LITTLE-endian — see codec comment)
+            0x78, 0x56, 0x34, 0x12,             // sector_id LE -> 0x12345678
+            0x01, 0x00, 0x00, 0x0A,             // ip LE int 0x0A000001 -> 10.0.0.1
+            0xAC, 0x0D,                         // port LE -> 0x0DAC = 3500
         };
 
         var codec = new ServerRedirectCodec();
@@ -38,17 +44,47 @@ public sealed class ServerRedirectCodecTests
         Assert.Equal(3500, result.ServerEndPoint.Port);
     }
 
+    /// <summary>
+    /// Real packet capture from
+    /// archive/kyp-snapshot/capturedPackets/capture_2.rar frame 222
+    /// (retail Net-7 master server, 2006). The exact 10 payload bytes
+    /// the client decoded into "connect to 159.153.232.97:3501 for
+    /// sector 10601 (Aragoth)". Pins our codec against ground truth.
+    /// </summary>
+    [Fact]
+    public void Decode_MatchesRetailCapture_Capture2Frame222()
+    {
+        byte[] payload = new byte[]
+        {
+            0x69, 0x29, 0x00, 0x00,             // sector_id LE = 0x2969 = 10601 Aragoth
+            0x61, 0xE8, 0x99, 0x9F,             // ip LE int 0x9F99E861 -> 159.153.232.97
+            0xAD, 0x0D,                         // port LE = 0x0DAD = 3501
+        };
+
+        var codec = new ServerRedirectCodec();
+        var result = (ServerRedirect)codec.DecodeInbound(payload);
+
+        Assert.Equal(10601, result.SectorId);
+        Assert.Equal(IPAddress.Parse("159.153.232.97"), result.ServerEndPoint.Address);
+        Assert.Equal(3501, result.ServerEndPoint.Port);
+    }
+
+    /// <summary>
+    /// Local-proxy round-trip: when the proxy is bound on 127.0.0.1,
+    /// its m_IpAddress is the inet_addr() value 0x0100007F (network
+    /// order). SendServerRedirect runs that through ntohl() and the
+    /// memcpy puts the post-swap LE-int bytes 01 00 00 7F on the wire.
+    /// The codec must round-trip that to 127.0.0.1 so the launcher
+    /// actually connects to the proxy's own sector port.
+    /// </summary>
     [Fact]
     public void Decode_HandlesProxyLocalRedirect()
     {
-        // Real-world ServerRedirect from proxy/ClientToMasterServer.cpp:
-        // proxy redirects to its own m_IpAddress + PROXY_LOCAL_TCP_PORT.
-        // sector_id = 1 (Earth sector), ip = 127.0.0.1, port = 3500.
         byte[] payload = new byte[]
         {
-            0x00, 0x00, 0x00, 0x01,             // sector 1
-            0x7F, 0x00, 0x00, 0x01,             // 127.0.0.1
-            0xAC, 0x0D                          // 3500 little-endian
+            0x01, 0x00, 0x00, 0x00,             // sector_id LE = 1 (Earth)
+            0x01, 0x00, 0x00, 0x7F,             // ip LE int 0x7F000001 -> 127.0.0.1
+            0xAC, 0x0D,                         // port LE = 3500
         };
 
         var codec = new ServerRedirectCodec();

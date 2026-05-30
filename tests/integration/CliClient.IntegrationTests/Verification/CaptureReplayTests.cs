@@ -72,20 +72,19 @@ public sealed class CaptureReplayTests
         var codec = new ServerRedirectCodec();
         var decoded = (ServerRedirect) codec.DecodeInbound(captured);
 
-        // sector_id is the documented byte-order divergence point. Our
-        // codec reads BE and matches our proxy's ntohl-then-dump path
-        // — see the fixture comment for the preservation discussion.
-        // The number is gibberish-large under BE interpretation; the
-        // test asserts what our codec produces today, not what retail
-        // "should" have meant. Catches a regression in our codec
-        // either way.
-        Assert.Equal(unchecked((int) 0x5FB00000), decoded.SectorId);
+        // sector_id read LE = 0xB05F = 45151, matching the ToSectorID
+        // the client sent in the preceding MasterJoin frame 220 (also
+        // captured in masterjoin_packet220.hex above). This pairing is
+        // the byte-level proof that the codec is faithful to retail
+        // wire format. Cross-checked against three more redirect frames
+        // (capture_1 656, 1062 and capture_2 222) -- all LE-on-wire.
+        Assert.Equal(45151, decoded.SectorId);
 
-        // ip_address read as BE → conventional dotted IP.
-        Assert.Equal("46.232.153.159", decoded.ServerEndPoint.Address.ToString());
+        // ip_address read LE = int 0x9F99E82E, fed through
+        // s_addr -> inet_ntoa it dots out to 159.153.232.46.
+        Assert.Equal("159.153.232.46", decoded.ServerEndPoint.Address.ToString());
 
-        // port read as LE → the well-known sector port. This is the
-        // strongest agreement we have with retail today.
+        // port read LE -> 3500.
         Assert.Equal(3500, decoded.ServerEndPoint.Port);
     }
 

@@ -51,11 +51,11 @@ public sealed class RetailCaptureTests
         var redirect = (ServerRedirect)codec.DecodeInbound(frame.Payload);
 
         // Wire bytes: 19 29 00 00 | 2C E8 99 9F | AF 0D
-        // sector_id    = BE int32 = 0x19290000 = 422576128
-        // ip_address   = BE int32 → bytes [0x2C, 0xE8, 0x99, 0x9F] → 44.232.153.159
+        // sector_id    = LE int32 = 0x00002919 = 10521 (an Aragoth-system sector)
+        // ip_address   = LE int32 0x9F99E82C -> as s_addr inet_ntoa's to 159.153.232.44
         // port         = LE uint16 = 0x0DAF = 3503
-        Assert.Equal(0x19290000, redirect.SectorId);
-        Assert.Equal(IPAddress.Parse("44.232.153.159"), redirect.ServerEndPoint.Address);
+        Assert.Equal(10521, redirect.SectorId);
+        Assert.Equal(IPAddress.Parse("159.153.232.44"), redirect.ServerEndPoint.Address);
         Assert.Equal(3503, redirect.ServerEndPoint.Port);
     }
 

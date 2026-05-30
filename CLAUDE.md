@@ -118,6 +118,70 @@ What is **NOT** an acceptable justification:
 
 This rule applies to `server/src/`, `login-server/Net7Mysql/`, `login-server/Net7SSL/`, and `proxy/`. It does NOT restrict changes that *tighten* the server toward greater fidelity (e.g. rejecting an input the real server rejected but we currently accept) -- those are always welcome.
 
+## Wire format & byte order (READ before touching ANY packet emitter)
+
+The EnB protocol predates portable serialization. Almost every packet
+that crosses a process boundary is a **packed C struct memcpy'd
+verbatim onto the socket** (`SendResponse((unsigned char*) &s,
+sizeof(s))` / `*((int*) p) = value`). The retail server, the retail
+client, and the proxy are all x86 little-endian, and the wire format
+*inherits* that. For nearly every numeric field, the on-wire bytes are
+the **little-endian** representation of the host-order integer.
+
+This bites in two reliable ways. Both have shipped real crashes:
+
+### Trap 1: `ntohl` / `htonl` on host-order data right before send
+
+`htonl` and `ntohl` are byte-swap macros on x86. If a field's source
+value is already in host order (a sector id, an avatar id, a slot
+number, a game id), then `redirect.field = ntohl(host_value)` puts the
+*byte-swapped* int into the struct. memcpy to wire yields BE-encoded
+bytes. The Win32 client reads LE, gets nonsense, looks it up in a
+pool, gets NULL, and crashes on the next vtable dispatch.
+
+This is exactly the `proxy/ClientToMasterServer.cpp` ServerRedirect
+crash. The fix: just assign the value (`redirect.sector_id = sector_id`).
+
+The ONLY legitimate use of `htonl`/`ntohl` on a send path is when the
+source value is genuinely in **network byte order** (`inet_addr`'s
+return value, `s_addr`, a field that was already byte-swapped on the
+receive side and stored that way). The IP-address slot in
+ServerRedirect is the canonical example -- `m_IpAddress` came from
+`inet_addr` and the `ntohl(m_ServerMgr.m_IpAddress)` IS correct
+there. Every other field in that struct is host-order and stays
+host-order on the wire.
+
+### Trap 2: stale docker images mask the source fix
+
+`just play-local` / `just run-stack-bg` use `docker compose up -d`,
+which reuses the existing image if the source has changed but the
+image hasn't been rebuilt. Fixing a bug in `proxy/`, `server/src/`,
+or `login-server/` and then re-running `play-local` will silently
+hand the old binary to the client and reproduce the original crash
+verbatim -- it will look like the fix did nothing. `play-local` now
+runs `docker compose build` and `--force-recreate` to defeat this;
+do NOT remove those steps. When you change C++ in the proxy/server
+and you're testing via docker, the image must be rebuilt.
+
+### Process when adding or changing a packet emitter
+
+1. **Find a real capture** of the same packet in
+   `archive/kyp-snapshot/capturedPackets/` (extract the relevant RAR
+   to `/tmp/` and `grep` for the opcode). If none exists, find one
+   for a structurally similar packet.
+2. **Build the struct, send it, capture the bytes, and diff against
+   the retail capture.** Byte-for-byte agreement is the bar.
+3. If the bytes differ on a field, the field's value-vs-byte-order
+   convention is wrong -- audit `htonl`/`ntohl` use on that field
+   first, then field type/size.
+4. Add a fixture under
+   `tests/integration/CliClient.IntegrationTests/Fixtures/Captures/`
+   and a `CaptureReplayTests.cs` `[Fact]` that pins the bytes, so a
+   future regression breaks the build.
+5. Cite the capture file + frame number in the commit message
+   (CLAUDE.md "Server integrity rules" requires this for ANY change
+   to server/proxy/login-server wire behaviour anyway).
+
 ## When you implement a new server-side opcode handler
 
 The integration suite tracks opcodes the Net-7 server does NOT implement in `tests/integration/CliClient.IntegrationTests/Coverage/KnownUnimplementedOpcodes.cs`. Each entry has a matching `[Fact(Skip = ...)]` stub in `UnimplementedOpcodeStubTests.cs` whose body throws `NotImplementedException` on the first line.
