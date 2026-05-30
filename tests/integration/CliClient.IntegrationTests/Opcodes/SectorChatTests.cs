@@ -22306,6 +22306,8 @@ public sealed class SectorChatTests
 
     private const string FactionStandingBoundsLiteral = "New faction standing must be between -9000 and 9999";
 
+    private const string EditPlayerFactionPlayerNotFoundLiteral = "Player 'noplayerfoo' not found";
+
     /// <summary>
     /// Wave 278 sibling-arm-pinning hardening (+0 ratchet): pins the
     /// 47-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
@@ -22962,6 +22964,171 @@ public sealed class SectorChatTests
                 $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
                 $"\"//editfaction 1 99999\" without seeing 0x001D MESSAGE_STRING equal to " +
                 $"\"{FactionStandingBoundsLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Wave 282 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 34-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
+    /// admin-tier <c>//editplayerfaction noplayerfoo 1 0</c> (target
+    /// player does not exist) on a fresh cli_test character. FIRST
+    /// SINGLE-QUOTE QUOTED-NAME pin in the HandleSlashCommands
+    /// catalogue. Structurally distinct from Wave 73 //bumpaccess foo
+    /// bar (BACKTICK-quoted "Player `foo` not found"): Wave 282 documents
+    /// that EditPlayerFactionStanding uses SINGLE QUOTES around the
+    /// player name (`Player '%s' not found` at PlayerMisc.cpp:1241)
+    /// rather than backticks. Two distinct Player-not-found format
+    /// strings exist in the codebase; this is the SECOND quote variant
+    /// pinned. FIRST EditPlayerFactionStanding code-path pin. FIRST
+    /// case-'e' admin ARM 2 pin (Wave 280/281 covered Arm 1
+    /// EditFactionStanding). FIRST case-'e' MULTI-ARM EXECUTION pin --
+    /// both arm 1 and arm 2 are plain `if` (not else-if); Wave 282
+    /// confirms arm 1 //editfaction does NOT match "editplayerfaction
+    /// noplayerfoo 1 0" (strncmp 11B fails at byte 4 'f' vs 'p') so
+    /// only arm 2 runs. ONE-HUNDRED-FORTY-SECOND overall byte-exact
+    /// dispatch pin. Assert.Equal pins the full 34-byte response shape
+    /// AND the literal content.
+    ///
+    /// <para>
+    /// Admin outer gate at PlayerConnection.cpp:4716 admits. pch=
+    /// &amp;Msg[2]="editplayerfaction noplayerfoo 1 0". Switch on 'e'.
+    /// case-'e' opens at 4891. Arm 1 at 4892: MatchOptWithParam(
+    /// "editfaction", "editplayerfaction noplayerfoo 1 0", ...):
+    /// strncmp 11B fails at byte 4 ('f' vs 'p'); returns false. NO
+    /// emit. Arm 2 at 4897: MatchOptWithParam("editplayerfaction",
+    /// pch, param, msg_sent): strncmp matches 17B; arg[17]=' ';
+    /// param=&amp;arg[18]="noplayerfoo 1 0"; returns true. Body at
+    /// 4899: success = EditPlayerFactionStanding("noplayerfoo 1 0").
+    /// Inside EditPlayerFactionStanding at PlayerMisc.cpp:1223:
+    /// p_name=strtok_s("noplayerfoo 1 0", " ") returns "noplayerfoo";
+    /// p_faction_id=strtok_s(NULL, " ") returns "1"; p_new_faction=
+    /// strtok_s(NULL, " ") returns "0". All non-NULL: predicate at
+    /// 1230 false. faction_id=atoi("1")=1. new_faction_standing=
+    /// atof("0")=0.0f. target=g_ServerMgr-&gt;m_PlayerMgr.GetPlayer(
+    /// "noplayerfoo") returns NULL (no such player). !target TRUE at
+    /// 1239. SendVaMessageC(17, "Player '%s' not found", "noplayerfoo")
+    /// at 1241 emits SINGLE 0x001D MESSAGE_STRING with body (30B,
+    /// COLOR=17). return true at 1242. Back in case-'e' at 4900:
+    /// msg_sent=true. case-'e' `break;` at 4902. NET RESULT: exactly
+    /// 1 0x001D emit "Player 'noplayerfoo' not found" (30B, COLOR=17).
+    /// Wire: `[u16 LE 31][u8 17][30B][NUL]` = 34 bytes. **+0 ratchet.**
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 4 NEW classes prior waves are structurally
+    /// blind to: (a) FIRST SINGLE-QUOTE QUOTED-NAME pin -- Wave 73
+    /// pinned BACKTICK `%s`; Wave 282 pins SINGLE-QUOTE '%s'. A
+    /// regression that unified quoting style would break one of the
+    /// two pins. The pin documents the upstream NET-7 quoting-style
+    /// inconsistency; (b) FIRST EditPlayerFactionStanding code-path
+    /// pin -- delegate now in dispatcher-coverage set; (c) FIRST case-'e'
+    /// admin ARM 2 pin -- previously only Arm 1 covered (Wave 280/281);
+    /// Wave 282 SINGLE-PINS the entire case-'e' admin branch when
+    /// combined with Wave 280/281; (d) FIRST case-'e' MULTI-ARM
+    /// EXECUTION pin -- both arms are plain `if` (not else-if), so a
+    /// regression that converted to else-if would still pass for
+    /// non-prefix-overlapping bodies but would break the case-'e'
+    /// fall-through invariant.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. //editplayerfaction is admin-tier with NO inline AdminLevel
+    /// gate -- the admin-tier outer gate at 4716 is the only access
+    /// check -- retail-faithful as preserved in source. cli_test
+    /// (ADMIN=100) passes the gate. GetPlayer returning NULL on
+    /// non-existent player name is the upstream-preserved invariant;
+    /// the pin DOCUMENTS that the lookup is case-sensitive and
+    /// non-fuzzy (regression that added prefix-matching would silently
+    /// match wrong players).
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashEditplayerfactionUnknownPlayer_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (31) = 34 bytes.
+        const int ExpectedReplyPayloadLength = 34;
+        const short ExpectedReplyLengthField = 31;
+        const byte ExpectedReplyColor = 17;
+        const int ExpectedLiteralByteCount = 30;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Eka", shipName: "EkaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//editplayerfaction noplayerfoo 1 0");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(EditPlayerFactionPlayerNotFoundLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(EditPlayerFactionPlayerNotFoundLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//editplayerfaction noplayerfoo 1 0\" without seeing 0x001D MESSAGE_STRING " +
+                $"equal to \"{EditPlayerFactionPlayerNotFoundLiteral}\".");
         }
         finally
         {
