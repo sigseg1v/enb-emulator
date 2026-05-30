@@ -171,12 +171,20 @@ gen-certs:
 # Bring up the full runtime stack (postgres + schema-init + server +
 # login + proxy). Server image is built on demand. Streams logs in the
 # foreground; Ctrl-C to stop.
+#
+# Includes `proxy` (and not just server + login) so the docker proxy is
+# what the WINE client TCP-connects to on localhost:3801 / :3805 / :3500.
+# Keeping the proxy in-network means proxy <-> server UDP never crosses
+# the docker NAT, which dodges the rootless-docker slirp4netns conntrack
+# pitfall on the sector reverse-push from MVASauth:3806. The xUnit
+# integration suite (ServerFixture `compose up -d --wait`) also brings
+# the proxy up; this keeps `just dev` parity with the test stack.
 run-stack: init
-    docker compose up server login
+    docker compose up server login proxy
 
 # Same but detached.
 run-stack-bg: init
-    docker compose up -d server login
+    docker compose up -d server login proxy
 
 # Convenience: legacy name. Same as run-stack-bg.
 dev: run-stack-bg
@@ -189,19 +197,36 @@ dev: run-stack-bg
 #   just play-local /home/me/.wine/drive_c/.../release/client.exe
 #   ENB_CLIENT_PATH=... just play-local
 #
+# Architecture (2026-05-29 rewrite):
+#   The recipe brings up the FULL docker-compose stack (postgres + server +
+#   login + PROXY) and then launches the launcher, which only spawns
+#   client.exe under WINE. There is NO WINE-side Net7Proxy.exe.
+#
+#   The client connects TCP to the docker proxy on localhost:3801 / :3805 /
+#   :3500 (port-published). The docker proxy speaks UDP to the docker
+#   server entirely INSIDE the docker network -- no host-side UDP, no
+#   docker NAT on the in-game plane.
+#
+#   Why this matters: on rootless docker (slirp4netns / pasta) the sector
+#   reverse-push from MVASauth:3806 to (proxy_ip, proxy_global_src_port)
+#   crosses a UDP conntrack mapping that wasn't established by an inbound
+#   flow on that exact 5-tuple. slirp drops it. The visible symptom is
+#   "Re-send Ack request 3" + "Player ... timed out during login stage 3"
+#   in the server log, with the client hung on Enter Galaxy. Keeping the
+#   proxy in-network sidesteps the whole rootless-docker NAT class of bugs.
+#
 # Steps the recipe performs:
-#   1. `just run-stack-bg`           — postgres + server + login (no proxy).
-#   2. `just stop-docker-proxy`      — the WINE proxy binds the same host
-#                                      ports as the docker proxy.
-#   3. `just build-proxy-win64`      — idempotent; ensures bin/Net7Proxy.exe.
-#   4. Pre-writes LaunchNet7.settings.json so the launcher opens with
+#   1. `just run-stack-bg`           -- postgres + server + login + proxy.
+#   2. Pre-writes LaunchNet7.settings.json so the launcher opens with
 #      Emulator=Net7Local, Host=localhost, port 4443 (the dev stack's
 #      host-side mapping of the login container's 443). The launcher's
 #      in-process LocalAuthRelay terminates the client's plaintext-HTTP
-#      auth call on 127.0.0.1 and re-wraps it as TLS to the upstream —
+#      auth call on 127.0.0.1 and re-wraps it as TLS to the upstream --
 #      so we don't need the WINE prefix to trust the dev cert (verify
 #      is skipped only because upstream is loopback).
-#   5. Runs the launcher so the spawned WINE proxy knows where to forward.
+#   3. Runs the launcher. Net7Local in LaunchNet7.cfg deliberately has
+#      no launchName attribute, so Launcher.cs's switch falls to its
+#      default case = LaunchClient() only (skip LaunchNet7Proxy).
 #
 # Click Play in the GUI; the client should connect to the local server.
 play-local CLIENT_PATH='':
@@ -216,14 +241,8 @@ play-local CLIENT_PATH='':
         exit 1
     fi
 
-    echo ">>> bringing up local stack (postgres + server + login)"
+    echo ">>> bringing up local stack (postgres + server + login + proxy)"
     just run-stack-bg
-
-    echo ">>> stopping docker proxy if running (WINE proxy will take its place)"
-    just stop-docker-proxy >/dev/null 2>&1 || true
-
-    echo ">>> ensuring bin/Net7Proxy.exe is built"
-    just build-proxy-win64
 
     echo ">>> building launcher (so its output dir exists for settings.json)"
     dotnet build tools/launchnet7-avalonia >/dev/null
@@ -249,31 +268,8 @@ play-local CLIENT_PATH='':
     : "${WINEPREFIX:=$HOME/.wine-enb}"
     export WINEPREFIX
 
-    # UDP routing for proxy<->server: always localhost.
-    #
-    # The compose stack publishes the server's UDP ports (3501-3800, 3808,
-    # 3810) to the host. Localhost reaches them via docker's port forwarder
-    # in both rootful and rootless modes.
-    #
-    # Earlier this recipe tried to resolve the server container's docker
-    # bridge IP via `docker inspect` in rootful mode -- the theory was that
-    # going direct to the bridge dodges a conntrack pitfall on the sector
-    # reverse-push. In practice the detection was brittle (one bad shell
-    # state and the recipe silently set NET7_GAME_SERVER_HOST to a bridge
-    # IP that's unreachable in rootless), and the localhost path through
-    # the docker forwarder is sufficient for the auth + ticket flow. If
-    # sector zone-in misbehaves on rootful, run `just dev` for the
-    # dockerised proxy (which is in-network and doesn't NAT at all).
-    #
-    # An explicit NET7_GAME_SERVER_HOST in the environment still wins via
-    # the override path in proxy/Net7.cpp; this just provides the default.
-    SERVER_IP=localhost
-
-    echo ">>> launching (WINEPREFIX=$WINEPREFIX, NET7_UPSTREAM_HOST=localhost, NET7_GAME_SERVER_HOST=$SERVER_IP) -- click Play in the GUI"
-    env -u NET7_GAME_SERVER_HOST -u NET7_UPSTREAM_HOST \
-        NET7_UPSTREAM_HOST=localhost \
-        NET7_GAME_SERVER_HOST="$SERVER_IP" \
-        dotnet run --no-build --project tools/launchnet7-avalonia
+    echo ">>> launching (WINEPREFIX=$WINEPREFIX) -- click Play in the GUI"
+    dotnet run --no-build --project tools/launchnet7-avalonia
 
 # Stream all logs in the foreground.
 dev-fg:
