@@ -22338,6 +22338,8 @@ public sealed class SectorChatTests
 
     private const string FindsectorHeaderZzzNoMatchLiteral = "Sectors like 'ZZZNOMATCH':";
 
+    private const string FindUserTierBacktickNotFoundLiteral = "Player `ghostfoo` not found!";
+
     /// <summary>
     /// Wave 278 sibling-arm-pinning hardening (+0 ratchet): pins the
     /// 47-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
@@ -25463,6 +25465,150 @@ public sealed class SectorChatTests
                 $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
                 $"\"//findsector ZZZNOMATCH\" without seeing 0x001D MESSAGE_STRING " +
                 $"equal to \"{FindsectorHeaderZzzNoMatchLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Wave 101 sibling-arm-pinning hardening (+0 ratchet): pins the 32-byte
+    /// wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to user-tier
+    /// <c>/find ghostfoo</c> (GetPlayer returns NULL) on a fresh cli_test
+    /// character. FIRST USER-TIER BACKTICK Player-not-found pin -- ALL prior
+    /// BACKTICK "Player `%s` not found" pins are admin-tier (Wave 73
+    /// //bumpaccess DEV-gated case-'b' arm 2; Wave 289/W92 //ban no-gate
+    /// case-'b' arm 1; Wave 290/W93 //gmgetaccess case-'g' arm 1; Wave 291/W94
+    /// //gmsetaccess SDEV-compound-gated case-'g' arm 2). Wave 101 pins the
+    /// USER-TIER variant via /find arm at PlayerConnection.cpp:6345.
+    /// FIRST EXCLAMATION-TERMINATED BACKTICK pin -- prior BACKTICK literals
+    /// emit "Player `%s` not found" (27B, no trailing !); Wave 101 pins
+    /// "Player `ghostfoo` not found!" (28B WITH trailing "!"). FIRST 28-byte
+    /// BACKTICK-with-exclamation variant pin. FIRST /find body pin -- prior
+    /// /find dispatch was pinned at the MatchOptWithParam Missing-arg
+    /// fallback (Wave 258 /find no-param "Missing arg for option find").
+    /// /find arm now DOUBLY-PINNED across BOTH MatchOptWithParam polarities
+    /// (no-param Missing-arg + with-param GetPlayer-NULL). FIVE-ARM BACKTICK
+    /// FAMILY pin -- the "Player `%s` not found" format string is now
+    /// reachable via FIVE distinct HandleSlashCommands dispatch paths (W73
+    /// admin DEV-gated, W92 admin no-gate, W93 admin no-gate, W94 admin
+    /// SDEV-gated, W101 user-tier no-gate); a regression that conflated the
+    /// dispatchers into a shared helper would pass byte-equality on the
+    /// 27B variants but fail the 28B-with-exclamation variant (DIFFERENT
+    /// FORMAT STRING). ONE-HUNDRED-FIFTY-EIGHTH overall byte-exact dispatch
+    /// pin. Assert.Equal pins the full 32-byte response shape AND the
+    /// literal content.
+    ///
+    /// <para>
+    /// User-tier dispatch at PlayerConnection.cpp:5434 admits (Msg[0]='/'
+    /// AND Msg[1]='f' non-zero AND !msg_sent=true). pch="find ghostfoo".
+    /// Switch on 'f'. case-'f' user-tier opens around 6283. Arm 1 //form
+    /// GM-gated strncmp 4B fails; Arm 2 strcmp("flushinv") fails (length);
+    /// Arm 3 strcmp("factionset") fails; Arm 4 strcmp("factionoverride")
+    /// fails (length); Arm 5 strcmp("fetch") fails (length). Arm 6 at 6345:
+    /// MatchOptWithParam("find", "find ghostfoo", ...) strncmp 4B matches;
+    /// arg[4]=' '; param="ghostfoo"; returns true. Body at 6347:
+    /// target=g_ServerMgr-&gt;m_PlayerMgr.GetPlayer("ghostfoo")=NULL.
+    /// if(target) FALSE at 6348 → else at 6353: SendVaMessage(
+    /// "Player `%s` not found!", "ghostfoo") (DEFAULT COLOR=5; 28B body
+    /// "Player `ghostfoo` not found!" with EXPLICIT trailing "!"). msg_sent
+    /// =true at 6356. case-'f' user-tier closes. NET RESULT: exactly 1
+    /// 0x001D emit. Wire: [u16 LE 29][u8 5][28B][NUL] = 32 bytes.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. /find is user-tier with NO AdminLevel gate (anyone can search
+    /// for online players) -- retail-faithful as preserved in source.
+    /// GetPlayer returning NULL on non-existent player name is the
+    /// upstream-preserved offline-check invariant. The pin DOCUMENTS the
+    /// user-tier-BACKTICK with-exclamation path byte-for-byte; TIGHTENS
+    /// toward preservation. No state mutation.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashFindOfflineTarget_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (29) = 32 bytes.
+        const int ExpectedReplyPayloadLength = 32;
+        const short ExpectedReplyLengthField = 29;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 28;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Hola", shipName: "HolaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/find ghostfoo");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(FindUserTierBacktickNotFoundLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(FindUserTierBacktickNotFoundLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/find ghostfoo\" without seeing 0x001D MESSAGE_STRING " +
+                $"equal to \"{FindUserTierBacktickNotFoundLiteral}\".");
         }
         finally
         {
