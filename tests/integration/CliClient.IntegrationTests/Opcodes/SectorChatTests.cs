@@ -18282,6 +18282,208 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 256 sibling-arm-pinning hardening (+0 ratchet) literal anchor
+    /// for the 14-byte ASCII body "GM channel on." that the server emits
+    /// when user-tier <c>/gmon</c> (SINGLE slash, NO param) arrives on a
+    /// cli_test (AdminLevel=100) account. Matcher at
+    /// PlayerConnection.cpp:6493 (arm 7 of case-'g' user-tier opened at
+    /// 6449); emit at PlayerConnection.cpp:6499 via the default
+    /// SendVaMessage(...) (COLOR=5). FIRST case-'g' user-tier SUCCESS-
+    /// BODY pin (Waves 182/186/187 pinned the case-'g' user-tier matcher-
+    /// failure ERROR forks for /gm, /gc, /getgmitems respectively; Wave
+    /// 256 lands the FIRST happy-path body emit on the same case-letter).
+    /// FIRST inner GM-gated body pin in case-'g' user-tier (the outer
+    /// strcmp matches on pch="gmon" before the inner AdminLevel()&gt;=GM
+    /// guard at 6495 evaluates; cli_test=100 clears the guard).
+    /// </summary>
+    private const string GmonLiteral = "GM channel on.";
+
+    /// <summary>
+    /// Wave 256 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 18-byte wire-shape of the single 0x001D MESSAGE_STRING reply to
+    /// user-tier <c>/gmon</c> on a fresh cli_test character. FIRST
+    /// case-'g' user-tier SUCCESS-BODY pin (case-'g' user-tier was
+    /// TRIPLE-PINNED on matcher-failure forks only; Wave 256 promotes
+    /// to QUADRUPLE-PINNED with the FIRST happy-path body emit). FIRST
+    /// MatchOptWithParam ISALPHA-FALLTHROUGH cascade-traversal validator
+    /// in case-'g' user-tier -- pch="gmon" feeds the /gm matcher at 6484,
+    /// which finds the 2-byte "gm" prefix, observes arg[2]='o' is alpha,
+    /// and returns FALSE WITHOUT emitting "Missing arg for option gm"
+    /// (the isalpha branch at MatchOptWithParam line 4537 short-circuits
+    /// before the missing-arg emit at 4548); the else-if cascade then
+    /// continues to the next arm (/gmon strcmp at 6493) which matches.
+    /// FIRST inner GM-guarded body emit pin in case-'g' user-tier. ONE-
+    /// HUNDRED-FIFTEENTH overall byte-exact dispatch pin. Assert.Equal
+    /// pins the full 18-byte response shape.
+    ///
+    /// <para>
+    /// User-tier outer gate at 5434 admits. Switch at 5442 jumps on
+    /// *pch='g' -&gt; case-'g' opens at PlayerConnection.cpp:6449.
+    /// case-'g' walk for pch="gmon":
+    ///   arm 1 MatchOptWithParam("gc", pch="gmon", true) at 6450 --
+    ///     strncmp("gc","gmon",2) byte 1 'c' vs 'm' NON-ZERO -&gt;
+    ///     false; PLAIN-`if` so the next arm is still evaluated.
+    ///   arm 2 else-if AdminLevel()&gt;=GM && MatchOptWithParam("gmgc",
+    ///     pch, true) at 6456 -- AdminLevel()=100 short-circuits TRUE;
+    ///     matcher strncmp("gmgc","gmon",4) byte 2 'g' vs 'o' NON-ZERO
+    ///     -&gt; false. arm 1's PLAIN-`if` already chained arm 2 as
+    ///     else-if; both fail.
+    ///   arm 3 PLAIN-`if` MatchOptWithParam("getgmitems", pch, true) at
+    ///     6462 -- strncmp("getgmitems","gmon",10) byte 1 'e' vs 'm'
+    ///     NON-ZERO -&gt; false; PLAIN-`if` so the next arm is still
+    ///     evaluated.
+    ///   arm 4 else-if strncmp(pch, "global ", 7) at 6470 -- byte 1
+    ///     'l' vs 'm' NON-ZERO -&gt; non-zero; skip (chained off arm 3).
+    ///   arm 5 else-if MatchOptWithParam("gm", pch="gmon") at 6484 --
+    ///     strncmp("gm","gmon",2) == 0 (2B prefix match); arg[2]='o' --
+    ///     NOT '=' or ' '; isalpha('o') TRUE -&gt; matcher returns
+    ///     false WITHOUT emit. The && AdminLevel()&gt;=GM short-circuit
+    ///     never reached. else-if false; skip.
+    ///   arm 6 else-if AdminLevel()&gt;=GM && MatchOptWithParam("gmon",
+    ///     ...) -- WAIT, no such arm: the next arm is the strcmp at
+    ///     6493. Let me restate: arm 6 is else-if strcmp(pch, "gmon")
+    ///     == 0 at 6493 -- 4B vs 4B FULL match -&gt; enter. Inner gate
+    ///     AdminLevel()=100 &gt;= GM=50 at 6495 admits. channel_id =
+    ///     g_PlayerMgr-&gt;GetChannelFromName("GM") at 6497;
+    ///     m_ChannelSubscription[channel_id] = true at 6498;
+    ///     SendVaMessage("GM channel on.") at 6499 emits body "GM
+    ///     channel on." (14B), COLOR=5 default; msg_sent=true; success
+    ///     =true at 6500-6501.
+    ///   arms 7+ (else-if strcmp("gmoff",pch), /goto, etc) short-
+    ///     circuited by arm 6's else-if match. case-'g' breaks at
+    ///     ~6705 (before case-'h' at 6707).
+    /// NET RESULT: ONE 0x001D MESSAGE_STRING emit. Wire: `[u16 LE 15]
+    /// [u8 5][14B ASCII "GM channel on."][NUL]` = 18 bytes.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 4 NEW classes prior waves are structurally
+    /// blind to: (a) FIRST case-'g' user-tier SUCCESS-BODY pin -- Waves
+    /// 182/186/187 pinned the matcher-failure paths only; Wave 256 lands
+    /// the FIRST happy-path body. A regression that broke SendVaMessage
+    /// (e.g. swapped to SendVaMessageC with a different colour) would
+    /// fire the COLOR=5 + literal assertions; a regression that changed
+    /// the literal text would fire the body assertion. (b) FIRST
+    /// MatchOptWithParam ISALPHA-FALLTHROUGH cascade-traversal validator
+    /// -- the /gm matcher at 6484 finds the 2B prefix but observes
+    /// arg[2]='o' is alpha and returns FALSE WITHOUT emitting "Missing
+    /// arg for option gm". A regression that removed the isalpha branch
+    /// at MatchOptWithParam:4537 would make /gm fire "Missing arg" on
+    /// every command starting with "gm..." (including /gmon, /gmoff,
+    /// /gmgc, etc.), short-circuiting the cascade and breaking ALL such
+    /// commands; Wave 256 catches by asserting the "GM channel on."
+    /// literal arrives (proving /gm did NOT consume the dispatch). (c)
+    /// FIRST inner GM-guarded body emit pin in case-'g' user-tier --
+    /// the inner `if (AdminLevel() &gt;= GM)` guard at 6495 wraps the
+    /// emit. A regression that raised the inner guard to SDEV or DEV
+    /// would silently break /gmon for GM-tier accounts; Wave 256 anchors
+    /// the GM=50 minimum threshold via cli_test=100. (d) FIRST stateful
+    /// channel-subscription pin -- the m_ChannelSubscription[GM] flip
+    /// at 6498 precedes the emit. A regression that moved the emit
+    /// BEFORE the flip would not break the wire-shape but would break
+    /// the dispatch semantics; the pin's primary value is the emit-
+    /// site validation, not the flip ordering.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. The /gmon arm is a retail-faithful slash-command dispatch.
+    /// m_ChannelSubscription is per-character chat-channel subscription
+    /// state matching the existing server behaviour. cli_test=100
+    /// satisfies the inner GM gate at 6495 unconditionally; the outer
+    /// user-tier gate at 5434 has no AdminLevel requirement.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashGmon_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (15) = 18 bytes.
+        const int ExpectedReplyPayloadLength = 18;
+        const short ExpectedReplyLengthField = 15;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 14;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Gmona", shipName: "GmonaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/gmon");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(GmonLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(GmonLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/gmon\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{GmonLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
