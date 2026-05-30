@@ -21357,6 +21357,190 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 273 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
+    /// the 30-byte ASCII body "Your inventory is now flushed!" that the
+    /// user-tier <c>/flushinv</c> arm emits at PlayerConnection.cpp:6304
+    /// after walking the cargo-inventory slot array (loop entered for all
+    /// CargoSpace slots, body NOT entered for any slot on a fresh
+    /// character because every slot's ItemTemplateID is the default -1).
+    /// SendAuxShip() at 6303 fires UNCONDITIONALLY before the MESSAGE_STRING
+    /// emit -- this companion ship-aux opcode is filtered out by the test's
+    /// 0x001D opcode filter but is documented here so the structural
+    /// invariant is captured.
+    /// </summary>
+    private const string YourInventoryFlushedLiteral = "Your inventory is now flushed!";
+
+    /// <summary>
+    /// Wave 273 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 34-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
+    /// user-tier <c>/flushinv</c> on a fresh cli_test character with
+    /// empty default cargo inventory. FIRST POST-LOOP UNCONDITIONAL
+    /// SUCCESS-EMIT pin -- prior post-match success pins (Waves 59/60
+    /// gmon/gmoff, Wave 75 factionoverride) fired emits NOT preceded
+    /// by a for-loop that walks a state-array. FIRST EMPTY-LOOP-BODY-
+    /// SKIPPED pin -- the for body at 6294 iterates ShipIndex()-&gt;
+    /// Inventory.GetCargoSpace() slots but the if-guard at 6296
+    /// (<c>ItemTemplateID() != -1</c>) is FALSE for every slot on a
+    /// freshly-created character (all slots default-constructed with
+    /// template-id -1), so SaveInventoryChange at 6299 is never
+    /// invoked. FIRST COMPANION-AUX-OPCODE pin -- SendAuxShip() at
+    /// 6303 fires UNCONDITIONALLY before the MESSAGE_STRING emit;
+    /// a single client command produces TWO different opcode replies
+    /// in sequence (ship-aux + 0x001D). SECOND USER-TIER CASE-'f'
+    /// POST-MATCH pin -- joins Wave 75 /factionoverride. ONE-HUNDRED-
+    /// THIRTY-THIRD overall byte-exact dispatch pin. Assert.Equal pins
+    /// the full 34-byte response shape.
+    ///
+    /// <para>
+    /// User-tier outer gate at PlayerConnection.cpp:5434 admits. pch=
+    /// &amp;Msg[1]="flushinv". Switch jumps on 'f'. case-'f' at 6280.
+    /// Cascade walks: strcmp(pch, "form") false (6283), strcmp(pch,
+    /// "flushinv") at 6291 TRUE. Enters strcmp-equal arm body. For-loop
+    /// at 6294: walks slots 0..CargoSpace-1. Each iteration: if-guard
+    /// at 6296 <c>ShipIndex()-&gt;Inventory.CargoInv.Item[Slot].
+    /// GetItemTemplateID() != -1</c> evaluates FALSE on a fresh
+    /// character (every cargo slot is default-constructed with
+    /// template-id -1). Body at 6298-6300 SKIPPED for every slot.
+    /// Loop exits clean with no SaveInventoryChange calls fired.
+    /// SendAuxShip() at 6303 fires UNCONDITIONALLY -- emits a ship-aux
+    /// opcode (NOT 0x001D) that the test filter drops. SendVaMessage
+    /// ("Your inventory is now flushed!") at 6304 emits SINGLE 0x001D
+    /// MESSAGE_STRING with body (30B, COLOR=5 default).
+    /// success=true, msg_sent=true at 6306-6307. Remaining case-'f'
+    /// arms (else-if cascade through factionset, factionoverride, fetch,
+    /// face, faceme, faceawayfromme, fgps, fireweapon) NOT walked
+    /// because they live in the else-if cascade and the active arm is
+    /// the strcmp("flushinv") arm. Trailing illegal-command fallback at
+    /// 7702-7705 suppressed by msg_sent=true.
+    /// </para>
+    ///
+    /// <para>
+    /// Wire: `[u16 LE 31][u8 5][30B][NUL]` = 34 bytes. length field =
+    /// 30 (body) + 1 (NUL) = 31. COLOR=5 (default SendVaMessage) is
+    /// byte span[2].
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 4 NEW classes prior waves are structurally
+    /// blind to: (a) FIRST POST-LOOP UNCONDITIONAL SUCCESS-EMIT pin --
+    /// a regression that moved SendVaMessage INSIDE the for-loop body
+    /// would emit zero MESSAGE_STRING frames on a fresh char (empty
+    /// cargo) and the drain-max-frames sentinel fires; (b) FIRST EMPTY-
+    /// LOOP-BODY-SKIPPED pin -- a regression that changed the ItemTemplate
+    /// default from -1 to 0 (or removed the if-guard) would invoke
+    /// SaveInventoryChange on every slot, blowing up the test budget
+    /// with DB chatter and exposing a state-pollution risk; (c) FIRST
+    /// COMPANION-AUX-OPCODE pin -- documents that SendAuxShip fires
+    /// BEFORE the MESSAGE_STRING; a regression that swapped the order
+    /// (SendVaMessage first then SendAuxShip) would not be caught by
+    /// the 0x001D-only filter but the test STRUCTURE pins the
+    /// invariant in the doc; (d) SECOND USER-TIER CASE-'f' POST-MATCH
+    /// pin -- joins Wave 75 /factionoverride; brings strcmp-equal
+    /// POST-MATCH coverage to TWO arms in user-tier case-'f' (4 distinct
+    /// strcmp-equal arms remain: factionset, fetch, face, faceme,
+    /// faceawayfromme, fgps, fireweapon).
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. /flushinv is user-tier with NO inline AdminLevel gate --
+    /// retail-faithful as preserved in source. The cargo-inventory walk
+    /// is the canonical "wipe my own cargo" idiom; SaveInventoryChange
+    /// persists per-slot DB writes only for non-empty slots (zero writes
+    /// on a fresh character). Character is destroyed at test cleanup so
+    /// no DB state leaks.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashFlushinv_FreshChar_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (31) = 34 bytes.
+        const int ExpectedReplyPayloadLength = 34;
+        const short ExpectedReplyLengthField = 31;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 30;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Flusha", shipName: "FlushaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/flushinv");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(YourInventoryFlushedLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(YourInventoryFlushedLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/flushinv\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{YourInventoryFlushedLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
