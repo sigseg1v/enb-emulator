@@ -19567,6 +19567,203 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 263 sibling-arm-pinning hardening (+0 ratchet) literal anchor
+    /// for the 50-byte ASCII body "Syntax: //gmskillpoints &lt;playername&gt;
+    /// &lt;skillpoints&gt;" emitted by the admin-tier case-'g' arm at
+    /// PlayerConnection.cpp:5296 when <c>//gmskillpoints foo</c> arrives
+    /// with EXACTLY ONE space-separated arg. SECOND POST-MATCH-SYNTAX-
+    /// VALIDATION pin -- distinct from Wave 262 (gmsetaccess one-arg) by
+    /// (a) NO inline AdminLevel gate (vs gmsetaccess's SDEV gate at 5221),
+    /// (b) sets <c>msg_sent=true</c> + <c>success=false</c> at 5297-5298
+    /// then FALLS THROUGH (vs gmsetaccess's <c>return;</c> early exit
+    /// at 5229), (c) different strtok_s structure: <c>SSkillPoints</c>
+    /// is checked AFTER the <c>Username</c>-nullity guard at 5266,
+    /// then the <c>if (SSkillPoints)</c> at 5272 selects the OK vs
+    /// syntax-error branches.
+    /// </summary>
+    private const string SyntaxGmskillpointsLiteral = "Syntax: //gmskillpoints <playername> <skillpoints>";
+
+    /// <summary>
+    /// Wave 263 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 54-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
+    /// admin-tier <c>//gmskillpoints foo</c> on a fresh cli_test character.
+    /// SECOND POST-MATCH-SYNTAX-VALIDATION pin in the HandleSlashCommands
+    /// catalogue -- exercises a structurally distinct exit pattern from
+    /// Wave 262: (a) NO inline AdminLevel gate (gmskillpoints is admitted
+    /// purely by the outer GM gate at 4716), (b) <c>msg_sent=true</c> +
+    /// <c>success=false</c> + FALL-THROUGH (vs <c>return;</c> in Wave 262
+    /// which exits HandleSlashCommands entirely), (c) different
+    /// strtok_s structure (Username-then-SSkillPoints, with Username
+    /// nullity-guarded BEFORE SSkillPoints is read -- vs gmsetaccess's
+    /// flat strtok_s pair). ONE-HUNDRED-TWENTY-THIRD overall byte-exact
+    /// dispatch pin. Assert.Equal pins the full 54-byte response shape.
+    ///
+    /// <para>
+    /// Admin-tier outer gate at PlayerConnection.cpp:4716 (<c>Msg[0]=='/'
+    /// &amp;&amp; Msg[1]=='/' &amp;&amp; AdminLevel() &gt;= GM</c>)
+    /// admits; cli_test=100 vs GM=50 satisfies. pch=&amp;Msg[2]=
+    /// "gmskillpoints foo". Switch at 4724 jumps on *pch='g'. case-'g'
+    /// arm at 5205. Three preceding matchers FAIL on strncmp mismatch
+    /// (gmgetaccess: 'g'!='s' at index 2; gmsetaccess: 'e'!='k' at
+    /// index 3; ALL fail without firing missing-arg error since the
+    /// outer strncmp guard at 4530 is false). MatchOptWithParam(
+    /// "gmskillpoints", pch, param, msg_sent) at 5260 evaluates:
+    /// strncmp("gmskillpoints", pch, 13)==0; pch[13]=' ' satisfies the
+    /// space-delimiter branch at 4532; param = pch + 14 = "foo";
+    /// matcher returns true. NO inline AdminLevel gate.
+    /// </para>
+    ///
+    /// <para>
+    /// Handler body at 5261-5299 runs: <c>Username = strtok_s(param, " ",
+    /// &amp;next_token)</c> returns "foo"; <c>if (Username)</c> true,
+    /// so <c>SSkillPoints = strtok_s(NULL, " ", &amp;next_token)</c>
+    /// returns NULL; <c>if (SSkillPoints)</c> nested guard FALSE so
+    /// <c>SkillPoints</c> is NEVER initialized (dead assignment if
+    /// nested). The OUTER <c>if (SSkillPoints)</c> check at 5272
+    /// evaluates FALSE; control enters the else-branch at 5294.
+    /// SendVaMessage("Syntax: //gmskillpoints &lt;playername&gt;
+    /// &lt;skillpoints&gt;") at 5296 (NO format args). COLOR=5
+    /// default. <c>success = false; msg_sent = true;</c> at 5297-5298.
+    /// Control FALLS THROUGH out of this matcher block; subsequent
+    /// case-'g' matchers (gmenableskills, gmplayerlevel, gmupgrade)
+    /// run but all fail on strncmp mismatch. Admin-tier case-'g' arm
+    /// closes; control falls to admin-tier switch close at 5431 with
+    /// msg_sent=true and success=false. NET RESULT: exactly 1 emit
+    /// "Syntax: //gmskillpoints &lt;playername&gt; &lt;skillpoints&gt;"
+    /// (50B, COLOR=5). Wire: `[u16 LE 51][u8 5][50B ASCII][NUL]` =
+    /// 54 bytes. User-tier fallback at 7702 (<c>!success &amp;&amp;
+    /// !msg_sent</c>) -- !msg_sent=false -- DOES NOT fire (key proof
+    /// that msg_sent=true suppresses the trailing fallback even when
+    /// success=false).
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 4 NEW classes prior waves (incl. Wave 262)
+    /// are structurally blind to: (a) FIRST msg_sent=true-with-success=
+    /// false POST-MATCH pin -- a regression that flipped EITHER bool
+    /// (msg_sent=false would let the trailing fallback fire and emit
+    /// "Illegal slash command: gmskillpoints foo"; success=true would
+    /// signal "command succeeded" semantically wrong) would fail this
+    /// test; (b) FIRST FALL-THROUGH-FROM-POST-MATCH-SYNTAX-ERROR pin --
+    /// Wave 262 uses return; Wave 263 uses bool flags + fall-through.
+    /// A regression that changed gmskillpoints' fall-through to return
+    /// would still pass this test, but a regression that changed
+    /// gmsetaccess's return to fall-through would fail Wave 262.
+    /// Together the two waves pin BOTH exit conventions; (c) FIRST
+    /// NO-INLINE-GATE POST-MATCH pin -- gmskillpoints has NO inline
+    /// AdminLevel gate (the outer GM gate at 4716 is the only check),
+    /// vs gmsetaccess's SDEV inline gate. A regression that added an
+    /// SDEV gate to gmskillpoints would cause non-SDEV cli_test (if
+    /// any) to fail this test; cli_test=100 satisfies SDEV anyway so
+    /// the test passes -- the pin is about the LITERAL emit; (d)
+    /// FIRST NESTED-strtok_s NULLITY-GUARD pin -- pins the nested
+    /// <c>if (Username)</c> wrapping the SSkillPoints read at 5266-5270.
+    /// A regression that removed the inner guard would not change
+    /// behavior for this test (Username is always "foo" not NULL),
+    /// but a regression that swapped the guard order (SSkillPoints
+    /// first) would crash on NULL deref.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. The msg_sent=true-with-success=false POST-MATCH pattern
+    /// is retail-faithful -- gmskillpoints uses this convention by
+    /// design so that the trailing fallback doesn't double-emit
+    /// "Illegal slash command" on syntax-error inputs while still
+    /// signaling success=false to the caller. cli_test=100 satisfies
+    /// the outer GM gate at 4716.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashGmskillpointsOneArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (51) = 54 bytes.
+        const int ExpectedReplyPayloadLength = 54;
+        const short ExpectedReplyLengthField = 51;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 50;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Galen", shipName: "GalenShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//gmskillpoints foo");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(SyntaxGmskillpointsLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(SyntaxGmskillpointsLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//gmskillpoints foo\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{SyntaxGmskillpointsLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
