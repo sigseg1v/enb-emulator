@@ -29005,4 +29005,210 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 305 (commit-counter Wave 108) sibling-arm-pinning hardening
+    /// (+0 ratchet): pins the structural wire-shape of the single
+    /// 0x001D MESSAGE_STRING reply to user-tier <c>/uptime</c> (NO param)
+    /// on a fresh cli_test character -- FIRST DYNAMIC-CONTENT-PREFIX-PIN
+    /// in HandleSlashCommands. The body is built from a printf format
+    /// string with THREE %d substitutions
+    /// (<c>"Uptime: %d Hour(s) %d Min(s) %d Sec(s)"</c>) whose values
+    /// change per invocation; the pin asserts the FIXED structural
+    /// invariants byte-for-byte (literal prefix "Uptime: ", literal
+    /// suffix " Sec(s)", embedded markers " Hour(s) " and " Min(s) ",
+    /// COLOR=5, length-prefix consistency, single NUL terminator) while
+    /// allowing the three %d substitutions to vary.
+    ///
+    /// <para>
+    /// Dispatch flow:
+    /// <list type="number">
+    /// <item>Client sends 8-byte 0x0033 CLIENT_CHAT body=<c>"/uptime\0"</c>.</item>
+    /// <item>User-tier dispatch entered at 5434 (Msg[0]='/', Msg[1]='u'
+    ///       non-zero, !msg_sent=true).</item>
+    /// <item><c>pch=&amp;Msg[1]="uptime"</c>. case-'u' user-tier opens at
+    ///       7575.</item>
+    /// <item>Arm 1 at 7576: <c>MatchOptWithParam("uitrigger", "uptime",
+    ///       ...)</c> strncmp 9B differs at byte 1 ('i' vs 'p') -- silent
+    ///       FALSE (no "Missing arg" emit because the prefix didn't
+    ///       match at all).</item>
+    /// <item>Arm 2 at 7593: <c>MatchOptWithParam("upgrade", "uptime",
+    ///       ...)</c> strncmp 7B; byte 0 'u' matches, byte 1 'p' matches
+    ///       'p', byte 2 'g' vs 't' MISMATCH -- silent FALSE.</item>
+    /// <item>Arm 3 at 7607: <c>strcmp(pch, "undockp")=="u"</c>: byte 1
+    ///       'p' vs 'n' MISMATCH -- silent FALSE (no emit).</item>
+    /// <item>Arm 4 at 7614: <c>strcmp(pch, "uptime")==0</c> -- MATCH.
+    ///       <c>success=true; msg_sent=true</c>.</item>
+    /// <item>Body at 7618-7621: <c>RSec=GetNet7TickCount()/1000;
+    ///       Sec=RSec%60; Min=(RSec/60)%60; Hours=RSec/3600</c>.</item>
+    /// <item>Emit at 7623: <c>SendVaMessage("Uptime: %d Hour(s) %d Min(s)
+    ///       %d Sec(s)", Hours, Min, Sec)</c> (DEFAULT COLOR=5; body
+    ///       varies with current server uptime). case-'u' breaks at
+    ///       7625. Trailing illegal-slash fallback at 7702 SKIPPED
+    ///       (msg_sent=true). NET RESULT: exactly 1 0x001D emit.</item>
+    /// </list>
+    /// </para>
+    ///
+    /// <para>
+    /// Wire prefix: <c>[u16 LE len+1][u8 5]"Uptime: "...</c>. The body
+    /// length depends on the digit-counts of Hours/Min/Sec; the pin
+    /// validates structural invariants rather than byte-exact length.
+    /// </para>
+    ///
+    /// <para>Novel structural axes vs prior waves:</para>
+    /// <list type="bullet">
+    ///   <item><b>FIRST DYNAMIC-CONTENT-PREFIX-PIN in HandleSlashCommands</b>
+    ///     -- every prior wave (W34-W304) asserted byte-exact wire-shape
+    ///     because the body literal was static. /uptime is the FIRST
+    ///     dispatch in HandleSlashCommands where the emit content varies
+    ///     per invocation (Hours/Min/Sec change with each call). The
+    ///     pin asserts FIXED structural invariants byte-for-byte
+    ///     (prefix/suffix/markers/COLOR/length-consistency/NUL) while
+    ///     allowing the three %d substitutions to vary. A regression
+    ///     that altered the format string, dropped a marker, or changed
+    ///     the COLOR would break this pin even though the digit values
+    ///     vary.</item>
+    ///   <item><b>FIRST SUCCESS-PATH pin in case-'u' user-tier</b> --
+    ///     W154 (/uitrigger) pinned arm 1 MatchOpt ERROR-fork
+    ///     (msg_sent=true, success=false, "Missing arg" emit); W157
+    ///     (/upgrade) pinned arm 2 MatchOpt ERROR-fork (same). Wave
+    ///     305 is the FIRST pin in case-'u' user-tier where
+    ///     <c>success=true</c> is set (arm 4 strcmp-MATCH at 7616).
+    ///     case-'u' user-tier now TRIPLY-PINNED across THREE distinct
+    ///     arms (W154 arm 1 + W157 arm 2 + W305 arm 4) AND TWO
+    ///     distinct dispatch outcomes (MatchOpt ERROR-fork + strcmp
+    ///     SUCCESS).</item>
+    ///   <item><b>FIRST 4-ARM CASCADE TERMINAL-strcmp-MATCH pin</b> --
+    ///     /uptime sits at the END of a 4-arm cascade in case-'u'
+    ///     (arm 1 MatchOpt strncmp-skip silent, arm 2 MatchOpt
+    ///     strncmp-skip silent, arm 3 strcmp("undockp") skip silent,
+    ///     arm 4 strcmp("uptime") MATCH). A regression that broke
+    ///     case-'u' fall-through (e.g. converted ELSE-IF to
+    ///     CONSECUTIVE-IF, or reordered arms so /uptime moved BEFORE
+    ///     /undockp) would change either the emit count or the order
+    ///     of strcmp evaluation.</item>
+    ///   <item><b>FIRST 3x %d SINGLE-FORMAT-STRING SUBSTITUTION pin</b>
+    ///     -- prior dynamic-content waves used 0 or 1 substitutions
+    ///     (e.g. backtick %s for player names in W92/W93/W94, single
+    ///     %d in /openif W69). /uptime emits THREE %d in a single
+    ///     SendVaMessage call. A regression in the vararg packing,
+    ///     a swap of Hours/Min/Sec parameter order, or a printf
+    ///     format-specifier change (%d to %ld or %u) would break this
+    ///     pin via the structural marker positions.</item>
+    ///   <item><b>FIRST GetNet7TickCount-DERIVED-CONTENT pin</b> -- the
+    ///     emit values come directly from
+    ///     <c>GetNet7TickCount()</c>; a regression that broke the
+    ///     uptime arithmetic (e.g. divided by 1000000 instead of
+    ///     1000 for seconds, or computed Min from RSec rather than
+    ///     RSec/60) would still produce structurally-valid output
+    ///     but the values would be nonsense; the structural pin
+    ///     catches format-string regressions, not value regressions
+    ///     -- but it DOES guard the format-string itself
+    ///     byte-for-byte.</item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md): no permissiveness
+    /// added. /uptime is user-tier with NO AdminLevel gate (baseline
+    /// informational command). GetNet7TickCount is a read-only counter
+    /// (no state mutation). The emit is the upstream-preserved
+    /// informational invariant; the format-string and COLOR are pinned
+    /// byte-for-byte. Pin DOCUMENTS the case-'u' user-tier SUCCESS path
+    /// structurally; TIGHTENS toward preservation by guarding the
+    /// dynamic-content format string against silent regression.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashUptime_OnAdminAccount_PinsExactReplyWirePrefix()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        const string UptimePrefix = "Uptime: ";
+        const string UptimeSuffix = " Sec(s)";
+        const string UptimeHourMarker = " Hour(s) ";
+        const string UptimeMinMarker = " Min(s) ";
+        const byte ExpectedReplyColor = 5;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Upmu", shipName: "UpmuShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/uptime");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.StartsWith(UptimePrefix, StringComparison.Ordinal))
+                    continue;
+
+                // Structural invariants: COLOR, format markers, length
+                // consistency, NUL terminator. Dynamic %d substitutions
+                // (Hours/Min/Sec) are NOT byte-pinned.
+                Assert.Equal(ExpectedReplyColor, span[2]);
+                Assert.EndsWith(UptimeSuffix, text);
+                Assert.Contains(UptimeHourMarker, text);
+                Assert.Contains(UptimeMinMarker, text);
+
+                // length-prefix u16 covers body+NUL.
+                Assert.Equal(text.Length + 1, msgLen);
+                // Payload = u16(2) + color(1) + body + NUL.
+                Assert.Equal(3 + text.Length + 1, span.Length);
+                // NUL terminator after body.
+                Assert.Equal((byte)0x00, span[3 + text.Length]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/uptime\" without seeing 0x001D MESSAGE_STRING starting with " +
+                $"\"{UptimePrefix}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
