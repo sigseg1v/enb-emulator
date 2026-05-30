@@ -17878,6 +17878,209 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 254 sibling-arm-pinning hardening (+0 ratchet) literal anchor
+    /// for the 36-byte ASCII body "Setting new sound warning level to 2"
+    /// that the server emits when user-tier <c>/shieldwarnings 2</c>
+    /// arrives. Matcher at PlayerConnection.cpp:7272 (arm 10 of case-'s'
+    /// user-tier opened at 7136). FIRST COLOR=13 pin overall -- a NEW
+    /// colour byte distinct from the existing COLOR=5 (default), COLOR=12,
+    /// COLOR=10, and COLOR=17 family already pinned across the test
+    /// catalogue.
+    /// </summary>
+    private const string ShieldwarningsLevel2Literal = "Setting new sound warning level to 2";
+
+    /// <summary>
+    /// Wave 254 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 40-byte wire-shape of the 0x001D MESSAGE_STRING reply to user-tier
+    /// <c>/shieldwarnings 2</c> (WITH param) on a fresh cli_test character.
+    /// FIRST COLOR=13 pin overall -- the existing pin catalogue covers
+    /// COLOR=5 (SendVaMessage default), COLOR=10 (findsector listings),
+    /// COLOR=12 (e.g. /range distance reports), and COLOR=17 (Waves 125
+    /// /notells, 126 /noattack, 253 /invisible). Wave 254 lands the FIRST
+    /// COLOR=13 byte assertion, plugging a colour-byte coverage gap and
+    /// catching any regression that swapped <c>SendVaMessageC(13, ...)</c>
+    /// for the default-colour <c>SendVaMessage(...)</c> or a different
+    /// colour code. FIRST WITH-PARAM happy-path pin on /shieldwarnings
+    /// (Wave 165 pinned the NO-PARAM "Missing arg" failure path; Wave 254
+    /// pins the WITH-PARAM success path). FIRST byte-exact pin on the
+    /// case-'s' arm 10 cascade body (Wave 165 pinned the MatchOptWithParam
+    /// matcher's missing-arg fallback; Wave 254 pins the body that runs
+    /// when the matcher SUCCEEDS). ONE-HUNDRED-THIRTEENTH overall byte-
+    /// exact dispatch pin. Assert.Equal pins the full 40-byte response
+    /// shape.
+    ///
+    /// <para>
+    /// User-tier outer gate at 5434 admits. Switch at 5442 jumps on
+    /// *pch='s' -&gt; case-'s' opens at PlayerConnection.cpp:7136.
+    /// case-'s' walk for pch="shieldwarnings 2":
+    ///   arm 1 strcmp("slaysectormobs", pch) -- byte 1 'l' vs 'h' NON-ZERO
+    ///     -&gt; skip.
+    ///   arm 2 MatchOptWithParam("script", pch) -- strncmp byte 1 'c' vs
+    ///     'h' NON-ZERO -&gt; false.
+    ///   arm 3 MatchOptWithParam("sounds", pch) -- strncmp byte 1 'o' vs
+    ///     'h' NON-ZERO -&gt; false.
+    ///   arm 4 strcmp("setturrets", pch) -- byte 1 'e' vs 'h' NON-ZERO
+    ///     -&gt; skip.
+    ///   arm 5 strcmp("setrespawns", pch) -- byte 1 'e' vs 'h' NON-ZERO
+    ///     -&gt; skip.
+    ///   arm 6 MatchOptWithParam("scale", pch) -- strncmp byte 1 'c' vs
+    ///     'h' NON-ZERO -&gt; false.
+    ///   arm 7 MatchOptWithParam("skillpoints", pch) -- strncmp byte 1 'k'
+    ///     vs 'h' NON-ZERO -&gt; false.
+    ///   arm 8 MatchOptWithParam("stat", pch) -- strncmp byte 1 't' vs 'h'
+    ///     NON-ZERO -&gt; false.
+    ///   arm 9 MatchOptWithParam("scan", pch) -- strncmp byte 1 'c' vs 'h'
+    ///     NON-ZERO -&gt; false.
+    ///   arm 10 MatchOptWithParam("shieldwarnings", pch="shieldwarnings 2")
+    ///     at 7272: strncmp("shieldwarnings","shieldwarnings 2",14) ->
+    ///     14B FULL prefix match; arg[14]=' ' -&gt; param="2"; returns
+    ///     true. Body at 7273-7283 runs: warning_level = (char)atoi("2")
+    ///     = 2; the clamp (`if &gt; 4 || &lt; 0`) does NOT fire; emit
+    ///     SendVaMessageC(13, "Setting new sound warning level to %d", 2)
+    ///     at 7279 with COLOR=13 explicit; m_SoundWarningSetting = 2 at
+    ///     7280; SaveAudioWarnLvl() at 7281 (per-character DB persist,
+    ///     retail-faithful). success=true; msg_sent=true.
+    ///   arms 11+ (DEV-gated /signature /setradius /shutdown ...): the
+    ///     outer cascade is else-if so arm 10's match short-circuits the
+    ///     rest. case-'s' breaks at 7459.
+    /// NET RESULT: ONE 0x001D MESSAGE_STRING emit. Wire: `[u16 LE 37]
+    /// [u8 13][36B ASCII "Setting new sound warning level to 2"][NUL]`
+    /// = 40 bytes.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 3 NEW classes prior waves are structurally
+    /// blind to: (a) FIRST COLOR=13 byte assertion overall -- a regression
+    /// that swapped <c>SendVaMessageC(13, ...)</c> for default
+    /// <c>SendVaMessage(...)</c> (COLOR=5) would silently degrade the
+    /// shield-warning message colour on every retail client; Wave 254
+    /// catches by asserting span[2]==13. A regression that swapped the
+    /// colour byte to any other value (e.g. 12, 17) would also fire the
+    /// assertion. (b) FIRST WITH-PARAM happy-path pin on /shieldwarnings
+    /// -- Wave 165 pinned the NO-PARAM "Missing arg for option
+    /// shieldwarnings" path; Wave 254 pins the orthogonal WITH-PARAM
+    /// success path. A regression that broke the MatchOptWithParam
+    /// "arg[len]==' '" branch (treating space-separated args as missing)
+    /// would fire BOTH Wave 165 (would no longer pass on no-param) and
+    /// Wave 254 (would no longer pass on with-param). (c) FIRST byte-
+    /// exact pin on the case-'s' arm 10 cascade BODY -- pinning the
+    /// matcher's failure path (Wave 165) does not exercise the body at
+    /// 7273-7283. A regression that changed the format string ("Setting
+    /// new sound warning level to" -&gt; anything else), changed the
+    /// %d format spec, or moved the emit to a different colour function
+    /// would all fire the literal+colour+length assertions.
+    /// </para>
+    ///
+    /// <para>
+    /// CLAMP BRANCH: the source clamps warning_level to 2 if it falls
+    /// outside [0, 4]. Sending "/shieldwarnings 99" or "/shieldwarnings
+    /// -5" would also emit "Setting new sound warning level to 2"
+    /// (clamp default = 2). Wave 254 sends literal "2" to take the
+    /// clamp-not-fired path; a separate later wave could pin the clamp-
+    /// fired path with "/shieldwarnings 99" but would emit IDENTICAL
+    /// bytes, so the regression value is low (the clamp default landing
+    /// at 2 is captured incidentally here).
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. The /shieldwarnings arm is a retail-faithful slash-command
+    /// dispatch. m_SoundWarningSetting + SaveAudioWarnLvl() is per-
+    /// character DB persist matching the existing server behaviour;
+    /// cli_test=100 satisfies the outer user-tier gate at 5434
+    /// unconditionally; no inner AdminLevel guard exists on this arm.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashShieldwarningsLevel2_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (37) = 40 bytes.
+        const int ExpectedReplyPayloadLength = 40;
+        const short ExpectedReplyLengthField = 37;
+        const byte ExpectedReplyColor = 13;
+        const int ExpectedLiteralByteCount = 36;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Sheia", shipName: "SheiaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/shieldwarnings 2");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(ShieldwarningsLevel2Literal, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(ShieldwarningsLevel2Literal, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/shieldwarnings 2\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{ShieldwarningsLevel2Literal}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
