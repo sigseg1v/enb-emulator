@@ -20820,6 +20820,191 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 270 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
+    /// the 22-byte ASCII body "Player `foo` not found" (NOTE: BACKTICKS
+    /// quote the player name) that the admin-tier //bumpaccess arm emits
+    /// at PlayerConnection.cpp:4803 when the named target player is not
+    /// online. Matcher at PlayerConnection.cpp:4789 with COMPOUND-AND
+    /// admin-gate `MatchOptWithParam(...) && AdminLevel() &gt;= DEV`.
+    /// THIRD distinct "player not found" literal variant in the codebase
+    /// (after "Could not find player %s" at 6714/7528 pinned by Waves
+    /// 268/269, and "Player %s not online." at the gmupgrade site pinned
+    /// by Wave 265).
+    /// </summary>
+    private const string PlayerBacktickFooNotFoundLiteral = "Player `foo` not found";
+
+    /// <summary>
+    /// Wave 270 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 26-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
+    /// admin-tier <c>//bumpaccess foo bar</c> on a fresh cli_test
+    /// character (AdminLevel=100=ADMIN, &gt;= DEV=80) with no online
+    /// player named "foo". FIRST BACKTICK-QUOTED-NAME emit pin in the
+    /// HandleSlashCommands catalogue. FIRST COMPOUND-MATCHER-AND-ADMIN-
+    /// GATE pin -- distinct from Wave 265 (gmupgrade NESTED-INLINE-GATE
+    /// where the gate is inside the matcher body) and from prior
+    /// admin-tier arms gated by the outer //+GM gate at 4716 alone.
+    /// THIRD distinct "player not found" literal variant pinned.
+    /// ONE-HUNDRED-THIRTIETH overall byte-exact dispatch pin. Assert.Equal
+    /// pins the full 26-byte response shape.
+    ///
+    /// <para>
+    /// Admin-tier outer gate at PlayerConnection.cpp:4716 requires
+    /// <c>Msg[0]=='/' &amp;&amp; Msg[1]=='/' &amp;&amp; Msg[2]!=0 &amp;&amp;
+    /// AdminLevel() &gt;= GM</c>. cli_test ADMIN=100 &gt;= GM=50 admits.
+    /// pch=&amp;Msg[2]="bumpaccess foo bar". Switch jumps on 'b'.
+    /// case-'b' arm. Eventually reaches arm at 4789: the COMPOUND
+    /// gate <c>MatchOptWithParam("bumpaccess", "bumpaccess foo bar",
+    /// param, msg_sent) &amp;&amp; AdminLevel() &gt;= DEV</c>. First
+    /// operand: strncmp matches 10B; pch[10]=' '; param="foo bar";
+    /// returns true. Second operand: AdminLevel()=100 &gt;= DEV=80 true.
+    /// Compound result: true. Body at 4791: <c>Username = strtok_s(
+    /// "foo bar", " ", &amp;next_token) = "foo"</c>; <c>Access =
+    /// strtok_s(NULL, " ", &amp;next_token) = "bar"</c>. Both non-NULL
+    /// -- skip the 4796 syntax-error path. Body at 4800: <c>target =
+    /// g_PlayerMgr-&gt;GetPlayer("foo")</c> returns NULL (no online
+    /// player). if-guard at 4801: <c>if (!target)</c> evaluates true.
+    /// <c>SendVaMessage("Player `%s` not found", "foo")</c> at 4803
+    /// emits a SINGLE 0x001D MESSAGE_STRING with body
+    /// "Player `foo` not found" (22B, COLOR=5 default). `return;` at
+    /// 4804 exits HandleSlashCommands ENTIRELY -- skips the access-level
+    /// promotion code at 4807-4828, skips msg_sent/success assignments,
+    /// skips remaining case-'b' arms AND the trailing admin-tier
+    /// illegal-command fallback.
+    /// </para>
+    ///
+    /// <para>
+    /// Wire: `[u16 LE 23][u8 5][22B][NUL]` = 26 bytes. length field = 22
+    /// (body) + 1 (NUL) = 23. Body contains TWO literal backtick (0x60)
+    /// bytes at positions 7 and 11 quoting the substituted player name.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 4 NEW classes prior waves are structurally
+    /// blind to: (a) FIRST BACKTICK-QUOTED-NAME emit pin -- the body
+    /// "Player `foo` not found" contains two backtick (ASCII 0x60)
+    /// bytes around the %s substitution. A regression that changed the
+    /// quoting to apostrophes (') or removed it altogether would change
+    /// byte count and content; (b) FIRST COMPOUND-MATCHER-AND-ADMIN-
+    /// GATE pin -- the inline `&amp;&amp; AdminLevel() &gt;= DEV` after
+    /// MatchOptWithParam is a distinct pattern from Wave 265's nested-
+    /// inline-gate (where the gate is INSIDE the matcher body) and from
+    /// the implicit outer //+GM gate at 4716. A regression that loosened
+    /// the inline DEV check (e.g. to BETA) would permit lower-tier
+    /// admins to trigger this code path; (c) THIRD distinct "player
+    /// not found" LITERAL pin -- the codebase has THREE variants
+    /// ("Could not find player %s" at 6714/7528, "Player %s not online."
+    /// at the gmupgrade site, "Player `%s` not found" here). A
+    /// consolidation refactor unifying them would need byte-exact
+    /// preservation at each site. This pin catches changes to the
+    /// //bumpaccess variant specifically; (d) FIRST CASE-'b' POST-MATCH
+    /// EARLY-RETURN pin in the admin-tier catalogue -- prior post-match
+    /// pins (262-269) fired from case-'g', case-'o', case-'p', case-'t',
+    /// case-'i'. case-'b' brings a new case-letter dispatch arm into
+    /// the pinned set.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. //bumpaccess is admin-tier with DEV gate inline at 4789 --
+    /// retail-faithful as preserved in source. The backtick-quoted name
+    /// in "Player `%s` not found" is the canonical wording in this code
+    /// path; the source comment at 4789 notes "this allows a dev to
+    /// recruit helpers" -- consistent with the DEV inline gate.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashBumpaccessUnknownPlayer_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (23) = 26 bytes.
+        const int ExpectedReplyPayloadLength = 26;
+        const short ExpectedReplyLengthField = 23;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 22;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Brina", shipName: "BrinaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//bumpaccess foo bar");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(PlayerBacktickFooNotFoundLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(PlayerBacktickFooNotFoundLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                // Confirm the two backtick bytes (0x60) at positions 7 and 11 of the body.
+                Assert.Equal((byte)0x60, span[3 + 7]);
+                Assert.Equal((byte)0x60, span[3 + 11]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//bumpaccess foo bar\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{PlayerBacktickFooNotFoundLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
