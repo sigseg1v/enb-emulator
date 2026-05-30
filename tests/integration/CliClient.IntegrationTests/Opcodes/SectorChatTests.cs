@@ -17672,6 +17672,212 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 253 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
+    /// the 20-byte ASCII body "Total Invisiblity on" that the server emits
+    /// when GM-gated user-tier single-slash <c>/invisible</c> arrives on
+    /// FIRST invocation (initial m_ScanInvisible=false; the format string
+    /// substitutes the value of `m_ScanInvisible ? "off" : "on"` BEFORE the
+    /// toggle, so a freshly-created character receives "on"). Matcher at
+    /// PlayerConnection.cpp:6732 (arm 2 of case-'i' user-tier opened at
+    /// 6708, inside the inner GM gate at 6730). FIRST case-'i' user-tier
+    /// pin. The source string is misspelled "Invisiblity" (11 letters,
+    /// missing one 'i' between 'l' and 't') -- the pin captures the
+    /// misspelling verbatim because that is the byte-exact retail wire
+    /// shape; do NOT silently correct the spelling in the server.
+    /// </summary>
+    private const string InvisibleFirstInvocationLiteral = "Total Invisiblity on";
+
+    /// <summary>
+    /// Wave 253 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 24-byte wire-shape of the 0x001D MESSAGE_STRING reply to user-tier
+    /// single-slash <c>/invisible</c> on a fresh cli_test character.
+    /// FIRST case-'i' user-tier pin overall, case-'i' user-tier promoted
+    /// from UNPINNED to SINGLE-PINNED. THIRD COLOR=17 cross-letter pin
+    /// (after Wave 125 case-'n' /notells and Wave 126 case-'n' /noattack,
+    /// both COLOR=17). FIRST case-'i' GM-gated inner cascade pin -- arm 2
+    /// at PlayerConnection.cpp:6732 lives inside the
+    /// <c>if (AdminLevel() &gt;= GM)</c> block at 6730. FIRST stateful-
+    /// toggle pin in case-'i' (m_ScanInvisible flips false-&gt;true after
+    /// the emit; the emit reports the OLD state's complement, which on
+    /// first invocation = "on"). ONE-HUNDRED-TWELFTH overall byte-exact
+    /// dispatch pin. Assert.Equal pins the full 24-byte response shape.
+    ///
+    /// <para>
+    /// User-tier outer gate at 5434 admits. Switch at 5442 jumps on
+    /// *pch='i' -&gt; case-'i' opens at PlayerConnection.cpp:6708.
+    /// case-'i' walk for pch="invisible":
+    ///   arm 1 `if MatchOptWithParam("invite", pch="invisible", ...)`
+    ///     at 6709: strncmp("invite","invisible",6) byte 4 't' vs 's'
+    ///     NON-ZERO -&gt; false, NO emit (MatchOptWithParam only fires
+    ///     "Missing arg" when the prefix matches but neither '='/' '/
+    ///     alpha follows; prefix didn't match here).
+    ///   inner GM gate at 6730: AdminLevel()=ADMIN(100) &gt;= GM(50) -&gt; enter.
+    ///   arm 2 `if strcmp(pch, "invisible")` at 6732: 9B vs 9B FULL match
+    ///     -&gt; SendVaMessageC(17, "Total Invisiblity %s",
+    ///     m_ScanInvisible ? "off" : "on") at 6734. m_ScanInvisible is
+    ///     FALSE (post-handshake default for newly created characters),
+    ///     so the substitution yields "on" -&gt; full body "Total
+    ///     Invisiblity on". COLOR=17 (explicitly passed). m_ScanInvisible
+    ///     flips to TRUE at 6735. BlankRangeList() at 6737 runs because
+    ///     m_ScanInvisible is now true (no other players visible in a
+    ///     fresh single-character sector, so the range-list flush is a
+    ///     no-op on the wire). success=true; msg_sent=true.
+    ///   arm 3 `else if strcmp(pch, "invis")` at 6743 chained off arm 2:
+    ///     arm 2's else-if was TRUE so cascade SKIPS arm 3.
+    /// case-'i' breaks. NET RESULT: ONE 0x001D MESSAGE_STRING emit.
+    /// Wire: `[u16 LE 21][u8 17][20B ASCII "Total Invisiblity on"][NUL]`
+    /// = 24 bytes.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 4 NEW classes prior waves are structurally
+    /// blind to: (a) FIRST case-'i' user-tier pin overall -- extends
+    /// case-letter coverage to include 'i' (catches regression where the
+    /// case-'i' label at PlayerConnection.cpp:6708 is deleted, mis-cased,
+    /// or its dispatch table entry collides with another letter); (b)
+    /// FIRST case-'i' GM-gated inner cascade pin -- arm 2 lives inside
+    /// the inner `if (AdminLevel() &gt;= GM)` block. A regression that
+    /// raised the gate to DEV or above would silently break /invisible
+    /// for GM-tier accounts; the pin catches by asserting reply receipt
+    /// at the cli_test ADMIN(100) tier. (c) THIRD COLOR=17 cross-letter
+    /// pin -- joins Wave 125 case-'n' /notells (COLOR=17, "Allow tells
+    /// on", 14B literal) and Wave 126 case-'n' /noattack (COLOR=17,
+    /// "Combat immunity on", 18B literal). A regression that swapped
+    /// SendVaMessageC for SendVaMessage (color 5 default) on this arm
+    /// would fire the COLOR=17 assertion. (d) FIRST stateful-toggle pin
+    /// in case-'i' -- m_ScanInvisible begins FALSE on a fresh character
+    /// and the emit fires the OLD state's complement before the flip.
+    /// A regression that swapped the ternary branches ("off" / "on" -&gt;
+    /// "on" / "off") would emit "Total Invisiblity off" on first
+    /// invocation, firing the literal assertion. A regression that moved
+    /// the m_ScanInvisible flip BEFORE the emit would emit "Total
+    /// Invisiblity off" (post-flip state's complement) and also fire the
+    /// literal assertion.
+    /// </para>
+    ///
+    /// <para>
+    /// IMPORTANT: the source spells "Invisiblity" (11 letters, missing
+    /// one 'i' between 'l' and 't') -- this is a verbatim copy of the
+    /// retail-faithful format string at PlayerConnection.cpp:6734. The
+    /// pin captures the misspelling. A maintainer who "corrects" the
+    /// spelling to "Invisibility" (12 letters) without primary-source
+    /// proof of retail behavior would fire BOTH the literal assertion
+    /// AND the length-field assertion (length would shift from 21 to
+    /// 22). Per CLAUDE.md server-integrity rules, the spelling stays
+    /// as-is until a primary source proves otherwise.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. The /invisible arm is a retail-faithful slash-command
+    /// dispatch. The m_ScanInvisible toggle is per-character flag state
+    /// matching the existing server behaviour; BlankRangeList() flushes
+    /// visibility relative to other players in sector (no-op for a
+    /// single-character sector). cli_test=100 satisfies the inner GM
+    /// gate at 6730 unconditionally.
+    /// </para>
+    ///
+    /// <para>
+    /// SHARP EDGE: the toggle means the test MUST invoke /invisible
+    /// exactly once on a never-before-invoked Player object to assert
+    /// "Total Invisiblity on". A retry harness that re-sends /invisible
+    /// on flake would observe "Total Invisiblity off" on the second
+    /// attempt (m_ScanInvisible=true after first emit -&gt; second emit
+    /// reports complement = "off"). The TestAccounts.New +
+    /// SectorHandshake.EstablishAsync pattern guarantees a fresh
+    /// character each run, so the pin holds.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashInvisible_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (21) = 24 bytes.
+        const int ExpectedReplyPayloadLength = 24;
+        const short ExpectedReplyLengthField = 21;
+        const byte ExpectedReplyColor = 17;
+        const int ExpectedLiteralByteCount = 20;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Invia", shipName: "InviaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/invisible");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(InvisibleFirstInvocationLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(InvisibleFirstInvocationLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/invisible\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{InvisibleFirstInvocationLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
