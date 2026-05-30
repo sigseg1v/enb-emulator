@@ -21949,6 +21949,176 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 276 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
+    /// the 35-byte ASCII body "//displayplayerfaction &lt;playername&gt;" that
+    /// admin-tier <c>//displayplayerfaction</c> emits at PlayerConnection.cpp:4873
+    /// when the post-MatchOptWithParam param resolves to NULL via strtok_s. Pinned
+    /// with COLOR=17 (joins Wave 56 /invisible as the SECOND COLOR=17 pin overall).
+    /// </summary>
+    private const string DisplayPlayerFactionUsageLiteral = "//displayplayerfaction <playername>";
+
+    /// <summary>
+    /// Wave 276 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 39-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
+    /// admin-tier <c>//displayplayerfaction</c> with a TRAILING SPACE (no
+    /// player-name param) on a fresh cli_test character. FIRST ADMIN-TIER
+    /// CASE-'d' PIN -- prior case-'d' coverage is empty (Wave 209
+    /// /destroyobject pinned only that single arm without exercising the
+    /// case body's strtok_s-NULL path). FIRST POST-MATCH STRTOK_S-NULL
+    /// EARLY-RETURN pin -- prior post-MatchOptWithParam pins (Wave 65
+    /// gmsetaccess, Wave 67 gmplayerlevel, Wave 68 gmupgrade) failed
+    /// inside POST-strtok_s logic (bounds-check, player-lookup); Wave 276
+    /// fails ON the strtok_s call itself (returns NULL on empty param after
+    /// the matched space). FIRST COLOR=17 admin-tier pin (Wave 56's
+    /// /invisible was user-tier COLOR=17). SECOND COLOR=17 pin overall.
+    /// ONE-HUNDRED-THIRTY-SIXTH overall byte-exact dispatch pin.
+    /// Assert.Equal pins the full 39-byte response shape.
+    ///
+    /// <para>
+    /// Admin outer gate at PlayerConnection.cpp:4716 (Msg[0]=='/' &amp;&amp;
+    /// Msg[1]=='/' &amp;&amp; AdminLevel()&gt;=GM) admits. pch=&amp;Msg[2]=
+    /// "displayplayerfaction ". Switch on 'd'. case-'d' opens at 4858.
+    /// Arm 1 at 4859: strcmp(pch, "displayfactions") -- at byte 7 'p'!='f'
+    /// mismatch, false. Arm 2 at 4865: MatchOptWithParam(
+    /// "displayplayerfaction", pch="displayplayerfaction ", param,
+    /// msg_sent): strncmp matches 20B; arg[20]=' '; param=&amp;arg[21]=""
+    /// (empty string after the matched space); returns true. Body at 4867:
+    /// char *p_name = strtok_s("", " ", &amp;next_token) returns NULL on
+    /// empty-string input. !p_name TRUE at 4871. SendVaMessageC(17,
+    /// "//displayplayerfaction &lt;playername&gt;") at 4873 emits SINGLE
+    /// 0x001D MESSAGE_STRING with body (35B, COLOR=17). `return;` at 4874
+    /// exits HandleSlashCommands ENTIRELY -- skips Arm 3 at 4884
+    /// (/destroyobject) AND the trailing illegal-command fallback.
+    /// </para>
+    ///
+    /// <para>
+    /// Wire: `[u16 LE 36][u8 17][35B][NUL]` = 39 bytes. length field = 35
+    /// (body) + 1 (NUL) = 36. Total payload = 2 (length prefix) + 1 (color)
+    /// + 35 (body) + 1 (NUL) = 39.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 4 NEW classes prior waves are structurally
+    /// blind to: (a) FIRST ADMIN-TIER CASE-'d' MULTI-ARM pin -- brings
+    /// admin-tier case-'d' into the dispatcher-coverage set beyond the
+    /// single Wave 209 /destroyobject arm; (b) FIRST POST-MATCH STRTOK_S-
+    /// NULL early-return pin -- exercises a code path where strtok_s on
+    /// an empty post-MatchOptWithParam param returns NULL; a regression
+    /// that changed strtok_s to strtok would behave identically here but
+    /// a regression that pre-validated the param (e.g. added a
+    /// `if (!*param) return;` guard before strtok_s) would change the
+    /// emit byte-shape; (c) FIRST COLOR=17 admin-tier pin -- prior
+    /// COLOR=17 coverage was user-tier only (Wave 56 /invisible). A
+    /// regression that consolidated COLOR=17 emits behind a shared
+    /// admin/user helper would need to preserve both byte-shapes;
+    /// (d) FIRST SECONDARY-PARAM-NULL EARLY-RETURN pin in admin-tier --
+    /// the return at 4874 exits HandleSlashCommands entirely, not just
+    /// the case-'d' body. A regression that changed `return;` to `break;`
+    /// would preserve the visible emit but would fall through to the
+    /// trailing illegal-command fallback (which would emit a SECOND
+    /// MESSAGE_STRING); the single-frame assertion catches this.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. //displayplayerfaction is admin-tier with NO inline AdminLevel
+    /// gate -- the admin-tier outer gate at 4716 is the only access check
+    /// -- retail-faithful as preserved in source. cli_test (ADMIN=100)
+    /// passes the gate. The strtok_s-NULL usage-emit is the canonical
+    /// "you forgot the playername" pattern; the &lt;playername&gt; angle-
+    /// bracketed placeholder convention is preserved byte-for-byte.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashDisplayPlayerFactionNoArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (36) = 39 bytes.
+        const int ExpectedReplyPayloadLength = 39;
+        const short ExpectedReplyLengthField = 36;
+        const byte ExpectedReplyColor = 17;
+        const int ExpectedLiteralByteCount = 35;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Dia", shipName: "DiaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//displayplayerfaction ");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(DisplayPlayerFactionUsageLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(DisplayPlayerFactionUsageLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//displayplayerfaction \" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{DisplayPlayerFactionUsageLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
