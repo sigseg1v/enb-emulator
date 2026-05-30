@@ -18081,6 +18081,207 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 255 sibling-arm-pinning hardening (+0 ratchet) literal anchor
+    /// for the 102-byte ASCII body
+    /// "//findsector is case sensitive eg '//findsector Xipe' will have
+    /// results, '//findsector xipe' will not." that the server emits when
+    /// admin-tier double-slash <c>//findsector ZZZNOMATCH</c> arrives and
+    /// no sector name contains the substring. Matcher at
+    /// PlayerConnection.cpp:4919 (arm 3 of case-'f' admin-tier opened at
+    /// 4904); emit site at PlayerConnection.cpp:8207 inside
+    /// FindSectorFromName (helper at 8182). SECOND COLOR=13 pin overall
+    /// (Wave 254 was the FIRST, on user-tier /shieldwarnings 2). FIRST
+    /// admin-tier double-slash dispatch pin in case-'f'.
+    /// </summary>
+    private const string FindsectorNoMatchLiteral =
+        "//findsector is case sensitive eg '//findsector Xipe' will have results, '//findsector xipe' will not.";
+
+    /// <summary>
+    /// Wave 255 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 106-byte wire-shape of the trailing 0x001D MESSAGE_STRING reply to
+    /// admin-tier double-slash <c>//findsector ZZZNOMATCH</c> on a fresh
+    /// cli_test character. SECOND COLOR=13 pin overall, paired with Wave
+    /// 254's FIRST COLOR=13 (user-tier /shieldwarnings 2) -- the pairing
+    /// catches a regression that swapped the colour byte on one site but
+    /// not the other, AND catches a regression that swapped the
+    /// SendVaMessageC helper itself. FIRST admin-tier dispatch pin in
+    /// case-'f' admin-tier (case-'f' now SINGLE-PINNED at admin-tier; the
+    /// only other case-'f' pin in the catalogue is the user-tier arm).
+    /// FIRST byte-exact pin on FindSectorFromName helper's no-match path.
+    /// ONE-HUNDRED-FOURTEENTH overall byte-exact dispatch pin.
+    /// Assert.Equal pins the full 106-byte response shape.
+    ///
+    /// <para>
+    /// Admin-tier outer gate at 4716 admits: Msg[0]='/' Msg[1]='/'
+    /// Msg[2]='f' (non-zero) AND AdminLevel()=100 &gt;= GM=50. Switch
+    /// at 4724 jumps on *pch='f' -&gt; case-'f' opens at
+    /// PlayerConnection.cpp:4904.
+    /// case-'f' admin-tier walk for pch="findsector ZZZNOMATCH":
+    ///   arm 1 strcmp("floodsave", "findsector ZZZNOMATCH") at 4905 --
+    ///     byte 1 'l' vs 'i' NON-ZERO -&gt; skip (plain if, no else).
+    ///   arm 2 strcmp("friends", "findsector ZZZNOMATCH") at 4913 --
+    ///     byte 1 'r' vs 'i' NON-ZERO -&gt; skip; the else branch at
+    ///     4919 chains to arm 3.
+    ///   arm 3 MatchOptWithParam("findsector", "findsector ZZZNOMATCH",
+    ///     &amp;param, &amp;msg_sent) at 4919: strncmp("findsector",
+    ///     "findsector ZZZNOMATCH", 10) == 0 (10B FULL prefix match);
+    ///     arg[10]=' ' -&gt; param="ZZZNOMATCH"; returns true. msg_sent
+    ///     not yet flipped by the matcher (matcher only flips on
+    ///     "Missing arg" failure). FindSectorFromName(param="ZZZNOMATCH")
+    ///     invoked at 4921.
+    /// FindSectorFromName walk at 8182:
+    ///   line 8188: wildcard = (param[0]=='Z' != '*') -&gt; false.
+    ///   line 8190: !param is FALSE -&gt; skip (dead-code: this null
+    ///     check is unreachable because param[0] was dereferenced above).
+    ///   line 8192: emit #1 -- SendVaMessageC(12, "Sectors like '%s':",
+    ///     "ZZZNOMATCH") -&gt; body "Sectors like 'ZZZNOMATCH':" (26B
+    ///     ASCII), COLOR=12, drained by the loop filter.
+    ///   lines 8195-8203: for each sector, strstr(sector_name,
+    ///     "ZZZNOMATCH") == NULL (no retail sector name contains this
+    ///     placeholder); found stays false. No COLOR=10 emit.
+    ///   lines 8205-8208: found == false -&gt; emit #2 --
+    ///     SendVaMessageC(13, "//findsector is case sensitive eg
+    ///     '//findsector Xipe' will have results, '//findsector xipe'
+    ///     will not.") at 8207. FIXED 102-byte literal regardless of
+    ///     param value. Returns true; success=true; msg_sent=true.
+    ///   case-'f' breaks at 4924.
+    /// NET RESULT: TWO 0x001D MESSAGE_STRING emits from this branch
+    /// (COLOR=12 listing header + COLOR=13 case-sensitivity hint). Wave
+    /// 255 drains all frames and pins only the COLOR=13 trailer (the
+    /// COLOR=12 header carries interpolated param text and is not fixed-
+    /// shape). Wire of pinned emit: `[u16 LE 103][u8 13][102B ASCII
+    /// "//findsector is case sensitive eg '//findsector Xipe' will have
+    /// results, '//findsector xipe' will not."][NUL]` = 106 bytes.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 4 NEW classes prior waves are structurally
+    /// blind to: (a) SECOND COLOR=13 byte assertion overall (paired with
+    /// Wave 254). A regression that swapped SendVaMessageC(13, ...) for
+    /// the default-colour SendVaMessage(...) at this site would silently
+    /// degrade the retail "use a capital letter" hint on every admin who
+    /// mistyped a sector name; Wave 255 catches by asserting span[2]==13.
+    /// A regression that drifted ONLY this site's colour (not the
+    /// /shieldwarnings site) would slip past Wave 254 alone but fire
+    /// here. (b) FIRST admin-tier case-'f' dispatch pin -- a regression
+    /// that swapped the else-if chain at 4919 to a plain if (allowing
+    /// arm 3 to fire even after arm 2's match) would not regress this
+    /// test, but a regression that broke MatchOptWithParam's
+    /// "arg[len]==' '" prefix-with-param branch would silently fall
+    /// through to "Missing arg for option findsector" and this test
+    /// would no longer see the case-sensitivity literal. (c) FIRST
+    /// byte-exact pin on FindSectorFromName helper -- a regression that
+    /// reworded the case-sensitivity hint, changed the trailing
+    /// punctuation ("will not." -&gt; "will not"), or moved the emit to
+    /// a different colour function would fire the literal+colour+length
+    /// assertions. (d) Pins admin-tier dispatch reachability for a
+    /// cli_test=ADMIN account. A regression that tightened the admin-
+    /// tier gate at 4716 (e.g. raised it from GM=50 to SDEV=90) would
+    /// not block cli_test=100 here but would change behaviour for GM-
+    /// tier accounts; Wave 255 anchors the GM=50 minimum threshold by
+    /// successfully reaching the dispatch on a 100-tier account.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. The //findsector arm is a retail-faithful diagnostic
+    /// helper. The case-sensitivity hint preserves the retail wording
+    /// verbatim (including the example sector name "Xipe"). cli_test
+    /// =100 satisfies the admin-tier outer gate at 4716 unconditionally;
+    /// the arm itself has no inner AdminLevel guard (unlike arms 1 and 2
+    /// which require SDEV=90).
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashFindsectorNoMatch_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (103) = 106 bytes.
+        const int ExpectedReplyPayloadLength = 106;
+        const short ExpectedReplyLengthField = 103;
+        const byte ExpectedReplyColor = 13;
+        const int ExpectedLiteralByteCount = 102;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Finda", shipName: "FindaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//findsector ZZZNOMATCH");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(FindsectorNoMatchLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(FindsectorNoMatchLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//findsector ZZZNOMATCH\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{FindsectorNoMatchLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
