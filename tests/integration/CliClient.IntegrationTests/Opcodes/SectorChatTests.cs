@@ -16175,6 +16175,152 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 244 sibling-arm-pinning hardening (+0 ratchet): pins the 63-byte
+    /// wire-shape of the single 0x001D MESSAGE_STRING reply to user-tier
+    /// single-slash <c>/faceme</c> on a fresh cli_test character with no
+    /// selected target. SECOND case-'f' user-tier pin (after Wave 243 /face)
+    /// -- case-'f' user-tier promoted from SINGLE-PINNED to DOUBLE-PINNED.
+    /// SECOND handler-side NULL-target FALLBACK pin -- pairs with Wave 243
+    /// to verify the SAME 59-byte literal "Unable to access selected
+    /// object - could not find object ID" emits from TWO DISTINCT handlers
+    /// (HandleFaceRequest at 8453 vs HandleFaceMeRequest at 8474), each
+    /// reached via a DISTINCT dispatch arm (case-'f' arm 7 strcmp("face")
+    /// vs arm 8 strcmp("faceme")). Catches regression where the two
+    /// handlers diverge on the literal (e.g. one is rewritten to use a
+    /// different error template).
+    ///
+    /// <para>
+    /// User-tier outer gate at 5434 admits. Switch at 5442 jumps on
+    /// *pch='f' -> case-'f' opens at 6280. case-'f' walk for pch="faceme":
+    /// blocks A/B (GM-gated) admit; all 6 arms silent or strcmp mismatch.
+    /// block C: arm 7 strcmp("face", "faceme") at 6360 -- byte 4 NUL vs
+    ///   'm' -> nonzero, MISMATCH. Skip. arm 8 `else if strcmp("faceme",
+    ///   pch)` at 6365: 6B vs 6B FULL match -> `HandleFaceMeRequest(
+    ///   ShipIndex()-&gt;GetTargetGameID())` at PlayerConnection.cpp:8474.
+    ///   Target=-1 (post-login default) -> `om-&gt;GetObjectFromID(-1)`
+    ///   returns NULL -> else-branch at 8487-8490 fires: `SendVaMessage(
+    ///   "Unable to access selected object - could not find object ID")`
+    ///   COLOR=5 default. success=false; msg_sent=true (set at 6368 after
+    ///   handler returns). arms 9-10 strcmp MISMATCH skip.
+    /// block D (DEV-gated) admits; all 10 f-prefix MatchOptWithParam
+    ///   arms silent-false (byte 1 or 2 mismatch).
+    /// case-'f' breaks. NET RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>
+    /// SECOND handler-side NULL-object FALLBACK pin. Wave 243 pinned the
+    /// HandleFaceRequest path; this wave pins HandleFaceMeRequest. Same
+    /// wire-shape, different handler entry. Catches regression where (a)
+    /// HandleFaceMeRequest's else-branch literal at 8487-8490 is altered
+    /// independently of HandleFaceRequest's at 8466-8469 -- a refactor
+    /// that consolidates the two literals into one helper is fine; a
+    /// refactor that changes only one is what this pin pairs catch; (b)
+    /// the case-'f' arm 7 vs arm 8 strcmp ordering is reversed (arm 7
+    /// would then match "faceme" via byte 4 NUL mismatch -- still skip
+    /// -- but a future ordering bug where arm 8 strcmp matches "face"
+    /// would fire HandleFaceMeRequest from the /face command -- this pin
+    /// keeps the two arms exclusive).
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. The /faceme arm is a retail-faithful slash-command dispatch
+    /// the real server already accepts; the NULL-target fallback is the
+    /// natural error-emit path in HandleFaceMeRequest. Pinning preserves
+    /// the wire shape exactly.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashFaceme_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (60) = 63 bytes.
+        // Same literal/shape as Wave 243 /face; DIFFERENT dispatch arm.
+        const int ExpectedReplyPayloadLength = 63;
+        const short ExpectedReplyLengthField = 60;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 59;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Facemea", shipName: "FacemeaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/faceme");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(FaceNoTargetLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(FaceNoTargetLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/faceme\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{FaceNoTargetLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
