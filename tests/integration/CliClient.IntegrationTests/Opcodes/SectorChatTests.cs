@@ -21185,6 +21185,178 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 272 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
+    /// the 53-byte ASCII body
+    /// "You can now use all class &amp; faction restricted gates." that the
+    /// user-tier /factionoverride arm emits at PlayerConnection.cpp:6319
+    /// (with COLOR=12) on the FIRST invocation against a fresh character
+    /// whose per-character OverrideFaction flag defaults to false. The
+    /// branch at 6317 (<c>if (!GetOverrideFaction())</c>) selects this
+    /// emit, then sets the flag true at 6320.
+    /// </summary>
+    private const string NowUseAllRestrictedGatesLiteral =
+        "You can now use all class & faction restricted gates.";
+
+    /// <summary>
+    /// Wave 272 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 57-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
+    /// user-tier <c>/factionoverride</c> on a fresh cli_test character.
+    /// FIRST COLOR=12 EMIT PIN OVERALL in the HandleSlashCommands
+    /// catalogue -- prior COLOR coverage in the catalogue spans 5
+    /// (default), 13 (Waves 57/58), and 17 (Wave 56). FIRST GM-GATED
+    /// SUCCESS-EMIT PIN -- prior GM-gated pins (e.g. Wave 56 /invisible)
+    /// pinned COLOR=17 toggle-status emits; this pins a long-form
+    /// status-change message. FIRST PER-CHARACTER STATE-TOGGLE SUCCESS-
+    /// EMIT pin -- exercises Player::SetOverrideFaction (PlayerClass.h:923)
+    /// which lives on the Player instance, not in global server state,
+    /// so the test does not pollute state visible to other tests
+    /// (character is destroyed at cleanup). FIRST USER-TIER CASE-'f'
+    /// POST-MATCH pin -- Wave 58 covered case-'f' admin-tier
+    /// (//findsector); this brings user-tier case-'f' into the pinned
+    /// set. ONE-HUNDRED-THIRTY-SECOND overall byte-exact dispatch pin.
+    /// Assert.Equal pins the full 57-byte response shape.
+    ///
+    /// <para>
+    /// User-tier outer gate at PlayerConnection.cpp:5434 admits. pch=
+    /// &amp;Msg[1]="factionoverride". Switch jumps on 'f'. case-'f' at
+    /// 6280. strcmp(pch, "factionset") at 6309 false. strcmp(pch,
+    /// "factionoverride") at 6313 true. Body at 6315: AdminLevel()=100
+    /// &gt;= GM=50 admits. Body at 6317: GetOverrideFaction() returns
+    /// false (default for fresh character). !false = true. Enters
+    /// if-true branch. SendVaMessageC(12, "You can now use all class
+    /// &amp; faction restricted gates.") at 6319 emits SINGLE 0x001D
+    /// MESSAGE_STRING with body (53B, COLOR=12). SetOverrideFaction(true)
+    /// at 6320 flips per-character flag. success=true, msg_sent=true
+    /// at 6327-6328. Remaining case-'f' arms (else-if cascade) are
+    /// skipped. Trailing illegal-command fallback at 7702-7705
+    /// suppressed by msg_sent=true.
+    /// </para>
+    ///
+    /// <para>
+    /// Wire: `[u16 LE 54][u8 12][53B][NUL]` = 57 bytes. length field =
+    /// 53 (body) + 1 (NUL) = 54. COLOR=12 is byte span[2].
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 4 NEW classes prior waves are structurally
+    /// blind to: (a) FIRST COLOR=12 EMIT PIN overall -- a regression
+    /// changing the SendVaMessageC color argument (e.g. to 17 or default
+    /// 5) would change byte span[2]; (b) FIRST GM-GATED SUCCESS-EMIT
+    /// PIN with COLOR&gt;5 -- the GM gate at 6315 is the inline guard;
+    /// a regression loosening to BETA would let lower-tier users trigger
+    /// it but for cli_test (ADMIN=100) the gate is irrelevant -- this
+    /// pin still catches any literal change; (c) FIRST PER-CHARACTER
+    /// STATE-TOGGLE SUCCESS-EMIT pin -- the default-false initial state
+    /// is critical to selecting the !GetOverrideFaction() branch; a
+    /// regression that changed the default to true would emit the OTHER
+    /// branch literal "You are now class &amp; faction restricted in
+    /// your gate travel." which has DIFFERENT byte count, and the test
+    /// would fail to match; (d) FIRST USER-TIER CASE-'f' POST-MATCH
+    /// pin -- case-'f' was previously only pinned in admin-tier
+    /// (//findsector Wave 58); brings the user-tier case-'f' arm into
+    /// the dispatcher-coverage set.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. /factionoverride is user-tier with GM inline gate at 6315 --
+    /// retail-faithful as preserved in source. The GM gate is the
+    /// canonical guard for class &amp; faction restriction bypass.
+    /// Per-character flag (SetOverrideFaction on the Player instance)
+    /// means no global state pollution; the flag dies with the
+    /// character at test cleanup.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashFactionoverride_FreshChar_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (54) = 57 bytes.
+        const int ExpectedReplyPayloadLength = 57;
+        const short ExpectedReplyLengthField = 54;
+        const byte ExpectedReplyColor = 12;
+        const int ExpectedLiteralByteCount = 53;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Fina", shipName: "FinaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/factionoverride");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(NowUseAllRestrictedGatesLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(NowUseAllRestrictedGatesLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/factionoverride\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{NowUseAllRestrictedGatesLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
