@@ -22316,6 +22316,8 @@ public sealed class SectorChatTests
 
     private const string RespecNotOnlinePeriodLiteral = "Player ghostfoo is not online.";
 
+    private const string RespecSyntaxLiteral = "Syntax: //respec <username> <all|call|0-63>";
+
     /// <summary>
     /// Wave 278 sibling-arm-pinning hardening (+0 ratchet): pins the
     /// 47-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
@@ -23801,6 +23803,163 @@ public sealed class SectorChatTests
                 $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
                 $"\"//respec ghostfoo bar\" without seeing 0x001D MESSAGE_STRING " +
                 $"equal to \"{RespecNotOnlinePeriodLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Wave 287 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 47-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
+    /// admin-tier <c>//respec ghostfoo</c> (Username present, Type
+    /// missing) on a fresh cli_test character. SECOND //respec emit-site
+    /// pin within the SAME case-'r' delegate -- Wave 286 fired the
+    /// inner if(!TargetP) path with PERIOD-terminated literal; Wave 287
+    /// fires the outer else-branch syntax-error emit. case-'r' admin
+    /// block now DOUBLY-PINNED. SECOND 43-BYTE LITERAL pin overall
+    /// (Wave 278 //setpassword was first 43B; SAME LENGTH, DIFFERENT
+    /// CONTENT). FIRST //respec ELSE-branch usage-syntax pin. FIRST
+    /// DISJUNCTION-Username-AND-Type-FALSE-PATH pin (the if(Username
+    /// &amp;&amp; Type) at 5098 fails when Type is NULL despite Username
+    /// being non-NULL). ONE-HUNDRED-FORTY-SEVENTH overall byte-exact
+    /// dispatch pin. Assert.Equal pins the full 47-byte response shape
+    /// AND the literal content.
+    ///
+    /// <para>
+    /// Admin outer gate at PlayerConnection.cpp:4716 admits (cli_test
+    /// ADMIN=100 satisfies GM=50). pch=&amp;Msg[2]="respec ghostfoo".
+    /// Switch on 'r'. case-'r' opens at 4962. Eight prior arms mismatch.
+    /// Final arm at 5090: MatchOptWithParam("respec", "respec ghostfoo",
+    /// ...) strncmp 6B matches; arg[6]=' '; param=&amp;arg[7]="ghostfoo";
+    /// returns true. Body at 5092-5093: Username=strtok_s("ghostfoo", " ")
+    /// returns "ghostfoo"; Type=strtok_s(NULL, " ") returns NULL (no
+    /// second token). if(Username &amp;&amp; Type) at 5098 evaluates
+    /// Username="ghostfoo"=true, Type=NULL=false, short-circuits to
+    /// false; outer else at 5144 -- emits SendVaMessage("Syntax: //respec
+    /// &lt;username&gt; &lt;all|call|0-63&gt;") at 5146 (DEFAULT COLOR=5;
+    /// 43-byte body); return at 5147 (EARLY-RETURN from HandleSlash
+    /// Commands). NET: exactly 1 0x001D emit.
+    /// </para>
+    ///
+    /// <para>
+    /// 0x001D MESSAGE_STRING wire shape (47 bytes total):
+    /// <list type="bullet">
+    /// <item><description>length field (LE u16, value 44) -- offset 0..1
+    /// </description></item>
+    /// <item><description>color byte (0x05 -- SendVaMessage default) --
+    /// offset 2</description></item>
+    /// <item><description>43-byte ASCII body "Syntax: //respec
+    /// &lt;username&gt; &lt;all|call|0-63&gt;" -- offset 3..45
+    /// </description></item>
+    /// <item><description>NUL terminator (0x00) -- offset 46
+    /// </description></item>
+    /// </list>
+    /// Length field = body bytes (43) + NUL (1) = 44.
+    /// </para>
+    ///
+    /// <para>
+    /// Coverage delta vs prior pins -- this pin is byte-exact for things
+    /// the rest of the suite is blind to: (a) FIRST //respec ELSE-branch
+    /// usage-syntax pin -- combined with Wave 286's inner if(!TargetP)
+    /// path, the //respec delegate is now DOUBLY-PINNED across both of
+    /// its non-success emit sites; (b) SECOND 43-byte literal pin --
+    /// Wave 278 //setpassword "Syntax: //setpassword &lt;username&gt;
+    /// &lt;password&gt;" was first 43B; Wave 287 "Syntax: //respec
+    /// &lt;username&gt; &lt;all|call|0-63&gt;" is also 43B but has
+    /// COMPLETELY DIFFERENT content; a regression that conflated the
+    /// two literals would only be caught by content-equality, not
+    /// length-equality; (c) FIRST DISJUNCTION-USERNAME-AND-TYPE-FALSE-
+    /// PATH pin -- exercises the &amp;&amp; short-circuit where Username
+    /// is non-NULL but Type is NULL; distinct from Wave 278's
+    /// disjunction-||-short-circuit on a single missing field; (d)
+    /// SECOND case-'r' admin pin (combined with Wave 286); case-'r' is
+    /// now DOUBLY-PINNED on the //respec arm.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashRespecMissingType_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (44) = 47 bytes.
+        const int ExpectedReplyPayloadLength = 47;
+        const short ExpectedReplyLengthField = 44;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 43;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Reka", shipName: "RekaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//respec ghostfoo");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(RespecSyntaxLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(RespecSyntaxLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//respec ghostfoo\" without seeing 0x001D MESSAGE_STRING " +
+                $"equal to \"{RespecSyntaxLiteral}\".");
         }
         finally
         {
