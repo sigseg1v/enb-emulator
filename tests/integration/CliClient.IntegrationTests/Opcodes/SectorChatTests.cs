@@ -29640,4 +29640,212 @@ public sealed class SectorChatTests
             catch { /* best-effort cleanup */ }
         }
     }
+
+    /// <summary>
+    /// Wave 308 (commit-counter Wave 111) sibling-arm-pinning hardening
+    /// (+0 ratchet): pins the 24-byte wire-shape of the 0x001D
+    /// MESSAGE_STRING reply emitted from the SUCCESS branch of
+    /// user-tier <c>/warp 5000</c> on a fresh cli_test character --
+    /// closes the 3-cell {below-minimum, above-maximum, in-range}
+    /// bounds-check matrix at PlayerConnection.cpp:7656-7665. W306
+    /// (/warp 500) pinned the SECOND-disjunct-TRUE FAIL branch; W307
+    /// (/warp 99999) pinned the FIRST-disjunct-TRUE FAIL branch; Wave
+    /// 308 (/warp 5000) pins the BOTH-disjuncts-FALSE SUCCESS branch
+    /// (5000>6000=FALSE, 5000&lt;1000=FALSE -- ELSE arm at 7660-7665
+    /// entered).
+    ///
+    /// <para>
+    /// The SUCCESS branch is structurally distinct: it emits
+    /// <c>SendVaMessage("Setting warp to %d", atoi(param))</c> where
+    /// the %d substitutes the USER-supplied param (not a function-local
+    /// constant as in W306/W307). It then mutates ship state via
+    /// <c>ShipIndex()-&gt;CurrentStats.SetWarpSpeed(atoi(param))</c>
+    /// and emits an 0x001B AUX_DATA frame via <c>SendAuxShip()</c>.
+    /// The AUX_DATA frame is conditional on
+    /// <c>m_ShipIndex.HasDiff()</c> so it is not byte-pinned here, but
+    /// the 0x001D MESSAGE_STRING is unconditional given the
+    /// SUCCESS-branch entry and is pinned byte-for-byte.
+    /// </para>
+    ///
+    /// <para>
+    /// Dispatch flow:
+    /// <list type="number">
+    /// <item>Client sends 10-byte 0x0033 CLIENT_CHAT body=<c>"/warp 5000\0"</c>.</item>
+    /// <item>User-tier dispatch entered at 5434.</item>
+    /// <item><c>pch="warp 5000"</c>. case-'w' user-tier opens at 7627.</item>
+    /// <item>Arm 1 at 7628: MatchOpt("who", ...) MISMATCH at byte 1 'h'
+    ///       vs 'a' -- silent FALSE.</item>
+    /// <item>Arm 2 at 7650: MatchOpt("warp", ...) matches; param="5000";
+    ///       returns true.</item>
+    /// <item>Body at 7652-7667: limit=6000. AdminLevel()&gt;=GM passes.
+    ///       Bounds check at 7656: atoi("5000")=5000; 5000&gt;6000=FALSE;
+    ///       5000&lt;1000=FALSE -- BOTH disjuncts FALSE; ELSE branch at
+    ///       7660-7665 entered.</item>
+    /// <item>ELSE body at 7662-7664: <c>SendVaMessage("Setting warp to
+    ///       %d", 5000)</c> (DEFAULT COLOR=5; 20B body "Setting warp to
+    ///       5000"); <c>SetWarpSpeed(5000)</c>; <c>SendAuxShip()</c>
+    ///       (0x001B AUX_DATA frame -- conditional on HasDiff, NOT
+    ///       byte-pinned here).</item>
+    /// <item><c>msg_sent=true</c> at 7666. <c>success</c> NOT set in
+    ///       this path (stays false).</item>
+    /// <item>Arm 3 at 7668 ELSE-IF SKIPPED. Independent /wormhole and
+    ///       /warpreset at 7673/7691 do not match. case-'w' breaks at
+    ///       7699.</item>
+    /// <item>Fallback at 7702: !success && !msg_sent short-circuits
+    ///       FALSE. NO illegal-slash emit.</item>
+    /// </list>
+    /// </para>
+    ///
+    /// <para>
+    /// NET RESULT: exactly 1 0x001D MESSAGE_STRING emit (byte-pinned)
+    /// plus zero-or-more 0x001B AUX_DATA frames (not pinned). Wire:
+    /// <c>[u16 LE 21][u8 5][20B][NUL]</c> = 24 bytes for the 0x001D.
+    /// <c>+0 ratchet</c>.
+    /// </para>
+    ///
+    /// <para>Novel structural axes vs prior waves:</para>
+    /// <list type="bullet">
+    ///   <item><b>FIRST IN-RANGE pin closing 3-cell BOUNDS-CHECK
+    ///     matrix</b> -- W306 pinned below-minimum (SECOND-disjunct
+    ///     TRUE), W307 pinned above-maximum (FIRST-disjunct TRUE),
+    ///     Wave 308 pins in-range (BOTH-disjuncts FALSE). The 3-cell
+    ///     {below, above, in} matrix is now COMPLETELY pinned. A
+    ///     regression that flipped the if/else polarity (entered the
+    ///     emit branch on in-range inputs and the SUCCESS branch on
+    ///     out-of-range inputs) would break ALL THREE pins
+    ///     simultaneously, distinguishing polarity regressions from
+    ///     bound-value regressions which break only one or two.</item>
+    ///   <item><b>FIRST SUCCESS-PATH-EMIT pin in case-'w' user-tier
+    ///     arm 2</b> -- W306 + W307 both pinned the FAIL branch of
+    ///     the SAME if/else; Wave 308 is the FIRST pin in case-'w'
+    ///     where the ELSE branch is entered. A regression that
+    ///     deleted the ELSE branch (left only the FAIL emit) would
+    ///     silently accept /warp 5000 with no reply and no
+    ///     SetWarpSpeed; this pin guards against that
+    ///     regression.</item>
+    ///   <item><b>FIRST USER-PARAM-%d pin in case-'w' user-tier</b> --
+    ///     W306/W307 used CONSTANT %d substituting the function-local
+    ///     <c>limit=6000</c>. Wave 308 uses USER-PARAM %d substituting
+    ///     <c>atoi(param)=5000</c>. A regression that hardcoded the
+    ///     emit (e.g. always printed "Setting warp to 5000" regardless
+    ///     of input) would pass this pin but break a hypothetical
+    ///     /warp 4000 pin; conversely a regression that swapped the
+    ///     %d source (atoi(param) for limit) would print "Setting
+    ///     warp to 6000" and break this pin.</item>
+    ///   <item><b>FIRST EMIT-WITH-SIDE-EFFECTS pin in case-'w' arm 2</b>
+    ///     -- the SUCCESS branch mutates ship state
+    ///     (SetWarpSpeed=5000) and emits AUX_DATA via SendAuxShip().
+    ///     W69 /openif pinned an emit-with-side-effect, but in case-'w'
+    ///     this is FIRST. A regression that swapped emit and
+    ///     SetWarpSpeed order would not break the byte pin (emit fires
+    ///     either way) but would change observable timing for
+    ///     concurrent observers.</item>
+    ///   <item><b>FIFTH consecutive pin in case-'w' user-tier (now
+    ///     QUINTUPLY-PINNED)</b> -- W155 wormhole MatchOpt ERROR + W156
+    ///     warp MatchOpt ERROR + W306 warp BODY SECOND-DISJUNCT-TRUE
+    ///     + W307 warp BODY FIRST-DISJUNCT-TRUE + W308 warp BODY
+    ///     BOTH-FALSE SUCCESS. case-'w' user-tier arm 2 (/warp) is
+    ///     now TRIPLY-PINNED across all 3 cells of its bounds-check
+    ///     ternary matrix.</item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md): no permissiveness
+    /// added. /warp body GM-gated inline at 7654; SUCCESS branch
+    /// reached only when [1000, 6000] inclusive (W306/W307 prove the
+    /// rejection paths). Pin DOCUMENTS the SUCCESS-path emit
+    /// byte-for-byte; TIGHTENS toward preservation by guarding the
+    /// success-emit literal and USER-PARAM %d substitution against
+    /// silent regression.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashWarpInRange_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        const string SuccessLiteral = "Setting warp to 5000";
+        // length-prefix u16 (2) + color u8 (1) + body(20) + NUL(1) = 24 bytes.
+        const int ExpectedReplyPayloadLength = 24;
+        const short ExpectedReplyLengthField = 21;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 20;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Wamo", shipName: "WamoShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/warp 5000");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(SuccessLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(SuccessLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/warp 5000\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{SuccessLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
 }
