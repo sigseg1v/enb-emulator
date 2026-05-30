@@ -25793,6 +25793,163 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 300 (commit-counter Wave 103) sibling-arm-pinning hardening
+    /// (+0 ratchet): pins the 52-byte wire-shape of the single 0x001D
+    /// MESSAGE_STRING reply to admin-tier <c>//adduser foo</c> (ONE-ARG,
+    /// Username="foo", Password=NULL, Access=NULL) on a cli_test account
+    /// with AdminLevel=ADMIN (100 >= GM=50). Triggers the SECOND-DISJUNCT
+    /// polarity of the disjunctive predicate at PlayerConnection.cpp:4734
+    /// (<c>!Username=FALSE</c>, <c>!Password=TRUE</c> short-circuits before
+    /// <c>!Access</c> is evaluated).
+    ///
+    /// <para>
+    /// Dispatch flow:
+    /// <list type="number">
+    /// <item>Client sends 14-byte 0x0033 CLIENT_CHAT body=<c>"//adduser foo\0"</c>.</item>
+    /// <item>Admin outer gate at 4716 admits.</item>
+    /// <item><c>pch="adduser foo"</c>. case-'a' opens at 4726. Arm 1 at
+    ///       4728: <c>MatchOptWithParam("adduser", "adduser foo", ...)</c>
+    ///       strncmp 7B matches; arg[7]=' '; param=&amp;arg[8]="foo";
+    ///       returns true.</item>
+    /// <item>Compound predicate <c>AdminLevel() &gt;= GM</c> admits.</item>
+    /// <item>Body at 4730: <c>Username=strtok_s("foo", " ", &amp;next_token)
+    ///       ="foo"</c>. <c>Password=strtok_s(NULL, ...)=NULL</c>.
+    ///       <c>Access=strtok_s(NULL, ...)=NULL</c>.</item>
+    /// <item>Disjunctive predicate at 4734: <c>!Username=FALSE</c> (Username
+    ///       is "foo" non-NULL); SECOND disjunct <c>!Password=TRUE</c>
+    ///       SHORT-CIRCUITS; <c>!Access</c> NEVER evaluated.</item>
+    /// <item>Emit at 4736: <c>SendVaMessage("Syntax: //adduser
+    ///       &lt;username&gt; &lt;password&gt; &lt;access&gt;")</c>
+    ///       (DEFAULT COLOR=5; 48B body). HARD-RETURN at 4737.</item>
+    /// </list>
+    /// </para>
+    ///
+    /// <para>
+    /// NET RESULT: exactly 1 0x001D emit. Wire:
+    /// <c>[u16 LE 49][u8 5][48B][NUL]</c> = 52 bytes. <c>+0 ratchet</c>.
+    /// </para>
+    ///
+    /// <para>Novel structural axes vs prior waves:</para>
+    /// <list type="bullet">
+    ///   <item><b>FIRST SECOND-DISJUNCT polarity pin</b> of case-'a' arm 1.
+    ///     W82 pinned THIRD-DISJUNCT (Access=NULL), W102 pinned FIRST-
+    ///     DISJUNCT (Username=NULL). W103 pins the MIDDLE polarity
+    ///     (Username non-NULL, Password=NULL); completes the THIRD-DISJUNCT
+    ///     TRIPLE-PIN coverage of the disjunctive predicate at 4734.</item>
+    ///   <item><b>FIRST ONE-ARG polarity</b> of case-'a' arm 1 (W82 had
+    ///     two-arg POPULATED, W102 had zero-arg EMPTY). A regression that
+    ///     special-cased one-arg paths (e.g. reading defaults for missing
+    ///     Password from a config) would break only this pin.</item>
+    ///   <item><b>FIRST POPULATED-FIRST-NULL-SECOND strtok_s chain pin</b>
+    ///     -- the FIRST strtok_s returns "foo", the SECOND returns NULL.
+    ///     A regression that called <c>strtok_s</c> with a wrong delimiter
+    ///     (e.g. ",") would break this pin.</item>
+    ///   <item><b>SAME 48B literal as W82 + W102</b> -- a regression that
+    ///     altered the 48B literal would break ALL THREE pins; the TRIPLE
+    ///     ensures all three polarities reach the emit.</item>
+    ///   <item>case-'a' admin arm 1 //adduser is now <b>TRIPLY-PINNED</b>
+    ///     across ALL THREE polarities of the disjunctive predicate
+    ///     (W82 + W102 + W103). FIRST TRIPLY-PINNED disjunctive predicate
+    ///     in HandleSlashCommands.</item>
+    /// </list>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md): no permissiveness added.
+    /// //adduser is admin-tier gated. The strtok_s-NULL emit is upstream-
+    /// preserved diagnostic invariant. The pin DOCUMENTS the SECOND-
+    /// DISJUNCT polarity byte-for-byte; TIGHTENS toward preservation.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashAdduserOneArg_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (49) = 52 bytes.
+        const int ExpectedReplyPayloadLength = 52;
+        const short ExpectedReplyLengthField = 49;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 48;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Pola", shipName: "PolaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//adduser foo");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(AdduserSyntaxLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(AdduserSyntaxLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//adduser foo\" (one arg) without seeing 0x001D MESSAGE_STRING " +
+                $"equal to \"{AdduserSyntaxLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
