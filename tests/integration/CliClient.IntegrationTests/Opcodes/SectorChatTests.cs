@@ -22304,6 +22304,8 @@ public sealed class SectorChatTests
 
     private const string FactionIdBoundsLiteral = "Faction ID must be between 1 and 32";
 
+    private const string FactionStandingBoundsLiteral = "New faction standing must be between -9000 and 9999";
+
     /// <summary>
     /// Wave 278 sibling-arm-pinning hardening (+0 ratchet): pins the
     /// 47-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
@@ -22804,6 +22806,162 @@ public sealed class SectorChatTests
                 $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
                 $"\"//editfaction 99 0\" without seeing 0x001D MESSAGE_STRING equal to " +
                 $"\"{FactionIdBoundsLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Wave 281 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 55-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
+    /// admin-tier <c>//editfaction 1 99999</c> (faction_id in valid range
+    /// but new_faction_standing out of -9000..9999 range) on a fresh
+    /// cli_test character. SECOND BOUNDS-CHECK pin inside the SAME
+    /// EditFactionStanding delegate. Structurally distinct from Wave 280
+    /// (FIRST bounds-check, faction_id range): Wave 281 exercises the
+    /// SECOND-OF-TWO bounds-checks -- the first (faction_id 1..32) passes
+    /// because faction_id=1 is in range; the second (faction_standing
+    /// -9000..9999) fires because atof("99999")=99999.0 > 9999.0f. This
+    /// confirms BOTH bounds-checks in EditFactionStanding are reachable
+    /// independently. FIRST 51-BYTE LITERAL pin in HandleSlashCommands.
+    /// SECOND case-'e' admin ARM-BODY pin. SECOND EditFactionStanding
+    /// code-path pin. ONE-HUNDRED-FORTY-FIRST overall byte-exact dispatch
+    /// pin. Assert.Equal pins the full 55-byte response shape AND the
+    /// literal content.
+    ///
+    /// <para>
+    /// Admin outer gate at PlayerConnection.cpp:4716 admits. pch=
+    /// &amp;Msg[2]="editfaction 1 99999". Switch on 'e'. case-'e' opens
+    /// at 4891. Arm 1 at 4892: MatchOptWithParam("editfaction", pch,
+    /// param, msg_sent): strncmp matches 11B; arg[11]=' '; param=
+    /// &amp;arg[12]="1 99999"; returns true. Body at 4894: success =
+    /// EditFactionStanding("1 99999"). Inside EditFactionStanding at
+    /// PlayerMisc.cpp:1175: p_faction_id=strtok_s("1 99999", " ")
+    /// returns "1"; p_new_faction=strtok_s(NULL, " ") returns "99999".
+    /// Both non-NULL: predicate at 1182 false. faction_id=atoi("1")=1.
+    /// new_faction_standing=(float)atof("99999")=99999.0f. First bounds-
+    /// check at 1192: 1&lt;1=false || 1&gt;32=false; SKIPPED. Second
+    /// bounds-check at 1198: 99999.0f&lt;-9000.0f=false || 99999.0f&gt;
+    /// 9999.0f=TRUE. SendVaMessageC(17, "New faction standing must be
+    /// between -9000 and 9999") at 1200 emits SINGLE 0x001D MESSAGE_STRING
+    /// (51B, COLOR=17). return false at 1201. Back in case-'e' at 4895:
+    /// msg_sent=true. Arm 2 at 4897: MatchOptWithParam("editplayerfaction",
+    /// "editfaction 1 99999", ...) strncmp 17B fails at byte 4
+    /// ('f' vs 'p'); returns false. NO emit. case-'e' `break;` at 4902.
+    /// NET RESULT: exactly 1 0x001D emit "New faction standing must be
+    /// between -9000 and 9999" (51B, COLOR=17). Wire: `[u16 LE 52][u8 17]
+    /// [51B][NUL]` = 55 bytes. **+0 ratchet.**
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 4 NEW classes prior waves are structurally
+    /// blind to: (a) FIRST SECOND-OF-TWO BOUNDS-CHECK pin -- Wave 280
+    /// fired on the FIRST bounds-check; Wave 281 walks past the FIRST
+    /// (faction_id in range) to fire on the SECOND. A regression that
+    /// short-circuited validation after the first bounds-check passes
+    /// would silently accept "//editfaction 1 99999" and call
+    /// UPDATE faction_matrix with new_faction_standing=99999.0 -- a
+    /// data-corruption bug; (b) FIRST 51-BYTE LITERAL pin extends per-
+    /// literal-length coverage spectrum (Wave 280=35B, Wave 281=51B);
+    /// (c) SECOND EditFactionStanding code-path pin -- confirms multiple
+    /// emit paths within the same delegate; (d) SECOND case-'e' admin
+    /// ARM-BODY pin -- joins Wave 280 covering case-'e' multi-branch
+    /// behaviour.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. The -9000..9999 faction-standing bounds-check is preserved
+    /// byte-for-byte from upstream. The pin DOCUMENTS the faction-standing
+    /// valid-range invariant. A regression that widened the range would
+    /// allow stored values that overflow the float-encoded reputation
+    /// system used by the client.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashEditfactionStandingOutOfRange_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (52) = 55 bytes.
+        const int ExpectedReplyPayloadLength = 55;
+        const short ExpectedReplyLengthField = 52;
+        const byte ExpectedReplyColor = 17;
+        const int ExpectedLiteralByteCount = 51;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Edna", shipName: "EdnaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//editfaction 1 99999");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(FactionStandingBoundsLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(FactionStandingBoundsLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//editfaction 1 99999\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{FactionStandingBoundsLiteral}\".");
         }
         finally
         {
