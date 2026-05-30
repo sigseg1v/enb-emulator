@@ -22314,6 +22314,8 @@ public sealed class SectorChatTests
 
     private const string GmenableskillsNotOnlineLiteral = "Player ghostfoo is not online";
 
+    private const string RespecNotOnlinePeriodLiteral = "Player ghostfoo is not online.";
+
     /// <summary>
     /// Wave 278 sibling-arm-pinning hardening (+0 ratchet): pins the
     /// 47-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
@@ -23633,6 +23635,172 @@ public sealed class SectorChatTests
                 $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
                 $"\"//gmenableskills ghostfoo\" without seeing 0x001D MESSAGE_STRING " +
                 $"equal to \"{GmenableskillsNotOnlineLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Wave 286 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 34-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
+    /// admin-tier <c>//respec ghostfoo bar</c> (target player not online)
+    /// on a fresh cli_test character. FIRST PERIOD-TERMINATED literal in
+    /// the NO-QUOTES player-not-found family -- Wave 285 //gmenableskills
+    /// pinned the NO-PERIOD variant "Player ghostfoo is not online" (29B);
+    /// Wave 286 //respec pins the PERIOD-TERMINATED variant "Player
+    /// ghostfoo is not online." (30B). The two literals differ by EXACTLY
+    /// ONE BYTE (the trailing '.') -- a regression that normalized punc-
+    /// tuation would break exactly ONE of the two pins. FIRST CASE-'r'
+    /// admin-tier arm pin in the HandleSlashCommands catalogue (case-'r'
+    /// admin had no prior pin; arms //rstations, //rsectors, //rsectorall,
+    /// //ritems, //rmissions, //resetmymissions, //rfactions, //replace
+    /// ship, //respec were all unpinned; many of the unpinned arms touch
+    /// global state -- //respec is the only safe-to-test arm without
+    /// side-effects when target player does not exist). FIRST nested-IF
+    /// (Username&amp;&amp;Type)+IF(!TargetP) early-return pin. FIRST RESPEC
+    /// code-path pin. ONE-HUNDRED-FORTY-SIXTH overall byte-exact dispatch
+    /// pin. Assert.Equal pins the full 34-byte response shape AND the
+    /// literal content.
+    ///
+    /// <para>
+    /// Admin outer gate at PlayerConnection.cpp:4716 admits (cli_test
+    /// ADMIN=100 satisfies GM=50). pch=&amp;Msg[2]="respec ghostfoo bar".
+    /// Switch on 'r'. case-'r' opens at 4962. Eight strcmp/MatchOptWithParam
+    /// arms (//rstations, //rsectors, //rsectorall, //ritems, //rmissions,
+    /// //resetmymissions, //rfactions, //replaceship) all mismatch at
+    /// strncmp byte 2 or earlier. Final arm at 5090: MatchOptWithParam
+    /// ("respec", "respec ghostfoo bar", ...) strncmp 6B matches; arg[6]
+    /// =' '; param=&amp;arg[7]="ghostfoo bar"; returns true. Body at 5092-
+    /// 5093: Username=strtok_s("ghostfoo bar", " ") returns "ghostfoo";
+    /// Type=strtok_s(NULL, " ") returns "bar". if(Username &amp;&amp; Type)
+    /// TRUE at 5098 -- enters inner block. TargetP=GetPlayer("ghostfoo")
+    /// returns NULL (no such player). if(!TargetP) TRUE at 5101 -- emits
+    /// SendVaMessage("Player %s is not online.", "ghostfoo") at 5103
+    /// (DEFAULT COLOR=5; 30-byte body INCLUDING trailing PERIOD); return
+    /// at 5104 (EARLY-RETURN from HandleSlashCommands -- not just from
+    /// case-'r'). NET: exactly 1 0x001D emit.
+    /// </para>
+    ///
+    /// <para>
+    /// 0x001D MESSAGE_STRING wire shape (34 bytes total):
+    /// <list type="bullet">
+    /// <item><description>length field (LE u16, value 31) -- offset 0..1
+    /// </description></item>
+    /// <item><description>color byte (0x05 -- SendVaMessage default) --
+    /// offset 2</description></item>
+    /// <item><description>30-byte ASCII body "Player ghostfoo is not
+    /// online." INCLUDING trailing period -- offset 3..32
+    /// </description></item>
+    /// <item><description>NUL terminator (0x00) -- offset 33
+    /// </description></item>
+    /// </list>
+    /// Length field = body bytes (30) + NUL (1) = 31.
+    /// </para>
+    ///
+    /// <para>
+    /// Coverage delta vs prior pins -- this pin is byte-exact for things
+    /// the rest of the suite is blind to: (a) FIRST PERIOD-TERMINATED
+    /// NO-QUOTES variant pin -- combined with Wave 285 NO-PERIOD variant,
+    /// the two single-byte-differing literals are doubly-pinned; a re-
+    /// gression that normalized trailing punctuation would break exactly
+    /// ONE of the two pins; (b) FIRST CASE-'r' admin-tier arm pin -- the
+    /// case-'r' admin block opens at 4962 with no prior coverage in any
+    /// wave; (c) FIRST nested-IF(Username&amp;&amp;Type) + IF(!TargetP)
+    /// early-return pin -- the conjunction predicate at 5098 followed by
+    /// the inner TargetP-NULL check at 5101 with HARD RETURN (not just
+    /// break) at 5104; this is structurally distinct from Wave 285's
+    /// non-returning if(!TargetP) branch; (d) FIRST RESPEC delegate code-
+    /// path pin; (e) FIRST 30-BYTE LITERAL pin; (f) FIRST else-if-cascade
+    /// final-arm pin in case-'r' admin -- //respec is the LAST arm in
+    /// the case-'r' else-if cascade (eight prior arms all mismatch);
+    /// pinning the final arm confirms the full cascade traversal.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashRespecOfflineTarget_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (31) = 34 bytes.
+        const int ExpectedReplyPayloadLength = 34;
+        const short ExpectedReplyLengthField = 31;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 30;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Rapa", shipName: "RapaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//respec ghostfoo bar");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(RespecNotOnlinePeriodLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(RespecNotOnlinePeriodLiteral, fullBody);
+                Assert.Equal((byte)'.', span[literalEnd - 1]);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//respec ghostfoo bar\" without seeing 0x001D MESSAGE_STRING " +
+                $"equal to \"{RespecNotOnlinePeriodLiteral}\".");
         }
         finally
         {
