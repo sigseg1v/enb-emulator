@@ -22308,6 +22308,8 @@ public sealed class SectorChatTests
 
     private const string EditPlayerFactionPlayerNotFoundLiteral = "Player 'noplayerfoo' not found";
 
+    private const string CountspUsageLiteral = "Usage: /countsp <player>";
+
     /// <summary>
     /// Wave 278 sibling-arm-pinning hardening (+0 ratchet): pins the
     /// 47-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
@@ -23129,6 +23131,168 @@ public sealed class SectorChatTests
                 $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
                 $"\"//editplayerfaction noplayerfoo 1 0\" without seeing 0x001D MESSAGE_STRING " +
                 $"equal to \"{EditPlayerFactionPlayerNotFoundLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Wave 283 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 28-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
+    /// admin-tier <c>//countsp </c> (TRAILING SPACE, ZERO-LENGTH PARAM)
+    /// on a fresh cli_test character. FIRST CASE-'c' admin-tier pin in
+    /// the HandleSlashCommands catalogue; case-'c' admin-tier now SINGLE-
+    /// PINNED. FIRST "Usage:" CAPITAL-U prefix literal in any wave (prior
+    /// "Usage:" pins do not exist; "Syntax:" capital-S used by Waves 278
+    /// //setpassword + 279 //adduser; "usage:" lowercase used by Wave 277
+    /// //halloween). FIRST ELSE-FROM-IF(Username) NULL-TARGET POST-STRTOK
+    /// USAGE-EMIT pin -- structurally distinct from prior strtok_s-NULL
+    /// pins (Waves 276 //displayplayerfaction, 277 //halloween, 278
+    /// //setpassword, 279 //adduser) which all hit explicit `if (!arg)`
+    /// usage-emit early-returns; Wave 283 hits an IMPLICIT if/else around
+    /// the success path with the else branch carrying the usage emit.
+    /// TWO-HUNDRED-EIGHTY-THIRD overall byte-exact dispatch pin. Assert
+    /// .Equal pins the full 28-byte response shape.
+    ///
+    /// <para>
+    /// Admin outer gate at PlayerConnection.cpp:4716 admits (cli_test
+    /// ADMIN=100 satisfies GM=50). pch=&amp;Msg[2]="countsp ". Switch on
+    /// 'c'. case-'c' opens at 4829. Arm at 4831:
+    /// MatchOptWithParam("countsp", pch, param, msg_sent) -- the
+    /// FOUR-ARGUMENT form, so allowNoParams defaults to false
+    /// (PlayerClass.h:1045): strncmp matches 7B; arg[7]=' '; param=
+    /// &amp;arg[8]="" (the empty string immediately past the trailing
+    /// space); returns true. Body at 4833: Username=strtok_s("", " ",
+    /// &amp;next_token) returns NULL (strtok_s on empty string returns
+    /// NULL by C11 standard). If at 4836 evaluates Username=NULL=false;
+    /// dispatches to else at 4849 -- SendVaMessage("Usage: /countsp
+    /// &lt;player&gt;") (no format args; DEFAULT COLOR=5). After else,
+    /// msg_sent=true and success=true at 4853-4854. case-'c' breaks at
+    /// 4857. The OUTER admin-dispatch loop returns. Exactly ONE 0x001D
+    /// emit fires from this dispatch.
+    /// </para>
+    ///
+    /// <para>
+    /// 0x001D MESSAGE_STRING wire shape (28 bytes total):
+    /// <list type="bullet">
+    /// <item><description>length field (LE u16, value 25) -- offset 0..1
+    /// </description></item>
+    /// <item><description>color byte (0x05 -- SendVaMessage default) --
+    /// offset 2</description></item>
+    /// <item><description>24-byte ASCII body "Usage: /countsp &lt;player&gt;"
+    /// -- offset 3..26</description></item>
+    /// <item><description>NUL terminator (0x00) -- offset 27
+    /// </description></item>
+    /// </list>
+    /// Length field = body bytes (24) + NUL (1) = 25.
+    /// </para>
+    ///
+    /// <para>
+    /// Coverage delta vs prior pins -- this pin is byte-exact for things
+    /// the rest of the suite is blind to: (a) FIRST CASE-'c' ADMIN-TIER
+    /// PIN -- case-'c' had no prior coverage in any wave (admin-tier OR
+    /// user-tier); (b) FIRST "Usage:" CAPITAL-U prefix -- prior "Usage"-
+    /// like literals were "Syntax:" capital-S (Waves 278, 279) or
+    /// "usage:" lowercase (Wave 277); (c) FIRST ELSE-BRANCH-FROM-IF
+    /// (TARGET-NULL) USAGE pin -- prior strtok_s-NULL pins (Waves
+    /// 276-279) all used explicit if(!arg) emit+return; Wave 283 uses
+    /// implicit if/else with the else carrying the usage emit and NO
+    /// early-return (msg_sent/success set AFTER the else block); (d)
+    /// FIRST 24-BYTE LITERAL pin -- prior literals were 25B (Wave 277),
+    /// 30B (Wave 282), 35B (Wave 280), 43B (Wave 278), 48B (Wave 279),
+    /// 51B (Wave 281); 24B fills the lowest-length slot in the admin-
+    /// tier spectrum; (e) FIRST POST-EMPTY-STRTOK_S NULL-USERNAME pin --
+    /// MatchOptWithParam returns true with param="" (zero-length string),
+    /// and the IMMEDIATELY-FOLLOWING strtok_s returns NULL -- structurally
+    /// distinct from MatchOptWithParam-emit-and-return-false (Wave 212
+    /// "Missing arg") and from MatchOptWithParam-NULL-param (which
+    /// requires allowNoParams=true; the 4-arg form here defaults false).
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashCountspTrailingSpace_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (25) = 28 bytes.
+        const int ExpectedReplyPayloadLength = 28;
+        const short ExpectedReplyLengthField = 25;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 24;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Capa", shipName: "CapaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//countsp ");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(CountspUsageLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(CountspUsageLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//countsp \" without seeing 0x001D MESSAGE_STRING " +
+                $"equal to \"{CountspUsageLiteral}\".");
         }
         finally
         {
