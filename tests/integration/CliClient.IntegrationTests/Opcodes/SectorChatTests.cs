@@ -16994,6 +16994,165 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 249 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
+    /// the 27-byte ASCII body "Removed all effects on you!" that the server
+    /// emits when user-tier single-slash <c>/reffect</c> arrives. Matcher at
+    /// PlayerConnection.cpp:6993 (arm 1 of case-'r' user-tier opened at
+    /// 6992) -- NO-INNER-GUARD pattern. The handler at 6995 has the only
+    /// real side effect (<c>RemoveEffectsByPlayer(GameID())</c>) FULLY
+    /// COMMENTED OUT in source, so the SendVaMessage at 6996 is the
+    /// arm's SOLE observable behaviour -- the emit IS the contract.
+    /// </summary>
+    private const string ReffectRemovedLiteral = "Removed all effects on you!";
+
+    /// <summary>
+    /// Wave 249 sibling-arm-pinning hardening (+0 ratchet): pins the 31-byte
+    /// wire-shape of the single 0x001D MESSAGE_STRING reply to user-tier
+    /// single-slash <c>/reffect</c> on a fresh cli_test character. FIRST
+    /// case-'r' user-tier pin overall -- promotes case-'r' user-tier from
+    /// UNPINNED to SINGLE-PINNED. ONE-HUNDRED-EIGHTH overall byte-exact
+    /// dispatch pin. Assert.Equal pins the full 31-byte response shape.
+    ///
+    /// <para>
+    /// User-tier outer gate at 5434 admits. Switch at 5442 jumps on
+    /// *pch='r' -&gt; case-'r' opens at PlayerConnection.cpp:6992.
+    /// case-'r' walk for pch="reffect":
+    ///   arm 1 `if strcmp(pch, "reffect")` at 6993: 7B vs 7B FULL match
+    ///     -&gt; commented-out RemoveEffectsByPlayer at 6995 (NO side
+    ///     effect); SendVaMessage("Removed all effects on you!") at 6996
+    ///     COLOR=5 default; msg_sent=true success=true.
+    ///   arm 2 `if strcmp(pch, "rs")` at 7000: 2B vs 7B; byte 1 's' vs
+    ///     'e' MISMATCH. Skip. (Plain `if`, NOT else-if -- evaluates
+    ///     after arm 1 matched.)
+    ///   arms 3-16 chain off arm 2: all silent-or-mismatch on
+    ///     pch="reffect" (release/rsi/rsa/rsn/rsd/range/restoreinv/
+    ///     rotatex/rotatey/rotatez/removebaseore/resetchar/resetmounts/
+    ///     resetnavs all mismatch at byte 1 or byte 2).
+    /// case-'r' breaks at 7134. NET RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 3 NEW classes prior waves are structurally
+    /// blind to: (a) FIRST case-'r' user-tier pin overall -- extends case-
+    /// letter coverage to include 'r' (catches regression where the case-'r'
+    /// label at PlayerConnection.cpp:6992 is deleted, mis-cased, or its
+    /// dispatch table entry collides with another letter); (b) FIRST PLAIN-
+    /// `if` arm 1 (NOT else-if) in case-'r' -- case-'r' opens with two
+    /// PLAIN `if`s (/reffect at 6993 and /rs at 7000) before the chained
+    /// else-if cascade. A regression that collapses arms 1 and 2 into an
+    /// else-if would silently break the structure-preservation contract;
+    /// the pin catches by exercising arm 1 directly (arm 2 still requires
+    /// a future pin to PAIR-COMPLETE this surface); (c) FIRST "commented-
+    /// out-side-effect-only-emit" pin -- the RemoveEffectsByPlayer line
+    /// at 6995 is FULLY commented out in source, leaving SendVaMessage at
+    /// 6996 as the SOLE observable behaviour. Catches regression where the
+    /// SendVaMessage line is removed (the arm would become a complete
+    /// no-op with msg_sent=true and no emit, silently breaking the user
+    /// contract) OR where the commented-out line is uncommented (which
+    /// would emit additional fan-out frames depending on
+    /// EffectManager's behaviour -- this pin would still pass on
+    /// uncomment-only regressions because we match the FIRST emit; future
+    /// pins on the EffectManager fan-out would be additive).
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. The /reffect arm is a retail-faithful slash-command dispatch
+    /// the real server already accepts on any user. cli_test=100 satisfies
+    /// the outer user-tier gate at 5434 unconditionally; no inner
+    /// AdminLevel guard exists on this arm.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashReffect_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (28) = 31 bytes.
+        const int ExpectedReplyPayloadLength = 31;
+        const short ExpectedReplyLengthField = 28;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 27;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Reffa", shipName: "ReffaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/reffect");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(ReffectRemovedLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(ReffectRemovedLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/reffect\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{ReffectRemovedLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
