@@ -18652,6 +18652,192 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 258 sibling-arm-pinning hardening (+0 ratchet) literal anchor
+    /// for the 33-byte ASCII body "/hijack - take control of object."
+    /// -- the FIRST of 25 SendVaMessage emits fired by user-tier
+    /// <c>/helpedit</c> at PlayerConnection.cpp:6663 (arm 4 of case-'h'
+    /// user-tier opened at 6627). FIRST case-'h' user-tier pin; opens
+    /// case-'h' user-tier to SINGLE-PINNED. FIRST multi-emit fanout
+    /// pin in the HandleSlashCommands catalogue (25 SendVaMessage
+    /// emits in ONE dispatch).
+    /// </summary>
+    private const string HelpeditHijackLineLiteral = "/hijack - take control of object.";
+
+    /// <summary>
+    /// Wave 258 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 37-byte wire-shape of the FIRST 0x001D MESSAGE_STRING reply
+    /// (lexically matching "/hijack - take control of object.") from
+    /// the user-tier <c>/helpedit</c> 25-emit fanout on a fresh
+    /// cli_test character. FIRST case-'h' user-tier pin overall;
+    /// case-'h' user-tier promoted from UNPINNED to SINGLE-PINNED.
+    /// FIRST MULTI-EMIT FANOUT pin in the HandleSlashCommands
+    /// catalogue -- /helpedit fires 25 SendVaMessage emits at
+    /// PlayerConnection.cpp:6663-6687, one per developer help line;
+    /// Wave 258 pins ONE specific emit (the first lexical line) and
+    /// proves the fanout is wired (test drains and matches against
+    /// the literal regardless of arrival order, but in practice the
+    /// emits arrive in source order). ONE-HUNDRED-SEVENTEENTH overall
+    /// byte-exact dispatch pin. Assert.Equal pins the full 37-byte
+    /// response shape.
+    ///
+    /// <para>
+    /// User-tier outer gate at 5434 admits. Switch at 5442 jumps on
+    /// *pch='h' -&gt; case-'h' opens at PlayerConnection.cpp:6627.
+    /// case-'h' walk for pch="helpedit":
+    ///   arm 1 PLAIN-if (strcmp(pch,"hijack")==0 &amp;&amp;
+    ///     ShipIndex()-&gt;GetTargetGameID()&gt;0) at 6628 -- 6B vs 8B
+    ///     differ; strcmp NON-ZERO; skip (also target gate fails on
+    ///     fresh character).
+    ///   arm 2 PLAIN-if strcmp(pch,"heading")==0 at 6640 -- 7B vs 8B
+    ///     differ; byte 2 'a' vs 'l' NON-ZERO; skip.
+    ///   arm 3 PLAIN-if MatchOptWithParam("ht",pch) at 6647 -- strncmp
+    ///     ("ht","helpedit",2) byte 1 't' vs 'e' NON-ZERO -&gt; matcher
+    ///     false; no emit; PLAIN-`if` so cascade continues.
+    ///   arm 4 else-if strcmp(pch,"helpedit")==0 at 6661 -- 8B vs 8B
+    ///     FULL match -&gt; enter. Body 6663-6687 fires 25 sequential
+    ///     SendVaMessage calls, each emitting one 0x001D MESSAGE_STRING
+    ///     with COLOR=5 default. The FIRST call at 6663 emits
+    ///     "/hijack - take control of object." (33B); the remaining
+    ///     24 cover /release, /exposedecos, /faceme, /panup, /panx,
+    ///     /pany, /panz, /rotatex, /rotatey, /rotatez, /levelout,
+    ///     /scale, /setradius (3 lines), /signature, /planetspin,
+    ///     /tilt, /commit, //rsectors, //killfactions, //displayfactions,
+    ///     //editfaction (4 lines). success=true; msg_sent=true at
+    ///     6688-6689.
+    ///   arm 5 else-if strncmp(pch,"helpfield",9)==0 at 6691 short-
+    ///     circuited by arm 4's else-if match.
+    ///   case-'h' breaks at 6706.
+    /// NET RESULT: 25 0x001D MESSAGE_STRING emits. Wave 258 pins the
+    /// FIRST emit's wire-shape; the test filter scans all frames and
+    /// returns on literal match. Wire of pinned emit: `[u16 LE 34]
+    /// [u8 5][33B ASCII "/hijack - take control of object."][NUL]`
+    /// = 37 bytes.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 4 NEW classes prior waves are structurally
+    /// blind to: (a) FIRST case-'h' user-tier pin overall -- extends
+    /// case-letter coverage to include 'h' (catches regression where
+    /// the case-'h' label at PlayerConnection.cpp:6627 is deleted,
+    /// mis-cased, or its dispatch table entry collides with another
+    /// letter); (b) FIRST MULTI-EMIT FANOUT pin in the HandleSlashCommands
+    /// catalogue -- /helpedit fires 25 emits in one dispatch. A
+    /// regression that broke the SendVaMessage loop (e.g. early-return,
+    /// loop bound off-by-one) would still emit some lines but drop
+    /// others; Wave 258 only validates that the FIRST line is emitted.
+    /// A regression that reordered or deleted the FIRST line would
+    /// fire the test (no matching literal in 400 frames); (c) FIRST
+    /// LEXICAL-FIRST-LINE pin -- the test catches a regression that
+    /// changed the literal "/hijack - take control of object." to any
+    /// other text via the literal+colour+length assertions; (d) FIRST
+    /// PLAIN-IF-CASCADE-ELSE-IF-TAIL pin in case-'h' -- arm 4 is the
+    /// FIRST else-if attached to the arm 3 PLAIN-`if`/MatchOptWithParam
+    /// chain. A regression that converted arm 4 to a PLAIN-`if` would
+    /// not affect this test (still reachable) but a regression that
+    /// converted arm 3 to else-if would block arm 4 from firing when
+    /// arm 3 evaluates true on some other input; Wave 258 anchors the
+    /// arm 3 PLAIN-`if` + arm 4 else-if structural pattern.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. /helpedit is a retail-faithful developer help dispatch
+    /// emitting 25 informational lines. The 25-emit fanout matches the
+    /// existing server behaviour. cli_test=100 satisfies the outer
+    /// user-tier gate at 5434 unconditionally; no inner AdminLevel
+    /// guard exists on this arm.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashHelpedit_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (34) = 37 bytes.
+        const int ExpectedReplyPayloadLength = 37;
+        const short ExpectedReplyLengthField = 34;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 33;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Helpia", shipName: "HelpiaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/helpedit");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(HelpeditHijackLineLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(HelpeditHijackLineLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/helpedit\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{HelpeditHijackLineLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
