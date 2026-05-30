@@ -19941,6 +19941,185 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 265 sibling-arm-pinning hardening (+0 ratchet) literal anchor
+    /// for the 22-byte ASCII body "Player foo not online." emitted by the
+    /// admin-tier case-'g' arm at PlayerConnection.cpp:5420 when
+    /// <c>//gmupgrade foo</c> arrives and the GetPlayer("foo") lookup
+    /// returns NULL. FIRST PLAYER-NOT-FOUND POST-MATCH pin. Distinct
+    /// literal from gmskillpoints' "Player %s is not online" (no "is",
+    /// trailing period) -- evidence of independent emit-site authorship
+    /// despite semantically equivalent intent.
+    /// </summary>
+    private const string PlayerFooNotOnlineLiteral = "Player foo not online.";
+
+    /// <summary>
+    /// Wave 265 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 26-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
+    /// admin-tier <c>//gmupgrade foo</c> on a fresh cli_test character
+    /// (where "foo" does NOT name any online player). FIRST NESTED-
+    /// INLINE-GATE pin in the HandleSlashCommands catalogue -- the
+    /// <c>AdminLevel() &gt;= GM</c> check at PlayerConnection.cpp:5394
+    /// is INSIDE the matcher body, NOT on the matcher predicate (vs
+    /// gmsetaccess's `if(matcher &amp;&amp; AdminLevel()&gt;=SDEV)`
+    /// pattern in Wave 262). FIRST PLAYER-NOT-FOUND POST-MATCH pin.
+    /// FIRST proactive-msg_sent=true+success=true POST-MATCH pin (the
+    /// flags are set at 5397-5398 BEFORE the GetPlayer NULL check at
+    /// 5403, distinct from Waves 262+263+264 where flags are set in
+    /// the error/syntax branch AFTER the check). ONE-HUNDRED-TWENTY-
+    /// FIFTH overall byte-exact dispatch pin. Assert.Equal pins the
+    /// full 26-byte response shape.
+    ///
+    /// <para>
+    /// Admin-tier outer gate at PlayerConnection.cpp:4716 admits;
+    /// cli_test=100 vs GM=50 satisfies. pch=&amp;Msg[2]="gmupgrade
+    /// foo". Switch jumps on 'g'. case-'g' at 5205. Preceding case-'g'
+    /// matchers (gmgetaccess: index 2 'g'!='u'; gmsetaccess: 's'!='u';
+    /// gmskillpoints: 's'!='u'; gmenableskills: 'e'!='u'; gmplayerlevel:
+    /// 'p'!='u') ALL fail strncmp without firing missing-arg error.
+    /// MatchOptWithParam("gmupgrade", pch, param, msg_sent) at 5392:
+    /// strncmp matches 9B; pch[9]=' '; param="foo"; returns true.
+    /// </para>
+    ///
+    /// <para>
+    /// Handler body at 5392-5428 enters; NESTED inline gate at 5394
+    /// <c>if (AdminLevel() &gt;= GM)</c> evaluates: cli_test=100 vs
+    /// GM=50 -> true. Inside the gate: <c>Username = strtok_s(param,
+    /// " ", &amp;next_token)</c> returns "foo". <c>msg_sent = true;
+    /// success = true;</c> at 5397-5398 (PROACTIVE flag-set, BEFORE
+    /// Player lookup). <c>if (Username)</c> at 5399 true; <c>Player
+    /// * TargetP = g_ServerMgr->m_PlayerMgr.GetPlayer("foo")</c>
+    /// returns NULL (no such player online). <c>if (TargetP)</c> at
+    /// 5403 false -> else at 5418. SendVaMessage("Player %s not
+    /// online.", "foo") at 5420 (COLOR=5 default, ONE %s sub). NET
+    /// RESULT: exactly 1 emit "Player foo not online." (22B,
+    /// COLOR=5). Wire: `[u16 LE 23][u8 5][22B][NUL]` = 26 bytes.
+    /// User-tier trailing fallback at 7702 (<c>!success &amp;&amp;
+    /// !msg_sent</c>) suppressed by BOTH flags=true.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 4 NEW classes prior waves are
+    /// structurally blind to: (a) FIRST NESTED-INLINE-GATE pin --
+    /// the AdminLevel gate is INSIDE the matcher body at 5394, NOT
+    /// on the matcher predicate. A regression that moved the gate
+    /// to the matcher predicate (Wave 262 pattern) would cause the
+    /// matcher to short-circuit when AdminLevel&lt;GM, suppressing
+    /// the "Missing arg for option gmupgrade" emit for low-access
+    /// accounts; (b) FIRST PLAYER-NOT-FOUND POST-MATCH pin -- prior
+    /// not-online emits are from MissingArg/Syntax paths or have
+    /// not been pinned. The "Player %s not online." format string
+    /// with trailing period and NO "is" word is unique to gmupgrade;
+    /// (c) FIRST proactive-msg_sent=true+success=true POST-MATCH
+    /// pin -- the flags are set BEFORE the player lookup at 5397-
+    /// 5398. A regression that moved flag-setting INTO the success
+    /// path (after lookup) would leave both flags FALSE in the
+    /// not-found case and fire the trailing fallback at 7702
+    /// emitting "Illegal slash command: gmupgrade foo"; (d) FIRST
+    /// PLAYER-NAME-IN-FORMAT-SUBSTITUTION POST-MATCH pin -- the
+    /// emit body contains the player name from the input ("foo"),
+    /// vs prior post-match pins which had hard-coded literal bodies.
+    /// A regression that swapped the format string or moved the
+    /// %s placement would produce a different byte-exact body.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. The proactive-flag-set pattern is retail-faithful --
+    /// gmupgrade unconditionally succeeds-or-not-onlines, never
+    /// failures-into-illegal-slash. cli_test=100 satisfies BOTH the
+    /// outer GM gate at 4716 AND the inner GM gate at 5394.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashGmupgradeUnknownPlayer_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (23) = 26 bytes.
+        const int ExpectedReplyPayloadLength = 26;
+        const short ExpectedReplyLengthField = 23;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 22;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Gerda", shipName: "GerdaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//gmupgrade foo");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(PlayerFooNotOnlineLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(PlayerFooNotOnlineLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//gmupgrade foo\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{PlayerFooNotOnlineLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
