@@ -22336,6 +22336,8 @@ public sealed class SectorChatTests
 
     private const string DisplayPlayerFactionCouldntLiteral = "Couldnt list faction for 'ghostfoo' !";
 
+    private const string FindsectorHeaderZzzNoMatchLiteral = "Sectors like 'ZZZNOMATCH':";
+
     /// <summary>
     /// Wave 278 sibling-arm-pinning hardening (+0 ratchet): pins the
     /// 47-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
@@ -25309,6 +25311,158 @@ public sealed class SectorChatTests
                 $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
                 $"\"//displayplayerfaction ghostfoo\" without seeing 0x001D MESSAGE_STRING " +
                 $"equal to \"{DisplayPlayerFactionCouldntLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Wave 100 milestone sibling-arm-pinning hardening (+0 ratchet): pins
+    /// the 30-byte wire-shape of the FindSectorFromName HEADER 0x001D
+    /// MESSAGE_STRING reply to admin-tier <c>//findsector ZZZNOMATCH</c>
+    /// on a fresh cli_test character. FIRST SAME-DISPATCH-DIFFERENT-FRAME
+    /// pin in HandleSlashCommands -- Wave 255 (commit-counter Wave 58)
+    /// pinned the COLOR=13 102B "//findsector is case sensitive..." TRAILER
+    /// from the SAME body; Wave 100 pins the COLOR=12 26B
+    /// "Sectors like 'ZZZNOMATCH':" HEADER from the SAME dispatch. case-'f'
+    /// admin arm 3 //findsector now DOUBLY-PINNED across BOTH emit frames
+    /// of FindSectorFromName (the HEADER at PlayerConnection.cpp:8192 and
+    /// the TRAILER at 8207). FIRST FindSectorFromName HEADER-emit byte-
+    /// exact pin -- a regression that altered the header wording, removed
+    /// the embedded single-quotes, changed the colour from 12 to default,
+    /// or moved the emit out of the function would break this pin. FIRST
+    /// 26-byte COLOR=12 literal pin (prior COLOR=12 pins: Wave 75
+    /// /factionoverride success, Wave 80 //halloween 25B usage). FIRST
+    /// HEADER-FRAME-FROM-DELEGATE-INTERNAL-EMIT pin -- the FIRST emit of
+    /// FindSectorFromName fires UNCONDITIONALLY at 8192 BEFORE the loop;
+    /// Wave 100 pins it byte-for-byte; a regression that conditionalized
+    /// the header on found-state would break this pin. FIRST PARAM-
+    /// ECHO-IN-EMIT pin -- the literal includes the verbatim user input
+    /// "ZZZNOMATCH" between single-quotes; a regression that stripped or
+    /// escaped the user-provided sector name would break ONLY this pin.
+    /// FIRST CROSS-COLOR DUAL-FRAME pin overall -- Wave 99 was COLOR-
+    /// SHIFTING DUAL-EMIT but pinned the SECOND frame; Wave 100 pins the
+    /// FIRST frame of an established dual-emit dispatch (Wave 99 + Wave
+    /// 100 + Wave 255 form a triple-color triplet: COLOR=5 W99-internal,
+    /// COLOR=12 W100-header, COLOR=13 W255-trailer). ONE-HUNDRED-FIFTY-
+    /// SEVENTH overall byte-exact dispatch pin. Assert.Equal pins the
+    /// full 30-byte response shape AND the literal content.
+    ///
+    /// <para>
+    /// Outer admin gate at PlayerConnection.cpp:4716 admits (cli_test
+    /// ADMIN=100 &gt;= GM=50). pch="findsector ZZZNOMATCH". Switch on 'f'.
+    /// case-'f' opens at 4904. Arms 1-2 strcmp("floodsave")/strcmp(
+    /// "friends") fail. Arm 3 at 4919: MatchOptWithParam("findsector",
+    /// "findsector ZZZNOMATCH", ...) strncmp 10B matches; arg[10]=' ';
+    /// param="ZZZNOMATCH"; returns true. FindSectorFromName("ZZZNOMATCH")
+    /// invoked at 4921. Inside delegate at PlayerMisc.cpp:8182:
+    /// wildcard=false (param[0]='Z'!='*'); !param FALSE; emits #1 at 8192:
+    /// SendVaMessageC(12, "Sectors like '%s':", "ZZZNOMATCH") (EXPLICIT
+    /// COLOR=12; 26B body "Sectors like 'ZZZNOMATCH':"); for-loop at
+    /// 8195-8203 iterates all sectors, none match strstr("ZZZNOMATCH"),
+    /// found stays false; if(!found) TRUE at 8205; emit #2 at 8207:
+    /// SendVaMessageC(13, "//findsector is case sensitive ...") (COLOR=13;
+    /// 102B trailer pinned by Wave 255). Returns true. Back at 4922:
+    /// msg_sent=true. case-'f' breaks at 4924. NET RESULT: exactly 2
+    /// 0x001D emits. Wire for HEADER frame: [u16 LE 27][u8 12][26B][NUL]
+    /// = 30 bytes. The test pins the HEADER frame's wire shape (the
+    /// TRAILER frame's existence and shape is asserted by Wave 255).
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. //findsector is admin-tier with NO inline AdminLevel gate
+    /// (outer 4716 gate only). FindSectorFromName is a read-only inspector
+    /// (no state mutation, no database write). The HEADER emit at 8192 is
+    /// the upstream-preserved "echo what you asked for" diagnostic
+    /// invariant. The pin DOCUMENTS the HEADER-frame admin path byte-for-
+    /// byte; TIGHTENS toward preservation.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashFindsectorNoMatch_OnAdminAccount_PinsHeaderFrameWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (27) = 30 bytes.
+        const int ExpectedReplyPayloadLength = 30;
+        const short ExpectedReplyLengthField = 27;
+        const byte ExpectedReplyColor = 12;
+        const int ExpectedLiteralByteCount = 26;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Folo", shipName: "FoloShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//findsector ZZZNOMATCH");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(FindsectorHeaderZzzNoMatchLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(FindsectorHeaderZzzNoMatchLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//findsector ZZZNOMATCH\" without seeing 0x001D MESSAGE_STRING " +
+                $"equal to \"{FindsectorHeaderZzzNoMatchLiteral}\".");
         }
         finally
         {
