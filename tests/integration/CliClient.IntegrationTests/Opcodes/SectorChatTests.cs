@@ -20120,6 +20120,183 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 266 sibling-arm-pinning hardening (+0 ratchet) literal anchor
+    /// for the 20-byte ASCII body "OpenInterface (1,2):" emitted by the
+    /// user-tier case-'o' arm at PlayerConnection.cpp:6898 when
+    /// <c>/openif 1,2</c> arrives with COMMA-DELIMITED args. FIRST
+    /// COMMA-DELIMITER strtok_s pin (vs all prior space-delimited
+    /// post-match pins). FIRST DUAL-%d-SUBSTITUTION pin (two atoi()
+    /// values in the emitted format string). FIRST SIDE-EFFECT-CALL-
+    /// BEFORE-EMIT pin (OpenInterface(1,2) sends ENB_OPCODE_0066_OPEN_
+    /// INTERFACE BEFORE the MESSAGE_STRING emit at 6898).
+    /// </summary>
+    private const string OpenInterface12Literal = "OpenInterface (1,2):";
+
+    /// <summary>
+    /// Wave 266 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 24-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
+    /// user-tier <c>/openif 1,2</c> on a fresh cli_test character.
+    /// FIRST COMMA-DELIMITER strtok_s pin -- exercises the comma-
+    /// separated-arg parsing convention (vs all prior post-match
+    /// pins using space-delimiter). FIRST DUAL-%d-SUBSTITUTION pin
+    /// (two atoi() values in format). FIRST SIDE-EFFECT-CALL-BEFORE-
+    /// EMIT pin (the OpenInterface(1,2) call sends an
+    /// ENB_OPCODE_0066_OPEN_INTERFACE packet to this client BEFORE
+    /// the MESSAGE_STRING emit fires at 6898). ONE-HUNDRED-TWENTY-
+    /// SIXTH overall byte-exact dispatch pin. Assert.Equal pins the
+    /// full 24-byte response shape.
+    ///
+    /// <para>
+    /// User-tier outer gate at PlayerConnection.cpp:5434 (<c>Msg[0]=='/'
+    /// &amp;&amp; Msg[1]!=0 &amp;&amp; (!msg_sent || !success)</c>)
+    /// admits; both flags false. pch=&amp;Msg[1]="openif 1,2". Switch
+    /// at 5442 jumps on *pch='o'. case-'o' arm at 6872. Arm 1 at
+    /// 6873 strcmp("ori") false. Arm 2 at 6881 MatchOptWithParam(
+    /// "orientation", "openif 1,2", ...) -- strncmp("orientation",
+    /// "openif", 11) 'r'!='p' at index 2 -- false (no error). Arm 3
+    /// at 6886 else-if MatchOptWithParam("oeuler", ...) -- strncmp
+    /// "oeuler" vs "openif" 'e'!='p' at index 1 -- false. Arm 4 at
+    /// 6891 else-if MatchOptWithParam("openif", "openif 1,2", ...):
+    /// strncmp matches 6B; pch[6]=' '; param="1,2"; returns true.
+    /// </para>
+    ///
+    /// <para>
+    /// Handler body at 6892-6900 runs: <c>a = strtok_s(param, ",")</c>
+    /// returns "1"; <c>b = strtok_s(NULL, ",")</c> returns "2";
+    /// <c>if (b)</c> at 6895 true; <c>OpenInterface(atoi("1"),
+    /// atoi("2"))</c> at 6897 -- SIDE EFFECT: sends ENB_OPCODE_0066_
+    /// OPEN_INTERFACE packet with UIChange=1 UIType=2 to this client
+    /// (test drain filter ignores non-0x001D opcodes). SendVaMessage(
+    /// "OpenInterface (%d,%d):", atoi("1"), atoi("2")) at 6898
+    /// (COLOR=5 default, DUAL-%d sub yielding "(1,2)"). msg_sent=true
+    /// at 6900 (success NOT explicitly set -- remains false). NET
+    /// RESULT: exactly 1 0x001D emit "OpenInterface (1,2):" (20B,
+    /// COLOR=5). Wire: `[u16 LE 21][u8 5][20B][NUL]` = 24 bytes.
+    /// User-tier trailing fallback at 7702 (<c>!success &amp;&amp;
+    /// !msg_sent</c>) -- !msg_sent=false -- suppressed.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 4 NEW classes prior waves are
+    /// structurally blind to: (a) FIRST COMMA-DELIMITER strtok_s pin
+    /// -- a regression that changed the delimiter to space would
+    /// cause "1,2" to parse as a SINGLE token "1,2" with b=NULL,
+    /// suppressing the emit entirely; (b) FIRST DUAL-%d-SUBSTITUTION
+    /// pin -- a regression that swapped %d order or changed format
+    /// would produce different bytes. The exact `(1,2):` payload
+    /// pins both substitution positions; (c) FIRST SIDE-EFFECT-CALL-
+    /// BEFORE-EMIT pin -- OpenInterface(1,2) is called BEFORE the
+    /// MESSAGE_STRING emit. A regression that reordered them would
+    /// not change the emit body but would change the observable
+    /// frame order (test drain filter is opcode-based so this
+    /// wouldn't fire here; the pin is structural); (d) FIRST
+    /// SUCCESS-FALSE-MSG_SENT-TRUE EMIT pin -- after the emit,
+    /// msg_sent=true but success is NOT set (line 6900). A regression
+    /// that set success=true would not change visible behavior but
+    /// would change the success/msg_sent invariant for subsequent
+    /// handlers. The trailing fallback at 7702 is suppressed by
+    /// msg_sent=true regardless of success.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. /openif is user-tier with NO inline AdminLevel gate --
+    /// retail-faithful as preserved in the source. The OpenInterface
+    /// side-effect call targets this client only (no cross-player
+    /// state mutation). UIChange=1 UIType=2 are dev-friendly values
+    /// that exercise the dispatcher without depending on UI state.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashOpenif_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (21) = 24 bytes.
+        const int ExpectedReplyPayloadLength = 24;
+        const short ExpectedReplyLengthField = 21;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 20;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Olena", shipName: "OlenaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/openif 1,2");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(OpenInterface12Literal, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(OpenInterface12Literal, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/openif 1,2\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{OpenInterface12Literal}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
