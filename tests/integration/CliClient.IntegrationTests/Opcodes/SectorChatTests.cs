@@ -22330,6 +22330,8 @@ public sealed class SectorChatTests
 
     private const string GmplayerlevelNotOnlineLiteral = "Player ghostfoo is not online";
 
+    private const string GmskillpointsNotOnlineLiteral = "Player ghostfoo is not online";
+
     /// <summary>
     /// Wave 278 sibling-arm-pinning hardening (+0 ratchet): pins the
     /// 47-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
@@ -24837,6 +24839,152 @@ public sealed class SectorChatTests
                 $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
                 $"\"//gmplayerlevel ghostfoo 30\" without seeing 0x001D MESSAGE_STRING " +
                 $"equal to \"{GmplayerlevelNotOnlineLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Wave 97 sibling-arm-pinning hardening (+0 ratchet): pins the 33-byte
+    /// wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to admin-tier
+    /// <c>//gmskillpoints ghostfoo 5</c> (Username + SSkillPoints both
+    /// present, SSkillPoints non-NULL passes the disjunctive-check, GetPlayer
+    /// returns NULL) on a fresh cli_test character. FIRST case-'g' admin
+    /// arm 3 BODY-PAST-SYNTAX pin -- Wave 66 //gmskillpoints foo (one arg)
+    /// pinned the SSkillPoints-NULL ELSE-branch Syntax-emit; Wave 97 walks
+    /// past with SSkillPoints="5" non-NULL into the IF(SSkillPoints) TRUE
+    /// arm's nested IF(!TargetP)-TRUE branch emitting "Player ghostfoo is
+    /// not online" (29B, COLOR=5 default). case-'g' arm 3 now DOUBLY-PINNED
+    /// across BOTH SSkillPoints-NULL polarities (Wave 66 FALSE-Syntax +
+    /// Wave 97 TRUE-then-TargetP-NULL). THIRD occurrence of the 29-byte
+    /// "Player ghostfoo is not online" literal overall (Wave 285
+    /// //gmenableskills via case-'g' arm 4; Wave 96 //gmplayerlevel via
+    /// case-'g' arm 5; Wave 97 //gmskillpoints via case-'g' arm 3). THIRD
+    /// SAME-WIRE-DIFFERENT-DISPATCH pin -- THREE distinct case-'g' arms
+    /// (3, 4, 5) now form a TRIPLY-PINNED SAME-WIRE-SHAPE-DIFFERENT-DISPATCH
+    /// triplet emitting byte-identical 33-byte replies via three different
+    /// MatchOptWithParam strncmp matches; a regression that conflated any
+    /// two arms would pass byte-equality but fail the dispatch-path pin.
+    /// FIRST SINGLE-PREDICATE-NON-NULL-THEN-TARGETP-NULL pin -- arm 3 uses
+    /// `if (SSkillPoints)` as the validity gate (Wave 66 fired its FALSE
+    /// branch); Wave 97 walks through TRUE then fires nested IF(!TargetP)-
+    /// TRUE within. ONE-HUNDRED-FIFTY-FOURTH overall byte-exact dispatch
+    /// pin. Assert.Equal pins the full 33-byte response shape AND the
+    /// literal content.
+    ///
+    /// <para>
+    /// Outer admin gate at PlayerConnection.cpp:4716 admits (cli_test
+    /// ADMIN=100 &gt;= GM=50). pch="gmskillpoints ghostfoo 5". Switch on
+    /// 'g'. case-'g' opens at 5205. Arms 1-2 strncmp-mismatch
+    /// (gmgetaccess/gmsetaccess); Arm 3 at 5260: MatchOptWithParam(
+    /// "gmskillpoints", "gmskillpoints ghostfoo 5", ...) strncmp 13B
+    /// matches; arg[13]=' '; param="ghostfoo 5"; returns true. Body at
+    /// 5265: Username=strtok_s("ghostfoo 5", " ")="ghostfoo"; SSkillPoints
+    /// =strtok_s(NULL, " ")="5"; SkillPoints=atoi("5")=5. Predicate at
+    /// 5272: SSkillPoints="5" TRUE → enter IF arm. TargetP=g_ServerMgr
+    /// ->m_PlayerMgr.GetPlayer("ghostfoo")=NULL. if(!TargetP) TRUE at 5276
+    /// -- emits SendVaMessage("Player %s is not online", "ghostfoo") at
+    /// 5278 (DEFAULT COLOR=5; 29B body "Player ghostfoo is not online").
+    /// msg_sent=true success=true at 5279-5280. Arms 4-6 NEVER REACHED.
+    /// case-'g' breaks. NET RESULT: exactly 1 0x001D emit. Wire:
+    /// [u16 LE 30][u8 5][29B][NUL] = 33 bytes.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. //gmskillpoints is admin-tier with NO inline AdminLevel
+    /// gate -- the admin-tier outer gate at 4716 is the only access
+    /// check -- retail-faithful as preserved in source. The IF(SSkillPoints)
+    /// disjunctive gate is the upstream-preserved validity-check
+    /// invariant. GetPlayer returning NULL on non-existent player name is
+    /// the upstream-preserved offline-check invariant. The pin DOCUMENTS
+    /// the SSKILLPOINTS-NON-NULL-THEN-TARGETP-NULL admin path byte-for-byte.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashGmskillpointsOfflineTarget_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (30) = 33 bytes.
+        const int ExpectedReplyPayloadLength = 33;
+        const short ExpectedReplyLengthField = 30;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 29;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Gola", shipName: "GolaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//gmskillpoints ghostfoo 5");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(GmskillpointsNotOnlineLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(GmskillpointsNotOnlineLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//gmskillpoints ghostfoo 5\" without seeing 0x001D MESSAGE_STRING " +
+                $"equal to \"{GmskillpointsNotOnlineLiteral}\".");
         }
         finally
         {
