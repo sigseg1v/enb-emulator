@@ -22318,6 +22318,8 @@ public sealed class SectorChatTests
 
     private const string RespecSyntaxLiteral = "Syntax: //respec <username> <all|call|0-63>";
 
+    private const string BanSyntaxLiteral = "Syntax: //ban <playername>";
+
     /// <summary>
     /// Wave 278 sibling-arm-pinning hardening (+0 ratchet): pins the
     /// 47-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
@@ -23960,6 +23962,160 @@ public sealed class SectorChatTests
                 $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
                 $"\"//respec ghostfoo\" without seeing 0x001D MESSAGE_STRING " +
                 $"equal to \"{RespecSyntaxLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Wave 288 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 30-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
+    /// admin-tier <c>//ban </c> (TRAILING SPACE, zero-length Username)
+    /// on a fresh cli_test character. FIRST CASE-'b' admin arm 1 (//ban)
+    /// pin in the HandleSlashCommands catalogue. Wave 73 covered case-'b'
+    /// arm 2 //bumpaccess (BACKTICK-quoted Player not found, DEV-gated);
+    /// Wave 288 covers arm 1 //ban (NO-INLINE-GATE, Syntax-error path).
+    /// case-'b' admin block now DOUBLY-PINNED across both arms. FIRST
+    /// 26-BYTE LITERAL pin. FIRST POST-MATCH SINGLE-STRTOK_S-NULL admin
+    /// //ban-specific syntax-emit pin -- structurally distinct from
+    /// Wave 283 //countsp's if(arg)..else-with-no-return; Wave 288 uses
+    /// if(!arg) WITH explicit return at 4763 (HARD return from Handle
+    /// SlashCommands, not just case-break). FIRST NO-INLINE-GATE BAN
+    /// code-path pin. ONE-HUNDRED-FORTY-EIGHTH overall byte-exact
+    /// dispatch pin. Assert.Equal pins the full 30-byte response shape
+    /// AND the literal content.
+    ///
+    /// <para>
+    /// Admin outer gate at PlayerConnection.cpp:4716 admits (cli_test
+    /// ADMIN=100 satisfies GM=50). pch=&amp;Msg[2]="ban ". Switch on
+    /// 'b'. case-'b' opens at 4754. Arm 1 at 4756: MatchOptWithParam
+    /// ("ban", "ban ", ...) -- 4-arg form, allowNoParams defaults false.
+    /// strncmp 3B matches; arg[3]=' '; param=&amp;arg[4]="" (zero-length
+    /// string past the trailing space); returns true. Body at 4758:
+    /// Username=strtok_s("", " ", &amp;next_token) returns NULL (C11:
+    /// strtok_s on empty string returns NULL). if(!Username) TRUE at
+    /// 4760 -- emits SendVaMessage("Syntax: //ban &lt;playername&gt;")
+    /// at 4762 (DEFAULT COLOR=5; 26-byte body); return at 4763 (HARD
+    /// EARLY-RETURN from HandleSlashCommands -- not just from case-'b').
+    /// Arm 2 //bumpaccess never reached. NET: exactly 1 0x001D emit.
+    /// </para>
+    ///
+    /// <para>
+    /// 0x001D MESSAGE_STRING wire shape (30 bytes total):
+    /// <list type="bullet">
+    /// <item><description>length field (LE u16, value 27) -- offset 0..1
+    /// </description></item>
+    /// <item><description>color byte (0x05 -- SendVaMessage default) --
+    /// offset 2</description></item>
+    /// <item><description>26-byte ASCII body "Syntax: //ban
+    /// &lt;playername&gt;" -- offset 3..28</description></item>
+    /// <item><description>NUL terminator (0x00) -- offset 29
+    /// </description></item>
+    /// </list>
+    /// Length field = body bytes (26) + NUL (1) = 27.
+    /// </para>
+    ///
+    /// <para>
+    /// Coverage delta vs prior pins -- this pin is byte-exact for things
+    /// the rest of the suite is blind to: (a) FIRST case-'b' admin arm 1
+    /// (//ban) pin -- combined with Wave 73 //bumpaccess (arm 2),
+    /// case-'b' admin is now DOUBLY-PINNED across both MatchOptWithParam
+    /// arms; (b) FIRST 26-BYTE LITERAL pin; (c) FIRST POST-MATCH SINGLE-
+    /// STRTOK_S-NULL admin pin with EXPLICIT if(!arg)+HARD-RETURN
+    /// pattern -- distinct from Wave 283 //countsp's if(arg)..else-with-
+    /// no-return and from Waves 278-279's NO-EARLY-RETURN paths; the
+    /// hard return at 4763 returns from HandleSlashCommands entirely,
+    /// preventing any subsequent arm execution; (d) FIRST NO-INLINE-
+    /// GATE BAN code-path pin -- //ban has NO `&amp;&amp; AdminLevel()
+    /// &gt;= X` inline gate (unlike //bumpaccess at 4789 which has
+    /// `&amp;&amp; AdminLevel() &gt;= DEV`); cli_test ADMIN=100 admits
+    /// via outer GM gate only.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashBanTrailingSpace_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (27) = 30 bytes.
+        const int ExpectedReplyPayloadLength = 30;
+        const short ExpectedReplyLengthField = 27;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 26;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Bapa", shipName: "BapaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//ban ");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(BanSyntaxLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(BanSyntaxLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//ban \" without seeing 0x001D MESSAGE_STRING " +
+                $"equal to \"{BanSyntaxLiteral}\".");
         }
         finally
         {
