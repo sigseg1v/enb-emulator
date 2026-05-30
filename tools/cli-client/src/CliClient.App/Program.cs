@@ -9,6 +9,7 @@ using N7.CliClient.Opcodes;
 using N7.CliClient.Opcodes.Inbound;
 using N7.CliClient.Opcodes.Outbound;
 using N7.CliClient.Repl;
+using N7.CliClient.Repl.Commands;
 using N7.CliClient.Session;
 using N7.CliClient.Workflows;
 
@@ -30,14 +31,27 @@ if (args[0] == "--smoke")
     return 0;
 }
 
-if (args[0] == "repl")
+if (args[0] is "repl" or "start")
 {
+    var replRegistry = new OpcodeRegistry();
+    replRegistry.RegisterAllNamedOpaque();
+    replRegistry.Register(new ServerRedirectCodec());
+    replRegistry.Register(new GlobalAvatarListCodec());
+    replRegistry.Register(new GlobalTicketCodec());
+
+    await using var sessionCtx = new SessionContext(replRegistry);
     var repl = new Repl();
-    // Workflow commands (connect, login, chat, enumerate ...) get
-    // registered here as Items 9-13 land. Today the REPL ships with
-    // the built-in `help` / `quit` only.
+    repl.Register(new ConnectCommand(sessionCtx));
+    repl.Register(new LoginCommand(sessionCtx));
+    repl.Register(new ListCommand(sessionCtx));
+    repl.Register(new CreateCommand(sessionCtx));
+    repl.Register(new EnterCommand(sessionCtx));
+
     using var cts = new CancellationTokenSource();
     Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
+
+    Console.WriteLine($"{ClientInfo.Name} {ClientInfo.Version}");
+    Console.WriteLine("type 'help' for commands, 'quit' to exit");
     return await repl.RunAsync(Console.In, Console.Out, cts.Token);
 }
 
@@ -238,7 +252,7 @@ static void PrintHelp()
         Headless passive observer client for the Earth & Beyond emulator.
 
         usage:
-          cli-client [options] [command]
+          enb-cli [options] [command]
 
         options:
           -h, --help        print this help and exit
@@ -246,7 +260,14 @@ static void PrintHelp()
           --smoke           print a one-line "ok" and exit (used by CI)
 
         commands:
-          repl              interactive REPL (help, quit; more in Items 9-13)
+          start             interactive REPL (alias: repl)
+                            commands inside the prompt:
+                              connect <host>[:port]
+                              login   <user> <pass>
+                              list
+                              create  <class> <firstname>   (e.g. JE Griever)
+                              enter   <firstname>
+                              help, quit
           connect-and-login --user X --pass Y [--login-host h] [--login-port p]
                             [--global-host h] [--global-port p] [--idle 5]
                             [--strict-tls]

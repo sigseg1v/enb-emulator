@@ -10,7 +10,7 @@ namespace N7.CliClient;
 /// </summary>
 public static class ClientInfo
 {
-    public const string Name = "enb-cli-client";
+    public const string Name = "enb-cli";
 
     /// <summary>
     /// Semantic version of the CLI client. Bump on protocol-impacting
