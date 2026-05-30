@@ -20655,6 +20655,171 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 269 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 29-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
+    /// user-tier <c>/invite foo</c> on a fresh cli_test character with
+    /// no online player named "foo". SECOND "Could not find player %s"
+    /// emit-site pin (after Wave 268's /trade arm at 7528). Distinct
+    /// from Wave 268 by FOUR structural axes: (a) different lookup
+    /// function -- GetGameIDFromName (returns -1 SENTINEL on miss) vs
+    /// GetPlayer (returns NULL POINTER); (b) different validation
+    /// pattern -- integer equality check `game_id == -1` vs pointer
+    /// nullity check `!targetp`; (c) different case-letter dispatch --
+    /// case-'i' arm 1 vs case-'t' arm 6; (d) different position-within-
+    /// case -- /invite is the FIRST arm in case-'i' (no preceding
+    /// strncmp false-arms in that case to walk past) vs /trade as the
+    /// SIXTH arm in case-'t' (five preceding arms reject first).
+    /// ONE-HUNDRED-TWENTY-NINTH overall byte-exact dispatch pin.
+    /// Assert.Equal pins the full 29-byte response shape.
+    ///
+    /// <para>
+    /// User-tier outer gate at PlayerConnection.cpp:5434 admits; both
+    /// flags false. pch=&amp;Msg[1]="invite foo". Switch jumps on 'i'.
+    /// case-'i' at 6708. Arm 1 MatchOptWithParam("invite", "invite foo",
+    /// param, msg_sent): strncmp matches 6B; pch[6]=' '; param="foo";
+    /// returns true. Body at 6711: <c>long game_id = g_ServerMgr-&gt;
+    /// m_PlayerMgr.GetGameIDFromName("foo")</c>. No online player named
+    /// "foo" -- returns -1 (SENTINEL). if-guard at 6712:
+    /// <c>if (game_id == -1)</c> evaluates true. <c>SendVaMessage(
+    /// "Could not find player %s", "foo")</c> at 6714 emits a SINGLE
+    /// 0x001D MESSAGE_STRING with body "Could not find player foo"
+    /// (25B, COLOR=5 default). `return;` at 6715 exits HandleSlashCommands
+    /// ENTIRELY -- skips the GameID()-equality self-invite check at
+    /// 6718, skips GroupInvite at 6726, skips msg_sent=true at 6727,
+    /// skips the case-'i' GM-gated /invisible arm at 6730, skips
+    /// remaining case-'i' arms AND the trailing user-tier
+    /// illegal-command fallback at 7702-7705.
+    /// </para>
+    ///
+    /// <para>
+    /// Wire: `[u16 LE 26][u8 5][25B][NUL]` = 29 bytes. length field = 25
+    /// (body) + 1 (NUL) = 26. IDENTICAL wire-shape to Wave 268 but from
+    /// a DIFFERENT emit site (6714 vs 7528) reached via DIFFERENT
+    /// validation pattern (SENTINEL-integer-equality vs POINTER-null).
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 4 NEW classes prior waves are structurally
+    /// blind to: (a) FIRST SENTINEL-VALUE NULL-LOOKUP PIN -- Wave 268's
+    /// /trade arm used GetPlayer returning NULL pointer; this arm uses
+    /// GetGameIDFromName returning -1 sentinel. A regression that
+    /// changed the sentinel (e.g. to 0 or LONG_MIN) would silently
+    /// break /invite while leaving /trade intact; (b) SECOND
+    /// "Could not find player %s" LITERAL EMIT-SITE pin -- the two
+    /// emit sites (6714 and 7528) share the format string but live in
+    /// different dispatch arms. A regression that altered the literal
+    /// at ONE site only (e.g. consolidation that updated 7528 but missed
+    /// 6714) would be caught here while Wave 268 still passed;
+    /// (c) FIRST CASE-'i' POST-MATCH EARLY-RETURN pin in the post-match
+    /// catalogue -- Waves 65-71 (262-268) all fired from case-'g',
+    /// case-'o', case-'p', case-'t'. case-'i' brings a new case-letter
+    /// dispatch arm into the pinned set; (d) FIRST ARM-POSITION-1 POST-
+    /// MATCH pin -- /invite is the FIRST arm in case-'i' (no preceding
+    /// strncmp rejections to walk past). Prior waves all pinned arms
+    /// at positions 2-6 within their case. A regression that reordered
+    /// the case-'i' arms (e.g. promoted a different command to slot 1)
+    /// would change which arm intercepts /invite-prefixed strings.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. /invite is user-tier with NO inline AdminLevel gate (the
+    /// GM-gated arms come later in case-'i' for /invisible at 6732);
+    /// retail-faithful as preserved in source. The -1 sentinel return
+    /// from GetGameIDFromName is the canonical "player-not-found" idiom
+    /// throughout the codebase for ID-returning lookup helpers.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashInviteUnknownPlayer_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (26) = 29 bytes.
+        const int ExpectedReplyPayloadLength = 29;
+        const short ExpectedReplyLengthField = 26;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 25;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Inga", shipName: "IngaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/invite foo");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(CouldNotFindPlayerFooLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(CouldNotFindPlayerFooLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/invite foo\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{CouldNotFindPlayerFooLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
