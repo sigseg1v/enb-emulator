@@ -19764,6 +19764,183 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 264 sibling-arm-pinning hardening (+0 ratchet) literal anchor
+    /// for the 49-byte ASCII body "Syntax: //gmplayerlevel &lt;playername&gt;
+    /// &lt;level 1-50&gt;" emitted by the admin-tier case-'g' arm at
+    /// PlayerConnection.cpp:5387 when <c>//gmplayerlevel foo 99</c>
+    /// arrives with BOTH tokens populated but the requested level
+    /// exceeds GM=50. THIRD POST-MATCH-SYNTAX-VALIDATION pin -- exercises
+    /// the BOUNDS-CHECK clause of the compound condition
+    /// <c>if (SLevel &amp;&amp; Level &lt;= GM)</c> at 5354. Distinct
+    /// from Waves 262+263 (nullity-failure path) by hitting the
+    /// SECOND clause of the short-circuit AND with the FIRST clause
+    /// true.
+    /// </summary>
+    private const string SyntaxGmplayerlevelLiteral = "Syntax: //gmplayerlevel <playername> <level 1-50>";
+
+    /// <summary>
+    /// Wave 264 sibling-arm-pinning hardening (+0 ratchet): pins the
+    /// 53-byte wire-shape of the SINGLE 0x001D MESSAGE_STRING reply to
+    /// admin-tier <c>//gmplayerlevel foo 99</c> on a fresh cli_test
+    /// character. THIRD POST-MATCH-SYNTAX-VALIDATION pin in the
+    /// HandleSlashCommands catalogue -- exercises a structurally
+    /// distinct failure path from Waves 262+263: the COMPOUND-AND
+    /// condition <c>if (SLevel &amp;&amp; Level &lt;= GM)</c> at 5354
+    /// short-circuits on the SECOND operand. ONE-HUNDRED-TWENTY-FOURTH
+    /// overall byte-exact dispatch pin. Assert.Equal pins the full
+    /// 53-byte response shape.
+    ///
+    /// <para>
+    /// Admin-tier outer gate at PlayerConnection.cpp:4716 admits;
+    /// cli_test=100 vs GM=50 satisfies. pch=&amp;Msg[2]="gmplayerlevel
+    /// foo 99". Switch jumps on 'g'. case-'g' at 5205. Preceding
+    /// matchers (gmgetaccess/gmsetaccess/gmskillpoints/gmenableskills)
+    /// fail on strncmp mismatch. MatchOptWithParam("gmplayerlevel",
+    /// pch, param, msg_sent) at 5341: strncmp matches 13B;
+    /// pch[13]=' '; param="foo 99"; returns true. NO inline AdminLevel
+    /// gate.
+    /// </para>
+    ///
+    /// <para>
+    /// Handler body at 5342-5390 runs: <c>Username = strtok_s(param,
+    /// " ")</c> returns "foo"; <c>if (Username)</c> true;
+    /// <c>SLevel = strtok_s(NULL, " ")</c> returns "99"; <c>if (SLevel)</c>
+    /// true; <c>Level = atoi(SLevel)</c> = 99. Compound check at 5354
+    /// evaluates: <c>SLevel</c>=truthy AND <c>Level &lt;= GM</c> = 99
+    /// &lt;= 50 = FALSE. Short-circuit AND -- SECOND OPERAND
+    /// FALSE -- enters else-branch at 5385. SendVaMessage("Syntax:
+    /// //gmplayerlevel &lt;playername&gt; &lt;level 1-50&gt;") at 5387
+    /// (NO format args, COLOR=5). <c>msg_sent=true; success=false;</c>
+    /// at 5388-5389. Control FALLS THROUGH to gmupgrade matcher at
+    /// 5392 (strncmp fails, 'u' vs 'p' at index 2). NET RESULT:
+    /// exactly 1 emit "Syntax: //gmplayerlevel &lt;playername&gt;
+    /// &lt;level 1-50&gt;" (49B, COLOR=5). Wire: `[u16 LE 50][u8 5]
+    /// [49B][NUL]` = 53 bytes.
+    /// </para>
+    ///
+    /// <para>
+    /// Regression coverage -- 4 NEW classes prior waves (incl. Waves
+    /// 262+263) are structurally blind to: (a) FIRST COMPOUND-AND-
+    /// BOUNDS-CHECK POST-MATCH pin -- exercises the SLevel-truthy/
+    /// Level-out-of-bounds path. A regression that swapped the
+    /// AND operands (Level &lt;= GM AND SLevel) would evaluate
+    /// atoi on NULL SLevel cases and crash; this test would still
+    /// pass but a hypothetical Wave 263-variant against NULL-SLevel
+    /// would crash; (b) FIRST SHORT-CIRCUIT-SECOND-OPERAND-FALSE pin
+    /// -- vs Waves 262+263 where the FIRST operand (Username/Access/
+    /// SSkillPoints nullity) was false. A regression that converted
+    /// the AND to OR would change the gate; (c) FIRST atoi-OUT-OF-
+    /// RANGE POST-MATCH pin -- pins the GM=50 bound. A regression
+    /// that raised the bound to 100 would let "99" pass and fall
+    /// through to the success path; (d) FIRST BOTH-TOKENS-POPULATED
+    /// SYNTAX-ERROR pin -- prior post-match pins (262, 263) had at
+    /// least ONE NULL token; Wave 264 has BOTH non-NULL but still
+    /// fires the syntax-error emit due to bounds.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity (POSITIVE per CLAUDE.md). No server permissiveness
+    /// added. The COMPOUND-AND-BOUNDS-CHECK pattern is retail-faithful --
+    /// gmplayerlevel correctly rejects levels above GM=50 because the
+    /// retail server caps player level at GM rank (50). cli_test=100
+    /// satisfies the outer GM gate at 4716 (admission), but the
+    /// REQUESTED level (99) is bounded by GM=50 per the syntax message
+    /// "&lt;level 1-50&gt;". Test does NOT exercise level=50 or
+    /// level=1 boundaries (those would enter the success path with
+    /// "Player foo is not online" emit since cli_test's character is
+    /// the only player online and "foo" is not their name).
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashSlashGmplayerlevelHighLevel_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (50) = 53 bytes.
+        const int ExpectedReplyPayloadLength = 53;
+        const short ExpectedReplyLengthField = 50;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 49;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Garin", shipName: "GarinShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "//gmplayerlevel foo 99");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(SyntaxGmplayerlevelLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(SyntaxGmplayerlevelLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"//gmplayerlevel foo 99\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{SyntaxGmplayerlevelLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
