@@ -15688,6 +15688,163 @@ public sealed class SectorChatTests
     }
 
     /// <summary>
+    /// Wave 241 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
+    /// the 16-byte ASCII body "Dev channel off." that the server emits when
+    /// user-tier single-slash <c>/doff</c> arrives on a cli_test account
+    /// (AdminLevel=100 >= DEV=80). Matcher at PlayerConnection.cpp:5928
+    /// (arm 3 of case-'d' user-tier opened at 5902) -- INTERNAL-BODY-DEV-
+    /// GUARD pattern (no outer admin gate on user-tier dispatch; the inner
+    /// `if (AdminLevel() >= DEV)` at 5931 admits the emit). SECOND user-tier
+    /// case-'d' strcmp body-emit pin candidate after Wave 174's /d.
+    /// </summary>
+    private const string DevChannelOffLiteral = "Dev channel off.";
+
+    /// <summary>
+    /// Wave 241 sibling-arm-pinning hardening (+0 ratchet): pins the 20-byte
+    /// wire-shape of the single 0x001D MESSAGE_STRING reply to user-tier
+    /// single-slash <c>/doff</c> on a cli_test account (AdminLevel=100).
+    /// SECOND user-tier strcmp BODY-EMIT pin after Wave 123 /authlevel,
+    /// and FIRST user-tier strcmp body-emit pin gated by an internal
+    /// `AdminLevel() >= DEV` guard (Wave 123 /authlevel had no inner
+    /// guard; emit was unconditional).
+    ///
+    /// <para>
+    /// User-tier outer gate at 5434 (`Msg[0]=='/' &amp;&amp; Msg[1]!=0 &amp;&amp;
+    /// (!msg_sent || !success)`) admits the dispatch. Switch at 5442 jumps
+    /// on *pch -> case-'d' opens at 5902. case-'d' user-tier walk for
+    /// pch="doff":
+    /// arm 1 `MatchOptWithParam("d", pch) &amp;&amp; AdminLevel() >= DEV`:
+    ///   strncmp("d","doff",1) byte 0 match; arg[1]='o' isalpha=true -> returns FALSE
+    ///   silently (no ERROR fork; the `&amp;&amp; DEV` RHS is short-circuited
+    ///   because LHS=false). msg_sent NOT set.
+    /// arm 2 strcmp("don", pch) at 5912: byte 2 'n' vs 'f' MISMATCH.
+    /// arm 3 strcmp("doff", pch) at 5928: 4B vs 4B FULL match. Inner
+    ///   `if (AdminLevel() >= DEV)` at 5931 admits (cli_test=100 >= 80) ->
+    ///   `m_ChannelSubscription[channel_id]=false; SendVaMessage("Dev channel off.")`.
+    ///   COLOR=5 (default). msg_sent=true, success=true.
+    /// arm 4 `MatchOptWithParam("dwho", pch, allowNoParams=true)` at 5944
+    ///   (plain `if`, NOT else-if -- evaluates after arm 3 matched):
+    ///   strncmp("dwho","doff",4) byte 1 'w' vs 'o' MISMATCH -> returns
+    ///   FALSE silently (msg_sent unchanged).
+    /// arm 5 `else if MatchOptWithParam("dialog", pch) &amp;&amp; DEV` at 5966:
+    ///   strncmp("dialog","doff",6) byte 1 'i' vs 'o' MISMATCH SILENT.
+    /// arm 6 `else if strcmp("debug", pch) &amp;&amp; DEV` at 5976: byte 2 'b'
+    ///   vs 'f' MISMATCH.
+    /// arm 7 `else if MatchOptWithParam("deco", pch)` at 5984:
+    ///   strncmp("deco","doff",4) byte 1 'e' vs 'o' MISMATCH SILENT.
+    /// arm 8 `else if strcmp("dockp", pch)` at 6014: byte 2 'c' vs 'f'
+    ///   MISMATCH.
+    /// arm 9 `else if MatchOptWithParam("debugmissions", pch)` at 6021:
+    ///   strncmp("debugmissions","doff",13) byte 1 'e' vs 'o' MISMATCH
+    ///   SILENT.
+    /// case-'d' breaks at 6044. NET RESULT: ONE emit.
+    /// </para>
+    ///
+    /// <para>
+    /// FIRST user-tier strcmp body-emit pin gated by an INTERNAL
+    /// `AdminLevel() >= DEV` guard. Catches regression where the inner
+    /// DEV gate at 5931 is removed (the emit would still fire from a
+    /// non-DEV account, leaking dev-channel mechanics to plain users)
+    /// OR where the inner gate is tightened (cli_test would silently
+    /// fall to the else-branch and emit nothing -- test fails by
+    /// drainage). Also catches the FIRST `m_ChannelSubscription[]=false`
+    /// mutation side-effect ordering pin: the mutation happens BEFORE
+    /// the SendVaMessage emit, so a refactor that reorders them (e.g.
+    /// emit first, then mutate, with the mutation throwing) would
+    /// produce the right wire-shape but corrupt subscription state --
+    /// out of scope for this test, documented for posterity.
+    /// </para>
+    ///
+    /// <para>Budget: 90s.</para>
+    /// </summary>
+    [Fact]
+    public async Task SlashDoff_OnAdminAccount_PinsExactReplyWireShape()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        // length-prefix u16 (2) + color u8 (1) + body+NUL (17) = 20 bytes.
+        const int ExpectedReplyPayloadLength = 20;
+        const short ExpectedReplyLengthField = 17;
+        const byte ExpectedReplyColor = 5;
+        const int ExpectedLiteralByteCount = 16;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Doffa", shipName: "DoffaShip", cts.Token);
+
+        try
+        {
+            var codec = new ClientChatCodec();
+            var chat = new ClientChatMessage(
+                GameId: session.GameId,
+                Type: ChatChannel.Group,
+                Message: "/doff");
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(
+                    OpcodeId.Known.ClientChat.Value,
+                    codec.EncodeOutbound(chat)),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+
+                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                if (msgLen < 1) continue;
+
+                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+                if (bodyBytes <= 0) continue;
+
+                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+                if (!text.Equals(DevChannelOffLiteral, StringComparison.Ordinal))
+                    continue;
+
+                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+                Assert.Equal(ExpectedReplyLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+
+                int literalEnd = 3 + ExpectedLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedLiteralByteCount));
+                Assert.Equal(DevChannelOffLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/doff\" without seeing 0x001D MESSAGE_STRING equal to " +
+                $"\"{DevChannelOffLiteral}\".");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Wave 212 sibling-arm-pinning hardening (+0 ratchet) literal anchor for
     /// the 34-byte ASCII body "Missing arg for option editfaction" that the
     /// server emits when admin-tier double-slash <c>//editfaction</c>
