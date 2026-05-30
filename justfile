@@ -300,17 +300,27 @@ psql-user:
     docker compose exec -e PGPASSWORD=net7 postgres psql -U net7 -d net7_user
 
 # Seed a known-good test account into net7_user.accounts. Idempotent
-# (DELETE-by-username then INSERT — the schema has no UNIQUE on username,
+# (DELETE-by-username then INSERT -- the schema has no UNIQUE on username,
 # so a plain UPSERT isn't available). Default user/pass: testuser/testpass.
-# Password is stored as upper-case MD5, matching what Net7SSL's LinuxAuth
-# compares against. pgcrypto's digest() does the hashing server-side.
+# Password is stored as an Argon2id PHC string in password_phc (Phase X
+# replaced raw MD5 with libsodium-verified Argon2id, commit 12acf26).
+# The PHC is generated on the host via PyNaCl (libsodium binding) using
+# the INTERACTIVE profile, then handed to psql via :'phc' for safe
+# SQL-literal interpolation. Requires python3-nacl on the host
+# (`sudo apt install python3-nacl`).
 seed-account USER='testuser' PASS='testpass':
-    docker compose exec -T -e PGPASSWORD=net7 postgres psql -U net7 -d net7_user -v ON_ERROR_STOP=1 -c \
-        "CREATE EXTENSION IF NOT EXISTS pgcrypto; \
-         SELECT setval('accounts_id_seq', GREATEST((SELECT COALESCE(MAX(id),0) FROM accounts), 1)); \
-         DELETE FROM accounts WHERE username = '{{USER}}'; \
-         INSERT INTO accounts (username, password, status, formname, email) \
-         VALUES ('{{USER}}', UPPER(encode(digest('{{PASS}}', 'md5'), 'hex')), 100, '{{USER}}_form', '{{USER}}@local');"
+    @phc=$(printf '%s' {{ quote(PASS) }} | python3 -c 'import nacl.pwhash,sys; sys.stdout.write(nacl.pwhash.argon2id.str(sys.stdin.buffer.read()).decode())'); \
+        if [ -z "$phc" ]; then \
+            echo "seed-account: failed to generate Argon2id PHC -- install python3-nacl (sudo apt install python3-nacl)" >&2; \
+            exit 1; \
+        fi; \
+        printf '%s\n' \
+            "SELECT setval('accounts_id_seq', GREATEST((SELECT COALESCE(MAX(id),0) FROM accounts), 1));" \
+            "DELETE FROM accounts WHERE username = :'username';" \
+            "INSERT INTO accounts (username, password_phc, status, formname, email)" \
+            "VALUES (:'username', :'phc', 100, :'username' || '_form', :'username' || '@local');" \
+        | docker compose exec -T -e PGPASSWORD=net7 postgres psql -U net7 -d net7_user -v ON_ERROR_STOP=1 \
+            -v username={{ quote(USER) }} -v phc="$phc"
     @echo ">>> seeded {{USER}} / {{PASS}} (status=100)"
 
 # ---- Phase C continuation (Postgres) ----
