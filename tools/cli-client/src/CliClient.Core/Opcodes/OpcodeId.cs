@@ -33,6 +33,7 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId Create                       = new(0x0004);
         public static readonly OpcodeId Start                        = new(0x0005);
         public static readonly OpcodeId StartAck                     = new(0x0006);
+        public static readonly OpcodeId Remove                       = new(0x0007);
         public static readonly OpcodeId Decal                        = new(0x0010);
         public static readonly OpcodeId Colorization                 = new(0x0011);
         public static readonly OpcodeId Turn                         = new(0x0012);
