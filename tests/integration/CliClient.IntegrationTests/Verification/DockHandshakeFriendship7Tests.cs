@@ -13,13 +13,12 @@ namespace N7.CliClient.IntegrationTests.Verification;
 /// Wave 116 (plan Wave 313) station-sector handshake byte-diff test
 /// targeting sector 45151 (Friendship 7 Recreation Port, Glenn Commission,
 /// Sirius system) -- the SAME destination station as the retail capture in
-/// <c>archive/kyp-snapshot/capturedPackets/capture_1.rar</c> (extracted to
-/// <c>/tmp/cap/capture_1.txt</c>). Where the existing
-/// <see cref="DockHandshakeRetailParityTests"/> pins sector-INVARIANT shape
-/// (no 0x00A5 self-broadcast, 0x007F MANU_TAG bits) using any station, this
-/// suite targets the EXACT station retail's player landed in so that
-/// per-station content (lounge NPCs, station NPC roster, starbase config)
-/// is part of the byte-diff.
+/// <c>archive/kyp-snapshot/capturedPackets/capture_1.rar</c>. Where the
+/// existing <see cref="DockHandshakeRetailParityTests"/> pins sector-
+/// INVARIANT shape (no 0x00A5 self-broadcast, 0x007F MANU_TAG bits) using
+/// any station, this suite targets the EXACT station retail's player landed
+/// in so that per-station content (lounge NPCs, station NPC roster,
+/// starbase config) is part of the byte-diff.
 ///
 /// <para>
 /// Caveats. The character we create is race=0 profession=0
@@ -42,10 +41,12 @@ namespace N7.CliClient.IntegrationTests.Verification;
 /// What this test pins. The histogram of opcodes emitted by the sector
 /// TCP from the first server frame after the client's LOGIN through and
 /// including the terminating 0x0005 START frame. Counts come from a
-/// direct grep of capture_1.txt; see the <see cref="ExpectedRetailHistogram"/>
-/// constant for the extraction recipe. A divergence is either (a)
-/// StationLogin code-path drift in our server vs retail -- the
-/// actionable kind -- or (b) starbase 73 / sector 45151 missing or
+/// hex-dump of the retail capture; see the
+/// <see cref="ExpectedRetailHistogram"/> constant for the extraction
+/// recipe a contributor can reproduce against
+/// <c>archive/kyp-snapshot/capturedPackets/capture_1.rar</c>. A divergence
+/// is either (a) StationLogin code-path drift in our server vs retail --
+/// the actionable kind -- or (b) starbase 73 / sector 45151 missing or
 /// differing seed data in our DB vs the retail server's prod state --
 /// the curatorial kind. Both matter; the diff distinguishes them.
 /// </para>
@@ -65,24 +66,33 @@ public sealed class DockHandshakeFriendship7Tests
     }
 
     /// <summary>
-    /// Retail sector-handshake opcode histogram from
-    /// <c>/tmp/cap/capture_1.txt</c>, lines 159..4977 (login-through-START).
-    /// Each entry is "{count}x 0x{opcode:X4}". Sorted DESC by count then
-    /// ASC by opcode value -- matches the ordering used by the actual-
-    /// histogram computation in the test below.
+    /// Retail sector-handshake opcode histogram extracted from the hex-dump
+    /// inside <c>archive/kyp-snapshot/capturedPackets/capture_1.rar</c>,
+    /// sector socket only (IP 159.153.232.46 for the sector-server host;
+    /// the .146 IP is the master / login host whose frames are NOT part
+    /// of our sector-TCP drain). Each entry is "{count}x 0x{opcode:X4}".
+    /// Sorted DESC by count then ASC by opcode value -- matches the
+    /// ordering used by the actual-histogram computation in the test below.
     ///
-    /// <para>Extraction recipe:</para>
+    /// <para>Extraction recipe (key constraint: filter by sector IP, not
+    /// just by direction -- the global server on .146 emits its own 0x0036
+    /// CLIENT_REDIRECT frame during the handoff which is NOT a sector
+    /// frame and would otherwise leak in). Run from the repo root:</para>
     /// <code>
-    /// awk 'BEGIN{dir=""; done=0} done==1 {next}
-    ///      /^Packet #.*Server-&gt;Client/{dir="s2c"; next}
-    ///      /^Packet #.*Client-&gt;Server/{dir="c2s"; next}
-    ///      dir=="s2c" &amp;&amp; /^ [0-9A-F]{2} 00 +Opcode 0x/{print $4;
-    ///         if ($4 == "0x05") done=1}' /tmp/cap/capture_1.txt
-    /// | sort | uniq -c | sort -rn
+    /// unrar p -inul archive/kyp-snapshot/capturedPackets/capture_1.rar \
+    ///  | awk 'BEGIN{dir=""; done=0} done==1 {next}
+    ///         /^Packet #.*Server-&gt;Client.*159\.153\.232\.46:/{dir="s2c-sector"; next}
+    ///         /^Packet #.*Server-&gt;Client/{dir="s2c-other"; next}
+    ///         /^Packet #.*Client-&gt;Server/{dir="c2s"; next}
+    ///         /^Packet #/{dir=""; next}
+    ///         dir=="s2c-sector" &amp;&amp; /^ [0-9A-F]{2} 00 +Opcode 0x/{
+    ///           print $4; if ($4 == "0x05") done=1
+    ///         }' \
+    ///  | sort | uniq -c | sort -k1,1rn -k2,2
     /// </code>
     ///
     /// <para>
-    /// 103 total frames. 0x0025 ItemBase dominates (77x) because
+    /// 101 total sector frames. 0x0025 ItemBase dominates (77x) because
     /// Friendship 7 is a casino lounge with a packed NPC roster; the
     /// 0x0052 LoungeNpc frame is 3404 bytes packing those NPCs'
     /// dialog/avatar/ship data.
@@ -99,7 +109,6 @@ public sealed class DockHandshakeFriendship7Tests
          1x 0x0011
          1x 0x001D
          1x 0x0034
-         1x 0x0036
          1x 0x0037
          1x 0x003E
          1x 0x0040
@@ -145,7 +154,7 @@ public sealed class DockHandshakeFriendship7Tests
 
             // Always dump the actual sequence to xUnit output so a failure
             // surfaces both the histogram diff and the ordered frame list
-            // for direct inspection against /tmp/cap/capture_1.txt.
+            // for direct inspection against the retail capture's hex-dump.
             _out.WriteLine("Our sector-handshake opcode histogram (Friendship 7, 45151):");
             _out.WriteLine(actualHistogram);
             _out.WriteLine("");

@@ -15,9 +15,8 @@ namespace N7.CliClient.IntegrationTests.Verification;
 /// Wave 115 retail-parity regression suite for the station-sector
 /// handshake stream. Each test in this class asserts a shape invariant
 /// we observed in the retail single-player dock capture
-/// (<c>archive/kyp-snapshot/capturedPackets/capture_1.rar</c>,
-/// extracted to <c>/tmp/cap/capture_1.txt</c>) that our server was
-/// silently violating prior to Waves 112/113. Distinct from the
+/// (<c>archive/kyp-snapshot/capturedPackets/capture_1.rar</c>) that our
+/// server was silently violating prior to Waves 112/113. Distinct from the
 /// per-opcode "hardening" suites under <c>Opcodes/</c> -- those pin
 /// individual opcode shapes; this one pins cross-opcode invariants
 /// (ordering, presence, byte-level field semantics) the per-opcode
