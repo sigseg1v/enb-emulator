@@ -284,7 +284,7 @@ play-local CLIENT_PATH='':
     echo ">>> launching (WINEPREFIX=$WINEPREFIX WINEDEBUG=${WINEDEBUG:-<unset>}) -- click Play in the GUI"
     dotnet run --no-build --project tools/launchnet7-avalonia
 
-# Same as `play-local`, but with two diagnostic knobs flipped on:
+# Same as `play-local`, but with three diagnostic knobs flipped on:
 #   1. WINEDEBUG=+seh,+module,err+module so wine prints the structured-
 #      exception backtrace (module + function names) to stderr on
 #      unhandled page faults. Override WINEDEBUG=... in the env to pick
@@ -294,6 +294,13 @@ play-local CLIENT_PATH='':
 #      every split-packet reassembly step, every inner opcode. Compose
 #      re-resolves the proxy `command:` from this env var, so the
 #      proxy container is recreated automatically on `up -d`.
+#   3. PROXY_S2C_HEXDUMP=1 so net7proxy dumps the full payload bytes of
+#      every server->client opcode it forwards, in the same row format as
+#      archive/kyp-snapshot/capturedPackets/*.txt. Pre-RC4-encryption, so
+#      it diffs directly against the retail captures. Only set here, not
+#      in play-local or the bisect-drop* recipes -- the volume is high
+#      (a sector zone-in is ~10k+ hex rows) and would bury the bisection
+#      DROP/keep summaries.
 #
 # Use this when chasing a client crash; `just play-local` stays quiet.
 debug-local CLIENT_PATH='':
@@ -302,6 +309,39 @@ debug-local CLIENT_PATH='':
     : "${WINEDEBUG:=+seh,+module,err+module}"
     export WINEDEBUG
     export PROXY_EXTRA_ARGS=/OPCODES
+    export PROXY_S2C_HEXDUMP=1
+    just play-local {{CLIENT_PATH}}
+
+# Bisection diagnostic: drop EVERY server->client opcode forwarded by the
+# proxy (the proxy still ACKs 0x2020 login-stage confirms back to the
+# server so the login state machine advances, but the client receives
+# nothing past the TCP redirect handshake). If the Win32 client survives
+# past the loading screen in this mode, the crash is being driven by
+# server-side payload content; if it still crashes, the crash is in the
+# client's post-connect self-test path and the data plane is innocent.
+# Inherits debug-local's WINEDEBUG + /OPCODES tracing.
+bisect-drop-all CLIENT_PATH='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${WINEDEBUG:=+seh,+module,err+module}"
+    export WINEDEBUG
+    export PROXY_EXTRA_ARGS=/OPCODES
+    export PROXY_S2C_DROP_ALL=1
+    just play-local {{CLIENT_PATH}}
+
+# Bisection diagnostic: drop a specific set of server->client opcodes (CSV
+# hex, e.g. `just bisect-drop 0x001b,0x0025,0x00b4`). Use after
+# `bisect-drop-all` narrows the failure to "data plane fault" -- start by
+# dropping the largest / most structurally novel opcodes (0x1B AUX_DATA,
+# 0x25 ITEM_BASE), then widen or narrow based on which iteration
+# survives. Inherits debug-local's WINEDEBUG + /OPCODES tracing.
+bisect-drop OPCODES CLIENT_PATH='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${WINEDEBUG:=+seh,+module,err+module}"
+    export WINEDEBUG
+    export PROXY_EXTRA_ARGS=/OPCODES
+    export PROXY_S2C_DROP={{OPCODES}}
     just play-local {{CLIENT_PATH}}
 
 # Drop into the enb-cli REPL pointed at the running local stack.

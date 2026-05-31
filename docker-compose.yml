@@ -164,6 +164,20 @@ services:
     # every sector UDP packet for crash diagnosis. Compose substitutes the
     # value at parse time, so a change in the host env triggers a
     # container recreate on the next `up -d`.
+    #
+    # PROXY_S2C_DROP_ALL / PROXY_S2C_DROP: bisection knobs read by
+    # UDPProxyToClient_linux.cpp's should_drop_s2c gate. Pass through
+    # from the host env so `just bisect-drop-all` / `just bisect-drop
+    # 0x001b,0x0025` work without editing this file.
+    #
+    # PROXY_S2C_HEXDUMP: per-frame hex dump of every server->client opcode
+    # payload (capture-file format). Only `just debug-local` sets this;
+    # play-local and the bisect-drop* recipes leave it unset so their
+    # console output stays focused.
+    environment:
+      - PROXY_S2C_DROP_ALL=${PROXY_S2C_DROP_ALL:-}
+      - PROXY_S2C_DROP=${PROXY_S2C_DROP:-}
+      - PROXY_S2C_HEXDUMP=${PROXY_S2C_HEXDUMP:-}
     command: ["sh", "-c", "exec /app/net7proxy ${PROXY_EXTRA_ARGS:-}"]
     restart: unless-stopped
 

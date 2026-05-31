@@ -112,6 +112,135 @@ bool g_ShuttingDown = false;
 uint32_t time_debug = 0;
 
 // ---------------------------------------------------------------------------
+// Bisection diagnostic: suppress server->client opcode forwarding to
+// narrow down which payload triggers the Win32 client crash during
+// sector zone-in. Reads two env vars lazily on first call:
+//
+//   PROXY_S2C_DROP_ALL=1     drop every opcode (still ACKs to server)
+//   PROXY_S2C_DROP=0x0025,0x001b,...   drop the listed opcodes only
+//
+// HandleCustomOpcode runs BEFORE this gate, so 0x2020/0x2021 stage
+// confirms still flow back to the server. That keeps the server's
+// login state machine advancing even when the client gets nothing.
+// ---------------------------------------------------------------------------
+static bool s_drop_init = false;
+static bool s_drop_all  = false;
+static bool s_drop_mask[0x1000];
+
+static void init_drop_filter_once()
+{
+    if (s_drop_init) return;
+    s_drop_init = true;
+    memset(s_drop_mask, 0, sizeof(s_drop_mask));
+
+    const char *drop_all = getenv("PROXY_S2C_DROP_ALL");
+    if (drop_all && drop_all[0] == '1') {
+        s_drop_all = true;
+        LogMessage("UDPClient(Linux): bisection: PROXY_S2C_DROP_ALL=1 "
+                   "(suppressing every server->client opcode)\n");
+        return;
+    }
+
+    const char *list = getenv("PROXY_S2C_DROP");
+    if (!list || !list[0]) return;
+
+    char buf[512];
+    strncpy(buf, list, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = '\0';
+
+    int dropped = 0;
+    for (char *tok = strtok(buf, ","); tok; tok = strtok(NULL, ",")) {
+        while (*tok == ' ') tok++;
+        unsigned int op = (unsigned int) strtoul(tok, NULL, 0);
+        if (op > 0 && op < 0x1000) {
+            s_drop_mask[op] = true;
+            dropped++;
+        }
+    }
+    if (dropped) {
+        LogMessage("UDPClient(Linux): bisection: PROXY_S2C_DROP set "
+                   "(%d opcodes suppressed): %s\n", dropped, list);
+    }
+}
+
+static bool should_drop_s2c(unsigned short opcode)
+{
+    init_drop_filter_once();
+    if (s_drop_all) return true;
+    if (opcode < 0x1000 && s_drop_mask[opcode]) return true;
+    return false;
+}
+
+// ---------------------------------------------------------------------------
+// Hex-dump helper for server->client opcode payloads. Emits the bytes that
+// will hit the proxy->client TCP socket pre-RC4-encryption, in the same
+// [length, opcode, payload]-rows format the retail packet captures under
+// archive/kyp-snapshot/capturedPackets/ use. That makes byte-diffing our
+// emit against a capture trivial (paste, sort, diff).
+//
+// Gated on its own env var (PROXY_S2C_HEXDUMP=1) -- NOT on the /OPCODES
+// verbose flag, because the bisect-drop* recipes also enable /OPCODES and
+// we do not want to bury those traces under thousands of hex rows. Only
+// `just debug-local` (which sets PROXY_S2C_HEXDUMP=1 explicitly) emits
+// the dump; `just play-local` stays quiet; `just bisect-drop*` runs
+// continue to emit the bisection DROP/keep summary lines without the
+// per-frame payload spam.
+//
+// `tag` is a short label: "direct" for the ProcessClientOpcode passthrough,
+// "inner"  for opcodes walked out of a reassembled packet sequence,
+// "datafile" for the 0x2010 DATA_FILE non-galaxy-map path.
+// ---------------------------------------------------------------------------
+static bool s_hexdump_init = false;
+static bool s_hexdump_on   = false;
+
+static bool hexdump_enabled()
+{
+    if (!s_hexdump_init) {
+        s_hexdump_init = true;
+        const char *v = getenv("PROXY_S2C_HEXDUMP");
+        if (v && v[0] == '1') {
+            s_hexdump_on = true;
+            LogMessage("UDPClient(Linux): PROXY_S2C_HEXDUMP=1 -- dumping every "
+                       "server->client opcode payload (capture-file format)\n");
+        }
+    }
+    return s_hexdump_on;
+}
+
+static void dump_s2c_hex(const char *tag, unsigned short opcode,
+                         const unsigned char *bytes, size_t len)
+{
+    if (!hexdump_enabled()) return;
+
+    // Header row mirrors the capture-file [length, opcode] preamble. The
+    // wire frame the client sees is sizeof(short)*2 (length+opcode) + len
+    // bytes, so we print the same length the client will decode.
+    unsigned int frame_len = (unsigned int) len + 4;
+    LogMessage("HEX(%s) op=0x%04x len=0x%04x (%u bytes payload, %u on wire)\n",
+               tag, opcode, frame_len, (unsigned) len, frame_len);
+
+    char line[128];
+    char ascii[17];
+    for (size_t off = 0; off < len; off += 16) {
+        size_t n = (len - off > 16) ? 16 : (len - off);
+        int pos = 0;
+        for (size_t i = 0; i < 16; i++) {
+            if (i < n) {
+                pos += snprintf(line + pos, sizeof(line) - pos,
+                                "%02X ", bytes[off + i]);
+                unsigned char c = bytes[off + i];
+                ascii[i] = (c >= 0x20 && c < 0x7F) ? (char) c : '.';
+            } else {
+                pos += snprintf(line + pos, sizeof(line) - pos, "   ");
+                ascii[i] = ' ';
+            }
+        }
+        ascii[16] = '\0';
+        LogMessage("HEX(%s) %04zx  %s %s\n", tag, off, line, ascii);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Direct server→client passthrough.
 //
 // The server sends opcodes that should appear on the client's TCP socket
@@ -134,7 +263,12 @@ void UDPClient::ProcessClientOpcode(char *msg, EnbUdpHeader *header)
                     (unsigned short) opcode);
     }
 
-    if (g_ServerMgr && g_ServerMgr->m_SectorConnection) {
+    if (should_drop_s2c((unsigned short) opcode)) {
+        LogVMessage("UDPClient(Linux): bisection: DROP direct 0x%04x [%d bytes]\n",
+                    (unsigned short) opcode, (int) bytes);
+    } else if (g_ServerMgr && g_ServerMgr->m_SectorConnection) {
+        dump_s2c_hex("direct", (unsigned short) opcode,
+                     (const unsigned char *) msg, (size_t) bytes);
         g_ServerMgr->m_SectorConnection->SendResponse(
             opcode, (unsigned char *) msg, bytes, header->packet_sequence);
     }
@@ -237,6 +371,9 @@ void UDPClient::SendClientDataFile(char *msg, EnbUdpHeader *header)
 
     default:
         // payload starts at offset 4 (after inner [size, opcode] header)
+        dump_s2c_hex("datafile", (unsigned short) inner_opcode,
+                     (const unsigned char *) msg + 4,
+                     (size_t)(inner_length - 4));
         g_ServerMgr->m_SectorConnection->SendResponse(
             inner_opcode, (unsigned char *) msg + 4, inner_length - 4,
             header->packet_sequence);
@@ -598,9 +735,17 @@ bool UDPClient::SendClientPacketSequence(char *msg)
                         (unsigned short) opcode, (unsigned) length);
             if (opcode > 0x0000 && opcode < 0x0FFF) {
                 IncommingOpcodePreProcessing(opcode, ptr + 4, length - 4);
-                g_ServerMgr->m_SectorConnection->SendResponse(
-                    opcode, (unsigned char *) ptr + 4, length - 4,
-                    header->packet_sequence);
+                if (should_drop_s2c((unsigned short) opcode)) {
+                    LogVMessage("UDPClient(Linux): bisection: DROP inner 0x%04x [0x%x]\n",
+                                (unsigned short) opcode, (unsigned) length);
+                } else {
+                    dump_s2c_hex("inner", (unsigned short) opcode,
+                                 (const unsigned char *) ptr + 4,
+                                 (size_t)(length - 4));
+                    g_ServerMgr->m_SectorConnection->SendResponse(
+                        opcode, (unsigned char *) ptr + 4, length - 4,
+                        header->packet_sequence);
+                }
             } else {
                 LogMessage("UDPClient(Linux): bad opcode through to proxy: 0x%04x len 0x%x\n",
                            (unsigned short) opcode, (unsigned) length);
