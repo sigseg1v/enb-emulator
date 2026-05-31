@@ -5,10 +5,11 @@
 namespace N7.CliClient.Repl;
 
 /// <summary>
-/// Race / profession lookup used by <c>create</c>. Values mirror the
-/// retail-server tables in <c>archive/kyp-snapshot/linux-port-legacy/StaticData.h</c>:
-/// <c>StartSector[race*3+profession]</c> is the station the avatar
-/// spawns in on first login.
+/// Race / profession lookup used by <c>create</c>. Values mirror
+/// <c>server/src/StaticData.h</c>: <c>StartSector[race*3+profession]</c>
+/// is the SPACE sector the avatar spawns in on first login. All IDs
+/// are &lt; 10000 so the server takes the SectorLogin path
+/// (StationLogin is gated on <c>m_SectorID &gt; 9999</c>).
 /// </summary>
 public static class CharacterClass
 {
@@ -22,8 +23,8 @@ public static class CharacterClass
 
     private static readonly int[] StartSectorTable =
     {
-        // Terran                  Jenquai                  Progen
-        10151, 10201, 10251,       10551, 10401, 10521,     10361, 10371, 10301,
+        // Terran               Jenquai             Progen
+        1015, 1020, 1025,       1055, 1040, 1052,   1036, 1037, 1030,
     };
 
     public static int StartSector(int race, int profession)

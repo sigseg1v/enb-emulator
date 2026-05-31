@@ -13,7 +13,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -60,17 +60,23 @@ static long BaseWingAsset[9] =  {1654, 1657, 1660, 1663, 1666, 1669, 1672, 1675,
 
 static long BaseEngineAsset[3] = {1681, 1684, 1687};
 
+// Fresh characters spawn in SPACE in their home sector, not docked
+// inside the home station. The space sector IDs are all < 10000, so
+// SectorManager::HandleSectorLogin takes the SectorLogin path
+// (the StationLogin branch is gated on `m_SectorID > 9999`).
+// Each ID is the `sectors.sector_id` that contains the station the
+// race/profession was historically associated with.
 static long StartSector[] =
 {
-    10151,      // Terran Warrior   = Enforcer  (Luna, Luna Station)
-    10201,      // Terran Trader    = Tradesman (High Earth, Loki Station)
-    10251,      // Terran Explorer  = Scout     ()
-    10551,      // Jenquai Warrior  = Defender  (Europa, Ashanti Maru)
-    10401,      // Jenquai Trader   = Seeker    ()
-    10521,      // Jenquai Explorer = Explorer  (Io, Nishino Research Facility)
-    10361,      // Progen Warrior   = Warrior   (Mars Alpha, Arx Forgus)
-    10371,      // Progen Trader    = Privateer (Mars Gama)
-    10301,      // Progen Explorer  = Sentinel  (Mars Beta, Arx Prima)
+    1015,       // Terran Warrior   = Enforcer  (Luna sector, near Luna Station)
+    1020,       // Terran Trader    = Tradesman (High Earth, near Loki Station)
+    1025,       // Terran Explorer  = Scout     (Equatorial Earth)
+    1055,       // Jenquai Warrior  = Defender  (Europa, near Ashanti Maru)
+    1040,       // Jenquai Trader   = Seeker    (Ganymede)
+    1052,       // Jenquai Explorer = Explorer  (Io, near Nishino Research Facility)
+    1036,       // Progen Warrior   = Warrior   (Mars Alpha, near Arx Forgus)
+    1037,       // Progen Trader    = Privateer (Mars Gamma)
+    1030,       // Progen Explorer  = Sentinel  (Mars Beta, near Arx Prima)
 };
 
 // How many hull points awarded at each upgrade level
