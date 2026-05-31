@@ -813,9 +813,18 @@ void PlayerManager::SendGlobalChatEvent(int type, Player *source, char *channel,
 	long adminLevel = source->AdminLevel() >= GM ? GM : 0;
 	Player * p = (0);
 
-	while (GetNextPlayerOnList(p, m_GlobalPlayerList))   
+	// `p != source` must gate the entire disjunction. Without the outer
+	// parens, C operator precedence binds && tighter than ||, so the
+	// expression collapses to
+	//   (p != source && admin) || GMpeer || friend
+	// and the source player (when GM-tier) hits the second disjunct and
+	// receives their own CHEV_LOGGED_IN during the sector handshake.
+	// Single-player retail dock capture (Ace, capture_1.txt frames
+	// 4977..14745) has zero 0xA5 type=1 frames -- retail never sends
+	// CHEV_LOGGED_IN to source.
+	while (GetNextPlayerOnList(p, m_GlobalPlayerList))
 	{
-		if (p != source && p->AdminLevel() >= adminLevel || p->AdminLevel() >= GM || source->IsMyFriend(p->Name()))
+		if (p != source && (p->AdminLevel() >= adminLevel || p->AdminLevel() >= GM || source->IsMyFriend(p->Name())))
 		{
 			p->SendClientChatEvent(type, source, channel, message);
 		}
