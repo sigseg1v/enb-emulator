@@ -284,10 +284,16 @@ play-local CLIENT_PATH='':
     echo ">>> launching (WINEPREFIX=$WINEPREFIX WINEDEBUG=${WINEDEBUG:-<unset>}) -- click Play in the GUI"
     dotnet run --no-build --project tools/launchnet7-avalonia
 
-# Same as `play-local`, but with WINEDEBUG=+seh,+module,err+module so
-# wine prints the structured-exception backtrace (module + function
-# names) to stderr on unhandled page faults. Override WINEDEBUG=... in
-# the env to pick different channels.
+# Same as `play-local`, but with two diagnostic knobs flipped on:
+#   1. WINEDEBUG=+seh,+module,err+module so wine prints the structured-
+#      exception backtrace (module + function names) to stderr on
+#      unhandled page faults. Override WINEDEBUG=... in the env to pick
+#      different channels.
+#   2. PROXY_EXTRA_ARGS=/OPCODES so net7proxy (in docker) emits its
+#      LogVMessage verbose stream -- every inbound/outbound UDP packet,
+#      every split-packet reassembly step, every inner opcode. Compose
+#      re-resolves the proxy `command:` from this env var, so the
+#      proxy container is recreated automatically on `up -d`.
 #
 # Use this when chasing a client crash; `just play-local` stays quiet.
 debug-local CLIENT_PATH='':
@@ -295,6 +301,7 @@ debug-local CLIENT_PATH='':
     set -euo pipefail
     : "${WINEDEBUG:=+seh,+module,err+module}"
     export WINEDEBUG
+    export PROXY_EXTRA_ARGS=/OPCODES
     just play-local {{CLIENT_PATH}}
 
 # Drop into the enb-cli REPL pointed at the running local stack.

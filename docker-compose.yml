@@ -157,6 +157,14 @@ services:
       # Connection ctor / handshake / framed-dispatch path as 3801/3805,
       # routed with m_ServerType=CLIENT_TO_SECTOR_SERVER.
       - "3500:3500/tcp"
+    # PROXY_EXTRA_ARGS lets the launcher recipes pass extra command-line
+    # flags to net7proxy without editing this file. `just play-local`
+    # leaves it unset (quiet console); `just debug-local` exports
+    # PROXY_EXTRA_ARGS=/OPCODES to enable LogVMessage verbose tracing of
+    # every sector UDP packet for crash diagnosis. Compose substitutes the
+    # value at parse time, so a change in the host env triggers a
+    # container recreate on the next `up -d`.
+    command: ["sh", "-c", "exec /app/net7proxy ${PROXY_EXTRA_ARGS:-}"]
     restart: unless-stopped
 
   # --------------------------------------------------------------
