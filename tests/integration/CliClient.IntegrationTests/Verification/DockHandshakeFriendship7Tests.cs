@@ -138,7 +138,14 @@ public sealed class DockHandshakeFriendship7Tests
     [Fact]
     public async Task StationHandshake_AgainstFriendship7Sector45151_OpcodeHistogramMatchesRetailCapture()
     {
-        var account = TestAccounts.New(_server);
+        // Non-admin account: the retail capture's player Ace was a
+        // normal subscriber, so AdminLevel()=0 and FirstLogin's tiered
+        // chat banner at PlayerClass.cpp:397-407 did NOT fire. Default
+        // TestAccounts.New uses status=100 (admin) which would trigger
+        // the 76B "Dev Chat: /d ..." 0x001D banner at frame [0] and
+        // pollute the histogram. Pin matches retail only with this
+        // override.
+        var account = TestAccounts.New(_server, status: TestAccounts.PlayerTierStatus);
         const int slot = 0;
         // Friendship 7 Recreation Port -- starbase 73, Glenn Commission,
         // Sirius. Retail capture_1.txt's MasterJoin frame 220 sets

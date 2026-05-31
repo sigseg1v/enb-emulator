@@ -42,15 +42,39 @@ public sealed record TestAccount(int Id, string Username, string Password);
 /// </para>
 ///
 /// <para>
-/// status defaults to 100 (ACTIVE/admin) which is what real accounts
-/// use. Pass <c>status: 0</c> to provision a STRESS_TEST_CLOSED
-/// account the global UDP plane will reject with G_ERROR 12 (see
-/// server/src/UDP_Global.cpp:ProcessTicketInfo).
+/// status defaults to 100 (ACTIVE/admin) which slash-command pinning
+/// suites need so the GM (50) / DEV (80) / SDEV (90) inline gates open.
+/// status flows through `AccountManager::HandleAvatarCreate` at
+/// `server/src/AccountManager.cpp:1273` into `m_Database.info.admin_level`,
+/// and `Player::AdminLevel()` at `server/src/PlayerClass.h:212` returns
+/// it verbatim (the htonl/ntohl pair is a no-op on x86). At first sector
+/// login `Player::FirstLogin` at `server/src/PlayerClass.cpp:397-407`
+/// emits a 0x001D chat-tier banner gated on AdminLevel(): &gt;=DEV(80)
+/// "Dev Chat..." / &gt;=GM(50) "GM Chat..." / &gt;=BETA(30) "Beta Chat...".
+/// Tests that diff opcode histograms against a retail-player capture
+/// (DockHandshakeFriendship7Tests) MUST pass <c>status:
+/// <see cref="PlayerTierStatus"/></c> so the banner does NOT fire.
+/// </para>
+///
+/// <para>
+/// Other status values: 0 = STRESS_TEST_CLOSED (rejected with G_ERROR
+/// 12 at server/src/UDP_Global.cpp:139), -1 = inactive registration
+/// (rejected with G_ERROR 9), -2 = banned (rejected with G_ERROR 0).
 /// </para>
 /// </summary>
 public static class TestAccounts
 {
     public const string SharedPassword = "testpw";
+
+    /// <summary>
+    /// Sub-BETA(30) status value for tests that need a non-admin avatar
+    /// (e.g. histogram parity vs a retail-player capture). The actual
+    /// numeric value is arbitrary as long as it's positive (so the
+    /// UDP_Global STRESS_TEST_CLOSED/INACTIVE/BANNED gates pass) and
+    /// below BETA=30 (so no chat-tier banner fires from FirstLogin).
+    /// 1 is the smallest such value.
+    /// </summary>
+    public const int PlayerTierStatus = 1;
 
     // Phase X: Argon2id PHC string for SharedPassword ("testpw"), produced
     // with libsodium's INTERACTIVE profile (m=64MiB, t=2, p=1). Stored as
@@ -82,8 +106,11 @@ public static class TestAccounts
     /// The collection fixture; used for its postgres connection string.
     /// </param>
     /// <param name="status">
-    /// accounts.status: 100 = ACTIVE/admin (default), 0 =
-    /// STRESS_TEST_CLOSED.
+    /// accounts.status: 100 = ACTIVE/admin (default; opens GM/DEV/SDEV
+    /// gates for slash-command suites and fires the DEV chat-tier banner
+    /// at FirstLogin). Pass <see cref="PlayerTierStatus"/> for a
+    /// non-admin avatar that bypasses the chat-tier banner. 0 =
+    /// STRESS_TEST_CLOSED (rejected). See class xmldoc for full table.
     /// </param>
     /// <param name="testName">
     /// Bound automatically via CallerMemberName. Used only for the
