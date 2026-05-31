@@ -409,6 +409,25 @@ void UDPClient::SendPacketSequence(char *msg, EnbUdpHeader *header, bool continu
                         chunk_bytes, (long) m_SplitPacketLength);
 
             if (m_SplitPacketLength <= 0) {
+                // Patch the reassembled buffer's EnbUdpHeader.size to the
+                // total bytes we've gathered. The first packet's header was
+                // memcpy'd verbatim and only reflects the first chunk's
+                // size (header_size + sizeof(EnbUdpHeader)). Without this
+                // patch SendClientPacketSequence computes
+                // bytes = header->size - sizeof(EnbUdpHeader) = ~512 and
+                // the inner walk breaks immediately on the first inner
+                // opcode whose declared length spans the full reassembled
+                // payload (e.g. 0x001B AUX_DATA at 0x320/0x600/0x1073
+                // bytes), forwarding garbage to the TCP client and
+                // crashing the retail Win32 client mid-load. Win32's
+                // UDPProxyToClient.cpp has the same length-vs-bytes guard
+                // but no break, so it silently falls through and reads
+                // past the claimed bound -- works because the reassembled
+                // data IS in the buffer, just unaccounted for. Stamping
+                // the correct size here is cleaner than removing the
+                // bound check.
+                EnbUdpHeader *split_hdr = (EnbUdpHeader *) m_SplitPacketBuffer;
+                split_hdr->size = (short)(m_SplitPacketptr - m_SplitPacketBuffer);
                 packet_pass = SendClientPacketSequence((char *) m_SplitPacketBuffer);
                 if (m_SplitPacketLength < 0) {
                     LogVMessage("UDPClient(Linux): split packet underflow %ld\n",
