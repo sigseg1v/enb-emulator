@@ -471,9 +471,16 @@ void SectorManager::StationLogin(Player *player)
     long ManuID = player->ManuID();
     
  	LogMessage("Station login for player %s [%08x]\n", player->Name(), GameID);
-   
-    //player->SendGalaxyMap(m_SystemName, m_ParentSectorName, m_SectorName);
-    
+
+    // Retail StationLogin emits 0x97 GALAXY_MAP early in the handshake.
+    // Primary source: capture_1 sector-S2C stream during the Friendship 7
+    // dock contains a 0x97 frame with payload (system, parent sector,
+    // station) = ("Beta Hydri", "Glenn", "Friendship 7 Recreation Port") --
+    // exactly the (m_SystemName, m_ParentSectorName, m_SectorName) tuple
+    // SectorManager populates at sector_id > 9999 init. Friendship7 byte-
+    // diff test (DockHandshakeFriendship7Tests) is the regression pin.
+    player->SendGalaxyMap(m_SystemName, m_ParentSectorName, m_SectorName);
+
     // TODO: Send ClientChatEvent packet for the 'local' channel
     
     // This is the manufacturing lab
