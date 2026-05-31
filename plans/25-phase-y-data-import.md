@@ -37,7 +37,10 @@ will provide newer references when each task is approved.
   handshake (the missing rows are the lounge NPC inventory and
   avatar/ship descriptors that Friendship 7's `LoungeNPC_45151.dat`
   references). Acceptance: `DockHandshakeFriendship7Tests` ItemBase
-  count climbs from 4 toward 77.
+  count climbs from 4 toward 77. Prerequisite (Wave 315 / 2026-05-31):
+  the test now actually exercises Friendship 7's SectorManager
+  (two-stage Establish-at-home + Reestablish-at-45151), so the 4-vs-77
+  deficit is a genuine seed-data gap and not a routing artifact.
   **STATUS: AWAITING USER APPROVAL + REFERENCE DATA.**
 
 - [ ] **Y2: Skill definitions import** -- populate the `skill` /

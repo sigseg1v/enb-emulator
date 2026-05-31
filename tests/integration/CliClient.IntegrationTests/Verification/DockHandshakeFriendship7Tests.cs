@@ -4,51 +4,64 @@
 
 using N7.CliClient.Auth;
 using N7.CliClient.IntegrationTests.Opcodes;
+using N7.CliClient.Net;
+using N7.CliClient.Opcodes;
 using Xunit;
 using Xunit.Abstractions;
 
 namespace N7.CliClient.IntegrationTests.Verification;
 
 /// <summary>
-/// Wave 116 (plan Wave 313) station-sector handshake byte-diff test
-/// targeting sector 45151 (Friendship 7 Recreation Port, Glenn Commission,
-/// Sirius system) -- the SAME destination station as the retail capture in
-/// <c>archive/kyp-snapshot/capturedPackets/capture_1.rar</c>. Where the
-/// existing <see cref="DockHandshakeRetailParityTests"/> pins sector-
-/// INVARIANT shape (no 0x00A5 self-broadcast, 0x007F MANU_TAG bits) using
-/// any station, this suite targets the EXACT station retail's player landed
+/// Station-sector handshake byte-diff test targeting sector 45151
+/// (Friendship 7 Recreation Port, Glenn Commission, Sirius system) --
+/// the SAME destination station as the retail capture in
+/// <c>archive/kyp-snapshot/capturedPackets/capture_1.rar</c>. Where
+/// <see cref="DockHandshakeRetailParityTests"/> pins sector-INVARIANT
+/// shape (no 0x00A5 self-broadcast, 0x007F MANU_TAG bits) using any
+/// station, this suite targets the EXACT station retail's player landed
 /// in so that per-station content (lounge NPCs, station NPC roster,
 /// starbase config) is part of the byte-diff.
 ///
 /// <para>
-/// Caveats. The character we create is race=0 profession=0
-/// (Terran/Warrior, home StartSector=10151 Luna) per the
-/// <see cref="SectorHandshake.BuildCreateCharacterPayload"/> defaults.
-/// The retail capture's player ("Ace") was already an established
-/// avatar parking at Friendship 7 -- they did not first-login there.
-/// Our fresh-character LOGIN to sector_id=45151 exercises the
-/// <c>SectorManager::StationLogin</c> path (sector_id &gt; 9999) on a
-/// player whose saved sector_num is still 10151 from
-/// <c>ReInitializeSavedData</c>. If the real server gated first-login
-/// on player.sector_num == ToSectorID, this test would have caught
-/// our previous over-permissiveness -- but per CLAUDE.md
-/// server-integrity rules we accept whatever the real server accepted,
-/// no more and no less. A test rejection here is a primary-source
-/// finding worth investigating.
+/// Sequencing. A fresh character's first sector LOGIN to any sector
+/// gets routed through their race/profession <c>StartSector</c> by
+/// <see cref="Player.ReInitializeSavedData"/> (Terran/Warrior =&gt;
+/// 10151 Luna), which resets <c>sector_num</c> to the home StartSector
+/// regardless of the LOGIN packet's ToSectorId. To actually exercise
+/// Friendship 7's <c>SectorManager::StationLogin</c> we two-stage:
+/// stage 1 EstablishAsync at Luna home so the avatar gets initialized
+/// + an <c>avatar_level_info</c> row is written; LogoffRequest + drain
+/// + Dispose to release the sector connection; stage 2 ReestablishAsync
+/// at 45151. The second login takes the <c>ReloadSavedData</c> path
+/// (avatar_level_info exists), which preserves the sector_num set by
+/// <c>Player::HandleLogin</c> from the LOGIN packet's ToSectorId
+/// (<c>server/src/PlayerSaves.cpp:289-291</c>). Player::GetSectorManager
+/// then returns the Friendship 7 SectorManager, not Luna's. This
+/// mirrors the retail capture player's path: an established avatar
+/// re-logging into Friendship 7, not a first-time character creation
+/// there. Phase K Wave 117 (commit ac7d49f) enabled SendGalaxyMap in
+/// StationLogin off this test, but only checked histogram counts -- the
+/// 0x0097 GalaxyMap payload bytes shipped Luna's strings, not
+/// Friendship 7's, because the fresh-character stage-1 flow this test
+/// originally used routed to Luna's SectorManager. Wave 118 (this
+/// rewrite) corrects the routing so the byte content is actually
+/// Friendship 7's.
 /// </para>
 ///
 /// <para>
 /// What this test pins. The histogram of opcodes emitted by the sector
 /// TCP from the first server frame after the client's LOGIN through and
-/// including the terminating 0x0005 START frame. Counts come from a
-/// hex-dump of the retail capture; see the
-/// <see cref="ExpectedRetailHistogram"/> constant for the extraction
-/// recipe a contributor can reproduce against
-/// <c>archive/kyp-snapshot/capturedPackets/capture_1.rar</c>. A divergence
-/// is either (a) StationLogin code-path drift in our server vs retail --
-/// the actionable kind -- or (b) starbase 73 / sector 45151 missing or
-/// differing seed data in our DB vs the retail server's prod state --
-/// the curatorial kind. Both matter; the diff distinguishes them.
+/// including the terminating 0x0005 START frame -- on the stage-2
+/// Friendship 7 session. Counts come from a hex-dump of the retail
+/// capture; see the <see cref="ExpectedRetailHistogram"/> constant for
+/// the extraction recipe a contributor can reproduce against
+/// <c>archive/kyp-snapshot/capturedPackets/capture_1.rar</c>. A
+/// divergence is either (a) StationLogin code-path drift in our server
+/// vs retail -- the actionable kind -- or (b) starbase 73 / sector
+/// 45151 missing or differing seed data in our DB vs the retail
+/// server's prod state -- the curatorial kind addressed by
+/// <c>plans/25-phase-y-data-import.md</c>. Both matter; the diff
+/// distinguishes them.
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
@@ -128,25 +141,57 @@ public sealed class DockHandshakeFriendship7Tests
         var account = TestAccounts.New(_server);
         const int slot = 0;
         // Friendship 7 Recreation Port -- starbase 73, Glenn Commission,
-        // Sirius (sector 4515). Retail capture_1.txt's MasterJoin frame
-        // 220 sets ToSectorId = 0x0000B05F = 45151 (verified by
+        // Sirius. Retail capture_1.txt's MasterJoin frame 220 sets
+        // ToSectorId = 0x0000B05F = 45151 (verified by
         // CaptureReplayTests.MasterJoin_RealCaptureBytes_RoundTripIdentity).
         const int friendship7SectorId = 45151;
+        // Terran/Warrior home StartSector -- where the fresh character's
+        // first sector login lands no matter what we ask for, because
+        // ReInitializeSavedData resets sector_num. Stage 1 lives here.
+        const int lunaHomeSectorId = 10151;
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(180));
 
         var login = await _client.AuthLogin.LoginAsync(
             new AuthLoginRequest(account.Username, account.Password), cts.Token);
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
-            _server, login.Ticket!, account.Username, slot, friendship7SectorId,
+        // Stage 1: first sector login at home so ReInitializeSavedData
+        // runs and writes the avatar_level_info row. Drain to 0x0005 START
+        // (handshake complete), then LogoffRequest + drain LogoffConfirmation
+        // for a clean server-side teardown, then dispose to release the
+        // sector TCP. We capture nothing from this session -- it exists
+        // solely to flip the avatar from "fresh" to "established".
+        var homeSession = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, lunaHomeSectorId,
             firstName: "Friend7Pin", shipName: "Friend7Ship", cts.Token);
 
         try
         {
-            var actualHistogram = string.Join("\n", session.HandshakeOpcodes
+            await homeSession.Sector.SendAsync(
+                Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, new byte[8]),
+                cts.Token);
+            await SectorHandshake.DrainUntilOpcode(
+                homeSession.Sector, OpcodeId.Known.LogoffConfirmation.Value, cts.Token);
+        }
+        finally
+        {
+            await homeSession.DisposeAsync();
+        }
+
+        // Stage 2: reconnect against the now-established avatar and LOGIN
+        // to 45151. ReadSavedData takes ReloadSavedData (avatar_level_info
+        // exists), which preserves the sector_num HandleLogin sets from
+        // the LOGIN packet's ToSectorId. GetSectorManager(45151) returns
+        // the Friendship 7 SectorManager and StationLogin emits Friendship
+        // 7's GalaxyMap / Greeting / etc.
+        await using var f7Session = await SectorHandshake.ReestablishAsync(
+            _server, login.Ticket!, slot, friendship7SectorId, cts.Token);
+
+        try
+        {
+            var actualHistogram = string.Join("\n", f7Session.HandshakeOpcodes
                 .GroupBy(o => o)
                 .OrderByDescending(g => g.Count())
                 .ThenBy(g => g.Key)
@@ -161,10 +206,10 @@ public sealed class DockHandshakeFriendship7Tests
             _out.WriteLine("Expected retail histogram:");
             _out.WriteLine(ExpectedRetailHistogram);
             _out.WriteLine("");
-            _out.WriteLine($"Ordered sequence ({session.HandshakeOpcodes.Count} frames):");
-            for (int i = 0; i < session.HandshakeOpcodes.Count; i++)
+            _out.WriteLine($"Ordered sequence ({f7Session.HandshakeOpcodes.Count} frames):");
+            for (int i = 0; i < f7Session.HandshakeOpcodes.Count; i++)
             {
-                var frame = session.HandshakeFrames[i];
+                var frame = f7Session.HandshakeFrames[i];
                 _out.WriteLine($"  [{i,3}] 0x{frame.Opcode:X4}  payload={frame.PayloadLength,5}B");
             }
 
@@ -173,7 +218,7 @@ public sealed class DockHandshakeFriendship7Tests
         finally
         {
             using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(f7Session.Global, slot, cleanupCts.Token); }
             catch { /* best-effort cleanup */ }
         }
     }
