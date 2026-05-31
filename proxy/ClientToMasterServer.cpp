@@ -87,11 +87,17 @@ void Connection::HandleMasterJoin()
 // (proxy -> server:3808 UDP, opcode 0x2008, wait for 0x2009 confirm).
 //
 // If the server doesn't confirm on the first SendMasterLogin attempt we
-// retry the handoff a few times before giving up. SendMasterLogin itself
-// does ~5s of internal retransmits via WaitForResponse (5 sends x 1s
-// window); the outer retry covers the case where the server-side
-// master-listener recv thread had not yet started on the first attempt
-// (e.g. client raced server startup).
+// retry the handoff up to kHandoffAttempts times before giving up.
+// SendMasterLogin itself does ~5s of internal retransmits via
+// WaitForResponse (5 sends x 1s window); the outer retry covers the
+// case where the server-side master-listener recv thread has not yet
+// started (the master UDP listener is deferred until every sector's
+// UDP port has been bound -- see ServerManager::Run, which can take
+// 60-90s during a cold start with ~300 sectors at ~100ms each). With
+// kHandoffAttempts=30 and a 5s inner window the proxy waits ~150s
+// before giving up, which comfortably covers the observed ~84s cold
+// start. SendMasterLogin resets m_global_account_rcv = false at the
+// top of every call so outer retries do not race on stale state.
 //
 // The fallback path (sending a proxy-local ServerRedirect without
 // SetClientPort/SetClientIP/SetSectorID being populated) leaves the
@@ -122,7 +128,7 @@ void Connection::HandleMasterJoin()
 		return;
 	}
 
-	const int kHandoffAttempts = 2;
+	const int kHandoffAttempts = 30;
 	for (int attempt = 0; attempt < kHandoffAttempts; attempt++)
 	{
 		sector_port = g_ServerMgr->m_UDPConnection->SendMasterLogin(
