@@ -13,15 +13,33 @@ namespace N7.CliClient.IntegrationTests.Verification;
 
 /// <summary>
 /// Wave 115 retail-parity regression suite for the station-sector
-/// (Luna 10151) handshake stream. Each test in this class asserts a
-/// shape invariant we observed in the retail single-player dock
-/// capture (<c>archive/kyp-snapshot/capturedPackets/capture_1.rar</c>,
+/// handshake stream. Each test in this class asserts a shape invariant
+/// we observed in the retail single-player dock capture
+/// (<c>archive/kyp-snapshot/capturedPackets/capture_1.rar</c>,
 /// extracted to <c>/tmp/cap/capture_1.txt</c>) that our server was
 /// silently violating prior to Waves 112/113. Distinct from the
 /// per-opcode "hardening" suites under <c>Opcodes/</c> -- those pin
 /// individual opcode shapes; this one pins cross-opcode invariants
 /// (ordering, presence, byte-level field semantics) the per-opcode
 /// pins cannot express.
+///
+/// <para>
+/// Sector caveat. The retail capture's destination station is sector
+/// 45151 (Friendship 7 Recreation Port, Glenn Commission, Sirius
+/// system) -- see <c>CaptureReplayTests.MasterJoin_...</c> which pins
+/// <c>ToSectorId == 0x0000B05F == 45151</c> from MasterJoin frame
+/// 220, and the chat-channel "Sector 45151" strings throughout the
+/// post-dock window. Our tests below use sector 10151 (Luna Station)
+/// because that is the StartSector for the test character's
+/// race/profession (Terran Warrior; race*3+profession = 0). Both
+/// invariants asserted here -- no 0x00A5 emit to self, and 0x007F
+/// payload LE-decode with MANU_TAG|PLAYER_TAG bits set -- are
+/// properties of the <c>SectorManager::StationLogin</c> code path
+/// itself, not of any specific station; they hold for both 10151 and
+/// 45151. The retail capture's bytes are the primary-source proof
+/// that the real Win32 client expects this shape from the StationLogin
+/// path.
+/// </para>
 ///
 /// <para>
 /// Failure of any test here means our station-login emit-stream has
@@ -79,7 +97,7 @@ public sealed class DockHandshakeRetailParityTests
     {
         var account = TestAccounts.New(_server);
         const int slot = 0;
-        const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
+        const int stationSectorId = 10151;  // Luna Station, StartSector[0*3+0] (Terran/Warrior)
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
 
@@ -145,7 +163,7 @@ public sealed class DockHandshakeRetailParityTests
     {
         var account = TestAccounts.New(_server);
         const int slot = 0;
-        const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
+        const int stationSectorId = 10151;  // Luna Station, StartSector[0*3+0] (Terran/Warrior)
         const uint ManuTag = 1u << 31;
         const uint PlayerTag = 1u << 30;
         const uint TagMask = ManuTag | PlayerTag;
