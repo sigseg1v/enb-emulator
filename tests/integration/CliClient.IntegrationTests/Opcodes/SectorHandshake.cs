@@ -80,6 +80,18 @@ public static class SectorHandshake
         /// </summary>
         public required IReadOnlyList<(ushort Opcode, int PayloadLength)> HandshakeFrames { get; init; }
 
+        /// <summary>
+        /// Same set of frames as <see cref="HandshakeFrames"/> but with
+        /// the full wire-payload bytes attached instead of just the
+        /// length. Wave 114 lit this up so byte-exact hardening tests
+        /// can diff a specific emit's payload bytes against a retail
+        /// capture fixture without re-driving the login flow. Order,
+        /// duplication, and 0x0005 terminator semantics all match
+        /// <see cref="HandshakeFrames"/>. The arrays are defensive
+        /// copies of the receive buffer.
+        /// </summary>
+        public required IReadOnlyList<(ushort Opcode, byte[] Payload)> HandshakePayloads { get; init; }
+
         public async ValueTask DisposeAsync()
         {
             await Sector.DisposeAsync();
@@ -124,7 +136,7 @@ public static class SectorHandshake
             Assert.Equal(sectorId, redirect.SectorId);
             Assert.Equal(server.SectorPort, redirect.ServerEndPoint.Port);
 
-            var (sectorConn, startId, handshakeFrames) = await DoSectorLoginUntilStartAsync(
+            var (sectorConn, startId, handshakePayloads) = await DoSectorLoginUntilStartAsync(
                 server, authTicket, gameId, sectorId, ct);
 
             return new Session
@@ -134,8 +146,9 @@ public static class SectorHandshake
                 GameId = gameId,
                 StartId = startId,
                 Slot = slot,
-                HandshakeOpcodes = handshakeFrames.Select(f => f.Opcode).ToList(),
-                HandshakeFrames = handshakeFrames,
+                HandshakeOpcodes = handshakePayloads.Select(f => f.Opcode).ToList(),
+                HandshakeFrames = handshakePayloads.Select(f => (f.Opcode, f.Payload.Length)).ToList(),
+                HandshakePayloads = handshakePayloads,
             };
         }
         catch
@@ -191,7 +204,7 @@ public static class SectorHandshake
             var redirect = await DoMasterJoinAsync(server, authTicket, gameId, sectorId, ct);
             Assert.Equal(sectorId, redirect.SectorId);
 
-            var (sectorConn, startId, handshakeFrames) = await DoSectorLoginUntilStartAsync(
+            var (sectorConn, startId, handshakePayloads) = await DoSectorLoginUntilStartAsync(
                 server, authTicket, gameId, sectorId, ct);
 
             return new Session
@@ -201,8 +214,9 @@ public static class SectorHandshake
                 GameId = gameId,
                 StartId = startId,
                 Slot = slot,
-                HandshakeOpcodes = handshakeFrames.Select(f => f.Opcode).ToList(),
-                HandshakeFrames = handshakeFrames,
+                HandshakeOpcodes = handshakePayloads.Select(f => f.Opcode).ToList(),
+                HandshakeFrames = handshakePayloads.Select(f => (f.Opcode, f.Payload.Length)).ToList(),
+                HandshakePayloads = handshakePayloads,
             };
         }
         catch
@@ -393,7 +407,7 @@ public static class SectorHandshake
     /// 0x0061 AVATAR_DESCRIPTION that the server pushes from
     /// SendLoginShipData before SendStart.
     /// </summary>
-    public static async Task<(EncryptedTcpConnection conn, int startId, IReadOnlyList<(ushort Opcode, int PayloadLength)> frames)>
+    public static async Task<(EncryptedTcpConnection conn, int startId, IReadOnlyList<(ushort Opcode, byte[] Payload)> frames)>
         DoSectorLoginUntilStartAsync(
             ServerFixture server, string authTicket, int gameId, int sectorId,
             CancellationToken ct)
@@ -405,7 +419,7 @@ public static class SectorHandshake
         {
             await conn.SendAsync(BuildLoginPacket(authTicket, gameId, sectorId), ct);
 
-            var frames = new List<(ushort, int)>();
+            var frames = new List<(ushort, byte[])>();
             int framesSeen = 0;
             const int maxFrames = 4000;
             while (framesSeen++ < maxFrames)
@@ -413,7 +427,8 @@ public static class SectorHandshake
                 var reply = await conn.ReceiveAsync(ct);
                 Assert.NotNull(reply);
 
-                frames.Add((reply!.Header.Opcode, reply.Payload.Length));
+                // Defensive copy: the receive buffer may be pooled/recycled.
+                frames.Add((reply!.Header.Opcode, reply.Payload.ToArray()));
 
                 if (reply.Header.Opcode == OpcodeId.Known.Start.Value)
                 {
