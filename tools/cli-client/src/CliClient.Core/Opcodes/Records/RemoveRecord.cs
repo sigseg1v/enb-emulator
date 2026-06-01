@@ -6,23 +6,15 @@ using System.Text;
 
 namespace N7.CliClient.Opcodes.Records;
 
-/// <summary>
-/// 0x0007 REMOVE -- despawn a previously-created object. Payload is a
-/// single int32 GameID identifying the object to remove.
-/// </summary>
+/// <summary>0x0007 REMOVE. Wire: int32 GameID (4 bytes).</summary>
 public sealed class RemoveRecord : PacketRecord
 {
     public RemoveRecord(ReadOnlySpan<byte> payload) : base(0x0007, payload) { }
-
     protected override void WriteFields(StringBuilder sb)
     {
-        if (Payload.Length < 4)
-        {
-            Flag(sb, $"REMOVE truncated -- {Payload.Length} bytes, expected 4");
-            return;
-        }
+        if (Payload.Length < 4) { Flag(sb, $"REMOVE truncated -- {'{'}Payload.Length{'}'} bytes, expected 4"); return; }
         int gameId = ReadI32LE(Payload, 0);
-        FieldHex(sb, "GameID", gameId);
+        FHex(sb, 0, "GameID", gameId);
         FlagSuspicious(sb, "GameID", gameId);
     }
 }

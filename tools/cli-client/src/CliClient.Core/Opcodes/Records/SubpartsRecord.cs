@@ -7,47 +7,35 @@ using System.Text;
 namespace N7.CliClient.Opcodes.Records;
 
 /// <summary>
-/// 0x00B4 SUBPARTS. Wire shape (variable, built via AddData/AddDataS):
-///   int32 GameID     (BE -- emitter applies ntohl)
-///   int32 NumSubParts (BE -- emitter applies ntohl)
-///   Then NumSubParts pairs of:
-///     NUL-terminated string (bone path, e.g. "~01", "~02/~03_01")
-///     int32 asset ID        (BE -- emitter applies ntohl)
-/// Race-dependent: Jenquai ships emit 4 subparts; other races 4 (5-6 for
-/// upgraded Terran traders). Source: PlayerClass.cpp SendSubparts().
+/// 0x00B4 SUBPARTS. Wire (variable, built via AddData/AddDataS):
+///   int32 GameID (BE -- emitter applies ntohl);
+///   int32 NumSubParts (BE);
+///   NumSubParts pairs: NUL-terminated bone path + int32 asset ID (BE).
+/// Source: PlayerClass.cpp SendSubparts().
 /// </summary>
 public sealed class SubpartsRecord : PacketRecord
 {
     public SubpartsRecord(ReadOnlySpan<byte> payload) : base(0x00B4, payload) { }
-
     protected override void WriteFields(StringBuilder sb)
     {
-        if (Payload.Length < 8)
-        {
-            Flag(sb, $"SUBPARTS truncated -- {Payload.Length} bytes, expected >= 8");
-            return;
-        }
-        int gameId    = ReadI32BE(Payload, 0);  // ntohl at emit
-        int numParts  = ReadI32BE(Payload, 4);  // ntohl at emit
-
-        FieldHex(sb, "GameID",      gameId, "(ntohl on wire -- decoded as BE)");
-        FieldDec(sb, "NumSubParts", numParts);
-
+        if (Payload.Length < 8) { Flag(sb, $"SUBPARTS truncated -- {'{'}Payload.Length{'}'} bytes, expected >= 8"); return; }
+        int gameId   = ReadI32BE(Payload, 0);
+        int numParts = ReadI32BE(Payload, 4);
+        FHex(sb, 0, "GameID",      gameId, "(BE -- ntohl at emit)");
+        FDec(sb, 4, "NumSubParts", numParts);
         int off = 8;
         for (int i = 0; i < numParts && off < Payload.Length; i++)
         {
-            // NUL-terminated bone path string
-            int nul = Array.IndexOf(Payload, (byte)0, off);
+            int nul = System.Array.IndexOf(Payload, (byte)0, off);
             if (nul < 0 || nul >= Payload.Length) break;
             string bone = System.Text.Encoding.ASCII.GetString(Payload, off, nul - off);
+            int strLen  = nul - off + 1; // include NUL
+            FStr(sb, off, strLen, $"  [{i}] Bone",    bone);
             off = nul + 1;
-
             if (off + 4 > Payload.Length) break;
-            int assetId = ReadI32BE(Payload, off);  // ntohl at emit
+            int assetId = ReadI32BE(Payload, off);
+            FHex(sb, off, $"  [{i}] AssetID", assetId);
             off += 4;
-
-            Field(sb, $"  [{i}] Bone",    Quote(bone));
-            Field(sb, $"  [{i}] AssetID", $"0x{assetId:X8}  ({assetId})  (BE)");
         }
     }
 }
