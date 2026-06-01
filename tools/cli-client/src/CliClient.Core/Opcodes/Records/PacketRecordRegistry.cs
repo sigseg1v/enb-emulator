@@ -34,6 +34,7 @@ public static class PacketRecordRegistry
             0x0025 => new ItemBaseRecord(payload),
             0x0030 => new ActivateRenderStateRecord(payload, 0x0030),
             0x0031 => new ActivateRenderStateRecord(payload, 0x0031),
+            0x003A => new ServerHandoffRecord(payload),
             0x003C => new ClientTypeRecord(payload),
             0x003F => new PlanetPositionalUpdateRecord(payload),
             0x0034 => new ClientSetTimeRecord(payload),
