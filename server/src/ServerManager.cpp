@@ -288,6 +288,22 @@ void ServerManager::RunMasterServer()
 		// real sector ports instead of -1.
 		master_udp_listener.StartReceiver();
 
+		// Phase S (2026-06-01): start the MVAS (move-assist) receiver. The
+		// MVASauth connection (MVAS_LOGIN_PORT/3806, CONNECTION_TYPE_MVAS_TO_PROXY,
+		// constructed in Net7.cpp and handed to us via SetUDPConnection) binds
+		// its socket in the constructor but -- unlike the global, master, and
+		// sector listeners above -- its receiver thread was never started by
+		// the deferred-start refactor. The result was that EVERY inbound MVAS
+		// datagram (0x1004 position, 0x1000 register, comms-alive) was silently
+		// dropped: no player's position ever updated from the move-assist feed
+		// (Player::UpdatePositionFromMVAS), so proximity nav exposure driven by
+		// movement (Player::CheckNavs) could never fire. HandleMVASPosReturn
+		// (server/src/UDP_MVAS.cpp) and the proxy's emit to MVAS_LOGIN_PORT
+		// (proxy/UDPProxyMVAS.cpp:161) both show 3806 is the intended receive
+		// path; this restores it. In-game/position traffic only matters once
+		// players are in-sector, so it starts here alongside the master plane.
+		if (m_UDPConnection) m_UDPConnection->StartReceiver();
+
 		LogMessage("Registering sector server: port=%d, max_sectors=%d\n", m_Port, m_MaxSectors);
 		//RegisterSectorServer(m_Port, m_MaxSectors);
 		//RegisterSectorServer(GLOBAL_SERVER_PORT, m_MaxSectors);
