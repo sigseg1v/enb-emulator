@@ -96,6 +96,9 @@
 // unistd is provided via Net7.h on both platforms.
 #include <string.h>
 #include <stdint.h>
+#include <errno.h>
+#include <deque>
+#include <vector>
 
 // Win32 sources gate the broader resend cadence on g_ShuttingDown. The
 // definition there lives in UDPProxyToClient.cpp (WIN32-walled at file
@@ -169,6 +172,260 @@ static bool should_drop_s2c(unsigned short opcode)
     if (s_drop_all) return true;
     if (opcode < 0x1000 && s_drop_mask[opcode]) return true;
     return false;
+}
+
+// ---------------------------------------------------------------------------
+// Capture-replay (Phase K Wave 324). Reads a binary replay file produced by
+// tools/capture-extract/ and, when the proxy is about to forward a
+// server->client opcode, substitutes the payload with the next retail
+// payload for that opcode from the capture. The point is to disentangle
+// transport bugs from payload bugs in the dock-zone-in client crash hunt:
+//   - if retail bytes through OUR transport STILL crash, the bug is
+//     in our transport/RC4/framing, not the payload our server computed;
+//   - if retail bytes DON'T crash but our payloads do, the diff between
+//     the substituted bytes and ours is the bug.
+//
+// Format (see tools/capture-extract/Program.cs for the writer):
+//   magic     "ENBREPLAY"   (9 bytes ASCII)
+//   version   1             (u8)
+//   meta_len  u32 LE        (ASCII "key=value\n" lines)
+//   meta      meta_len bytes
+//   nframes   u32 LE
+//   frames    nframes x [opcode u16 LE, payload_len u32 LE, payload bytes]
+//
+// Per-opcode FIFO: opcode 0xZZZZ -> deque of retail payloads in capture
+// order. Pop head on each emit. A miss (we emit an opcode the capture
+// didn't have) is logged but does not block the send.
+//
+// Substitution happens AT the proxy's S->C chokepoint (both
+// ProcessClientOpcode "direct" path and the inner-bundle path here in
+// SendClientPacketSequence). Bytes here are pre-RC4-encryption -- the
+// existing m_CryptOut.RC4 layer at Connection.cpp:629/668/684 wraps the
+// substituted bytes with the active session key transparently.
+//
+// Gated on PROXY_S2C_REPLAY=<path>. Off by default; play-local does not
+// set it. `just packet-replay <capture>` does.
+// ---------------------------------------------------------------------------
+static bool s_replay_init = false;
+static bool s_replay_on   = false;
+static std::deque<std::vector<unsigned char>> s_replay_q[0x1000];
+
+// Identity rewrite (Phase K Wave 325). The retail payloads in the replay
+// file reference the retail session's avatar_id (e.g. 0x06EE13DE for "Ace"
+// in capture_1). The live session has a different avatar_id assigned by
+// our server. Without rewriting, the client receives frames addressed to
+// an avatar it doesn't know about and crashes in the avatar-pool lookup.
+//
+// In the EnB protocol the same 4-byte avatar_id (LE) appears as the first
+// payload word of Client_Avatar (0x37), Client_Ship (0x47), AvatarDesc
+// (0x61), NameDecal (0xB2), and is embedded into most movement/effect
+// payloads. ship_id aliases avatar_id, so a single ID-pair covers both.
+//
+// Learn s_live_avatar_id either from PROXY_LIVE_AVATAR_ID env var (decimal
+// or 0xhex), or lazily on the first s2c substitution where the retail
+// payload starts with s_retail_avatar_id (in which case orig[0..3] is the
+// live id). After learning, every substituted payload gets every 4-byte
+// LE occurrence of s_retail_avatar_id rewritten to s_live_avatar_id.
+static uint32_t s_retail_avatar_id = 0;   // parsed from replay metadata
+static uint32_t s_live_avatar_id   = 0;   // from env or learned
+
+static void init_replay_once()
+{
+    if (s_replay_init) return;
+    s_replay_init = true;
+
+    const char *path = getenv("PROXY_S2C_REPLAY");
+    if (!path || !path[0]) return;
+
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        LogMessage("UDPClient(Linux): replay: PROXY_S2C_REPLAY=%s open failed: %s\n",
+                   path, strerror(errno));
+        return;
+    }
+
+    char magic[9];
+    unsigned char ver = 0;
+    if (fread(magic, 1, 9, f) != 9 || memcmp(magic, "ENBREPLAY", 9) != 0
+        || fread(&ver, 1, 1, f) != 1 || ver != 1) {
+        LogMessage("UDPClient(Linux): replay: bad magic or version in %s\n", path);
+        fclose(f);
+        return;
+    }
+
+    uint32_t meta_len = 0;
+    if (fread(&meta_len, 1, 4, f) != 4 || meta_len > (1u << 20)) {
+        LogMessage("UDPClient(Linux): replay: bad meta_len in %s\n", path);
+        fclose(f);
+        return;
+    }
+    std::vector<char> meta(meta_len + 1, 0);
+    if (meta_len && fread(meta.data(), 1, meta_len, f) != meta_len) {
+        fclose(f);
+        return;
+    }
+    meta[meta_len] = '\0';
+
+    uint32_t nframes = 0;
+    if (fread(&nframes, 1, 4, f) != 4) {
+        fclose(f);
+        return;
+    }
+
+    unsigned loaded = 0;
+    unsigned skipped_oversized = 0;
+    for (uint32_t i = 0; i < nframes; i++) {
+        uint16_t opcode = 0;
+        uint32_t plen = 0;
+        if (fread(&opcode, 1, 2, f) != 2) break;
+        if (fread(&plen, 1, 4, f) != 4) break;
+        std::vector<unsigned char> payload(plen);
+        if (plen && fread(payload.data(), 1, plen, f) != plen) break;
+        if (opcode >= 0x1000) { skipped_oversized++; continue; }
+        s_replay_q[opcode].push_back(std::move(payload));
+        loaded++;
+    }
+    fclose(f);
+
+    s_replay_on = true;
+    // The metadata block lives in a single multi-line string; log it
+    // verbatim so the operator can confirm which capture is mounted.
+    LogMessage("UDPClient(Linux): replay: PROXY_S2C_REPLAY=%s -- loaded %u frames "
+               "(%u oversized opcode skipped)\n",
+               path, loaded, skipped_oversized);
+    LogMessage("UDPClient(Linux): replay: metadata: %s\n", meta.data());
+
+    // Parse "avatar_id=0xNNNNNNNN" out of the metadata block so the
+    // rewrite pass knows what 4-byte LE pattern to scrub. The extractor
+    // emits avatar_id in 0x-prefixed hex; tolerate decimal too.
+    const char *meta_str = meta.data();
+    const char *k = strstr(meta_str, "avatar_id=");
+    if (k) {
+        k += strlen("avatar_id=");
+        unsigned long parsed = strtoul(k, nullptr, 0);
+        if (parsed && parsed <= 0xFFFFFFFFul) {
+            s_retail_avatar_id = (uint32_t) parsed;
+            LogMessage("UDPClient(Linux): replay: retail_avatar_id=0x%08x\n",
+                       s_retail_avatar_id);
+        }
+    }
+
+    // Optional explicit override of the live avatar_id. Useful when the
+    // operator already knows which avatar will be selected (e.g. seeded
+    // via SQL) and wants to skip the lazy-learn step.
+    const char *live_env = getenv("PROXY_LIVE_AVATAR_ID");
+    if (live_env && live_env[0]) {
+        unsigned long live = strtoul(live_env, nullptr, 0);
+        if (live && live <= 0xFFFFFFFFul) {
+            s_live_avatar_id = (uint32_t) live;
+            LogMessage("UDPClient(Linux): replay: live_avatar_id=0x%08x "
+                       "(from PROXY_LIVE_AVATAR_ID env)\n",
+                       s_live_avatar_id);
+        }
+    }
+}
+
+// Read a u32 LE from buf at offset, bounds-safe.
+static uint32_t read_u32le(const unsigned char *buf, size_t len, size_t off)
+{
+    if (off + 4 > len) return 0;
+    return (uint32_t) buf[off]
+         | ((uint32_t) buf[off + 1] << 8)
+         | ((uint32_t) buf[off + 2] << 16)
+         | ((uint32_t) buf[off + 3] << 24);
+}
+
+// Scan `payload` for every 4-byte LE occurrence of `from` and overwrite
+// each with `to`. Returns the number of replacements. Naive O(n) scan;
+// payloads are at most a few KB so allocation-free byte-walk is fine.
+static unsigned rewrite_u32le(std::vector<unsigned char> &payload,
+                              uint32_t from, uint32_t to)
+{
+    if (from == 0 || to == 0 || from == to || payload.size() < 4) return 0;
+    unsigned char from_b[4] = {
+        (unsigned char) (from & 0xFF),
+        (unsigned char) ((from >> 8) & 0xFF),
+        (unsigned char) ((from >> 16) & 0xFF),
+        (unsigned char) ((from >> 24) & 0xFF),
+    };
+    unsigned char to_b[4] = {
+        (unsigned char) (to & 0xFF),
+        (unsigned char) ((to >> 8) & 0xFF),
+        (unsigned char) ((to >> 16) & 0xFF),
+        (unsigned char) ((to >> 24) & 0xFF),
+    };
+    unsigned hits = 0;
+    for (size_t i = 0; i + 4 <= payload.size(); i++) {
+        if (payload[i]   == from_b[0]
+         && payload[i+1] == from_b[1]
+         && payload[i+2] == from_b[2]
+         && payload[i+3] == from_b[3]) {
+            payload[i]   = to_b[0];
+            payload[i+1] = to_b[1];
+            payload[i+2] = to_b[2];
+            payload[i+3] = to_b[3];
+            hits++;
+            i += 3; // skip past the rewrite (loop ++ adds the 4th)
+        }
+    }
+    return hits;
+}
+
+// Pop the next retail payload for `opcode` if one is queued and replay is
+// active. On hit, copies bytes into `out` and emits a one-line diff
+// summary (our_len, retail_len, byte-prefix match) so the operator can
+// see at-a-glance how close our generated payload was. On miss, logs a
+// MISS line and returns false; caller sends original.
+static bool replay_substitute_s2c(unsigned short opcode,
+                                  const unsigned char *orig, size_t orig_len,
+                                  std::vector<unsigned char> &out)
+{
+    init_replay_once();
+    if (!s_replay_on || opcode >= 0x1000) return false;
+
+    if (s_replay_q[opcode].empty()) {
+        LogMessage("UDPClient(Linux): replay: MISS op=0x%04x our=%zu "
+                   "(no retail payload queued)\n",
+                   opcode, orig_len);
+        return false;
+    }
+    out = std::move(s_replay_q[opcode].front());
+    s_replay_q[opcode].pop_front();
+
+    // Lazy learn of live avatar_id. Trigger condition: we know the
+    // retail_avatar_id (from metadata), the substituted payload starts
+    // with it, AND the live orig payload has a non-zero u32 at offset 0
+    // (so it's plausibly the live avatar_id at the same slot). This
+    // matches the shape of 0x37 Client_Avatar / 0x47 Client_Ship /
+    // 0x61 AvatarDescription / 0xB2 NameDecal. We do NOT learn from
+    // other opcodes -- if the first emit isn't one of those, learning
+    // simply waits for the next compatible opcode; the rewrite is a
+    // no-op until learned.
+    if (s_live_avatar_id == 0 && s_retail_avatar_id != 0
+        && out.size() >= 4 && orig_len >= 4) {
+        uint32_t retail_head = read_u32le(out.data(), out.size(), 0);
+        uint32_t live_head   = read_u32le(orig, orig_len, 0);
+        if (retail_head == s_retail_avatar_id && live_head != 0
+            && live_head != s_retail_avatar_id) {
+            s_live_avatar_id = live_head;
+            LogMessage("UDPClient(Linux): replay: LEARN live_avatar_id="
+                       "0x%08x from op=0x%04x\n",
+                       s_live_avatar_id, opcode);
+        }
+    }
+
+    // ID rewrite: every 4-byte LE occurrence of the retail avatar_id in
+    // the substituted payload becomes the live avatar_id. No-op until
+    // both IDs are known.
+    unsigned hits = rewrite_u32le(out, s_retail_avatar_id, s_live_avatar_id);
+
+    size_t prefix = 0;
+    size_t n = orig_len < out.size() ? orig_len : out.size();
+    while (prefix < n && orig[prefix] == out[prefix]) prefix++;
+    LogMessage("UDPClient(Linux): replay: SUB op=0x%04x our=%zu retail=%zu "
+               "prefix_match=%zu rewrites=%u\n",
+               opcode, orig_len, out.size(), prefix, hits);
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -267,10 +524,15 @@ void UDPClient::ProcessClientOpcode(char *msg, EnbUdpHeader *header)
         LogVMessage("UDPClient(Linux): bisection: DROP direct 0x%04x [%d bytes]\n",
                     (unsigned short) opcode, (int) bytes);
     } else if (g_ServerMgr && g_ServerMgr->m_SectorConnection) {
-        dump_s2c_hex("direct", (unsigned short) opcode,
-                     (const unsigned char *) msg, (size_t) bytes);
+        std::vector<unsigned char> sub;
+        bool subbed = replay_substitute_s2c(
+            (unsigned short) opcode,
+            (const unsigned char *) msg, (size_t) bytes, sub);
+        unsigned char *out_buf = subbed ? sub.data() : (unsigned char *) msg;
+        size_t         out_len = subbed ? sub.size() : (size_t) bytes;
+        dump_s2c_hex("direct", (unsigned short) opcode, out_buf, out_len);
         g_ServerMgr->m_SectorConnection->SendResponse(
-            opcode, (unsigned char *) msg, bytes, header->packet_sequence);
+            opcode, out_buf, (short) out_len, header->packet_sequence);
     }
 
     IncommingOpcodePreProcessing(opcode, msg, bytes);
@@ -739,12 +1001,18 @@ bool UDPClient::SendClientPacketSequence(char *msg)
                     LogVMessage("UDPClient(Linux): bisection: DROP inner 0x%04x [0x%x]\n",
                                 (unsigned short) opcode, (unsigned) length);
                 } else {
-                    dump_s2c_hex("inner", (unsigned short) opcode,
-                                 (const unsigned char *) ptr + 4,
-                                 (size_t)(length - 4));
+                    std::vector<unsigned char> sub;
+                    bool subbed = replay_substitute_s2c(
+                        (unsigned short) opcode,
+                        (const unsigned char *) ptr + 4, (size_t)(length - 4),
+                        sub);
+                    unsigned char *out_buf = subbed
+                        ? sub.data() : (unsigned char *) ptr + 4;
+                    size_t         out_len = subbed
+                        ? sub.size() : (size_t)(length - 4);
+                    dump_s2c_hex("inner", (unsigned short) opcode, out_buf, out_len);
                     g_ServerMgr->m_SectorConnection->SendResponse(
-                        opcode, (unsigned char *) ptr + 4, length - 4,
-                        header->packet_sequence);
+                        opcode, out_buf, (short) out_len, header->packet_sequence);
                 }
             } else {
                 LogMessage("UDPClient(Linux): bad opcode through to proxy: 0x%04x len 0x%x\n",

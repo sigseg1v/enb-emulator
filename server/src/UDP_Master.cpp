@@ -58,9 +58,21 @@ void UDP_Connection::ProcessHandoff(char *msg, EnbUdpHeader *hdr, const long sou
 	{
         ServerRedirect redirect;
         memset(&redirect, 0, sizeof(redirect));
-        redirect.sector_id = ntohl(sector_id);
+        // ServerRedirect.sector_id is host-order both inside this server and
+        // when the proxy puts it on the wire to the client (see proxy
+        // SendServerRedirect; the captures pin a LE-on-wire layout that
+        // matches host-order on x86). This callsite previously stored
+        // ntohl(sector_id) and LookupSectorServer below applied a second
+        // ntohl to undo it -- two byte-swaps that cancel out, leaving the
+        // next reader of either site primed to write a bug.
+        redirect.sector_id = sector_id;
 		ip = (unsigned char *)&source_addr;
-		LogMessage("[UDP port:%u IP:%d.%d.%d.%d] Master handoff player %s [%08x], to sector %d\n", source_port, ip[0], ip[1], ip[2], ip[3], player->Name(), player->GameID(), sector_id);
+		// %u with a signed short value sign-extends through varargs to int then
+		// gets reinterpreted as unsigned, so e.g. port 41468 (0xA1FC, fits an
+		// unsigned short but is negative as a signed one) logs as 4294943164.
+		// Cast to unsigned short before promotion so the printed value matches
+		// the wire.
+		LogMessage("[UDP port:%u IP:%d.%d.%d.%d] Master handoff player %s [%08x], to sector %d\n", (unsigned short) source_port, ip[0], ip[1], ip[2], ip[3], player->Name(), player->GameID(), sector_id);
         if (m_ServerMgr->m_SectorServerMgr.LookupSectorServer(redirect))
         {
             //LogMessage("Found sector %d\n",sector_id);

@@ -85,7 +85,12 @@ SectorServerManager::~SectorServerManager()
 bool SectorServerManager::LookupSectorServer(ServerRedirect & redirect)
 {
 	bool success = false;
-	long sector_id = (long)ntohl(redirect.sector_id);
+	// redirect.sector_id is host-order -- see the comment at the call site
+	// in UDP_Connection::ProcessHandoff (UDP_Master.cpp). The previous
+	// `ntohl(redirect.sector_id)` here paired with a matching ntohl at the
+	// store site; both swaps cancelled, which worked but trapped the next
+	// reader into thinking redirect.sector_id was BE.
+	long sector_id = (long) redirect.sector_id;
 
 	SectorManager *sector_manager = g_ServerMgr->GetSectorManager(sector_id);
 

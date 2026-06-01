@@ -197,7 +197,13 @@ void UDP_Connection::HandleGlobalTicketRequest(char *msg, EnbUdpHeader *hdr, con
     // `long` (8 bytes) used to pull the trailing length-prefix of the username
     // into the high half of char_slot, so every Linux GlobalTicketRequest
     // resolved to a wrong slot and GetAvatarID returned -1.
-    long char_slot = (long) *(int32_t *) msg;
+    // Phase K (slot 1+ fix): proxy applies ntohl(char_slot) before AddData,
+    // i.e. the wire field is big-endian. Reading as raw int32_t LE silently
+    // worked for slot 0 (0x00 swaps to 0x00) but produced 0x01000000 for
+    // slot 1, failing GetAvatarID's [0,4] range check and surfacing as
+    // "galaxy full" (error 1002) on the client. ntohl here to match the
+    // proxy's BE wire encoding.
+    long char_slot = (long) ntohl((uint32_t) *(int32_t *) msg);
     char username[128];
     int index = 4;
     ExtractDataLS((unsigned char*)msg, username, index);
@@ -315,7 +321,13 @@ void UDP_Connection::HandleAvatarDeleteRequest(char *msg, EnbUdpHeader *hdr, con
     char username[64];
     int index = 0;
 
-    character_slot = ExtractLong((unsigned char*)msg, index);
+    // Same proxy-side encoding convention as HandleGlobalTicketRequest:
+    // proxy's DeleteCharacter (UDPClient_linux.cpp / UDPProxyToGlobal.cpp)
+    // writes `AddData(data, ntohl((uint32_t) character_slot), index)`, so
+    // the on-wire slot is big-endian. ExtractLong reads host-LE, which
+    // worked accidentally for slot 0 only. Apply ntohl on read so any
+    // slot resolves correctly.
+    character_slot = (long) ntohl((uint32_t) ExtractLong((unsigned char*)msg, index));
     ExtractDataLS((unsigned char*)msg, username, index);
 
 	LogMessage("Delete params: Account %s, slot: %d\n", username, character_slot);

@@ -344,6 +344,69 @@ bisect-drop OPCODES CLIENT_PATH='':
     export PROXY_S2C_DROP={{OPCODES}}
     just play-local {{CLIENT_PATH}}
 
+# Build a binary capture-replay file from a retail packet capture
+# (archive/kyp-snapshot/capturedPackets/capture_NNN.rar) into
+# archive/replay/. The result feeds `just packet-replay`. CAPTURE is
+# the basename without extension, e.g. `capture_1`.
+capture-extract CAPTURE='capture_1':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    rar=archive/kyp-snapshot/capturedPackets/{{CAPTURE}}.rar
+    txt=archive/replay/{{CAPTURE}}.txt
+    out=archive/replay/{{CAPTURE}}-sector-s2c.bin
+    if [ ! -f "$rar" ]; then echo "$rar not found" >&2; exit 1; fi
+    mkdir -p archive/replay
+    if [ ! -f "$txt" ]; then
+        echo ">>> extracting $rar -> $txt"
+        unrar p -inul "$rar" > "$txt"
+    fi
+    dotnet run --project tools/capture-extract/CaptureExtract.csproj -c Release \
+        -- --input "$txt" --output "$out"
+
+# Run the local stack with PROXY_S2C_REPLAY pointing at a capture file.
+# The proxy substitutes each server->client opcode payload with the next
+# retail payload for that opcode from the file, and rewrites the retail
+# avatar_id to your live session's avatar_id on the fly (Wave 325). No DB
+# seeding required -- log in with any existing account and enter any
+# sector; the proxy learns your live avatar_id from the first s2c emit
+# whose retail payload starts with the capture's retail avatar_id and
+# rewrites every subsequent substitution.
+#
+# Outcomes:
+#
+#   (a) client survives the dock zone-in -> bug is in our payload content,
+#       and the per-substitution SUB log lines show byte-prefix-match
+#       lengths so you know which opcodes diverge from retail and where.
+#   (b) client crashes IDENTICALLY (same AV address) -> the trigger is in
+#       our transport (RC4, framing, length encoding, byte order in our
+#       headers) NOT the payload, because retail's exact payload bytes
+#       still crashed.
+#   (c) client crashes DIFFERENTLY -> something the rewrite missed:
+#       other-player avatar IDs (NPCs / other players from retail's
+#       session), object IDs, or a session-specific ID at an unexpected
+#       byte offset. Inspect the SUB / LEARN / REWRITE log lines near
+#       the crash to narrow down which opcode caused it.
+#
+# Optional: if you already know your live avatar_id (e.g. via psql -- see
+# `just psql-user` and SELECT avatar_id FROM avatar_info ... ), skip the
+# lazy learn:
+#   PROXY_LIVE_AVATAR_ID=0xNNNNNNNN just packet-replay capture_1
+#
+# Volume: archive/replay/ is mounted into the proxy at /app/replay/.
+packet-replay CAPTURE='capture_1' CLIENT_PATH='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out=archive/replay/{{CAPTURE}}-sector-s2c.bin
+    if [ ! -f "$out" ]; then
+        echo ">>> $out not found, building"
+        just capture-extract {{CAPTURE}}
+    fi
+    : "${WINEDEBUG:=+seh,+module,err+module}"
+    export WINEDEBUG
+    export PROXY_EXTRA_ARGS=/OPCODES
+    export PROXY_S2C_REPLAY=/app/replay/{{CAPTURE}}-sector-s2c.bin
+    just play-local {{CLIENT_PATH}}
+
 # Drop into the enb-cli REPL pointed at the running local stack.
 # Assumes the stack is already up (`just dev` / `just run-stack-bg`); does
 # not start anything. Useful for reproducing client-side crashes from the
