@@ -54,6 +54,7 @@ if (args[0] is "repl" or "start")
     repl.Register(new ListCommand(sessionCtx));
     repl.Register(new CreateCommand(sessionCtx));
     repl.Register(new EnterCommand(sessionCtx));
+    repl.Register(new MoveCommand(sessionCtx));
     repl.Register(new ChatCommand(sessionCtx));
     repl.Register(new DumpCommand(sessionCtx));
     repl.Register(new DumpOnCommand(sessionCtx));
@@ -280,6 +281,7 @@ static void PrintHelp()
                               list    (characters; in-sector: nearby objects)
                               create  <class> <firstname>   (e.g. JE Griever)
                               enter   <firstname>
+                              move    <x> <y> <z> [send]  (MVAS position; see note)
                               chat    [sector|gm|dev|beta|whisper] <message>
                               help, quit (alias: exit)
                             Tab/Shift-Tab complete the available commands;

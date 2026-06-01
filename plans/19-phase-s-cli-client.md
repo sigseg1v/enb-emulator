@@ -798,8 +798,32 @@ Driven by live-play feedback. All client-side; NO server change.
       to validate against, so a hand-ported MobIndex schema would be unverified
       and could perturb the (well-pinned) dump candidate selection. Other
       players' ships already decode level via the existing ShipIndex schema.
-- [ ] CLI movement (0x1004 MVAS_SEND_POSITION over UDP): the real client reports
-      flight position via the MVAS UDP channel, not the TCP sector socket. The
-      CLI has no UDP transport today -- this is a new subsystem (UDP socket +
-      MVAS registration handshake + EnbUdpHeader framing). Needed to drive
-      server-side proximity nav exposure and make the world model populate.
+- [~] CLI movement (0x1004 MVAS_SEND_POSITION over UDP): wire emitter built and
+      verified, but live driving is blocked by an architectural constraint
+      (documented below).
+      - `Net/MvasClient.cs`: byte-exact EnbUdpHeader emitter (12B header
+        `{short size; short opcode; int32 player_id; int32 seq}` + pos[3]
+        (+heading[3])), plaintext, mirroring proxy/UDPClient_linux.cpp
+        SendResponse + server/src/UDPConnection.cpp SendOpcode. Unit-tested
+        byte-for-byte (suite 244->246); dry-run verified live against a real
+        session (datagram for player 0x40000033 / pos 50000,-1000,0 is exact).
+      - `Repl/Commands/MoveCommand.cs`: `move <x> <y> <z> [send]`. DRY-RUN by
+        default (prints the datagram + the reason it isn't sent); transmits
+        only on an explicit `send`.
+      - BLOCKER (server-code evidence, not a guess): the server routes a
+        player's downstream sector data -- including the nav-exposure frames
+        movement is meant to trigger -- to a single `m_Player_IPAddr`/
+        `m_Player_Port` (server/src/PlayerConnection.cpp:246), which
+        `SetPlayerPortIP` (server/src/UDP_MVAS.cpp:149) (re)sets to the source
+        of every inbound MVAS datagram. In the live stack that source is the
+        proxy, so data returns through the proxy to our TCP channel. If the CLI
+        sends MVAS from its own socket the server redirects this player's whole
+        sector stream to us over UDP and the TCP feed (where the world model
+        reads navs) goes dark. Also: MVAS port 3806 is server-bound but not
+        host-published in docker-compose, and CheckNavs only runs while the
+        avatar is actually moving (PlayerClass.cpp:1780-1790).
+      - CONCLUSION: faithful CLI movement requires the CLI to become a full UDP
+        client (own the UDP receive path + the 0x2016 PACKET_SEQUENCE
+        reliability layer), effectively replacing the proxy. That is a separate
+        subsystem, out of scope for the passive observer. The verified emitter
+        is the wire primitive that work would build on.

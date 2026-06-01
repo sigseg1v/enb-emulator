@@ -34,6 +34,14 @@ public sealed class SessionContext : IAsyncDisposable
     public int MasterPort { get; set; } = 3801;
     public int SectorPort { get; set; } = 3500;
 
+    /// <summary>
+    /// MVAS (move-assist) UDP port for position updates. In the live stack the
+    /// proxy speaks this on the client's behalf (scraping engine memory); a
+    /// headless client feeds it directly. Not host-reachable on the default
+    /// docker-compose unless 3806/udp is published. See <see cref="MvasClient"/>.
+    /// </summary>
+    public int MvasPort { get; set; } = MvasClient.DefaultPort;
+
     /// <summary>Accept self-signed TLS certs (true for the docker dev stack).</summary>
     public bool AcceptUntrustedTls { get; set; } = true;
 
@@ -130,6 +138,14 @@ public sealed class SessionContext : IAsyncDisposable
 
     private CancellationTokenSource? _dumpDrainCts;
     private Task? _dumpDrainTask;
+    private MvasClient? _mvas;
+
+    /// <summary>
+    /// Lazily-created MVAS position emitter for the active host. Used by the
+    /// <c>move</c> command to feed position updates the way a real client's
+    /// proxy would. Reused so the UDP sequence counter stays monotonic.
+    /// </summary>
+    public MvasClient Mvas => _mvas ??= new MvasClient(Host, MvasPort);
 
     public SessionContext(OpcodeRegistry registry)
     {
@@ -356,6 +372,7 @@ public sealed class SessionContext : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await StopSectorDrainAsync().ConfigureAwait(false);
+        _mvas?.Dispose();
         if (_sector is not null) { DetachDumpHook(_sector); await _sector.DisposeAsync(); _sector = null; }
         if (_global is not null) { DetachDumpHook(_global); await _global.DisposeAsync(); _global = null; }
     }
