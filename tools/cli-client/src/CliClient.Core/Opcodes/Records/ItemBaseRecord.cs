@@ -217,11 +217,20 @@ public sealed class ItemBaseRecord : PacketRecord
         return off;
     }
 
-    // AddDataLS: LE int16 len + char[len] (no NUL). Returns new off or -1.
-    // Includes resync: if the length field reads > 1024 (impossible for a tooltip/description),
-    // the preceding string was 1 byte longer than its length field stated -- a known retail
-    // capture artifact where embedded bytes > 127 shift the length field by 1. Skip 1 byte
-    // and retry before giving up.
+    // AddDataLS decoder: LE int16 len + bytes. Returns new off or -1.
+    //
+    // The retail EA server's AddDataLS wrote `len` = count of STANDARD PRINTABLE ASCII
+    // chars (0x20-0x7E), then memcpy'd ALL bytes including any embedded non-printable
+    // formatting codes. Non-printable bytes (< 0x20 control chars like NUL, or >= 0x7F
+    // extended/DEL) are consumed from the wire stream but do NOT count toward `len`.
+    //
+    // Examples from the retail capture:
+    //   "Defle\xCEct Energy (Activated)" -- len=26 (26 printable), wire=27B (CE skipped)
+    //   "Incre\x00ase Shield Capacity (Equip)" -- len=32 (32 printable), wire=33B (NUL skipped)
+    //
+    // Our server uses strlen (total byte count). For pure-ASCII DB strings this is identical.
+    // Any item DB string with embedded format bytes would produce a divergence -- fix those
+    // item DB entries rather than changing the server's AddDataLS.
     private int ReadAddDataLS(StringBuilder sb, int off, string name, bool required = false)
     {
         if (off + 2 > Payload.Length)
@@ -230,29 +239,39 @@ public sealed class ItemBaseRecord : PacketRecord
             return -1;
         }
         short len = ReadI16LE(Payload, off);
-
-        // Resync: plausible max for any effect string is well under 1024 bytes.
-        // A length > 1024 means the previous string's real byte count was 1 more than
-        // its declared length, pushing this length field 1 byte off.
-        if ((len < 0 || len > 1024) && off + 3 <= Payload.Length)
+        if (len < 0)
         {
-            short altLen = ReadI16LE(Payload, off + 1);
-            if (altLen >= 0 && altLen <= 1024 && off + 3 + altLen <= Payload.Length)
-            {
-                Flag(sb, $"resync +1: skipped byte 0x{Payload[off]:X2} before {name} (was len={len})");
-                off++;
-                len = altLen;
-            }
-        }
-
-        if (len < 0 || off + 2 + len > Payload.Length)
-        {
-            Flag(sb, $"truncated inside {name} (len={len}, have {Payload.Length - off - 2}B)");
+            Flag(sb, $"negative length for {name} (len={len})");
             return -1;
         }
-        string s = len > 0 ? System.Text.Encoding.ASCII.GetString(Payload, off + 2, len) : "";
-        FStr(sb, off, 2 + len, name, s, required);
-        return off + 2 + len;
+
+        // Read until `len` standard-printable chars consumed.
+        // Bytes outside 0x20-0x7E (control chars, DEL, extended ASCII) are
+        // formatting codes: consume from the wire but don't count toward len.
+        int dataOff   = off + 2;
+        int charsLeft = len;
+        int byteIdx   = 0;
+        var chars     = new System.Text.StringBuilder(len + 4);
+        while (charsLeft > 0 && dataOff + byteIdx < Payload.Length)
+        {
+            byte b = Payload[dataOff + byteIdx];
+            byteIdx++;
+            if (b >= 0x20 && b < 0x7F)
+            {
+                chars.Append((char)b);
+                charsLeft--;
+            }
+            // else: format/control byte -- consume, not counted toward len
+        }
+        if (charsLeft > 0)
+        {
+            Flag(sb, $"truncated inside {name} (got {len - charsLeft}/{len} chars, {byteIdx} bytes consumed)");
+            return -1;
+        }
+
+        string s = chars.ToString();
+        FStr(sb, off, 2 + byteIdx, name, s, required);
+        return off + 2 + byteIdx;
     }
 
     private static ushort ReadU16BE(ReadOnlySpan<byte> p, int off) =>
