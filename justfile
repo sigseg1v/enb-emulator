@@ -434,9 +434,28 @@ launch-cli:
 #   just cli-replay                    # capture_1-sector-s2c.bin
 #   just cli-replay capture_2          # capture_2-sector-s2c.bin
 #   NO_COLOR=1 just cli-replay | less  # plain-text scroll
+#
+# To replay a raw pcap from the proxy (converts pcap -> ENBREPLAY on the fly):
+#   just pcap-replay proxy/local-debug/foo.pcap [server_ip] [client_ip]
 cli-replay CAPTURE='capture_1':
     printf 'replay archive/replay/{{CAPTURE}}-sector-s2c.bin\nquit\n' | \
         dotnet run --project tools/cli-client/src/CliClient.App -- start
+
+# Convert a raw pcap of server->proxy UDP traffic to ENBREPLAY and replay it.
+# The pcap must contain 0x2016/0x201A PACKET_SEQUENCE frames (what the Net-7
+# server sends to the proxy over UDP). Requires Python 3.
+#
+# Usage: just pcap-replay proxy/local-debug/foo.pcap [216.219.87.147] [192.168.0.150]
+pcap-replay PCAP SERVER='216.219.87.147' CLIENT='192.168.0.150':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tmp=$(mktemp /tmp/enbreplay-XXXXXX.bin)
+    python3 tools/pcap-to-replay/pcap_to_replay.py \
+        --pcap "{{PCAP}}" --out "$tmp" \
+        --server "{{SERVER}}" --client "{{CLIENT}}" --verbose
+    printf 'replay %s\nquit\n' "$tmp" | \
+        dotnet run --project tools/cli-client/src/CliClient.App -- start
+    rm -f "$tmp"
 
 # Stream all logs in the foreground.
 dev-fg:

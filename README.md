@@ -136,6 +136,36 @@ ps aux | grep whatever-you-want-to-capture
 sudo nsenter -t <PID> -n tcpdump -i any -nn -s0 -w network-capture.pcap
 ```
 
+Dumping the proxy is a good idea as it's unencrypted. You can convert to hex with hexdump -C
+
+**Replaying a raw pcap capture (server->proxy UDP traffic):**
+
+The Net-7 server sends sector S2C data as 0x2016/0x201A PACKET_SEQUENCE UDP frames.
+`pcap_to_replay.py` extracts the inner game opcodes from those frames and writes an
+ENBREPLAY binary that the CLI replay tool can parse:
+
+```bash
+# Convert a pcap to ENBREPLAY and replay it in one step:
+just pcap-replay proxy/local-debug/foo.pcap
+
+# With custom IPs (default: 216.219.87.147 -> 192.168.0.150):
+just pcap-replay proxy/local-debug/foo.pcap 10.0.0.1 10.0.0.2
+
+# Or run the converter directly to produce a persistent .bin:
+python3 tools/pcap-to-replay/pcap_to_replay.py \
+    --pcap proxy/local-debug/foo.pcap \
+    --out  /tmp/foo.bin \
+    --server 216.219.87.147 --client 192.168.0.150 --verbose
+
+# Then replay the .bin at any time:
+printf 'replay /tmp/foo.bin\nquit\n' | \
+    dotnet run --project tools/cli-client/src/CliClient.App -- start
+```
+
+The pcap must be a standard LE pcap (hexdump -C or wireshark export).
+Only the UDP flows from server to client are extracted; RC4-encrypted
+auth traffic and launcher opcodes are automatically skipped.
+
 ## Repo layout
 
 See `CLAUDE.md` for the full directory map and rules. Short version:

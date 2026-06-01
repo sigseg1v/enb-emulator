@@ -19,7 +19,7 @@ public sealed class NameDecalRecord : PacketRecord
         float  g      = ReadF32LE(Payload, 40);
         float  b      = ReadF32LE(Payload, 44);
         FHex(sb, 0, "GameID", gameId);
-        FStr(sb, 4, 32, "Name", name, required: true);
+        FStr(sb, 4, 32, "Name", name);
         FBytes(sb, 36, 12, "RGB", $"({r:0.0##}, {g:0.0##}, {b:0.0##})");
     }
 }
