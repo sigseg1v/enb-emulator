@@ -350,8 +350,15 @@ bool ItemBaseParser::LoadItemBase(ItemBase ** GlobalDB)
 			case 11:
 				{
 					// Execute Query
+					// Phase N: mysqlplus.cpp routes through libpqxx; backtick
+					// identifiers get rewritten to double-quotes so they keep
+					// MySQL's case-insensitive match against the actual column
+					// names. Anything bare gets lowercased by Postgres and
+					// then fails to find e.g. `EnergyUse` -- pre-Phase-N this
+					// silently dropped device range/energy data into zeroes
+					// and the boot log showed 914 "Error executing" lines.
 					Item_result = SqlQueryP1(&connection,
-						"SELECT a.*,b._Range,b.EnergyUse FROM item_device as a LEFT JOIN item_effect_container AS b ON a.item_id=b.itemid WHERE a.item_id = ?", ItemID);
+						"SELECT a.*,b.`_Range`,b.`EnergyUse` FROM item_device as a LEFT JOIN item_effect_container AS b ON a.item_id=b.`ItemID` WHERE a.item_id = ?", ItemID);
 					if (Item_result && Item_result->n_rows() > 0)
 					{
 						// Get results
@@ -595,7 +602,10 @@ bool ItemBaseParser::LoadItemBase(ItemBase ** GlobalDB)
 			sql_row_c Effect_List_Data;
 
 			// Execute Query
-			Effect_List_result = SqlQueryP1(&connection, "SELECT * FROM item_effects Inner Join item_effect_base ON item_effects.item_effect_base_id = item_effect_base.EffectID WHERE `ItemID` = ?", ItemID);
+			// Phase N: backtick EffectID so the libpqxx layer translates it
+			// to a case-sensitive "EffectID" identifier. Bare CamelCase gets
+			// folded to lowercase by Postgres and the join silently misses.
+			Effect_List_result = SqlQueryP1(&connection, "SELECT * FROM item_effects Inner Join item_effect_base ON item_effects.item_effect_base_id = item_effect_base.`EffectID` WHERE `ItemID` = ?", ItemID);
 			if (Effect_List_result && Effect_List_result->n_rows() > 0)
 			{
 				for(int eff=0;eff<Effect_List_result->n_rows();eff++)

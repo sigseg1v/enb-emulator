@@ -118,6 +118,43 @@ What is **NOT** an acceptable justification:
 
 This rule applies to `server/src/`, `login-server/Net7Mysql/`, `login-server/Net7SSL/`, and `proxy/`. It does NOT restrict changes that *tighten* the server toward greater fidelity (e.g. rejecting an input the real server rejected but we currently accept) -- those are always welcome.
 
+## Log warnings and errors are not noise (CRITICAL)
+
+If the server, proxy, login-server, or any docker container logs an
+`Error`, `WARNING`, `FATAL`, `failed`, exception trace, SQL error,
+"Unable to ...", or similar, you do NOT get to wave it off as boot
+noise, stale state, or "pre-existing". Treat every such line as a real
+defect until you have read the code that produced it, identified the
+root cause, and confirmed in writing that:
+
+1. The failure has no functional consequence (e.g. the affected code
+   path is genuinely unreachable in the running configuration), OR
+2. The failure is logged but the operation transparently recovers via
+   a documented retry / fallback that you have actually verified.
+
+Otherwise: fix it.
+
+The Phase-N Postgres case-folding incident is the canonical example.
+The boot log printed 3104 `Error executing` lines that "had always been
+there"; treating that as noise meant items loaded with empty effect
+payloads for years, which was a load-bearing contributor to the
+loading-screen hang investigation taking far longer than it should
+have. Errors in the log are debt with compound interest.
+
+This applies equally to:
+
+- `docker compose logs <svc>` output (server, proxy, login, postgres)
+- `wine` / client traces (some lines really are mouse-handler noise --
+  see the Wine-debug-noise memory -- but the burden is on you to
+  identify them by code path, not by hand-wave)
+- Test runner output, build warnings, lint findings, CI step exit
+  codes that didn't go to zero
+- Anything that says "Error" or "warning" anywhere
+
+If you log something and it doesn't matter, demote it to debug or
+delete the log line. A log line that says "Error" but doesn't mean
+"Error" is a worse bug than a silent failure.
+
 ## Wire format & byte order (READ before touching ANY packet emitter)
 
 The EnB protocol predates portable serialization. Almost every packet
