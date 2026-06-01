@@ -14,6 +14,26 @@ Goal: take the Phase J "TLS terminates, handshake works, opcodes are dispatched"
 
 ## Items
 
+- [x] Wave 332 (2026-05-31): **Structured decode for 15 sector-handshake opcodes -- every frame in `dump-on` and `replay` output now shows GlobalTicket-style field detail, zero GenericRecord fallback in the 101-frame retail capture.** NO server code change. 15 new record classes:
+      - `ClientSetTimeRecord` (0x0034) -- fixed 12B; ClientSent/ServerReceived/ServerSent all LE int32.
+      - `MessageStringRecord` (0x001D) -- variable; int16 length, uint8 color (with comment annotations for colors 4/5/7/11/17), NUL-terminated message string.
+      - `ColorizationRecord` (0x0011) -- variable; int32 GameID + int16 ItemCount + ItemCount * (int32 metal + float H/S/V).
+      - `DecalRecord` (0x0010) -- variable; int32 GameID + int16 DecalCount + DecalCount * (int32 Index + int32 decal_id + float H/S/V + float opacity).
+      - `ObjectEffectRecord` (0x0009) -- bitmask-driven; 7-bit mask (0x01-0x40) selects EffectID/TimeStamp/Duration/Scale/HSVShift[3] conditional fields.
+      - `AdvancedPositionalUpdateRecord` (0x003E) -- bitmask-driven; 9-bit mask on 4B slots; fixed header = Bitmask(2) + 10 mandatory floats/ints + conditional speed/rotation/imparted-velocity/UpdatePeriod fields.
+      - `SubpartsRecord` (0x00B4) -- pairs of (NUL-terminated bone path, BE int32 assetID); GameID and NumSubParts also BE (emitter uses ntohl); verified against Jenquai ~01/~03_01/~03_02/~02 layout.
+      - `RelationshipRecord` (0x0089) -- fixed 9B; ObjectID decoded as BE (emitter uses ntohl), Reaction + IsAttacking LE.
+      - `LoungeNpcRecord` (0x0052) -- StationType + RoomCount + Rooms (28B each) + NumTerms + Terms (16B each) + NumNPCs; NPC bodies not iterated (too large, count reported).
+      - `ManufactureSetManufactureIdRecord` (0x007F) -- fixed 4B int32 mfg_id.
+      - `AuxDataRecord` (0x001B) -- decodes ResourceName sub-type (DataType=0x1201) structurally; falls back to ASCII string scan for other sub-types.
+      - `GalaxyMapRecord` (0x0097) -- int32 Type + int32 Size + int32 PlayerID + three NUL-terminated strings (system/sector/station) + int32 unknown (expected 375); verified against capture: "Beta Hydri / Glenn / Friendship 7 Recreation Port".
+      - `ClientAvatarRecord` (0x0037) -- fixed 4B int32 GameID; emitter uses int32_t temporary to avoid LP64 sizeof(long)=8.
+      - `ClientShipRecord` (0x0047) -- same as ClientAvatar.
+      - `ItemBaseRecord` (0x0025) -- decodes fixed header (ItemTemplateID BE, Category/SubCategory/ItemType/FieldCount); extracts trailing AddDataLS-encoded Name/Description/Manufacturer from the variable body; verified against 101 retail frames: item names ("EMP Resistance Item P", "Pitbull Jr.", "DigiApogee" items, etc.) all match.
+      - All 15 registered in `PacketRecordRegistry.cs`.
+      - Build green: 0 warnings 0 errors. 14/14 docker-free tests pass. `just cli-replay` against capture_1: 0 GenericRecord fallback lines (was 15 opcodes falling through before), every frame shows structured fields. GalaxyMap system/sector/station strings byte-verified against capture_1-sector-s2c.bin frame 79.
+      - Source: struct layouts from PacketStructures.h; emitter code from PlayerConnection.cpp, PlayerClass.cpp, ItemBase.cpp, ItemBaseManager.cpp; capture cross-check: archive/replay/capture_1-sector-s2c.bin frames 0/78-100.
+
 - [x] Wave 331 (2026-05-31): **CLI `dump-on` / `dump-off` REPL toggles land a live packet tail that prints every frame crossing the active global or sector connection -- coloured opcode header, structured record decode for known opcodes, hex-only dump for unknowns, full payload always (no truncation cap).** Lets the operator skim packets as they hit the wire instead of reaching for an offline capture+replay loop. Builds on the Wave 329 record-class scaffold. NO server code change. Pieces:
       - `tools/cli-client/src/CliClient.Core/Net/EncryptedTcpConnection.cs` -- exposes two events `PacketSent` / `PacketReceived` raised AFTER the RC4 transform so observers see cleartext `Packet` values. Wired in `SendAsync` (post-flush) and `ReceiveAsync` (post-parse). No allocation on no-subscribers path.
       - `tools/cli-client/src/CliClient.Core/Logging/AnsiPalette.cs` -- added `BrightYellow = "\x1b[93m"` for outbound-arrow tagging (inbound stays on `BrightCyan`).
