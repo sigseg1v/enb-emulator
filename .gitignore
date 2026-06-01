@@ -119,6 +119,9 @@ pgdata/
 # Game-asset binaries from kyp's tooling
 !archive/kyp-snapshot/**
 
+# Derived from capture-extract runs (regenerable from archive/kyp-snapshot/capturedPackets/)
+archive/replay/
+
 # Original packet captures
 !**/capturedPackets/**
 

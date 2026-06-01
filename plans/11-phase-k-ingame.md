@@ -14,6 +14,18 @@ Goal: take the Phase J "TLS terminates, handshake works, opcodes are dispatched"
 
 ## Items
 
+- [x] Wave 329 (2026-05-31): **CLI `dump` command lands per-opcode record classes for structured S2C frame inspection.** Foundation for the byte-diff investigation against retail captures without needing the Win32 client. NO server code change. Pieces:
+      - `tools/cli-client/src/CliClient.Core/Logging/AnsiPalette.cs` -- 8-colour-safe ANSI helpers; auto-disables on `NO_COLOR` and on `Console.IsOutputRedirected`. Centralises the palette so every record class renders consistently.
+      - `tools/cli-client/src/CliClient.Core/Replay/ReplayBinary.cs` -- ENBREPLAY loader (magic + version + meta + frame index) used by `dump --compare`.
+      - `tools/cli-client/src/CliClient.Core/Opcodes/Records/IPacketRecord.cs` + `PacketRecord.cs` -- interface (`Opcode`, `PayloadLength`, `DumpToString()`) and abstract base with the field/flag/colour helpers and the 16x16-byte hex+ASCII gutter dump used as a fallback tail on every record.
+      - `tools/cli-client/src/CliClient.Core/Opcodes/Records/PacketRecordRegistry.cs` -- opcode -> record-class dispatch switch.
+      - 10 concrete record classes for the in-sector handshake set: `CreateRecord` (0x0004), `StartRecord` (0x0005), `RemoveRecord` (0x0007), `SimplePosRecord` (0x0008), `ServerRedirectRecord` (0x0036), `ConstantPosRecord` (0x0040), `StarbaseSetRecord` (0x004F), `AvatarDescriptionRecord` (0x0061), `GlobalTicketRecord` (0x006F), `NameDecalRecord` (0x00B2), plus `GenericRecord` fallback that emits any embedded ASCII strings then dumps the hex tail.
+      - `tools/cli-client/src/CliClient.Core/Repl/Commands/DumpCommand.cs` -- new REPL `dump <firstname> [--compare replay.bin] [--drain seconds]` command. Runs the same handshake driver as `enter`, then per-frame: prints a coloured header (`#N  0xNNNN OPCODE_NAME  len=...  [match]/[byte-diff]/[LEN MISMATCH]/[OPCODE MISMATCH]`) and the record's `DumpToString()`. On byte-diff against `--compare`, dumps our record then a magenta "--- retail capture ---" delimiter and the retail record so divergent fields are visually obvious. Trailing coverage summary lists opcodes present in retail but missing locally and vice versa.
+      - `tools/cli-client/src/CliClient.App/Program.cs` registers the new command in the REPL.
+      - Build green: `dotnet build tools/cli-client/src/CliClient.App` 0 warnings 0 errors; `dotnet build tests/integration/CliClient.IntegrationTests` 0/0.
+      - Open follow-ups in the same direction: ItemBaseRecord (0x0025), ClientAvatarRecord (0x0037), ClientShipRecord (0x0047) -- these are variable-shape and were left in `GenericRecord` so the ASCII scanner at least highlights name strings. Wire them up once the byte-diff investigation pins down the exact server-emitter layout against a capture.
+      - Tracked as task #214 ratchets in_progress -> completed-foundation. Wave-counter: 329 plan-side; commit-counter pending.
+
 - [x] Wave 328 (2026-05-31): **Static disassembly pass on the inventory-tab controller class around the `0x00742F4E` crash -- full lifecycle (constructor, init, mode dispatcher, setter, crash function) is now mapped from offset `[esi+0x1350]` "currently active tab widget pointer" outward.** Pure-RE artefact, NO server code change. Findings:
       - Class identity: inventory-tab controller, main vtable at `.rdata` `0x00B03240`, sub-vtable at `0x00B0323C` (slot 0 = `0x00410FE6`, unrelated to crash path).
       - Field layout on the receiver `esi`: `[+0x1350]` = currently-active tab widget pointer; `[+0x1354..+0x1364]` = five per-mode tab-widget slots (modes 0..4); `[+0x136c]` = current mode int, zero-init to `0x2`.

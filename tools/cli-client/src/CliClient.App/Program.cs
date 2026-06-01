@@ -46,6 +46,7 @@ if (args[0] is "repl" or "start")
     repl.Register(new ListCommand(sessionCtx));
     repl.Register(new CreateCommand(sessionCtx));
     repl.Register(new EnterCommand(sessionCtx));
+    repl.Register(new DumpCommand(sessionCtx));
 
     using var cts = new CancellationTokenSource();
     Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
