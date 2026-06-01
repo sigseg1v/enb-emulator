@@ -30,10 +30,16 @@ public sealed class LineEditor : ILineInput
 {
     private readonly Func<IReadOnlyList<CommandSpec>> _specs;
     private readonly int _pollMs;
+    private readonly IKeySource? _keys;
 
     public LineEditor(Func<IReadOnlyList<CommandSpec>> specs, int pollMs = 15)
+        : this(specs, null, pollMs) { }
+
+    // Test seam: inject a deterministic key source instead of the console.
+    internal LineEditor(Func<IReadOnlyList<CommandSpec>> specs, IKeySource? keys, int pollMs = 15)
     {
         _specs = specs ?? throw new ArgumentNullException(nameof(specs));
+        _keys = keys;
         _pollMs = pollMs;
     }
 
@@ -53,10 +59,11 @@ public sealed class LineEditor : ILineInput
         }
 
         // Raw key editing runs on a worker so the poll loop can observe ct.
-        return await Task.Run(() => RunInteractive(prompt, output, ct), ct).ConfigureAwait(false);
+        IKeySource keys = _keys ?? new ConsoleKeySource(_pollMs);
+        return await Task.Run(() => RunInteractive(prompt, keys, output, ct), ct).ConfigureAwait(false);
     }
 
-    private string? RunInteractive(string prompt, TextWriter output, CancellationToken ct)
+    internal string? RunInteractive(string prompt, IKeySource keys, TextWriter output, CancellationToken ct)
     {
         var buffer = new StringBuilder();
         int cursor = 0;
@@ -70,21 +77,15 @@ public sealed class LineEditor : ILineInput
 
         while (true)
         {
-            try
+            ConsoleKeyInfo? next = keys.ReadKey(ct);
+            if (next is null)
             {
-                while (!Console.KeyAvailable)
-                {
-                    if (ct.IsCancellationRequested) { output.WriteLine(); return null; }
-                    Thread.Sleep(_pollMs);
-                }
-            }
-            catch (Exception)
-            {
-                // Console went away (redirected mid-run) -- give up cleanly.
+                // Cancelled, EOF, or the console went away -- give up cleanly.
+                output.WriteLine();
+                output.Flush();
                 return null;
             }
-
-            ConsoleKeyInfo k = Console.ReadKey(intercept: true);
+            ConsoleKeyInfo k = next.Value;
 
             switch (k.Key)
             {
@@ -244,5 +245,43 @@ public sealed class LineEditor : ILineInput
     {
         try { int w = Console.WindowWidth; return w > 0 ? w : 80; }
         catch { return 80; }
+    }
+}
+
+/// <summary>
+/// Source of keystrokes for <see cref="LineEditor"/>. The production path
+/// polls the console; tests inject a deterministic queue so the Tab/cycle/
+/// ghost editing logic is exercised without a real TTY.
+/// </summary>
+internal interface IKeySource
+{
+    /// <summary>
+    /// Block until a key is available, then return it. Returns null when the
+    /// token is cancelled, input ends, or the console is unavailable.
+    /// </summary>
+    ConsoleKeyInfo? ReadKey(CancellationToken ct);
+}
+
+/// <summary>Polls <see cref="Console"/> for keystrokes (the runtime source).</summary>
+internal sealed class ConsoleKeySource : IKeySource
+{
+    private readonly int _pollMs;
+    public ConsoleKeySource(int pollMs) => _pollMs = pollMs;
+
+    public ConsoleKeyInfo? ReadKey(CancellationToken ct)
+    {
+        try
+        {
+            while (!Console.KeyAvailable)
+            {
+                if (ct.IsCancellationRequested) return null;
+                Thread.Sleep(_pollMs);
+            }
+        }
+        catch (Exception)
+        {
+            return null; // console went away (redirected mid-run)
+        }
+        return Console.ReadKey(intercept: true);
     }
 }
