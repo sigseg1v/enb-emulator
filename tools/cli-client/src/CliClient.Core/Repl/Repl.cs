@@ -36,7 +36,12 @@ public sealed class Repl
         ArgumentNullException.ThrowIfNull(prompt);
         _prompt = prompt;
         Register(new HelpCommand(this));
-        Register(new QuitCommand());
+        var quit = new QuitCommand();
+        Register(quit);
+        // `exit` is a hard-wired synonym for `quit`. Same instance under
+        // both keys so help only lists it once (Register filters by
+        // handler.Name, which is "quit").
+        _commands["exit"] = quit;
     }
 
     /// <summary>

@@ -93,6 +93,18 @@ public sealed class EnterCommand : ICommandHandler
         _ctx.ActiveSlot = result.Slot;
         _ctx.ActiveSectorId = result.SectorId;
 
+        // SectorEnterDriver drains the LOGIN handshake on a brand-new
+        // sector connection BEFORE we set _ctx.Sector, so the dump-on
+        // hook never saw those frames. Replay them through the dump
+        // printer in arrival order now so they get the same structured
+        // decode any other in-sector frame would. No-op when dump-on
+        // is off (PrintIfEnabled gates on DumpEnabled).
+        if (_ctx.DumpEnabled)
+        {
+            foreach (var f in result.HandshakeFrames)
+                _ctx.ReplayInboundFrame(f);
+        }
+
         await output.WriteLineAsync(
             $"in-sector: gameId=0x{result.GameId:X8} startId=0x{result.StartId:X8} " +
             $"handshake-frames={result.HandshakeFrames.Count}")

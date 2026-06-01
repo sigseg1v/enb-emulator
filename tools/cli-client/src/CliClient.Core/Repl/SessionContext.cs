@@ -196,6 +196,16 @@ public sealed class SessionContext : IAsyncDisposable
     private void OnPacketSent(Packet p)     => PrintIfEnabled(p, PacketDirection.Outbound);
     private void OnPacketReceived(Packet p) => PrintIfEnabled(p, PacketDirection.Inbound);
 
+    /// <summary>
+    /// Replay an already-received frame through the dump printer as if it
+    /// had crossed the wire just now. Used by <c>enter</c> to surface the
+    /// sector-handshake frames that the <see cref="SectorEnterDriver"/>
+    /// consumes BEFORE the connection becomes <c>_ctx.Sector</c> and the
+    /// dump hook attaches; without this they would silently disappear
+    /// even though dump-on was on.
+    /// </summary>
+    public void ReplayInboundFrame(Packet p) => PrintIfEnabled(p, PacketDirection.Inbound);
+
     private void PrintIfEnabled(Packet p, PacketDirection dir)
     {
         if (!DumpEnabled) return;

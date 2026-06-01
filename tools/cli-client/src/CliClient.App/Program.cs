@@ -55,7 +55,7 @@ if (args[0] is "repl" or "start")
     Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
 
     Console.WriteLine($"{ClientInfo.Name} {ClientInfo.Version}");
-    Console.WriteLine("type 'help' for commands, 'quit' to exit");
+    Console.WriteLine("type 'help' for commands, 'quit' (or 'exit') to leave");
     return await repl.RunAsync(Console.In, Console.Out, cts.Token);
 }
 
