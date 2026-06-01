@@ -29,9 +29,14 @@ public sealed class AuxDataRecord : PacketRecord
 
         ushort bodyLen = ReadU16LE(Payload, 4);
         byte   version = Payload[6];
-        bool   headerOk = version == 1 && bodyLen == (ushort)(Payload.Length - 6);
+        // The body-length field is set as (index-6) by most Build* paths but as
+        // (index) by some diff paths, so don't gate on it -- gate on version and
+        // let exact-consumption validate the walk.
+        bool   headerOk = version == 1 && Payload.Length >= 8;
 
         if (headerOk && TrySchemaWalk(sb)) return;
+
+        if (headerOk && EmitBestPartial(sb)) return;
 
         // ── fallback: outer header + AddString scan (legacy behaviour) ────────
         int gameId = ReadI32LE(Payload, 0);
@@ -75,31 +80,69 @@ public sealed class AuxDataRecord : PacketRecord
     }
 
     /// <summary>
-    /// Try every candidate schema; keep the one that consumes the payload exactly.
-    /// Ties broken by most fields decoded (deepest structural match).
+    /// Try every candidate schema/flavour; keep the one that consumes the payload
+    /// exactly. Among exact fits, prefer the highest string-plausibility (a wrong
+    /// schema tends to read random bytes as bogus strings), then most fields.
     /// </summary>
     private bool TrySchemaWalk(StringBuilder sb)
     {
-        AuxSchema? best = null; List<AuxAnno>? bestAnnos = null;
-        foreach (var schema in AuxSchemaRegistry.Candidates)
+        uint gameId = ReadU32LE(Payload, 0);
+        string? bestName = null; bool bestExt = false;
+        List<AuxAnno>? bestAnnos = null; double bestPlaus = -1;
+        foreach (var c in AuxSchemaRegistry.Candidates)
         {
-            if (!AuxSchemaRegistry.GameIdMatches(schema, ReadU32LE(Payload, 0))) continue;
-            var w = new AuxWalker(Payload);
-            int consumed = w.Walk(schema);
-            if (consumed != Payload.Length) continue;
-            if (bestAnnos is null || w.Annos.Count > bestAnnos.Count)
+            if (!AuxSchemaRegistry.GateMatches(c.Gate, gameId)) continue;
+            var w = new AuxWalker(Payload, c.Extended);
+            if (w.Walk(c.Schema) != Payload.Length) continue;
+            double plaus = w.StringPlausibility;
+            if (plaus < 0.9) continue;
+            bool better = bestAnnos is null
+                || plaus > bestPlaus + 0.001
+                || (System.Math.Abs(plaus - bestPlaus) <= 0.001 && w.Annos.Count > bestAnnos.Count);
+            if (better)
             {
-                best = schema; bestAnnos = w.Annos;
+                bestName = c.Schema.Name; bestExt = c.Extended;
+                bestAnnos = w.Annos; bestPlaus = plaus;
             }
         }
-        if (best is null || bestAnnos is null) return false;
+        if (bestName is null || bestAnnos is null) return false;
 
-        F(sb, 0, 0, "AuxType", best.Name);
+        F(sb, 0, 0, "AuxType", bestName + (bestExt ? " (extended)" : ""));
         foreach (var a in bestAnnos)
         {
             string indent = a.Depth > 0 ? new string(' ', a.Depth * 2) : "";
-            if (a.Len > 0) F(sb, a.Off, a.Len, indent + a.Name, a.Value);
+            if (a.Len > 0 || a.Value.StartsWith("("))
+                F(sb, a.Off, a.Len, indent + a.Name, a.Value);
         }
+        return true;
+    }
+
+    /// <summary>
+    /// No candidate consumed the payload exactly. Emit the furthest-reaching
+    /// candidate's partial annotations plus a divergence marker, so the
+    /// remaining bytes show as a gap exactly where the schema drifts. Falls
+    /// through (returns false) when even the best walk barely started.
+    /// </summary>
+    private bool EmitBestPartial(StringBuilder sb)
+    {
+        uint gameId = ReadU32LE(Payload, 0);
+        AuxWalker? best = null; AuxSchemaRegistry.Candidate bestC = default;
+        foreach (var c in AuxSchemaRegistry.Candidates)
+        {
+            if (!AuxSchemaRegistry.GateMatches(c.Gate, gameId)) continue;
+            var w = new AuxWalker(Payload, c.Extended);
+            w.Walk(c.Schema);
+            if (best is null || w.FailOffset > best.FailOffset) { best = w; bestC = c; }
+        }
+        if (best is null || best.FailOffset < 12) return false;  // nothing useful
+
+        F(sb, 0, 0, "AuxType", $"{bestC.Schema.Name}{(bestC.Extended ? " (extended)" : "")} -- PARTIAL");
+        foreach (var a in best.Annos)
+        {
+            string indent = a.Depth > 0 ? new string(' ', a.Depth * 2) : "";
+            if (a.Len > 0 || a.Value.StartsWith("(")) F(sb, a.Off, a.Len, indent + a.Name, a.Value);
+        }
+        Flag(sb, $"schema diverged at 0x{best.FailOffset:X4} in {best.FailWhere} -- remaining bytes undecoded");
         return true;
     }
 
