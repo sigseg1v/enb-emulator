@@ -58,6 +58,7 @@ TestResults/
 # IDEs / editors
 .idea/
 .vscode/
+.VSCodeCounter/
 *.swp
 *.swo
 *~
