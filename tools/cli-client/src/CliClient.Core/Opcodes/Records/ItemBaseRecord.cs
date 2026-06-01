@@ -218,6 +218,10 @@ public sealed class ItemBaseRecord : PacketRecord
     }
 
     // AddDataLS: LE int16 len + char[len] (no NUL). Returns new off or -1.
+    // Includes resync: if the length field reads > 1024 (impossible for a tooltip/description),
+    // the preceding string was 1 byte longer than its length field stated -- a known retail
+    // capture artifact where embedded bytes > 127 shift the length field by 1. Skip 1 byte
+    // and retry before giving up.
     private int ReadAddDataLS(StringBuilder sb, int off, string name, bool required = false)
     {
         if (off + 2 > Payload.Length)
@@ -226,6 +230,21 @@ public sealed class ItemBaseRecord : PacketRecord
             return -1;
         }
         short len = ReadI16LE(Payload, off);
+
+        // Resync: plausible max for any effect string is well under 1024 bytes.
+        // A length > 1024 means the previous string's real byte count was 1 more than
+        // its declared length, pushing this length field 1 byte off.
+        if ((len < 0 || len > 1024) && off + 3 <= Payload.Length)
+        {
+            short altLen = ReadI16LE(Payload, off + 1);
+            if (altLen >= 0 && altLen <= 1024 && off + 3 + altLen <= Payload.Length)
+            {
+                Flag(sb, $"resync +1: skipped byte 0x{Payload[off]:X2} before {name} (was len={len})");
+                off++;
+                len = altLen;
+            }
+        }
+
         if (len < 0 || off + 2 + len > Payload.Length)
         {
             Flag(sb, $"truncated inside {name} (len={len}, have {Payload.Length - off - 2}B)");
