@@ -12,7 +12,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 #include "AuxPlayerIndex.h"
@@ -39,7 +39,7 @@ bool AuxPlayerIndex::BuildPacket(unsigned char *buffer, long &index)
 
 	if (Flags[0] & 0x10)	//ExtendedFlags[2] & 0x40
 	{
-		AddData(buffer, Data.Credits, index);
+		AddData64(buffer, Data.Credits, index);
 	}
 
 	if (Flags[0] & 0x20)	//ExtendedFlags[2] & 0x80
@@ -156,7 +156,7 @@ bool AuxPlayerIndex::BuildExtendedPacket(unsigned char *buffer, long &index)
 
 	if (ExtendedFlags[0] & 0x10)	//ExtendedFlags[2] & 0x40
 	{
-		AddData(buffer, Data.Credits, index);
+		AddData64(buffer, Data.Credits, index);
 	}
 
 	if (ExtendedFlags[0] & 0x20)	//ExtendedFlags[2] & 0x80

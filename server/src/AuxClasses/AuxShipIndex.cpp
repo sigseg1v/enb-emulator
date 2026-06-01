@@ -12,7 +12,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 #include "AuxShipIndex.h"
@@ -290,7 +290,7 @@ bool AuxShipIndex::BuildPacket(unsigned char *buffer, long &index)
 
 	if (Flags[5] & 0x80)	//ExtendedFlags[13] & 0x02
 	{
-		AddData(buffer,Data.TradeMoney,index);
+		AddData64(buffer,Data.TradeMoney,index);
 	}
 
 	if (Flags[6] & 0x01)	//ExtendedFlags[13] & 0x04
@@ -664,7 +664,7 @@ bool AuxShipIndex::BuildExtendedPacket(unsigned char *buffer, long &index)
 
 	if (ExtendedFlags[5] & 0x80)	//ExtendedFlags[13] & 0x02
 	{
-		AddData(buffer,Data.TradeMoney,index);
+		AddData64(buffer,Data.TradeMoney,index);
 	}
 
 	if (ExtendedFlags[6] & 0x01)	//ExtendedFlags[13] & 0x04

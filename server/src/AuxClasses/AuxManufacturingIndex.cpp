@@ -12,7 +12,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 #include "AuxManufacturingIndex.h"
@@ -125,12 +125,12 @@ bool AuxManufacturingIndex::BuildPacket(unsigned char *buffer, long &index, bool
 
 	if (Flags[1] & 0x10)	//ExtendedFlags[4] & 0x02
 	{
-		AddData(buffer,Data.NegotiatedCost,index);
+		AddData64(buffer,Data.NegotiatedCost,index);
 	}
 
 	if (Flags[1] & 0x20)	//ExtendedFlags[4] & 0x04
 	{
-		AddData(buffer,Data.BaseCost,index);
+		AddData64(buffer,Data.BaseCost,index);
 	}
 
 	if (Flags[1] & 0x40)	//ExtendedFlags[4] & 0x08

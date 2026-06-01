@@ -75,6 +75,28 @@ protected:
 		}
 	}
 
+	/* u64 wire fields (Credits, Price, costs, TradeMoney) are 8 bytes on the
+	** wire. On Win32 `u64` is `unsigned __int64` and AddData<u64> uses the
+	** template (8B). On Linux `u64` resolves to `unsigned long`, which the
+	** 4-byte overload above hijacks -- truncating the field to 4 bytes and
+	** shifting every subsequent byte, which the Win32 client cannot parse
+	** (it reads garbage past the short field and crashes). Route u64 fields
+	** through this explicit 8-byte emitter so the wire shape matches Win32 /
+	** the live retail server on both platforms.
+	*/
+	void AddData64(unsigned char *buffer, u64 data, long &index)
+	{
+		if (sizeof(uint64_t) + index < m_Max_Buffer)
+		{
+			*((uint64_t *) &buffer[index]) = (uint64_t) data;
+			index += 8;
+		}
+		else
+		{
+			printf("Error: Bufferoverflow in Aux!");
+		}
+	}
+
 	void AddString(unsigned char *, char *, long &);
 	void AddFlags(unsigned char *, unsigned int, unsigned char *, long &);
 

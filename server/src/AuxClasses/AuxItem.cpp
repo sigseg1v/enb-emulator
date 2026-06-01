@@ -12,7 +12,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 #include "AuxItem.h"
@@ -33,7 +33,7 @@ void AuxItem::BuildPacket(unsigned char *buffer, long &index)
 
 	if (Flags[0] & 0x40)	//ExtendedFlags[2] & 0x01
 	{
-		AddData(buffer, Data->Price, index);
+		AddData64(buffer, Data->Price, index);
 	}
 
 	if (Flags[0] & 0x80)	//ExtendedFlags[2] & 0x02
@@ -90,7 +90,7 @@ void AuxItem::BuildExtendedPacket(unsigned char *buffer, long &index)
 
 	if (ExtendedFlags[0] & 0x40)	//ExtendedFlags[2] & 0x01
 	{
-		AddData(buffer, Data->Price, index);
+		AddData64(buffer, Data->Price, index);
 	}
 
 	if (ExtendedFlags[0] & 0x80)	//ExtendedFlags[2] & 0x02
