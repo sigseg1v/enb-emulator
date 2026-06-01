@@ -31,6 +31,13 @@ public sealed class ObjectEffectRecord : PacketRecord
         if ((bitmask & 0x08) != 0) { if (off + 4 > Payload.Length) { Flag(sb, "truncated before Scale"); return; }      FFloat(sb, off, "Scale",      ReadF32LE(Payload, off)); off += 4; }
         if ((bitmask & 0x10) != 0) { if (off + 4 > Payload.Length) { Flag(sb, "truncated before HSVShift[0]"); return; }FFloat(sb, off, "HSVShift[0]",ReadF32LE(Payload, off)); off += 4; }
         if ((bitmask & 0x20) != 0) { if (off + 4 > Payload.Length) { Flag(sb, "truncated before HSVShift[1]"); return; }FFloat(sb, off, "HSVShift[1]",ReadF32LE(Payload, off)); off += 4; }
-        if ((bitmask & 0x40) != 0) { if (off + 4 > Payload.Length) { Flag(sb, "truncated before HSVShift[2]"); return; }FFloat(sb, off, "HSVShift[2]",ReadF32LE(Payload, off)); }
+        if ((bitmask & 0x40) != 0) { if (off + 4 > Payload.Length) { Flag(sb, "truncated before HSVShift[2]"); return; }FFloat(sb, off, "HSVShift[2]",ReadF32LE(Payload, off)); off += 4; }
+
+        // Live net-7 (2026) capture sends an unconditional EffectID right after
+        // EffectDescID even when bitmask bit0 is clear; tada-o's SendEffect gates
+        // it on bit0 (and the older capture set always had bit0 set, hiding this).
+        // Decode any trailing 4 bytes so the frame is fully accounted for.
+        if (off + 4 == Payload.Length)
+            FHex(sb, off, "EffectID", ReadU32LE(Payload, off), "(unconditional in live net7 capture)");
     }
 }
