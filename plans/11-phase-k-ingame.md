@@ -14,6 +14,12 @@ Goal: take the Phase J "TLS terminates, handshake works, opcodes are dispatched"
 
 ## Items
 
+- [x] Wave 330 (2026-05-31): **CLI `replay` command lands offline ENBREPLAY-to-record-dump path, end-to-end-verified against the 101-frame retail capture.** Sibling to `dump`; needs no live server, just exercises the Wave 329 record-class scaffold against recorded bytes. Pieces:
+      - `tools/cli-client/src/CliClient.Core/Repl/Commands/ReplayCommand.cs` -- `replay <path>`; loads an ENBREPLAY file via `ReplayFile.Load`, iterates every frame, prints the same `#N 0xNNNN OPCODE_NAME len=...` cyan header used by `dump`, then `PacketRecord.Resolve(opcode, payload).DumpToString()`.
+      - `tools/cli-client/src/CliClient.App/Program.cs` registers the new command in the REPL.
+      - End-to-end-verified: `replay archive/replay/capture_1-sector-s2c.bin` loads all 101 frames; structured records decode cleanly against real retail bytes -- `0x0004 Create` shows `GameID=0x06EE13DE Scale=1.0 BaseAsset=0x0650 Type=1`, `0x0061 AvatarDescription` extracts `FirstName="Ace" Race=1 Profession=2` matching the capture's `avatar_name=Ace` metadata, `0x00B2 NameDecal` extracts `Name="Revenge of the Jenquai"` matching `ship_name`. The `GenericRecord` fallback on `0x0025 ItemBase` cleanly surfaces item names ("Beam Weapon", "Plasma Resistance Item C", "Pitbull Jr.V", etc.) via its ASCII scanner so the unimplemented-record opcodes still produce useful output for the byte-diff workflow. Build green: 0 warnings 0 errors.
+      - Closes the original directive's third leg ("And to 'replay' you load the caprure into the classes and then dump"); the `dump` REPL command covers the live-server diff direction and `replay` covers the offline-only direction. NO server code change. Wave-counter: 330 plan-side; commit-counter pending.
+
 - [x] Wave 329 (2026-05-31): **CLI `dump` command lands per-opcode record classes for structured S2C frame inspection.** Foundation for the byte-diff investigation against retail captures without needing the Win32 client. NO server code change. Pieces:
       - `tools/cli-client/src/CliClient.Core/Logging/AnsiPalette.cs` -- 8-colour-safe ANSI helpers; auto-disables on `NO_COLOR` and on `Console.IsOutputRedirected`. Centralises the palette so every record class renders consistently.
       - `tools/cli-client/src/CliClient.Core/Replay/ReplayBinary.cs` -- ENBREPLAY loader (magic + version + meta + frame index) used by `dump --compare`.
