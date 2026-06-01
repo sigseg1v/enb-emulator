@@ -26,9 +26,9 @@ namespace N7.CliClient.Opcodes.Records;
 ///
 ///   ActivatableEffects.Count  BE int32  (AddDataFlip4)
 ///   For each activatable effect:
-///     Name        AddDataLS: LE int16(len) + chars, no NUL
-///     Description AddDataLS
-///     Tooltip     AddDataLS
+///     Name        AddDataLS: uint8(printable_len) + uint8(fmt_code) + chars
+///     Description AddDataLS (same format)
+///     Tooltip     AddDataLS (same format)
 ///     Filler      LE int32 = 0
 ///     DescVarCount BE int32  (AddDataFlip4)
 ///     For each DescVar: 4B BE float (float bits stored as long, AddDataFlip4)
@@ -36,7 +36,7 @@ namespace N7.CliClient.Opcodes.Records;
 ///     Flag2       LE int32
 ///   If Count &gt; 0: RechargeTime(LE int32) + 0(4B) + EffectRange(LE int32) + 0(4B)
 ///
-///   EquipableEffects.Count  BE int32  (same layout as activatable)
+///   EquipableEffects.Count  BE int32  (same layout as activatable, AddDataLS same format)
 ///   For each equippable effect: [identical structure]
 ///   If Count &gt; 0: 4 * LE int32(0) = 16 bytes filler
 ///
@@ -47,7 +47,7 @@ namespace N7.CliClient.Opcodes.Records;
 ///   MaxStack       BE int32
 ///   UseEffect      BE int32
 ///   Flags          LE int32   (AddData&lt;int&gt;)
-///   Name           AddDataLS
+///   Name           AddDataLS (uint8 printable_len + uint8 fmt_code + chars)
 ///   Description    AddDataLS
 ///   Manufacturer   AddDataLS
 ///
@@ -217,20 +217,30 @@ public sealed class ItemBaseRecord : PacketRecord
         return off;
     }
 
-    // AddDataLS decoder: LE int16 len + bytes. Returns new off or -1.
+    // AddDataLS decoder: 2-byte header + bytes. Returns new off or -1.
     //
-    // The retail EA server's AddDataLS wrote `len` = count of STANDARD PRINTABLE ASCII
-    // chars (0x20-0x7E), then memcpy'd ALL bytes including any embedded non-printable
-    // formatting codes. Non-printable bytes (< 0x20 control chars like NUL, or >= 0x7F
-    // extended/DEL) are consumed from the wire stream but do NOT count toward `len`.
+    // The retail EA server's AddDataLS wire format is 2 bytes followed by string data:
+    //   byte[0] = printable char count (uint8): count of STANDARD PRINTABLE ASCII
+    //             chars (0x20-0x7E) in the following data
+    //   byte[1] = color/format code (uint8): usually 0x00; non-zero values are a
+    //             formatting indicator (e.g. 0xED for colored text). Consumed as part
+    //             of the length prefix, not as a data byte.
+    //
+    // This looks like LE uint16 for most strings (high byte = 0x00), but the true
+    // printable count lives only in the low byte. At least one retail item (templateID
+    // 0x131A "Tractor Speed Boost") has 0xED in the high byte, which would read as
+    // int16 = -4839 under a naive LE-int16 parse. The correct read is: low byte only.
+    //
+    // After the 2-byte header, the data bytes contain printable chars interspersed with
+    // non-printable formatting codes. Non-printable bytes (< 0x20 or >= 0x7F) are
+    // consumed from the wire but do NOT count toward the printable-char count.
     //
     // Examples from the retail capture:
     //   "Defle\xCEct Energy (Activated)" -- len=26 (26 printable), wire=27B (CE skipped)
     //   "Incre\x00ase Shield Capacity (Equip)" -- len=32 (32 printable), wire=33B (NUL skipped)
     //
-    // Our server uses strlen (total byte count). For pure-ASCII DB strings this is identical.
-    // Any item DB string with embedded format bytes would produce a divergence -- fix those
-    // item DB entries rather than changing the server's AddDataLS.
+    // Our server uses strlen (total byte count) with 0x00 in the high byte. For
+    // pure-ASCII DB strings this is identical to the retail format.
     private int ReadAddDataLS(StringBuilder sb, int off, string name, bool required = false)
     {
         if (off + 2 > Payload.Length)
@@ -238,12 +248,12 @@ public sealed class ItemBaseRecord : PacketRecord
             Flag(sb, $"truncated before {name} length");
             return -1;
         }
-        short len = ReadI16LE(Payload, off);
-        if (len < 0)
-        {
-            Flag(sb, $"negative length for {name} (len={len})");
-            return -1;
-        }
+        // Read printable-char count from the LOW BYTE only; high byte is a color/format
+        // code (usually 0x00) that is consumed as part of the 2-byte prefix.
+        int  len       = Payload[off];
+        byte fmtCode   = Payload[off + 1];
+        if (fmtCode != 0)
+            Flag(sb, $"{name}: format code 0x{fmtCode:X2} in length prefix");
 
         // Read until `len` standard-printable chars consumed.
         // Bytes outside 0x20-0x7E (control chars, DEL, extended ASCII) are

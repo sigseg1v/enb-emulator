@@ -129,6 +129,13 @@ diff retail.txt live.txt
 
 See `docs/15-cli-client.md` for the full REPL command reference.
 
+Or if you want to manually dump network traffic to compare:
+
+```bash
+ps aux | grep whatever-you-want-to-capture
+sudo nsenter -t <PID> -n tcpdump -i any -nn -s0 -w network-capture.pcap
+```
+
 ## Repo layout
 
 See `CLAUDE.md` for the full directory map and rules. Short version:
