@@ -32,15 +32,16 @@ public sealed class DumpOnCommand : ICommandHandler
         _ctx.DumpOutput = output;
         _ctx.DumpEnabled = true;
 
-        // If we are already in-sector, start a background drain so the
-        // tail keeps flowing while the prompt sits idle. (Pre-enter we
-        // have no socket to drain; the toggle just flips a flag and
-        // commands that already do their own receive loops -- login,
-        // list, enter -- pick it up automatically.)
+        // Sector-only drain (see SessionContext.StartDumpDrain). On the
+        // global connection a parallel drain would race the command-
+        // driven ReceiveAsync calls in login / list / enter and eat
+        // bytes the command was waiting on; instead we rely on the
+        // PacketSent / PacketReceived events firing from those
+        // command-owned loops directly.
         _ctx.StartDumpDrain();
 
-        string where = _ctx.Sector is not null ? "sector"
-                     : _ctx.Global is not null ? "global"
+        string where = _ctx.Sector is not null ? "sector (background drain active)"
+                     : _ctx.Global is not null ? "global (via command-driven receives -- no background drain)"
                      : "no active connection -- dumps will start with the next login/enter";
         output.WriteLine($"dump-on: tailing {where}");
         return Task.FromResult(0);

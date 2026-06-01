@@ -111,14 +111,26 @@ public sealed class SessionContext : IAsyncDisposable
     }
 
     /// <summary>
-    /// Start a background drain on the active sector (preferred) or
-    /// global connection so packets flow through <c>PacketReceived</c>
-    /// while the REPL is idle. Idempotent.
+    /// Start a background drain on the active sector connection so
+    /// packets flow through <c>PacketReceived</c> while the REPL is
+    /// idle. Idempotent.
+    ///
+    /// <para>
+    /// Sector-only on purpose. Pre-enter, the Global connection is
+    /// owned by command-driven receive loops (<c>login</c>,
+    /// <c>list</c>, <c>enter</c>) which fire the same
+    /// <c>PacketReceived</c> hook naturally — running a background
+    /// drain in parallel would race the command-owned reads
+    /// (<see cref="EncryptedTcpConnection"/> is documented
+    /// single-reader) and steal bytes the command was waiting on.
+    /// Post-enter, no command currently reads from Sector, so the
+    /// drain monopolises it harmlessly.
+    /// </para>
     /// </summary>
     public void StartDumpDrain()
     {
         if (_dumpDrainTask is { IsCompleted: false }) return;
-        var conn = _sector ?? _global;
+        var conn = _sector;
         if (conn is null) return;
 
         var cts = new CancellationTokenSource();
