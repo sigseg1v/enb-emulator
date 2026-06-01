@@ -19,7 +19,7 @@ public sealed class LoungeNpcRecord : PacketRecord
     public LoungeNpcRecord(ReadOnlySpan<byte> payload) : base(0x0052, payload) { }
     protected override void WriteFields(StringBuilder sb)
     {
-        if (Payload.Length < 8) { Flag(sb, $"LOUNGE_NPC truncated -- {'{'}Payload.Length{'}'} bytes, expected >= 8"); return; }
+        if (Payload.Length < 8) { Flag(sb, $"LOUNGE_NPC truncated -- {Payload.Length} bytes, expected >= 8"); return; }
         int stationType = ReadI32LE(Payload, 0);
         int roomCount   = ReadI32LE(Payload, 4);
         FDec(sb, 0, "StationType", stationType);
@@ -37,20 +37,20 @@ public sealed class LoungeNpcRecord : PacketRecord
             float fogR      = ReadF32LE(Payload, roff + 16);
             float fogG      = ReadF32LE(Payload, roff + 20);
             float fogB      = ReadF32LE(Payload, roff + 24);
-            FBytes(sb, roff, RoomSize, $"  Room[{r}]", $"num={'{'}roomNum{'}'} style={'{'}roomStyle{'}'} fog=({fogNear:0.##},{fogFar:0.##}) rgb=({fogR:0.##},{fogG:0.##},{fogB:0.##})");
+            FBytes(sb, roff, RoomSize, $"  Room[{r}]", $"num={roomNum} style={roomStyle} fog=({fogNear:0.##},{fogFar:0.##}) rgb=({fogR:0.##},{fogG:0.##},{fogB:0.##})");
         }
         if (off + 4 > Payload.Length) { Flag(sb, "truncated before NumTerms"); return; }
         int numTerms = ReadI32LE(Payload, off);
         FDec(sb, off, "NumTerms", numTerms); off += 4;
         const int TermSize = 16;
         int termsEnd = off + numTerms * TermSize;
-        if (termsEnd > Payload.Length) { Flag(sb, $"truncated: need {'{'}termsEnd - Payload.Length{'}'} more bytes for terms"); return; }
+        if (termsEnd > Payload.Length) { Flag(sb, $"truncated: need {termsEnd - Payload.Length} more bytes for terms"); return; }
         for (int t = 0; t < numTerms; t++, off += TermSize)
         {
             int room     = ReadI32LE(Payload, off);
             int location = ReadI32LE(Payload, off + 4);
             int termType = ReadI32LE(Payload, off + 8);
-            FBytes(sb, off, TermSize, $"  Term[{t}]", $"room={'{'}room{'}'} loc={'{'}location{'}'} type={'{'}termType{'}'}");
+            FBytes(sb, off, TermSize, $"  Term[{t}]", $"room={room} loc={location} type={termType}");
         }
         if (off + 4 > Payload.Length) { Flag(sb, "truncated before NumNPCs"); return; }
         int numNpcs   = ReadI32LE(Payload, off);

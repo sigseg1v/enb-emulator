@@ -12,10 +12,10 @@ public sealed class StartRecord : PacketRecord
     public StartRecord(ReadOnlySpan<byte> payload) : base(0x0005, payload) { }
     protected override void WriteFields(StringBuilder sb)
     {
-        if (Payload.Length < 4) { Flag(sb, $"START truncated -- {'{'}Payload.Length{'}'} bytes, expected 4"); return; }
+        if (Payload.Length < 4) { Flag(sb, $"START truncated -- {Payload.Length} bytes, expected 4"); return; }
         int startId = ReadI32LE(Payload, 0);
         FHex(sb, 0, "StartID", startId, "(= player GameID; client uses as self-id)");
         FlagSuspicious(sb, "StartID", startId);
-        if (Payload.Length > 4) Flag(sb, $"START has {'{'}Payload.Length - 4{'}'} trailing bytes");
+        if (Payload.Length > 4) Flag(sb, $"START has {Payload.Length - 4} trailing bytes");
     }
 }

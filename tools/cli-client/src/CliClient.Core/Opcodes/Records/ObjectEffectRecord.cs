@@ -17,7 +17,7 @@ public sealed class ObjectEffectRecord : PacketRecord
     public ObjectEffectRecord(ReadOnlySpan<byte> payload) : base(0x0009, payload) { }
     protected override void WriteFields(StringBuilder sb)
     {
-        if (Payload.Length < 7) { Flag(sb, $"OBJECT_EFFECT truncated -- {'{'}Payload.Length{'}'} bytes, expected >= 7"); return; }
+        if (Payload.Length < 7) { Flag(sb, $"OBJECT_EFFECT truncated -- {Payload.Length} bytes, expected >= 7"); return; }
         byte  bitmask     = Payload[0];
         int   gameId      = ReadI32LE(Payload, 1);
         short effectDescId = ReadI16LE(Payload, 5);

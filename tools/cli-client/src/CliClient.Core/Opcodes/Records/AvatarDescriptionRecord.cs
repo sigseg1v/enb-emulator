@@ -18,7 +18,7 @@ public sealed class AvatarDescriptionRecord : PacketRecord
     public AvatarDescriptionRecord(ReadOnlySpan<byte> payload) : base(0x0061, payload) { }
     protected override void WriteFields(StringBuilder sb)
     {
-        if (Payload.Length < 4 + 60) { Flag(sb, $"AVATAR_DESCRIPTION truncated -- {'{'}Payload.Length{'}'} bytes"); return; }
+        if (Payload.Length < 4 + 60) { Flag(sb, $"AVATAR_DESCRIPTION truncated -- {Payload.Length} bytes"); return; }
         uint avatarId  = ReadU32LE(Payload, 0);
         const int D    = 4; // AvatarData starts at offset 4
         string firstName = ReadNulString(Payload.AsSpan(D, 20));

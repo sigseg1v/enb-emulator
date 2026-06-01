@@ -17,7 +17,7 @@ public sealed class ServerRedirectRecord : PacketRecord
     public ServerRedirectRecord(ReadOnlySpan<byte> payload) : base(0x0036, payload) { }
     protected override void WriteFields(StringBuilder sb)
     {
-        if (Payload.Length < 10) { Flag(sb, $"SERVER_REDIRECT truncated -- {'{'}Payload.Length{'}'} bytes, expected 10"); return; }
+        if (Payload.Length < 10) { Flag(sb, $"SERVER_REDIRECT truncated -- {Payload.Length} bytes, expected 10"); return; }
         int    sectorId = ReadI32LE(Payload, 0);
         int    ipValue  = ReadI32LE(Payload, 4);
         ushort port     = ReadU16LE(Payload, 8);

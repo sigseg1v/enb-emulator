@@ -15,7 +15,7 @@ public sealed class ClientShipRecord : PacketRecord
     public ClientShipRecord(ReadOnlySpan<byte> payload) : base(0x0047, payload) { }
     protected override void WriteFields(StringBuilder sb)
     {
-        if (Payload.Length < 4) { Flag(sb, $"CLIENT_SHIP truncated -- {'{'}Payload.Length{'}'} bytes, expected 4"); return; }
+        if (Payload.Length < 4) { Flag(sb, $"CLIENT_SHIP truncated -- {Payload.Length} bytes, expected 4"); return; }
         int gameId = ReadI32LE(Payload, 0);
         FHex(sb, 0, "GameID", gameId);
         FlagSuspicious(sb, "GameID", gameId);

@@ -18,7 +18,7 @@ public sealed class SubpartsRecord : PacketRecord
     public SubpartsRecord(ReadOnlySpan<byte> payload) : base(0x00B4, payload) { }
     protected override void WriteFields(StringBuilder sb)
     {
-        if (Payload.Length < 8) { Flag(sb, $"SUBPARTS truncated -- {'{'}Payload.Length{'}'} bytes, expected >= 8"); return; }
+        if (Payload.Length < 8) { Flag(sb, $"SUBPARTS truncated -- {Payload.Length} bytes, expected >= 8"); return; }
         int gameId   = ReadI32BE(Payload, 0);
         int numParts = ReadI32BE(Payload, 4);
         FHex(sb, 0, "GameID",      gameId, "(BE -- ntohl at emit)");

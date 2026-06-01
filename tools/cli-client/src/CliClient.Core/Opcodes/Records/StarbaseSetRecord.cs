@@ -12,7 +12,7 @@ public sealed class StarbaseSetRecord : PacketRecord
     public StarbaseSetRecord(ReadOnlySpan<byte> payload) : base(0x004F, payload) { }
     protected override void WriteFields(StringBuilder sb)
     {
-        if (Payload.Length < 6) { Flag(sb, $"STARBASE_SET truncated -- {'{'}Payload.Length{'}'} bytes, expected 6"); return; }
+        if (Payload.Length < 6) { Flag(sb, $"STARBASE_SET truncated -- {Payload.Length} bytes, expected 6"); return; }
         int  starbaseId = ReadI32LE(Payload, 0);
         byte action     = Payload[4];
         byte exitMode   = Payload[5];

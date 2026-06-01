@@ -16,7 +16,7 @@ public sealed class MessageStringRecord : PacketRecord
     public MessageStringRecord(ReadOnlySpan<byte> payload) : base(0x001D, payload) { }
     protected override void WriteFields(StringBuilder sb)
     {
-        if (Payload.Length < 3) { Flag(sb, $"MESSAGE_STRING truncated -- {'{'}Payload.Length{'}'} bytes, expected >= 3"); return; }
+        if (Payload.Length < 3) { Flag(sb, $"MESSAGE_STRING truncated -- {Payload.Length} bytes, expected >= 3"); return; }
         short length = ReadI16LE(Payload, 0);
         byte  color  = Payload[2];
         int   msgLen = Math.Max(0, Math.Min(length, Payload.Length - 3));

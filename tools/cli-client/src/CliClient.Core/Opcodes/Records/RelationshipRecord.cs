@@ -15,7 +15,7 @@ public sealed class RelationshipRecord : PacketRecord
     public RelationshipRecord(ReadOnlySpan<byte> payload) : base(0x0089, payload) { }
     protected override void WriteFields(StringBuilder sb)
     {
-        if (Payload.Length < 9) { Flag(sb, $"RELATIONSHIP truncated -- {'{'}Payload.Length{'}'} bytes, expected 9"); return; }
+        if (Payload.Length < 9) { Flag(sb, $"RELATIONSHIP truncated -- {Payload.Length} bytes, expected 9"); return; }
         int  objectId    = ReadI32BE(Payload, 0);
         int  reaction    = ReadI32LE(Payload, 4);
         byte isAttacking = Payload[8];

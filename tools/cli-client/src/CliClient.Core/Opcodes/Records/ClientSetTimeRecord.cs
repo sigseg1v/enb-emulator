@@ -15,7 +15,7 @@ public sealed class ClientSetTimeRecord : PacketRecord
     public ClientSetTimeRecord(ReadOnlySpan<byte> payload) : base(0x0034, payload) { }
     protected override void WriteFields(StringBuilder sb)
     {
-        if (Payload.Length < 12) { Flag(sb, $"CLIENT_SET_TIME truncated -- {'{'}Payload.Length{'}'} bytes, expected 12"); return; }
+        if (Payload.Length < 12) { Flag(sb, $"CLIENT_SET_TIME truncated -- {Payload.Length} bytes, expected 12"); return; }
         int clientSent     = ReadI32LE(Payload, 0);
         int serverReceived = ReadI32LE(Payload, 4);
         int serverSent     = ReadI32LE(Payload, 8);
@@ -23,6 +23,6 @@ public sealed class ClientSetTimeRecord : PacketRecord
         FHex(sb, 4, "ServerReceived", serverReceived);
         FHex(sb, 8, "ServerSent",     serverSent);
         if (serverReceived != serverSent)
-            Flag(sb, $"ServerReceived != ServerSent ({'{'}serverReceived{'}'} vs {'{'}serverSent{'}'})");
+            Flag(sb, $"ServerReceived != ServerSent ({serverReceived} vs {serverSent})");
     }
 }

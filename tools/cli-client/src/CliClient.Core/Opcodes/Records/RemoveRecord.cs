@@ -12,7 +12,7 @@ public sealed class RemoveRecord : PacketRecord
     public RemoveRecord(ReadOnlySpan<byte> payload) : base(0x0007, payload) { }
     protected override void WriteFields(StringBuilder sb)
     {
-        if (Payload.Length < 4) { Flag(sb, $"REMOVE truncated -- {'{'}Payload.Length{'}'} bytes, expected 4"); return; }
+        if (Payload.Length < 4) { Flag(sb, $"REMOVE truncated -- {Payload.Length} bytes, expected 4"); return; }
         int gameId = ReadI32LE(Payload, 0);
         FHex(sb, 0, "GameID", gameId);
         FlagSuspicious(sb, "GameID", gameId);

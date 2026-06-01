@@ -12,7 +12,7 @@ public sealed class NameDecalRecord : PacketRecord
     public NameDecalRecord(ReadOnlySpan<byte> payload) : base(0x00B2, payload) { }
     protected override void WriteFields(StringBuilder sb)
     {
-        if (Payload.Length < 48) { Flag(sb, $"NAME_DECAL truncated -- {'{'}Payload.Length{'}'} bytes, expected 48"); return; }
+        if (Payload.Length < 48) { Flag(sb, $"NAME_DECAL truncated -- {Payload.Length} bytes, expected 48"); return; }
         int    gameId = ReadI32LE(Payload, 0);
         string name   = ReadNulString(Payload.AsSpan(4, 32));
         float  r      = ReadF32LE(Payload, 36);

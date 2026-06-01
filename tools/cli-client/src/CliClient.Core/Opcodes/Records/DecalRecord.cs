@@ -16,14 +16,14 @@ public sealed class DecalRecord : PacketRecord
     public DecalRecord(ReadOnlySpan<byte> payload) : base(0x0010, payload) { }
     protected override void WriteFields(StringBuilder sb)
     {
-        if (Payload.Length < 6) { Flag(sb, $"DECAL truncated -- {'{'}Payload.Length{'}'} bytes, expected >= 6"); return; }
+        if (Payload.Length < 6) { Flag(sb, $"DECAL truncated -- {Payload.Length} bytes, expected >= 6"); return; }
         int   gameId = ReadI32LE(Payload, 0);
         short count  = ReadI16LE(Payload, 4);
         FHex(sb, 0, "GameID",     gameId);
         FDec(sb, 4, "DecalCount", count);
         const int ItemSize = 24;
         int expected = 6 + count * ItemSize;
-        if (Payload.Length < expected) { Flag(sb, $"payload too short for {'{'}count{'}'} items -- {'{'}Payload.Length{'}'} bytes, expected {'{'}expected{'}'}"); return; }
+        if (Payload.Length < expected) { Flag(sb, $"payload too short for {count} items -- {Payload.Length} bytes, expected {expected}"); return; }
         int off = 6;
         for (int i = 0; i < count; i++, off += ItemSize)
         {

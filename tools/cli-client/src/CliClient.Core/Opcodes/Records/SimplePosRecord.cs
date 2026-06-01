@@ -15,7 +15,7 @@ public sealed class SimplePosRecord : PacketRecord
     public SimplePosRecord(ReadOnlySpan<byte> payload) : base(0x0008, payload) { }
     protected override void WriteFields(StringBuilder sb)
     {
-        if (Payload.Length < 48) { Flag(sb, $"SIMPLE_POS truncated -- {'{'}Payload.Length{'}'} bytes, expected 48"); return; }
+        if (Payload.Length < 48) { Flag(sb, $"SIMPLE_POS truncated -- {Payload.Length} bytes, expected 48"); return; }
         int   gameId = ReadI32LE(Payload, 0);
         uint  ts     = ReadU32LE(Payload, 4);
         float px = ReadF32LE(Payload,  8), py = ReadF32LE(Payload, 12), pz = ReadF32LE(Payload, 16);

@@ -156,7 +156,7 @@ public sealed class ItemBaseRecord : PacketRecord
         }
 
         // -- Fixed tail --
-        if (off + 19 > Payload.Length) { Flag(sb, $"truncated before fixed tail (need 19B, have {Payload.Length - off}B)"); return; }
+        if (off + 22 > Payload.Length) { Flag(sb, $"truncated before fixed tail (need 22B, have {Payload.Length - off}B)"); return; }
         ushort gameBase = ReadU16BE(Payload, off);
         ushort iconBase = ReadU16BE(Payload, off + 2);
         ushort techLvl  = ReadU16BE(Payload, off + 4);

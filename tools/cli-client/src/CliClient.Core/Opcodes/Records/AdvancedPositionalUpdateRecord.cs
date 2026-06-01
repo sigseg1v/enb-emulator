@@ -19,7 +19,7 @@ public sealed class AdvancedPositionalUpdateRecord : PacketRecord
     public AdvancedPositionalUpdateRecord(ReadOnlySpan<byte> payload) : base(0x003E, payload) { }
     protected override void WriteFields(StringBuilder sb)
     {
-        if (Payload.Length < 42) { Flag(sb, $"ADVANCED_POSITIONAL_UPDATE truncated -- {'{'}Payload.Length{'}'} bytes, expected >= 42"); return; }
+        if (Payload.Length < 42) { Flag(sb, $"ADVANCED_POSITIONAL_UPDATE truncated -- {Payload.Length} bytes, expected >= 42"); return; }
         short bitmask = ReadI16LE(Payload, 0);
         FHex(sb, 0, "Bitmask", (ushort)bitmask);
         int off = 2;

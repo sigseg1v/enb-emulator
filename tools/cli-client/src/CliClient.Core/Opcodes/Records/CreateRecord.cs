@@ -14,7 +14,7 @@ public sealed class CreateRecord : PacketRecord
     public CreateRecord(ReadOnlySpan<byte> payload) : base(0x0004, payload) { }
     protected override void WriteFields(StringBuilder sb)
     {
-        if (Payload.Length < 23) { Flag(sb, $"CREATE truncated -- {'{'}Payload.Length{'}'} bytes, expected 23+"); return; }
+        if (Payload.Length < 23) { Flag(sb, $"CREATE truncated -- {Payload.Length} bytes, expected 23+"); return; }
         int   gameId = ReadI32LE(Payload, 0);
         float scale  = ReadF32LE(Payload, 4);
         short asset  = ReadI16LE(Payload, 8);

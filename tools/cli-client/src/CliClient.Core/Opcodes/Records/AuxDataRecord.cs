@@ -20,7 +20,7 @@ public sealed class AuxDataRecord : PacketRecord
 
     protected override void WriteFields(StringBuilder sb)
     {
-        if (Payload.Length < 4) { Flag(sb, $"AUX_DATA truncated -- {'{'}Payload.Length{'}'} bytes, expected >= 4"); return; }
+        if (Payload.Length < 4) { Flag(sb, $"AUX_DATA truncated -- {Payload.Length} bytes, expected >= 4"); return; }
         int gameId = ReadI32LE(Payload, 0);
         FHex(sb, 0, "GameID", gameId);
         if (Payload.Length < 7) return;
