@@ -47,6 +47,8 @@ if (args[0] is "repl" or "start")
     repl.Register(new CreateCommand(sessionCtx));
     repl.Register(new EnterCommand(sessionCtx));
     repl.Register(new DumpCommand(sessionCtx));
+    repl.Register(new DumpOnCommand(sessionCtx));
+    repl.Register(new DumpOffCommand(sessionCtx));
     repl.Register(new ReplayCommand());
 
     using var cts = new CancellationTokenSource();

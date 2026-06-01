@@ -46,9 +46,24 @@ public sealed class EncryptedTcpConnection : IAsyncDisposable
     private readonly WestwoodRC4 _cryptOut = new();
     private readonly byte[] _readBuffer = new byte[PacketHeader.WireSize];
 
-    /// <summary>Endpoint we're connected to — for diagnostics / logs.</summary>
+    /// <summary>Endpoint we're connected to -- for diagnostics / logs.</summary>
     public string Host { get; }
     public int Port { get; }
+
+    /// <summary>
+    /// Raised AFTER a packet has been successfully written to the socket
+    /// (i.e. encrypted + sent). Handlers see the cleartext Packet. Used
+    /// by the REPL's <c>dump-on</c> live-tail printer; null when nobody
+    /// is listening.
+    /// </summary>
+    public event Action<Packet>? PacketSent;
+
+    /// <summary>
+    /// Raised AFTER a packet has been successfully read from the socket
+    /// and decrypted, before <see cref="ReceiveAsync"/> returns it.
+    /// Handlers see the cleartext Packet.
+    /// </summary>
+    public event Action<Packet>? PacketReceived;
 
     private EncryptedTcpConnection(TcpClient tcp, string host, int port)
     {
@@ -154,6 +169,7 @@ public sealed class EncryptedTcpConnection : IAsyncDisposable
         _cryptOut.Transform(wire);
         await _stream.WriteAsync(wire, cancellationToken).ConfigureAwait(false);
         await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        PacketSent?.Invoke(packet);
     }
 
     /// <summary>
@@ -186,7 +202,9 @@ public sealed class EncryptedTcpConnection : IAsyncDisposable
             _cryptIn.Transform(payload);
         }
 
-        return new Packet(header, payload);
+        var pkt = new Packet(header, payload);
+        PacketReceived?.Invoke(pkt);
+        return pkt;
     }
 
     private async Task ReadExactAsync(byte[] buffer, CancellationToken ct)

@@ -43,6 +43,20 @@ public abstract class PacketRecord : IPacketRecord
     }
 
     /// <summary>
+    /// Hex+ASCII gutter only, no structured fields. Used by the live
+    /// REPL tail for opcodes we don't have a structured decoder for --
+    /// printing field heuristics for unknown opcodes is more noise than
+    /// signal, so we just show every byte and let the operator spot the
+    /// nonsense.
+    /// </summary>
+    public string HexOnlyDump()
+    {
+        var sb = new StringBuilder(512);
+        WriteHexTail(sb);
+        return sb.ToString();
+    }
+
+    /// <summary>
     /// Per-opcode field decoder -- subclasses override and append decoded
     /// fields with <see cref="Field"/> / <see cref="FlagSuspicious"/> / etc.
     /// </summary>
@@ -180,9 +194,8 @@ public abstract class PacketRecord : IPacketRecord
     private void WriteHexTail(StringBuilder sb)
     {
         const int Stride = 16;
-        const int MaxRows = 16; // 256 bytes max in the dump; longer payloads get a "... +N" tail
         ReadOnlySpan<byte> p = Payload;
-        int rows = Math.Min((p.Length + Stride - 1) / Stride, MaxRows);
+        int rows = (p.Length + Stride - 1) / Stride;
         for (int row = 0; row < rows; row++)
         {
             int off = row * Stride;
@@ -201,9 +214,6 @@ public abstract class PacketRecord : IPacketRecord
               .Append(Color(AnsiPalette.Blue, AsciiGutter(p.Slice(off, n))))
               .AppendLine();
         }
-        if (p.Length > rows * Stride)
-            sb.Append("  ").AppendLine(Color(AnsiPalette.Gray,
-                "... +" + (p.Length - rows * Stride) + " more bytes"));
     }
 
     private static string AsciiGutter(ReadOnlySpan<byte> bytes)

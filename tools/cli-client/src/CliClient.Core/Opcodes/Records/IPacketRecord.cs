@@ -35,7 +35,10 @@ public interface IPacketRecord
     /// <summary>
     /// Multi-line annotated dump. Lines start with two spaces of indent
     /// (so the caller can prefix a frame number on the header without
-    /// the body collapsing visually). Includes ANSI colour codes when
+    /// the body collapsing visually). The full payload always appears
+    /// in the trailing hex+ASCII gutter -- nothing is truncated, on the
+    /// grounds that finding garbage values is the whole point of the
+    /// dump. Includes ANSI colour codes when
     /// <see cref="N7.CliClient.Logging.AnsiPalette.Enabled"/> is true.
     /// </summary>
     string DumpToString();

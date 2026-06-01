@@ -29,6 +29,7 @@ public static class AnsiPalette
     public const string BrightCyan = "[96m";
     public const string Magenta    = "[35m";    // compare-mismatch
     public const string Yellow     = "[33m";    // suspicious value (zero, sentinel)
+    public const string BrightYellow = "[93m";    // outbound packet header in dump-on live tail
     public const string Red        = "[31m";    // hard error flag
     public const string BrightRed  = "[91m";
     public const string Green      = "[32m";    // values, ok-compare

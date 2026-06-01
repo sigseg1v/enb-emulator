@@ -424,6 +424,20 @@ packet-replay CAPTURE='capture_1' CLIENT_PATH='':
 launch-cli:
     dotnet run --project tools/cli-client/src/CliClient.App -- start
 
+# Run the enb-cli REPL `replay` command against a captured ENBREPLAY S2C
+# stream and exit. Decodes every frame through the record classes (known
+# opcodes -> structured fields + hex tail; unknown opcodes -> ASCII-string
+# heuristic + hex tail) so you can byte-skim retail captures without
+# touching the docker stack. Default CAPTURE matches the on-disk file in
+# archive/replay/. NO_COLOR strips ANSI when output is piped.
+#
+#   just cli-replay                    # capture_1-sector-s2c.bin
+#   just cli-replay capture_2          # capture_2-sector-s2c.bin
+#   NO_COLOR=1 just cli-replay | less  # plain-text scroll
+cli-replay CAPTURE='capture_1':
+    printf 'replay archive/replay/{{CAPTURE}}-sector-s2c.bin\nquit\n' | \
+        dotnet run --project tools/cli-client/src/CliClient.App -- start
+
 # Stream all logs in the foreground.
 dev-fg:
     docker compose up
