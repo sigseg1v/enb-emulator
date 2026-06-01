@@ -749,7 +749,57 @@ Driven by live-play feedback. All client-side; NO server change.
       Tests: +18 unit tests (CompletionTests, SectorWorldTests, LineEditorTests,
       ChatCommandTests, ClientChatEventExtractTests, ReplTests dedup); suite
       216→234, all green.
-- [ ] Follow-ups noted, not done: mob/avatar level once an RPGInfo-aux decode
-      lands; CLI movement (position-update send) to drive proximity nav
-      exposure server-side; cross-thread redraw so async chat lines don't
-      interleave the prompt mid-edit.
+- [x] Follow-up: mob/ship level + object names now decoded from 0x001B aux.
+      `SectorWorld` ingests 0x003F PLANET_POSITIONAL_UPDATE (planets announce
+      position there, not via 0x0040) and 0x001B AUX_DATA. The aux is decoded
+      by reusing the catalog's schema walker via a new
+      `AuxDataRecord.TryExtractSummary` (returns GameId + depth-0 Name +
+      CombatLevel) -- no hand-rolled offsets. `Tracked.Level` added; render
+      shows real level when announced (else `-`), plus a `you:` own-ship line
+      (name + level + position). Files: `Opcodes/Records/AuxDataRecord.cs`,
+      `Repl/SectorWorld.cs`. Tests: +4 (planet 0x003F distance, ShipIndex aux
+      name+CombatLevel=42 decode, gid=0 PlayerIndex skip, own-ship render);
+      suite 234->238.
+
+## Live verification (2026-06-01)
+
+- [x] Drove the CLI against the running docker stack (server/proxy/login/pg)
+      via piped stdin (non-TTY fallback). Seeded a Postgres account
+      (`clitest*`, argon2 PHC for "testpw") mirroring `TestAccounts.New`, then
+      `connect -> login -> create JE <name> -> enter -> list -> chat`. Confirmed:
+      auth+global handshake, character create, sector LOGIN (gameId allocated,
+      30 handshake frames), outbound chat echo (`--> [sector] you: ...`) without
+      `dump-on`, and the in-sector `list`/arrival render.
+- [x] The live drive surfaced (and fixed) two real gaps in the world model: the
+      home planet "Io" was rendering with no name and `d=?`. Root cause from the
+      dump: its name arrives via a 0x001B Harvestable aux and its position via
+      0x003F -- neither was ingested. After the fix the drive renders
+      `planet  lvl -  Io  d=140538.8  visited`.
+- [!] A docked fresh char sees only its home planet (1 object) -- navs/mobs are
+      exploration-gated and proximity-exposed, so they don't appear until the
+      avatar moves. The CLI cannot yet move (no MVAS UDP), so a live
+      navs-populate test still needs CLI movement.
+- [!] Caveats: piped stdin exercises the ReadLine fallback, NOT the interactive
+      editor's key handling (Tab/ghost) -- that path needs separate coverage.
+      `quit` drops the socket without a clean logout, so the server holds the
+      avatar `ACCOUNT_IN_USE` (G_ERROR 13) for a while -- use a fresh account
+      per drive.
+
+## Continuation (2026-06-01 cont.): client-fidelity world model + CLI movement
+
+- [~] "Act like a real client" -- guid-keyed live model of objects + own ship,
+      updated from packets, listable, reset on sector transition. The model is
+      guid-keyed and reset on `enter`; own-ship (name/level/pos) now rendered.
+      Reset-on-station-transition is structurally ready (`World.Reset()` is the
+      single chokepoint) but the REPL is still single-enter-per-session, so
+      to/from-station resets land when multi-sector enter is added.
+- [ ] Mob level via a dedicated AuxMobIndex schema: deferred. No mob 0x001B was
+      observable in a docked home sector and there's no pinned mob-aux capture
+      to validate against, so a hand-ported MobIndex schema would be unverified
+      and could perturb the (well-pinned) dump candidate selection. Other
+      players' ships already decode level via the existing ShipIndex schema.
+- [ ] CLI movement (0x1004 MVAS_SEND_POSITION over UDP): the real client reports
+      flight position via the MVAS UDP channel, not the TCP sector socket. The
+      CLI has no UDP transport today -- this is a new subsystem (UDP socket +
+      MVAS registration handshake + EnbUdpHeader framing). Needed to drive
+      server-side proximity nav exposure and make the world model populate.

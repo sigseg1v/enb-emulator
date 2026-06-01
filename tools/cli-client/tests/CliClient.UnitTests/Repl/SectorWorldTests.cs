@@ -58,6 +58,36 @@ public sealed class SectorWorldTests
         return Packet.ForOpcode(0x0099, p);
     }
 
+    private static Packet PlanetPos(int gameId, float x, float y, float z)
+    {
+        // 0x003F PLANET_POSITIONAL_UPDATE: GameID@0, TimeStamp@4, Position@8.
+        byte[] p = new byte[48];
+        BinaryPrimitives.WriteInt32LittleEndian(p.AsSpan(0, 4), gameId);
+        BinaryPrimitives.WriteSingleLittleEndian(p.AsSpan(8, 4), x);
+        BinaryPrimitives.WriteSingleLittleEndian(p.AsSpan(12, 4), y);
+        BinaryPrimitives.WriteSingleLittleEndian(p.AsSpan(16, 4), z);
+        return Packet.ForOpcode(0x003F, p);
+    }
+
+    // Minimal AuxShipIndex 0x001B frame with only flag 0 (Name) and flag 26
+    // (CombatLevel) set, matching the catalog's ShipIndex schema layout:
+    // [u32 GameID][u16 BodyLen=payload-6][u8 ver=1][8 flag bytes][Name str][u32 lvl].
+    private static Packet ShipAux(uint gameId, string name, uint combatLevel)
+    {
+        byte[] nameB = Encoding.ASCII.GetBytes(name);
+        byte[] p = new byte[7 + 8 + (2 + nameB.Length) + 4];
+        BinaryPrimitives.WriteUInt32LittleEndian(p.AsSpan(0, 4), gameId);
+        BinaryPrimitives.WriteUInt16LittleEndian(p.AsSpan(4, 2), (ushort)(p.Length - 6));
+        p[6] = 1;                       // version
+        p[7 + 0] = 0x10;                // bit 4  -> flag 0  (Name)
+        p[7 + 3] = 0x40;                // bit 30 -> flag 26 (CombatLevel)
+        int o = 7 + 8;
+        BinaryPrimitives.WriteUInt16LittleEndian(p.AsSpan(o, 2), (ushort)nameB.Length); o += 2;
+        nameB.CopyTo(p.AsSpan(o)); o += nameB.Length;
+        BinaryPrimitives.WriteUInt32LittleEndian(p.AsSpan(o, 4), combatLevel);
+        return Packet.ForOpcode(0x001B, p);
+    }
+
     [Fact]
     public void Ingest_CreateAndPosition_TracksTypeAndDistance()
     {
@@ -125,9 +155,66 @@ public sealed class SectorWorldTests
         w.Render(sw, 0x0001);
         string outp = sw.ToString();
 
-        Assert.Contains("location:", outp);
+        Assert.Contains("you:", outp);
         Assert.Contains("1.2346", outp);   // 4 d.p. rounding of self X
         Assert.Contains("planet", outp);
         Assert.Contains("nearby:", outp);
+    }
+
+    [Fact]
+    public void Ingest_PlanetPositionalUpdate_GivesPlanetADistance()
+    {
+        var w = new SectorWorld();
+        w.Ingest(ConstantPos(0x0001, 0, 0, 0));      // self at origin
+        w.Ingest(Create(0x1885F, baseAsset: 0xFF, type: 3)); // a planet
+        w.Ingest(PlanetPos(0x1885F, 30, 40, 0));     // planet 50 away via 0x003F
+
+        var row = w.NearestTo(0x0001)[0];
+        Assert.Equal("planet", SectorWorld.TypeName(row.Obj));
+        Assert.NotNull(row.Dist);
+        Assert.Equal(50f, row.Dist!.Value, 3);
+    }
+
+    [Fact]
+    public void Ingest_ShipAux_DecodesNameAndCombatLevel()
+    {
+        var w = new SectorWorld();
+        w.Ingest(Create(0x40000050, baseAsset: 0x649, type: 1));
+        w.Ingest(ShipAux(0x40000050, "Trader Bob", combatLevel: 42));
+
+        var obj = w.NearestTo(0)[0].Obj;   // no self -> still tracked
+        Assert.Equal("Trader Bob", obj.Name);
+        Assert.Equal(42, obj.Level);
+    }
+
+    [Fact]
+    public void Ingest_SelfPlayerIndexAux_GameIdZero_IsIgnored()
+    {
+        // A PlayerIndex-shaped aux keys to GameID 0 and its nested names
+        // belong to no single object -- it must not create a phantom gid=0.
+        var w = new SectorWorld();
+        byte[] p = new byte[7 + 8 + 6];
+        // GameID 0, version 1, no flags set -> empty body. Walks as the
+        // gid-zero PlayerIndex candidate (or simply yields no object).
+        p[6] = 1;
+        BinaryPrimitives.WriteUInt16LittleEndian(p.AsSpan(4, 2), (ushort)(p.Length - 6));
+        w.Ingest(Packet.ForOpcode(0x001B, p));
+        Assert.Equal(0, w.Count);
+    }
+
+    [Fact]
+    public void Render_ShowsOwnShipNameAndLevel()
+    {
+        var w = new SectorWorld();
+        w.Ingest(ConstantPos(0x40000050, 5, 0, 0));
+        w.Ingest(ShipAux(0x40000050, "Cli Pilot", combatLevel: 7));
+
+        var sw = new StringWriter();
+        w.Render(sw, 0x40000050);
+        string outp = sw.ToString();
+
+        Assert.Contains("you:", outp);
+        Assert.Contains("Cli Pilot", outp);
+        Assert.Contains("lvl 7", outp);
     }
 }

@@ -6,6 +6,7 @@ using System.Buffers.Binary;
 using System.Globalization;
 using System.Text;
 using N7.CliClient.Net;
+using N7.CliClient.Opcodes.Records;
 
 namespace N7.CliClient.Repl;
 
@@ -40,6 +41,7 @@ public sealed class SectorWorld
         public bool? Visited;
         public bool HasPos;
         public float X, Y, Z;
+        public int? Level;          // CombatLevel from a 0x001B aux, if announced
     }
 
     private readonly object _gate = new();
@@ -80,8 +82,10 @@ public sealed class SectorWorld
                     case 0x0008: IngestSimplePos(s); break;
                     case 0x0040: IngestConstantPos(s); break;
                     case 0x003E: IngestAdvancedPos(s); break;
+                    case 0x003F: IngestPlanetPos(s); break;
                     case 0x0061: IngestAvatar(s); break;
                     case 0x0099: IngestNavigation(s); break;
+                    case 0x001B: IngestAux(s); break;
                 }
             }
         }
@@ -160,6 +164,34 @@ public sealed class SectorWorld
             BinaryPrimitives.ReadSingleLittleEndian(s.Slice(10, 4)),
             BinaryPrimitives.ReadSingleLittleEndian(s.Slice(14, 4)),
             BinaryPrimitives.ReadSingleLittleEndian(s.Slice(18, 4)));
+    }
+
+    private void IngestPlanetPos(ReadOnlySpan<byte> s)
+    {
+        // 0x003F PLANET_POSITIONAL_UPDATE: GameID@0, TimeStamp@4, Position@8
+        // (3 floats), then orbit/rotate fields. Planets/moons announce their
+        // location here rather than via 0x0040/0x0008, so without this they
+        // show up with an unknown distance.
+        if (s.Length < 20) return;
+        int gameId = BinaryPrimitives.ReadInt32LittleEndian(s[..4]);
+        SetPos(gameId,
+            BinaryPrimitives.ReadSingleLittleEndian(s.Slice(8, 4)),
+            BinaryPrimitives.ReadSingleLittleEndian(s.Slice(12, 4)),
+            BinaryPrimitives.ReadSingleLittleEndian(s.Slice(16, 4)));
+    }
+
+    private void IngestAux(ReadOnlySpan<byte> s)
+    {
+        // 0x001B AUX_DATA carries an object's name (and, for ships/mobs, its
+        // combat level) in a flag-driven variable-layout body. Reuse the
+        // catalog's schema walker rather than hand-rolling offsets. The self
+        // PlayerIndex keys to GameID 0 and its nested names belong to no one
+        // sector object -- skip it.
+        var sum = AuxDataRecord.TryExtractSummary(s);
+        if (sum is not { } a || a.GameId == 0) return;
+        var t = GetOrAdd((int)a.GameId);
+        if (!string.IsNullOrEmpty(a.Name)) t.Name = a.Name;
+        if (a.CombatLevel is { } lvl) t.Level = (int)lvl;
     }
 
     private void IngestAvatar(ReadOnlySpan<byte> s)
@@ -255,22 +287,40 @@ public sealed class SectorWorld
     }
 
     /// <summary>
+    /// Snapshot of the player's own ship/avatar, accumulated from the same
+    /// frame stream (0x0061 name, 0x001B ship aux level, 0x003E position).
+    /// </summary>
+    public (string? Name, int? Level, (float X, float Y, float Z)? Pos) SelfSnapshot(int selfGameId)
+    {
+        lock (_gate)
+        {
+            if (!_objects.TryGetValue(selfGameId, out var me))
+                return (null, null, null);
+            (float, float, float)? pos = me.HasPos ? (me.X, me.Y, me.Z) : null;
+            return (me.Name, me.Level, pos);
+        }
+    }
+
+    /// <summary>
     /// Print the nearby summary: own position to 4 d.p. then one row per
     /// object (kind, name, level, distance), nearest first.
     /// </summary>
     public void Render(TextWriter output, int selfGameId, int maxRows = 30)
     {
-        var self = SelfPosition(selfGameId);
+        var (selfName, selfLevel, self) = SelfSnapshot(selfGameId);
         string here = self is { } sp
             ? $"({F4(sp.X)}, {F4(sp.Y)}, {F4(sp.Z)})"
             : "(unknown -- no positional update for self yet)";
-        output.WriteLine($"location: gameId=0x{selfGameId:X8}  pos={here}");
+        string selfLbl = selfName is { Length: > 0 } ? selfName : "<self>";
+        string selfLvl = selfLevel is { } sl ? sl.ToString(CultureInfo.InvariantCulture) : "-";
+        output.WriteLine(
+            $"you: {selfLbl} (lvl {selfLvl})  gameId=0x{selfGameId:X8}  pos={here}");
 
         var rows = NearestTo(selfGameId);
         int navs = rows.Count(r => r.Obj.IsNav);
         int avatars = rows.Count(r => r.Obj.IsAvatar);
         output.WriteLine(
-            $"nearby: {rows.Count} objects ({avatars} avatars, {navs} navs)  [level unknown: not in object frames]");
+            $"nearby: {rows.Count} objects ({avatars} avatars, {navs} navs)  [lvl '-' = not yet announced via aux]");
 
         if (rows.Count == 0)
         {
@@ -288,7 +338,7 @@ public sealed class SectorWorld
             }
             string kind = TypeName(o);
             string name = o.Name ?? $"<gid=0x{o.GameId:X8}>";
-            string lvl = "-"; // level is not carried in any tracked frame
+            string lvl = o.Level is { } lv ? lv.ToString(CultureInfo.InvariantCulture) : "-";
             string distStr = dist is { } d ? $"d={d:0.0}" : "d=?";
             string visited = o.IsNav ? (o.Visited == true ? " visited" : " unvisited") : "";
             output.WriteLine(

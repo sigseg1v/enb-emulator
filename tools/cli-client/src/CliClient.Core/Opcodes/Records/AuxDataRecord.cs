@@ -2,6 +2,8 @@
 // Part of the Earth & Beyond emulator preservation project.
 // License: LICENSES/enb-emulator
 
+using System.Buffers.Binary;
+using System.Globalization;
 using System.Text;
 using N7.CliClient.Opcodes.Records.Aux;
 
@@ -162,5 +164,65 @@ public sealed class AuxDataRecord : PacketRecord
             i++;
         }
         return result;
+    }
+
+    /// <summary>
+    /// Object name + combat level pulled out of a 0x001B frame for the
+    /// in-sector world model. Reuses the exact same best-fit schema
+    /// selection as the dump path (<see cref="TrySchemaWalk"/>): try each
+    /// gated candidate, keep the one that consumes the payload exactly with
+    /// the highest string-plausibility. <see cref="GameId"/> is the aux's
+    /// own id slot -- 0 for the self <c>PlayerIndex</c> (whose nested
+    /// names/levels belong to no single sector object), the entity id for
+    /// <c>ShipIndex</c>/<c>Harvestable</c>. Returns null when no schema fits.
+    /// </summary>
+    public readonly record struct AuxSummary(uint GameId, string? Name, uint? CombatLevel);
+
+    public static AuxSummary? TryExtractSummary(ReadOnlySpan<byte> payload)
+    {
+        // Same header gate as WriteFields: version byte at 6 must be 1.
+        if (payload.Length < 8 || payload[6] != 1) return null;
+        uint gameId = BinaryPrimitives.ReadUInt32LittleEndian(payload[..4]);
+
+        List<AuxAnno>? bestAnnos = null;
+        double bestPlaus = -1;
+        foreach (var c in AuxSchemaRegistry.Candidates)
+        {
+            if (!AuxSchemaRegistry.GateMatches(c.Gate, gameId)) continue;
+            var w = new AuxWalker(payload, c.Extended);
+            if (w.Walk(c.Schema) != payload.Length) continue;
+            double plaus = w.StringPlausibility;
+            if (plaus < 0.9) continue;
+            bool better = bestAnnos is null
+                || plaus > bestPlaus + 0.001
+                || (System.Math.Abs(plaus - bestPlaus) <= 0.001 && w.Annos.Count > bestAnnos.Count);
+            if (better) { bestAnnos = w.Annos; bestPlaus = plaus; }
+        }
+        if (bestAnnos is null) return null;
+
+        string? name = null;
+        uint? level = null;
+        foreach (var a in bestAnnos)
+        {
+            // Only the top-level (depth-0) Name field is the object's own
+            // name; nested Mission/Faction/GroupMember "Name" fields are
+            // depth>0 and must not be mistaken for it.
+            if (a.Depth == 0 && a.Name == "Name" && name is null)
+                name = Unquote(a.Value);
+            else if (a.Name == "CombatLevel" && level is null && TryLeadingUint(a.Value, out uint v))
+                level = v;
+        }
+        return new AuxSummary(gameId, name, level);
+    }
+
+    // AuxWalker renders strings as "\"value\"" and U32 as "{v}  (0x........)".
+    private static string Unquote(string v)
+        => v.Length >= 2 && v[0] == '"' && v[^1] == '"' ? v[1..^1] : v;
+
+    private static bool TryLeadingUint(string v, out uint result)
+    {
+        int sp = v.IndexOf(' ');
+        string head = sp < 0 ? v : v[..sp];
+        return uint.TryParse(head, NumberStyles.Integer, CultureInfo.InvariantCulture, out result);
     }
 }
