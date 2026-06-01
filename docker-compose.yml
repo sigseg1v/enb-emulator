@@ -114,6 +114,13 @@ services:
       # proxy over the same docker network when needed.
       - "3501-3800:3501-3800/udp"
       - "3808:3808/udp"
+      # MVAS_LOGIN_PORT — move-assist position channel. Normally proxy<->server
+      # only (the proxy scrapes the Win32 client's engine position and relays
+      # it here). Published so the headless CLI can act as a full UDP client:
+      # it feeds its own position here and, because the server routes a
+      # player's sector stream back from this port to whoever last sent MVAS
+      # (SetPlayerPortIP), it then receives the live sector fanout here too.
+      - "3806:3806/udp"
       # Phase K: UDP_GLOBAL_SERVER_PORT — proxy<->server "global" control
       # plane (ticket validation, avatar list, char create/delete). Was TCP
       # via SSL_LOCALCERT_LOGIN_PORT in the kyp-era Win32 build; Phase Q

@@ -147,6 +147,14 @@ public sealed class SessionContext : IAsyncDisposable
     /// </summary>
     public MvasClient Mvas => _mvas ??= new MvasClient(Host, MvasPort);
 
+    /// <summary>
+    /// Full-duplex sector UDP client, live once the player starts driving its
+    /// own position (the <c>move ... send</c> path). When set, the live sector
+    /// stream arrives here (the server reroutes it to our socket) rather than
+    /// over the proxy TCP channel. Feeds the same world model + echo hooks.
+    /// </summary>
+    public SectorUdpClient? SectorUdp { get; set; }
+
     public SessionContext(OpcodeRegistry registry)
     {
         ArgumentNullException.ThrowIfNull(registry);
@@ -372,6 +380,7 @@ public sealed class SessionContext : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await StopSectorDrainAsync().ConfigureAwait(false);
+        if (SectorUdp is not null) { await SectorUdp.StopAsync().ConfigureAwait(false); SectorUdp.Dispose(); SectorUdp = null; }
         _mvas?.Dispose();
         if (_sector is not null) { DetachDumpHook(_sector); await _sector.DisposeAsync(); _sector = null; }
         if (_global is not null) { DetachDumpHook(_global); await _global.DisposeAsync(); _global = null; }

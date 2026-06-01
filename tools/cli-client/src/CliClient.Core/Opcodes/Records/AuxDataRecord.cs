@@ -176,7 +176,7 @@ public sealed class AuxDataRecord : PacketRecord
     /// names/levels belong to no single sector object), the entity id for
     /// <c>ShipIndex</c>/<c>Harvestable</c>. Returns null when no schema fits.
     /// </summary>
-    public readonly record struct AuxSummary(uint GameId, string? Name, uint? CombatLevel);
+    public readonly record struct AuxSummary(uint GameId, string? Name, uint? CombatLevel, float? MaxSpeed);
 
     public static AuxSummary? TryExtractSummary(ReadOnlySpan<byte> payload)
     {
@@ -202,6 +202,7 @@ public sealed class AuxDataRecord : PacketRecord
 
         string? name = null;
         uint? level = null;
+        float? maxSpeed = null;
         foreach (var a in bestAnnos)
         {
             // Only the top-level (depth-0) Name field is the object's own
@@ -211,8 +212,11 @@ public sealed class AuxDataRecord : PacketRecord
                 name = Unquote(a.Value);
             else if (a.Name == "CombatLevel" && level is null && TryLeadingUint(a.Value, out uint v))
                 level = v;
+            else if (a.Depth == 0 && a.Name == "MaxSpeed" && maxSpeed is null
+                     && float.TryParse(a.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out float ms))
+                maxSpeed = ms;
         }
-        return new AuxSummary(gameId, name, level);
+        return new AuxSummary(gameId, name, level, maxSpeed);
     }
 
     // AuxWalker renders strings as "\"value\"" and U32 as "{v}  (0x........)".

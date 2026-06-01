@@ -42,6 +42,7 @@ public sealed class SectorWorld
         public bool HasPos;
         public float X, Y, Z;
         public int? Level;          // CombatLevel from a 0x001B aux, if announced
+        public float? MaxSpeed;     // ship MaxSpeed from a 0x001B ship aux, if announced
     }
 
     private readonly object _gate = new();
@@ -192,6 +193,7 @@ public sealed class SectorWorld
         var t = GetOrAdd((int)a.GameId);
         if (!string.IsNullOrEmpty(a.Name)) t.Name = a.Name;
         if (a.CombatLevel is { } lvl) t.Level = (int)lvl;
+        if (a.MaxSpeed is { } spd && spd > 0) t.MaxSpeed = spd;
     }
 
     private void IngestAvatar(ReadOnlySpan<byte> s)
@@ -299,6 +301,13 @@ public sealed class SectorWorld
             (float, float, float)? pos = me.HasPos ? (me.X, me.Y, me.Z) : null;
             return (me.Name, me.Level, pos);
         }
+    }
+
+    /// <summary>Own ship MaxSpeed (units/sec) if a ship aux announced it.</summary>
+    public float? SelfSpeed(int selfGameId)
+    {
+        lock (_gate)
+            return _objects.TryGetValue(selfGameId, out var me) ? me.MaxSpeed : null;
     }
 
     /// <summary>

@@ -798,6 +798,69 @@ Driven by live-play feedback. All client-side; NO server change.
       to validate against, so a hand-ported MobIndex schema would be unverified
       and could perturb the (well-pinned) dump candidate selection. Other
       players' ships already decode level via the existing ShipIndex schema.
+### CLI movement: full UDP client (2026-06-01, continued)
+
+The "blocker" below was wrong -- the user clarified the CLI owns the avatar
+exclusively, so the server rerouting the sector stream to the CLI's socket is
+exactly what a full client wants. Built it as a real UDP client and, along the
+way, found and fixed a real server bug.
+
+- [x] SERVER BUG FIX (server/src/ServerManager.cpp): the MVAS receiver thread
+      was never started. MVASauth (MVAS_LOGIN_PORT/3806, constructed in
+      Net7.cpp:442) binds its socket but -- unlike the global (line 186), master
+      (289), and sector (SectorManager.cpp:172) listeners -- nothing called
+      StartReceiver() on it. Every inbound MVAS datagram (0x1004 position, 0x1000
+      register) was silently dropped, so NO player's position ever updated from
+      the move-assist feed and proximity nav exposure could never fire -- for
+      the proxy OR the CLI. Added `m_UDPConnection->StartReceiver()` after the
+      master plane starts. Fidelity fix (HandleMVASPosReturn + the proxy's emit
+      to MVAS_LOGIN_PORT prove 3806 is the intended receive path), not a
+      weakening. Verified: after the fix the server logs "Received MVAS login"
+      and "MVAS synched and locked in for <char>".
+- [x] docker-compose.yml: publish 3806/udp so the host CLI can reach the MVAS
+      port (was proxy<->server internal only).
+- [x] Net/MvasClient.cs + Net/SectorUdpClient.cs: full-duplex MVAS/sector UDP
+      client. MvasClient builds byte-exact 0x1004 datagrams (unit-tested).
+      SectorUdpClient binds an UNCONNECTED socket (the server reply NATs back
+      from a different source -- a connect() drops it, exactly the trap
+      proxy/UDPClient.h:30 warns about), sends position, and parses the
+      downstream: EnbUdpHeader-wrapped 0x2016/0x201A batches of inner
+      EnbTcpHeader frames (plaintext -- the proxy adds RC4 only for client TCP),
+      feeding each inner opcode to the same world-model/echo hooks.
+- [x] Repl/Commands/MoveCommand.cs: `move <x> <y> <z> [send]`. Realistic flight
+      -- orient toward the target, step at the ship's MaxSpeed (read from the
+      0x001B ship aux), send position+heading at the server's rate, stop within
+      an arrival delta. Engages forward thrust (0x0014 MOVE type 2 over the
+      sector channel) first, because CheckNavs only sweeps while the avatar has
+      non-zero speed (Player::CalcVelocity gates on the throttle, not the
+      position feed); kills thrust (type 4) on arrival.
+- [x] VERIFIED end-to-end transport: the server accepts our MVAS ("MVAS synched
+      and locked in"), the return path works (we receive 0x1007 freq + 0x2016
+      sector batches), and SectorUdpClient correctly decodes the inner frames
+      (observed 0x00A5 ClientChatEvent + 0x001B AuxData parsed out of a live
+      0x2016).
+- [!] NOT yet visually populating navs, two remaining reasons, both inherent to
+      the CLI's hybrid session (established via the proxy, MVAS via its own
+      socket):
+      1. IP split (server/src/UDP_Client.cpp:72,96): the sector handler only
+         processes a client opcode when source_addr == player->PlayerIPAddr().
+         Our MVAS sets PlayerIPAddr to the CLI's IP (docker gateway 172.19.0.1),
+         but the session/MOVE comes via the proxy (172.19.0.6) -> the server's
+         anti-spoof check logs "Player IP mismatch" and drops the cross-IP
+         opcode. (The initial throttle still lands because it precedes the first
+         MVAS; later sector opcodes do not.)
+      2. docker's userland UDP proxy does not reliably relay server-INITIATED
+         pushes to the NAT'd client (only ~2-3 datagrams arrive per flight),
+         independent of our code.
+- [ ] TRUE completion = the CLI establishes its ENTIRE session over UDP from its
+      own socket/IP (global 3810 + master 3808 + sector handoff + the 0x2016
+      reliability layer), replacing the proxy. Then one IP owns everything, the
+      anti-spoof check passes, and (run in-network, or with reliable NAT) the
+      sector stream flows. That is a sizeable subsystem (a C# port of the
+      proxy's UDPClient login/handoff sequence) -- scoped as the next step.
+
+#### superseded earlier note (kept for history)
+
 - [~] CLI movement (0x1004 MVAS_SEND_POSITION over UDP): wire emitter built and
       verified, but live driving is blocked by an architectural constraint
       (documented below).
