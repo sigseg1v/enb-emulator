@@ -7,8 +7,10 @@ using N7.CliClient.Opcodes.Inbound;
 namespace N7.CliClient.Repl.Commands;
 
 /// <summary>
-/// <c>list</c> -- reprint the avatar list from the last
-/// GlobalAvatarList we saw. Doesn't re-query the server.
+/// <c>list</c> -- context-aware. In a sector it re-dumps the live
+/// <see cref="SectorWorld"/> (nearby objects + own position); otherwise it
+/// reprints the cached character list from the last GlobalAvatarList. Never
+/// re-queries the server -- both views are recomputed from state we hold.
 /// </summary>
 public sealed class ListCommand : ICommandHandler
 {
@@ -21,12 +23,22 @@ public sealed class ListCommand : ICommandHandler
     }
 
     public string Name    => "list";
-    public string Summary => "show the cached character list";
+    public string Summary => "in-sector: list nearby objects; else: cached characters";
     public string Usage   => "list";
+
+    // Useful once logged in (character list) or in a sector (nearby).
+    public bool Available => _ctx.AvatarList is not null || _ctx.Sector is not null;
 
     public async Task<int> ExecuteAsync(
         IReadOnlyList<string> args, TextWriter output, CancellationToken ct)
     {
+        // In-sector: re-compute and dump the nearby world model.
+        if (_ctx.Sector is not null && _ctx.GameId is { } selfId)
+        {
+            _ctx.World.Render(output, selfId);
+            return 0;
+        }
+
         if (_ctx.AvatarList is null)
         {
             await output.WriteLineAsync("no avatar list yet -- run `login` first").ConfigureAwait(false);

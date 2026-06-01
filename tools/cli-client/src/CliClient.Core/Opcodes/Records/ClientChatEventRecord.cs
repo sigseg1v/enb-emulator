@@ -2,6 +2,7 @@
 // Part of the Earth & Beyond emulator preservation project.
 // License: LICENSES/enb-emulator
 
+using System.Buffers.Binary;
 using System.Text;
 
 namespace N7.CliClient.Opcodes.Records;
@@ -39,5 +40,39 @@ public sealed class ClientChatEventRecord : PacketRecord
         }
         if (off + 2 <= Payload.Length) { FDec(sb, off, "Unknown6Len", ReadI16LE(Payload, off)); off += 2; }
         if (off + 4 <= Payload.Length) { FHex(sb, off, "Trailing", ReadI32LE(Payload, off)); }
+    }
+
+    /// <summary>
+    /// One decoded 0x00A5 chat event, reduced to the fields a reader cares
+    /// about. <see cref="Type"/> is the CHEV_* discriminator.
+    /// </summary>
+    public readonly record struct ChatEvent(
+        int Type, string Sender, string OtherPlayer, string Channel, string Message);
+
+    /// <summary>
+    /// Parse a 0x00A5 CLIENT_CHAT_EVENT payload into sender/channel/message
+    /// without producing the full structural dump. Returns null if the
+    /// buffer is truncated or a length prefix overruns. Layout mirrors
+    /// <see cref="WriteFields"/>: int32 Type, int32 unknown, then five
+    /// AddDataLS strings (LastName, LastName2, OtherPlayer, Channel, Message).
+    /// </summary>
+    public static ChatEvent? TryExtract(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length < 8) return null;
+        int type = BinaryPrimitives.ReadInt32LittleEndian(payload[0..4]);
+
+        int off = 8;
+        var values = new string[StrLabels.Length];
+        for (int i = 0; i < StrLabels.Length; i++)
+        {
+            if (off + 2 > payload.Length) return null;
+            ushort len = BinaryPrimitives.ReadUInt16LittleEndian(payload.Slice(off, 2));
+            if (off + 2 + len > payload.Length) return null;
+            values[i] = Encoding.ASCII.GetString(payload.Slice(off + 2, len));
+            off += 2 + len;
+        }
+
+        // values: 0=LastName(sender) 1=LastName2 2=OtherPlayer 3=Channel 4=Message
+        return new ChatEvent(type, values[0], values[2], values[3], values[4]);
     }
 }

@@ -20,6 +20,7 @@ public sealed class ReplayCommand : ICommandHandler
     public string Name    => "replay";
     public string Summary => "load an ENBREPLAY capture and dump every frame as a structured record";
     public string Usage   => "replay <path/to/capture.bin>";
+    public string? Placeholder => "<path/to/capture.bin>";
 
     public async Task<int> ExecuteAsync(
         IReadOnlyList<string> args, TextWriter output, CancellationToken ct)

@@ -40,12 +40,21 @@ if (args[0] is "repl" or "start")
     replRegistry.Register(new GlobalTicketCodec());
 
     await using var sessionCtx = new SessionContext(replRegistry);
-    var repl = new Repl();
+
+    // The line editor needs the live command set (for context-aware
+    // completion); the repl needs the editor at construction. Break the
+    // cycle with a captured local the editor's callback reads at run time.
+    Repl repl = null!;
+    var editor = new LineEditor(() => repl.Commands
+        .Select(h => new CommandSpec(h.Name, h.Available, h.Placeholder))
+        .ToList());
+    repl = new Repl(lineInput: editor);
     repl.Register(new ConnectCommand(sessionCtx));
     repl.Register(new LoginCommand(sessionCtx));
     repl.Register(new ListCommand(sessionCtx));
     repl.Register(new CreateCommand(sessionCtx));
     repl.Register(new EnterCommand(sessionCtx));
+    repl.Register(new ChatCommand(sessionCtx));
     repl.Register(new DumpCommand(sessionCtx));
     repl.Register(new DumpOnCommand(sessionCtx));
     repl.Register(new DumpOffCommand(sessionCtx));
@@ -268,10 +277,14 @@ static void PrintHelp()
                             commands inside the prompt:
                               connect <host>[:port]
                               login   <user> <pass>
-                              list
+                              list    (characters; in-sector: nearby objects)
                               create  <class> <firstname>   (e.g. JE Griever)
                               enter   <firstname>
-                              help, quit
+                              chat    [sector|gm|dev|beta|whisper] <message>
+                              help, quit (alias: exit)
+                            Tab/Shift-Tab complete the available commands;
+                            grey ghost text hints the next argument.
+                            chat events (in/out) echo at the prompt by default.
           connect-and-login --user X --pass Y [--login-host h] [--login-port p]
                             [--global-host h] [--global-port p] [--idle 5]
                             [--strict-tls]

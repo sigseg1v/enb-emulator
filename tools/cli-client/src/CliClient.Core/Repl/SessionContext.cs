@@ -6,6 +6,7 @@ using N7.CliClient.Logging;
 using N7.CliClient.Net;
 using N7.CliClient.Opcodes;
 using N7.CliClient.Opcodes.Inbound;
+using N7.CliClient.Opcodes.Outbound;
 using N7.CliClient.Opcodes.Records;
 using N7.CliClient.Session;
 
@@ -70,9 +71,10 @@ public sealed class SessionContext : IAsyncDisposable
             DetachDumpHook(_sector);
             _sector = value;
             AttachDumpHook(_sector);
-            // Restart any active background drain on the new sector
-            // connection so dump-on keeps fed across enter.
-            if (DumpEnabled) RestartDumpDrain();
+            // NB: the background sector drain is started explicitly by
+            // `enter` AFTER its own foreground drain window closes -- not
+            // here -- so the two don't both read the single-reader socket
+            // at once. See EnterCommand.
         }
     }
 
@@ -84,6 +86,16 @@ public sealed class SessionContext : IAsyncDisposable
 
     /// <summary>Sector id the active avatar entered.</summary>
     public int? ActiveSectorId { get; set; }
+
+    /// <summary>True once <c>connect</c> has probed a reachable endpoint.</summary>
+    public bool Connected { get; set; }
+
+    /// <summary>
+    /// Running model of objects/navs the server has announced for the
+    /// current sector. Fed by the inbound packet hook; read by <c>enter</c>'s
+    /// arrival summary and the in-sector <c>list</c> command.
+    /// </summary>
+    public SectorWorld World { get; } = new();
 
     // ---------- dump-on / dump-off live tail state ----------
 
@@ -101,6 +113,21 @@ public sealed class SessionContext : IAsyncDisposable
     /// </summary>
     public TextWriter DumpOutput { get; set; } = Console.Out;
 
+    // ---------- chat echo state ----------
+
+    /// <summary>
+    /// When true (the default), every chat frame that crosses a connection
+    /// is echoed as a one-line <c>[channel] sender: message</c> to
+    /// <see cref="ChatOutput"/>, independent of <see cref="DumpEnabled"/>.
+    /// This is what makes chat visible at the prompt without <c>dump-on</c>.
+    /// </summary>
+    public bool ChatEcho { get; set; } = true;
+
+    /// <summary>Where chat echo lines go. Defaults to <see cref="Console.Out"/>.</summary>
+    public TextWriter ChatOutput { get; set; } = Console.Out;
+
+    private readonly object _chatGate = new();
+
     private CancellationTokenSource? _dumpDrainCts;
     private Task? _dumpDrainTask;
 
@@ -111,23 +138,24 @@ public sealed class SessionContext : IAsyncDisposable
     }
 
     /// <summary>
-    /// Start a background drain on the active sector connection so
-    /// packets flow through <c>PacketReceived</c> while the REPL is
-    /// idle. Idempotent.
+    /// Start a background drain on the active sector connection so packets
+    /// flow through <c>PacketReceived</c> -- feeding both the chat echo and
+    /// (when enabled) the dump printer -- while the REPL sits idle at the
+    /// prompt. Idempotent.
     ///
     /// <para>
-    /// Sector-only on purpose. Pre-enter, the Global connection is
-    /// owned by command-driven receive loops (<c>login</c>,
-    /// <c>list</c>, <c>enter</c>) which fire the same
-    /// <c>PacketReceived</c> hook naturally — running a background
-    /// drain in parallel would race the command-owned reads
-    /// (<see cref="EncryptedTcpConnection"/> is documented
-    /// single-reader) and steal bytes the command was waiting on.
-    /// Post-enter, no command currently reads from Sector, so the
-    /// drain monopolises it harmlessly.
+    /// Sector-only on purpose. Pre-enter, the Global connection is owned by
+    /// command-driven receive loops (<c>login</c>, <c>list</c>,
+    /// <c>enter</c>) which fire the same <c>PacketReceived</c> hook
+    /// naturally — running a background drain in parallel would race the
+    /// command-owned reads (<see cref="EncryptedTcpConnection"/> is
+    /// documented single-reader) and steal bytes the command was waiting
+    /// on. Post-enter, no command reads from Sector, so the drain
+    /// monopolises it harmlessly. <c>enter</c> starts it only after its own
+    /// foreground drain window closes, for the same single-reader reason.
     /// </para>
     /// </summary>
-    public void StartDumpDrain()
+    public void StartSectorDrain()
     {
         if (_dumpDrainTask is { IsCompleted: false }) return;
         var conn = _sector;
@@ -148,13 +176,13 @@ public sealed class SessionContext : IAsyncDisposable
             catch (OperationCanceledException) { /* expected */ }
             catch (Exception ex)
             {
-                try { DumpOutput.WriteLine($"[dump-drain] {ex.GetType().Name}: {ex.Message}"); } catch { }
+                try { DumpOutput.WriteLine($"[sector-drain] {ex.GetType().Name}: {ex.Message}"); } catch { }
             }
         });
     }
 
-    /// <summary>Cancel the background drain task. Idempotent.</summary>
-    public async Task StopDumpDrainAsync()
+    /// <summary>Cancel the background sector drain task. Idempotent.</summary>
+    public async Task StopSectorDrainAsync()
     {
         var cts = _dumpDrainCts;
         var task = _dumpDrainTask;
@@ -167,16 +195,6 @@ public sealed class SessionContext : IAsyncDisposable
             try { await task.ConfigureAwait(false); } catch { }
         }
         cts.Dispose();
-    }
-
-    private void RestartDumpDrain()
-    {
-        // Fire-and-forget restart -- the property setter can't await.
-        _ = Task.Run(async () =>
-        {
-            await StopDumpDrainAsync().ConfigureAwait(false);
-            StartDumpDrain();
-        });
     }
 
     private void AttachDumpHook(EncryptedTcpConnection? conn)
@@ -193,8 +211,18 @@ public sealed class SessionContext : IAsyncDisposable
         conn.PacketReceived -= OnPacketReceived;
     }
 
-    private void OnPacketSent(Packet p)     => PrintIfEnabled(p, PacketDirection.Outbound);
-    private void OnPacketReceived(Packet p) => PrintIfEnabled(p, PacketDirection.Inbound);
+    private void OnPacketSent(Packet p)
+    {
+        EchoChat(p, PacketDirection.Outbound);
+        PrintIfEnabled(p, PacketDirection.Outbound);
+    }
+
+    private void OnPacketReceived(Packet p)
+    {
+        World.Ingest(p);
+        EchoChat(p, PacketDirection.Inbound);
+        PrintIfEnabled(p, PacketDirection.Inbound);
+    }
 
     /// <summary>
     /// Replay an already-received frame through the dump printer as if it
@@ -204,7 +232,12 @@ public sealed class SessionContext : IAsyncDisposable
     /// dump hook attaches; without this they would silently disappear
     /// even though dump-on was on.
     /// </summary>
-    public void ReplayInboundFrame(Packet p) => PrintIfEnabled(p, PacketDirection.Inbound);
+    public void ReplayInboundFrame(Packet p)
+    {
+        World.Ingest(p);
+        EchoChat(p, PacketDirection.Inbound);
+        PrintIfEnabled(p, PacketDirection.Inbound);
+    }
 
     private void PrintIfEnabled(Packet p, PacketDirection dir)
     {
@@ -238,9 +271,91 @@ public sealed class SessionContext : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Echo a chat frame as one readable line, regardless of
+    /// <see cref="DumpEnabled"/>. Inbound 0x00A5 CLIENT_CHAT_EVENT and
+    /// outbound 0x0033 CLIENT_CHAT are recognised; everything else is
+    /// ignored. Never throws -- a malformed frame must not kill the drain.
+    /// </summary>
+    private void EchoChat(Packet p, PacketDirection dir)
+    {
+        if (!ChatEcho) return;
+        try
+        {
+            ushort op = p.Header.Opcode;
+            if (dir == PacketDirection.Inbound && op == 0x00A5)
+            {
+                var ev = ClientChatEventRecord.TryExtract(p.Payload.Span);
+                if (ev is not { } e) return;
+                // Status-only events (LOGGED_IN / ALL_STATUS / friend
+                // presence) carry no message body -- not chat, skip them.
+                if (string.IsNullOrEmpty(e.Message)) return;
+                string channel = string.IsNullOrEmpty(e.Channel) ? "chat" : e.Channel;
+                string sender = string.IsNullOrEmpty(e.Sender) ? "?" : e.Sender;
+                WriteChatLine(channel, sender, e.Message, incoming: true);
+            }
+            else if (dir == PacketDirection.Outbound && op == 0x0033)
+            {
+                if (new ClientChatCodec().DecodeInbound(p.Payload.Span) is not ClientChatMessage m)
+                    return;
+                var (channel, text) = InterpretOutbound(m.Type, m.Message);
+                WriteChatLine(channel, "you", text, incoming: false);
+            }
+        }
+        catch
+        {
+            // Best-effort: chat echo is a convenience, never a failure point.
+        }
+    }
+
+    /// <summary>
+    /// Map an outbound <see cref="ClientChatMessage"/> to a (channel, text)
+    /// pair for display. A leading '/' is a slash command -- surface the
+    /// recognised channel words (gm/dev/beta) as their channel with the
+    /// '/word ' prefix stripped; other slash commands show as "cmd".
+    /// </summary>
+    private static (string Channel, string Text) InterpretOutbound(ChatChannel type, string message)
+    {
+        if (message.StartsWith('/'))
+        {
+            int sp = message.IndexOf(' ');
+            string word = (sp < 0 ? message[1..] : message[1..sp]).ToLowerInvariant();
+            string rest = sp < 0 ? string.Empty : message[(sp + 1)..];
+            return word switch
+            {
+                "gm" or "dev" or "beta" => (word, rest),
+                _ => ("cmd", message),
+            };
+        }
+
+        string channel = type switch
+        {
+            ChatChannel.Target    => "whisper",
+            ChatChannel.Group     => "group",
+            ChatChannel.Guild     => "guild",
+            ChatChannel.Local     => "local",
+            ChatChannel.Broadcast => "sector",
+            _ => "chat",
+        };
+        return (channel, message);
+    }
+
+    private void WriteChatLine(string channel, string sender, string message, bool incoming)
+    {
+        string arrow = incoming ? "<--" : "-->";
+        string line = $"{arrow} [{channel}] {sender}: {message}";
+        string colored = AnsiPalette.Colorize(
+            incoming ? AnsiPalette.Green : AnsiPalette.BrightCyan, line);
+        lock (_chatGate)
+        {
+            ChatOutput.WriteLine(colored);
+            ChatOutput.Flush();
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
-        await StopDumpDrainAsync().ConfigureAwait(false);
+        await StopSectorDrainAsync().ConfigureAwait(false);
         if (_sector is not null) { DetachDumpHook(_sector); await _sector.DisposeAsync(); _sector = null; }
         if (_global is not null) { DetachDumpHook(_global); await _global.DisposeAsync(); _global = null; }
     }

@@ -30,6 +30,21 @@ public interface ICommandHandler
     /// <summary>Multi-line detailed usage, shown by <c>help &lt;name&gt;</c>.</summary>
     string Usage { get; }
 
+    /// <summary>
+    /// Whether this command is usable in the current session state. Drives
+    /// the interactive completer -- unavailable commands are hidden from the
+    /// grey suggestion list. Defaults to always-available; stateful commands
+    /// (login needs a connection, chat needs a sector, ...) override it.
+    /// </summary>
+    bool Available => true;
+
+    /// <summary>
+    /// Grey ghost-text hint for this command's arguments, shown after the
+    /// command word once it is complete (e.g. connect → <c>&lt;ip:127.0.0.1&gt;</c>).
+    /// Null when the command takes no arguments.
+    /// </summary>
+    string? Placeholder => null;
+
     /// <summary>Execute the command. Returns an exit-style int (see interface remarks).</summary>
     Task<int> ExecuteAsync(
         IReadOnlyList<string> args,

@@ -23,6 +23,7 @@ public sealed class ConnectCommand : ICommandHandler
 
     public string Name    => "connect";
     public string Summary => "set host[:auth-port] and probe TCP";
+    public string? Placeholder => "<ip:127.0.0.1>";
     public string Usage   =>
         "connect <host>[:auth-port]\n" +
         "  default auth-port: 4443 (docker dev stack)\n" +
@@ -69,6 +70,7 @@ public sealed class ConnectCommand : ICommandHandler
         {
             using var tcp = new TcpClient();
             await tcp.ConnectAsync(_ctx.Host, _ctx.AuthPort, ct).ConfigureAwait(false);
+            _ctx.Connected = true;
             await output.WriteLineAsync(
                 $"probe: {_ctx.Host}:{_ctx.AuthPort} accepting TCP").ConfigureAwait(false);
             return 0;

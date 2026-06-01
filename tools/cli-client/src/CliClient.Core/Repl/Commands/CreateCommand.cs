@@ -28,6 +28,10 @@ public sealed class CreateCommand : ICommandHandler
         "    professions:  W=Warrior T=Trader   E=Explorer\n" +
         "  example: create JE Griever\n" +
         "  example: create character JE Griever";
+    public string? Placeholder => "<class> <firstname>";
+
+    // Available once logged in.
+    public bool Available => _ctx.Global is not null && _ctx.AvatarList is not null;
 
     public async Task<int> ExecuteAsync(
         IReadOnlyList<string> args, TextWriter output, CancellationToken ct)

@@ -30,17 +30,19 @@ public sealed class Repl
     private readonly Dictionary<string, ICommandHandler> _commands =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly string _prompt;
+    private readonly ILineInput? _lineInput;
 
-    public Repl(string prompt = "> ")
+    public Repl(string prompt = "> ", ILineInput? lineInput = null)
     {
         ArgumentNullException.ThrowIfNull(prompt);
         _prompt = prompt;
+        _lineInput = lineInput;
         Register(new HelpCommand(this));
         var quit = new QuitCommand();
         Register(quit);
-        // `exit` is a hard-wired synonym for `quit`. Same instance under
-        // both keys so help only lists it once (Register filters by
-        // handler.Name, which is "quit").
+        // `exit` is a hard-wired synonym for `quit`: the same handler
+        // instance under a second key. `Commands` dedupes by Name so help
+        // lists it once; `Find("exit")` still resolves it.
         _commands["exit"] = quit;
     }
 
@@ -57,8 +59,16 @@ public sealed class Repl
     }
 
     /// <summary>The set of registered commands, sorted by name (snapshot).</summary>
+    /// <remarks>
+    /// Deduped by <see cref="ICommandHandler.Name"/>: aliases that point the
+    /// same handler at a second key (e.g. <c>exit</c> → the <c>quit</c>
+    /// handler) live in <c>_commands</c> twice but must list once.
+    /// </remarks>
     public IReadOnlyList<ICommandHandler> Commands
-        => _commands.Values.OrderBy(h => h.Name, StringComparer.OrdinalIgnoreCase).ToArray();
+        => _commands.Values
+            .DistinctBy(h => h.Name, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(h => h.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
 
     /// <summary>Look up a handler by name, or null if not registered.</summary>
     public ICommandHandler? Find(string name)
@@ -80,10 +90,20 @@ public sealed class Repl
         int lastExit = 0;
         while (!ct.IsCancellationRequested)
         {
-            await output.WriteAsync(_prompt).ConfigureAwait(false);
-            await output.FlushAsync(ct).ConfigureAwait(false);
-
-            string? line = await input.ReadLineAsync(ct).ConfigureAwait(false);
+            string? line;
+            if (_lineInput is not null)
+            {
+                // The line editor writes its own prompt (and may run an
+                // interactive completer or fall back to ReadLine itself).
+                line = await _lineInput.ReadLineAsync(_prompt, input, output, ct)
+                    .ConfigureAwait(false);
+            }
+            else
+            {
+                await output.WriteAsync(_prompt).ConfigureAwait(false);
+                await output.FlushAsync(ct).ConfigureAwait(false);
+                line = await input.ReadLineAsync(ct).ConfigureAwait(false);
+            }
             if (line is null) return lastExit; // EOF
 
             line = line.Trim();
@@ -192,8 +212,8 @@ public sealed class Repl
     private sealed class QuitCommand : ICommandHandler
     {
         public string Name    => "quit";
-        public string Summary => "exit the REPL";
-        public string Usage   => "quit";
+        public string Summary => "exit the REPL (alias: exit)";
+        public string Usage   => "quit  (alias: exit)";
 
         public Task<int> ExecuteAsync(
             IReadOnlyList<string> args, TextWriter output, CancellationToken ct)

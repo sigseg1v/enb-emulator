@@ -165,6 +165,35 @@ public sealed class ReplTests
     }
 
     [Fact]
+    public void Commands_DedupesAliasedHandler_QuitListedOnce()
+    {
+        // `quit` and `exit` are the same handler under two keys; the help
+        // listing must show it once.
+        var repl = new N7.CliClient.Repl.Repl();
+        int quitCount = repl.Commands.Count(h =>
+            string.Equals(h.Name, "quit", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(1, quitCount);
+    }
+
+    [Fact]
+    public async Task Run_Help_ListsQuitOnce()
+    {
+        var repl = new N7.CliClient.Repl.Repl();
+        var input  = new StringReader("help\nquit\n");
+        var output = new StringWriter();
+        await repl.RunAsync(input, output);
+
+        // Count lines that introduce the quit command in the listing
+        // ("  quit         exit the REPL"). The trailing "quit\n" input
+        // line is echoed by the prompt, not the listing, so anchor on the
+        // two-space indent the help body uses.
+        int listed = output.ToString()
+            .Split('\n')
+            .Count(l => l.TrimEnd().StartsWith("  quit", StringComparison.Ordinal));
+        Assert.Equal(1, listed);
+    }
+
+    [Fact]
     public void Register_Null_Throws()
     {
         var repl = new N7.CliClient.Repl.Repl();

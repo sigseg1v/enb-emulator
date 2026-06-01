@@ -705,3 +705,51 @@ Phase S is done when:
 - GUI / TUI (this is a CLI; a TUI is a follow-up)
 - Multi-account orchestration (one connection at a time; multi-instance is a follow-up)
 - Server-side instrumentation (rule 1 — do not modify the server)
+
+## Continuation (2026-06-01): interactive REPL UX + in-sector observability
+
+Driven by live-play feedback. All client-side; NO server change.
+
+- [x] Chat echo by default. Inbound 0x00A5 CLIENT_CHAT_EVENT and outbound
+      0x0033 CLIENT_CHAT now print a one-line `<-- [channel] sender: msg` /
+      `--> [channel] you: msg` at the prompt regardless of dump-on (previously
+      only visible under dump-on). The sector drain that feeds the hooks is
+      now always-on post-`enter` (was dump-on-only), started by `enter` AFTER
+      its foreground drain window so it doesn't race the single-reader socket.
+      `dump-off` no longer cancels the drain. Files: `Repl/SessionContext.cs`
+      (EchoChat/InterpretOutbound/WriteChatLine; StartDumpDrain→StartSectorDrain;
+      setter no longer auto-starts), `Logging/ConsoleSink.cs` (reused),
+      `Opcodes/Records/ClientChatEventRecord.cs` (+TryExtract/ChatEvent),
+      `Repl/Commands/Dump{On,Off}Command.cs`, `Repl/Commands/EnterCommand.cs`.
+- [x] `chat [sector|gm|dev|beta|whisper] <message>` command (default sector).
+      Faithful to `Player::HandleClientChat`: sector→Type 4, whisper→Type 0,
+      gm/dev/beta→slash-command text (`/gm …`) which the server routes via
+      `ChatSendChannel` and gates on admin level — the CLI does NOT bypass that
+      gate. Files: `Repl/Commands/ChatCommand.cs`, registered in `Program.cs`.
+- [x] `quit`/`exit` alias surfaced. `Commands` now DistinctBy(Name) so `help`
+      lists `quit` once (was twice); summary reads "exit the REPL (alias: exit)".
+      File: `Repl/Repl.cs`.
+- [x] zsh-style interactive line editor (`Repl/LineEditor.cs`, `Repl/Completion.cs`,
+      `ILineInput`). Context-aware grey command suggestions (only commands whose
+      `ICommandHandler.Available` is true in the current state), Tab/Shift-Tab
+      menu cycling, Enter to pick, grey argument placeholder
+      (`ICommandHandler.Placeholder`) once a command is chosen. Falls back to
+      plain ReadLine when stdin/stdout is not a TTY (tests + `just *-replay`
+      keep working). Availability wired: connect/help/quit/dump-on always;
+      dump-off when dumping; login after connect; list/create/enter after login;
+      chat in-sector. `SessionContext.Connected` flag added.
+- [x] In-sector world model (`Repl/SectorWorld.cs`) fed by the always-on drain:
+      ingests 0x0004 create, 0x0007 remove, 0x0008/0x0040/0x003E positions,
+      0x0061 avatar names, 0x2018 static/nav create (name+pos+signature), 0x0099
+      navigation (navType+visited). `enter`'s arrival summary and a now
+      context-aware `list` (in-sector → nearby; else → cached characters) print
+      per-object kind (English), name, distance, and own position to 4 d.p.
+      Level is reported as unknown (`-`): it is not carried in any object frame
+      (arrives via RPGInfo aux) — not guessed.
+      Tests: +18 unit tests (CompletionTests, SectorWorldTests, LineEditorTests,
+      ChatCommandTests, ClientChatEventExtractTests, ReplTests dedup); suite
+      216→234, all green.
+- [ ] Follow-ups noted, not done: mob/avatar level once an RPGInfo-aux decode
+      lands; CLI movement (position-update send) to drive proximity nav
+      exposure server-side; cross-thread redraw so async chat lines don't
+      interleave the prompt mid-edit.

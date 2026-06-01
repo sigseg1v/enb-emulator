@@ -32,13 +32,14 @@ public sealed class DumpOnCommand : ICommandHandler
         _ctx.DumpOutput = output;
         _ctx.DumpEnabled = true;
 
-        // Sector-only drain (see SessionContext.StartDumpDrain). On the
+        // Sector-only drain (see SessionContext.StartSectorDrain). On the
         // global connection a parallel drain would race the command-
         // driven ReceiveAsync calls in login / list / enter and eat
         // bytes the command was waiting on; instead we rely on the
         // PacketSent / PacketReceived events firing from those
-        // command-owned loops directly.
-        _ctx.StartDumpDrain();
+        // command-owned loops directly. Usually a no-op: `enter` already
+        // starts the drain so chat echoes without dump-on.
+        _ctx.StartSectorDrain();
 
         string where = _ctx.Sector is not null ? "sector (background drain active)"
                      : _ctx.Global is not null ? "global (via command-driven receives -- no background drain)"

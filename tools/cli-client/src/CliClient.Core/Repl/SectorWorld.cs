@@ -1,0 +1,300 @@
+// SPDX-License-Identifier: CC-BY-NC-SA-3.0
+// Part of the Earth & Beyond emulator preservation project.
+// License: LICENSES/enb-emulator
+
+using System.Buffers.Binary;
+using System.Globalization;
+using System.Text;
+using N7.CliClient.Net;
+
+namespace N7.CliClient.Repl;
+
+/// <summary>
+/// A running model of what the server has told us is in the current
+/// sector, accumulated from the inbound frame stream. Fed by
+/// <see cref="SessionContext"/>'s packet hook; read by <c>enter</c>'s
+/// arrival summary and the in-sector <c>list</c> command.
+/// </summary>
+/// <remarks>
+/// Decodes the frames whose layout is pinned and stable:
+/// 0x0004 CREATE, 0x0007 REMOVE, 0x0008/0x0040/0x003E positional updates,
+/// 0x0061 AVATAR_DESCRIPTION (names + avatar flag), 0x2018
+/// STATIC_OBJECT_CREATE (nav/station/gate names + signature), and 0x0099
+/// NAVIGATION (nav-list membership + visited flag). Level is not present in
+/// any of these frames -- it arrives via RPGInfo aux -- so it is reported
+/// as unknown rather than guessed. Thread-safe: the background sector
+/// drain ingests while the REPL thread renders.
+/// </remarks>
+public sealed class SectorWorld
+{
+    public sealed class Tracked
+    {
+        public int GameId;
+        public int? CreateType;     // server create-type byte (0x0004 / 0x2018)
+        public short? BaseAsset;
+        public string? Name;
+        public bool IsAvatar;       // saw a 0x0061 AVATAR_DESCRIPTION
+        public bool IsNav;          // saw a 0x0099 NAVIGATION entry
+        public int? NavType;        // 1 = minor nav, 2 = major nav
+        public float? Signature;
+        public bool? Visited;
+        public bool HasPos;
+        public float X, Y, Z;
+    }
+
+    private readonly object _gate = new();
+    private readonly Dictionary<int, Tracked> _objects = new();
+
+    /// <summary>Drop all tracked state (called on entering a new sector).</summary>
+    public void Reset()
+    {
+        lock (_gate) _objects.Clear();
+    }
+
+    /// <summary>Number of tracked objects.</summary>
+    public int Count { get { lock (_gate) return _objects.Count; } }
+
+    private Tracked GetOrAdd(int gameId)
+    {
+        if (!_objects.TryGetValue(gameId, out var t))
+        {
+            t = new Tracked { GameId = gameId };
+            _objects[gameId] = t;
+        }
+        return t;
+    }
+
+    /// <summary>Update the model from one inbound frame. Never throws.</summary>
+    public void Ingest(Packet p)
+    {
+        try
+        {
+            var s = p.Payload.Span;
+            lock (_gate)
+            {
+                switch (p.Header.Opcode)
+                {
+                    case 0x0004: IngestCreate(s); break;
+                    case 0x2018: IngestStatic(s); break;
+                    case 0x0007: IngestRemove(s); break;
+                    case 0x0008: IngestSimplePos(s); break;
+                    case 0x0040: IngestConstantPos(s); break;
+                    case 0x003E: IngestAdvancedPos(s); break;
+                    case 0x0061: IngestAvatar(s); break;
+                    case 0x0099: IngestNavigation(s); break;
+                }
+            }
+        }
+        catch
+        {
+            // Best-effort: a malformed frame must not kill the drain.
+        }
+    }
+
+    private void IngestCreate(ReadOnlySpan<byte> s)
+    {
+        if (s.Length < 11) return;
+        int gameId = BinaryPrimitives.ReadInt32LittleEndian(s[..4]);
+        var t = GetOrAdd(gameId);
+        t.BaseAsset = BinaryPrimitives.ReadInt16LittleEndian(s.Slice(8, 2));
+        t.CreateType = (sbyte)s[10];
+    }
+
+    private void IngestStatic(ReadOnlySpan<byte> s)
+    {
+        // 0x2018 StaticMap::FormStaticPacket layout: GameID@0, CreateType u8@4,
+        // BaseAsset i16@5, Scale@7, HSV@11/15/19, relationship@23, posType@24,
+        // PosX@25, PosY@29, PosZ@33, orient[4]@37, Signature@53, sig_flags@57,
+        // then AddDataLS Name@58 (u16 len + chars, no NUL).
+        if (s.Length < 58) return;
+        int gameId = BinaryPrimitives.ReadInt32LittleEndian(s[..4]);
+        var t = GetOrAdd(gameId);
+        t.CreateType = s[4];
+        t.BaseAsset = BinaryPrimitives.ReadInt16LittleEndian(s.Slice(5, 2));
+        t.X = BinaryPrimitives.ReadSingleLittleEndian(s.Slice(25, 4));
+        t.Y = BinaryPrimitives.ReadSingleLittleEndian(s.Slice(29, 4));
+        t.Z = BinaryPrimitives.ReadSingleLittleEndian(s.Slice(33, 4));
+        t.HasPos = true;
+        t.Signature = BinaryPrimitives.ReadSingleLittleEndian(s.Slice(53, 4));
+        if (s.Length >= 60)
+        {
+            ushort nameLen = BinaryPrimitives.ReadUInt16LittleEndian(s.Slice(58, 2));
+            if (60 + nameLen <= s.Length)
+                t.Name = Encoding.ASCII.GetString(s.Slice(60, nameLen));
+        }
+    }
+
+    private void IngestRemove(ReadOnlySpan<byte> s)
+    {
+        if (s.Length < 4) return;
+        int gameId = BinaryPrimitives.ReadInt32LittleEndian(s[..4]);
+        _objects.Remove(gameId);
+    }
+
+    private void IngestSimplePos(ReadOnlySpan<byte> s)
+    {
+        if (s.Length < 20) return;
+        int gameId = BinaryPrimitives.ReadInt32LittleEndian(s[..4]);
+        SetPos(gameId,
+            BinaryPrimitives.ReadSingleLittleEndian(s.Slice(8, 4)),
+            BinaryPrimitives.ReadSingleLittleEndian(s.Slice(12, 4)),
+            BinaryPrimitives.ReadSingleLittleEndian(s.Slice(16, 4)));
+    }
+
+    private void IngestConstantPos(ReadOnlySpan<byte> s)
+    {
+        if (s.Length < 16) return;
+        int gameId = BinaryPrimitives.ReadInt32LittleEndian(s[..4]);
+        SetPos(gameId,
+            BinaryPrimitives.ReadSingleLittleEndian(s.Slice(4, 4)),
+            BinaryPrimitives.ReadSingleLittleEndian(s.Slice(8, 4)),
+            BinaryPrimitives.ReadSingleLittleEndian(s.Slice(12, 4)));
+    }
+
+    private void IngestAdvancedPos(ReadOnlySpan<byte> s)
+    {
+        // 0x003E: int16 bitmask, then gameId@2, timestamp@6, pos@10..21.
+        if (s.Length < 42) return;
+        int gameId = BinaryPrimitives.ReadInt32LittleEndian(s.Slice(2, 4));
+        SetPos(gameId,
+            BinaryPrimitives.ReadSingleLittleEndian(s.Slice(10, 4)),
+            BinaryPrimitives.ReadSingleLittleEndian(s.Slice(14, 4)),
+            BinaryPrimitives.ReadSingleLittleEndian(s.Slice(18, 4)));
+    }
+
+    private void IngestAvatar(ReadOnlySpan<byte> s)
+    {
+        if (s.Length < 24) return;
+        int avatarId = BinaryPrimitives.ReadInt32LittleEndian(s[..4]);
+        var t = GetOrAdd(avatarId);
+        t.IsAvatar = true;
+        var nameSpan = s.Slice(4, 20);
+        int nul = nameSpan.IndexOf((byte)0);
+        if (nul < 0) nul = nameSpan.Length;
+        string name = Encoding.ASCII.GetString(nameSpan[..nul]);
+        if (name.Length > 0) t.Name = name;
+    }
+
+    private void IngestNavigation(ReadOnlySpan<byte> s)
+    {
+        if (s.Length < 14) return;
+        int gameId = BinaryPrimitives.ReadInt32LittleEndian(s[..4]);
+        var t = GetOrAdd(gameId);
+        t.IsNav = true;
+        t.Signature = BinaryPrimitives.ReadSingleLittleEndian(s.Slice(4, 4));
+        t.Visited = s[8] != 0;
+        t.NavType = BinaryPrimitives.ReadInt32LittleEndian(s.Slice(9, 4));
+    }
+
+    private void SetPos(int gameId, float x, float y, float z)
+    {
+        var t = GetOrAdd(gameId);
+        t.X = x; t.Y = y; t.Z = z; t.HasPos = true;
+    }
+
+    /// <summary>Human-readable object kind for a tracked entry.</summary>
+    public static string TypeName(Tracked t)
+    {
+        if (t.IsAvatar) return "avatar";
+        int? ct = t.CreateType;
+        string baseName = ct switch
+        {
+            0  => "mob spawn",
+            1  => "mob",
+            3  => "planet",
+            10 => "stargate",
+            11 => "stargate",
+            12 => "station",
+            37 => t.IsNav ? "nav" : "deco",
+            38 => "resource",
+            40 => "radiation",
+            41 => "gravity well",
+            42 => "turret",
+            _  => t.IsNav ? "nav" : "object",
+        };
+        if (t.IsNav && t.NavType == 2 && baseName is "nav") return "nav (major)";
+        return baseName;
+    }
+
+    /// <summary>
+    /// Snapshot the tracked objects, sorted by distance from the self
+    /// avatar (objects with no known position sort last).
+    /// </summary>
+    public IReadOnlyList<(Tracked Obj, float? Dist)> NearestTo(int selfGameId)
+    {
+        lock (_gate)
+        {
+            (float X, float Y, float Z)? self =
+                _objects.TryGetValue(selfGameId, out var me) && me.HasPos
+                    ? (me.X, me.Y, me.Z)
+                    : null;
+
+            return _objects.Values
+                .Where(o => o.GameId != selfGameId)
+                .Select(o =>
+                {
+                    float? d = (self is { } sp && o.HasPos)
+                        ? MathF.Sqrt(
+                            (o.X - sp.X) * (o.X - sp.X) +
+                            (o.Y - sp.Y) * (o.Y - sp.Y) +
+                            (o.Z - sp.Z) * (o.Z - sp.Z))
+                        : (float?)null;
+                    return (Obj: o, Dist: d);
+                })
+                .OrderBy(t => t.Dist ?? float.MaxValue)
+                .ToArray();
+        }
+    }
+
+    /// <summary>Own position if known, else null.</summary>
+    public (float X, float Y, float Z)? SelfPosition(int selfGameId)
+    {
+        lock (_gate)
+            return _objects.TryGetValue(selfGameId, out var me) && me.HasPos
+                ? (me.X, me.Y, me.Z) : null;
+    }
+
+    /// <summary>
+    /// Print the nearby summary: own position to 4 d.p. then one row per
+    /// object (kind, name, level, distance), nearest first.
+    /// </summary>
+    public void Render(TextWriter output, int selfGameId, int maxRows = 30)
+    {
+        var self = SelfPosition(selfGameId);
+        string here = self is { } sp
+            ? $"({F4(sp.X)}, {F4(sp.Y)}, {F4(sp.Z)})"
+            : "(unknown -- no positional update for self yet)";
+        output.WriteLine($"location: gameId=0x{selfGameId:X8}  pos={here}");
+
+        var rows = NearestTo(selfGameId);
+        int navs = rows.Count(r => r.Obj.IsNav);
+        int avatars = rows.Count(r => r.Obj.IsAvatar);
+        output.WriteLine(
+            $"nearby: {rows.Count} objects ({avatars} avatars, {navs} navs)  [level unknown: not in object frames]");
+
+        if (rows.Count == 0)
+        {
+            output.WriteLine("  (nothing tracked yet -- fly around or wait for the sector fanout)");
+            return;
+        }
+
+        int shown = 0;
+        foreach (var (o, dist) in rows)
+        {
+            if (shown++ >= maxRows)
+            {
+                output.WriteLine($"  ... +{rows.Count - maxRows} more");
+                break;
+            }
+            string kind = TypeName(o);
+            string name = o.Name ?? $"<gid=0x{o.GameId:X8}>";
+            string lvl = "-"; // level is not carried in any tracked frame
+            string distStr = dist is { } d ? $"d={d:0.0}" : "d=?";
+            string visited = o.IsNav ? (o.Visited == true ? " visited" : " unvisited") : "";
+            output.WriteLine(
+                $"  {kind,-12} lvl {lvl,-3} {name,-28} {distStr,-12}{visited}");
+        }
+    }
+
+    private static string F4(float v) => v.ToString("0.0000", CultureInfo.InvariantCulture);
+}

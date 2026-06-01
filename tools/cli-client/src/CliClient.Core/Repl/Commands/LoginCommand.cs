@@ -27,6 +27,10 @@ public sealed class LoginCommand : ICommandHandler
     public string Name    => "login";
     public string Summary => "TLS login + global channel + show characters";
     public string Usage   => "login <user> <pass>";
+    public string? Placeholder => "<user> <pass>";
+
+    // Offered once `connect` has probed a reachable endpoint.
+    public bool Available => _ctx.Connected && _ctx.Global is null;
 
     public async Task<int> ExecuteAsync(
         IReadOnlyList<string> args, TextWriter output, CancellationToken ct)
