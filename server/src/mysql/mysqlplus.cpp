@@ -24,6 +24,8 @@
 #include <stdlib.h>
 #include <stdexcept>
 #include <string>
+#include <map>
+#include <vector>
 #include <pqxx/pqxx>
 
 ///////////////////////////////////////////////////////////////////////////////////////
@@ -33,11 +35,21 @@ struct net7_db_handle {
     pqxx::connection *conn;
     std::string       last_error;
     unsigned int      last_errno;
+    // OID -> relname cache for compound "table.field" row lookups (see
+    // resolve_column_tables). OIDs are stable for the life of a database and
+    // a handle is checked out exclusively by one query at a time, so this
+    // needs no extra lock beyond the pool's busy flag.
+    std::map<unsigned int, std::string> table_names;
 };
 
 struct net7_result_holder {
     pqxx::result      result;
     my_ulonglong      affected_rows;   // for INSERT/UPDATE/DELETE
+    // Per-column source table name, parallel to result columns. Populated at
+    // execute() time because libpqxx only exposes the column's table as an
+    // OID; the sql_row_c compound-name lookup needs the name. "" for computed
+    // columns or columns not backed by a real table.
+    std::vector<std::string> column_tables;
 };
 
 // Accumulator for parameterised execute_params(). Hides pqxx::params from
@@ -335,6 +347,45 @@ sql_query_c::~sql_query_c()
 
 ///////////////////////////////////////////////////////////////////////////////////////
 
+// libpqxx exposes a result column's source table only as an OID, whereas
+// MySQL's mysql_fetch_field handed back the table NAME -- which the
+// sql_row_c::operator[](char*) compound "table.field" lookup relies on. e.g.
+// ItemBaseSQL reads "item_manufacturer_base.name" out of a
+// `SELECT * FROM item_base JOIN item_manufacturer_base` where item_base ALSO
+// has a "name" column; resolving by bare name would silently return the
+// item's name instead of the manufacturer's. Resolve each column's OID to a
+// relname via pg_class, caching per-connection. A column that is computed or
+// not backed by a real table resolves to "" and the compound lookup simply
+// will not match it -- identical to the pre-fix behaviour, never worse.
+static std::vector<std::string> resolve_column_tables(
+        net7_db_handle *db, pqxx::work &tx, const pqxx::result &r)
+{
+    const int ncols = (int) r.columns();
+    std::vector<std::string> out(ncols);
+    for (int i = 0; i < ncols; ++i)
+    {
+        pqxx::oid t = pqxx::oid_none;
+        try { t = r.column_table(i); }
+        catch (const std::exception &) { continue; }   // computed column, no table
+        if (t == pqxx::oid_none) continue;
+
+        auto it = db->table_names.find(t);
+        if (it == db->table_names.end())
+        {
+            std::string name;
+            try {
+                pqxx::result cr = tx.exec_params(
+                    "SELECT relname FROM pg_class WHERE oid = $1", t);
+                if (!cr.empty() && !cr[0][0].is_null())
+                    name = cr[0][0].c_str();
+            } catch (const std::exception &) { /* leave empty -- degrade gracefully */ }
+            it = db->table_names.emplace(t, std::move(name)).first;
+        }
+        out[i] = it->second;
+    }
+    return out;
+}
+
 int sql_query_c::execute(char *sql)
 {
     free_result();
@@ -353,10 +404,12 @@ int sql_query_c::execute(char *sql)
     try {
         pqxx::work tx(*odb->db->conn);
         pqxx::result r = tx.exec(translated);
+        std::vector<std::string> col_tables = resolve_column_tables(odb->db, tx, r);
         tx.commit();
 
         net7_result_holder *holder = new net7_result_holder;
         holder->affected_rows = r.affected_rows();
+        holder->column_tables = std::move(col_tables);
         holder->result = std::move(r);
         res = holder;
         last_affected = holder->affected_rows;
@@ -456,10 +509,12 @@ int sql_query_c::execute_params(const char *sql)
         pqxx::result r = params
             ? tx.exec_params(translated, params->p)
             : tx.exec(translated);
+        std::vector<std::string> col_tables = resolve_column_tables(odb->db, tx, r);
         tx.commit();
 
         net7_result_holder *holder = new net7_result_holder;
         holder->affected_rows = r.affected_rows();
+        holder->column_tables = std::move(col_tables);
         holder->result = std::move(r);
         res = holder;
         last_affected = holder->affected_rows;
@@ -780,13 +835,13 @@ char * sql_result_c::field(int index)
 
 char * sql_result_c::table(int index)
 {
-    // libpqxx does not surface per-column table names without a round-trip
-    // to pg_class (column_table returns an oid). Legacy callers only use
-    // this in the row[char*] compound-name fallback path; returning the
-    // empty string keeps that path safe (compound "" "." field_name will
-    // not match any user-provided name).
-    (void)index;
-    return (char *)"";
+    // Per-column source table name, resolved at execute() time (libpqxx only
+    // exposes the column's table as an OID). Used by the row[char*]
+    // compound-name lookup ("table.field"). "" when the column is not backed
+    // by a real table or could not be resolved.
+    if (!res || index < 0 || index >= (int) res->column_tables.size())
+        return (char *)"";
+    return const_cast<char *>(res->column_tables[index].c_str());
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
