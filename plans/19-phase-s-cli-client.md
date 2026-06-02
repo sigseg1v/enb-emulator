@@ -1336,3 +1336,37 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       nested sub-objects) are the likely next grounded step but are deferred --
       high mis-decode surface, low payoff for a debug-annotation view, and best
       validated interactively rather than autonomously.
+
+- [x] Captures-to-CLI decode-quality audit across the WHOLE corpus (99,804
+      complete frames, all opcodes), not just one opcode. Per-opcode gap survey:
+      every opcode without a dedicated record falls to GenericRecord (whole-body
+      hexdump -- expected, not a gap). Among dedicated records only six gap at
+      all, and after investigation only honest gaps remain:
+      * 0x97 GalaxyMap: 216/243 frames are retail nav-detail subtypes (Type
+        3/5/6/7/8/9) our server never emits. Tested every 4-byte alignment of the
+        post-name block across all 216 frames: no single rigid layout fits (Type
+        6: 48/57 "messy", Type 9: 109/134) because the trailing float blocks are
+        BYTE-misaligned (a `00 00 80 3F` == 1.0 sits at a 1-byte offset), implying
+        an odd-sized or variable sub-field the captures alone cannot resolve. The
+        decoder already does the right thing: header + verifiable Name, numeric
+        block left as honest hex. The 88.9% gap is honest, NOT a defect. Modeling
+        it would fabricate the exact layout it cannot verify (the ItemBase trap).
+      * 0x25 ItemBase: 466/467 frames decode with exact full byte consumption.
+        The 1 `[!]`-flagged frame is a single-byte-corrupted duplicate of an
+        otherwise-clean item (template 0x043E appears twice -- one copy ends
+        `00 00`, the other `00 31`; the `31` is a capture seam artifact). The
+        decoder CORRECTLY flags the corrupt frame as a desync -- working as
+        intended, not a bug. The 36 `????` "gaps" are intentional placeholders
+        for field IDs 0x00 and 0x1E, which have no authoritative friendly name in
+        server source or docs; inventing one would be fabrication, so they stay.
+        Net: ItemBase decoding is solid; nothing to fix. Grounded in
+        PacketMethods.h AddDataLS (`[short strlen][bytes]`, and NULL -> emit
+        nothing -- a latent decoder edge case with no corpus witness, so left
+        un-handled per the no-speculation rule).
+- [x] Closed the one real ItemBase test-comprehensiveness gap surfaced by the
+      audit: the ReadEffect substructure (the decoder's most intricate path) had
+      NO capture-pinned coverage -- all three prior fixtures carry zero effects.
+      Added `itembase_ward_of_muck` (capture_1.rar #260, 2 equippable effects)
+      and a content-pinning test for both effects' strings, the BE-float DescVars
+      (5460.0, 27.5), flags, the 16-byte filler, and the honest `????` field
+      0x1E. Commit 2eebc361. Suite 347->348.
