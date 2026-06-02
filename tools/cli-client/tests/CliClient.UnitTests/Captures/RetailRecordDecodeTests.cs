@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllTwentyFrames()
+    public void Fixture_Loads_AllTwentyTwoFrames()
     {
-        Assert.Equal(20, Frames.Count);
+        Assert.Equal(22, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -73,6 +73,10 @@ public sealed class RetailRecordDecodeTests
         Assert.Equal(115, Frames["serverhandoff_friendship7_to_glenn"].Payload.Length);
         Assert.Equal(0x3A, Frames["serverhandoff_glenn_to_asteroidbelt"].Opcode);
         Assert.Equal(135, Frames["serverhandoff_glenn_to_asteroidbelt"].Payload.Length);
+        Assert.Equal(0x36, Frames["serverredirect_to_glenn"].Opcode);
+        Assert.Equal(10, Frames["serverredirect_to_glenn"].Payload.Length);
+        Assert.Equal(0x36, Frames["serverredirect_to_asteroidbelt"].Opcode);
+        Assert.Equal(10, Frames["serverredirect_to_asteroidbelt"].Payload.Length);
     }
 
     // ── ItemBase 0x25 ────────────────────────────────────────────────────────
@@ -617,5 +621,63 @@ public sealed class RetailRecordDecodeTests
             d);
         // The surrounding fields are untouched by the ticket edit.
         Assert.Contains("ToSector          = \"Glenn\"", d);
+    }
+
+    // ── ServerRedirect 0x36 ──────────────────────────────────────────────────
+    // The Client_Redirect that immediately follows a Server_Handoff. This is THE
+    // packet whose ntohl byte-order bug shipped a real client crash (the proxy
+    // ServerRedirect crash). Two traps live here, both pinned below:
+    //   * SectorID is host LITTLE-endian (the OPPOSITE of ServerHandoff's BE
+    //     ToSectorID -- the same logical sector, two encodings).
+    //   * IP is network byte order; the decoder recovers the dotted quad.
+
+    [Fact]
+    public void ServerRedirect_ToGlenn_DecodesSectorIpPort()
+    {
+        string d = Dump("serverredirect_to_glenn");
+
+        Assert.Contains("SectorID          = 0x000011A3  (4515)", d);   // A3 11 00 00 LE
+        Assert.Contains("IP                = 159.153.232.99", d);       // 63 E8 99 9F net-order
+        Assert.Contains("Port              = 3500", d);                 // AC 0D LE, standard port
+        Assert.DoesNotContain("[!]", d);
+        Assert.DoesNotContain("uninitialised", d);
+    }
+
+    [Fact]
+    public void ServerRedirect_ToAsteroidBelt_DecodesNonStandardPort()
+    {
+        string d = Dump("serverredirect_to_asteroidbelt");
+
+        Assert.Contains("SectorID          = 0x00000435  (1077)", d);   // 35 04 00 00 LE
+        Assert.Contains("IP                = 159.153.232.35", d);
+        Assert.Contains("Port              = 3503", d);                 // AF 0D LE -- not 3500
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void ServerRedirect_SectorId_IsLittleEndian_OppositeOfHandoff()
+    {
+        // The regression lock for the byte-order trap. ServerRedirect's SectorID
+        // is host LE (payload[0..3]); the paired ServerHandoff's ToSectorID is BE
+        // (payload[20..23], ntohl at emit). They name the SAME sector, so reading
+        // each with its OWN convention must yield the identical id. If a future
+        // change "unifies" the two readings to one endianness, exactly one of
+        // these decodes flips to a garbage sector and this test breaks -- which is
+        // precisely the failure that crashed the client.
+        var redirect = Frames["serverredirect_to_glenn"].Payload;
+        var handoff  = Frames["serverhandoff_friendship7_to_glenn"].Payload;
+        int redirectSector = redirect[0] | redirect[1] << 8 | redirect[2] << 16 | redirect[3] << 24; // LE
+        int handoffSector  = handoff[23] | handoff[22] << 8 | handoff[21] << 16 | handoff[20] << 24;  // BE
+        Assert.Equal(4515, redirectSector);
+        Assert.Equal(4515, handoffSector);
+        Assert.Equal(handoffSector, redirectSector);
+
+        // And the same pairing for the second transition (sector 1077).
+        var redirect2 = Frames["serverredirect_to_asteroidbelt"].Payload;
+        var handoff2  = Frames["serverhandoff_glenn_to_asteroidbelt"].Payload;
+        int r2 = redirect2[0] | redirect2[1] << 8 | redirect2[2] << 16 | redirect2[3] << 24;
+        int h2 = handoff2[23] | handoff2[22] << 8 | handoff2[21] << 16 | handoff2[20] << 24;
+        Assert.Equal(1077, r2);
+        Assert.Equal(h2, r2);
     }
 }

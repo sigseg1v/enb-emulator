@@ -259,3 +259,15 @@ hex: 00 00 00 01 00 00 00 00 40 e6 04 1a 3e 22 12 01
       6d 29 0a 00 42 65 74 61 20 48 79 64 72 69 12 00
       41 73 74 65 72 6f 69 64 20 42 65 6c 74 20 42 65
       74 61 03 00 53 6f 6c
+
+[serverredirect_to_glenn]
+provenance: ServerRedirect 0x36 (Client_Redirect) -- redirect to sector 0x11A3=4515 at 159.153.232.99:3500 (capture_1.rar, Packet #656, Length=14). Follows the Server_Handoff at Packet #646 in the same transition. CROSS-VALIDATES the byte-order trap: SectorID is LITTLE-endian here (A3 11 00 00) but the paired ServerHandoff encodes the SAME sector 4515 BIG-endian (00 00 11 A3); both must decode to 4515. IP is network-order (recovered via WriteInt32BigEndian to the dotted quad).
+opcode: 0x36
+payload-bytes: 10
+hex: a3 11 00 00 63 e8 99 9f ac 0d
+
+[serverredirect_to_asteroidbelt]
+provenance: ServerRedirect 0x36 (Client_Redirect) -- redirect to sector 0x0435=1077 at 159.153.232.35:3503 (capture_1.rar, Packet #3097, Length=14). Pairs with the Server_Handoff at Packet #3086 (sector 1077 BE). Non-standard Port 3503 (0x0DAF, not the usual 3500) -- pins the LE u16 Port read.
+opcode: 0x36
+payload-bytes: 10
+hex: 35 04 00 00 23 e8 99 9f af 0d
