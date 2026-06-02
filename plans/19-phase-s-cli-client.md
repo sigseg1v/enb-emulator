@@ -1174,3 +1174,23 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       `>=1 avatars` both ways, all 4 PASS, exit 0 (non-TTY path unaffected).
       Files: `Repl/LivePrompt.cs`, `Repl/LineEditor.cs`, `Repl/SessionContext.cs`,
       `CliClient.App/Program.cs`, `tests/.../LivePromptTests.cs`.
+
+### Downstream sector-stream reassembly extracted + byte-pinned (2026-06-01)
+
+- [x] The 0x2016/0x201A continuation-stream reassembly was inline + private in
+      `SectorUdpClient` (commit 57e0a617) with NO unit coverage -- only the
+      outbound `MvasClient.BuildDatagram` was tested. Per the "strengthen shallow
+      tests" standing rule, extracted the pure wire logic into
+      `Net/SectorStreamReassembler.cs` (`Push(datagram) -> IReadOnlyList<Packet>`,
+      `Frequency`, `Aligned`). `SectorUdpClient.ProcessDatagram` is now a thin
+      socket-loop adapter that forwards each emitted frame to `_onInbound`
+      (consumer try/catch kept; `ForOpcode` proven non-throwing under the
+      `size<=65535` cap so behaviour is byte-identical).
+- [x] `SectorStreamReassemblerTests` (20): single/multi/empty-body frame emit,
+      split-frame across 0x2016->0x201A, continuation-before-alignment dropped,
+      unknown UDP opcode mid-split doesn't corrupt, 0x1007 frequency set+clamp
+      ([1,60] incl. 0->1 / 61->60 / -5->1), short-payload-leaves-default,
+      sub-12-byte datagram ignored, desync on bogus inner `size` (clears +
+      de-aligns + logs), desync still emits the good frame that preceded it,
+      desync->continuation-dropped->fresh-0x2016-realigns, and a 65535-byte
+      max-size frame that must NOT trip the desync guard. Suite 295->315.

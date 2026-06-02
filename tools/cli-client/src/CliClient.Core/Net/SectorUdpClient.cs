@@ -40,23 +40,19 @@ namespace N7.CliClient.Net;
 public sealed class SectorUdpClient : IDisposable
 {
     private const int HeaderSize = 12;
-    private const ushort PacketSequence  = 0x2016;
-    private const ushort PacketCSequence = 0x201A;
-    private const ushort ToggleSendFreq  = 0x1007;
 
     private readonly Socket _sock;
     private readonly IPEndPoint _server;
     private readonly Action<Packet> _onInbound;
     private readonly Action<string>? _log;
-    private readonly List<byte> _stream = new();
-    private bool _aligned;             // have we hit a 0x2016 frame boundary yet
+    private readonly SectorStreamReassembler _reasm;
     private int _seq;
     private int _rxDatagrams;
     private CancellationTokenSource? _cts;
     private Task? _recvTask;
 
     /// <summary>Server-suggested send rate (Hz) from 0x1007; default 20.</summary>
-    public int Frequency { get; private set; } = 20;
+    public int Frequency => _reasm.Frequency;
 
     /// <summary>Local UDP port the socket bound to (server replies here).</summary>
     public int LocalPort => ((IPEndPoint)_sock.LocalEndPoint!).Port;
@@ -67,6 +63,7 @@ public sealed class SectorUdpClient : IDisposable
         ArgumentNullException.ThrowIfNull(onInbound);
         _onInbound = onInbound;
         _log = log;
+        _reasm = new SectorStreamReassembler(log);
         IPAddress ip = IPAddress.TryParse(host, out var parsed)
             ? parsed
             : Dns.GetHostAddresses(host).First(a => a.AddressFamily == AddressFamily.InterNetwork);
@@ -118,54 +115,16 @@ public sealed class SectorUdpClient : IDisposable
     {
         if (dg.Length < HeaderSize) return;
         _rxDatagrams++;
-        ushort opcode = BinaryPrimitives.ReadUInt16LittleEndian(dg.Slice(2, 2));
         if (_rxDatagrams <= 8)
+        {
+            ushort opcode = BinaryPrimitives.ReadUInt16LittleEndian(dg.Slice(2, 2));
             _log?.Invoke($"[sector-udp] rx #{_rxDatagrams} op=0x{opcode:X4} len={dg.Length}");
-        ReadOnlySpan<byte> payload = dg[HeaderSize..];
-
-        switch (opcode)
-        {
-            case PacketSequence:
-                _aligned = true;            // 0x2016 starts on a frame boundary
-                AppendAndEmit(payload);
-                break;
-            case PacketCSequence:
-                if (_aligned) AppendAndEmit(payload);
-                break;
-            case ToggleSendFreq:
-                if (payload.Length >= 4)
-                    Frequency = Math.Clamp(BinaryPrimitives.ReadInt32LittleEndian(payload[..4]), 1, 60);
-                break;
-            default:
-                // 0x2010/0x201B/etc -- not needed for the world model.
-                break;
         }
-    }
 
-    private void AppendAndEmit(ReadOnlySpan<byte> payload)
-    {
-        foreach (byte b in payload) _stream.Add(b);
-
-        while (_stream.Count >= PacketHeader.WireSize)
+        foreach (Packet frame in _reasm.Push(dg))
         {
-            int size   = _stream[0] | (_stream[1] << 8);
-            ushort op  = (ushort)(_stream[2] | (_stream[3] << 8));
-            if (size < PacketHeader.WireSize || size > 65535)
-            {
-                // Desync (likely a dropped datagram). Resync at the next
-                // 0x2016 boundary rather than emit garbage.
-                _log?.Invoke($"[sector-udp] stream desync (size={size}); resyncing");
-                _stream.Clear();
-                _aligned = false;
-                return;
-            }
-            if (_stream.Count < size) break;
-
-            byte[] frame = new byte[size - PacketHeader.WireSize];
-            _stream.CopyTo(PacketHeader.WireSize, frame, 0, frame.Length);
-            _stream.RemoveRange(0, size);
-            try { _onInbound(Packet.ForOpcode(op, frame)); }
-            catch (Exception ex) { _log?.Invoke($"[sector-udp] ingest 0x{op:X4}: {ex.Message}"); }
+            try { _onInbound(frame); }
+            catch (Exception ex) { _log?.Invoke($"[sector-udp] ingest 0x{frame.Header.Opcode:X4}: {ex.Message}"); }
         }
     }
 
