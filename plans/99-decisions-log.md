@@ -7406,3 +7406,39 @@ server never had, with made-up combat behaviour. Both are exactly the
 absent a primary-source dump. A name-level linkage with no rate is not an
 importable gap; it is a wishlist. Recorded here so a future pass does not
 rebuild the same importer and re-derive the same rejection.
+
+## 2026-06-02: 0x001B ShipIndex divergence is a REAL gap, but BLOCKED (correcting Wave 337)
+
+The original Wave 337 entry concluded "the preservation target is the retail
+EA server, not net-7.org-2026, so the ShipIndex divergence is not our concern
+-- server stays as-is." That reasoning was WRONG and is hereby superseded. The
+2026-06-02 captures are of the live net7 server talking to the REAL retail
+Win32 client, and that client rendered the ships. The retail client is the
+same client this project targets; a byte stream it accepts is precisely the
+CLAUDE.md primary-source escape hatch ("a reproducible trace from a Win32
+client ... with byte-level agreement"). Matching the capture is the fidelity
+goal, not a violation. So this IS a server gap worth closing.
+
+What is NOT changing, and why: a CORRECT fix is blocked on missing
+information, proven (not asserted). The divergent frames are mostly NPC-create
+packets (low GameIDs -- "Craxel", "Juuona Master", "Love Bug": station NPCs,
+template-identical except Name). Their flag block is 15 bytes wide (extended),
+but running those bytes through our 58-field _ShipIndex model with the
+extended present-bit rule produces garbage values (IsOrganic='H',
+CombatLevel=2.6 billion) and leaves 16 bytes over. That proves net-7.org's
+NPC-create layout differs in field gating/order/types, not merely "our fields
+plus extras." The constant preamble `C3 00 AE 40 F8 C0 07` and the constant
+`AC 48 AF 1F A9 9F 43 37` block are real per-entity data whose semantics the
+bytes alone do not reveal. Hardcoding captured bytes would emit constant wrong
+data for every entity and is exactly the guess the integrity rule forbids.
+
+DECISION: server unchanged THIS pass; Wave 337 reopened to `[~]` (real gap,
+blocked). Unblock requires EITHER net-7.org-2026 server source (authoritative
+field defs) OR a much larger varied ShipIndex capture corpus to triangulate
+each field. Independently: capture the loopback (127.0.0.1) proxy<->client leg
+to remove the residual "maybe a newer net-7 proxy rewrites 0x001B" doubt --
+our proxy forwards it verbatim, but theirs may differ. HIGH-VALUE LEAD: the
+NPC-create preamble our BuildCreatePacket omits is a concrete candidate root
+cause for "can't see other players/NPCs in space"; the decisive test is
+pointing the retail client at OUR server and watching whether station NPCs
+render.
