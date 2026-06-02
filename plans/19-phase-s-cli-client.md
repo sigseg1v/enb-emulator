@@ -1428,9 +1428,27 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       0x06EE13DE big-endian while Create stores it LE -- now SIX decoders agree on
       that object's id across mixed endianness (CrossOpcode_Object06EE13DE). Commit
       0d9fae9f. Suite 384->392.
-- [ ] Long-tail records still unpinned (all <=10 frames in capture_1, lower
-      value/higher edge-case risk): 0x05 Start, 0x08 SimplePos, 0x37 ClientAvatar,
-      0x3C ClientType, 0x3F PlanetPos, 0x42 ServerParameters, 0x47 ClientShip,
-      0x4F StarbaseSet, 0x7F ManufactureSetManufactureId. Zero in capture_1 (may
-      be in other captures): 0x52 LoungeNpc, 0x6F GlobalTicket, 0xD0
-      GuildMessageSector. Pin the ones that decode a real frame cleanly.
+- [x] Long-tail records (batch 5): pinned 17 byte-exact capture_1 fixtures + 17
+      content tests for 0x05 Start, 0x08 SimplePos, 0x37 ClientAvatar, 0x3C
+      ClientType, 0x3F PlanetPos, 0x42 ServerParameters, 0x47 ClientShip, 0x4F
+      StarbaseSet, 0x7F ManufactureSetManufactureId. All decode with zero (NB)
+      gaps. Two doc/field-note corrections (no behaviour change):
+      (a) StartRecord 0x05 -- capture disproves both the old "= player GameID"
+      note and a wrong intra-session "CharacterID" edit: StartID varies per
+      sector entry within ONE single-character session (10069/8865/3126/...) with
+      no PLAYER_TAG, so it is the client's sector-ASSIGNED in-sector avatar id
+      (same 10069 keys GalaxyMap 0x97 #351 / skill-list 0xA3 #550 / 0x4E #638).
+      Our server emits CharacterID(); retail used a sector-local id (id-allocation
+      difference, not wire-format -- noted in decisions log).
+      (b) ManufactureSet 0x7F -- documented the LE-with-tag-bits byte-order pin.
+      Cross-opcode pins: ClientAvatar #370 == ClientShip #370 == 0x06EE13DE; and
+      ServerParameters.SectorNum agrees with ServerHandoff ToSectorID + Server
+      Redirect SectorID per transition (Glenn 4515, Asteroid Belt 1077). PlanetPos
+      orbit fields are zero in ALL 33 0x3F frames across capture_1/2/3 (orbit is
+      client-side) -- pinned with a labelled synthetic frame. Commit a40dc3a7.
+      Suite 392->409.
+- [ ] Long-tail records with ZERO frames in capture_1 (need other captures):
+      0x52 LoungeNpc, 0x6F GlobalTicket, 0xD0 GuildMessageSector. Defer until a
+      capture containing them is located. AuxMobIndex/AuxHulkIndex 0x1B version-1
+      diff tails also remain deferred (high mis-decode surface, validate
+      interactively).

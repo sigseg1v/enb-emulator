@@ -7045,3 +7045,38 @@ The wiki JSONL is a **name-level near-duplicate in an incompatible form**: nav c
 **Deferred opt-in.** If we later want wiki lore/aliases for tooling (search, an editor's autocomplete), the safe shape is separate `wiki_*` reference tables that the server never reads -- never the authoritative runtime tables. Not built; would need an explicit ask.
 
 Alternatives considered: (a) inject with synth ids >= 100000 like Y1 -- rejected, because unlike NPCs these categories are NOT sparse in the runtime, so every injected row is a duplicate-at-wrong-coords, not a gap-fill; (b) overwrite runtime rows from wiki -- rejected outright, destroys the authoritative asset/faction/XML data.
+
+---
+
+## 2026-06-01 -- 0x05 START carries a sector-assigned avatar id, not the CharacterID; do NOT byte-diff its value against retail
+
+**Context.** While pinning long-tail record decoders against capture_1 (CLI
+decode-sweep batch 5, commit a40dc3a7), the 0x05 START payload value was found to
+VARY across sector entries within one continuous single-character session: 10069
+(Friendship 7), 8865 (Glenn), 3126, 8873, 2920, ... -- all small positive int32s
+with no PLAYER_TAG bit.
+
+**Finding.** It is neither the constant CharacterID (8865 read as `account*5 +
+slot + 1` would belong to a different account than 10069 -- impossible for one
+character) nor the PLAYER_TAG'd GameID (no tag bits). It is the client's
+sector-ASSIGNED in-sector avatar object id: the same 10069 leads the GalaxyMap
+(0x97 #351), the avatar skill/faction list (0xA3 #550, the class strings
+Jenquai/Progen/Explorer/Warrior/Trader/Sentinel/Defender/Enforcer) and the
+StarbaseSet-list (0x4E #638) in the first sector. The client adopts START's value
+as its self-id and the sector server keys every avatar-scoped packet to it.
+
+**Decision.** Decode 0x05 as a bare LE int32. Do NOT attempt to make our START
+value match the retail capture's specific number: our server emits
+`SendStart(player->CharacterID())` (PlayerConnection.cpp:1079), retail used a
+sector-local id. This is an id-ALLOCATION difference, not a wire-format one --
+the protocol is indifferent to the specific value so long as the server uses it
+consistently for the avatar's packets, which ours does. A future capture-replay
+that byte-diffs START will see a value mismatch; that is expected and is NOT a
+bug. No server change is warranted (and none is permitted without a primary
+source proving retail's allocation scheme, which we do not have).
+
+**Server-integrity note.** This is the accuracy-half question, not the
+security-half: our server does not diverge in any way the client can observe as
+wrong (the client just uses whatever id START hands it). If a future need arises
+to replay retail captures byte-exactly through our server, that is the tooling's
+problem to stub the id, not grounds to change the server's id allocation.
