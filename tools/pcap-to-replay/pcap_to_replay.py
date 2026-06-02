@@ -35,8 +35,13 @@
 #
 #   Inner bundle:
 #     [length:uint16 LE] [opcode:uint16 LE] [payload:(length-4) bytes]
-#     Only opcodes in 0x0001..0x0FFE are game-protocol and are emitted.
-#     Auth/launcher opcodes (0x2016, 0x201A, etc.) are skipped.
+#     Every inner bundle is a game-protocol opcode and is emitted, including
+#     the object-create / login opcodes that live above 0x0FFE
+#     (0x2018 STATIC_OBJECT_CREATE, 0x2019 RESOURCE_OBJECT_CREATE,
+#     0x2020 LOGIN_STAGE_S_C, 0x2025, 0x2011 ...). Only the UDP-transport
+#     framing opcodes (0x2016 PACKET_SEQUENCE, 0x201A PACKET_C_SEQUENCE)
+#     and the 0x0000 padding sentinel are skipped -- those are never a
+#     game payload and only appear here as reassembly artifacts.
 #
 #   ENBREPLAY frame format:
 #     [opcode:uint16 LE] [payload_len:uint32 LE] [payload bytes]
@@ -93,7 +98,8 @@ def decode_inner_bundles(inner: bytes):
         if length < 4 or idx + length > len(inner):
             break
         payload = inner[idx + 4 : idx + length]
-        if 0x0001 <= opcode <= 0x0FFE:
+        # Skip only UDP-transport framing / padding -- never a game payload.
+        if opcode not in (0x0000, 0x2016, 0x201A):
             yield opcode, payload
         idx += length
 
