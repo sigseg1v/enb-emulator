@@ -308,8 +308,32 @@ public static class SectorEnterDriver
                 if (span.Length >= 8)
                     errCode = BinaryPrimitives.ReadInt32BigEndian(span.Slice(4, 4)) - 7;
                 throw new InvalidOperationException(
-                    $"server returned GlobalError code={errCode}; expected opcode 0x{targetOpcode:X4}");
+                    $"server rejected the request: {GlobalErrorMessage(errCode)} " +
+                    $"(GlobalError code={errCode})");
             }
         }
     }
+
+    /// <summary>
+    /// A human reason for a server GlobalError code. Mirrors the server's
+    /// own G_ERROR_* enum (server/src/UDP_Global.cpp) so the REPL surfaces
+    /// "name too short" instead of a bare number; unknown codes pass through.
+    /// </summary>
+    internal static string GlobalErrorMessage(int code) => code switch
+    {
+        0  => "account banned",
+        1  => "that character name is already taken",
+        2  => "name contains invalid characters",
+        3  => "name too short (minimum 3 characters)",
+        4  => "name needs at least one vowel (a/e/i/o/u/y)",
+        5  => "name has more than 3 repeating characters",
+        6  => "character name is on the restricted list",
+        7  => "login ticket invalid or expired",
+        8  => "auth server unavailable",
+        9  => "account inactive",
+        10 => "ship name is on the restricted list",
+        11 => "server internal error",
+        12 => "server closed (stress-test gate)",
+        _  => "unknown reason",
+    };
 }

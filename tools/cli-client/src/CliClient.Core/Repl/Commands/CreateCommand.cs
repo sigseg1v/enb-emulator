@@ -68,10 +68,14 @@ public sealed class CreateCommand : ICommandHandler
         }
 
         string firstName = args[idx + 1];
-        if (firstName.Length == 0 || firstName.Length > 19)
+        // Mirror the server's hard length bound (AccountManager::CreateCharacter
+        // rejects < 3 as G_ERROR_TOO_SHORT) so an obvious miss fails instantly
+        // instead of after a round-trip. The vowel / repeating-char / forbidden
+        // rules stay server-authoritative (surfaced via the GlobalError text).
+        if (firstName.Length < 3 || firstName.Length > 19)
         {
             await output.WriteLineAsync(
-                AnsiPalette.Err("firstname must be 1-19 ASCII chars")).ConfigureAwait(false);
+                AnsiPalette.Err("firstname must be 3-19 ASCII chars")).ConfigureAwait(false);
             return 1;
         }
 

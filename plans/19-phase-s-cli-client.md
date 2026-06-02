@@ -1082,3 +1082,26 @@ Live-play request: "right arrow key should pick the option we are tabbing to".
       (`RightArrow` case + `TryAcceptInlineGhost`). Tests: +5 in `LineEditorTests`
       (menu pick fwd/after-cycle, arg-ghost accept, command-word complete,
       mid-line cursor-move regression). Suite 261->266, all green.
+
+## REPL UX: legible create-character failures (2026-06-01)
+
+Live-play report: `create TW c1` -> `create failed: server returned GlobalError
+code=3; expected opcode 0x0070`. NOT a server bug -- the server faithfully
+rejects the 2-char name "c1" with G_ERROR_TOO_SHORT=3
+(`AccountManager::CreateCharacter`, `name_len < 3`). Per the integrity rules the
+server stays as-is; the only thing wrong was that the CLI surfaced the raw enum
+number instead of a reason.
+
+- [x] `SectorEnterDriver.GlobalErrorMessage(int)` decodes the G_ERROR_* enum
+      (server/src/UDP_Global.cpp, codes 0-12) to a readable reason; the
+      GlobalError throw now reads `server rejected the request: <reason>
+      (GlobalError code=N)`. So `create TW c1` now says `name too short (minimum
+      3 characters)`. Made `internal static` and pinned by
+      `GlobalErrorMessageTests` (13 known codes + unknown fallback) so it can't
+      drift from the server enum.
+- [x] `CreateCommand` mirrors the server's hard length bound (`firstName.Length
+      < 3 || > 19`) so an obvious miss fails instantly client-side instead of
+      after a global round-trip; vowel / repeating-char / forbidden-name /
+      uniqueness rules stay server-authoritative (surfaced via the decoded text).
+      Files: `Repl/SectorEnterDriver.cs`, `Repl/Commands/CreateCommand.cs`.
+      Tests: +`GlobalErrorMessageTests`. Suite 266->281, all green.
