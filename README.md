@@ -132,7 +132,7 @@ See `docs/15-cli-client.md` for the full REPL command reference.
 Or if you want to manually dump network traffic to compare:
 
 ```bash
-ps aux | grep whatever-you-want-to-capture
+ps aux | grep -i Net7Proxy # or whatever else you want to capture
 sudo nsenter -t <PID> -n tcpdump -i any -nn -s0 -w network-capture.pcap
 ```
 

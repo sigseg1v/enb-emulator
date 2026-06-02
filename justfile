@@ -189,6 +189,17 @@ run-stack-bg: init
 # Convenience: legacy name. Same as run-stack-bg.
 dev: run-stack-bg
 
+# Rebuild the server / login / proxy images from current source and recreate
+# JUST those containers. Run this after changing C++ in server/, proxy/, or
+# login-server/. `just play-local` / `run-stack-bg` deliberately REUSE running
+# containers so a relaunch never wipes player state -- which means a plain
+# relaunch keeps serving the OLD binary until you rebuild. This is the one
+# recipe that intentionally force-recreates (and only server/login/proxy;
+# postgres + its pgdata volume are untouched).
+rebuild:
+    docker compose build proxy server login
+    docker compose up -d --force-recreate proxy server login
+
 # Bring up an interactive CLI client in its own container, paired with its own
 # dedicated proxy, against the running shared stack.
 #
@@ -221,9 +232,21 @@ play-cli UNIT='cli1':
     echo ">>> CLI unit '{{UNIT}}' -> stack network '$STACK_NETWORK'"
     echo ">>> inside the REPL:  connect cliproxy   then   login <user> <pass>"
     # `run` (not `up`) gives an interactive TTY so the line editor + colour
-    # turn on; --build keeps the image current; --rm cleans up the CLI on exit.
-    # The dedicated proxy stays up (unless-stopped) for re-runs of the same unit.
-    docker compose -f docker-compose.cli.yml -p {{UNIT}} run --rm --build cli
+    # turn on; --rm cleans up the ephemeral CLI container on exit. We REUSE
+    # the existing cli + dedicated-proxy images (no --build): relaunching a
+    # unit reuses what's already built instead of rebuilding every time. The
+    # dedicated proxy stays up (unless-stopped) for re-runs of the same unit.
+    #
+    # Changed CliClient code or the proxy? Run `just rebuild-cli {{UNIT}}`
+    # first -- otherwise this reuses the OLD image and your change is absent.
+    echo ">>> reusing existing cli/proxy images. Changed CLI or proxy code? run 'just rebuild-cli {{UNIT}}' first."
+    docker compose -f docker-compose.cli.yml -p {{UNIT}} run --rm cli
+
+# Rebuild a CLI unit's cli + dedicated-proxy images from current source. Run
+# this after changing CliClient code (e.g. the REPL) or the proxy; then
+# `just play-cli <UNIT>` reuses the freshly-built image. Defaults to `cli1`.
+rebuild-cli UNIT='cli1':
+    docker compose -f docker-compose.cli.yml -p {{UNIT}} build
 
 # Tear down a CLI unit's dedicated proxy (and any leftover CLI container).
 # Pair with `just play-cli <UNIT>`; defaults to the same `cli1` unit name.
@@ -283,16 +306,18 @@ play-local CLIENT_PATH='':
     fi
 
     echo ">>> bringing up local stack (postgres + server + login + proxy)"
-    # Always rebuild proxy + server + login images first. `docker compose
-    # up` on its own reuses existing images and silently masks source
-    # changes -- we used to debug "fix didn't work" symptoms that were
-    # really "fix never reached the running container" (see the wire-
-    # format byte-order rules in CLAUDE.md "Wire format & byte order").
-    # `build` invalidates the image; the subsequent `up -d` in run-stack-
-    # bg detects the new image-id and recreates the affected containers
-    # automatically, so no separate --force-recreate pass is needed.
-    docker compose build proxy server login
+    # REUSE already-running containers. `run-stack-bg` is `up -d`, which is a
+    # no-op for a container that is already up with its current image -- so
+    # launching the client does NOT restart the server or wipe in-flight
+    # player/session state. Images build automatically on first run, and
+    # after `just down` the next `up -d` recreates the containers from the
+    # existing images. This recipe never force-recreates on its own.
+    #
+    # Changed C++ in server/ proxy/ login-server/ ? The running container
+    # keeps the OLD binary until you rebuild -- the stale-image trap (see
+    # CLAUDE.md "Wire format & byte order"). Run `just rebuild` first.
     just run-stack-bg
+    echo ">>> reused the running stack (no rebuild). Changed server/proxy/login C++? run 'just rebuild' first."
 
     echo ">>> building launcher (so its output dir exists for settings.json)"
     dotnet build tools/launchnet7-avalonia >/dev/null

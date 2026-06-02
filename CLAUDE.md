@@ -195,10 +195,26 @@ which reuses the existing image if the source has changed but the
 image hasn't been rebuilt. Fixing a bug in `proxy/`, `server/src/`,
 or `login-server/` and then re-running `play-local` will silently
 hand the old binary to the client and reproduce the original crash
-verbatim -- it will look like the fix did nothing. `play-local` now
-runs `docker compose build` and `--force-recreate` to defeat this;
-do NOT remove those steps. When you change C++ in the proxy/server
-and you're testing via docker, the image must be rebuilt.
+verbatim -- it will look like the fix did nothing.
+
+`play-local` and `play-cli` deliberately REUSE running containers --
+they do NOT auto-build or force-recreate. This is intentional: an
+auto-build on every launch silently restarts the server and wipes
+in-flight player/session state, which corrupts interactive testing.
+The cost is that you OWN the rebuild step when you change C++:
+
+- Changed `server/`, `proxy/`, or `login-server/`? Run **`just rebuild`**
+  (it `docker compose build`s those three and `up -d --force-recreate`s
+  them; postgres + pgdata are untouched), then relaunch.
+- Changed CliClient code or the unit proxy? Run **`just rebuild-cli <UNIT>`**
+  before `just play-cli <UNIT>`.
+
+Both `play-local` and `play-cli` print a one-line reminder to this
+effect on every launch. If you change C++ and test via docker WITHOUT
+rebuilding, the running container keeps the old binary -- that is the
+stale-image trap, now your responsibility to avoid, not the recipe's.
+Do NOT re-add an unconditional `docker compose build` to `play-local`
+or `play-cli`; use the explicit `rebuild` / `rebuild-cli` recipes.
 
 ### Process when adding or changing a packet emitter
 
