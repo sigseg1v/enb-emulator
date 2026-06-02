@@ -361,3 +361,48 @@ provenance: Remove 0x07 -- despawns GameID 0x00163D32 (capture_1.rar, Packet #14
 opcode: 0x07
 payload-bytes: 4
 hex: 32 3d 16 00
+
+[objeffect_obj_06ee13de]
+provenance: ObjectEffect 0x09 -- attaches an effect to GameID 0x06EE13DE (capture_1.rar, Packet #372, Length=19). Bitmask 0x03 (EffectID + TimeStamp present; Duration/Scale/HSVShift absent). EffectDescID 0x00D8, EffectID 0x06EE13F6, TimeStamp 0x256F4148. This GameID is the SAME object Create (#370) spawns and AdvPos (#372) moves -- a third decoder reading the same id.
+opcode: 0x09
+payload-bytes: 15
+hex: 03 de 13 ee 06 d8 00 f6 13 ee 06 48 41 6f 25
+
+[objeffect_obj_3ad922]
+provenance: ObjectEffect 0x09 -- attaches an effect to GameID 0x003AD922 (capture_1.rar, Packet #946, Length=19). Bitmask 0x03. EffectDescID 0x0017, EffectID 0x003B0204, TimeStamp 0x256FAE44. This GameID is the object Remove (#1009) later despawns -- effect-then-remove across two opcodes.
+opcode: 0x09
+payload-bytes: 15
+hex: 03 22 d9 3a 00 17 00 04 02 3b 00 44 ae 6f 25
+
+[removeeffect_3b0295]
+provenance: RemoveEffect 0x0F -- tears down server effect id 0x003B0295 (capture_1.rar, Packet #787, Length=8). The whole 4-byte body is one LE EffectID.
+opcode: 0x0F
+payload-bytes: 4
+hex: 95 02 3b 00
+
+[removeeffect_3b0329]
+provenance: RemoveEffect 0x0F -- tears down server effect id 0x003B0329 (capture_1.rar, Packet #1019, Length=8). Second sample, distinct id.
+opcode: 0x0F
+payload-bytes: 4
+hex: 29 03 3b 00
+
+[constpos_origin_06ee13f7]
+provenance: ConstantPos 0x40 -- GameID 0x06EE13F7 parked at the origin (capture_1.rar, Packet #376, Length=36). Position (0,0,0), Orientation (0,0,0,1) -- the identity quaternion (w=1). This GameID is the object Create (#376) spawns; pins the all-zero position plus the w-last quaternion ordering (the lone 1.0 lands on the LAST float, not the first).
+opcode: 0x40
+payload-bytes: 32
+hex: f7 13 ee 06 00 00 00 00 00 00 00 00 00 00 00 00
+      00 00 00 00 00 00 00 00 00 00 00 00 00 00 80 3f
+
+[constpos_realpos_86]
+provenance: ConstantPos 0x40 -- GameID 0x00000086 at a real world position (capture_1.rar, Packet #849, Length=36). Position (59999.6, -37883.5, -500.0), Orientation identity. This GameID is the Scale-0.25 object Create (#849) spawns; pins three distinct nonzero position floats incl. a negative.
+opcode: 0x40
+payload-bytes: 32
+hex: 86 00 00 00 9a 5f 6a 47 80 fb 13 c7 00 00 fa c3
+      00 00 00 00 00 00 00 00 00 00 00 00 00 00 80 3f
+
+[constpos_oriented_94]
+provenance: ConstantPos 0x40 -- GameID 0x00000094 with a NON-identity orientation (capture_1.rar, Packet #849, Length=36). Position (55201.1, -35835.8, 0.0), Orientation (0, 0, 0.951, -0.308) -- a real rotation quaternion, so the last two orient floats are nonzero. Complements the identity-quaternion frames: proves all four orient slots are read, not just the trailing w.
+opcode: 0x40
+payload-bytes: 32
+hex: 94 00 00 00 1a a1 57 47 cd fb 0b c7 00 00 00 00
+      00 00 00 00 00 00 00 00 60 88 73 3f 45 d5 9d be

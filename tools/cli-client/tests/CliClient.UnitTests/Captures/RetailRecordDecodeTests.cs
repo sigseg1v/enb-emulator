@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllThirtyThreeFrames()
+    public void Fixture_Loads_AllFortyFrames()
     {
-        Assert.Equal(33, Frames.Count);
+        Assert.Equal(40, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -99,6 +99,20 @@ public sealed class RetailRecordDecodeTests
         Assert.Equal(4, Frames["remove_obj_355a56"].Payload.Length);
         Assert.Equal(0x07, Frames["remove_obj_163d32"].Opcode);
         Assert.Equal(4, Frames["remove_obj_163d32"].Payload.Length);
+        Assert.Equal(0x09, Frames["objeffect_obj_06ee13de"].Opcode);
+        Assert.Equal(15, Frames["objeffect_obj_06ee13de"].Payload.Length);
+        Assert.Equal(0x09, Frames["objeffect_obj_3ad922"].Opcode);
+        Assert.Equal(15, Frames["objeffect_obj_3ad922"].Payload.Length);
+        Assert.Equal(0x0F, Frames["removeeffect_3b0295"].Opcode);
+        Assert.Equal(4, Frames["removeeffect_3b0295"].Payload.Length);
+        Assert.Equal(0x0F, Frames["removeeffect_3b0329"].Opcode);
+        Assert.Equal(4, Frames["removeeffect_3b0329"].Payload.Length);
+        Assert.Equal(0x40, Frames["constpos_origin_06ee13f7"].Opcode);
+        Assert.Equal(32, Frames["constpos_origin_06ee13f7"].Payload.Length);
+        Assert.Equal(0x40, Frames["constpos_realpos_86"].Opcode);
+        Assert.Equal(32, Frames["constpos_realpos_86"].Payload.Length);
+        Assert.Equal(0x40, Frames["constpos_oriented_94"].Opcode);
+        Assert.Equal(32, Frames["constpos_oriented_94"].Payload.Length);
     }
 
     // ── ItemBase 0x25 ────────────────────────────────────────────────────────
@@ -964,5 +978,159 @@ public sealed class RetailRecordDecodeTests
 
         Assert.Contains("GameID            = 0x00163D32", d);
         Assert.DoesNotContain("(NB)", d);
+    }
+
+    // ── ObjectEffect 0x09 ────────────────────────────────────────────────────
+    // byte Bitmask, int32 GameID, u16 EffectDescID, then conditional fields per
+    // bit: 0x01 EffectID, 0x02 TimeStamp, 0x04 Duration, 0x08 Scale,
+    // 0x10/0x20/0x40 HSVShift[3]. Like AdvPos, the bitmask gates the byte offset
+    // of every later field. Every corpus frame is bitmask 0x03, so the real
+    // frames pin that path and a synthetic full-bitmask frame locks the rest.
+
+    [Fact]
+    public void ObjectEffect_Bitmask03_DecodesEffectIdAndTimeStamp()
+    {
+        string d = Dump("objeffect_obj_06ee13de");
+
+        Assert.Contains("Bitmask           = 0x03", d);
+        Assert.Contains("GameID            = 0x06EE13DE", d);
+        Assert.Contains("EffectDescID      = 0x00D8  (216)", d);
+        Assert.Contains("EffectID          = 0x06EE13F6", d);
+        Assert.Contains("TimeStamp         = 0x256F4148", d);
+        // Bits 0x04..0x40 are clear, so nothing past TimeStamp is read.
+        Assert.DoesNotContain("Duration", d);
+        Assert.DoesNotContain("Scale", d);
+        Assert.DoesNotContain("HSVShift", d);
+        // All 15 bytes consumed.
+        Assert.DoesNotContain("(NB)", d);
+        Assert.DoesNotContain("truncated", d);
+    }
+
+    [Fact]
+    public void ObjectEffect_SecondObject_DecodesDistinctFields()
+    {
+        string d = Dump("objeffect_obj_3ad922");
+
+        Assert.Contains("GameID            = 0x003AD922", d);
+        Assert.Contains("EffectDescID      = 0x0017  (23)", d);
+        Assert.Contains("EffectID          = 0x003B0204", d);
+        Assert.Contains("TimeStamp         = 0x256FAE44", d);
+        Assert.DoesNotContain("(NB)", d);
+    }
+
+    [Fact]
+    public void ObjectEffect_FullBitmask_DecodesEveryConditionalField()
+    {
+        // No corpus frame sets bits 0x04..0x40, so synthesise one with bitmask
+        // 0x7F (all bits). Each conditional field only lands on the right byte if
+        // every earlier field consumed exactly its width -- Duration is a u16 (2
+        // bytes), the others 4. A wrong width anywhere shifts the rest.
+        byte[] p = Convert.FromHexString(
+            "7f" + "44332211" + "5500" + "ddccbbaa" + "78563412" +
+            "6400" + "00000040" + "0000003f" + "000000bf" + "0000803e");
+        string d = PacketRecord.Resolve((ushort)0x09, p).DumpToString();
+
+        Assert.Contains("Bitmask           = 0x7F", d);
+        Assert.Contains("GameID            = 0x11223344", d);
+        Assert.Contains("EffectDescID      = 0x0055  (85)", d);
+        Assert.Contains("EffectID          = 0xAABBCCDD", d);
+        Assert.Contains("TimeStamp         = 0x12345678", d);
+        Assert.Contains("Duration          = 100", d);   // u16, the only 2-byte conditional
+        Assert.Contains("Scale             = 2.0", d);
+        Assert.Contains("HSVShift[0]       = 0.5", d);
+        Assert.Contains("HSVShift[1]       = -0.5", d);
+        Assert.Contains("HSVShift[2]       = 0.25", d);
+        Assert.DoesNotContain("(NB)", d);
+        Assert.DoesNotContain("truncated", d);
+    }
+
+    // ── RemoveEffect 0x0F ────────────────────────────────────────────────────
+    // A single LE int32 EffectID -- the inverse of ObjectEffect.
+
+    [Fact]
+    public void RemoveEffect_DecodesEffectId()
+    {
+        string d = Dump("removeeffect_3b0295");
+
+        Assert.Contains("EffectID          = 0x003B0295", d);
+        Assert.DoesNotContain("(NB)", d);
+        Assert.DoesNotContain("truncated", d);
+    }
+
+    [Fact]
+    public void RemoveEffect_SecondSample_DecodesDistinctEffectId()
+    {
+        string d = Dump("removeeffect_3b0329");
+
+        Assert.Contains("EffectID          = 0x003B0329", d);
+        Assert.DoesNotContain("(NB)", d);
+    }
+
+    // ── ConstantPos 0x40 ─────────────────────────────────────────────────────
+    // int32 GameID, float Pos[3], float Orient[4] (w-last quaternion). 32 bytes,
+    // fixed. The trap is the quaternion ordering: the identity rotation is
+    // (0,0,0,1) with the 1 on the LAST float, so a frame full of zeros except a
+    // trailing 1.0 proves w is read last, not first.
+
+    [Fact]
+    public void ConstantPos_Origin_DecodesIdentityQuaternion()
+    {
+        string d = Dump("constpos_origin_06ee13f7");
+
+        Assert.Contains("GameID            = 0x06EE13F7", d);
+        Assert.Contains("Position          = (0.0, 0.0, 0.0)", d);
+        // Identity quaternion: w=1 lands on the LAST orient float.
+        Assert.Contains("Orientation       = (0.0, 0.0, 0.0, 1.0)", d);
+        Assert.DoesNotContain("(NB)", d);
+        Assert.DoesNotContain("truncated", d);
+    }
+
+    [Fact]
+    public void ConstantPos_RealPosition_DecodesThreeDistinctFloats()
+    {
+        string d = Dump("constpos_realpos_86");
+
+        Assert.Contains("GameID            = 0x00000086", d);
+        // Three distinct position floats incl. a negative -- a swapped axis or a
+        // wrong float width would change these.
+        Assert.Contains("Position          = (59999.6, -37883.5, -500.0)", d);
+        Assert.Contains("Orientation       = (0.0, 0.0, 0.0, 1.0)", d);
+        Assert.DoesNotContain("(NB)", d);
+    }
+
+    [Fact]
+    public void ConstantPos_NonIdentityOrientation_DecodesAllFourOrientFloats()
+    {
+        string d = Dump("constpos_oriented_94");
+
+        Assert.Contains("GameID            = 0x00000094", d);
+        Assert.Contains("Position          = (55201.1, -35835.8, 0.0)", d);
+        // A real rotation: the last two orient floats are nonzero, so all four
+        // slots are exercised (not just the trailing w of the identity frames).
+        Assert.Contains("Orientation       = (0.0, 0.0, 0.951, -0.308)", d);
+        Assert.DoesNotContain("(NB)", d);
+    }
+
+    // Cross-opcode GameID agreement, all frames from the same capture:
+    //   * 0x06EE13DE -- spawned by Create (#370), moved by AdvPos (#372), and
+    //     given an effect by ObjectEffect (#372). Three different decoders, same
+    //     4 LE bytes, same id.
+    //   * 0x06EE13F7 -- spawned by Create (#376) and parked by ConstantPos (#376).
+    // If any decoder had the wrong GameID offset or endianness the ids would not
+    // match and the packets could not be correlated into one object's lifecycle.
+    [Fact]
+    public void CrossOpcode_GameIds_Agree()
+    {
+        var create370 = Dump("create_friendship_06ee13de");
+        var advpos372 = Dump("advpos_minimal_bitmask0");
+        var objeffect372 = Dump("objeffect_obj_06ee13de");
+        Assert.Contains("GameID            = 0x06EE13DE", create370);
+        Assert.Contains("GameID            = 0x06EE13DE", advpos372);
+        Assert.Contains("GameID            = 0x06EE13DE", objeffect372);
+
+        var create376 = Dump("create_asset_ffff_type39");
+        var constpos376 = Dump("constpos_origin_06ee13f7");
+        Assert.Contains("GameID            = 0x06EE13F7", create376);
+        Assert.Contains("GameID            = 0x06EE13F7", constpos376);
     }
 }
