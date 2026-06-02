@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllTwentyFourFrames()
+    public void Fixture_Loads_AllTwentySixFrames()
     {
-        Assert.Equal(24, Frames.Count);
+        Assert.Equal(26, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -81,6 +81,10 @@ public sealed class RetailRecordDecodeTests
         Assert.Equal(42, Frames["advpos_minimal_bitmask0"].Payload.Length);
         Assert.Equal(0x3E, Frames["advpos_full_bitmask01ff"].Opcode);
         Assert.Equal(98, Frames["advpos_full_bitmask01ff"].Payload.Length);
+        Assert.Equal(0xA5, Frames["chatevent_join_general"].Opcode);
+        Assert.Equal(37, Frames["chatevent_join_general"].Payload.Length);
+        Assert.Equal(0xA5, Frames["chatevent_market_wtb"].Opcode);
+        Assert.Equal(187, Frames["chatevent_market_wtb"].Payload.Length);
     }
 
     // ── ItemBase 0x25 ────────────────────────────────────────────────────────
@@ -749,5 +753,64 @@ public sealed class RetailRecordDecodeTests
         // Whole 98-byte payload consumed: no undecoded gap, no truncation flag.
         Assert.DoesNotContain("(NB)", d);
         Assert.DoesNotContain("truncated", d);
+    }
+
+    // ── ClientChatEvent 0xA5 ─────────────────────────────────────────────────
+    // Five AddDataLS strings preceded by two int32s. The decoder must handle the
+    // server's dual-LastName quirk (LastName is emitted twice -- the Rank slot
+    // between them is commented out server-side) or every field after it shifts.
+
+    [Fact]
+    public void ChatEvent_JoinGeneral_DecodesDualLastNameAndChannel()
+    {
+        string d = Dump("chatevent_join_general");
+
+        Assert.Contains("Type              = 0x00000007", d);
+        // The dual LastName -- both slots carry the same name. If a decoder read
+        // a rank between them, Channel would desync.
+        Assert.Contains("LastName          = \"Ace\"", d);
+        Assert.Contains("LastName2         = \"Ace\"", d);
+        Assert.Contains("OtherPlayer       = \"\"", d);
+        Assert.Contains("Channel           = \"General\"", d);
+        Assert.Contains("Message           = \"\"", d);
+        Assert.Contains("Trailing          = 0x00000000", d);
+        Assert.DoesNotContain("overruns", d);
+        Assert.DoesNotContain("(NB)", d);
+    }
+
+    [Fact]
+    public void ChatEvent_MarketWtb_DecodesFullBroadcastMessage()
+    {
+        string d = Dump("chatevent_market_wtb");
+
+        Assert.Contains("Type              = 0x00000003", d);
+        Assert.Contains("LastName          = \"Scrabble\"", d);
+        Assert.Contains("Channel           = \"Market\"", d);
+        // The whole 141-char message, byte-pinned. The closing "need." only
+        // appears if the AddDataLS length prefix (8D 00 == 141) was read as a
+        // full u16; a low-byte-only read would land Trailing mid-message.
+        Assert.Contains(
+            "Message           = \"WTB Warp Kazas, any level, PM or looted.  If anybody " +
+            "can build them up to level 2 I've got a couple of the gemstones and that's " +
+            "all I'd need.\"",
+            d);
+        Assert.Contains("Trailing          = 0x00000000", d);
+        Assert.DoesNotContain("overruns", d);
+        Assert.DoesNotContain("(NB)", d);
+    }
+
+    [Fact]
+    public void ChatEvent_TryExtract_PullsSenderChannelMessage()
+    {
+        // The reader-facing helper (used by the REPL chat view) must agree with
+        // the structural dump: sender from LastName, channel, message.
+        var ev = ClientChatEventRecord.TryExtract(Frames["chatevent_market_wtb"].Payload);
+        Assert.NotNull(ev);
+        Assert.Equal(3, ev!.Value.Type);
+        Assert.Equal("Scrabble", ev.Value.Sender);
+        Assert.Equal("Market", ev.Value.Channel);
+        Assert.StartsWith("WTB Warp Kazas", ev.Value.Message);
+        Assert.EndsWith("all I'd need.", ev.Value.Message);
+        Assert.Equal("", ev.Value.OtherPlayer);
     }
 }
