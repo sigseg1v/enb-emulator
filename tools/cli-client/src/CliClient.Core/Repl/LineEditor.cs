@@ -71,7 +71,7 @@ public sealed class LineEditor : ILineInput
         var menu = new List<string>();
         int menuIndex = 0;
         string preMenu = string.Empty;
-        int promptLen = prompt.Length;
+        int promptLen = VisibleLength(prompt);   // exclude ANSI bytes from column math
 
         Render(prompt, promptLen, buffer, cursor, inMenu, menu, menuIndex, output);
 
@@ -158,10 +158,26 @@ public sealed class LineEditor : ILineInput
     {
         if (!inMenu)
         {
-            var cands = Completion.FirstTokenCandidates(buffer.ToString(), _specs());
+            string text = buffer.ToString();
+
+            // Past the command word: fill the suggested argument value (e.g.
+            // connect's <ip:127.0.0.1> default), not another command name.
+            if (Completion.PastFirstToken(text))
+            {
+                string? filled = Completion.CompleteArgument(text, _specs());
+                if (filled is not null)
+                {
+                    buffer.Clear();
+                    buffer.Append(filled);
+                    cursor = buffer.Length;
+                }
+                return;
+            }
+
+            var cands = Completion.FirstTokenCandidates(text, _specs());
             if (cands.Count == 0) return;
 
-            preMenu = buffer.ToString();
+            preMenu = text;
             if (cands.Count == 1)
             {
                 AcceptCommand(buffer, cands[0]);
@@ -229,7 +245,7 @@ public sealed class LineEditor : ILineInput
             int avail = Math.Max(0, width - 1 - promptLen - text.Length);
             string ghostFit = ghost.Length > avail ? ghost[..avail] : ghost;
             if (ghostFit.Length > 0)
-                sb.Append(AnsiPalette.Colorize(AnsiPalette.Gray, ghostFit));
+                sb.Append(ColorGhost(text, ghostFit, inMenu));
         }
 
         output.Write(sb.ToString());
@@ -239,6 +255,44 @@ public sealed class LineEditor : ILineInput
         int col = promptLen + cursor;
         if (col > 0) output.Write($"\x1b[{col}C");
         output.Flush();
+    }
+
+    /// <summary>
+    /// Colour the grey ghost tail. On an empty buffer the ghost is the list of
+    /// available commands; the first one is the flow-preferred next step (see
+    /// <see cref="CommandSpec.Priority"/>), so it is highlighted and the rest
+    /// dimmed. Everything else (inline command remainder, argument
+    /// placeholder, menu hint) stays muted.
+    /// </summary>
+    private static string ColorGhost(string text, string ghostFit, bool inMenu)
+    {
+        if (!inMenu && text.TrimStart().Length == 0)
+        {
+            int brk = ghostFit.IndexOf("  ", StringComparison.Ordinal);
+            string accent = AnsiPalette.BrightCyan + AnsiPalette.Bold;
+            if (brk < 0) return AnsiPalette.Colorize(accent, ghostFit);
+            return AnsiPalette.Colorize(accent, ghostFit[..brk])
+                 + AnsiPalette.Colorize(AnsiPalette.Gray, ghostFit[brk..]);
+        }
+        return AnsiPalette.Colorize(AnsiPalette.Gray, ghostFit);
+    }
+
+    /// <summary>Visible width of a string, ignoring CSI (ESC[...) escapes.</summary>
+    private static int VisibleLength(string s)
+    {
+        int len = 0;
+        for (int i = 0; i < s.Length; i++)
+        {
+            if (s[i] == '\x1b')
+            {
+                i++;                                   // skip ESC
+                if (i < s.Length && s[i] == '[')       // CSI: run to the final letter
+                    while (i < s.Length && !char.IsLetter(s[i])) i++;
+                continue;                               // i lands on the final byte; loop ++ skips it
+            }
+            len++;
+        }
+        return len;
     }
 
     private static int SafeWidth()

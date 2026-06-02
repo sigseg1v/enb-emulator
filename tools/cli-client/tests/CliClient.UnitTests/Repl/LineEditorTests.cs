@@ -71,6 +71,40 @@ public sealed class LineEditorTests
     }
 
     [Fact]
+    public void Tab_PastCommandWord_FillsArgDefault()
+    {
+        // "connect " (command word done, fresh arg) -> Tab fills the
+        // <ip:127.0.0.1> default rather than opening a command menu.
+        string? line = Run(
+            Ch('c'), Ch('o'), Ch('n'), Ch('n'), Ch('e'), Ch('c'), Ch('t'), Ch(' '),
+            Tab, Enter);
+        Assert.Equal("connect 127.0.0.1", line);
+    }
+
+    [Fact]
+    public void Tab_PastCommandWord_CompletesTypedArgPrefix()
+    {
+        // A partially-typed arg that prefixes the default is completed, not
+        // clobbered.
+        string? line = Run(
+            Ch('c'), Ch('o'), Ch('n'), Ch('n'), Ch('e'), Ch('c'), Ch('t'), Ch(' '),
+            Ch('1'), Ch('2'), Ch('7'),
+            Tab, Enter);
+        Assert.Equal("connect 127.0.0.1", line);
+    }
+
+    [Fact]
+    public void Tab_PastCommandWord_NoDefault_LeavesBufferUntouched()
+    {
+        // create's first slot is <class> with no default -> Tab is inert; the
+        // buffer submits exactly as typed.
+        string? line = Run(
+            Ch('c'), Ch('r'), Ch('e'), Ch('a'), Ch('t'), Ch('e'), Ch(' '),
+            Tab, Enter);
+        Assert.Equal("create ", line);
+    }
+
+    [Fact]
     public void Backspace_EditsBuffer()
     {
         string? line = Run(Ch('h'), Ch('x'), Back, Ch('e'), Ch('l'), Ch('p'), Enter);

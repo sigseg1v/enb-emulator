@@ -123,6 +123,27 @@ public sealed class SessionContext : IAsyncDisposable
     public bool Connected { get; set; }
 
     /// <summary>
+    /// A short, uncoloured label for the prompt that tracks how far along the
+    /// flow the session is: <c>offline</c> -> <c>connected</c> -> the avatar
+    /// name once in-world -> <c>name@sector</c> once in a sector. Program.cs
+    /// wraps it in colour; this stays plain so it is safe to log or test.
+    /// </summary>
+    public string PromptLabel
+    {
+        get
+        {
+            if (Sector is not null)
+            {
+                string who = string.IsNullOrEmpty(Username) ? "in-sector" : Username;
+                return ActiveSectorId is { } sid ? $"{who}@{sid}" : who;
+            }
+            if (Global is not null) return string.IsNullOrEmpty(Username) ? "online" : Username;
+            if (Connected) return "connected";
+            return "offline";
+        }
+    }
+
+    /// <summary>
     /// Running model of objects/navs the server has announced for the
     /// current sector. Fed by the inbound packet hook; read by <c>enter</c>'s
     /// arrival summary and the in-sector <c>list</c> command.

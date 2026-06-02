@@ -2,6 +2,8 @@
 // Part of the Earth & Beyond emulator preservation project.
 // License: LICENSES/enb-emulator
 
+using N7.CliClient.Logging;
+
 namespace N7.CliClient.Repl.Commands;
 
 /// <summary>
@@ -31,7 +33,7 @@ public sealed class DumpOffCommand : ICommandHandler
     {
         // Leave the sector drain running -- chat-by-default depends on it.
         _ctx.DumpEnabled = false;
-        await output.WriteLineAsync("dump-off").ConfigureAwait(false);
+        await output.WriteLineAsync(AnsiPalette.Ok("dump-off")).ConfigureAwait(false);
         return 0;
     }
 }

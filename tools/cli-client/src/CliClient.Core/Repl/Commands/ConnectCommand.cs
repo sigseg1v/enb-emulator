@@ -3,6 +3,7 @@
 // License: LICENSES/enb-emulator
 
 using System.Net.Sockets;
+using N7.CliClient.Logging;
 
 namespace N7.CliClient.Repl.Commands;
 
@@ -24,6 +25,11 @@ public sealed class ConnectCommand : ICommandHandler
     public string Name    => "connect";
     public string Summary => "set host[:auth-port] and probe TCP";
     public string? Placeholder => "<ip:127.0.0.1>";
+
+    // The entry point, and the obvious first action -> leads the suggestions.
+    // Once a probe has connected, the next step is login, so connect retires.
+    public bool Available => !_ctx.Connected;
+    public int Priority => 100;
     public string Usage   =>
         "connect <host>[:auth-port]\n" +
         "  default auth-port: 4443 (docker dev stack)\n" +
@@ -35,7 +41,8 @@ public sealed class ConnectCommand : ICommandHandler
     {
         if (args.Count < 1)
         {
-            await output.WriteLineAsync("usage: connect <host>[:auth-port]").ConfigureAwait(false);
+            await output.WriteLineAsync(
+                AnsiPalette.Warn("usage: connect <host>[:auth-port]")).ConfigureAwait(false);
             return 1;
         }
 
@@ -48,7 +55,8 @@ public sealed class ConnectCommand : ICommandHandler
             host = raw[..colon];
             if (!int.TryParse(raw[(colon + 1)..], out int p) || p <= 0 || p > 65535)
             {
-                await output.WriteLineAsync($"bad port: {raw[(colon + 1)..]}").ConfigureAwait(false);
+                await output.WriteLineAsync(
+                    AnsiPalette.Err($"bad port: {raw[(colon + 1)..]}")).ConfigureAwait(false);
                 return 1;
             }
             port = p;
@@ -62,8 +70,11 @@ public sealed class ConnectCommand : ICommandHandler
         if (port.HasValue) _ctx.AuthPort = port.Value;
 
         await output.WriteLineAsync(
-            $"target: auth={_ctx.EffectiveAuthHost}:{_ctx.AuthPort} global={_ctx.Host}:{_ctx.GlobalPort} " +
-            $"master={_ctx.Host}:{_ctx.MasterPort} sector={_ctx.Host}:{_ctx.SectorPort}")
+            AnsiPalette.Muted("target: ") +
+            $"auth={AnsiPalette.Value($"{_ctx.EffectiveAuthHost}:{_ctx.AuthPort}")} " +
+            $"global={AnsiPalette.Value($"{_ctx.Host}:{_ctx.GlobalPort}")} " +
+            $"master={AnsiPalette.Value($"{_ctx.Host}:{_ctx.MasterPort}")} " +
+            $"sector={AnsiPalette.Value($"{_ctx.Host}:{_ctx.SectorPort}")}")
             .ConfigureAwait(false);
 
         try
@@ -72,13 +83,15 @@ public sealed class ConnectCommand : ICommandHandler
             await tcp.ConnectAsync(_ctx.EffectiveAuthHost, _ctx.AuthPort, ct).ConfigureAwait(false);
             _ctx.Connected = true;
             await output.WriteLineAsync(
-                $"probe: {_ctx.EffectiveAuthHost}:{_ctx.AuthPort} accepting TCP").ConfigureAwait(false);
+                AnsiPalette.Ok($"probe: {_ctx.EffectiveAuthHost}:{_ctx.AuthPort} accepting TCP"))
+                .ConfigureAwait(false);
             return 0;
         }
         catch (Exception ex)
         {
             await output.WriteLineAsync(
-                $"probe failed: {_ctx.EffectiveAuthHost}:{_ctx.AuthPort} -- {ex.Message}").ConfigureAwait(false);
+                AnsiPalette.Err($"probe failed: {_ctx.EffectiveAuthHost}:{_ctx.AuthPort} -- {ex.Message}"))
+                .ConfigureAwait(false);
             return 1;
         }
     }

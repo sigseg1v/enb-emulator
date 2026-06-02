@@ -2,6 +2,7 @@
 // Part of the Earth & Beyond emulator preservation project.
 // License: LICENSES/enb-emulator
 
+using N7.CliClient.Logging;
 using N7.CliClient.Net;
 
 namespace N7.CliClient.Repl.Commands;
@@ -27,27 +28,31 @@ public sealed class EnterCommand : ICommandHandler
     public string Usage   => "enter <firstname>";
     public string? Placeholder => "<firstname>";
 
-    // Available once logged in with a character list to pick from.
+    // Available once logged in with a character list to pick from; a primary
+    // next step alongside `create`.
     public bool Available => _ctx.Global is not null && _ctx.AvatarList is not null;
+    public int Priority => 100;
 
     public async Task<int> ExecuteAsync(
         IReadOnlyList<string> args, TextWriter output, CancellationToken ct)
     {
         if (_ctx.Global is null || _ctx.AvatarList is null)
         {
-            await output.WriteLineAsync("not logged in -- run `login` first").ConfigureAwait(false);
+            await output.WriteLineAsync(
+                AnsiPalette.Warn("not logged in -- run `login` first")).ConfigureAwait(false);
             return 1;
         }
         if (_ctx.Sector is not null)
         {
-            await output.WriteLineAsync(
-                $"already in sector {_ctx.ActiveSectorId} -- restart the REPL to switch")
+            await output.WriteLineAsync(AnsiPalette.Warn(
+                $"already in sector {_ctx.ActiveSectorId} -- restart the REPL to switch"))
                 .ConfigureAwait(false);
             return 1;
         }
         if (args.Count < 1)
         {
-            await output.WriteLineAsync("usage: enter <firstname>").ConfigureAwait(false);
+            await output.WriteLineAsync(
+                AnsiPalette.Warn("usage: enter <firstname>")).ConfigureAwait(false);
             return 1;
         }
 
@@ -68,14 +73,16 @@ public sealed class EnterCommand : ICommandHandler
         }
         if (slot < 0)
         {
-            await output.WriteLineAsync(
-                $"no character named '{firstName}' in the cached list (run `list`)")
+            await output.WriteLineAsync(AnsiPalette.Err(
+                $"no character named '{firstName}' in the cached list (run `list`)"))
                 .ConfigureAwait(false);
             return 1;
         }
 
         await output.WriteLineAsync(
-            $"entering sector {sectorId} on slot {slot} as {firstName}...")
+            AnsiPalette.Muted("entering sector ") + AnsiPalette.Value($"{sectorId}") +
+            AnsiPalette.Muted(" on slot ") + AnsiPalette.Value($"{slot}") +
+            AnsiPalette.Muted(" as ") + AnsiPalette.Accent(firstName) + AnsiPalette.Muted("..."))
             .ConfigureAwait(false);
 
         SectorEnterDriver.SectorEntryResult result;
@@ -86,7 +93,8 @@ public sealed class EnterCommand : ICommandHandler
         }
         catch (Exception ex)
         {
-            await output.WriteLineAsync($"enter failed: {ex.Message}").ConfigureAwait(false);
+            await output.WriteLineAsync(
+                AnsiPalette.Err($"enter failed: {ex.Message}")).ConfigureAwait(false);
             return 1;
         }
 
@@ -106,8 +114,10 @@ public sealed class EnterCommand : ICommandHandler
             _ctx.ReplayInboundFrame(f);
 
         await output.WriteLineAsync(
-            $"in-sector: gameId=0x{result.GameId:X8} startId=0x{result.StartId:X8} " +
-            $"handshake-frames={result.HandshakeFrames.Count}")
+            AnsiPalette.Ok("in-sector: ") +
+            AnsiPalette.Muted("gameId=") + AnsiPalette.Value($"0x{result.GameId:X8}") + " " +
+            AnsiPalette.Muted("startId=") + AnsiPalette.Value($"0x{result.StartId:X8}") + " " +
+            AnsiPalette.Muted("handshake-frames=") + AnsiPalette.Value($"{result.HandshakeFrames.Count}"))
             .ConfigureAwait(false);
 
         // The 0x0005 START frame terminates the handshake but more CREATE /

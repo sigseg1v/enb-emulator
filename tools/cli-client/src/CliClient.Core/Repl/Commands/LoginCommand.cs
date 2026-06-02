@@ -3,6 +3,7 @@
 // License: LICENSES/enb-emulator
 
 using N7.CliClient.Auth;
+using N7.CliClient.Logging;
 using N7.CliClient.Net;
 using N7.CliClient.Opcodes;
 using N7.CliClient.Opcodes.Inbound;
@@ -29,22 +30,25 @@ public sealed class LoginCommand : ICommandHandler
     public string Usage   => "login <user> <pass>";
     public string? Placeholder => "<user> <pass>";
 
-    // Offered once `connect` has probed a reachable endpoint.
+    // Offered once `connect` has probed a reachable endpoint -- and then it's
+    // the obvious next step, so it leads the suggestions.
     public bool Available => _ctx.Connected && _ctx.Global is null;
+    public int Priority => 100;
 
     public async Task<int> ExecuteAsync(
         IReadOnlyList<string> args, TextWriter output, CancellationToken ct)
     {
         if (args.Count < 2)
         {
-            await output.WriteLineAsync("usage: login <user> <pass>").ConfigureAwait(false);
+            await output.WriteLineAsync(
+                AnsiPalette.Warn("usage: login <user> <pass>")).ConfigureAwait(false);
             return 1;
         }
 
         if (_ctx.Global is not null)
         {
-            await output.WriteLineAsync(
-                "already logged in (a global channel is open); restart the REPL to switch accounts")
+            await output.WriteLineAsync(AnsiPalette.Warn(
+                "already logged in (a global channel is open); restart the REPL to switch accounts"))
                 .ConfigureAwait(false);
             return 1;
         }
@@ -53,7 +57,7 @@ public sealed class LoginCommand : ICommandHandler
         string pass = args[1];
 
         await output.WriteLineAsync(
-            $"auth: GET /AuthLogin -> {_ctx.Host}:{_ctx.AuthPort} (user={user})")
+            AnsiPalette.Muted($"auth: GET /AuthLogin -> {_ctx.Host}:{_ctx.AuthPort} (user={user})"))
             .ConfigureAwait(false);
 
         AuthLoginResponse login;
@@ -66,16 +70,18 @@ public sealed class LoginCommand : ICommandHandler
         }
         catch (Exception ex)
         {
-            await output.WriteLineAsync($"auth transport error: {ex.Message}").ConfigureAwait(false);
+            await output.WriteLineAsync(
+                AnsiPalette.Err($"auth transport error: {ex.Message}")).ConfigureAwait(false);
             return 1;
         }
 
         if (!login.Valid || string.IsNullOrEmpty(login.Ticket))
         {
-            await output.WriteLineAsync("auth: rejected").ConfigureAwait(false);
+            await output.WriteLineAsync(AnsiPalette.Err("auth: rejected")).ConfigureAwait(false);
             return 1;
         }
-        await output.WriteLineAsync($"auth: ok (ticket length={login.Ticket.Length})").ConfigureAwait(false);
+        await output.WriteLineAsync(
+            AnsiPalette.Ok($"auth: ok (ticket length={login.Ticket.Length})")).ConfigureAwait(false);
 
         EncryptedTcpConnection global;
         try
@@ -85,7 +91,8 @@ public sealed class LoginCommand : ICommandHandler
         }
         catch (Exception ex)
         {
-            await output.WriteLineAsync($"global connect failed: {ex.Message}").ConfigureAwait(false);
+            await output.WriteLineAsync(
+                AnsiPalette.Err($"global connect failed: {ex.Message}")).ConfigureAwait(false);
             return 1;
         }
 
@@ -103,14 +110,15 @@ public sealed class LoginCommand : ICommandHandler
             _ctx.AvatarList = avatars;
 
             await output.WriteLineAsync(
-                $"global: connected ({_ctx.Host}:{_ctx.GlobalPort})").ConfigureAwait(false);
+                AnsiPalette.Ok($"global: connected ({_ctx.Host}:{_ctx.GlobalPort})")).ConfigureAwait(false);
             await ListCommand.PrintAvatarsAsync(avatars, output).ConfigureAwait(false);
             return 0;
         }
         catch (Exception ex)
         {
             await global.DisposeAsync();
-            await output.WriteLineAsync($"global handshake failed: {ex.Message}").ConfigureAwait(false);
+            await output.WriteLineAsync(
+                AnsiPalette.Err($"global handshake failed: {ex.Message}")).ConfigureAwait(false);
             return 1;
         }
     }

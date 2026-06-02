@@ -2,6 +2,8 @@
 // Part of the Earth & Beyond emulator preservation project.
 // License: LICENSES/enb-emulator
 
+using N7.CliClient.Logging;
+
 namespace N7.CliClient.Repl.Commands;
 
 /// <summary>
@@ -44,7 +46,7 @@ public sealed class DumpOnCommand : ICommandHandler
         string where = _ctx.Sector is not null ? "sector (background drain active)"
                      : _ctx.Global is not null ? "global (via command-driven receives -- no background drain)"
                      : "no active connection -- dumps will start with the next login/enter";
-        output.WriteLine($"dump-on: tailing {where}");
+        output.WriteLine(AnsiPalette.Ok("dump-on: ") + AnsiPalette.Muted($"tailing {where}"));
         return Task.FromResult(0);
     }
 }

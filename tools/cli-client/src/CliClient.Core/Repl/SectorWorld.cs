@@ -5,6 +5,7 @@
 using System.Buffers.Binary;
 using System.Globalization;
 using System.Text;
+using N7.CliClient.Logging;
 using N7.CliClient.Net;
 using N7.CliClient.Opcodes.Records;
 
@@ -323,17 +324,21 @@ public sealed class SectorWorld
         string selfLbl = selfName is { Length: > 0 } ? selfName : "<self>";
         string selfLvl = selfLevel is { } sl ? sl.ToString(CultureInfo.InvariantCulture) : "-";
         output.WriteLine(
-            $"you: {selfLbl} (lvl {selfLvl})  gameId=0x{selfGameId:X8}  pos={here}");
+            AnsiPalette.Muted("you: ") + AnsiPalette.Accent(selfLbl) +
+            AnsiPalette.Muted($" (lvl {selfLvl})  gameId=0x{selfGameId:X8}  pos=") +
+            AnsiPalette.Value(here));
 
         var rows = NearestTo(selfGameId);
         int navs = rows.Count(r => r.Obj.IsNav);
         int avatars = rows.Count(r => r.Obj.IsAvatar);
         output.WriteLine(
-            $"nearby: {rows.Count} objects ({avatars} avatars, {navs} navs)  [lvl '-' = not yet announced via aux]");
+            AnsiPalette.Head($"nearby: {rows.Count} objects") +
+            AnsiPalette.Muted($" ({avatars} avatars, {navs} navs)  [lvl '-' = not yet announced via aux]"));
 
         if (rows.Count == 0)
         {
-            output.WriteLine("  (nothing tracked yet -- fly around or wait for the sector fanout)");
+            output.WriteLine(AnsiPalette.Muted(
+                "  (nothing tracked yet -- fly around or wait for the sector fanout)"));
             return;
         }
 
@@ -342,7 +347,7 @@ public sealed class SectorWorld
         {
             if (shown++ >= maxRows)
             {
-                output.WriteLine($"  ... +{rows.Count - maxRows} more");
+                output.WriteLine(AnsiPalette.Muted($"  ... +{rows.Count - maxRows} more"));
                 break;
             }
             string kind = TypeName(o);
@@ -350,8 +355,13 @@ public sealed class SectorWorld
             string lvl = o.Level is { } lv ? lv.ToString(CultureInfo.InvariantCulture) : "-";
             string distStr = dist is { } d ? $"d={d:0.0}" : "d=?";
             string visited = o.IsNav ? (o.Visited == true ? " visited" : " unvisited") : "";
+            // Pad each field BEFORE colouring so the escape bytes don't count
+            // toward the column widths.
             output.WriteLine(
-                $"  {kind,-12} lvl {lvl,-3} {name,-28} {distStr,-12}{visited}");
+                "  " + AnsiPalette.Info($"{kind,-12}") + " " +
+                AnsiPalette.Muted("lvl ") + AnsiPalette.Value($"{lvl,-3}") + " " +
+                AnsiPalette.Accent($"{name,-28}") + " " +
+                AnsiPalette.Muted($"{distStr,-12}") + AnsiPalette.Muted(visited));
         }
     }
 

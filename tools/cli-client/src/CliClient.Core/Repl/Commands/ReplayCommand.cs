@@ -27,7 +27,8 @@ public sealed class ReplayCommand : ICommandHandler
     {
         if (args.Count < 1)
         {
-            await output.WriteLineAsync($"usage: {Usage}").ConfigureAwait(false);
+            await output.WriteLineAsync(
+                AnsiPalette.Warn($"usage: {Usage}")).ConfigureAwait(false);
             return 1;
         }
 
@@ -39,12 +40,14 @@ public sealed class ReplayCommand : ICommandHandler
         }
         catch (Exception ex)
         {
-            await output.WriteLineAsync($"failed to load replay: {ex.Message}").ConfigureAwait(false);
+            await output.WriteLineAsync(
+                AnsiPalette.Err($"failed to load replay: {ex.Message}")).ConfigureAwait(false);
             return 1;
         }
 
         await output.WriteLineAsync(
-            $"loaded {replay.Frames.Count} frames from {path} (meta={FormatMeta(replay.Metadata)})")
+            AnsiPalette.Ok($"loaded {replay.Frames.Count} frames") +
+            AnsiPalette.Muted($" from {path} (meta={FormatMeta(replay.Metadata)})"))
             .ConfigureAwait(false);
 
         for (int i = 0; i < replay.Frames.Count; i++)

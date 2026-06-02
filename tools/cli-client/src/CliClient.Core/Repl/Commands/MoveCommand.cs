@@ -4,6 +4,7 @@
 
 using System.Buffers.Binary;
 using System.Globalization;
+using N7.CliClient.Logging;
 using N7.CliClient.Net;
 
 namespace N7.CliClient.Repl.Commands;
@@ -58,7 +59,8 @@ public sealed class MoveCommand : ICommandHandler
     {
         if (_ctx.Sector is null || _ctx.GameId is not { } id)
         {
-            await output.WriteLineAsync("not in a sector -- run `enter` first").ConfigureAwait(false);
+            await output.WriteLineAsync(
+                AnsiPalette.Warn("not in a sector -- run `enter` first")).ConfigureAwait(false);
             return 1;
         }
 
@@ -69,14 +71,15 @@ public sealed class MoveCommand : ICommandHandler
             || !float.TryParse(args[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float ty)
             || !float.TryParse(args[2], NumberStyles.Float, CultureInfo.InvariantCulture, out float tz))
         {
-            await output.WriteLineAsync("usage: move <x> <y> <z> [send]  (numbers)").ConfigureAwait(false);
+            await output.WriteLineAsync(
+                AnsiPalette.Warn("usage: move <x> <y> <z> [send]  (numbers)")).ConfigureAwait(false);
             return 1;
         }
 
         if (_ctx.World.SelfSnapshot(id).Pos is not { } start0)
         {
-            await output.WriteLineAsync(
-                "no own position yet -- wait for the sector fanout, then retry").ConfigureAwait(false);
+            await output.WriteLineAsync(AnsiPalette.Warn(
+                "no own position yet -- wait for the sector fanout, then retry")).ConfigureAwait(false);
             return 1;
         }
 
@@ -84,14 +87,18 @@ public sealed class MoveCommand : ICommandHandler
         {
             byte[] dg = MvasClient.BuildDatagram(id, sequence: 1, tx, ty, tz);
             await output.WriteLineAsync(
-                $"move (dry-run): ({start0.X:0.0}, {start0.Y:0.0}, {start0.Z:0.0}) -> " +
-                $"({tx:0.0}, {ty:0.0}, {tz:0.0})  player=0x{id:X8}").ConfigureAwait(false);
+                AnsiPalette.Muted("move (dry-run): ") +
+                AnsiPalette.Value($"({start0.X:0.0}, {start0.Y:0.0}, {start0.Z:0.0})") +
+                AnsiPalette.Muted(" -> ") +
+                AnsiPalette.Value($"({tx:0.0}, {ty:0.0}, {tz:0.0})") + "  " +
+                AnsiPalette.Muted("player=") + AnsiPalette.Value($"0x{id:X8}")).ConfigureAwait(false);
             await output.WriteLineAsync(
-                $"  MVAS 0x1004 datagram ({dg.Length}B): {Convert.ToHexString(dg)}").ConfigureAwait(false);
+                AnsiPalette.Muted($"  MVAS 0x1004 datagram ({dg.Length}B): ") +
+                AnsiPalette.Info(Convert.ToHexString(dg))).ConfigureAwait(false);
             await output.WriteLineAsync(
-                "  not sent. Append 'send' to fly there as a full UDP client").ConfigureAwait(false);
+                AnsiPalette.Muted("  not sent. Append 'send' to fly there as a full UDP client")).ConfigureAwait(false);
             await output.WriteLineAsync(
-                "  (opens the sector UDP socket; the live sector stream then arrives there).")
+                AnsiPalette.Muted("  (opens the sector UDP socket; the live sector stream then arrives there)."))
                 .ConfigureAwait(false);
             return 0;
         }
@@ -109,8 +116,11 @@ public sealed class MoveCommand : ICommandHandler
             udp.Start(ct);
             _ctx.SectorUdp = udp;
             await output.WriteLineAsync(
-                $"sector UDP client up on local port {udp.LocalPort} -> {_ctx.EffectiveMvasHost}:{_ctx.MvasPort}; " +
-                "live sector stream now arrives here").ConfigureAwait(false);
+                AnsiPalette.Ok("sector UDP client up ") +
+                AnsiPalette.Muted("on local port ") + AnsiPalette.Value($"{udp.LocalPort}") +
+                AnsiPalette.Muted(" -> ") +
+                AnsiPalette.Value($"{_ctx.EffectiveMvasHost}:{_ctx.MvasPort}") +
+                AnsiPalette.Muted("; live sector stream now arrives here")).ConfigureAwait(false);
         }
         var client = _ctx.SectorUdp;
 
@@ -130,8 +140,14 @@ public sealed class MoveCommand : ICommandHandler
         float arrive = Math.Max(ArriveDelta, stepDist);
 
         await output.WriteLineAsync(
-            $"move: ({start0.X:0.0}, {start0.Y:0.0}, {start0.Z:0.0}) -> ({tx:0.0}, {ty:0.0}, {tz:0.0})  " +
-            $"speed={speed:0}u/s rate={freq}Hz step={stepDist:0}u player=0x{id:X8}").ConfigureAwait(false);
+            AnsiPalette.Muted("move: ") +
+            AnsiPalette.Value($"({start0.X:0.0}, {start0.Y:0.0}, {start0.Z:0.0})") +
+            AnsiPalette.Muted(" -> ") +
+            AnsiPalette.Value($"({tx:0.0}, {ty:0.0}, {tz:0.0})") + "  " +
+            AnsiPalette.Muted("speed=") + AnsiPalette.Info($"{speed:0}u/s") + " " +
+            AnsiPalette.Muted("rate=") + AnsiPalette.Info($"{freq}Hz") + " " +
+            AnsiPalette.Muted("step=") + AnsiPalette.Info($"{stepDist:0}u") + " " +
+            AnsiPalette.Muted("player=") + AnsiPalette.Value($"0x{id:X8}")).ConfigureAwait(false);
 
         // Throttle the position readout to ~once per 2s, and only while moving
         // (i.e. inside this loop). We print the locally-fed position (assumed
@@ -168,13 +184,15 @@ public sealed class MoveCommand : ICommandHandler
                     if (serverOverride && sp is { } sv)
                     {
                         await output.WriteLineAsync(
-                            $"  pos (server): ({sv.X:0.0}, {sv.Y:0.0}, {sv.Z:0.0})").ConfigureAwait(false);
+                            AnsiPalette.Warn("  pos (server): ") +
+                            AnsiPalette.Value($"({sv.X:0.0}, {sv.Y:0.0}, {sv.Z:0.0})")).ConfigureAwait(false);
                         cur = sv;   // adopt the server's position and continue from there
                     }
                     else
                     {
                         await output.WriteLineAsync(
-                            $"  pos (local):  ({cur.X:0.0}, {cur.Y:0.0}, {cur.Z:0.0})").ConfigureAwait(false);
+                            AnsiPalette.Muted("  pos (local):  ") +
+                            AnsiPalette.Value($"({cur.X:0.0}, {cur.Y:0.0}, {cur.Z:0.0})")).ConfigureAwait(false);
                     }
                     lastServerPos = sp;
                 }
@@ -187,15 +205,18 @@ public sealed class MoveCommand : ICommandHandler
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
-            await output.WriteLineAsync($"move failed: {ex.Message}").ConfigureAwait(false);
+            await output.WriteLineAsync(
+                AnsiPalette.Err($"move failed: {ex.Message}")).ConfigureAwait(false);
             return 1;
         }
 
         var landed = _ctx.World.SelfSnapshot(id).Pos;
         string where = landed is { } lp ? $"({lp.X:0.0}, {lp.Y:0.0}, {lp.Z:0.0})" : "(server pos unknown)";
         await output.WriteLineAsync(
-            $"  flew {ticks} ticks; {client.ReceivedDatagrams} datagrams in; server reports {where}. " +
-            "Run `list` for navs/objects in range.").ConfigureAwait(false);
+            AnsiPalette.Ok($"  flew {ticks} ticks; ") +
+            AnsiPalette.Muted($"{client.ReceivedDatagrams} datagrams in; server reports ") +
+            AnsiPalette.Value(where) +
+            AnsiPalette.Muted(". Run `list` for navs/objects in range.")).ConfigureAwait(false);
         return 0;
     }
 }

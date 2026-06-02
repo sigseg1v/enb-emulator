@@ -2,6 +2,8 @@
 // Part of the Earth & Beyond emulator preservation project.
 // License: LICENSES/enb-emulator
 
+using N7.CliClient.Logging;
+
 namespace N7.CliClient.Repl;
 
 /// <summary>
@@ -29,13 +31,20 @@ public sealed class Repl
 {
     private readonly Dictionary<string, ICommandHandler> _commands =
         new(StringComparer.OrdinalIgnoreCase);
-    private readonly string _prompt;
+    private readonly Func<string> _promptFactory;
     private readonly ILineInput? _lineInput;
 
     public Repl(string prompt = "> ", ILineInput? lineInput = null)
+        : this(() => prompt, lineInput) { }
+
+    /// <summary>
+    /// Construct with a prompt <em>factory</em> so the prompt can reflect live
+    /// session state (offline -> connected -> &lt;user&gt; -> &lt;user&gt;@sector).
+    /// Evaluated once per input line.
+    /// </summary>
+    public Repl(Func<string> prompt, ILineInput? lineInput = null)
     {
-        ArgumentNullException.ThrowIfNull(prompt);
-        _prompt = prompt;
+        _promptFactory = prompt ?? throw new ArgumentNullException(nameof(prompt));
         _lineInput = lineInput;
         Register(new HelpCommand(this));
         var quit = new QuitCommand();
@@ -90,17 +99,18 @@ public sealed class Repl
         int lastExit = 0;
         while (!ct.IsCancellationRequested)
         {
+            string prompt = _promptFactory();
             string? line;
             if (_lineInput is not null)
             {
                 // The line editor writes its own prompt (and may run an
                 // interactive completer or fall back to ReadLine itself).
-                line = await _lineInput.ReadLineAsync(_prompt, input, output, ct)
+                line = await _lineInput.ReadLineAsync(prompt, input, output, ct)
                     .ConfigureAwait(false);
             }
             else
             {
-                await output.WriteAsync(_prompt).ConfigureAwait(false);
+                await output.WriteAsync(prompt).ConfigureAwait(false);
                 await output.FlushAsync(ct).ConfigureAwait(false);
                 line = await input.ReadLineAsync(ct).ConfigureAwait(false);
             }
@@ -117,8 +127,10 @@ public sealed class Repl
 
             if (!_commands.TryGetValue(cmd, out var handler))
             {
-                await output.WriteLineAsync($"unknown command: {cmd}").ConfigureAwait(false);
-                await output.WriteLineAsync("type 'help' for a list").ConfigureAwait(false);
+                await output.WriteLineAsync(
+                    AnsiPalette.Err($"unknown command: {cmd}")).ConfigureAwait(false);
+                await output.WriteLineAsync(
+                    AnsiPalette.Muted("type 'help' for a list")).ConfigureAwait(false);
                 lastExit = 1;
                 continue;
             }
@@ -134,7 +146,8 @@ public sealed class Repl
             }
             catch (Exception ex)
             {
-                await output.WriteLineAsync($"error: {ex.Message}").ConfigureAwait(false);
+                await output.WriteLineAsync(
+                    AnsiPalette.Err($"error: {ex.Message}")).ConfigureAwait(false);
                 lastExit = 1;
                 continue;
             }
@@ -192,19 +205,24 @@ public sealed class Repl
         {
             if (args.Count == 0)
             {
-                await output.WriteLineAsync("commands:").ConfigureAwait(false);
+                await output.WriteLineAsync(AnsiPalette.Head("commands:")).ConfigureAwait(false);
                 foreach (var h in _owner.Commands)
-                    await output.WriteLineAsync($"  {h.Name,-12} {h.Summary}").ConfigureAwait(false);
+                    await output.WriteLineAsync(
+                        "  " + AnsiPalette.Accent($"{h.Name,-12}") + " " +
+                        AnsiPalette.Muted(h.Summary)).ConfigureAwait(false);
                 return 0;
             }
             var target = _owner.Find(args[0]);
             if (target is null)
             {
-                await output.WriteLineAsync($"unknown command: {args[0]}").ConfigureAwait(false);
+                await output.WriteLineAsync(
+                    AnsiPalette.Err($"unknown command: {args[0]}")).ConfigureAwait(false);
                 return 1;
             }
-            await output.WriteLineAsync($"{target.Name}: {target.Summary}").ConfigureAwait(false);
-            await output.WriteLineAsync($"usage: {target.Usage}").ConfigureAwait(false);
+            await output.WriteLineAsync(
+                AnsiPalette.Accent(target.Name) + ": " + target.Summary).ConfigureAwait(false);
+            await output.WriteLineAsync(
+                AnsiPalette.Muted("usage: ") + target.Usage).ConfigureAwait(false);
             return 0;
         }
     }

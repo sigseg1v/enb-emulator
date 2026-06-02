@@ -2,6 +2,7 @@
 // Part of the Earth & Beyond emulator preservation project.
 // License: LICENSES/enb-emulator
 
+using N7.CliClient.Logging;
 using N7.CliClient.Net;
 using N7.CliClient.Opcodes;
 using N7.CliClient.Opcodes.Outbound;
@@ -57,17 +58,20 @@ public sealed class ChatCommand : ICommandHandler
     {
         if (_ctx.Sector is null)
         {
-            await output.WriteLineAsync("not in a sector -- run `enter` first").ConfigureAwait(false);
+            await output.WriteLineAsync(
+                AnsiPalette.Warn("not in a sector -- run `enter` first")).ConfigureAwait(false);
             return 1;
         }
         if (_ctx.GameId is null)
         {
-            await output.WriteLineAsync("no avatar id for this session -- enter a sector first").ConfigureAwait(false);
+            await output.WriteLineAsync(
+                AnsiPalette.Warn("no avatar id for this session -- enter a sector first")).ConfigureAwait(false);
             return 1;
         }
         if (args.Count == 0)
         {
-            await output.WriteLineAsync($"usage: {Usage}").ConfigureAwait(false);
+            await output.WriteLineAsync(
+                AnsiPalette.Warn($"usage: {Usage}")).ConfigureAwait(false);
             return 1;
         }
 
@@ -89,7 +93,8 @@ public sealed class ChatCommand : ICommandHandler
         string message = string.Join(' ', words);
         if (message.Length == 0)
         {
-            await output.WriteLineAsync($"nothing to say on '{channel}' -- give a message").ConfigureAwait(false);
+            await output.WriteLineAsync(
+                AnsiPalette.Warn($"nothing to say on '{channel}' -- give a message")).ConfigureAwait(false);
             return 1;
         }
 

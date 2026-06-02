@@ -6,10 +6,11 @@ namespace N7.CliClient.Repl;
 
 /// <summary>
 /// A snapshot of one command for the interactive completer: its name,
-/// whether it's usable in the current session state, and the grey
-/// ghost-text hint for its arguments.
+/// whether it's usable in the current session state, the grey ghost-text
+/// hint for its arguments, and a flow-ordering priority (higher = offered
+/// first; ties break alphabetically).
 /// </summary>
-public sealed record CommandSpec(string Name, bool Available, string? Placeholder);
+public sealed record CommandSpec(string Name, bool Available, string? Placeholder, int Priority = 0);
 
 /// <summary>
 /// Pure completion logic for the REPL line editor -- candidate filtering
@@ -18,11 +19,15 @@ public sealed record CommandSpec(string Name, bool Available, string? Placeholde
 /// </summary>
 public static class Completion
 {
-    /// <summary>Available command names, sorted, case-insensitively.</summary>
+    /// <summary>
+    /// Available command names, highest <see cref="CommandSpec.Priority"/>
+    /// first (the expected next step in the flow), then alphabetically.
+    /// </summary>
     public static IReadOnlyList<string> AvailableNames(IReadOnlyList<CommandSpec> specs)
         => specs.Where(s => s.Available)
+                .OrderByDescending(s => s.Priority)
+                .ThenBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
                 .Select(s => s.Name)
-                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
 
     /// <summary>
@@ -91,6 +96,70 @@ public static class Completion
         // Only show the placeholder while no argument has been typed yet.
         string afterCmd = buffer.TrimStart()[Math.Min(cmd.Length, buffer.TrimStart().Length)..].TrimStart();
         return afterCmd.Length == 0 ? spec.Placeholder : string.Empty;
+    }
+
+    /// <summary>
+    /// The full buffer text after Tab fills the suggested value for the
+    /// argument currently being typed, or null when nothing applies. Only
+    /// acts past the command word. A placeholder slot may embed a suggestion:
+    /// <list type="bullet">
+    ///   <item><c>&lt;name:default&gt;</c> -> <c>default</c>
+    ///         (e.g. <c>&lt;ip:127.0.0.1&gt;</c> -> <c>127.0.0.1</c>);</item>
+    ///   <item><c>[a|b|c]</c> -> the first option matching what's typed.</item>
+    /// </list>
+    /// Whatever the user has already typed for the argument must be a prefix
+    /// of the suggestion, so Tab never clobbers a value in progress.
+    /// </summary>
+    public static string? CompleteArgument(string buffer, IReadOnlyList<CommandSpec> specs)
+    {
+        if (!PastFirstToken(buffer)) return null;
+
+        string cmd = FirstToken(buffer);
+        var spec = specs.FirstOrDefault(
+            s => s.Available && string.Equals(s.Name, cmd, StringComparison.OrdinalIgnoreCase));
+        if (spec?.Placeholder is null) return null;
+
+        // Args after the command word; preserve a trailing space (it means
+        // "starting a fresh argument", not "editing the last one").
+        string args = buffer.TrimStart()[cmd.Length..].TrimStart();
+        string[] parts = args.Length == 0
+            ? Array.Empty<string>()
+            : args.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        bool onNewArg = args.Length == 0 || char.IsWhiteSpace(args[^1]);
+        int argIndex = onNewArg ? parts.Length : parts.Length - 1;
+        string partial = onNewArg ? string.Empty : parts[^1];
+
+        string[] slots = spec.Placeholder.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (argIndex < 0 || argIndex >= slots.Length) return null;
+
+        string? value = SuggestArg(slots[argIndex], partial);
+        if (value is null) return null;
+
+        string rebuilt = cmd + " " + string.Join(' ', parts.Take(argIndex).Append(value));
+        return rebuilt == buffer ? null : rebuilt;
+    }
+
+    /// <summary>The suggested value for one placeholder slot, or null.</summary>
+    private static string? SuggestArg(string slot, string partial)
+    {
+        // <name:default> -- the text after the first colon is the default.
+        if (slot.Length >= 2 && slot[0] == '<' && slot[^1] == '>')
+        {
+            int colon = slot.IndexOf(':');
+            if (colon < 0 || colon >= slot.Length - 2) return null;   // <name> or <name:>
+            string def = slot[(colon + 1)..^1];
+            return def.StartsWith(partial, StringComparison.OrdinalIgnoreCase) ? def : null;
+        }
+
+        // [a|b|c] -- the first option that matches what's already typed.
+        if (slot.Length >= 2 && slot[0] == '[' && slot[^1] == ']')
+        {
+            foreach (string opt in slot[1..^1].Split('|'))
+                if (opt.StartsWith(partial, StringComparison.OrdinalIgnoreCase))
+                    return opt;
+        }
+
+        return null;
     }
 }
 

@@ -2,6 +2,7 @@
 // Part of the Earth & Beyond emulator preservation project.
 // License: LICENSES/enb-emulator
 
+using N7.CliClient.Logging;
 using N7.CliClient.Opcodes.Inbound;
 
 namespace N7.CliClient.Repl.Commands;
@@ -41,7 +42,8 @@ public sealed class ListCommand : ICommandHandler
 
         if (_ctx.AvatarList is null)
         {
-            await output.WriteLineAsync("no avatar list yet -- run `login` first").ConfigureAwait(false);
+            await output.WriteLineAsync(
+                AnsiPalette.Warn("no avatar list yet -- run `login` first")).ConfigureAwait(false);
             return 1;
         }
         await PrintAvatarsAsync(_ctx.AvatarList, output).ConfigureAwait(false);
@@ -53,7 +55,7 @@ public sealed class ListCommand : ICommandHandler
         ArgumentNullException.ThrowIfNull(list);
         ArgumentNullException.ThrowIfNull(output);
 
-        await output.WriteLineAsync("characters:").ConfigureAwait(false);
+        await output.WriteLineAsync(AnsiPalette.Head("characters:")).ConfigureAwait(false);
         int filled = 0;
         for (int i = 0; i < list.Avatars.Length; i++)
         {
@@ -61,7 +63,8 @@ public sealed class ListCommand : ICommandHandler
             bool empty = string.IsNullOrEmpty(slot.Data.FirstName) && slot.Info.AccountIdLsb == 0;
             if (empty)
             {
-                await output.WriteLineAsync($"  [{i}] <empty>").ConfigureAwait(false);
+                await output.WriteLineAsync(
+                    AnsiPalette.Muted($"  [{i}] <empty>")).ConfigureAwait(false);
                 continue;
             }
             filled++;
@@ -69,23 +72,31 @@ public sealed class ListCommand : ICommandHandler
             string prof = CharacterClass.ProfessionName(slot.Data.Profession);
             string loc = string.IsNullOrEmpty(slot.Info.Location) ? "?" : slot.Info.Location;
             await output.WriteLineAsync(
-                $"  [{i}] {slot.Data.FirstName,-20} {race}/{prof}  " +
-                $"sector={slot.Info.SectorId} loc={loc} " +
-                $"levels(C/E/T)={slot.Info.CombatLevel}/{slot.Info.ExploreLevel}/{slot.Info.TradeLevel}")
+                "  " + AnsiPalette.Muted($"[{i}]") + " " +
+                AnsiPalette.Accent($"{slot.Data.FirstName,-20}") + " " +
+                AnsiPalette.Info($"{race}/{prof}") + "  " +
+                AnsiPalette.Muted($"sector={slot.Info.SectorId} loc={loc} ") +
+                AnsiPalette.Value(
+                    $"levels(C/E/T)={slot.Info.CombatLevel}/{slot.Info.ExploreLevel}/{slot.Info.TradeLevel}"))
                 .ConfigureAwait(false);
         }
         if (list.Galaxies.Length > 0)
         {
-            await output.WriteLineAsync($"galaxies: {list.NumGalaxies}").ConfigureAwait(false);
+            await output.WriteLineAsync(
+                AnsiPalette.Head($"galaxies: {list.NumGalaxies}")).ConfigureAwait(false);
             for (int i = 0; i < list.Galaxies.Length; i++)
             {
                 var g = list.Galaxies[i];
                 await output.WriteLineAsync(
-                    $"  [{i}] {g.Name}  {g.IpAddress}:{g.Port}  players={g.NumPlayers}/{g.MaxPlayers}")
+                    "  " + AnsiPalette.Muted($"[{i}]") + " " +
+                    AnsiPalette.Accent(g.Name) + "  " +
+                    AnsiPalette.Value($"{g.IpAddress}:{g.Port}") + "  " +
+                    AnsiPalette.Muted($"players={g.NumPlayers}/{g.MaxPlayers}"))
                     .ConfigureAwait(false);
             }
         }
-        await output.WriteLineAsync($"({filled}/{list.Avatars.Length} slots filled)")
+        await output.WriteLineAsync(
+            AnsiPalette.Muted($"({filled}/{list.Avatars.Length} slots filled)"))
             .ConfigureAwait(false);
     }
 }

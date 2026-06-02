@@ -59,4 +59,18 @@ public static class AnsiPalette
 
     public static string Colorize(string code, string text) =>
         Enabled ? string.Concat(code, text, Reset) : text;
+
+    // ---- semantic roles for ordinary REPL output ----
+    // The annotated hex `dump` view keeps its own per-byte palette above;
+    // these give the rest of the REPL (prompt, command output, suggestions)
+    // a single consistent vocabulary. Each is a no-op when colour is off, so
+    // piped / non-interactive output stays plain.
+    public static string Head(string s)   => Colorize(BrightCyan + Bold, s);  // section titles
+    public static string Ok(string s)     => Colorize(Green, s);              // success / done
+    public static string Err(string s)    => Colorize(BrightRed, s);          // failures
+    public static string Warn(string s)   => Colorize(Yellow, s);            // hints / usage
+    public static string Info(string s)   => Colorize(Cyan, s);              // neutral status
+    public static string Muted(string s)  => Colorize(Gray, s);              // secondary detail
+    public static string Accent(string s) => Colorize(BrightCyan, s);        // names / emphasis
+    public static string Value(string s)  => Colorize(BrightYellow, s);      // ids, coords, counts
 }

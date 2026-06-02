@@ -40,10 +40,18 @@ public interface ICommandHandler
 
     /// <summary>
     /// Grey ghost-text hint for this command's arguments, shown after the
-    /// command word once it is complete (e.g. connect → <c>&lt;ip:127.0.0.1&gt;</c>).
+    /// command word once it is complete (e.g. connect -> <c>&lt;ip:127.0.0.1&gt;</c>).
     /// Null when the command takes no arguments.
     /// </summary>
     string? Placeholder => null;
+
+    /// <summary>
+    /// Ordering hint for the interactive completer. Available commands with a
+    /// higher priority are offered first, so the obvious next step in the flow
+    /// (connect, then login, then create) leads the suggestion list and the
+    /// Tab menu. Ties break alphabetically. Defaults to 0 (no preference).
+    /// </summary>
+    int Priority => 0;
 
     /// <summary>Execute the command. Returns an exit-style int (see interface remarks).</summary>
     Task<int> ExecuteAsync(

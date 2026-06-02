@@ -39,19 +39,21 @@ public sealed class DumpCommand : ICommandHandler
     {
         if (_ctx.Global is null || _ctx.AvatarList is null)
         {
-            await output.WriteLineAsync("not logged in -- run `login` first").ConfigureAwait(false);
+            await output.WriteLineAsync(
+                AnsiPalette.Warn("not logged in -- run `login` first")).ConfigureAwait(false);
             return 1;
         }
         if (_ctx.Sector is not null)
         {
-            await output.WriteLineAsync(
-                $"already in sector {_ctx.ActiveSectorId} -- restart the REPL to switch")
+            await output.WriteLineAsync(AnsiPalette.Warn(
+                $"already in sector {_ctx.ActiveSectorId} -- restart the REPL to switch"))
                 .ConfigureAwait(false);
             return 1;
         }
         if (args.Count < 1)
         {
-            await output.WriteLineAsync($"usage: {Usage}").ConfigureAwait(false);
+            await output.WriteLineAsync(
+                AnsiPalette.Warn($"usage: {Usage}")).ConfigureAwait(false);
             return 1;
         }
 
@@ -65,20 +67,23 @@ public sealed class DumpCommand : ICommandHandler
             {
                 case "--compare":
                     if (i + 1 >= args.Count) {
-                        await output.WriteLineAsync("--compare needs a file path").ConfigureAwait(false);
+                        await output.WriteLineAsync(
+                            AnsiPalette.Err("--compare needs a file path")).ConfigureAwait(false);
                         return 1;
                     }
                     comparePath = args[++i];
                     break;
                 case "--drain":
                     if (i + 1 >= args.Count || !int.TryParse(args[++i], out int secs)) {
-                        await output.WriteLineAsync("--drain needs an integer seconds value").ConfigureAwait(false);
+                        await output.WriteLineAsync(
+                            AnsiPalette.Err("--drain needs an integer seconds value")).ConfigureAwait(false);
                         return 1;
                     }
                     drain = TimeSpan.FromSeconds(Math.Max(0, secs));
                     break;
                 default:
-                    await output.WriteLineAsync($"unknown option: {args[i]}").ConfigureAwait(false);
+                    await output.WriteLineAsync(
+                        AnsiPalette.Err($"unknown option: {args[i]}")).ConfigureAwait(false);
                     return 1;
             }
         }
@@ -98,7 +103,8 @@ public sealed class DumpCommand : ICommandHandler
         }
         if (slot < 0)
         {
-            await output.WriteLineAsync($"no character named '{firstName}' in the cached list (run `list`)")
+            await output.WriteLineAsync(AnsiPalette.Err(
+                $"no character named '{firstName}' in the cached list (run `list`)"))
                 .ConfigureAwait(false);
             return 1;
         }
@@ -110,19 +116,25 @@ public sealed class DumpCommand : ICommandHandler
             {
                 replay = ReplayFile.Load(comparePath);
                 await output.WriteLineAsync(
-                    $"loaded retail capture: {replay.Frames.Count} frames, meta={FormatMeta(replay.Metadata)}")
+                    AnsiPalette.Ok("loaded retail capture: ") +
+                    AnsiPalette.Value($"{replay.Frames.Count} frames") +
+                    AnsiPalette.Muted($", meta={FormatMeta(replay.Metadata)}"))
                     .ConfigureAwait(false);
             }
             catch (Exception ex)
             {
-                await output.WriteLineAsync($"failed to load --compare file: {ex.Message}")
+                await output.WriteLineAsync(
+                    AnsiPalette.Err($"failed to load --compare file: {ex.Message}"))
                     .ConfigureAwait(false);
                 return 1;
             }
         }
 
         await output.WriteLineAsync(
-            $"entering sector {sectorId} on slot {slot} as {firstName} (dump mode, drain={drain.TotalSeconds:0}s)...")
+            AnsiPalette.Muted("entering sector ") + AnsiPalette.Value($"{sectorId}") +
+            AnsiPalette.Muted(" on slot ") + AnsiPalette.Value($"{slot}") +
+            AnsiPalette.Muted(" as ") + AnsiPalette.Accent(firstName) +
+            AnsiPalette.Muted($" (dump mode, drain={drain.TotalSeconds:0}s)..."))
             .ConfigureAwait(false);
 
         SectorEnterDriver.SectorEntryResult result;
@@ -133,7 +145,8 @@ public sealed class DumpCommand : ICommandHandler
         }
         catch (Exception ex)
         {
-            await output.WriteLineAsync($"enter failed: {ex.Message}").ConfigureAwait(false);
+            await output.WriteLineAsync(
+                AnsiPalette.Err($"enter failed: {ex.Message}")).ConfigureAwait(false);
             return 1;
         }
 
@@ -143,8 +156,10 @@ public sealed class DumpCommand : ICommandHandler
         _ctx.ActiveSectorId = result.SectorId;
 
         await output.WriteLineAsync(
-            $"in-sector: gameId=0x{result.GameId:X8} startId=0x{result.StartId:X8} " +
-            $"handshake-frames={result.HandshakeFrames.Count}")
+            AnsiPalette.Ok("in-sector: ") +
+            AnsiPalette.Muted("gameId=") + AnsiPalette.Value($"0x{result.GameId:X8}") + " " +
+            AnsiPalette.Muted("startId=") + AnsiPalette.Value($"0x{result.StartId:X8}") + " " +
+            AnsiPalette.Muted("handshake-frames=") + AnsiPalette.Value($"{result.HandshakeFrames.Count}"))
             .ConfigureAwait(false);
 
         var extra = await DrainBriefly(result.Sector, drain, ct).ConfigureAwait(false);
@@ -162,7 +177,7 @@ public sealed class DumpCommand : ICommandHandler
         TextWriter output, IReadOnlyList<Packet> ours, ReplayFile? replay)
     {
         await output.WriteLineAsync(
-            $"---- frame dump ({ours.Count} total) ----")
+            AnsiPalette.Head($"---- frame dump ({ours.Count} total) ----"))
             .ConfigureAwait(false);
         for (int i = 0; i < ours.Count; i++)
         {
@@ -236,17 +251,19 @@ public sealed class DumpCommand : ICommandHandler
     private static async Task PrintCoverageSummary(
         TextWriter output, IReadOnlyList<Packet> ours, ReplayFile? replay)
     {
-        await output.WriteLineAsync("---- opcode coverage ----").ConfigureAwait(false);
+        await output.WriteLineAsync(AnsiPalette.Head("---- opcode coverage ----")).ConfigureAwait(false);
         var oursCounts = CountByOpcode(ours.Select(p => p.Header.Opcode));
         await output.WriteLineAsync(
-            $"ours:   {oursCounts.Count} distinct opcodes, {ours.Count} frames")
+            AnsiPalette.Muted("ours:   ") +
+            AnsiPalette.Value($"{oursCounts.Count} distinct opcodes, {ours.Count} frames"))
             .ConfigureAwait(false);
 
         if (replay is null) return;
 
         var retailCounts = CountByOpcode(replay.Frames.Select(f => f.Opcode));
         await output.WriteLineAsync(
-            $"retail: {retailCounts.Count} distinct opcodes, {replay.Frames.Count} frames")
+            AnsiPalette.Muted("retail: ") +
+            AnsiPalette.Value($"{retailCounts.Count} distinct opcodes, {replay.Frames.Count} frames"))
             .ConfigureAwait(false);
 
         var missing = retailCounts.Keys.Except(oursCounts.Keys).OrderBy(o => o).ToList();
@@ -254,24 +271,26 @@ public sealed class DumpCommand : ICommandHandler
 
         if (missing.Count > 0)
         {
-            await output.WriteLineAsync(
-                "[!] opcodes present in retail but NOT emitted by our server:")
+            await output.WriteLineAsync(AnsiPalette.Err(
+                "[!] opcodes present in retail but NOT emitted by our server:"))
                 .ConfigureAwait(false);
             foreach (var op in missing)
-                await output.WriteLineAsync($"    0x{op:X4} {NameOr(op)}  (retail x{retailCounts[op]})")
+                await output.WriteLineAsync(
+                    AnsiPalette.Muted($"    0x{op:X4} {NameOr(op)}  (retail x{retailCounts[op]})"))
                     .ConfigureAwait(false);
         }
         if (extra.Count > 0)
         {
-            await output.WriteLineAsync(
-                "[!] opcodes emitted by our server but NOT in the retail capture:")
+            await output.WriteLineAsync(AnsiPalette.Warn(
+                "[!] opcodes emitted by our server but NOT in the retail capture:"))
                 .ConfigureAwait(false);
             foreach (var op in extra)
-                await output.WriteLineAsync($"    0x{op:X4} {NameOr(op)}  (ours x{oursCounts[op]})")
+                await output.WriteLineAsync(
+                    AnsiPalette.Muted($"    0x{op:X4} {NameOr(op)}  (ours x{oursCounts[op]})"))
                     .ConfigureAwait(false);
         }
         if (missing.Count == 0 && extra.Count == 0)
-            await output.WriteLineAsync("opcode sets match.").ConfigureAwait(false);
+            await output.WriteLineAsync(AnsiPalette.Ok("opcode sets match.")).ConfigureAwait(false);
     }
 
     private static Dictionary<ushort, int> CountByOpcode(IEnumerable<ushort> opcodes)

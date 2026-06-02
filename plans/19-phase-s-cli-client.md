@@ -949,3 +949,43 @@ the CLI inside the docker network; the true blocker is server-side dock state.
 - Net: don't move the proxy. The CLI's path to flying is the launch/undock
   handshake above (server-side dock state), which is unrelated to where the
   proxy runs.
+
+## REPL UX polish: Tab arg-fill + state-aware flow + full-line colour (2026-06-01)
+
+Live-play feedback. All client-side; NO server change.
+
+- [x] Tab fills argument values, not just command names. Past the command word,
+      Tab completes the suggestion embedded in the placeholder:
+      `<name:default>` -> `default` (e.g. connect's `<ip:127.0.0.1>` -> `127.0.0.1`)
+      and `[a|b|c]` -> the first option matching what's typed. A partially-typed
+      arg must prefix the suggestion, so Tab never clobbers a value in progress.
+      Pure logic in `Completion.CompleteArgument`/`SuggestArg`; `LineEditor`'s
+      `HandleTab` routes to it when `PastFirstToken`. Files: `Repl/Completion.cs`,
+      `Repl/LineEditor.cs`.
+- [x] Flow-ordered suggestions via `ICommandHandler.Priority` (default 0;
+      `CommandSpec` 4th field). `AvailableNames` sorts `Priority` desc then name.
+      The expected next step leads: connect at startup (Priority 100, retires
+      once `Connected`), login after connect (100, while `Global is null`),
+      create+enter after login (both 100 -> `create` leads by the alpha tie),
+      move/chat in-sector. So the first grey ghost command is always the obvious
+      next action. Files: `Repl/ICommandHandler.cs`, `Repl/Completion.cs`,
+      `Repl/Commands/{Connect,Login,Create,Enter,Move}Command.cs`, `Program.cs`.
+- [x] Colour across the whole REPL, not just the packet dump. Added semantic
+      helpers to `AnsiPalette` (Head/Ok/Err/Warn/Info/Muted/Accent/Value), each a
+      no-op when colour is off. Every command's status/error/summary output now
+      uses them (connect/login/create/enter/list/move/chat/dump/dump-on/dump-off/
+      replay), plus the REPL built-ins (prompt, help, unknown-command, errors) and
+      the `SectorWorld` render. The annotated hex `dump` view keeps its own
+      per-byte palette untouched (it was already good). Colour auto-disables when
+      stdout is redirected or `NO_COLOR` is set, so piped/non-TTY output (tests,
+      `just *-replay`) stays plain -- this is why none of the colour additions
+      needed test changes. State-aware prompt: a `Func<string>` prompt factory
+      shows `offline` -> `connected` -> `user` -> `user@sector`. Files:
+      `Logging/AnsiPalette.cs`, `Repl/Repl.cs` (Func prompt), `Repl/SessionContext.cs`
+      (`PromptLabel`), `Repl/SectorWorld.cs`, all `Repl/Commands/*`, `Program.cs`.
+- [x] Tests: +15 (CompletionTests: CompleteArgument default/prefix/non-prefix/
+      no-default/bracket-options/before-word/past-slot/unavailable + AvailableNames
+      priority; LineEditorTests: interactive Tab fills arg default, completes typed
+      prefix, inert with no default). Suite 246->261, all green. Colour confirmed
+      transparent under `dotnet test` (redirected stdout -> `AnsiPalette.Enabled`
+      false).

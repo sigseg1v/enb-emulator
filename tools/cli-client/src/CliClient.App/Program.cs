@@ -51,9 +51,13 @@ if (args[0] is "repl" or "start")
     // cycle with a captured local the editor's callback reads at run time.
     Repl repl = null!;
     var editor = new LineEditor(() => repl.Commands
-        .Select(h => new CommandSpec(h.Name, h.Available, h.Placeholder))
+        .Select(h => new CommandSpec(h.Name, h.Available, h.Placeholder, h.Priority))
         .ToList());
-    repl = new Repl(lineInput: editor);
+    // State-aware, coloured prompt: tracks offline -> connected -> user ->
+    // user@sector. Plain automatically when colour is off (piped/NO_COLOR).
+    string Prompt() =>
+        AnsiPalette.Accent(sessionCtx.PromptLabel) + AnsiPalette.Muted(" > ");
+    repl = new Repl(Prompt, editor);
     repl.Register(new ConnectCommand(sessionCtx));
     repl.Register(new LoginCommand(sessionCtx));
     repl.Register(new ListCommand(sessionCtx));
@@ -289,8 +293,11 @@ static void PrintHelp()
                               move    <x> <y> <z> [send]  (MVAS position; see note)
                               chat    [sector|gm|dev|beta|whisper] <message>
                               help, quit (alias: exit)
-                            Tab/Shift-Tab complete the available commands;
-                            grey ghost text hints the next argument.
+                            Tab/Shift-Tab complete the available commands
+                            (the likely next step leads the list). Past the
+                            command word Tab fills the suggested argument
+                            (e.g. connect's 127.0.0.1); grey ghost text hints
+                            the next argument.
                             chat events (in/out) echo at the prompt by default.
           connect-and-login --user X --pass Y [--login-host h] [--login-port p]
                             [--global-host h] [--global-port p] [--idle 5]

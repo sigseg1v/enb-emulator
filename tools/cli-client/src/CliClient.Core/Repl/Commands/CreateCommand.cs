@@ -2,6 +2,8 @@
 // Part of the Earth & Beyond emulator preservation project.
 // License: LICENSES/enb-emulator
 
+using N7.CliClient.Logging;
+
 namespace N7.CliClient.Repl.Commands;
 
 /// <summary>
@@ -30,15 +32,18 @@ public sealed class CreateCommand : ICommandHandler
         "  example: create character JE Griever";
     public string? Placeholder => "<class> <firstname>";
 
-    // Available once logged in.
+    // Available once logged in; the primary next step after login (it leads
+    // `enter` in the suggestions by the alphabetical tiebreak).
     public bool Available => _ctx.Global is not null && _ctx.AvatarList is not null;
+    public int Priority => 100;
 
     public async Task<int> ExecuteAsync(
         IReadOnlyList<string> args, TextWriter output, CancellationToken ct)
     {
         if (_ctx.Global is null || _ctx.AvatarList is null || _ctx.Username is null)
         {
-            await output.WriteLineAsync("not logged in -- run `login` first").ConfigureAwait(false);
+            await output.WriteLineAsync(
+                AnsiPalette.Warn("not logged in -- run `login` first")).ConfigureAwait(false);
             return 1;
         }
 
@@ -50,20 +55,23 @@ public sealed class CreateCommand : ICommandHandler
 
         if (args.Count - idx < 2)
         {
-            await output.WriteLineAsync("usage: create [character] <class> <firstname>").ConfigureAwait(false);
+            await output.WriteLineAsync(
+                AnsiPalette.Warn("usage: create [character] <class> <firstname>")).ConfigureAwait(false);
             return 1;
         }
 
         if (!CharacterClass.TryParseCode(args[idx], out int race, out int profession))
         {
-            await output.WriteLineAsync($"bad class code '{args[idx]}' (try JE, TW, PT, ...)").ConfigureAwait(false);
+            await output.WriteLineAsync(
+                AnsiPalette.Err($"bad class code '{args[idx]}' (try JE, TW, PT, ...)")).ConfigureAwait(false);
             return 1;
         }
 
         string firstName = args[idx + 1];
         if (firstName.Length == 0 || firstName.Length > 19)
         {
-            await output.WriteLineAsync("firstname must be 1-19 ASCII chars").ConfigureAwait(false);
+            await output.WriteLineAsync(
+                AnsiPalette.Err("firstname must be 1-19 ASCII chars")).ConfigureAwait(false);
             return 1;
         }
 
@@ -79,7 +87,8 @@ public sealed class CreateCommand : ICommandHandler
         }
         if (slot < 0)
         {
-            await output.WriteLineAsync("no empty slots -- delete a character first").ConfigureAwait(false);
+            await output.WriteLineAsync(
+                AnsiPalette.Warn("no empty slots -- delete a character first")).ConfigureAwait(false);
             return 1;
         }
 
@@ -87,8 +96,11 @@ public sealed class CreateCommand : ICommandHandler
         if (shipName.Length > 25) shipName = firstName;
 
         await output.WriteLineAsync(
-            $"create: slot={slot} class={CharacterClass.RaceName(race)} {CharacterClass.ProfessionName(profession)} " +
-            $"name='{firstName}' ship='{shipName}'")
+            AnsiPalette.Muted("create: ") +
+            AnsiPalette.Muted($"slot={slot} ") +
+            AnsiPalette.Info($"{CharacterClass.RaceName(race)} {CharacterClass.ProfessionName(profession)}") + " " +
+            AnsiPalette.Muted("name=") + AnsiPalette.Accent($"'{firstName}'") + " " +
+            AnsiPalette.Muted($"ship='{shipName}'"))
             .ConfigureAwait(false);
 
         try
@@ -110,7 +122,8 @@ public sealed class CreateCommand : ICommandHandler
         }
         catch (Exception ex)
         {
-            await output.WriteLineAsync($"create failed: {ex.Message}").ConfigureAwait(false);
+            await output.WriteLineAsync(
+                AnsiPalette.Err($"create failed: {ex.Message}")).ConfigureAwait(false);
             return 1;
         }
     }
