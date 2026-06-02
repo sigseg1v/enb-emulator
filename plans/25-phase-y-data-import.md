@@ -250,25 +250,51 @@ will provide newer references when each task is approved.
   is the load-bearing column and it simply does not exist in the
   dataset; fabricating it onto authoritative mobs would corrupt the
   loot tables. Real unblock needs a Net-7 drop dump with numeric rates.
+  A full importer WAS written 2026-06-02 to pressure-test this verdict
+  (fabricated `drop_chance` from same-type averages + 59 invented
+  `mob_base` rows) and then deleted as dead code -- it confirmed the
+  block. See decisions-log "Phase Y8 drop-table importer built,
+  evaluated, and REJECTED" for why this differs from the Y9 unblock.
 
-- [!] **Y9: Prospecting / resource import** --
-  (`prospecting/prospecting.jsonl` + `prospect_fields.jsonl`).
-  **BLOCKED -- diffed 2026-06-02, no importable row.**
-  `sector_objects_harvestable` holds **882** harvestable fields keyed
-  by `resource_id` (a sector_object_id), with spawn mechanics
-  (`spawn_radius`, `pop_rock_chance`, `respawn_timer`, `res_count`,
-  `max_field_radius`). The diff: 3545 dataset rows -- but **0** carry
-  any id field, and the dataset has NONE of the runtime mechanics
-  columns (its keys are resource/nodeType/level/sector/refinesTo/
-  navDistribution -- descriptive lore). There is no way to link a
-  dataset row to a runtime field without fabricating `resource_id`, and
-  nothing to populate the mechanics with. Real unblock needs a Net-7
-  harvestable dump. Both prospecting files were inspected:
-  `prospect_fields.jsonl` (145 rows) has keys
-  `system/sector/nav/levelMin/levelMax/types/density/densityWeight/roamingCL`
-  -- it describes which resource classes appear near a *named* nav at
-  what level, again with no `resource_id` and no numeric spawn mechanic,
-  so it is non-importable for the same reason.
+- [x] **Y9: Prospecting / resource import** --
+  (`prospecting/prospecting.jsonl`). **IMPORTER BUILT 2026-06-02; 529
+  nodes generated. The earlier "BLOCKED -- no importable row" finding
+  below was WRONG and is superseded.** The prior pass concluded the
+  dataset was non-importable because its rows carry no numeric
+  `resource_id`. That reasoning was the same Y4-era mistake the rest of
+  this file warns against: it diffed on *ids* instead of *names*. A
+  harvestable node is constructable from name + position + per-sector
+  mechanics derivation -- exactly the path that made Y4 navs importable.
+  Concretely: `sector_objects_harvestable.resource_id` is a
+  `sector_objects.sector_object_id` of **type 38** (the field object),
+  not a separate key (verified against the server's own join in
+  `server/src/SectorContentSQL.cpp`: `sector_objects.sector_object_id =
+  sector_objects_harvestable.resource_id`). `field` is a 0-5 field-type
+  enum (NOT a nav id). The dataset's `resource` names resolve to ore
+  `item_id`s via `base_ore_list`/`item_base` (339/342 = 99%), and its
+  `(sector, nav)` pairs resolve to runtime nav-point `sector_objects`
+  (93% of triples) which supply the field POSITION + `sector_id`.
+  Importer: `tools/dataimport-jsonl/generate_seed_prospecting.py` ->
+  `db/postgres/seed_phase_y_prospecting.sql`. Each gap node is emitted
+  as a type-38 `sector_objects` row at the matched nav's coords + a
+  `sector_objects_harvestable` row (resource_id == node id; res_count
+  1-5 per project intent; mechanics columns copied from same-level
+  existing fields) + 1-5 `oretypes` rows (resource->item, frequency =
+  dataset prob/weight/density apportioned, top-N=res_count) + restypes
+  rock-asset rows (copied from a same-level node). Synth ids >= 100000,
+  gated DELETE-then-INSERT, ON CONFLICT DO NOTHING, idempotent. Field-
+  level dedup drops 136 candidates coincident with an existing type-38
+  field. Result: **529 nodes, 2537 oretype links, 1339 restype rows.**
+  Honest caveats: oretype `frequency` is currently INERT (the server
+  picks ore uniformly -- `ItemBaseManager.cpp ~244` has a "TODO: add
+  frequency weightings"); positions are the matched nav-point's, so a
+  field sits exactly on the nav rather than at the retail offset;
+  rock-asset `type` ids and the 4 mechanics columns are same-level
+  copies, not dataset-attested. `prospect_fields.jsonl` (145 rows) was
+  inspected but adds nothing the per-nav `navDistribution` in
+  prospecting.jsonl does not already carry. **NOT YET APPLIED** (DB is
+  read-only in the build task); apply via the schema-init service or
+  `psql -f db/postgres/seed_phase_y_prospecting.sql`.
 
 ## Finding 2026-06-01..02: per-category diff of the reconstruct dataset
 
@@ -294,7 +320,7 @@ A by-name + by-position diff per category yields:
 | mobs | `mob_base` | 2042 | 242 / 1113 | no importable row -- 0 of the 242 carry an asset/template id (unspawnable) |
 | missions | `missions` | 364 (all w/ XML) | 430 / 587 | no importable row -- 0 carry `mission_XML` (the executable script; cannot synthesize from prose) |
 | item drops | `mob_items` | 8583 | -- | no importable row -- 0 of 2415 rows carry a numeric `drop_chance` |
-| prospecting | `sector_objects_harvestable` | 882 | -- | no importable row -- 0 of 3545 rows carry a `resource_id` or any spawn-mechanics column |
+| prospecting | `sector_objects_harvestable` | 882 | -- | **529-node gap importer BUILT (Y9, 2026-06-02)** -- the "no resource_id" verdict was an id-diff mistake; resource+nav NAMES resolve (99%/93%) and a node is constructable from name+position+per-sector mechanics, exactly like Y4 navs |
 
 **What was importable** (Y1 NPCs, Y4 navs, Y5 items): a real diff
 surfaced rows the runtime genuinely lacked, and each carried enough to

@@ -7338,3 +7338,71 @@ a case-mismatched name) and they are keyed primarily by `avatar_id`. Left
 as-is to keep the change scoped to the three behaviourally load-bearing
 columns; noted here so a future pass can extend citext if a divergence is
 observed.
+
+---
+
+## 2026-06-02: Phase Y9 prospecting-node importer built (prior "blocked" finding overturned)
+
+The 2026-06-02 Phase Y diff finding had declared Y9 (prospecting) "no
+importable row" because the dataset carries no numeric `resource_id`. That
+was an id-diff mistake -- the same error this file flags for Y4. Re-diffed
+by NAME against the live runtime (read-only):
+
+- `sector_objects_harvestable.resource_id` IS a `sector_objects.sector_object_id`
+  of type 38 (the field object), confirmed against the server's own join in
+  `server/src/SectorContentSQL.cpp` (`sector_objects.sector_object_id =
+  sector_objects_harvestable.resource_id`). `field` is a 0-5 field-type enum,
+  not a nav id (the task brief's schema note was inverted on both points).
+- Dataset `resource` names resolve to ore `item_id`s via `base_ore_list` /
+  `item_base` at 339/342 (99%). `(sector, nav)` pairs resolve to runtime
+  nav-point sector_objects at 93% of triples; the matched nav supplies the
+  new field's position + sector_id.
+
+A harvestable node is therefore constructable from name + position +
+per-sector mechanics derivation, exactly the path that made Y4 navs
+importable. Built `tools/dataimport-jsonl/generate_seed_prospecting.py` ->
+`db/postgres/seed_phase_y_prospecting.sql`: 529 type-38 nodes (synth ids
+>= 100000, gated + idempotent), 2537 oretype links (resource->item,
+frequency = dataset prob/weight/density apportioned, capped to top-N where
+N == res_count 1-5), 1339 restype rock-asset rows (copied from same-level
+nodes). Field-level dedup drops 136 candidates coincident with an existing
+type-38 field.
+
+**Server-integrity note.** This does NOT relax the server. Every emitted
+node is a complete, loadable type-38 field with real resolved item ids and
+a real resolved nav position; the server's ParseSectorContent path consumes
+exactly these rows. Fabricated-but-grounded values (the 4 mechanics columns,
+rock-asset `type` ids) are copied from same-level existing fields, not
+invented constants. Honest divergence from retail: positions sit on the
+matched nav rather than the retail field offset, and oretype `frequency` is
+inert today (server picks ore uniformly -- `ItemBaseManager.cpp ~244`
+"TODO: add frequency weightings"). Not applied to any DB (build-only task).
+3 resources (Aluminium Ore / DA6 Volatile Slugs / Harrier) and 76
+(sector,nav) pairs did not name-resolve -- the residual gap.
+
+---
+
+## 2026-06-02: Phase Y8 drop-table importer built, evaluated, and REJECTED
+
+To pressure-test the Y8 "blocked" verdict the same way Y9 was re-examined, a
+full importer was actually written (`generate_seed_drops.py` ->
+`seed_phase_y_drops.sql`, 2662 lines: 59 synth `mob_base` rows + backfilled
+`mob_items` loot rows). The exercise CONFIRMED the block rather than
+overturning it, and the artifacts were deleted as dead code (they contradict
+this recorded decision and were never wired into compose).
+
+Why Y8 stays blocked where Y9 cleared: a prospecting node's only fabricated
+fields are inert/cosmetic (oretype `frequency` is unused by the server; rock
+`type` is copied from a same-level field) -- the load-bearing fields
+(resolved item ids, a real nav position) are all real. A loot row's ONE
+load-bearing field IS the fabricated one: `mob_items.drop_chance` governs
+whether and how often the item drops, and the reconstruct dataset carries no
+numeric rate at all (the generator's own docstring: "a faithful import is
+impossible"). Worse, population 2 invents `mob_base` rows for named mobs
+absent from the runtime, copying model/type/faction from a "same-family
+donor" and defaulting level/AI/stats -- i.e. spawning creatures the real
+server never had, with made-up combat behaviour. Both are exactly the
+"non-runnable/divergent objects" the CLAUDE.md server-integrity rule forbids
+absent a primary-source dump. A name-level linkage with no rate is not an
+importable gap; it is a wishlist. Recorded here so a future pass does not
+rebuild the same importer and re-derive the same rejection.
