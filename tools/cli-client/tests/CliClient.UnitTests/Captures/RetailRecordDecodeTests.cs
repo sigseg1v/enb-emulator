@@ -48,13 +48,15 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllSeventeenFrames()
+    public void Fixture_Loads_AllEighteenFrames()
     {
-        Assert.Equal(17, Frames.Count);
+        Assert.Equal(18, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
         Assert.Equal(456, Frames["itembase_terminal_controller_v9"].Payload.Length);
+        Assert.Equal(0x25, Frames["itembase_ward_of_muck"].Opcode);
+        Assert.Equal(458, Frames["itembase_ward_of_muck"].Payload.Length);
         Assert.Equal(0x34, Frames["clientsettime_roundtrip"].Opcode);
         Assert.Equal(12, Frames["clientsettime_roundtrip"].Payload.Length);
         Assert.Equal(0x1B, Frames["aux_ship_turret"].Opcode);
@@ -152,6 +154,68 @@ public sealed class RetailRecordDecodeTests
         // Whole 456-byte payload accounted for: no truncation flag, no gap.
         Assert.DoesNotContain("truncated", d);
         Assert.DoesNotContain("???", d);
+    }
+
+    // The ore and terminal-controller items above all carry zero effects, so the
+    // ReadEffect path -- the most intricate part of the decoder -- had no
+    // capture-pinned coverage. This Device carries two equippable effects. Pin
+    // the whole substructure: per-effect Name/Description/Tooltip strings, the
+    // BE int32 DescVarCount, the BE-float DescVar bit pattern (45 aa a0 00 decodes
+    // to 5460.0, 41 dc 00 00 to 27.5 -- a low/big-endian slip would yield garbage),
+    // and both LE int32 effect flags. A desync anywhere in effect 0 would corrupt
+    // every field after it, so pinning effect 1's strings and the trailing economy
+    // block transitively proves effect 0 consumed exactly the right number of bytes.
+    [Fact]
+    public void ItemBase_WardOfMuck_DecodesBothEquippableEffects()
+    {
+        string d = Dump("itembase_ward_of_muck");
+
+        Assert.Contains("0x00001A6D", d);                       // 6765, BE on the wire
+        Assert.Contains("Category          = 11  (Device)", d);
+
+        // Field 0x1E has no authoritative name -- it stays the honest '????'
+        // placeholder. Pinning it guards against a future change inventing a name
+        // (the ItemBase fabrication trap) AND against dropping the field entirely.
+        Assert.Contains("Field[2].ID     = 30  ????", d);
+        Assert.Contains("Field[2].Value  = 2750", d);
+
+        // Effect counts: zero activatable, two equippable.
+        Assert.Contains("ActEffects.Count  = 0", d);
+        Assert.Contains("EqEffects.Count   = 2", d);
+
+        // Effect 0 -- all three AddDataLS strings, the DescVar, and both flags.
+        Assert.Contains("\"Increase Shield Capacity 5000 Item P\"", d);
+        Assert.Contains("\"Increase Shield Capacity (Equip)\"", d);
+        Assert.Contains("\"+%value0.0f% Shield Capacity when equipped.\"", d);
+        Assert.Contains("EqEffect[0].DescVarCount= 1", d);
+        Assert.Contains("EqEffect[0].DescVar[0]= 5460", d);     // BE float 45 aa a0 00
+        Assert.Contains("EqEffect[0].Flag1 = 0x00000002", d);
+        Assert.Contains("EqEffect[0].Flag2 = 0x00000001", d);
+
+        // Effect 1 -- only reachable if effect 0 consumed exactly to its boundary.
+        Assert.Contains("\"Energy Resistance Item P\"", d);
+        Assert.Contains("\"Deflect Energy (Equip)\"", d);
+        Assert.Contains("\"+%value2.0f% Energy Deflect when equipped.\"", d);
+        Assert.Contains("EqEffect[1].DescVar[0]= 27.5", d);     // BE float 41 dc 00 00
+        Assert.Contains("EqEffect[1].Flag1 = 0x00000002", d);
+
+        // The 16-byte EqEffects filler block follows both effects.
+        Assert.Contains("EqEffects.Filler[0]= 0", d);
+        Assert.Contains("EqEffects.Filler[3]= 0", d);
+
+        // Trailing economy + identity block -- only on the right byte if every
+        // preceding variable-length field consumed correctly.
+        Assert.Contains("Cost              = 156000", d);
+        Assert.Contains("Flags             = 0x00000084  (132)  (UNIQUE | NO_MANUFACTURE)", d);
+        Assert.Contains("\"Ward of Muck\"", d);
+        Assert.Contains("\"This filthy device offers a good deal of protection.\"", d);
+        Assert.Contains("Manufacturer      = \"\"", d);
+
+        // The whole 458-byte payload is accounted for: no truncation flag and no
+        // auto-rendered undecoded-byte gap ('(NB)'). The '????' field-name
+        // placeholder above is deliberate and is NOT such a gap.
+        Assert.DoesNotContain("truncated", d);
+        Assert.DoesNotContain("(NB)", d);
     }
 
     // ── Aux 0x1B ShipIndex ───────────────────────────────────────────────────
