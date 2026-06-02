@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllFiftyThreeFrames()
+    public void Fixture_Loads_AllSeventyFrames()
     {
-        Assert.Equal(53, Frames.Count);
+        Assert.Equal(70, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -139,6 +139,40 @@ public sealed class RetailRecordDecodeTests
         Assert.Equal(4, Frames["warpindex_one"].Payload.Length);
         Assert.Equal(0x9C, Frames["warpindex_none"].Opcode);
         Assert.Equal(4, Frames["warpindex_none"].Payload.Length);
+        Assert.Equal(0x05, Frames["start_avatarid_10069"].Opcode);
+        Assert.Equal(4, Frames["start_avatarid_10069"].Payload.Length);
+        Assert.Equal(0x05, Frames["start_avatarid_3126"].Opcode);
+        Assert.Equal(4, Frames["start_avatarid_3126"].Payload.Length);
+        Assert.Equal(0x08, Frames["simplepos_docked_obj_cb"].Opcode);
+        Assert.Equal(48, Frames["simplepos_docked_obj_cb"].Payload.Length);
+        Assert.Equal(0x08, Frames["simplepos_oriented_obj_6c"].Opcode);
+        Assert.Equal(48, Frames["simplepos_oriented_obj_6c"].Payload.Length);
+        Assert.Equal(0x37, Frames["clientavatar_your_ship_06ee13de"].Opcode);
+        Assert.Equal(4, Frames["clientavatar_your_ship_06ee13de"].Payload.Length);
+        Assert.Equal(0x37, Frames["clientavatar_npc_3b027d"].Opcode);
+        Assert.Equal(4, Frames["clientavatar_npc_3b027d"].Payload.Length);
+        Assert.Equal(0x3C, Frames["clienttype_space_zero"].Opcode);
+        Assert.Equal(4, Frames["clienttype_space_zero"].Payload.Length);
+        Assert.Equal(0x3F, Frames["planetpos_static_cc"].Opcode);
+        Assert.Equal(48, Frames["planetpos_static_cc"].Payload.Length);
+        Assert.Equal(0x3F, Frames["planetpos_static_76"].Opcode);
+        Assert.Equal(48, Frames["planetpos_static_76"].Payload.Length);
+        Assert.Equal(0x42, Frames["serverparams_glenn_4515"].Opcode);
+        Assert.Equal(70, Frames["serverparams_glenn_4515"].Payload.Length);
+        Assert.Equal(0x42, Frames["serverparams_asteroidbelt_1077"].Opcode);
+        Assert.Equal(70, Frames["serverparams_asteroidbelt_1077"].Payload.Length);
+        Assert.Equal(0x47, Frames["clientship_your_ship_06ee13de"].Opcode);
+        Assert.Equal(4, Frames["clientship_your_ship_06ee13de"].Payload.Length);
+        Assert.Equal(0x47, Frames["clientship_npc_3b027d"].Opcode);
+        Assert.Equal(4, Frames["clientship_npc_3b027d"].Payload.Length);
+        Assert.Equal(0x4F, Frames["starbaseset_b05f_action0"].Opcode);
+        Assert.Equal(6, Frames["starbaseset_b05f_action0"].Payload.Length);
+        Assert.Equal(0x4F, Frames["starbaseset_b05f_action1"].Opcode);
+        Assert.Equal(6, Frames["starbaseset_b05f_action1"].Payload.Length);
+        Assert.Equal(0x7F, Frames["manufactureset_manulab_tagged"].Opcode);
+        Assert.Equal(4, Frames["manufactureset_manulab_tagged"].Payload.Length);
+        Assert.Equal(0x7F, Frames["manufactureset_reset_zero"].Opcode);
+        Assert.Equal(4, Frames["manufactureset_reset_zero"].Payload.Length);
     }
 
     // ── ItemBase 0x25 ────────────────────────────────────────────────────────
@@ -1403,5 +1437,277 @@ public sealed class RetailRecordDecodeTests
         {
             Assert.Contains("GameID            = 0x06EE13DE", Dump(name));
         }
+    }
+
+    // ── Start 0x05 ───────────────────────────────────────────────────────────
+    // A bare LE int32 -- the client's in-sector avatar id. Sector-assigned, so
+    // it changes per sector entry (10069 vs 3126 below) within one session, and
+    // carries no PLAYER_TAG bits.
+
+    [Fact]
+    public void Start_FirstSector_DecodesAvatarId()
+    {
+        string d = Dump("start_avatarid_10069");
+
+        Assert.Contains("StartID           = 0x00002755  (10069)  (client's in-sector avatar id; sector-assigned)", d);
+        Assert.DoesNotContain("(NB)", d);
+        Assert.DoesNotContain("truncated", d);
+    }
+
+    [Fact]
+    public void Start_LaterSector_DecodesDifferentAvatarId()
+    {
+        // Same single-character session, different sector entry, different id --
+        // the regression pin against treating StartID as a session constant.
+        var first = Dump("start_avatarid_10069");
+        var later = Dump("start_avatarid_3126");
+        Assert.Contains("StartID           = 0x00002755  (10069)", first);
+        Assert.Contains("StartID           = 0x00000C36  (3126)", later);
+        Assert.NotEqual(first, later);
+    }
+
+    // ── SimplePos 0x08 ───────────────────────────────────────────────────────
+    // int32 GameID, u32 TimeStamp, float Pos[3], float Orient[4], float Vel[3] =
+    // 48 bytes. The w-last identity quaternion is the offset pin.
+
+    [Fact]
+    public void SimplePos_Docked_DecodesIdentityQuaternionAndZeroVelocity()
+    {
+        string d = Dump("simplepos_docked_obj_cb");
+
+        Assert.Contains("GameID            = 0x000000CB", d);
+        Assert.Contains("TimeStamp         = 0x256FE044", d);
+        Assert.Contains("Position          = (76284.45, -17325.62, 0.0)", d);
+        // Identity quaternion: the 1.0 lands on the LAST orient float.
+        Assert.Contains("Orientation       = (0.0, 0.0, 0.0, 1.0)", d);
+        Assert.Contains("Velocity          = (0.0, 0.0, 0.0)", d);
+        Assert.DoesNotContain("(NB)", d);
+        Assert.DoesNotContain("truncated", d);
+    }
+
+    [Fact]
+    public void SimplePos_Oriented_DecodesRealQuaternion()
+    {
+        string d = Dump("simplepos_oriented_obj_6c");
+
+        Assert.Contains("GameID            = 0x0000006C", d);
+        // A real rotation: all four orient floats distinct and nonzero, so the
+        // whole 16-byte Orient block is read (complement to the identity frame).
+        Assert.Contains("Position          = (15164.1, 15164.1, -879.007)", d);
+        Assert.Contains("Orientation       = (-0.063, -0.024, -0.129, 0.989)", d);
+        Assert.DoesNotContain("(NB)", d);
+    }
+
+    // ── ClientAvatar 0x37 / ClientShip 0x47 ──────────────────────────────────
+    // Both are a bare LE int32 GameID. In the sector-entry burst the server sends
+    // ClientAvatar then ClientShip with the SAME id == the player's own ship --
+    // the "this is you" pair.
+
+    [Fact]
+    public void ClientAvatar_And_ClientShip_AgreeOnYourShipId()
+    {
+        var avatar = Dump("clientavatar_your_ship_06ee13de");
+        var ship   = Dump("clientship_your_ship_06ee13de");
+        Assert.Contains("GameID            = 0x06EE13DE", avatar);
+        Assert.Contains("GameID            = 0x06EE13DE", ship);
+        Assert.DoesNotContain("(NB)", avatar);
+        Assert.DoesNotContain("(NB)", ship);
+    }
+
+    [Fact]
+    public void ClientAvatar_And_ClientShip_DecodeNonPlayerIds()
+    {
+        // A different (non-player) id through both decoders -- guards a hard-wired
+        // self id and pins the offset/endianness independently of 0x06EE13DE.
+        Assert.Contains("GameID            = 0x003B027D", Dump("clientavatar_npc_3b027d"));
+        Assert.Contains("GameID            = 0x003B027D", Dump("clientship_npc_3b027d"));
+    }
+
+    // ── ClientType 0x3C ──────────────────────────────────────────────────────
+    [Fact]
+    public void ClientType_DecodesSectorType()
+    {
+        string d = Dump("clienttype_space_zero");
+
+        Assert.Contains("ClientType        = 0x00000000  (0)", d);
+        Assert.DoesNotContain("(NB)", d);
+        Assert.DoesNotContain("truncated", d);
+    }
+
+    // ── PlanetPos 0x3F ───────────────────────────────────────────────────────
+    // 48-byte PACKED: int32 GameID, u32 TimeStamp, float X/Y/Z, int32 OrbitID,
+    // then six orbit/rotate floats. Every 0x3F frame across all three captures
+    // has zero orbit fields (orbital motion is client-side), so a synthetic frame
+    // pins the orbit-field offsets the corpus never exercises.
+
+    [Fact]
+    public void PlanetPos_Static_DecodesPositionWithZeroOrbit()
+    {
+        string d = Dump("planetpos_static_cc");
+
+        Assert.Contains("GameID            = 0x000000CC", d);
+        Assert.Contains("TimeStamp         = 0x256FE044", d);
+        Assert.Contains("Position          = X=111773.0  Y=39449.4  Z=0.0", d);
+        Assert.Contains("OrbitID           = 0x00000000  (0)", d);
+        Assert.Contains("OrbitDist         = 0.0", d);
+        Assert.Contains("TiltAngle         = 0.0", d);
+        Assert.DoesNotContain("(NB)", d);
+        Assert.DoesNotContain("truncated", d);
+    }
+
+    [Fact]
+    public void PlanetPos_SecondBody_DecodesDistinctPosition()
+    {
+        string d = Dump("planetpos_static_76");
+
+        Assert.Contains("GameID            = 0x00000076", d);
+        // Three distinct floats incl. two negatives and a nonzero Z.
+        Assert.Contains("Position          = X=-39332.9  Y=-102688.0  Z=-5000.0", d);
+        Assert.DoesNotContain("(NB)", d);
+    }
+
+    [Fact]
+    public void PlanetPos_Synthetic_DecodesEveryOrbitField()
+    {
+        // No corpus frame carries orbit data (all 33 across capture_1/2/3 are
+        // zero there), so synthesise an orbiting body to pin the six orbit/rotate
+        // float offsets. Each only lands correctly if OrbitID (int32 at 20) and
+        // every prior float consumed exactly 4 bytes. Values chosen distinct:
+        // OrbitID 5, OrbitDist 1000, OrbitAngle 0.2, OrbitRate 0.6, RotateAngle
+        // 0.1, RotateRate 1.5707964, TiltAngle -0.5.
+        byte[] p = Convert.FromHexString(
+            "2a000000" + "40e00100" + "00004843" + "00004843" + "0000c842" +
+            "05000000" + "00007a44" + "cdcc4c3e" + "9a99193f" + "cdcccc3d" +
+            "db0fc93f" + "000000bf");
+        string d = PacketRecord.Resolve((ushort)0x3F, p).DumpToString();
+
+        Assert.Contains("OrbitID           = 0x00000005  (5)", d);
+        Assert.Contains("OrbitDist         = 1000.0", d);
+        Assert.Contains("OrbitAngle        = 0.2", d);
+        Assert.Contains("OrbitRate         = 0.6", d);
+        Assert.Contains("RotateAngle       = 0.1", d);
+        Assert.Contains("RotateRate        = 1.571", d);
+        Assert.Contains("TiltAngle         = -0.5", d);
+        Assert.DoesNotContain("(NB)", d);
+        Assert.DoesNotContain("truncated", d);
+    }
+
+    // ── ServerParameters 0x42 ────────────────────────────────────────────────
+    // 70-byte PACKED sector-physics block. The three backdrop bytes at 36/37/38
+    // push every later float off natural alignment; BackdropBaseAsset (int16 @64)
+    // and SectorNum (uint32 @66) only land if the whole pack is read byte-exact.
+
+    [Fact]
+    public void ServerParameters_Glenn_DecodesPackedFields()
+    {
+        string d = Dump("serverparams_glenn_4515");
+
+        Assert.Contains("ZBandMin          = -2500.0", d);
+        Assert.Contains("ZBandMax          = 2500.0", d);
+        Assert.Contains("XMin              = -50000.0", d);
+        Assert.Contains("YMin              = -150000.0", d);
+        Assert.Contains("XMax              = 250000.0", d);
+        Assert.Contains("YMax              = 50000.0", d);
+        Assert.Contains("DebrisMode        = 0", d);
+        Assert.Contains("MaxTilt           = 1.222", d);     // unaligned float after the 3 backdrop bytes
+        Assert.Contains("AutoLevel         = 1", d);
+        Assert.Contains("ImpulseRate       = 0.026", d);
+        Assert.Contains("DecayVelocity     = 9.33", d);
+        Assert.Contains("DecaySpin         = 9.33", d);
+        Assert.Contains("BackdropBaseAsset = 422", d);       // int16 @64
+        Assert.Contains("SectorNum         = 0x000011A3  (4515)", d);   // uint32 @66
+        Assert.DoesNotContain("(NB)", d);
+        Assert.DoesNotContain("truncated", d);
+    }
+
+    [Fact]
+    public void ServerParameters_AsteroidBelt_DecodesDistinctBounds()
+    {
+        string d = Dump("serverparams_asteroidbelt_1077");
+
+        // Symmetric +/-175000 bounds, different from Glenn -- same offsets, new floats.
+        Assert.Contains("XMin              = -175000.0", d);
+        Assert.Contains("YMin              = -175000.0", d);
+        Assert.Contains("XMax              = 175000.0", d);
+        Assert.Contains("YMax              = 175000.0", d);
+        Assert.Contains("BackdropBaseAsset = 220", d);
+        Assert.Contains("SectorNum         = 0x00000435  (1077)", d);
+        Assert.DoesNotContain("(NB)", d);
+    }
+
+    // ServerParameters.SectorNum cross-validates the ServerHandoff/ServerRedirect
+    // ToSectorID for the SAME sector transition. The handoff/redirect encode the
+    // sector id (Glenn 4515, Asteroid Belt 1077) at sector-handoff time; the
+    // ServerParameters that the destination sector then sends must report the
+    // same SectorNum, or the three packets describe different sectors.
+    [Fact]
+    public void CrossOpcode_SectorNum_AgreesWithHandoffAndRedirect()
+    {
+        // Glenn == 4515 across handoff, redirect and server-params.
+        Assert.Contains("ToSectorID", Dump("serverhandoff_friendship7_to_glenn"));
+        Assert.Contains("4515", Dump("serverhandoff_friendship7_to_glenn"));
+        Assert.Contains("4515", Dump("serverredirect_to_glenn"));
+        Assert.Contains("SectorNum         = 0x000011A3  (4515)", Dump("serverparams_glenn_4515"));
+
+        // Asteroid Belt Beta == 1077 across all three.
+        Assert.Contains("1077", Dump("serverhandoff_glenn_to_asteroidbelt"));
+        Assert.Contains("1077", Dump("serverredirect_to_asteroidbelt"));
+        Assert.Contains("SectorNum         = 0x00000435  (1077)", Dump("serverparams_asteroidbelt_1077"));
+    }
+
+    // ── StarbaseSet 0x4F ─────────────────────────────────────────────────────
+    // int32 StarbaseID + u8 Action + u8 ExitMode = 6 bytes. The two trailing
+    // bytes must be read as separate u8s, not folded into a 4-byte field.
+
+    [Fact]
+    public void StarbaseSet_Action0_DecodesIdAndBytes()
+    {
+        string d = Dump("starbaseset_b05f_action0");
+
+        Assert.Contains("StarbaseID        = 0x0000B05F", d);
+        Assert.Contains("Action            = 0", d);
+        Assert.Contains("ExitMode          = 0", d);
+        Assert.DoesNotContain("(NB)", d);
+        Assert.DoesNotContain("truncated", d);
+    }
+
+    [Fact]
+    public void StarbaseSet_Action1_DecodesActionByteIndependently()
+    {
+        // Same StarbaseID, Action toggled 0 -> 1 -- pins that the Action byte at
+        // offset 4 is read independently of the id.
+        string d = Dump("starbaseset_b05f_action1");
+
+        Assert.Contains("StarbaseID        = 0x0000B05F", d);
+        Assert.Contains("Action            = 1", d);
+        Assert.Contains("ExitMode          = 0", d);
+        Assert.DoesNotContain("(NB)", d);
+    }
+
+    // ── ManufactureSetManufactureId 0x7F ─────────────────────────────────────
+    // A bare LE int32. For the manu-lab anchor the value is GameID|MANU_TAG|
+    // PLAYER_TAG, so the LE int32 has bits 31 and 30 set (top byte >= 0xC0). A BE
+    // read would strip the tag bits -- the byte-order pin.
+
+    [Fact]
+    public void ManufactureSet_ManuLab_DecodesTaggedIdLittleEndian()
+    {
+        string d = Dump("manufactureset_manulab_tagged");
+
+        // LE 0xF713EE06: top byte 0xF7 has MANU_TAG (bit31) | PLAYER_TAG (bit30).
+        // A BE read would give 0x06EE13F7 with no tag bits -- an invalid manu-id.
+        Assert.Contains("ManufactureID     = 0xF713EE06", d);
+        Assert.DoesNotContain("0x06EE13F7", d);
+        Assert.DoesNotContain("(NB)", d);
+        Assert.DoesNotContain("truncated", d);
+    }
+
+    [Fact]
+    public void ManufactureSet_Reset_DecodesZero()
+    {
+        string d = Dump("manufactureset_reset_zero");
+
+        Assert.Contains("ManufactureID     = 0x00000000", d);
+        Assert.DoesNotContain("(NB)", d);
     }
 }

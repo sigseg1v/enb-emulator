@@ -8,7 +8,15 @@ namespace N7.CliClient.Opcodes.Records;
 
 /// <summary>
 /// 0x007F MANUFACTURE_SET_MANUFACTURE_ID. Wire: int32 mfg_id (4 bytes, LE).
-/// Emitter sends sizeof(int32_t) explicitly to avoid LP64 sizeof(long)=8.
+/// Emitter (Player::SetManufactureID, PlayerConnection.cpp:10137) memcpy's the
+/// raw 4 bytes; sends sizeof(int32_t) explicitly to avoid LP64 sizeof(long)=8.
+/// For the manufacturing-lab anchor the value is GameID | MANU_TAG | PLAYER_TAG,
+/// so the LE int32 has bit 31 (MANU_TAG) and bit 30 (PLAYER_TAG) set -- a large
+/// negative int32 / top byte >= 0xC0. capture_1 frame #351 payload `06 EE 13 F7`
+/// LE-decodes 0xF713EE06 (top byte 0xF7 = both tag bits set); a BE read would
+/// give 0x06EE13F7 with no tag bits, an invalid manu-id -- this is the byte-order
+/// pin. A SetManufactureID(0) reset (frame #640) clears it. Source: the
+/// SectorManager StationLogin ntohl-trap fix (SectorManager.cpp:490).
 /// </summary>
 public sealed class ManufactureSetManufactureIdRecord : PacketRecord
 {

@@ -498,3 +498,121 @@ provenance: WarpIndex 0x9C -- warp index 0xFFFFFFFF == -1, the "no warp" sentine
 opcode: 0x9C
 payload-bytes: 4
 hex: ff ff ff ff
+
+[start_avatarid_10069]
+provenance: Start 0x05 -- the client's in-sector avatar id 10069 (0x2755) for the first sector (capture_1.rar, Packet #387, Length=8). The SAME 10069 leads the GalaxyMap (0x97 #351), the avatar skill/faction list (0xA3 #550) and the StarbaseSet-list (0x4E #638) in this sector, proving it is the avatar-scope key the client adopts as its self-id. Sector-assigned and tag-free (not the PLAYER_TAG'd GameID, not the constant CharacterID).
+opcode: 0x05
+payload-bytes: 4
+hex: 55 27 00 00
+
+[start_avatarid_3126]
+provenance: Start 0x05 -- a DIFFERENT in-sector avatar id 3126 (0x0C36) for a later sector entry (capture_1.rar, Packet #1268, Length=8). Same continuous single-character session as #387 yet a different value -- pins that StartID is sector-assigned, not a session constant.
+opcode: 0x05
+payload-bytes: 4
+hex: 36 0c 00 00
+
+[simplepos_docked_obj_cb]
+provenance: SimplePositionalUpdate 0x08 -- object 0xCB=203 at rest: identity orientation (0,0,0,1) and zero velocity (capture_1.rar, Packet #861, Length=52). The w-last identity quaternion proves Orient[4] is read w-first-byte..w-last and that the 12-byte Velocity tail lands at offset 36.
+opcode: 0x08
+payload-bytes: 48
+hex: cb 00 00 00 44 e0 6f 25 3a fe 94 47 3c 5b 87 c6
+      00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+      00 00 80 3f 00 00 00 00 00 00 00 00 00 00 00 00
+
+[simplepos_oriented_obj_6c]
+provenance: SimplePositionalUpdate 0x08 -- object 0x6C=108 with a real (non-identity) orientation quaternion (capture_1.rar, Packet #6962, Length=52). All four orient floats are distinct and nonzero, so the full 16-byte Orient block is exercised (complement to the docked identity frame). Velocity is ~zero here (the body is oriented but not translating).
+opcode: 0x08
+payload-bytes: 48
+hex: 6c 00 00 00 48 76 7b 25 66 f0 6c 46 66 f0 6c 46
+      73 c0 5b c4 3e 4d 80 bd 02 81 c3 bc de e8 03 be
+      4e 49 7d 3f 00 00 00 00 00 00 00 80 00 00 00 00
+
+[clientavatar_your_ship_06ee13de]
+provenance: ClientAvatar 0x37 -- GameID 0x06EE13DE, the player's own ship/avatar in the first sector (capture_1.rar, Packet #370, Length=8). Sent immediately before the matching ClientShip 0x47 (#370, same id) -- the "this is you" pair. Same object as the NameDecal "Revenge of the Jenquai", the Subparts bones and the Decals.
+opcode: 0x37
+payload-bytes: 4
+hex: de 13 ee 06
+
+[clientavatar_npc_3b027d]
+provenance: ClientAvatar 0x37 -- GameID 0x003B027D, a non-player avatar (capture_1.rar, Packet #862, Length=8). A distinct id from the player's own ship -- guards against a decoder that hard-wires the self id.
+opcode: 0x37
+payload-bytes: 4
+hex: 7d 02 3b 00
+
+[clienttype_space_zero]
+provenance: ClientType 0x3C -- ClientType 0 (capture_1.rar, Packet #776, Length=8). The only 0x3C frame in capture_1; the sector_type the server reports to the client. Pins the bare LE int32.
+opcode: 0x3C
+payload-bytes: 4
+hex: 00 00 00 00
+
+[planetpos_static_cc]
+provenance: PlanetPositionalUpdate 0x3F -- object 0xCC=204, a static body at (111773, 39449.4, 0) (capture_1.rar, Packet #853, Length=52). Every orbit/rotate float is zero: in ALL 33 0x3F frames across capture_1/2/3 the orbit fields are zero, i.e. retail sends only the base position and orbital motion is computed client-side. Pins the GameID/TimeStamp/Position offsets and that OrbitID lands at offset 20.
+opcode: 0x3F
+payload-bytes: 48
+hex: cc 00 00 00 44 e0 6f 25 80 4e da 47 66 19 1a 47
+      00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+      00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+
+[planetpos_static_76]
+provenance: PlanetPositionalUpdate 0x3F -- object 0x76=118 at (-39332.9, -102688, -5000) (capture_1.rar, Packet #6948, Length=52). Three distinct position floats incl. two negatives and a nonzero Z -- a swapped axis or wrong float width would change them. Orbit fields zero (see planetpos_static_cc).
+opcode: 0x3F
+payload-bytes: 48
+hex: 76 00 00 00 48 76 7b 25 e6 a4 19 c7 00 90 c8 c7
+      00 40 9c c5 00 00 00 00 00 00 00 00 00 00 00 00
+      00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+
+[serverparams_glenn_4515]
+provenance: ServerParameters 0x42 -- the 70-byte PACKED sector-physics block for 'Glenn' sector, SectorNum 0x11A3=4515 (capture_1.rar, Packet #870, Length=74). SectorNum CROSS-VALIDATES the ServerHandoff (#646) and ServerRedirect (#656) ToSectorID for the SAME Glenn transition (all == 4515). Pins the unaligned packed offsets: the three backdrop bytes at 36/37/38 force every later float off natural alignment; BackdropBaseAsset (int16) at 64 and SectorNum (uint32) at 66 only land if the whole pack is read byte-exact.
+opcode: 0x42
+payload-bytes: 70
+hex: 00 40 1c c5 00 40 1c 45 00 50 43 c7 00 7c 12 c8
+      00 24 74 48 00 50 43 47 00 50 c3 47 00 50 c3 47
+      00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ab
+      61 9c 3f 01 17 b7 d1 3c 08 49 15 41 08 49 15 41
+      a6 01 a3 11 00 00
+
+[serverparams_asteroidbelt_1077]
+provenance: ServerParameters 0x42 -- the sector-physics block for 'Asteroid Belt Beta', SectorNum 0x0435=1077 (capture_1.rar, Packet #3687, Length=74). SectorNum CROSS-VALIDATES the ServerHandoff (#3086) and ServerRedirect (#3097) ToSectorID for the SAME Asteroid Belt transition (all == 1077). Distinct bounds from Glenn (symmetric +/-175000 X/Y) -- exercises different float values in the same offsets.
+opcode: 0x42
+payload-bytes: 70
+hex: 00 40 1c c5 00 40 1c 45 00 e6 2a c8 00 e6 2a c8
+      00 e6 2a 48 00 e6 2a 48 00 50 c3 47 00 50 c3 47
+      00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ab
+      61 9c 3f 01 17 b7 d1 3c 08 49 15 41 08 49 15 41
+      dc 00 35 04 00 00
+
+[clientship_your_ship_06ee13de]
+provenance: ClientShip 0x47 -- GameID 0x06EE13DE, the player's own ship in the first sector (capture_1.rar, Packet #370, Length=8). Sent right after the matching ClientAvatar 0x37 (#370, same id) -- the "this is your ship" half of the self pair.
+opcode: 0x47
+payload-bytes: 4
+hex: de 13 ee 06
+
+[clientship_npc_3b027d]
+provenance: ClientShip 0x47 -- GameID 0x003B027D, a non-player ship (capture_1.rar, Packet #862, Length=8). Distinct from the player's own id.
+opcode: 0x47
+payload-bytes: 4
+hex: 7d 02 3b 00
+
+[starbaseset_b05f_action0]
+provenance: StarbaseSet 0x4F -- StarbaseID 0xB05F=45151, Action 0, ExitMode 0 (capture_1.rar, Packet #379, Length=10). The struct is int32 StarbaseID + char Action + char ExitMode = 6 bytes; pins that the two trailing bytes are read as separate u8s, not folded into a 4-byte field. StarbaseID 0xB05F also appears in the 0x4E StarbaseSet-list at #638.
+opcode: 0x4F
+payload-bytes: 6
+hex: 5f b0 00 00 00 00
+
+[starbaseset_b05f_action1]
+provenance: StarbaseSet 0x4F -- SAME StarbaseID 0xB05F but Action 1 (capture_1.rar, Packet #640, Length=10). Action toggles 0 -> 1 on the same starbase -- pins that the Action byte at offset 4 is read independently of the id.
+opcode: 0x4F
+payload-bytes: 6
+hex: 5f b0 00 00 01 00
+
+[manufactureset_manulab_tagged]
+provenance: ManufactureSetManufactureId 0x7F -- the manufacturing-lab anchor, payload 06 EE 13 F7 (capture_1.rar, Packet #351, Length=8). LE int32 0xF713EE06: top byte 0xF7 has MANU_TAG (bit31) and PLAYER_TAG (bit30) set. A BE read would give 0x06EE13F7 with no tag bits -- an invalid manu-id; this is the byte-order pin for the SectorManager StationLogin ntohl-trap fix.
+opcode: 0x7F
+payload-bytes: 4
+hex: 06 ee 13 f7
+
+[manufactureset_reset_zero]
+provenance: ManufactureSetManufactureId 0x7F -- SetManufactureID(0) reset, payload 00 00 00 00 (capture_1.rar, Packet #640, Length=8). Clears the manu anchor; pins that a zero id decodes plainly (no tag bits, no flag).
+opcode: 0x7F
+payload-bytes: 4
+hex: 00 00 00 00
