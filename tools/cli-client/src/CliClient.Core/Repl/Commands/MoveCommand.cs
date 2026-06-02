@@ -32,6 +32,7 @@ public sealed class MoveCommand : ICommandHandler
     private const float DefaultSpeed = 1500f;   // units/sec when no ship aux MaxSpeed seen
     private const float ArriveDelta  = 1200f;   // stop when this close to target
     private const int   MaxTicks     = 1200;    // hard cap so a bad target can't loop forever
+    private const float OverrideEpsilon = 50f;  // server-override detection threshold (units)
 
     private readonly SessionContext _ctx;
 
@@ -132,6 +133,14 @@ public sealed class MoveCommand : ICommandHandler
             $"move: ({start0.X:0.0}, {start0.Y:0.0}, {start0.Z:0.0}) -> ({tx:0.0}, {ty:0.0}, {tz:0.0})  " +
             $"speed={speed:0}u/s rate={freq}Hz step={stepDist:0}u player=0x{id:X8}").ConfigureAwait(false);
 
+        // Throttle the position readout to ~once per 2s, and only while moving
+        // (i.e. inside this loop). We print the locally-fed position (assumed
+        // accepted) unless the server pushes an override for our own object --
+        // a fresh self-position frame that differs from the last one we saw, as
+        // happens when the server rejects an MVAS update and recomputes.
+        int printEvery = Math.Max(1, 2000 / intervalMs);
+        var lastServerPos = _ctx.World.SelfSnapshot(id).Pos;
+
         (float X, float Y, float Z) cur = start0;
         int ticks = 0;
         try
@@ -148,6 +157,28 @@ public sealed class MoveCommand : ICommandHandler
                 cur = (cur.X + head.X * adv, cur.Y + head.Y * adv, cur.Z + head.Z * adv);
 
                 client.SendPosition(id, cur.X, cur.Y, cur.Z, head);
+
+                if ((ticks - 1) % printEvery == 0)
+                {
+                    var sp = _ctx.World.SelfSnapshot(id).Pos;
+                    bool serverOverride = sp is { } cs && lastServerPos is { } l
+                        && (MathF.Abs(cs.X - l.X) > OverrideEpsilon
+                            || MathF.Abs(cs.Y - l.Y) > OverrideEpsilon
+                            || MathF.Abs(cs.Z - l.Z) > OverrideEpsilon);
+                    if (serverOverride && sp is { } sv)
+                    {
+                        await output.WriteLineAsync(
+                            $"  pos (server): ({sv.X:0.0}, {sv.Y:0.0}, {sv.Z:0.0})").ConfigureAwait(false);
+                        cur = sv;   // adopt the server's position and continue from there
+                    }
+                    else
+                    {
+                        await output.WriteLineAsync(
+                            $"  pos (local):  ({cur.X:0.0}, {cur.Y:0.0}, {cur.Z:0.0})").ConfigureAwait(false);
+                    }
+                    lastServerPos = sp;
+                }
+
                 await Task.Delay(intervalMs, ct).ConfigureAwait(false);
             }
             // Settle on the target so the server registers arrival.
