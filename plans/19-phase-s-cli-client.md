@@ -1240,3 +1240,31 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       FOLLOW-UP: port the missing AuxClasses BuildPacket layouts into `AuxSchemas`
       and audit the Harvestable/ShipIndex field lists against captures (each new
       schema validated by an exact-consumption count rising on the real corpus).
+- [x] **Colorization 0x11 decoder fixed (real 64-byte decode gap).** The record
+      read `ItemCount` flat 16-byte `{metal, HSV[3]}` blocks. On a real retail
+      frame that silently dropped 64 bytes: every Colorization frame across all
+      three captures (capture_1/2/3, 90/90) is identical -- GameID, ItemCount=4,
+      a 134-byte payload == 8 colour blocks == 4 primary/secondary SLOTS. So the
+      counted unit retail uses is the 32-byte slot, and 6 + 4*16 left half the
+      body (the Wing+Engine pairs) undecoded. Decoder now derives the block count
+      from `(payload-6)/16` and pairs blocks into slots, so it does NOT trust
+      ItemCount's unit. Pinned the verbatim 134-byte frame as `colorization_default`
+      + 2 facts (retail count=4 and a flipped count=8 both decode the same four
+      slots). Suite 337->339. Commits 0e1f02a1, 48ac7146.
+- [!] **Server Colorization ItemCount divergence (do NOT flip blindly).**
+      `server/src/PlayerClass.cpp` SendShipColorization writes `ItemCount=8` (it
+      counts flat blocks) and sizes the packet `&item[count]` == 6+count*16. For
+      the standard 8-block body that yields ItemCount=8 where retail's own server
+      wrote 4 (90/90 frames). On its face that's a fidelity gap, BUT it is a
+      MATCHED-PAIR divergence: the live Net-7-modded client evidently reads count
+      as flat blocks too (else ItemCount=8 would make a slot-reading client over-
+      read 8*32=256 bytes past a 134-byte packet and crash, which it demonstrably
+      does not). "Fixing" the server toward retail's count=4 would (a) require
+      decoupling the count field from the block count -- the size calc currently
+      ties them -- and (b) regress the Net-7 client we actually run under
+      `just play-local` (a flat-block reader would then apply only Hull+Profession
+      and drop Wing+Engine colours). Per CLAUDE.md server-integrity rules this
+      change needs the CLIENT-side parse confirmed (decomp or a live A/B with a
+      retail-faithful client), NOT just the server capture. Primary source for the
+      retail behaviour: capture_1/2/3.rar, 90 Colorization frames, all ItemCount=4
+      / 134 bytes. LEFT AS-IS; logged for a future client-parse-backed decision.
