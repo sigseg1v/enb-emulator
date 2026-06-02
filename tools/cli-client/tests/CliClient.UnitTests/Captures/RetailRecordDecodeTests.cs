@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllFortyFrames()
+    public void Fixture_Loads_AllFortySixFrames()
     {
-        Assert.Equal(40, Frames.Count);
+        Assert.Equal(46, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -113,6 +113,18 @@ public sealed class RetailRecordDecodeTests
         Assert.Equal(32, Frames["constpos_realpos_86"].Payload.Length);
         Assert.Equal(0x40, Frames["constpos_oriented_94"].Opcode);
         Assert.Equal(32, Frames["constpos_oriented_94"].Payload.Length);
+        Assert.Equal(0x5C, Frames["verb_obj450_dis_toofar"].Opcode);
+        Assert.Equal(16, Frames["verb_obj450_dis_toofar"].Payload.Length);
+        Assert.Equal(0x5C, Frames["verb_obj450_both_passes"].Opcode);
+        Assert.Equal(20, Frames["verb_obj450_both_passes"].Payload.Length);
+        Assert.Equal(0x92, Frames["camera_msg4_obj450"].Opcode);
+        Assert.Equal(8, Frames["camera_msg4_obj450"].Payload.Length);
+        Assert.Equal(0x92, Frames["camera_msg3_obj3a1ec7"].Opcode);
+        Assert.Equal(8, Frames["camera_msg3_obj3a1ec7"].Payload.Length);
+        Assert.Equal(0x99, Frames["nav_obj_c5_type1"].Opcode);
+        Assert.Equal(14, Frames["nav_obj_c5_type1"].Payload.Length);
+        Assert.Equal(0x99, Frames["nav_obj_94_type2"].Opcode);
+        Assert.Equal(14, Frames["nav_obj_94_type2"].Payload.Length);
     }
 
     // ── ItemBase 0x25 ────────────────────────────────────────────────────────
@@ -1132,5 +1144,122 @@ public sealed class RetailRecordDecodeTests
         var constpos376 = Dump("constpos_origin_06ee13f7");
         Assert.Contains("GameID            = 0x06EE13F7", create376);
         Assert.Contains("GameID            = 0x06EE13F7", constpos376);
+    }
+
+    // ── VerbUpdate 0x5C ──────────────────────────────────────────────────────
+    // The context-menu verb list. GameID and BOTH int32 Counts are big-endian
+    // (ntohl at emit); the int16 {Attribute, VerbID} entries are little-endian --
+    // a mixed-endian packet. Two passes: a disabled/too-far pass and an enabled
+    // pass. The second Count only lands on the right byte if the first pass's
+    // entries were each consumed as exactly 4 bytes.
+
+    [Fact]
+    public void VerbUpdate_EmptyEnablePass_DecodesSingleDisabledVerb()
+    {
+        string d = Dump("verb_obj450_dis_toofar");
+
+        Assert.Contains("GameID            = 0x000001C2  (450)  (BE -- ntohl at emit)", d);
+        Assert.Contains("Count[0]          = 0  (BE)", d);
+        Assert.Contains("Count[1]          = 1  (BE)", d);
+        Assert.Contains("[1.0]           = Attr=DIS_TOOFAR Verb=0x000A (10)", d);
+        // No phantom entry in the empty pass 0.
+        Assert.DoesNotContain("[0.0]", d);
+        Assert.DoesNotContain("(NB)", d);
+        Assert.DoesNotContain("truncated", d);
+    }
+
+    [Fact]
+    public void VerbUpdate_BothPasses_DecodesEnableAndDisable()
+    {
+        string d = Dump("verb_obj450_both_passes");
+
+        Assert.Contains("GameID            = 0x000001C2  (450)  (BE -- ntohl at emit)", d);
+        // Pass 0 is the disabled/too-far entry, pass 1 the enabled entry. Both
+        // present means the second Count was read at the correct offset.
+        Assert.Contains("Count[0]          = 1  (BE)", d);
+        Assert.Contains("[0.0]           = Attr=DIS_TOOFAR Verb=0x000A (10)", d);
+        Assert.Contains("Count[1]          = 1  (BE)", d);
+        Assert.Contains("[1.0]           = Attr=ENABLE Verb=0x000A (10)", d);
+        Assert.DoesNotContain("(NB)", d);
+        Assert.DoesNotContain("truncated", d);
+    }
+
+    // ── CameraControl 0x92 ───────────────────────────────────────────────────
+    // int32 Message, int32 GameID. BOTH are big-endian on the wire: the GameID is
+    // always ntohl'd by callers and Message is a pre-swapped literal. A host-LE
+    // GameID read is the ntohl trap that points the camera at a garbage id -- the
+    // same byte-order class of bug that crashed the client via ServerRedirect.
+
+    [Fact]
+    public void CameraControl_BigEndian_DecodesMessageAndGameId()
+    {
+        string d = Dump("camera_msg4_obj450");
+
+        Assert.Contains("Message           = 0x00000004  (4)  (BE -- pre-swapped at emit)", d);
+        // GameID 450 == 0x000001C2 read big-endian. A LE read would yield
+        // 0xC2010000 -- a garbage id that matches no object.
+        Assert.Contains("GameID            = 0x000001C2  (450)  (BE -- ntohl at emit)", d);
+        Assert.DoesNotContain("0xC2010000", d);
+        Assert.DoesNotContain("(NB)", d);
+        Assert.DoesNotContain("truncated", d);
+    }
+
+    [Fact]
+    public void CameraControl_SecondSample_DecodesLargeGameId()
+    {
+        string d = Dump("camera_msg3_obj3a1ec7");
+
+        Assert.Contains("Message           = 0x00000003  (3)", d);
+        Assert.Contains("GameID            = 0x003A1EC7", d);
+        Assert.DoesNotContain("0xC71E3A00", d);          // the LE-misread garbage
+        Assert.DoesNotContain("(NB)", d);
+    }
+
+    // ── Navigation 0x99 ──────────────────────────────────────────────────────
+    // A PACKED 14-byte struct: int32 GameID, float Signature, u8 PlayerHasVisited,
+    // int32 NavType, u8 IsHuge. The pack means NavType sits at offset 9, NOT a
+    // 4-aligned offset -- a decoder that assumed natural alignment would read it
+    // from the wrong byte and pick up the IsHuge byte too.
+
+    [Fact]
+    public void Navigation_Type1_DecodesPackedFields()
+    {
+        string d = Dump("nav_obj_c5_type1");
+
+        Assert.Contains("GameID            = 0x000000C5", d);
+        Assert.Contains("Signature         = 37000.0", d);
+        Assert.Contains("PlayerHasVisited  = 1", d);
+        Assert.Contains("NavType           = 1", d);      // unaligned int32 at offset 9
+        Assert.Contains("IsHuge            = 0", d);
+        Assert.DoesNotContain("(NB)", d);
+        Assert.DoesNotContain("truncated", d);
+    }
+
+    [Fact]
+    public void Navigation_Type2_DecodesDistinctSignatureAndType()
+    {
+        string d = Dump("nav_obj_94_type2");
+
+        Assert.Contains("GameID            = 0x00000094", d);
+        Assert.Contains("Signature         = 28000.0", d);
+        Assert.Contains("NavType           = 2", d);
+        Assert.DoesNotContain("(NB)", d);
+    }
+
+    // Object 450 (0x000001C2) appears across four opcodes in this capture:
+    // SetTarget (#1368) clears it, VerbUpdate (#1372) lists its verbs, and
+    // CameraControl (#1712) points the camera at it. SetTarget reads the id
+    // little-endian; VerbUpdate and CameraControl read it big-endian (ntohl at
+    // emit). All three must resolve to the SAME 450 -- the mixed-endian decode is
+    // correct only if it does.
+    [Fact]
+    public void CrossOpcode_Object450_AgreesAcrossEndianness()
+    {
+        var settarget = Dump("settarget_clear_basic");      // GameID is LE here
+        var verb = Dump("verb_obj450_dis_toofar");          // GameID is BE here
+        var camera = Dump("camera_msg4_obj450");            // GameID is BE here
+        Assert.Contains("GameID            = 0x000001C2", settarget);
+        Assert.Contains("GameID            = 0x000001C2  (450)", verb);
+        Assert.Contains("GameID            = 0x000001C2  (450)", camera);
     }
 }

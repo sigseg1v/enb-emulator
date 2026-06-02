@@ -33,7 +33,7 @@ public sealed class VerbUpdateRecord : PacketRecord
                 short attr = ReadI16LE(Payload, off);
                 short verb = ReadI16LE(Payload, off + 2);
                 string an = attr == 0 ? "ENABLE" : attr == 2 ? "DIS_TOOFAR" : $"0x{(ushort)attr:X4}";
-                F(sb, off, 4, $"  [{pass}.{i}] Attr={an}", $"Verb=0x{(ushort)verb:X4} ({(ushort)verb})");
+                F(sb, off, 4, $"  [{pass}.{i}]", $"Attr={an} Verb=0x{(ushort)verb:X4} ({(ushort)verb})");
                 off += 4;
             }
         }

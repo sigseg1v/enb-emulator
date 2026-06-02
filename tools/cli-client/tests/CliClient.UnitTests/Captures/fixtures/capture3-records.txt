@@ -406,3 +406,40 @@ opcode: 0x40
 payload-bytes: 32
 hex: 94 00 00 00 1a a1 57 47 cd fb 0b c7 00 00 00 00
       00 00 00 00 00 00 00 00 60 88 73 3f 45 d5 9d be
+
+[verb_obj450_dis_toofar]
+provenance: VerbUpdate 0x5C -- context-verb list for GameID 0x000001C2 (==450) (capture_1.rar, Packet #1372, Length=20). GameID and both Counts are BIG-endian (ntohl at emit); the int16 verb entries are LE. Count[0]=0 (empty enable pass), Count[1]=1 with one DIS_TOOFAR entry (Verb 0x000A). Object 450 is the same id SetTarget (#1368) and CameraControl (#1712) reference.
+opcode: 0x5C
+payload-bytes: 16
+hex: 00 00 01 c2 00 00 00 00 00 00 00 01 02 00 0a 00
+
+[verb_obj450_both_passes]
+provenance: VerbUpdate 0x5C -- GameID 0x000001C2 with BOTH passes populated (capture_1.rar, Packet #1670, Length=24). Count[0]=1 (DIS_TOOFAR Verb 0x000A), Count[1]=1 (ENABLE Verb 0x000A). Exercises both Attribute values and proves the second Count int32 lands on the right byte after the first pass's entries.
+opcode: 0x5C
+payload-bytes: 20
+hex: 00 00 01 c2 00 00 00 01 02 00 0a 00 00 00 00 01
+      00 00 0a 00
+
+[camera_msg4_obj450]
+provenance: CameraControl 0x92 -- Message 4 targeting GameID 0x000001C2 (==450) (capture_1.rar, Packet #1712, Length=12). BOTH int32 fields are BIG-endian on the wire (GameID always ntohl'd by callers, Message a pre-swapped literal). This is the regression lock for the ntohl byte-order trap: a host-LE GameID read yields 0xC2010000 (garbage, camera points at nothing) instead of 450 -- and 450 is exactly the object SetTarget (#1368) and VerbUpdate (#1372) name.
+opcode: 0x92
+payload-bytes: 8
+hex: 00 00 00 04 00 00 01 c2
+
+[camera_msg3_obj3a1ec7]
+provenance: CameraControl 0x92 -- Message 3 targeting GameID 0x003A1EC7 (capture_1.rar, Packet #16288, Length=12). Second sample with a large id (0x003Axxxx range, like other live objects); a host-LE read would yield 0xC71E3A00. Distinct Message proves the field is read per-frame.
+opcode: 0x92
+payload-bytes: 8
+hex: 00 00 00 03 00 3a 1e c7
+
+[nav_obj_c5_type1]
+provenance: Navigation 0x99 -- nav beacon for GameID 0x000000C5 (==197) (capture_1.rar, Packet #849, Length=18). Packed 14 bytes: GameID (LE), float Signature (37000.0), u8 PlayerHasVisited (1), int32 NavType (1), u8 IsHuge (0). The packed layout puts NavType at offset 9 (no alignment padding); pins the unaligned int32 read.
+opcode: 0x99
+payload-bytes: 14
+hex: c5 00 00 00 00 88 10 47 01 01 00 00 00 00
+
+[nav_obj_94_type2]
+provenance: Navigation 0x99 -- nav beacon for GameID 0x00000094 (==148) (capture_1.rar, Packet #849, Length=18). Signature 28000.0, NavType 2. This GameID is the object constpos_oriented_94 (ConstantPos #849) also carries -- a Navigation/ConstantPos cross-link. Distinct NavType from the type-1 frame.
+opcode: 0x99
+payload-bytes: 14
+hex: 94 00 00 00 00 c0 da 46 01 02 00 00 00 00
