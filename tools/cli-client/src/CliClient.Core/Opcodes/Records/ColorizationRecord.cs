@@ -7,9 +7,16 @@ using System.Text;
 namespace N7.CliClient.Opcodes.Records;
 
 /// <summary>
-/// 0x0011 COLORIZATION. Wire (struct Colorization):
-///   int32 GameID; int16 ItemCount; then ItemCount * ColorizationItem (16B each):
-///   int32 metal; float H; float S; float V.
+/// 0x0011 COLORIZATION. Wire:
+///   int32 GameID; int16 ItemCount; then ItemCount colour slots, each a PAIR of
+///   {int32 metal; float H,S,V} blocks -- a primary block followed by a secondary
+///   block (32 bytes per slot). Retail's own colorization (capture_3.rar, the
+///   frame just before Server-&gt;Client packet #373: GameID 0x00AACCEE,
+///   ItemCount 4, 134-byte payload) carries 4 slots == 8 colour blocks, so the
+///   counted unit is the slot/pair, not the single ColorizationItem. The server's
+///   struct Colorization names the 8 blocks Hull/Profession/Wing/Engine x
+///   {primary,secondary}; here we stay byte-literal and just label them
+///   primary/secondary per slot.
 /// </summary>
 public sealed class ColorizationRecord : PacketRecord
 {
@@ -21,18 +28,27 @@ public sealed class ColorizationRecord : PacketRecord
         short count  = ReadI16LE(Payload, 4);
         FHex(sb, 0, "GameID",    gameId);
         FDec(sb, 4, "ItemCount", count);
-        const int ItemSize = 16;
-        int expected = 6 + count * ItemSize;
-        if (Payload.Length < expected) { Flag(sb, $"payload too short for {count} items -- {Payload.Length} bytes, expected {expected}"); return; }
+        const int BlockSize = 16;       // one {metal, H, S, V}
+        const int SlotSize  = 32;       // primary + secondary block
+        int expected = 6 + count * SlotSize;
+        if (Payload.Length < expected) { Flag(sb, $"payload too short for {count} slots -- {Payload.Length} bytes, expected {expected}"); return; }
         int off = 6;
-        for (int i = 0; i < count; i++, off += ItemSize)
+        for (int i = 0; i < count; i++, off += SlotSize)
         {
-            int   metal = ReadI32LE(Payload, off);
-            float h     = ReadF32LE(Payload, off + 4);
-            float s     = ReadF32LE(Payload, off + 8);
-            float v     = ReadF32LE(Payload, off + 12);
-            FHex(sb, off,     $"  [{i}] Metal", metal);
-            FBytes(sb, off+4, 12, $"  [{i}] H/S/V", $"{h:0.###}, {s:0.###}, {v:0.###}");
+            EmitBlock(sb, off,             $"  [{i}] primary  ");
+            EmitBlock(sb, off + BlockSize, $"  [{i}] secondary");
         }
+        if (Payload.Length > expected)
+            Flag(sb, $"{Payload.Length - expected} trailing bytes after {count} slots");
+    }
+
+    private void EmitBlock(StringBuilder sb, int off, string label)
+    {
+        int   metal = ReadI32LE(Payload, off);
+        float h     = ReadF32LE(Payload, off + 4);
+        float s     = ReadF32LE(Payload, off + 8);
+        float v     = ReadF32LE(Payload, off + 12);
+        FHex(sb, off,       $"{label} Metal", metal);
+        FBytes(sb, off + 4, 12, $"{label} H/S/V", $"{h:0.###}, {s:0.###}, {v:0.###}");
     }
 }

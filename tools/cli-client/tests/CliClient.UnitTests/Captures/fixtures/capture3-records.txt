@@ -88,6 +88,20 @@ opcode: 0x89
 payload-bytes: 9
 hex: 00 aa cc ee 02 00 00 00 00
 
+[colorization_default]
+provenance: Colorization 0x11 -- GameID 0x00AACCEE, 4 slots (Hull/Profession/Wing/Engine), all HSV 1.0 (capture_3.rar, frame before S->C #373)
+opcode: 0x11
+payload-bytes: 134
+hex: ee cc aa 00 04 00 02 00 00 00 00 00 80 3f 00 00
+      80 3f 00 00 80 3f 00 00 00 00 00 00 80 3f 00 00
+      80 3f 00 00 80 3f 02 00 00 00 00 00 80 3f 00 00
+      80 3f 00 00 80 3f 00 00 00 00 00 00 80 3f 00 00
+      80 3f 00 00 80 3f 02 00 00 00 00 00 80 3f 00 00
+      80 3f 00 00 80 3f 00 00 00 00 00 00 80 3f 00 00
+      80 3f 00 00 80 3f 02 00 00 00 00 00 80 3f 00 00
+      80 3f 00 00 80 3f 00 00 00 00 00 00 80 3f 00 00
+      80 3f 00 00 80 3f
+
 [avatardesc_ace]
 provenance: AvatarDescription 0x61 -- 'Ace' (AvatarID 0x0084E1E9) (capture_3.rar)
 opcode: 0x61

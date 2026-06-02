@@ -48,12 +48,14 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllTenFrames()
+    public void Fixture_Loads_AllElevenFrames()
     {
-        Assert.Equal(10, Frames.Count);
+        Assert.Equal(11, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x1B, Frames["aux_ship_turret"].Opcode);
+        Assert.Equal(0x11, Frames["colorization_default"].Opcode);
+        Assert.Equal(134, Frames["colorization_default"].Payload.Length);
         Assert.Equal(0x61, Frames["avatardesc_ace"].Opcode);
         Assert.Equal(260, Frames["avatardesc_ace"].Payload.Length);
     }
@@ -207,6 +209,34 @@ public sealed class RetailRecordDecodeTests
         Assert.Contains("Reaction          = 2", d);
         Assert.Contains("IsAttacking", d);
         Assert.Contains("false", d);
+    }
+
+    // ── Colorization 0x11 ────────────────────────────────────────────────────
+    // The counted unit is a slot (primary+secondary pair, 32B), NOT a single
+    // colour block. Retail sends ItemCount=4 for a 134-byte body == 8 blocks;
+    // decoding count*16 would have left 64 bytes (the Wing+Engine pairs)
+    // silently undecoded.
+
+    [Fact]
+    public void Colorization_DecodesFourSlotsAsPrimarySecondaryPairs()
+    {
+        string d = Dump("colorization_default");
+
+        Assert.Contains("GameID", d);
+        Assert.Contains("0x00AACCEE", d);
+        Assert.Contains("ItemCount", d);
+        // All four slots present, each with a primary and a secondary block.
+        Assert.Contains("[0] primary", d);
+        Assert.Contains("[0] secondary", d);
+        Assert.Contains("[3] primary", d);
+        Assert.Contains("[3] secondary", d);
+        // This default ship is uncoloured: every block is HSV 1, 1, 1.
+        Assert.Contains("1, 1, 1", d);
+        // The whole 134-byte payload is consumed -- no undecoded gap (the old
+        // count*16 reading left "??? (64B)" here), no overrun, no short-read.
+        Assert.DoesNotContain("???", d);
+        Assert.DoesNotContain("trailing bytes", d);
+        Assert.DoesNotContain("too short", d);
     }
 
     // ── AvatarDescription 0x61 ───────────────────────────────────────────────
