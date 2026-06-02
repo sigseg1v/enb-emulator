@@ -1322,3 +1322,17 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       deterministic cloak abilities 0x0C15/0x0CF5 = 256) and `aux_abilityvar_float_
       value` (capture_1.rar #7764, ability 0x1161 = float 0.819). No per-id
       semantics claimed (the source itself does not know them). Suite 344->347.
+      Full 0x1B corpus classification after this change (17493 frames): 12436
+      full schema-match, 1066 abilityVar, 2824 honest partial (schema diverges
+      mid-walk, remaining bytes shown as a gap), 44 inline husk/mob name, 1123
+      pure-gap. The pure-gap tail is dominated by tiny version-1 entity diffs
+      (e.g. `gid 03 00 01 a8 09`: 4B GameID + bodyLen 3 + version 1 + a 2-byte
+      flag-only body, no field payload) keyed by sequential 0x2Exxxxx entity ids
+      -- per-object micro-diffs from a small-field aux class. They are left as an
+      honest `???` gap on purpose: the captures carry no GameID->class map, so
+      attributing them to a specific AuxBase subclass (and thus a flag layout)
+      would be a guess. Decoding them needs the diff sender identified in source
+      first; AuxMobIndex/AuxHulkIndex full schemas (two-bit extended flags +
+      nested sub-objects) are the likely next grounded step but are deferred --
+      high mis-decode surface, low payoff for a debug-annotation view, and best
+      validated interactively rather than autonomously.
