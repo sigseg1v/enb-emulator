@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllSeventyFrames()
+    public void Fixture_Loads_AllSeventyOneFrames()
     {
-        Assert.Equal(70, Frames.Count);
+        Assert.Equal(71, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -173,6 +173,8 @@ public sealed class RetailRecordDecodeTests
         Assert.Equal(4, Frames["manufactureset_manulab_tagged"].Payload.Length);
         Assert.Equal(0x7F, Frames["manufactureset_reset_zero"].Opcode);
         Assert.Equal(4, Frames["manufactureset_reset_zero"].Payload.Length);
+        Assert.Equal(0x52, Frames["loungenpc_friendship7_full"].Opcode);
+        Assert.Equal(3400, Frames["loungenpc_friendship7_full"].Payload.Length);
     }
 
     // ── ItemBase 0x25 ────────────────────────────────────────────────────────
@@ -1709,5 +1711,85 @@ public sealed class RetailRecordDecodeTests
 
         Assert.Contains("ManufactureID     = 0x00000000", d);
         Assert.DoesNotContain("(NB)", d);
+    }
+
+    // ── LoungeNpc 0x52 ───────────────────────────────────────────────────────
+    // The largest record we pin: the Friendship 7 Recreation Port lounge, a
+    // 3400-byte frame reassembled from a fragmented UDP stream. Header + rooms +
+    // terminals + an array of 12 fixed-stride (265B) StationNPC records. The NPC
+    // names land at exact offsets only if the 24B-header + 241B-AvatarData stride
+    // is right, so pinning every name self-validates the array math.
+
+    [Fact]
+    public void LoungeNpc_Friendship7_DecodesStationRoomsAndTerminals()
+    {
+        string d = Dump("loungenpc_friendship7_full");
+
+        Assert.Contains("StationType       = 6", d);
+        Assert.Contains("RoomCount         = 5", d);
+        // 5 rooms, distinct styles, identical fog -- pins the 28B room stride.
+        Assert.Contains("Room[0]         = num=0 style=0 fog=(100,1000) rgb=(0,0,0)", d);
+        Assert.Contains("Room[1]         = num=1 style=2 fog=(100,1000) rgb=(0,0,0)", d);
+        Assert.Contains("Room[2]         = num=2 style=11 fog=(100,1000) rgb=(0,0,0)", d);
+        Assert.Contains("Room[3]         = num=3 style=130 fog=(100,1000) rgb=(0,0,0)", d);
+        Assert.Contains("Room[4]         = num=4 style=0 fog=(100,1000) rgb=(0,0,0)", d);
+        // 4 terminals, 16B stride.
+        Assert.Contains("NumTerms          = 4", d);
+        Assert.Contains("Term[0]         = room=1 loc=1 type=0", d);
+        Assert.Contains("Term[1]         = room=1 loc=2 type=2", d);
+        Assert.Contains("Term[2]         = room=3 loc=1 type=3", d);
+        Assert.Contains("Term[3]         = room=1 loc=3 type=1", d);
+
+        Assert.DoesNotContain("(NB)", d);
+        Assert.DoesNotContain("truncated", d);
+    }
+
+    [Fact]
+    public void LoungeNpc_Friendship7_DecodesAllTwelveNpcsAtFixedStride()
+    {
+        string d = Dump("loungenpc_friendship7_full");
+
+        Assert.Contains("NumNPCs           = 12", d);
+
+        // Every NPC header (room/loc/npcId/booth) AND name pair. If the 265-byte
+        // stride were wrong, a later NPC's name would land mid-AvatarData and garble.
+        Assert.Contains("NPC[0]          = room=2 loc=0 npcId=0x0004 booth=0 unk=(0,0)", d);
+        Assert.Contains("name          = \"Kah\" / \"Rinno\"", d);
+        Assert.Contains("NPC[1]          = room=2 loc=1 npcId=0x0045 booth=2 unk=(0,0)", d);
+        Assert.Contains("name          = \"Trevor\" / \"Jorst\"", d);
+        // booth=-1 (0xFFFFFFFF) is the no-booth sentinel -- read as signed int32.
+        Assert.Contains("NPC[2]          = room=1 loc=2 npcId=0x0003 booth=-1 unk=(0,0)", d);
+        Assert.Contains("name          = \"Wenton\" / \"Ness\"", d);
+        Assert.Contains("NPC[3]          = room=2 loc=2 npcId=0x0065 booth=4 unk=(0,0)", d);
+        Assert.Contains("name          = \"Anveryn\" / \"O'Connell\"", d);
+        Assert.Contains("NPC[4]          = room=2 loc=3 npcId=0x007A booth=5 unk=(0,0)", d);
+        Assert.Contains("name          = \"Regina\" / \"Flore\"", d);
+        Assert.Contains("NPC[5]          = room=1 loc=4 npcId=0x0002 booth=-1 unk=(0,0)", d);
+        Assert.Contains("name          = \"Arno\" / \"Suiliman\"", d);
+        Assert.Contains("NPC[6]          = room=2 loc=6 npcId=0x00A5 booth=5 unk=(0,0)", d);
+        Assert.Contains("name          = \"Kristin\" / \"Sadler\"", d);
+        Assert.Contains("NPC[7]          = room=3 loc=7 npcId=0x0127 booth=-1 unk=(0,0)", d);
+        Assert.Contains("name          = \"Portia\" / \"LaPointe\"", d);
+        Assert.Contains("NPC[8]          = room=2 loc=8 npcId=0x00FF booth=5 unk=(0,0)", d);
+        Assert.Contains("name          = \"Sara\" / \"Green\"", d);
+        Assert.Contains("NPC[9]          = room=1 loc=9 npcId=0x0001 booth=-1 unk=(0,0)", d);
+        Assert.Contains("name          = \"Monty\" / \"duChampe\"", d);
+        Assert.Contains("NPC[10]         = room=3 loc=8 npcId=0x0128 booth=-1 unk=(0,0)", d);
+        Assert.Contains("name          = \"Belulah\" / \"Lee\"", d);
+        Assert.Contains("NPC[11]         = room=2 loc=11 npcId=0x00D1 booth=5 unk=(0,0)", d);
+        Assert.Contains("name          = \"Ian\" / \"Darson\"", d);
+
+        // Each NPC's 201-byte cosmetic block is byte-pinned (full frame in the
+        // fixture) but not field-decoded -- 12 of them, all accounted for.
+        Assert.Equal(12, CountOccurrences(d, "(AvatarData cosmetic block -- not field-decoded)"));
+        Assert.DoesNotContain("(NB)", d);
+        Assert.DoesNotContain("truncated", d);
+    }
+
+    private static int CountOccurrences(string haystack, string needle)
+    {
+        int n = 0, i = 0;
+        while ((i = haystack.IndexOf(needle, i, StringComparison.Ordinal)) >= 0) { n++; i += needle.Length; }
+        return n;
     }
 }

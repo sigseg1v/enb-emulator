@@ -7,12 +7,21 @@ using System.Text;
 namespace N7.CliClient.Opcodes.Records;
 
 /// <summary>
-/// 0x0052 LOUNGE_NPC. Wire (variable, up to ~10KB):
+/// 0x0052 LOUNGE_NPC. Wire (variable, up to ~10KB), all fields LE:
 ///   StationData (8B): int32 StationType; int32 RoomCount.
 ///   RoomCount * StationRooms (28B each): RoomNumber; RoomStyle; FogNear; FogFar; FogR; FogG; FogB.
 ///   int32 NumTerms; NumTerms * StationTerms (16B each): RoomNumber; Location; TermType; Unknown.
-///   int32 NumNPCs; NumNPCs * StationNPC (~269B each, not iterated -- count reported).
-/// Source: PlayerConnection.cpp SendStationLounge().
+///   int32 NumNPCs; NumNPCs * StationNPC (265B each, fixed stride): 6 int32 header
+///     (RoomNumber, Location, NPCID, BoothType, Unknown1, Unknown2 = 24B) followed by
+///     a 241-byte AvatarData (avatar_first_name[20], avatar_last_name[20], then a
+///     cosmetic appearance block). Lounge NPCs repurpose the name fields: first_name
+///     carries the visible NPC name, last_name a dialogue/mission tag.
+/// The 265-byte stride is fixed because StationNPC + AvatarData are both ATTRIB_PACKED
+/// fixed-size structs that SendLoungeNPC (PlayerConnection.cpp:9721) memcpy's verbatim
+/// (sizeof(StationNPC)) per NPC. Decoding the 6 ints + both names per NPC self-validates
+/// the stride: a wrong size garbles every subsequent NPC's name. The remaining 201 bytes
+/// of each AvatarData (colours/body fields) are byte-pinned but not field-decoded.
+/// Source: PlayerConnection.cpp SendLoungeNPC(); structs in common/include/net7/PacketStructures.h.
 /// </summary>
 public sealed class LoungeNpcRecord : PacketRecord
 {
@@ -55,7 +64,31 @@ public sealed class LoungeNpcRecord : PacketRecord
         if (off + 4 > Payload.Length) { Flag(sb, "truncated before NumNPCs"); return; }
         int numNpcs   = ReadI32LE(Payload, off);
         FDec(sb, off, "NumNPCs", numNpcs); off += 4;
-        int remaining = Payload.Length - off;
-        F(sb, off, remaining, "NPC data bytes", remaining.ToString(), "(AvatarData embedded -- not iterated)");
+        const int NpcHdr = 24;          // 6 int32: Room, Location, NPCID, BoothType, Unknown1, Unknown2
+        const int AvatarSize = 241;     // fixed ATTRIB_PACKED AvatarData
+        const int NpcSize = NpcHdr + AvatarSize;   // 265
+        const int NameLen = 20;         // avatar_first_name[20] / avatar_last_name[20]
+        for (int n = 0; n < numNpcs; n++, off += NpcSize)
+        {
+            if (off + NpcSize > Payload.Length)
+            {
+                Flag(sb, $"NPC[{n}] truncated: need {off + NpcSize - Payload.Length} more bytes");
+                return;
+            }
+            int room   = ReadI32LE(Payload, off);
+            int loc    = ReadI32LE(Payload, off + 4);
+            int npcId  = ReadI32LE(Payload, off + 8);
+            int booth  = ReadI32LE(Payload, off + 12);
+            int unk1   = ReadI32LE(Payload, off + 16);
+            int unk2   = ReadI32LE(Payload, off + 20);
+            int avOff  = off + NpcHdr;
+            string first = ReadNulString(Payload.AsSpan(avOff, NameLen));
+            string last  = ReadNulString(Payload.AsSpan(avOff + NameLen, NameLen));
+            FBytes(sb, off, NpcHdr, $"  NPC[{n}]",
+                   $"room={room} loc={loc} npcId=0x{npcId:X4} booth={booth} unk=({unk1},{unk2})");
+            FBytes(sb, avOff, NameLen * 2, "    name", $"{Quote(first)} / {Quote(last)}");
+            F(sb, avOff + NameLen * 2, AvatarSize - NameLen * 2, "    appearance",
+              $"{AvatarSize - NameLen * 2}B", "(AvatarData cosmetic block -- not field-decoded)");
+        }
     }
 }

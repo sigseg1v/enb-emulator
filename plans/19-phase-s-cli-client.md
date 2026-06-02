@@ -1447,8 +1447,24 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       orbit fields are zero in ALL 33 0x3F frames across capture_1/2/3 (orbit is
       client-side) -- pinned with a labelled synthetic frame. Commit a40dc3a7.
       Suite 392->409.
-- [ ] Long-tail records with ZERO frames in capture_1 (need other captures):
-      0x52 LoungeNpc, 0x6F GlobalTicket, 0xD0 GuildMessageSector. Defer until a
-      capture containing them is located. AuxMobIndex/AuxHulkIndex 0x1B version-1
-      diff tails also remain deferred (high mis-decode surface, validate
-      interactively).
+- [x] 0x52 LoungeNpc -- enhanced the decoder to iterate the NPC array (was
+      count-only) and pinned the Friendship 7 Recreation Port lounge. CORRECTS a
+      prior plan claim that 0x52 had "zero frames in capture_1": it has 5 frames
+      (16 across all 3 captures), each FRAGMENTED across multiple UDP packets
+      (Length=3404, only ~196B in the opcode's own packet) -- extop.py rejected
+      them on the len(payload)==declen-4 check, which read as absence. Reassembled
+      via reasm52.py (concatenate continuation payload to declen-4 bytes). The
+      decoder now walks the 12 StationNPC records at fixed 265-byte stride (24B
+      header: Room/Location/NPCID/BoothType/Unknown1/Unknown2; + 241B AvatarData:
+      first_name[20]/last_name[20] decoded as the NPC name + dialogue tag, then a
+      201B cosmetic block byte-pinned but not field-decoded). Stride is fixed
+      because SendLoungeNPC (PlayerConnection.cpp:9721) memcpy's sizeof(StationNPC)
+      verbatim. Decode is self-validating: all 12 names land at exact offsets
+      (Kah/Trevor/Wenton/Anveryn/Regina/Arno/Kristin/Portia/Sara/Monty/Belulah/Ian)
+      -- a wrong stride would garble every subsequent name. Zero (NB). Fixture
+      loungenpc_friendship7_full (capture_1 #379, 3400 payload bytes) + 2 content
+      tests pinning every room/terminal/NPC. Suite 409->411.
+- [ ] Long-tail records with ZERO frames in any of the 3 captures (need other
+      captures): 0x6F GlobalTicket, 0xD0 GuildMessageSector. Defer until a capture
+      containing them is located. AuxMobIndex/AuxHulkIndex 0x1B version-1 diff
+      tails also remain deferred (high mis-decode surface, validate interactively).
