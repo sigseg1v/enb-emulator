@@ -989,3 +989,64 @@ Live-play feedback. All client-side; NO server change.
       prefix, inert with no default). Suite 246->261, all green. Colour confirmed
       transparent under `dotnet test` (redirected stdout -> `AnsiPalette.Enabled`
       false).
+
+## Multi-client: containerise the CLI, one proxy per client (2026-06-01)
+
+Problem reported in live play: the CLI client and `client.exe` can't run at
+the same time -- "one disconnects the other / steals its ports" -- and there
+was no way to spawn several CLI clients at once.
+
+Root cause (NOT a bug to fix in the proxy -- it's the proxy's design): the
+**Net7Proxy is a single-client bridge**. It holds one global `g_ServerMgr`
+(one `ServerManager`) with one upstream UDP triple
+(`m_UDPConnection`/`m_UDPClient`/`m_UDPGlobalClient`) and singular
+`m_{Sector,Global,Master}Connection` pointers (`proxy/ServerManager.h:50-76`),
+gated by one global `g_LoggedIn` (`proxy/Net7.cpp:45`). A second client
+through the same proxy clobbers those pointers -- exactly the observed
+symptom. And the server's control plane is **UDP-only** (server publishes only
+`*/udp`), so a TCP-speaking client *cannot* skip the proxy. Conclusion: the
+proxy is architecturally one-per-client; the fix is to give each client its
+own proxy, not to make the proxy multi-client (that would be a server-adjacent
+rewrite with no preservation value).
+
+Secondary constraint, intentionally preserved: the server force-kicks a
+duplicate login **per account** (`PlayerManager::CheckAccountInUse`,
+login-server `ConnectionManager::CheckAccountInUse`). This is correct retail
+behaviour and is NOT bypassed -- each concurrent client needs a distinct
+account.
+
+Solution (containerise the CLI; one proxy + one CLI per "unit"):
+
+- [x] `tools/cli-client/Dockerfile` -- multi-stage SDK->runtime publish of the
+      `enb-cli` app. Invariant globalisation; ENTRYPOINT `enb-cli`, CMD `repl`.
+      Build context is the repo root (matches proxy/server). Image builds clean.
+- [x] `docker-compose.cli.yml` -- a CLI+proxy unit. The proxy joins the shared
+      stack network (`stack`, external, `${STACK_NETWORK:-enb-emulator_default}`)
+      to resolve `server`, plus a private `unit` net where it answers to the
+      alias `cliproxy`. The CLI joins both nets: `unit` to dial its own proxy by
+      the `cliproxy` alias (no cross-unit DNS collision even with many units up),
+      `stack` to reach `login:443` (auth TLS) and `server:3806` (MVAS UDP)
+      directly. Nothing host-published, so every unit reuses the default proxy
+      ports 3801/3805/3500 in its own namespace. `stdin_open`+`tty` so the line
+      editor + colour turn on.
+- [x] CLI env wiring: `Program.cs` reads `N7_AUTH_HOST`/`N7_MVAS_HOST` (already)
+      and now `N7_AUTH_PORT` (new) -- so in-network the CLI reaches login on 443
+      rather than the 4443 host remap, without spelling the port out on every
+      `connect`. Compose sets `N7_AUTH_HOST=login`, `N7_AUTH_PORT=443`,
+      `N7_MVAS_HOST=server`.
+- [x] `just play-cli UNIT='cli1'` -- ensures the shared stack is up
+      (`run-stack-bg`), passes `STACK_NETWORK=${COMPOSE_PROJECT_NAME}_default`
+      (so it works on any worktree, not just `main`), then
+      `docker compose -f docker-compose.cli.yml -p <UNIT> run --rm --build cli`
+      interactively. Several at once: `just play-cli cli1`, `just play-cli cli2`,
+      .... `just stop-cli UNIT='cli1'` tears a unit's dedicated proxy down.
+      (Distinct from the pre-existing host-local `launch-cli`, which dials
+      127.0.0.1 and so conflicts with `client.exe` -- that one is the single
+      host-side client path; `play-cli` is the containerised multi-client path.)
+- [x] Verified end-to-end wiring: a `clismoke` unit's in-container CLI resolved
+      its dedicated `cliproxy` (private net), set master/global/sector targets to
+      it, AND reached the shared `login:443` ("probe: login:443 accepting TCP"),
+      reaching `connected >` and exiting clean. SectorEnterDriver dials
+      `ctx.Host` (not the redirect-advertised IP), so the in-container sector
+      reconnect has no 127.0.0.1 trap. No server/proxy/login change -- this is
+      pure packaging + an env knob on the CLI tool.

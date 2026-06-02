@@ -1,0 +1,85 @@
+# docker-compose.cli.yml -- one CLI client + its own dedicated proxy.
+#
+# WHY THIS EXISTS
+# The Net7Proxy is a single-client bridge: one global ServerManager holding one
+# upstream UDP triple and singular m_{Sector,Global,Master}Connection pointers
+# (proxy/ServerManager.h:50-76), gated by a single global g_LoggedIn
+# (proxy/Net7.cpp:45). A second client through the same proxy clobbers those
+# pointers -- "one disconnects the other / steals its ports". The server's
+# control plane is UDP-only, so a TCP-speaking client CANNOT skip the proxy.
+# Therefore: ONE PROXY PER CLIENT. The shared server/login/postgres stack
+# (docker-compose.yml) stays as-is; client.exe keeps the host-published proxy;
+# each CLI gets its own proxy here.
+#
+# TOPOLOGY
+#   cli ──TCP──> proxy(cliproxy) ──UDP──> server      (global/master/sector)
+#   cli ──TLS──────────────────────────> login:443    (auth, N7_AUTH_HOST)
+#   cli ──UDP──────────────────────────> server:3806  (MVAS, N7_MVAS_HOST)
+# The proxy joins the shared stack network (to resolve `server`) and a private
+# per-unit network (so the CLI reaches ITS proxy via the `cliproxy` alias,
+# which exists only on the private net -- no cross-unit DNS collision even when
+# several units run at once). Nothing is published to the host, so every unit
+# safely reuses the default proxy ports 3801/3805/3500 in its own namespace.
+#
+# USAGE (see `just play-cli`)
+#   # bring up the shared stack first (creates the `enb-emulator_default` net):
+#   just run-stack-bg
+#   # then an interactive CLI unit (own proxy, own private net):
+#   docker compose -f docker-compose.cli.yml -p cli1 run --rm --build cli
+#   # a second concurrent client: different project name + a DIFFERENT account
+#   docker compose -f docker-compose.cli.yml -p cli2 run --rm --build cli
+# Inside the REPL:  connect cliproxy   then   login <user> <pass>
+# (auth-port defaults to N7_AUTH_PORT=443; MVAS/auth hosts come from env).
+#
+# The server force-kicks a duplicate login PER ACCOUNT
+# (PlayerManager::CheckAccountInUse) -- this is correct retail behaviour and is
+# NOT bypassed. Use a distinct account per concurrent client.
+
+networks:
+  # The shared stack's network, created by `docker compose up` on
+  # docker-compose.yml. External so this file attaches to it rather than
+  # creating its own. Override the name with STACK_NETWORK if you set
+  # COMPOSE_PROJECT_NAME on the main stack.
+  stack:
+    external: true
+    name: ${STACK_NETWORK:-enb-emulator_default}
+  # Private to this unit (namespaced by -p project name). Carries the
+  # CLI<->proxy TCP planes only.
+  unit: {}
+
+services:
+  proxy:
+    build:
+      context: .
+      dockerfile: proxy/Dockerfile
+    networks:
+      stack: {}
+      unit:
+        # Stable name the CLI dials; lives only on the private net, so it
+        # always resolves to THIS unit's proxy.
+        aliases: [cliproxy]
+    environment:
+      # Upstream game server on the shared stack network.
+      - NET7_GAME_SERVER_HOST=server
+    restart: unless-stopped
+
+  cli:
+    build:
+      context: .
+      dockerfile: tools/cli-client/Dockerfile
+    depends_on:
+      - proxy
+    networks:
+      # `unit` to reach the proxy (cliproxy); `stack` to reach login (auth TLS)
+      # and server (MVAS UDP 3806) directly.
+      unit: {}
+      stack: {}
+    environment:
+      - N7_AUTH_HOST=login   # auth TLS terminates on the login container...
+      - N7_AUTH_PORT=443     # ...on 443 in-network (not the 4443 host remap)
+      - N7_MVAS_HOST=server  # MVAS UDP goes direct to the server container
+      - DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
+    # Interactive REPL: `docker compose run` gives a TTY so the line editor +
+    # colour turn on.
+    stdin_open: true
+    tty: true

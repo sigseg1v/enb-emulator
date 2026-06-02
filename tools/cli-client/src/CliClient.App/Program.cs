@@ -45,6 +45,12 @@ if (args[0] is "repl" or "start")
     // server's MVAS port 3806 live on different container IPs.
     sessionCtx.MvasHost = Environment.GetEnvironmentVariable("N7_MVAS_HOST");
     sessionCtx.AuthHost = Environment.GetEnvironmentVariable("N7_AUTH_HOST");
+    // Inside the docker network the login container's TLS port is 443, not the
+    // 4443 host remap. N7_AUTH_PORT lets the containerised CLI reach it without
+    // having to spell the port out on every `connect`.
+    if (int.TryParse(Environment.GetEnvironmentVariable("N7_AUTH_PORT"), out int authPortEnv)
+        && authPortEnv > 0 && authPortEnv <= 65535)
+        sessionCtx.AuthPort = authPortEnv;
 
     // The line editor needs the live command set (for context-aware
     // completion); the repl needs the editor at construction. Break the

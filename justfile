@@ -189,6 +189,47 @@ run-stack-bg: init
 # Convenience: legacy name. Same as run-stack-bg.
 dev: run-stack-bg
 
+# Bring up an interactive CLI client in its own container, paired with its own
+# dedicated proxy, against the running shared stack.
+#
+# Why a dedicated proxy: the Net7Proxy is a SINGLE-client bridge (one global
+# ServerManager + g_LoggedIn + singular m_{Sector,Global,Master}Connection in
+# proxy/ServerManager.h). A second client through the same proxy clobbers those
+# pointers -- that's the "cli client and client.exe steal each other's ports"
+# symptom. So each CLI gets its OWN proxy. client.exe keeps the host-published
+# proxy from the main stack; this recipe never touches it. See
+# docker-compose.cli.yml for the full topology rationale.
+#
+# UNIT names the compose project (container/network namespace) so you can run
+# several at once: `just play-cli cli1`, `just play-cli cli2`, ... Each unit
+# reuses the default proxy ports inside its own private network; nothing is
+# host-published, so they never collide. NOTE: the server force-kicks a
+# duplicate login PER ACCOUNT (retail behaviour, not bypassed) -- give each
+# concurrent client a DISTINCT account.
+#
+# Inside the REPL:  connect cliproxy   then   login <user> <pass>
+# (auth/MVAS hosts + auth port 443 come from env in docker-compose.cli.yml.)
+play-cli UNIT='cli1':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Ensure the shared stack is up so its network + server/login/postgres exist.
+    just run-stack-bg
+    # The CLI unit attaches to the shared stack network by name. It's derived
+    # from COMPOSE_PROJECT_NAME (per-worktree), so pass it through rather than
+    # hardcoding `enb-emulator_default`.
+    export STACK_NETWORK="${COMPOSE_PROJECT_NAME}_default"
+    echo ">>> CLI unit '{{UNIT}}' -> stack network '$STACK_NETWORK'"
+    echo ">>> inside the REPL:  connect cliproxy   then   login <user> <pass>"
+    # `run` (not `up`) gives an interactive TTY so the line editor + colour
+    # turn on; --build keeps the image current; --rm cleans up the CLI on exit.
+    # The dedicated proxy stays up (unless-stopped) for re-runs of the same unit.
+    docker compose -f docker-compose.cli.yml -p {{UNIT}} run --rm --build cli
+
+# Tear down a CLI unit's dedicated proxy (and any leftover CLI container).
+# Pair with `just play-cli <UNIT>`; defaults to the same `cli1` unit name.
+stop-cli UNIT='cli1':
+    docker compose -f docker-compose.cli.yml -p {{UNIT}} down
+
 # Bring up the local stack + launch the launcher pre-configured to connect.
 #
 # With no args, defaults to the linux-installer's default install location:
