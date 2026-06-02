@@ -7237,9 +7237,31 @@ returned from `table()`. Verified: 6005 -> 0; "Dragonclaw Missile" now
 resolves manufacturer "Blacksun" (distinct from the item name).
 
 **Final fresh-boot state:** postgres 0 errors; server log down to exactly
-TWO remaining classes, both **mission-data-quality, not server code** --
-24x `ERROR: Mutually exclusive types in stage N` and 9x `ERROR IN
-MISSION: NPC [N] doesn't exist.` These are the mission validator
-correctly reporting bad rows in the seeded `missions` content (inherited
-from the upstream dump), NOT a code defect; tracked separately. All
-~14700 SQL/wrapper error lines per boot-cycle are gone.
+TWO remaining classes, both **mission-data-quality, not server code**.
+All ~14700 SQL/wrapper error lines per boot-cycle are gone.
+
+The two survivors were root-caused (not waved off) per the log-error
+mandate, both in `TalkTreeParser.cpp` which validates the 364 missions
+at load:
+- 9x `[N] ERROR IN MISSION: NPC [id] doesn't exist.` (`TalkTreeParser.cpp:287`):
+  a TALK_NPC mission node references an NPC id absent from
+  `starbase_npcs`. Verified the 7 distinct ids (329/431/471/661/664/
+  666/667) return 0 rows; the table holds 662 NPCs spanning id 7..100501
+  and they all load (so this is NOT residual breakage from the Bug-B
+  NPC-load fix -- that fix is confirmed working at the data level).
+  These are dangling references in the authoritative net7 dump.
+- 24x `[N] ERROR: Mutually exclusive types in stage N` (`TalkTreeParser.cpp:323`):
+  a single mission stage carries >1 completion node of the set the
+  Mission Editor treats as mutually exclusive (ARRIVE_AT / FIGHT_MOB /
+  OBTAIN_ITEMS / TALK_NPC / USE_SKILL_* / TALK_SPACE_NPC /
+  PROXIMITY_TO_SPACE_NPC / NAV_MESSAGE). An authoring/integrity defect
+  in the seeded mission XML.
+
+Both error lines STAY (they correctly flag bad content -- they are not
+"Error lines that don't mean Error"). Fixing the data requires an
+authoritative NPC/mission source we do not have; fabricating the 7 NPC
+rows or rewriting the mission stages would be exactly the divergence the
+server-integrity / fidelity rule forbids. Recorded here as a known
+content-integrity gap in the runtime dump (distinct from the Phase Y
+reconstruct-dataset gaps -- this is the *authoritative* data referencing
+rows it doesn't contain).
