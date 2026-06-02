@@ -166,6 +166,47 @@ The pcap must be a standard LE pcap (hexdump -C or wireshark export).
 Only the UDP flows from server to client are extracted; RC4-encrypted
 auth traffic and launcher opcodes are automatically skipped.
 
+### Testing with multiple players
+
+The `just launch-cli` REPL above dials the host-published proxy on `127.0.0.1`,
+so it shares that proxy with the WINE `client.exe` started by `just play-local`.
+The Net7Proxy is a **single-client bridge** (one connection set, one logged-in
+state), so two clients through the same proxy clobber each other -- one
+disconnects the other. To run several clients at once, give each its **own
+proxy** in a container.
+
+```bash
+just run-stack-bg        # shared stack: postgres + server + login + proxy
+
+# each `play-cli` brings up a CLI + its own dedicated proxy on a private
+# network, against the running stack. Run as many as you like; the UNIT arg
+# names the container set so they don't collide.
+just play-cli cli1       # first player
+just play-cli cli2       # second player (in another terminal)
+
+# inside each REPL:
+connect cliproxy         # dial THIS unit's own proxy (not 127.0.0.1)
+login <user> <pass>      # authenticate
+enter <firstname>        # enter sector
+```
+
+This composes freely: `just play-local` (the WINE client on the shared proxy)
+can run at the same time as any number of `just play-cli` units, because each
+has a proxy to itself.
+
+Tear a unit's proxy down when finished:
+
+```bash
+just stop-cli cli1
+```
+
+One catch: the server force-kicks a duplicate login **per account** (this is
+correct retail behaviour and is deliberately not bypassed). Give each
+concurrent client a **distinct account**, not the same login twice.
+
+See `docs/15-cli-client.md` for the REPL command reference and
+`docker-compose.cli.yml` for the per-unit topology.
+
 ## Repo layout
 
 See `CLAUDE.md` for the full directory map and rules. Short version:
