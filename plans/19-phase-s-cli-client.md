@@ -1305,3 +1305,20 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       the latency as a benign note and flags only ServerSent < ServerReceived
       (clock running backwards). Pinned `clientsettime_roundtrip` (+1, not flagged)
       and a synthesised backwards-clock frame (flagged). Suite 342->344.
+- [x] **Aux 0x1B version-byte-0 frames decoded (player-var ability updates).** The
+      capture gap-audit's largest remaining bucket was 0x1B frames the schema
+      registry could not match (2233/17493). Splitting by the post-bodyLen byte
+      showed 1078 with that byte == 0. Source proves these are NOT AuxBase builds:
+      every `AuxBase::*::BuildPacket` writes `char(1)` there (and returns false
+      unless `Flags[0] & 0x02`), so a 0 is a different 0x1B sub-protocol. Traced to
+      `Player::SendProspectAUX` (PlayerConnection.cpp): a flat (abilityID, value)
+      array -- `[u32 GameID][u16 bodyLen][u8 0][u32 count][count x (u32 id,u32 val)]
+      [u64 trailing]`. Added `AuxDataRecord.TryAbilityVarUpdate` (gated on version
+      0 + exact count/length fit): 1066/1078 decode cleanly, the 12 mixed-entry
+      outliers fall through to the honest fallback rather than mis-split. Value is
+      shown as raw hex with an f32 gloss when the bit pattern is a finite in-range
+      float (it is opaque: a timestamp, a 256/0 flag, or a float depending on the
+      ability). Byte-pinned `aux_abilityvar_cloak_disable` (capture_2.rar #1007,
+      deterministic cloak abilities 0x0C15/0x0CF5 = 256) and `aux_abilityvar_float_
+      value` (capture_1.rar #7764, ability 0x1161 = float 0.819). No per-id
+      semantics claimed (the source itself does not know them). Suite 344->347.

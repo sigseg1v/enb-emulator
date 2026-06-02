@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllFifteenFrames()
+    public void Fixture_Loads_AllSeventeenFrames()
     {
-        Assert.Equal(15, Frames.Count);
+        Assert.Equal(17, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -58,6 +58,10 @@ public sealed class RetailRecordDecodeTests
         Assert.Equal(0x34, Frames["clientsettime_roundtrip"].Opcode);
         Assert.Equal(12, Frames["clientsettime_roundtrip"].Payload.Length);
         Assert.Equal(0x1B, Frames["aux_ship_turret"].Opcode);
+        Assert.Equal(0x1B, Frames["aux_abilityvar_cloak_disable"].Opcode);
+        Assert.Equal(35, Frames["aux_abilityvar_cloak_disable"].Payload.Length);
+        Assert.Equal(0x1B, Frames["aux_abilityvar_float_value"].Opcode);
+        Assert.Equal(43, Frames["aux_abilityvar_float_value"].Payload.Length);
         Assert.Equal(0x11, Frames["colorization_default"].Opcode);
         Assert.Equal(134, Frames["colorization_default"].Payload.Length);
         Assert.Equal(0x97, Frames["galaxymap_system_aragoth"].Opcode);
@@ -212,6 +216,69 @@ public sealed class RetailRecordDecodeTests
         string d = Dump("aux_harvestable_halon");
         Assert.Contains("Harvestable", d);
         Assert.Contains("\"Halon\"", d);
+    }
+
+    // ── Aux 0x1B ability-var update (version byte 0) ─────────────────────────
+    // A different 0x1B sub-protocol from the AuxBase object-indexes above: the
+    // player-variable ability-state list (Player::SendProspectAUX). A version
+    // byte of 0 is the discriminator -- every AuxBase Build*Packet writes 1, so
+    // these are never a top-level index. The body is a flat (abilityID,value)
+    // array, NOT a flag-walked struct, so the schema registry must not claim it.
+
+    [Fact]
+    public void Aux_AbilityVar_CloakDisable_DecodesEveryEntry()
+    {
+        string d = Dump("aux_abilityvar_cloak_disable");
+
+        Assert.Contains("AbilityVarUpdate", d);
+        Assert.Contains("GameID            = 0x00000000", d);
+        Assert.Contains("(self / player-var)", d);
+        Assert.Contains("Version           = 0", d);
+        Assert.Contains("not a top-level AuxIndex build", d);
+        Assert.Contains("Count             = 2", d);
+        // Both cloak-ability slots, byte-pinned id AND value.
+        Assert.Contains("[0] AbilityID     = 0x00000C15", d);   // 3093
+        Assert.Contains("[0] Value         = 0x00000100  (256)", d);
+        Assert.Contains("[1] AbilityID     = 0x00000CF5", d);   // 3317
+        Assert.Contains("[1] Value         = 0x00000100  (256)", d);
+        Assert.Contains("Trailing          = 00 00 00 00 00 00 00 00", d);
+        // A clean, fully-consumed decode: no schema-walk gap, no flag, no
+        // mis-classification as a top-level index.
+        Assert.DoesNotContain("???", d);
+        Assert.DoesNotContain("[!]", d);
+        Assert.DoesNotContain("AuxType           = ShipIndex", d);
+        Assert.DoesNotContain("PARTIAL", d);
+    }
+
+    [Fact]
+    public void Aux_AbilityVar_FloatValue_GlossesTheFloatBitPattern()
+    {
+        string d = Dump("aux_abilityvar_float_value");
+
+        Assert.Contains("AbilityVarUpdate", d);
+        Assert.Contains("Count             = 3", d);
+        Assert.Contains("[0] AbilityID     = 0x00000D75", d);   // 3445
+        Assert.Contains("[0] Value         = 0x00000100  (256)", d);
+        Assert.Contains("[1] AbilityID     = 0x00000E35", d);   // 3637
+        Assert.Contains("[2] AbilityID     = 0x00001161", d);   // 4449
+        // The third value's bit pattern is a finite float -- shown as hex with
+        // an f32 gloss. 0x3F51B879 == 0.819...
+        Assert.Contains("[2] Value         = 0x3F51B879", d);
+        Assert.Contains("(f32 0.819)", d);
+        Assert.Contains("Trailing          = 00 00 00 00 00 00 00 00", d);
+        Assert.DoesNotContain("???", d);
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void Aux_AbilityVar_IsNotMisreadAsTopLevelIndex()
+    {
+        // The registry's schema-walk path is gated on version byte == 1. Prove a
+        // version-0 frame never produces an AuxType index match (which would mean
+        // a wrong schema happened to consume the bytes) -- it must take the
+        // dedicated ability-var path instead.
+        var sum = AuxDataRecord.TryExtractSummary(Frames["aux_abilityvar_cloak_disable"].Payload);
+        Assert.Null(sum);   // not a summarisable object index
     }
 
     // ── GalaxyMap 0x97 ───────────────────────────────────────────────────────

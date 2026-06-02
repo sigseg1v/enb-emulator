@@ -40,6 +40,12 @@ public sealed class AuxDataRecord : PacketRecord
 
         if (headerOk && EmitBestPartial(sb)) return;
 
+        // A version byte of 0 is never a top-level AuxBase build -- every
+        // Build*Packet path writes char(1) at offset 6. Those frames are the
+        // player-variable ability-state list emitted by SendProspectAUX
+        // (server/src/PlayerConnection.cpp): a flat (abilityID, value) array.
+        if (version == 0 && TryAbilityVarUpdate(sb)) return;
+
         // ── fallback: outer header + AddString scan (legacy behaviour) ────────
         int gameId = ReadI32LE(Payload, 0);
         FHex(sb, 0, "GameID", gameId);
@@ -79,6 +85,56 @@ public sealed class AuxDataRecord : PacketRecord
             }
         }
         foreach (var (soff, value) in ExtractAddStrings(Payload.AsSpan(4), minLen: 2)) { int absOff = soff + 4; FStr(sb, absOff, 2 + value.Length, $"str@{absOff:X4}", value); }
+    }
+
+    /// <summary>
+    /// version-byte-0 AUX_DATA: the player-variable ability-state update emitted
+    /// by Player::SendProspectAUX (server/src/PlayerConnection.cpp). Unlike a
+    /// top-level AuxBase build (which always writes char(1) at offset 6), these
+    /// write a 0 there and carry a flat list of (abilityID, value) updates:
+    ///   [u32 GameID][u16 bodyLen][u8 0][u32 count]
+    ///   [count x (u32 abilityID, u32 value)][u64 trailing]
+    /// GameID is 0 for a self/player update and the target object id otherwise.
+    /// The value is opaque -- observed as a last-activation timestamp, as a flag
+    /// (256 disables / 0 re-enables the cloak abilities 0x0C15 and 0x0CF5), and as
+    /// a float -- so it is shown as raw hex with a float gloss when the bit pattern
+    /// is a finite, in-range float. Returns false (falls through) unless the
+    /// count/length relationship holds exactly, so the 12-entry-style variant with
+    /// a wider leading entry is left to the honest fallback rather than mis-split.
+    /// </summary>
+    private bool TryAbilityVarUpdate(StringBuilder sb)
+    {
+        if (Payload.Length < 19) return false;            // 7 hdr + 4 count + 8 entry (>=1) ... min real frame is 27
+        uint count = ReadU32LE(Payload, 7);
+        if (count < 1 || count > 64) return false;
+        if (7 + 4 + (long)count * 8 + 8 != Payload.Length) return false;   // exact structural fit
+
+        uint gameId = ReadU32LE(Payload, 0);
+        F(sb, 0, 0, "AuxType", "AbilityVarUpdate (player-var ability-id/value pairs)");
+        FHex(sb, 0, "GameID", gameId, gameId == 0 ? "(self / player-var)" : "(target object)");
+        FDec(sb, 4, "BodyLen", (short)ReadU16LE(Payload, 4));
+        FDec(sb, 6, "Version", Payload[6], "(0 = not a top-level AuxIndex build)");
+        FDec(sb, 7, "Count", (int)count);
+        int off = 11;
+        for (int i = 0; i < count; i++)
+        {
+            uint id  = ReadU32LE(Payload, off);
+            uint val = ReadU32LE(Payload, off + 4);
+            float f  = ReadF32LE(Payload, off + 4);
+            string? note = float.IsFinite(f) && f != 0f
+                           && System.Math.Abs(f) >= 1e-3f && System.Math.Abs(f) < 1e9f
+                ? $"(f32 {f:0.###})" : null;
+            FHex(sb, off,     $"[{i}] AbilityID", id);
+            FHex(sb, off + 4, $"[{i}] Value",     val, note);
+            off += 8;
+        }
+        var trail = Payload.AsSpan(off, 8);
+        var th = new StringBuilder();
+        for (int k = 0; k < 8; k++) { if (k > 0) th.Append(' '); th.Append(trail[k].ToString("X2")); }
+        bool trailZero = true;
+        for (int k = 0; k < 8; k++) if (trail[k] != 0) { trailZero = false; break; }
+        FBytes(sb, off, 8, "Trailing", th.ToString(), trailZero ? null : "(non-zero -- unexpected)");
+        return true;
     }
 
     /// <summary>

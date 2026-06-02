@@ -140,6 +140,22 @@ opcode: 0x34
 payload-bytes: 12
 hex: d0 1e 10 00 9d 78 7e 25 9e 78 7e 25
 
+[aux_abilityvar_cloak_disable]
+provenance: Aux 0x1B ability-var update (capture_2.rar Packet #1007, Server->Client, Length 39). version byte 0 (not a top-level AuxIndex build, which always writes 1); count=2; abilities 0x0C15 and 0x0CF5 both set to 256. A deterministic frame -- the bytes are fixed in Player::SendProspectAUX. Pins the (abilityID,value) flat-list decode.
+opcode: 0x1B
+payload-bytes: 35
+hex: 00 00 00 00 1d 00 00 02 00 00 00 15 0c 00 00 00
+      01 00 00 f5 0c 00 00 00 01 00 00 00 00 00 00 00
+      00 00 00
+
+[aux_abilityvar_float_value]
+provenance: Aux 0x1B ability-var update (capture_1.rar Packet #7764, Server->Client, Length 47). version byte 0; count=3; abilities 0x0D75 and 0x0E35 set to 256, ability 0x1161 set to float 0x3F51B879 == 0.819. Pins the f32-gloss path: a Value whose bit pattern is a finite in-range float is annotated as such.
+opcode: 0x1B
+payload-bytes: 43
+hex: 00 00 00 00 25 00 00 03 00 00 00 75 0d 00 00 00
+      01 00 00 35 0e 00 00 00 01 00 00 61 11 00 00 79
+      b8 51 3f 00 00 00 00 00 00 00 00
+
 [relationship_aaccee]
 provenance: Relationship 0x89 -- ObjectID 0x00AACCEE reaction 2 (capture_3.rar)
 opcode: 0x89
