@@ -26,6 +26,8 @@ public sealed class LineEditorTests
     private static readonly ConsoleKeyInfo ShiftTab = new('\t', ConsoleKey.Tab, true, false, false);
     private static readonly ConsoleKeyInfo Enter   = new('\r', ConsoleKey.Enter, false, false, false);
     private static readonly ConsoleKeyInfo Back    = new('\b', ConsoleKey.Backspace, false, false, false);
+    private static readonly ConsoleKeyInfo Right   = new('\0', ConsoleKey.RightArrow, false, false, false);
+    private static readonly ConsoleKeyInfo Left    = new('\0', ConsoleKey.LeftArrow, false, false, false);
 
     private static readonly IReadOnlyList<CommandSpec> Specs = new[]
     {
@@ -102,6 +104,54 @@ public sealed class LineEditorTests
             Ch('c'), Ch('r'), Ch('e'), Ch('a'), Ch('t'), Ch('e'), Ch(' '),
             Tab, Enter);
         Assert.Equal("create ", line);
+    }
+
+    [Fact]
+    public void RightArrow_InMenu_PicksHighlightedCandidate()
+    {
+        // "c" opens the menu (connect, create); Tab highlights connect.
+        // Right-arrow picks it -- same as Enter in the menu -- committing
+        // "connect " (trailing space, it takes an arg). Enter then submits.
+        string? line = Run(Ch('c'), Tab, Right, Enter);
+        Assert.Equal("connect ", line);
+    }
+
+    [Fact]
+    public void RightArrow_InMenu_PicksAfterCycling()
+    {
+        // Tab past connect to create, then right-arrow picks create.
+        string? line = Run(Ch('c'), Tab, Tab, Right, Enter);
+        Assert.Equal("create ", line);
+    }
+
+    [Fact]
+    public void RightArrow_AtEnd_AcceptsArgGhost()
+    {
+        // "connect " then right-arrow fills the <ip:127.0.0.1> default,
+        // fish-style -- the same value Tab fills past the command word.
+        string? line = Run(
+            Ch('c'), Ch('o'), Ch('n'), Ch('n'), Ch('e'), Ch('c'), Ch('t'), Ch(' '),
+            Right, Enter);
+        Assert.Equal("connect 127.0.0.1", line);
+    }
+
+    [Fact]
+    public void RightArrow_AtEnd_CompletesCommandWord()
+    {
+        // "conn" uniquely prefixes connect; right-arrow at end completes the
+        // command word (and adds the trailing arg-space) without a menu.
+        string? line = Run(Ch('c'), Ch('o'), Ch('n'), Ch('n'), Right, Enter);
+        Assert.Equal("connect ", line);
+    }
+
+    [Fact]
+    public void RightArrow_MidLine_MovesCursorNotAccept()
+    {
+        // "ab", Left (cursor between a and b), Right (back to end), then 'c'
+        // appends -> "abc". Mid-line right-arrow is plain cursor motion, not
+        // a suggestion-accept.
+        string? line = Run(Ch('a'), Ch('b'), Left, Right, Ch('c'), Enter);
+        Assert.Equal("abc", line);
     }
 
     [Fact]

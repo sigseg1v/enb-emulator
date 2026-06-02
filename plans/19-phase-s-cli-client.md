@@ -1050,3 +1050,35 @@ Solution (containerise the CLI; one proxy + one CLI per "unit"):
       `ctx.Host` (not the redirect-advertised IP), so the in-container sector
       reconnect has no 127.0.0.1 trap. No server/proxy/login change -- this is
       pure packaging + an env knob on the CLI tool.
+- [x] Live-play follow-up (the `connect 127.0.0.1` trap). In the container the
+      proxy is `cliproxy`, not loopback, but the connect default WAS `127.0.0.1`
+      (placeholder + Tab autofill), so a user typing `connect 127.0.0.1` pointed
+      global/master/sector at the CLI container's own loopback -> `global connect
+      failed: Connection refused` (auth still worked, since it uses
+      `EffectiveAuthHost=login`). Fix: `N7_PROXY_HOST` env seeds
+      `SessionContext.Host` (compose sets it to `cliproxy`); `connect` now takes
+      ZERO args (probes the current default host) and its placeholder is dynamic
+      (`<host:{Host}>`) so Tab/right-arrow fill the host that actually works
+      (cliproxy in-container, 127.0.0.1 on the host stack). Also fixed a cosmetic
+      bug: `LoginCommand` logged the auth GET against `_ctx.Host` while really
+      dialing `EffectiveAuthHost` -- now logs the host it actually hits. Verified:
+      bare `connect` in a unit prints `global=cliproxy:3805 master=cliproxy:3801
+      sector=cliproxy:3500`; all three proxy ports answer TCP via the `cliproxy`
+      alias from inside the unit net. Files: `Program.cs`, `ConnectCommand.cs`,
+      `LoginCommand.cs`, `docker-compose.cli.yml`, README.
+
+## REPL UX: right-arrow accepts the suggestion (2026-06-01)
+
+Live-play request: "right arrow key should pick the option we are tabbing to".
+
+- [x] In the Tab menu, Right-arrow now picks the highlighted candidate (commits
+      the command word + arg-space, leaves the menu), identical to Enter-in-menu.
+      Extended fish-style: at end of line with no menu open, Right-arrow accepts
+      the inline grey suggestion too -- the argument placeholder default, or the
+      rest of a uniquely-prefixed command word -- whatever Tab would fill.
+      Mid-line it stays plain cursor motion; on a blank line it is inert (the
+      ghost there is the whole command list, not a single suggestion). Menu hint
+      updated to `Tab/Shift-Tab cycle, ->/Enter pick`. Files: `Repl/LineEditor.cs`
+      (`RightArrow` case + `TryAcceptInlineGhost`). Tests: +5 in `LineEditorTests`
+      (menu pick fwd/after-cycle, arg-ghost accept, command-word complete,
+      mid-line cursor-move regression). Suite 261->266, all green.

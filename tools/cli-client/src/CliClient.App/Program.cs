@@ -40,6 +40,13 @@ if (args[0] is "repl" or "start")
     replRegistry.Register(new GlobalTicketCodec());
 
     await using var sessionCtx = new SessionContext(replRegistry);
+    // The proxy host (global/master/sector TCP). Defaults to 127.0.0.1 for the
+    // host-published dev stack; inside the docker network it's the per-unit
+    // proxy alias (cliproxy), so 127.0.0.1 would dial the CLI container's own
+    // loopback and the global channel would refuse. N7_PROXY_HOST seeds it so a
+    // bare `connect` (and the Tab/right-arrow default) lands on the proxy.
+    string? proxyHost = Environment.GetEnvironmentVariable("N7_PROXY_HOST");
+    if (!string.IsNullOrEmpty(proxyHost)) sessionCtx.Host = proxyHost;
     // Override the MVAS/sector UDP host (defaults to the connect host). Used to
     // run the CLI inside the docker network, where the proxy (TCP) and the
     // server's MVAS port 3806 live on different container IPs.

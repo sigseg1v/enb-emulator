@@ -57,7 +57,7 @@ public sealed class LoginCommand : ICommandHandler
         string pass = args[1];
 
         await output.WriteLineAsync(
-            AnsiPalette.Muted($"auth: GET /AuthLogin -> {_ctx.Host}:{_ctx.AuthPort} (user={user})"))
+            AnsiPalette.Muted($"auth: GET /AuthLogin -> {_ctx.EffectiveAuthHost}:{_ctx.AuthPort} (user={user})"))
             .ConfigureAwait(false);
 
         AuthLoginResponse login;

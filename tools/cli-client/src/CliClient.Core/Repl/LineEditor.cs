@@ -9,8 +9,8 @@ namespace N7.CliClient.Repl;
 
 /// <summary>
 /// A zsh-style interactive line editor: context-aware command suggestions
-/// in grey, Tab / Shift-Tab menu cycling, Enter to pick, and a grey
-/// argument placeholder once a command is chosen.
+/// in grey, Tab / Shift-Tab menu cycling, Right-arrow or Enter to pick, and
+/// a grey argument placeholder once a command is chosen.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -126,7 +126,25 @@ public sealed class LineEditor : ILineInput
                 case ConsoleKey.LeftArrow:
                     inMenu = false; if (cursor > 0) cursor--; break;
                 case ConsoleKey.RightArrow:
-                    inMenu = false; if (cursor < buffer.Length) cursor++; break;
+                    if (inMenu)
+                    {
+                        // Right-arrow picks the highlighted menu candidate, the
+                        // same as Enter in the menu: commit the command word (+
+                        // a trailing space when it takes args) and drop out of
+                        // the menu so the argument can follow.
+                        AcceptCommand(buffer, menu[menuIndex]);
+                        cursor = buffer.Length;
+                        inMenu = false;
+                        break;
+                    }
+                    // At the end of the line, right-arrow also accepts the
+                    // inline grey suggestion (fish-style) -- the argument
+                    // default or the rest of the command word, whatever Tab
+                    // would fill. Mid-line it is plain cursor motion.
+                    if (cursor == buffer.Length && TryAcceptInlineGhost(buffer, ref cursor))
+                        break;
+                    if (cursor < buffer.Length) cursor++;
+                    break;
                 case ConsoleKey.Home:
                     inMenu = false; cursor = 0; break;
                 case ConsoleKey.End:
@@ -202,6 +220,38 @@ public sealed class LineEditor : ILineInput
         cursor = buffer.Length;
     }
 
+    /// <summary>
+    /// Accept the inline grey suggestion at the end of the line (the fish-style
+    /// right-arrow): fill the argument placeholder default past the command
+    /// word, or complete the command word from its best match. Returns false --
+    /// so the caller falls back to plain cursor motion -- when there is nothing
+    /// to accept (blank line, unknown word, or value already complete).
+    /// </summary>
+    private bool TryAcceptInlineGhost(StringBuilder buffer, ref int cursor)
+    {
+        string text = buffer.ToString();
+        var specs = _specs();
+
+        if (Completion.PastFirstToken(text))
+        {
+            string? filled = Completion.CompleteArgument(text, specs);
+            if (filled is null) return false;
+            buffer.Clear();
+            buffer.Append(filled);
+            cursor = buffer.Length;
+            return true;
+        }
+
+        // Command word: only when a prefix has been typed -- a blank line's
+        // ghost is the whole command list, not a single suggestion to accept.
+        if (text.TrimStart().Length == 0) return false;
+        var cands = Completion.FirstTokenCandidates(text, specs);
+        if (cands.Count == 0) return false;
+        AcceptCommand(buffer, cands[0]);
+        cursor = buffer.Length;
+        return true;
+    }
+
     /// <summary>Replace the command word, preserving any args after it.</summary>
     private static void SetFirstToken(StringBuilder buffer, string name)
     {
@@ -231,7 +281,7 @@ public sealed class LineEditor : ILineInput
     {
         string text = buffer.ToString();
         string ghost = inMenu
-            ? $"  ({menuIndex + 1}/{menu.Count}  Tab/Shift-Tab cycle, Enter pick)"
+            ? $"  ({menuIndex + 1}/{menu.Count}  Tab/Shift-Tab cycle, ->/Enter pick)"
             : Completion.Ghost(text, _specs());
 
         var sb = new StringBuilder();

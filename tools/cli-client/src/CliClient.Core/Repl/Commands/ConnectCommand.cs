@@ -24,50 +24,53 @@ public sealed class ConnectCommand : ICommandHandler
 
     public string Name    => "connect";
     public string Summary => "set host[:auth-port] and probe TCP";
-    public string? Placeholder => "<ip:127.0.0.1>";
+
+    // Reflect the live default host so Tab / right-arrow fill the value that
+    // actually works here: 127.0.0.1 on the host stack, the proxy alias
+    // (cliproxy) inside the docker network (seeded from N7_PROXY_HOST).
+    public string? Placeholder => $"<host:{_ctx.Host}>";
 
     // The entry point, and the obvious first action -> leads the suggestions.
     // Once a probe has connected, the next step is login, so connect retires.
     public bool Available => !_ctx.Connected;
     public int Priority => 100;
     public string Usage   =>
-        "connect <host>[:auth-port]\n" +
-        "  default auth-port: 4443 (docker dev stack)\n" +
-        "  example: connect localhost          (uses 4443)\n" +
+        "connect [host[:auth-port]]\n" +
+        "  no host: probe the current default (" + _ctx.Host + ")\n" +
+        "  default auth-port: " + _ctx.AuthPort + "\n" +
+        "  example: connect localhost\n" +
         "  example: connect 127.0.0.1:4443";
 
     public async Task<int> ExecuteAsync(
         IReadOnlyList<string> args, TextWriter output, CancellationToken ct)
     {
-        if (args.Count < 1)
+        // A bare `connect` probes the current default host (127.0.0.1, or the
+        // proxy alias inside docker) -- no need to retype it every session.
+        if (args.Count >= 1)
         {
-            await output.WriteLineAsync(
-                AnsiPalette.Warn("usage: connect <host>[:auth-port]")).ConfigureAwait(false);
-            return 1;
-        }
-
-        string raw = args[0];
-        string host;
-        int? port = null;
-        int colon = raw.LastIndexOf(':');
-        if (colon > 0 && colon < raw.Length - 1)
-        {
-            host = raw[..colon];
-            if (!int.TryParse(raw[(colon + 1)..], out int p) || p <= 0 || p > 65535)
+            string raw = args[0];
+            string host;
+            int? port = null;
+            int colon = raw.LastIndexOf(':');
+            if (colon > 0 && colon < raw.Length - 1)
             {
-                await output.WriteLineAsync(
-                    AnsiPalette.Err($"bad port: {raw[(colon + 1)..]}")).ConfigureAwait(false);
-                return 1;
+                host = raw[..colon];
+                if (!int.TryParse(raw[(colon + 1)..], out int p) || p <= 0 || p > 65535)
+                {
+                    await output.WriteLineAsync(
+                        AnsiPalette.Err($"bad port: {raw[(colon + 1)..]}")).ConfigureAwait(false);
+                    return 1;
+                }
+                port = p;
             }
-            port = p;
-        }
-        else
-        {
-            host = raw;
-        }
+            else
+            {
+                host = raw;
+            }
 
-        _ctx.Host = host;
-        if (port.HasValue) _ctx.AuthPort = port.Value;
+            _ctx.Host = host;
+            if (port.HasValue) _ctx.AuthPort = port.Value;
+        }
 
         await output.WriteLineAsync(
             AnsiPalette.Muted("target: ") +

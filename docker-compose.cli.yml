@@ -28,8 +28,9 @@
 #   docker compose -f docker-compose.cli.yml -p cli1 run --rm --build cli
 #   # a second concurrent client: different project name + a DIFFERENT account
 #   docker compose -f docker-compose.cli.yml -p cli2 run --rm --build cli
-# Inside the REPL:  connect cliproxy   then   login <user> <pass>
-# (auth-port defaults to N7_AUTH_PORT=443; MVAS/auth hosts come from env).
+# Inside the REPL:  connect   then   login <user> <pass>
+# (bare `connect` uses N7_PROXY_HOST=cliproxy; auth-port N7_AUTH_PORT=443;
+#  MVAS/auth hosts come from env. `connect cliproxy` works too, explicitly.)
 #
 # The server force-kicks a duplicate login PER ACCOUNT
 # (PlayerManager::CheckAccountInUse) -- this is correct retail behaviour and is
@@ -75,6 +76,7 @@ services:
       unit: {}
       stack: {}
     environment:
+      - N7_PROXY_HOST=cliproxy  # global/master/sector TCP -> THIS unit's proxy
       - N7_AUTH_HOST=login   # auth TLS terminates on the login container...
       - N7_AUTH_PORT=443     # ...on 443 in-network (not the 4443 host remap)
       - N7_MVAS_HOST=server  # MVAS UDP goes direct to the server container

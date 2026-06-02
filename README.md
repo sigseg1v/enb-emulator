@@ -185,10 +185,14 @@ just play-cli cli1       # first player
 just play-cli cli2       # second player (in another terminal)
 
 # inside each REPL:
-connect cliproxy         # dial THIS unit's own proxy (not 127.0.0.1)
+connect                  # bare connect dials THIS unit's own proxy (cliproxy)
 login <user> <pass>      # authenticate
 enter <firstname>        # enter sector
 ```
+
+Inside a `play-cli` container a bare `connect` already targets the unit's own
+proxy (`N7_PROXY_HOST=cliproxy`); on the host stack it defaults to `127.0.0.1`.
+Pass an explicit host (`connect cliproxy`, `connect 10.0.0.5:4443`) to override.
 
 This composes freely: `just play-local` (the WINE client on the shared proxy)
 can run at the same time as any number of `just play-cli` units, because each
