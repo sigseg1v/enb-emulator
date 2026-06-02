@@ -69,21 +69,26 @@ public sealed class SectorWorldTests
         return Packet.ForOpcode(0x003F, p);
     }
 
-    // Minimal AuxShipIndex 0x001B frame with only flag 0 (Name) and flag 26
-    // (CombatLevel) set, matching the catalog's ShipIndex schema layout:
-    // [u32 GameID][u16 BodyLen=payload-6][u8 ver=1][8 flag bytes][Name str][u32 lvl].
-    private static Packet ShipAux(uint gameId, string name, uint combatLevel)
+    // Minimal AuxShipIndex 0x001B frame with flag 0 (Name), optionally flag 13
+    // (MaxSpeed, F32), and flag 26 (CombatLevel) set, matching the catalog's
+    // ShipIndex schema layout. A field with flagNum N is present iff bit (N+4)
+    // is set, and present fields serialise in flag order:
+    // [u32 GameID][u16 BodyLen=payload-6][u8 ver=1][8 flag bytes][Name][MaxSpeed?][lvl].
+    private static Packet ShipAux(uint gameId, string name, uint combatLevel, float? maxSpeed = null)
     {
         byte[] nameB = Encoding.ASCII.GetBytes(name);
-        byte[] p = new byte[7 + 8 + (2 + nameB.Length) + 4];
+        int speedBytes = maxSpeed is null ? 0 : 4;
+        byte[] p = new byte[7 + 8 + (2 + nameB.Length) + speedBytes + 4];
         BinaryPrimitives.WriteUInt32LittleEndian(p.AsSpan(0, 4), gameId);
         BinaryPrimitives.WriteUInt16LittleEndian(p.AsSpan(4, 2), (ushort)(p.Length - 6));
         p[6] = 1;                       // version
         p[7 + 0] = 0x10;                // bit 4  -> flag 0  (Name)
+        if (maxSpeed is not null) p[7 + 2] = 0x02;   // bit 17 -> flag 13 (MaxSpeed)
         p[7 + 3] = 0x40;                // bit 30 -> flag 26 (CombatLevel)
         int o = 7 + 8;
         BinaryPrimitives.WriteUInt16LittleEndian(p.AsSpan(o, 2), (ushort)nameB.Length); o += 2;
         nameB.CopyTo(p.AsSpan(o)); o += nameB.Length;
+        if (maxSpeed is { } ms) { BinaryPrimitives.WriteSingleLittleEndian(p.AsSpan(o, 4), ms); o += 4; }
         BinaryPrimitives.WriteUInt32LittleEndian(p.AsSpan(o, 4), combatLevel);
         return Packet.ForOpcode(0x001B, p);
     }
@@ -185,6 +190,30 @@ public sealed class SectorWorldTests
         var obj = w.NearestTo(0)[0].Obj;   // no self -> still tracked
         Assert.Equal("Trader Bob", obj.Name);
         Assert.Equal(42, obj.Level);
+    }
+
+    [Fact]
+    public void Ingest_ShipAux_WithMaxSpeed_ExposesSelfSpeed()
+    {
+        // The flight loop reads SelfSpeed to pick its step size; a ship aux that
+        // announces MaxSpeed (flag 13) must surface it through the world model.
+        var w = new SectorWorld();
+        w.Ingest(ShipAux(0x40000050, "Cli Pilot", combatLevel: 7, maxSpeed: 1850.5f));
+
+        Assert.Equal(1850.5f, w.SelfSpeed(0x40000050)!.Value, 3);
+        // Name + level still decode alongside the new field.
+        var obj = w.NearestTo(0)[0].Obj;
+        Assert.Equal("Cli Pilot", obj.Name);
+        Assert.Equal(7, obj.Level);
+    }
+
+    [Fact]
+    public void SelfSpeed_WithoutAMaxSpeedAux_IsNull()
+    {
+        var w = new SectorWorld();
+        w.Ingest(ShipAux(0x40000050, "Slowpoke", combatLevel: 3));   // no MaxSpeed flag
+        Assert.Null(w.SelfSpeed(0x40000050));
+        Assert.Null(w.SelfSpeed(0x12345678));                        // unknown object
     }
 
     [Fact]

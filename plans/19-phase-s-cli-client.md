@@ -1194,3 +1194,13 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       de-aligns + logs), desync still emits the good frame that preceded it,
       desync->continuation-dropped->fresh-0x2016-realigns, and a 65535-byte
       max-size frame that must NOT trip the desync guard. Suite 295->315.
+- [x] `AuxDataRecord.TryExtractSummary` (the world-model name/level/MaxSpeed
+      extractor, ZERO coverage despite the 57e0a617 MaxSpeed addition) byte-pinned
+      in `Opcodes/AuxDataRecordSummaryTests.cs` (9): ShipIndex Name+CombatLevel+
+      MaxSpeed extract, F32 round-trip through the "0.0##" formatter (incl. a
+      byte-exact 1500.0f LE pin 00 80 BB 44), no-MaxSpeed-flag-leaves-null
+      regression guard, name-only, truncated->null, wrong-version->null. Plus
+      `SectorWorldTests` SelfSpeed coverage (2): a MaxSpeed aux surfaces through
+      `SelfSpeed` (drives the flight step size) and an unknown/no-aux object
+      returns null. Extended the existing `ShipAux` helper non-breakingly with an
+      optional flag-13 MaxSpeed field. Suite 315->326.
