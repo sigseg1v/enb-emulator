@@ -26,7 +26,7 @@ namespace N7.CliClient.Opcodes.Records;
 ///
 ///   ActivatableEffects.Count  BE int32  (AddDataFlip4)
 ///   For each activatable effect:
-///     Name        AddDataLS: uint8(printable_len) + uint8(fmt_code) + chars
+///     Name        AddDataLS: uint16 LE byte-count length prefix + chars
 ///     Description AddDataLS (same format)
 ///     Tooltip     AddDataLS (same format)
 ///     Filler      LE int32 = 0
@@ -47,7 +47,7 @@ namespace N7.CliClient.Opcodes.Records;
 ///   MaxStack       BE int32
 ///   UseEffect      BE int32
 ///   Flags          LE int32   (AddData&lt;int&gt;)
-///   Name           AddDataLS (uint8 printable_len + uint8 fmt_code + chars)
+///   Name           AddDataLS (uint16 LE byte-count length prefix + chars)
 ///   Description    AddDataLS
 ///   Manufacturer   AddDataLS
 ///
@@ -217,30 +217,17 @@ public sealed class ItemBaseRecord : PacketRecord
         return off;
     }
 
-    // AddDataLS decoder: 2-byte header + bytes. Returns new off or -1.
+    // AddDataLS decoder: u16 LE byte-count length prefix + that many string
+    // bytes. Returns new off or -1.
     //
-    // The retail EA server's AddDataLS wire format is 2 bytes followed by string data:
-    //   byte[0] = printable char count (uint8): count of STANDARD PRINTABLE ASCII
-    //             chars (0x20-0x7E) in the following data
-    //   byte[1] = color/format code (uint8): usually 0x00; non-zero values are a
-    //             formatting indicator (e.g. 0xED for colored text). Consumed as part
-    //             of the length prefix, not as a data byte.
-    //
-    // This looks like LE uint16 for most strings (high byte = 0x00), but the true
-    // printable count lives only in the low byte. At least one retail item (templateID
-    // 0x131A "Tractor Speed Boost") has 0xED in the high byte, which would read as
-    // int16 = -4839 under a naive LE-int16 parse. The correct read is: low byte only.
-    //
-    // After the 2-byte header, the data bytes contain printable chars interspersed with
-    // non-printable formatting codes. Non-printable bytes (< 0x20 or >= 0x7F) are
-    // consumed from the wire but do NOT count toward the printable-char count.
-    //
-    // Examples from the retail capture:
-    //   "Defle\xCEct Energy (Activated)" -- len=26 (26 printable), wire=27B (CE skipped)
-    //   "Incre\x00ase Shield Capacity (Equip)" -- len=32 (32 printable), wire=33B (NUL skipped)
-    //
-    // Our server uses strlen (total byte count) with 0x00 in the high byte. For
-    // pure-ASCII DB strings this is identical to the retail format.
+    // The prefix is a plain little-endian uint16 byte count. Verified against
+    // every complete ItemBase frame in capture_1/2/3.rar (467 frames, full
+    // consumption, no desync): short strings carry a 0x00 high byte (e.g. "Sand"
+    // = 04 00, "Deflect Energy (Equip)" = 16 00 == 22), and long ones use the
+    // high byte for real -- "Terminal Controller v9.0"'s 320-byte description is
+    // prefixed 40 01 == 0x0140. An earlier low-byte-only reading (treating the
+    // high byte as a "format code") truncated those long descriptions at 64
+    // chars and desynced the rest of the packet.
     private int ReadAddDataLS(StringBuilder sb, int off, string name, bool required = false)
     {
         if (off + 2 > Payload.Length)
@@ -248,40 +235,16 @@ public sealed class ItemBaseRecord : PacketRecord
             Flag(sb, $"truncated before {name} length");
             return -1;
         }
-        // Read printable-char count from the LOW BYTE only; high byte is a color/format
-        // code (usually 0x00) that is consumed as part of the 2-byte prefix.
-        int  len       = Payload[off];
-        byte fmtCode   = Payload[off + 1];
-        if (fmtCode != 0)
-            Flag(sb, $"{name}: format code 0x{fmtCode:X2} in length prefix");
-
-        // Read until `len` standard-printable chars consumed.
-        // Bytes outside 0x20-0x7E (control chars, DEL, extended ASCII) are
-        // formatting codes: consume from the wire but don't count toward len.
-        int dataOff   = off + 2;
-        int charsLeft = len;
-        int byteIdx   = 0;
-        var chars     = new System.Text.StringBuilder(len + 4);
-        while (charsLeft > 0 && dataOff + byteIdx < Payload.Length)
+        int len = ReadU16LE(Payload, off);
+        if (off + 2 + len > Payload.Length)
         {
-            byte b = Payload[dataOff + byteIdx];
-            byteIdx++;
-            if (b >= 0x20 && b < 0x7F)
-            {
-                chars.Append((char)b);
-                charsLeft--;
-            }
-            // else: format/control byte -- consume, not counted toward len
-        }
-        if (charsLeft > 0)
-        {
-            Flag(sb, $"truncated inside {name} (got {len - charsLeft}/{len} chars, {byteIdx} bytes consumed)");
+            Flag(sb, $"truncated inside {name} (prefix says {len} bytes, only {Payload.Length - off - 2} remain)");
             return -1;
         }
 
-        string s = chars.ToString();
-        FStr(sb, off, 2 + byteIdx, name, s, required);
-        return off + 2 + byteIdx;
+        string s = System.Text.Encoding.ASCII.GetString(Payload, off + 2, len);
+        FStr(sb, off, 2 + len, name, s, required);
+        return off + 2 + len;
     }
 
     private static ushort ReadU16BE(ReadOnlySpan<byte> p, int off) =>

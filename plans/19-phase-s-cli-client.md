@@ -1268,3 +1268,30 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       retail-faithful client), NOT just the server capture. Primary source for the
       retail behaviour: capture_1/2/3.rar, 90 Colorization frames, all ItemCount=4
       / 134 bytes. LEFT AS-IS; logged for a future client-parse-backed decision.
+- [x] **GalaxyMap 0x97 multiplex dispatch.** The record assumed the single Type-4
+      "you are here" layout our server emits (PlayerID + system/sector/station
+      strings + 375). Retail multiplexes 0x97 on a leading int32 Type: captures
+      carry Types 3/5/6/7/8/9 too (5 = star systems "Aragoth"; 6/9 = sectors
+      "Io"/"Earth"; 7/8 = planets/areas), each a few int32 IDs + a NUL name +
+      a float coordinate block. The old code mis-read those as the Type-4 string
+      layout and emitted garbage. Now dispatches on Type: Type 4 unchanged; all
+      others decode Type/Size + the verifiable embedded Name and leave the
+      unmodeled numeric/coordinate fields in the honest hex tail (no server source
+      to pin them, so we do not invent a layout). Pinned `galaxymap_system_aragoth`
+      (Type 5) and `galaxymap_sector_earth` (Type 9). Commit 284c9013.
+- [x] **ItemBase 0x25 long-string decoder fixed (AddDataLS prefix).** The trailing
+      Name/Description/Manufacturer strings (and effect Name/Desc/Tooltip) were
+      read with a fabricated "u8 printable-count + u8 format-code" model. The real
+      AddDataLS prefix is a plain u16 LE byte count. The bug was invisible on short
+      strings (high byte always 0x00) but truncated any string >= 256 bytes at 64
+      chars and desynced the rest of the packet. Verified by re-walking every
+      complete ItemBase frame in capture_1/2/3.rar (467 frames): all consume fully
+      with the u16 LE model. Byte-pinned `itembase_terminal_controller_v9`
+      (ItemTemplateID 0x1DC4) whose 320-byte Description carries prefix 40 01 ==
+      0x0140 -- the exact case the old model broke; the test pins the whole
+      description so dropping the high byte fails the build. Suite 339->342.
+      (Aside: the survey's one "anomaly" frame was a single-byte dump artifact at
+      a TCP fragment seam in capture_3 -- capture_1's copy of the identical frame
+      is clean; root-caused, not a decoder bug. Non-empty Manufacturer confirmed
+      on 4 real frames via the survey but not pinned: those frames are large and
+      multi-fragment, so byte-exact extraction is seam-artifact-prone.)

@@ -29,6 +29,40 @@ hex: 00 00 04 fb ff ff ff ff ff ff ff ff 0d 00 00 00
       11 00 52 65 66 69 6e 65 73 20 74 6f 3a 20 4f 78
       69 75 6d 00 00
 
+[itembase_terminal_controller_v9]
+provenance: ItemBase 0x25 -- 'Terminal Controller v9.0' (ItemTemplateID 0x1DC4), 320-byte Description (capture_3.rar, near Packet #17610). Pins the long-string AddDataLS path: the Description's u16 LE length prefix is 40 01 == 0x0140 == 320; a low-byte-only reading would truncate it at 64 chars and desync the Manufacturer field.
+opcode: 0x25
+payload-bytes: 456
+hex: 00 00 1d c4 ff ff ff ff ff ff ff ff 12 00 00 00
+      04 0d 00 00 00 1d 00 4c 65 76 65 6c 20 39 20 4d
+      61 6e 75 66 61 63 74 75 72 65 20 4f 76 65 72 72
+      69 64 65 00 11 00 00 00 00 00 00 00 23 00 00 00
+      03 00 00 00 24 00 00 00 ab aa aa 3e 00 00 00 00
+      00 00 00 00 01 45 03 f2 00 09 00 05 35 08 00 00
+      00 f0 00 00 00 00 80 00 00 00 18 00 54 65 72 6d
+      69 6e 61 6c 20 43 6f 6e 74 72 6f 6c 6c 65 72 20
+      76 39 2e 30 40 01 49 6c 6c 69 63 69 74 20 74 65
+      63 68 6e 6f 6c 6f 67 79 20 6f 66 20 75 6e 6b 6e
+      6f 77 6e 20 6f 72 69 67 69 6e 2e 20 54 68 69 73
+      20 64 65 76 69 63 65 2c 20 77 68 65 6e 20 69 6e
+      73 65 72 74 65 64 20 69 6e 74 6f 20 61 20 63 6f
+      6d 70 61 74 69 62 6c 65 20 74 65 72 6d 69 6e 61
+      6c 20 63 6f 6e 74 72 6f 6c 20 69 6e 74 65 72 66
+      61 63 65 2c 20 72 65 66 69 6e 65 73 20 74 68 65
+      20 69 6e 6e 65 72 20 77 6f 72 6b 69 6e 67 73 20
+      6f 66 20 74 68 65 20 74 65 72 6d 69 6e 61 6c 20
+      74 6f 20 61 73 73 69 73 74 20 79 6f 75 72 20 72
+      65 71 75 65 73 74 65 64 20 6f 70 65 72 61 74 69
+      6f 6e 2e 20 55 6e 66 6f 72 74 75 6e 61 74 65 6c
+      79 2c 20 74 65 72 6d 69 6e 61 6c 20 73 65 63 75
+      72 69 74 79 20 73 79 73 74 65 6d 73 20 77 69 6c
+      6c 20 64 65 74 65 63 74 20 75 6e 61 75 74 68 6f
+      72 69 7a 65 64 20 6d 6f 64 69 66 69 63 61 74 69
+      6f 6e 73 20 75 70 6f 6e 20 69 6e 69 74 69 61 74
+      69 6f 6e 20 61 6e 64 20 66 72 79 20 74 68 69 73
+      20 64 65 76 69 63 65 20 61 66 74 65 72 20 6f 6e
+      65 20 75 73 65 2e 00 00
+
 [aux_ship_turret]
 provenance: Aux 0x1B ShipIndex -- 'Starbase Guardian Turret' CombatLevel 66 (capture_3.rar)
 opcode: 0x1B

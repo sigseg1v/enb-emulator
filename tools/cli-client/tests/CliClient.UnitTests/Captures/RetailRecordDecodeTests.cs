@@ -48,11 +48,13 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllThirteenFrames()
+    public void Fixture_Loads_AllFourteenFrames()
     {
-        Assert.Equal(13, Frames.Count);
+        Assert.Equal(14, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
+        Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
+        Assert.Equal(456, Frames["itembase_terminal_controller_v9"].Payload.Length);
         Assert.Equal(0x1B, Frames["aux_ship_turret"].Opcode);
         Assert.Equal(0x11, Frames["colorization_default"].Opcode);
         Assert.Equal(134, Frames["colorization_default"].Payload.Length);
@@ -101,6 +103,49 @@ public sealed class RetailRecordDecodeTests
         Assert.Contains("Cost", d);
         Assert.Contains("754", d);                  // tradein cost
         Assert.DoesNotContain("truncated", d);
+    }
+
+    // The AddDataLS string prefix is a plain u16 LE byte count. The ore items
+    // above only ever exercise the low byte (their strings are < 256 bytes, so
+    // the high byte is always 0x00). This item's 320-byte Description forces the
+    // high byte: its prefix is 40 01 == 0x0140. A low-byte-only reading (the
+    // earlier "printable count + format code" model) truncated it to 64 chars
+    // and then desynced the Manufacturer field. Pin the WHOLE description so a
+    // regression that drops the high byte fails the build.
+    [Fact]
+    public void ItemBase_TerminalControllerV9_DecodesFull320ByteDescription()
+    {
+        string d = Dump("itembase_terminal_controller_v9");
+
+        Assert.Contains("0x00001DC4", d);                       // 7620, BE on the wire
+        Assert.Contains("\"Terminal Controller v9.0\"", d);
+
+        // The full 320-byte description, byte-pinned start to end. The closing
+        // "after one use." only appears if all 320 bytes were read -- a 64-char
+        // truncation would stop at "...origin. This devic".
+        Assert.Contains(
+            "\"Illicit technology of unknown origin. This device, when inserted " +
+            "into a compatible terminal control interface, refines the inner " +
+            "workings of the terminal to assist your requested operation. " +
+            "Unfortunately, terminal security systems will detect unauthorized " +
+            "modifications upon initiation and fry this device after one use.\"",
+            d);
+
+        // Manufacturer is the field that desynced under the old model -- here it
+        // is present and empty, which only parses if the description ended on the
+        // right byte.
+        Assert.Contains("Manufacturer      = \"\"", d);
+
+        // Mixed field types in the variable header decode too: a string field,
+        // a float field (Terminal Override Skill+ == 1/3), an int field.
+        Assert.Contains("\"Level 9 Manufacture Override\"", d);
+        Assert.Contains("Terminal Override Skill+", d);
+        Assert.Contains("0.333", d);
+        Assert.Contains("NO_MANUFACTURE", d);                   // Flags 0x80
+
+        // Whole 456-byte payload accounted for: no truncation flag, no gap.
+        Assert.DoesNotContain("truncated", d);
+        Assert.DoesNotContain("???", d);
     }
 
     // ── Aux 0x1B ShipIndex ───────────────────────────────────────────────────
