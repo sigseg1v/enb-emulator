@@ -58,7 +58,7 @@ jobs:
             g++ cmake ninja-build pkg-config \
             libssl-dev liblua5.4-dev liblua5.4-0 \
             libtinyxml-dev libcrypto++-dev \
-            libpq-dev libpqxx-dev
+            libpq-dev libpqxx-dev libsodium-dev
       - name: Configure
         run: cmake -S server -B build/server -G Ninja
       - name: Upload CMake logs
@@ -89,7 +89,7 @@ jobs:
             g++ cmake ninja-build pkg-config \
             libssl-dev liblua5.4-dev liblua5.4-0 \
             libtinyxml-dev libcrypto++-dev \
-            libpq-dev libpqxx-dev
+            libpq-dev libpqxx-dev libsodium-dev
       - name: Configure
         run: cmake -S server -B build/server -G Ninja
       - name: Build (best-effort; captures BUILD_ERRORS.md + WARNINGS.txt)
