@@ -1,0 +1,815 @@
+# Live retail capture fixtures (2026-06-02) -- sector S2C frames.
+# Decode-path (PacketRecord.DumpToString) coverage for the nav-display and
+# in-game opcodes exercised by two live Net-7 captures. Provenance lines name
+# the source pcap. Frames are verbatim DECRYPTED opcode bodies (the 4-byte
+# size+opcode bundle header already stripped). Consumed by LiveTraceDecodeTests.
+# Layouts validated byte-exact: every frame decodes with no GenericRecord
+# fallback, no undecoded-byte gap, and no anomaly flag.
+
+[loot_item_blue_dust]
+provenance: loot_item 0x2014 (cap2-full-workflow.pcap)
+opcode: 0x2014
+payload-bytes: 50
+hex: 2a 99 03 40 49 49 26 00 48 49 26 00 77 00 e2 96
+      1f 47 0a 00 42 6c 75 65 20 44 75 73 74 32 c6 07
+      00 00 00 00 af 43 73 27 db c6 15 52 18 47 86 75
+      10 c3
+
+[priority_msg_discovered]
+provenance: priority_msg 0x0020 (cap2-full-workflow.pcap)
+opcode: 0x0020
+payload-bytes: 84
+hex: 44 69 73 63 6f 76 65 72 65 64 20 53 65 63 74 6f
+      72 20 47 61 74 65 20 74 6f 20 49 73 68 75 61 6e
+      20 38 30 30 20 45 78 70 6c 6f 72 65 20 65 78 70
+      65 72 69 65 6e 63 65 20 65 61 72 6e 65 64 2e 00
+      4d 65 73 73 61 67 65 4c 69 6e 65 00 a0 0f 00 00
+      04 00 00 00
+
+[obj2obj_weapon_fire]
+provenance: obj2obj_effect 0x000B (cap2-full-workflow.pcap)
+opcode: 0x000B
+payload-bytes: 35
+hex: 07 00 2a 99 03 40 a2 87 01 00 72 03 7e 30 32 2f
+      7e 57 45 41 50 5f 30 31 00 2c 49 26 00 e6 35 1f
+      47 7c 27
+
+[talk_tree_bow_greeting]
+provenance: talk_tree 0x0054 (cap2-full-workflow.pcap)
+opcode: 0x0054
+payload-bytes: 119
+hex: 2f 62 6f 77 20 47 72 65 65 74 69 6e 67 73 20 57
+      61 72 72 69 6f 72 21 20 2f 70 6f 69 6e 74 20 54
+      6f 20 74 68 65 20 70 61 74 68 20 6f 66 20 53 68
+      61 72 69 6d 20 61 72 65 20 79 6f 75 20 77 65 6c
+      63 6f 6d 65 64 2e 00 00 02 03 00 00 00 4d 6f 73
+      74 20 6b 69 6e 64 20 68 6f 6e 6f 72 65 64 20 65
+      78 70 6c 6f 72 65 72 2e 00 02 00 00 00 54 68 61
+      6e 6b 73 2e 2e 2e 00
+
+[client_sound_mp3]
+provenance: client_sound 0x006A (cap2-full-workflow.pcap)
+opcode: 0x006A
+payload-bytes: 27
+hex: 12 00 00 00 31 35 31 32 5f 30 30 5f 30 33 32 53
+      65 2e 4d 50 33 00 00 00 00 00 00
+
+[static_obj_has_nav]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 71
+hex: a0 86 01 00 0b b7 05 00 00 80 3f 00 00 00 00 00
+      00 00 00 00 00 00 00 01 03 5a b1 b2 47 00 fa 34
+      47 00 80 bb c4 00 00 00 00 00 00 00 00 00 00 00
+      00 00 00 80 3f 00 50 43 47 b2 0b 00 47 61 74 65
+      20 74 6f 20 53 6f 6c
+
+[navigation_first]
+provenance: navigation 0x0099 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x0099
+payload-bytes: 14
+hex: b3 86 01 00 00 ed 94 48 01 02 00 00 00 01
+
+[static_obj_00]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 75
+hex: a1 86 01 00 25 8e 00 00 00 80 3f 00 00 00 00 00
+      00 00 00 00 00 00 00 02 03 00 80 ac 47 00 78 b9
+      46 00 00 7a c4 00 00 00 00 00 00 00 00 00 00 00
+      00 00 00 80 3f 00 60 ea 46 f1 0f 00 47 61 6e 79
+      6d 65 64 65 20 42 65 61 63 6f 6e
+
+[static_obj_01]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 75
+hex: c4 86 01 00 25 8f 00 00 00 80 3f 00 00 00 00 00
+      00 00 00 00 00 00 00 02 03 00 78 21 c5 66 ec c3
+      46 00 00 fa 44 00 00 00 00 00 00 00 00 00 00 00
+      00 00 00 80 3f 00 60 ea 46 f1 0f 00 43 61 73 74
+      6f 72 20 53 6b 79 77 61 79 20 34
+
+[static_obj_02]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 73
+hex: a2 86 01 00 25 8e 00 00 00 80 3f 00 00 00 00 00
+      00 00 00 00 00 00 00 02 03 e6 9f a1 47 7b bc a5
+      c4 00 40 1c c5 00 00 00 00 00 00 00 00 00 00 00
+      00 00 00 80 3f 00 60 ea 46 f1 0d 00 54 72 61 64
+      65 72 73 20 52 75 6e 20 33
+
+[static_obj_03]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 73
+hex: a3 86 01 00 25 8e 00 00 00 80 3f 00 00 00 00 00
+      00 00 00 00 00 00 00 02 03 80 08 8f 47 33 f1 c2
+      c6 00 80 3b c5 00 00 00 00 00 00 00 00 00 00 00
+      00 00 00 80 3f 00 b8 08 47 f1 0d 00 54 72 61 64
+      65 72 73 20 52 75 6e 20 34
+
+[static_obj_04]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 73
+hex: a4 86 01 00 25 8e 00 00 00 80 3f 00 00 00 00 00
+      00 00 00 00 00 00 00 02 03 b8 6e 39 47 51 4a 81
+      c7 00 00 7a c5 00 00 00 00 00 00 00 00 00 00 00
+      00 00 00 80 3f 00 60 ea 46 f1 0d 00 54 72 61 64
+      65 72 73 20 52 75 6e 20 36
+
+[static_obj_05]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 75
+hex: a5 86 01 00 25 8f 00 00 00 80 3f 00 00 00 00 00
+      00 00 00 00 00 00 00 02 03 cd 4f 6c 47 3d b2 cb
+      c5 00 00 7a c4 00 00 00 00 00 00 00 00 00 00 00
+      00 00 00 80 3f 00 60 ea 46 b1 0f 00 43 61 73 74
+      6f 72 20 53 6b 79 77 61 79 20 31
+
+[static_obj_06]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 75
+hex: c2 86 01 00 25 8f 00 00 00 80 3f 00 00 00 00 00
+      00 00 00 00 00 00 00 02 03 cd 98 2e 47 9a b7 50
+      46 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+      00 00 00 80 3f 00 60 ea 46 b1 0f 00 43 61 73 74
+      6f 72 20 53 6b 79 77 61 79 20 32
+
+[static_obj_07]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 75
+hex: c3 86 01 00 25 8f 00 00 00 80 3f 00 00 00 00 00
+      00 00 00 00 00 00 00 02 03 cd 00 ae 46 33 02 b4
+      46 00 00 7a 44 00 00 00 00 00 00 00 00 00 00 00
+      00 00 00 80 3f 00 60 ea 46 b1 0f 00 43 61 73 74
+      6f 72 20 53 6b 79 77 61 79 20 33
+
+[static_obj_08]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 71
+hex: a6 86 01 00 25 e7 01 00 00 80 3f 00 00 00 00 00
+      00 00 00 00 00 00 00 02 03 66 95 8b c6 cd 2a 4c
+      c6 00 80 bb c5 00 00 00 00 00 00 00 00 00 00 00
+      00 00 00 80 3f 00 b8 08 47 f2 0b 00 4c 69 74 74
+      6c 65 20 52 6f 63 6b
+
+[static_obj_09]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 74
+hex: a7 86 01 00 03 0f 01 00 00 80 3f 00 00 00 00 00
+      00 00 00 00 00 00 00 02 03 a1 a7 0d 46 e9 c8 3e
+      c7 00 00 7a c4 00 00 00 00 00 00 00 00 00 00 00
+      00 00 00 80 3f 00 40 1c 47 b1 0e 00 42 61 72 6e
+      27 73 20 4c 6f 6f 6b 6f 75 74
+
+[static_obj_10]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 74
+hex: 08 87 01 00 0c f5 05 00 00 80 3f 00 00 00 00 00
+      00 00 00 00 00 00 00 01 03 26 5c b8 47 4d fc 6b
+      c7 a4 60 20 45 58 39 b4 bc ec 51 38 bd e5 d0 e2
+      be b8 1e 65 3f 00 40 1c 47 b1 0e 00 49 73 68 75
+      61 6e 20 53 74 61 74 69 6f 6e
+
+[static_obj_11]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 72
+hex: b2 86 01 00 25 ad 01 00 00 80 3f 00 00 00 00 00
+      00 00 00 00 00 00 00 02 03 cd a6 99 c6 33 e5 82
+      c6 00 80 bb c5 5c 8f 42 3e 33 33 33 3e cd cc cc
+      3d 19 04 76 3f 00 40 1c 46 22 0c 00 53 74 72 61
+      6e 67 65 20 53 68 69 70
+
+[static_obj_12]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 72
+hex: be 86 01 00 25 8e 00 00 00 80 3f 00 00 00 00 00
+      00 00 00 00 00 00 00 02 03 43 78 af 46 b4 6c 9f
+      c7 00 e0 ab c5 00 00 00 00 00 00 00 00 00 00 00
+      00 00 00 80 3f 00 60 ea 46 f1 0c 00 59 6f 6b 61
+      6e 20 42 65 61 63 6f 6e
+
+[static_obj_13]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 83
+hex: c0 86 01 00 25 11 04 00 00 80 3f 00 00 00 00 00
+      00 00 00 00 00 00 00 02 03 66 95 aa c6 00 9c 71
+      45 00 00 00 00 0a d7 a3 3b 6f 12 83 ba ec 51 78
+      3f 48 e1 7a 3e 00 7c 92 47 b1 17 00 4e 69 73 68
+      69 64 6f 20 57 65 61 70 6f 6e 73 20 46 61 63 74
+      6f 72 79
+
+[static_obj_14]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 90
+hex: c1 86 01 00 25 f5 05 33 33 33 3f 00 00 00 00 00
+      00 00 00 00 00 00 00 02 03 71 fa 1a 46 9a 12 33
+      47 00 00 00 00 42 60 e5 bb 0a d7 a3 bb f4 fd 54
+      bf f2 d2 0d 3f 00 7c 92 47 b1 1e 00 53 75 6e 64
+      61 72 69 20 4d 61 6e 75 66 61 63 74 75 72 69 6e
+      67 20 46 61 63 69 6c 69 74 79
+
+[static_obj_15]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 81
+hex: da 86 01 00 0b 30 00 00 00 80 3f 00 00 00 00 00
+      00 00 00 00 00 00 00 02 03 00 b8 3f c7 00 c0 0a
+      46 00 80 bb 45 00 00 00 00 00 00 00 00 00 00 00
+      00 00 00 80 3f 00 7c 92 47 b2 15 00 53 65 63 74
+      6f 72 20 47 61 74 65 20 74 6f 20 4d 65 6e 6f 72
+      62
+
+[static_obj_16]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 73
+hex: e5 86 01 00 25 8e 00 00 00 80 3f 00 00 00 00 00
+      00 00 00 00 00 00 00 02 03 37 b2 a2 47 31 85 30
+      c7 00 00 fa 43 00 00 00 00 00 00 00 00 00 00 00
+      00 00 00 80 3f 00 60 ea 46 b1 0d 00 49 73 68 75
+      61 6e 20 42 65 61 63 6f 6e
+
+[static_obj_17]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 73
+hex: 09 87 01 00 25 8e 00 00 00 80 3f 00 00 00 00 00
+      00 00 00 00 00 00 00 02 03 00 00 d2 c6 00 e8 c1
+      46 00 80 3b 45 00 00 00 00 00 00 00 00 00 00 00
+      00 00 00 80 3f 00 60 ea 46 b1 0d 00 4d 65 6e 6f
+      72 62 20 42 65 61 63 6f 6e
+
+[static_obj_18]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 73
+hex: ea 86 01 00 25 40 01 00 00 00 40 00 00 00 00 00
+      00 00 00 00 00 00 00 02 03 00 90 9a c6 0a 1d 84
+      45 00 00 00 00 68 91 6d bd cd cc 4c 3d c1 ca 41
+      3f dd 24 26 3f 00 40 1c 46 21 0d 00 48 6f 75 27
+      6a 65 75 20 42 79 65 6f 6e
+
+[static_obj_19]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 82
+hex: 0b 87 01 00 0b b7 05 00 00 80 3f 00 00 00 00 00
+      00 00 00 00 00 00 00 02 03 00 d0 c1 c3 4a e1 b3
+      c7 00 80 bb c5 00 00 00 00 00 00 00 00 00 00 00
+      00 00 00 80 3f 00 60 ea 46 b2 16 00 47 61 74 65
+      20 74 6f 20 43 61 70 65 6c 6c 61 20 53 79 73 74
+      65 6d
+
+[static_obj_20]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 72
+hex: d9 87 01 00 25 8e 00 00 00 80 3f 00 00 00 00 00
+      00 00 00 00 00 00 00 02 03 00 46 8a 47 9a e0 a8
+      c7 85 7b f1 44 58 39 34 3e a4 70 3d be 83 c0 2a
+      3f 33 33 33 3f 00 60 ea 46 31 0c 00 41 62 6f 76
+      65 20 48 61 64 65 61 6e
+
+[static_obj_21]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 65
+hex: 0a 87 01 00 25 fa 03 33 33 33 3f 00 00 00 00 00
+      00 00 00 00 00 00 00 02 03 33 c1 8c 46 52 c8 d4
+      c5 71 09 1c 45 42 60 e5 3d 37 89 81 3e 14 ae c7
+      be 9c c4 60 3f 00 50 c3 46 00 05 00 52 69 6e 67
+      73
+
+[static_obj_22]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 65
+hex: c7 86 01 00 25 ef 04 00 00 80 3f 00 00 00 00 00
+      00 00 00 00 00 00 00 02 03 cd 0f d3 c6 40 48 ad
+      47 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+      00 00 00 80 3f 00 40 9c 46 00 05 00 64 65 63 6f
+      31
+
+[static_obj_23]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 65
+hex: c8 86 01 00 25 f0 04 00 00 80 3f 00 00 00 00 00
+      00 00 00 00 00 00 00 02 03 66 37 de c6 f3 3f b5
+      47 00 00 5e c3 00 00 00 00 00 00 00 00 00 00 00
+      00 00 00 80 3f 00 40 9c 46 00 05 00 64 65 63 6f
+      32
+
+[static_obj_24]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 64
+hex: 2d 87 01 00 03 0b 01 00 00 00 40 00 00 00 00 00
+      00 00 00 00 00 00 00 02 03 f3 f7 b7 47 1a 54 6a
+      c7 f6 4c 54 c5 0e 2d b2 3d 2d b2 9d 3d 3f 35 3e
+      bf 39 b4 28 3f 00 50 c3 47 00 04 00 41 37 37 31
+
+[static_obj_25]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 80
+hex: d2 87 01 00 25 ec 04 00 00 80 3f 00 00 00 00 00
+      00 00 00 00 00 00 00 02 03 40 ad b3 47 b3 7b 71
+      c7 f6 98 c3 44 96 43 8b 3c 0a d7 a3 3c 9e ef 27
+      bf 25 06 41 3f 00 50 43 47 00 14 00 4a 65 6e 71
+      75 61 69 20 53 68 69 70 70 69 6e 67 20 50 61 64
+
+[static_obj_26]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 74
+hex: d3 87 01 00 25 38 05 00 00 40 40 00 00 00 00 00
+      00 00 00 00 00 00 00 02 03 8d 9d b3 47 9a d6 71
+      c7 00 dc 2e 45 0a d7 23 3d 50 8d 17 3d 48 e1 3a
+      bf 04 56 2e 3f 00 40 9c 46 00 0e 00 53 68 69 70
+      70 69 6e 67 20 43 72 61 74 65
+
+[static_obj_27]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 71
+hex: d4 87 01 00 25 0f 00 00 00 80 3f 00 00 00 00 00
+      00 00 00 00 00 00 00 02 03 5a 25 b4 47 4d ef 72
+      c7 cd 4c 2c 45 6f 12 03 bb 0a d7 23 3c d5 78 69
+      3e 10 58 79 3f 00 40 9c 46 00 0b 00 54 72 61 64
+      65 72 20 53 68 69 70
+
+[static_obj_28]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 68
+hex: cf 86 01 00 25 f7 05 00 00 80 3f 00 00 00 00 00
+      00 00 00 00 00 00 00 02 03 5c b5 c6 45 e6 d1 3f
+      47 00 00 fa c3 00 00 00 00 00 00 00 00 00 00 00
+      00 00 00 80 3f 00 40 9c 46 00 08 00 55 43 20 73
+      68 69 70 31
+
+[static_obj_29]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 68
+hex: d0 86 01 00 25 f8 05 00 00 80 3f 00 00 00 00 00
+      00 00 00 00 00 00 00 02 03 cd 54 49 46 e6 d1 3f
+      47 00 00 7a 44 00 00 00 00 00 00 00 00 00 00 00
+      00 00 00 80 3f 00 40 9c 46 00 08 00 55 43 20 53
+      68 69 70 32
+
+[static_obj_30]
+provenance: static_obj 0x2018 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2018
+payload-bytes: 66
+hex: d1 86 01 00 25 f4 04 00 00 80 3f 00 00 00 00 00
+      00 00 00 00 00 00 00 02 03 00 07 03 c7 4d 4a ab
+      47 00 80 a2 c4 00 00 00 00 00 00 00 00 00 00 00
+      00 00 00 80 3f 00 40 9c 46 00 06 00 64 65 63 6f
+      20 39
+
+[resource_obj_00]
+provenance: resource_obj 0x2019 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2019
+payload-bytes: 56
+hex: 97 87 01 00 1e 07 00 00 80 3f 00 00 a0 41 00 00
+      00 00 a4 da 40 47 28 92 8d 43 00 40 5d 44 cd cc
+      4c 3e 00 00 80 3f 00 00 00 3f cd cc 4c 3e 08 00
+      41 73 74 65 72 6f 69 64
+
+[resource_obj_01]
+provenance: resource_obj 0x2019 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2019
+payload-bytes: 56
+hex: a0 87 01 00 1e 07 00 00 80 3f 00 00 f0 41 00 00
+      00 00 e8 27 52 47 05 09 05 46 00 00 87 43 cd cc
+      4c 3e 00 00 80 3e 00 00 80 3e 00 00 00 3f 08 00
+      41 73 74 65 72 6f 69 64
+
+[resource_obj_02]
+provenance: resource_obj 0x2019 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2019
+payload-bytes: 56
+hex: 95 87 01 00 1f 07 00 00 80 3f 00 00 f0 41 00 00
+      00 00 39 f2 42 47 f2 40 2d 46 00 00 4e 44 00 00
+      80 3f ab aa aa 3e ab aa aa 3e ab aa 2a 3e 08 00
+      41 73 74 65 72 6f 69 64
+
+[resource_obj_03]
+provenance: resource_obj 0x2019 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2019
+payload-bytes: 57
+hex: ae 87 01 00 2a 07 00 00 80 3f 00 00 f0 41 e1 7a
+      14 3f c0 0b 44 47 34 0d 03 46 00 00 17 44 00 00
+      80 3e cd cc 4c 3e 00 00 80 3f cd cc 4c 3e 09 00
+      47 61 73 20 43 6c 6f 75 64
+
+[resource_obj_04]
+provenance: resource_obj 0x2019 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2019
+payload-bytes: 57
+hex: 9b 87 01 00 2a 07 00 00 80 3f 00 00 f0 41 00 00
+      00 00 56 d2 34 47 58 0a 46 46 00 40 73 44 ab aa
+      2a 3e ab aa aa 3e cd cc 4c 3e 00 00 80 3f 09 00
+      47 61 73 20 43 6c 6f 75 64
+
+[resource_obj_05]
+provenance: resource_obj 0x2019 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2019
+payload-bytes: 57
+hex: a9 87 01 00 2a 07 00 00 80 3f 00 00 f0 41 00 00
+      00 00 93 ee 3b 47 7b a9 6a 46 00 00 39 44 ab aa
+      aa 3e 00 00 00 3f cd cc 4c 3e ab aa 2a 3e 09 00
+      47 61 73 20 43 6c 6f 75 64
+
+[resource_obj_06]
+provenance: resource_obj 0x2019 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2019
+payload-bytes: 67
+hex: 9a 87 01 00 26 07 00 00 80 3f 00 00 f0 41 00 00
+      00 00 09 10 36 47 11 9f 21 46 00 40 5c c4 00 00
+      80 3f cd cc 4c 3e 00 00 00 3f cd cc 4c 3e 13 00
+      48 79 64 72 6f 63 61 72 62 6f 6e 20 44 65 70 6f
+      73 69 74
+
+[resource_obj_07]
+provenance: resource_obj 0x2019 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2019
+payload-bytes: 67
+hex: a8 87 01 00 26 07 00 00 80 3f 00 00 f0 41 00 00
+      00 00 a1 fd 2f 47 20 ae 09 46 00 00 f8 41 ab aa
+      2a 3e ab aa aa 3e 00 00 80 3e ab aa 2a 3e 13 00
+      48 79 64 72 6f 63 61 72 62 6f 6e 20 44 65 70 6f
+      73 69 74
+
+[resource_obj_08]
+provenance: resource_obj 0x2019 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2019
+payload-bytes: 67
+hex: a2 87 01 00 26 07 00 00 80 3f 00 00 f0 41 00 00
+      00 00 93 68 30 47 64 20 1d 46 00 80 a3 43 ab aa
+      2a 3e ab aa 2a 3e 00 00 00 3f 00 00 00 3f 13 00
+      48 79 64 72 6f 63 61 72 62 6f 6e 20 44 65 70 6f
+      73 69 74
+
+[resource_obj_09]
+provenance: resource_obj 0x2019 (cap2-full-workflow.pcap)
+opcode: 0x2019
+payload-bytes: 68
+hex: 63 87 01 00 29 07 00 00 80 3f 00 00 f0 41 00 00
+      00 00 fd 46 f0 c6 e7 05 1d 47 2f 69 a8 c3 00 00
+      80 3f ab aa aa 3e 00 00 80 3e 00 00 80 3e 14 00
+      43 72 79 73 74 61 6c 6c 69 6e 65 20 41 73 74 65
+      72 6f 69 64
+
+[resource_obj_10]
+provenance: resource_obj 0x2019 (cap2-full-workflow.pcap)
+opcode: 0x2019
+payload-bytes: 68
+hex: 68 87 01 00 29 07 00 00 80 3f 00 00 f0 41 00 00
+      00 00 32 c7 e8 c6 71 78 10 47 79 9f 5a 45 ab aa
+      2a 3e ab aa 2a 3e ab aa 2a 3e 00 00 80 3f 14 00
+      43 72 79 73 74 61 6c 6c 69 6e 65 20 41 73 74 65
+      72 6f 69 64
+
+[resource_obj_11]
+provenance: resource_obj 0x2019 (cap2-full-workflow.pcap)
+opcode: 0x2019
+payload-bytes: 68
+hex: 5e 87 01 00 27 07 00 00 80 3f 00 00 f0 41 00 00
+      00 00 01 4b b6 c6 25 7e 16 47 e9 52 88 c4 00 00
+      80 3e 00 00 80 3f 00 00 00 3f 00 00 00 3f 14 00
+      43 72 79 73 74 61 6c 6c 69 6e 65 20 41 73 74 65
+      72 6f 69 64
+
+[login_stage_00]
+provenance: login_stage 0x2020 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2020
+payload-bytes: 4
+hex: 03 00 00 00
+
+[login_stage_01]
+provenance: login_stage 0x2020 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2020
+payload-bytes: 4
+hex: 06 00 00 00
+
+[login_stage_02]
+provenance: login_stage 0x2020 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2020
+payload-bytes: 4
+hex: 09 00 00 00
+
+[galaxy_map_cache_00]
+provenance: galaxy_map_cache 0x2011 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2011
+payload-bytes: 0
+hex: 
+
+[opcode_2025_00]
+provenance: opcode_2025 0x2025 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2025
+payload-bytes: 4
+hex: a0 0e 00 00
+
+[opcode_2025_01]
+provenance: opcode_2025 0x2025 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2025
+payload-bytes: 4
+hex: 6c 19 00 00
+
+[opcode_2025_02]
+provenance: opcode_2025 0x2025 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x2025
+payload-bytes: 4
+hex: 1f 0a 00 00
+
+[logoff_confirm_00]
+provenance: logoff_confirm 0x00BA (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x00BA
+payload-bytes: 0
+hex: 
+
+[priority_msg_00]
+provenance: priority_msg 0x0020 (cap2-full-workflow.pcap)
+opcode: 0x0020
+payload-bytes: 76
+hex: 44 69 73 63 6f 76 65 72 65 64 20 4d 65 6e 6f 72
+      62 20 50 61 74 68 20 31 20 34 30 30 20 45 78 70
+      6c 6f 72 65 20 65 78 70 65 72 69 65 6e 63 65 20
+      65 61 72 6e 65 64 2e 00 4d 65 73 73 61 67 65 4c
+      69 6e 65 00 a0 0f 00 00 04 00 00 00
+
+[priority_msg_01]
+provenance: priority_msg 0x0020 (cap2-full-workflow.pcap)
+opcode: 0x0020
+payload-bytes: 76
+hex: 44 65 66 65 61 74 65 64 20 43 72 79 73 74 61 6c
+      6c 69 6e 65 20 47 61 6d 6d 61 3a 20 30 20 43 6f
+      6d 62 61 74 20 65 78 70 65 72 69 65 6e 63 65 20
+      65 61 72 6e 65 64 2e 00 4d 65 73 73 61 67 65 4c
+      69 6e 65 00 a0 0f 00 00 04 00 00 00
+
+[priority_msg_02]
+provenance: priority_msg 0x0020 (cap2-full-workflow.pcap)
+opcode: 0x0020
+payload-bytes: 78
+hex: 44 69 73 63 6f 76 65 72 65 64 20 4d 65 6e 6f 72
+      62 20 53 6b 79 77 61 79 20 31 20 34 30 30 20 45
+      78 70 6c 6f 72 65 20 65 78 70 65 72 69 65 6e 63
+      65 20 65 61 72 6e 65 64 2e 00 4d 65 73 73 61 67
+      65 4c 69 6e 65 00 a0 0f 00 00 04 00 00 00
+
+[priority_msg_03]
+provenance: priority_msg 0x0020 (cap2-full-workflow.pcap)
+opcode: 0x0020
+payload-bytes: 63
+hex: 4e 6f 74 20 65 6e 6f 75 67 68 20 66 72 65 65 20
+      73 70 61 63 65 20 74 6f 20 61 74 74 65 6d 70 74
+      20 64 69 73 6d 61 6e 74 6c 65 00 4d 65 73 73 61
+      67 65 4c 69 6e 65 00 88 13 00 00 04 00 00 00
+
+[client_sound_00]
+provenance: client_sound 0x006A (cap2-full-workflow.pcap)
+opcode: 0x006A
+payload-bytes: 35
+hex: 1a 00 00 00 73 66 78 5f 67 65 6e 65 72 69 63 5f
+      67 61 74 65 5f 74 68 72 75 73 74 20 31 00 00 00
+      00 00 00
+
+[client_sound_01]
+provenance: client_sound 0x006A (cap2-full-workflow.pcap)
+opcode: 0x006A
+payload-bytes: 29
+hex: 14 00 00 00 4c 6f 63 61 74 69 6f 6e 5f 44 69 73
+      63 6f 76 65 72 65 64 00 00 00 00 00 00
+
+[client_sound_02]
+provenance: client_sound 0x006A (cap2-full-workflow.pcap)
+opcode: 0x006A
+payload-bytes: 20
+hex: 0b 00 00 00 4f 6e 5f 44 65 73 74 72 6f 79 00 00
+      00 00 00 00
+
+[client_sound_03]
+provenance: client_sound 0x006A (cap2-full-workflow.pcap)
+opcode: 0x006A
+payload-bytes: 30
+hex: 15 00 00 00 63 61 72 67 6f 5f 6f 6e 5f 62 6f 61
+      72 64 5f 31 2e 77 61 76 00 00 00 00 00 00
+
+[obj2obj_effect_00]
+provenance: obj2obj_effect 0x000B (cap2-full-workflow.pcap)
+opcode: 0x000B
+payload-bytes: 35
+hex: 07 00 2a 99 03 40 a2 87 01 00 72 03 7e 30 32 2f
+      7e 57 45 41 50 5f 30 32 00 2d 49 26 00 e6 35 1f
+      47 7c 27
+
+[obj2obj_effect_01]
+provenance: obj2obj_effect 0x000B (cap2-full-workflow.pcap)
+opcode: 0x000B
+payload-bytes: 35
+hex: 07 00 2a 99 03 40 a2 87 01 00 72 03 7e 30 32 2f
+      7e 57 45 41 50 5f 30 33 00 2e 49 26 00 53 36 1f
+      47 b7 26
+
+[obj2obj_effect_02]
+provenance: obj2obj_effect 0x000B (cap2-full-workflow.pcap)
+opcode: 0x000B
+payload-bytes: 27
+hex: 07 08 a2 87 01 00 2a 99 03 40 aa 03 00 30 49 26
+      00 7c 5e 1f 47 42 1c 00 00 00 00
+
+[obj2obj_effect_03]
+provenance: obj2obj_effect 0x000B (cap2-full-workflow.pcap)
+opcode: 0x000B
+payload-bytes: 27
+hex: 07 08 a2 87 01 00 2a 99 03 40 aa 03 00 33 49 26
+      00 c2 62 1f 47 7a 18 00 00 00 00
+
+[obj2obj_effect_04]
+provenance: obj2obj_effect 0x000B (cap2-full-workflow.pcap)
+opcode: 0x000B
+payload-bytes: 27
+hex: 07 08 a2 87 01 00 2a 99 03 40 aa 03 00 39 49 26
+      00 08 67 1f 47 71 12 00 00 00 00
+
+[client_damage_00]
+provenance: client_damage 0x0064 (cap2-full-workflow.pcap)
+opcode: 0x0064
+payload-bytes: 24
+hex: 00 80 01 44 0c 02 ad 42 02 00 00 00 03 00 00 00
+      2a 99 03 40 a2 87 01 00
+
+[client_damage_01]
+provenance: client_damage 0x0064 (cap2-full-workflow.pcap)
+opcode: 0x0064
+payload-bytes: 24
+hex: 00 00 ba 42 00 00 88 c1 02 00 00 00 01 00 00 00
+      a2 87 01 00 2a 99 03 40
+
+[client_damage_02]
+provenance: client_damage 0x0064 (cap2-full-workflow.pcap)
+opcode: 0x0064
+payload-bytes: 24
+hex: 00 00 18 42 00 00 e0 c0 02 00 00 00 01 00 00 00
+      a3 87 01 00 2a 99 03 40
+
+[open_interface_00]
+provenance: open_interface 0x0066 (cap2-full-workflow.pcap)
+opcode: 0x0066
+payload-bytes: 8
+hex: 01 00 00 00 00 00 00 00
+
+[attacker_updates_00]
+provenance: attacker_updates 0x008B (cap2-full-workflow.pcap)
+opcode: 0x008B
+payload-bytes: 9
+hex: 01 00 00 00 01 00 01 87 a2
+
+[attacker_updates_01]
+provenance: attacker_updates 0x008B (cap2-full-workflow.pcap)
+opcode: 0x008B
+payload-bytes: 9
+hex: 00 00 00 00 01 00 01 87 a2
+
+[attacker_updates_02]
+provenance: attacker_updates 0x008B (cap2-full-workflow.pcap)
+opcode: 0x008B
+payload-bytes: 9
+hex: 01 00 00 00 01 00 01 87 a3
+
+[loot_hulk_perm_00]
+provenance: loot_hulk_perm 0x008C (cap2-full-workflow.pcap)
+opcode: 0x008C
+payload-bytes: 4
+hex: 00 01 88 7d
+
+[talk_tree_00]
+provenance: talk_tree 0x0054 (cap2-full-workflow.pcap)
+opcode: 0x0054
+payload-bytes: 179
+hex: 2f 74 61 6c 6b 35 20 49 74 20 69 73 20 6f 6e 6c
+      79 20 74 68 72 6f 75 67 68 20 68 61 72 64 73 68
+      69 70 20 74 68 61 74 20 61 70 70 72 65 63 69 61
+      74 69 6f 6e 20 66 6f 72 20 70 6c 65 6e 74 79 20
+      64 65 72 69 76 65 73 2e 00 00 02 04 00 00 00 41
+      68 2c 20 62 75 74 20 73 75 72 65 6c 79 20 6f 6e
+      6c 79 20 74 68 6f 73 65 20 74 68 61 74 20 73 75
+      66 66 65 72 20 75 6e 64 65 72 73 74 61 6e 64 20
+      74 68 65 6d 73 65 6c 76 65 73 2e 00 05 00 00 00
+      49 20 66 65 65 6c 20 6c 69 6b 65 20 79 6f 75 20
+      6a 75 73 74 20 6d 61 64 65 20 74 68 61 74 20 75
+      70 2e 00
+
+[talk_tree_01]
+provenance: talk_tree 0x0054 (cap2-full-workflow.pcap)
+opcode: 0x0054
+payload-bytes: 117
+hex: 2f 63 65 6c 65 62 72 61 74 65 20 54 72 75 6c 79
+      20 79 6f 75 72 20 70 61 74 68 20 73 65 65 6b 73
+      20 74 72 75 74 68 2e 00 00 02 07 00 00 00 54 72
+      75 74 68 20 69 73 20 72 65 6c 61 74 69 76 65 20
+      74 6f 20 70 65 72 63 65 70 74 69 6f 6e 2e 00 05
+      00 00 00 48 61 68 61 2c 20 49 20 77 61 73 20 6a
+      75 73 74 20 6d 61 6b 69 6e 67 20 73 74 75 66 66
+      20 75 70 21 00
+
+[talk_tree_02]
+provenance: talk_tree 0x0054 (cap2-full-workflow.pcap)
+opcode: 0x0054
+payload-bytes: 71
+hex: 2f 70 6f 69 6e 74 20 45 6e 6c 69 67 68 74 65 6e
+      6d 65 6e 74 20 77 69 6c 6c 20 66 69 6e 64 20 79
+      6f 75 2e 20 2f 62 6f 77 20 4d 61 79 20 70 61 72
+      74 69 6e 67 20 62 65 63 6f 6d 65 20 72 65 75 6e
+      69 6f 6e 2e 00 00 00
+
+[talk_tree_03]
+provenance: talk_tree 0x0054 (cap2-full-workflow.pcap)
+opcode: 0x0054
+payload-bytes: 73
+hex: 57 65 6c 6c 2c 20 74 68 61 74 27 73 20 61 20 6c
+      69 74 74 6c 65 20 68 61 72 73 68 2e 20 4c 65 74
+      27 73 20 6a 75 73 74 20 73 61 79 20 74 68 65 20
+      64 6f 63 74 6f 72 20 6e 65 65 64 73 20 77 61 74
+      63 68 69 6e 67 2e 00 00 00
+
+[talk_tree_04]
+provenance: talk_tree 0x0054 (cap2-full-workflow.pcap)
+opcode: 0x0054
+payload-bytes: 75
+hex: 2f 67 69 76 65 20 54 68 61 6e 6b 73 2c 20 61 6e
+      64 20 63 6f 6d 65 20 62 61 63 6b 20 73 6f 6f 6e
+      20 6f 72 20 79 6f 75 20 6d 69 67 68 74 20 6d 69
+      73 73 20 6f 75 74 20 6f 6e 20 73 6f 6d 65 20 62
+      61 72 67 61 69 6e 73 21 00 00 00
+
+[talk_tree_05]
+provenance: talk_tree 0x0054 (cap2-full-workflow.pcap)
+opcode: 0x0054
+payload-bytes: 82
+hex: 48 69 20 53 74 61 72 73 74 72 75 6b 6b 2c 20 49
+      27 6d 20 62 61 73 69 63 61 6c 6c 79 20 61 20 68
+      75 6d 61 6e 20 67 75 69 6e 65 61 20 70 69 67 2e
+      00 00 01 02 00 00 00 48 6f 77 20 64 69 64 20 79
+      6f 75 20 6b 6e 6f 77 20 6d 79 20 6e 61 6d 65 20
+      3f 00
+
+[talk_tree_06]
+provenance: talk_tree 0x0054 (cap2-full-workflow.pcap)
+opcode: 0x0054
+payload-bytes: 108
+hex: 49 6e 66 69 6e 69 43 6f 72 70 20 68 61 73 20 61
+      73 73 69 67 6e 65 64 20 6d 65 20 68 65 72 65 20
+      74 6f 20 68 65 6c 70 20 44 72 2e 20 48 27 6e 65
+      79 64 6f 6f 20 77 69 74 68 20 68 69 73 20 72 65
+      73 65 61 72 63 68 2e 00 00 01 03 00 00 00 59 6f
+      75 20 6d 65 61 6e 20 73 70 79 20 6f 6e 20 68 69
+      73 20 72 65 73 65 61 72 63 68 2e 00
+
+[talk_tree_action_00]
+provenance: talk_tree_action 0x0056 (cap2-full-workflow.pcap)
+opcode: 0x0056
+payload-bytes: 4
+hex: 06 00 00 00
+
+[talk_tree_action_01]
+provenance: talk_tree_action 0x0056 (cap2-full-workflow.pcap)
+opcode: 0x0056
+payload-bytes: 4
+hex: e0 ff ff ff
+
+[talk_tree_action_02]
+provenance: talk_tree_action 0x0056 (cap2-full-workflow.pcap)
+opcode: 0x0056
+payload-bytes: 4
+hex: 05 00 00 00
+
+[navigation_00]
+provenance: navigation 0x0099 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x0099
+payload-bytes: 14
+hex: b4 86 01 00 00 ed 94 48 01 02 00 00 00 01
+
+[navigation_01]
+provenance: navigation 0x0099 (cap1-login-undock-clicknavs-warp-logout.pcap)
+opcode: 0x0099
+payload-bytes: 14
+hex: bf 86 01 00 00 8c b9 47 01 02 00 00 00 01
