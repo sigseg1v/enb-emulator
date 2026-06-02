@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllSeventyOneFrames()
+    public void Fixture_Loads_AllSeventyFiveFrames()
     {
-        Assert.Equal(71, Frames.Count);
+        Assert.Equal(75, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -175,6 +175,14 @@ public sealed class RetailRecordDecodeTests
         Assert.Equal(4, Frames["manufactureset_reset_zero"].Payload.Length);
         Assert.Equal(0x52, Frames["loungenpc_friendship7_full"].Opcode);
         Assert.Equal(3400, Frames["loungenpc_friendship7_full"].Payload.Length);
+        Assert.Equal(0x0A, Frames["pointeffect_satellite_7392"].Opcode);
+        Assert.Equal(40, Frames["pointeffect_satellite_7392"].Payload.Length);
+        Assert.Equal(0x0A, Frames["pointeffect_satellite_7637"].Opcode);
+        Assert.Equal(40, Frames["pointeffect_satellite_7637"].Payload.Length);
+        Assert.Equal(0x0E, Frames["linkedeffect_e1_33_e2_3_speed1"].Opcode);
+        Assert.Equal(58, Frames["linkedeffect_e1_33_e2_3_speed1"].Payload.Length);
+        Assert.Equal(0x0E, Frames["linkedeffect_e1_33_e2_3_speed2"].Opcode);
+        Assert.Equal(58, Frames["linkedeffect_e1_33_e2_3_speed2"].Payload.Length);
     }
 
     // ── ItemBase 0x25 ────────────────────────────────────────────────────────
@@ -1791,5 +1799,78 @@ public sealed class RetailRecordDecodeTests
         int n = 0, i = 0;
         while ((i = haystack.IndexOf(needle, i, StringComparison.Ordinal)) >= 0) { n++; i += needle.Length; }
         return n;
+    }
+
+    // ── PointEffect 0x0A ─────────────────────────────────────────────────────
+    // Fixed 40-byte one-shot point effect (no parent object). Player::PointEffect
+    // builds the buffer at fixed offsets, so every field is pinnable exactly.
+
+    [Fact]
+    public void PointEffect_DecodesFixedFortyByteLayout()
+    {
+        string d = Dump("pointeffect_satellite_7392");
+
+        Assert.Contains("ObjectID          = 0x003A06C0", d);
+        Assert.Contains("TimeStamp         = 0x257C4870", d);
+        Assert.Contains("Position          = (-99144.98, 36557.84, 4282.668)", d);
+        Assert.Contains("Duration          = 0", d);
+        Assert.Contains("EffectID          = 1013", d);
+        Assert.Contains("Scale             = 129.982", d);
+        Assert.Contains("HSVShift          = (0.0, 0.0, 0.0)", d);
+        Assert.DoesNotContain("(NB)", d);
+        Assert.DoesNotContain("truncated", d);
+        Assert.DoesNotContain("trailing", d);
+    }
+
+    [Fact]
+    public void PointEffect_SecondInstance_ConstantEffectIdAndScale()
+    {
+        // A second spawn: obj id and tick advance, effect id + scale are invariant.
+        string d = Dump("pointeffect_satellite_7637");
+
+        Assert.Contains("ObjectID          = 0x003A07A0", d);
+        Assert.Contains("TimeStamp         = 0x257C8628", d);
+        Assert.Contains("EffectID          = 1013", d);
+        Assert.Contains("Scale             = 129.982", d);
+        Assert.DoesNotContain("(NB)", d);
+    }
+
+    // ── ObjectToObjectLinkedEffect 0x0E ──────────────────────────────────────
+    // Fixed 58-byte duration-linked source->target effect, serialised field by
+    // field. The effect ids and speedup match the MOBClass weapon-impact call
+    // site SendObjectToObjectLinkedEffect(this, p, 0x21, 0x03, 2.0).
+
+    [Fact]
+    public void LinkedEffect_DecodesFixedFiftyEightByteLayout()
+    {
+        string d = Dump("linkedeffect_e1_33_e2_3_speed1");
+
+        Assert.Contains("ObjectID          = 0x003A069A", d);
+        Assert.Contains("TimeStamp         = 0x257C4230", d);
+        Assert.Contains("SourceID          = 0x0039F9E3", d);
+        Assert.Contains("Spacer            = 0", d);
+        Assert.Contains("TargetID          = 0x0039F387", d);
+        Assert.Contains("LinkedEffectDescID= 33", d);
+        Assert.Contains("EffectDescID      = 3", d);
+        // Retail populated the target offset; our server reimpl zeroes it.
+        Assert.Contains("TargetOffset      = (55.487, -13.827, 0.192)", d);
+        Assert.Contains("OutsideTargetRadius= 1", d);
+        Assert.Contains("Scale             = 1.0", d);
+        Assert.Contains("Speedup           = 1.0", d);
+        Assert.DoesNotContain("(NB)", d);
+        Assert.DoesNotContain("truncated", d);
+        Assert.DoesNotContain("trailing", d);
+    }
+
+    [Fact]
+    public void LinkedEffect_SpeedupTwo_ReadIndependentlyOfEffectIds()
+    {
+        // Same effect ids, speedup 2.0 -- pins the Speedup float at offset 0x36.
+        string d = Dump("linkedeffect_e1_33_e2_3_speed2");
+
+        Assert.Contains("LinkedEffectDescID= 33", d);
+        Assert.Contains("EffectDescID      = 3", d);
+        Assert.Contains("Speedup           = 2.0", d);
+        Assert.DoesNotContain("(NB)", d);
     }
 }

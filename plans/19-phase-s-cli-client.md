@@ -1464,6 +1464,31 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       -- a wrong stride would garble every subsequent name. Zero (NB). Fixture
       loungenpc_friendship7_full (capture_1 #379, 3400 payload bytes) + 2 content
       tests pinning every room/terminal/NPC. Suite 409->411.
+- [x] Effect-opcode decoders (the GenericRecord-fallthrough sweep). Audited all
+      95 distinct opcodes across the 3 captures vs the record registry: ~58 still
+      fell to GenericRecord. Added two clean fixed-layout decoders verified
+      byte-exact against real frames (zero NB):
+      0x0A PointEffect (40B; Player::PointEffect, PlayerConnection.cpp:1018) --
+      one-shot point effect, fixtures pointeffect_satellite_7392/_7637.
+      0x0E ObjectToObjectLinkedEffect (58B; SendObjectToObjectLinkedEffect:914) --
+      duration-linked source->target effect, fixtures linkedeffect_*_speed1/_speed2.
+      Fidelity note pinned in the 0x0E test: retail populated TargetOffset
+      (55.487,-13.827,0.192); our reimpl zeroes it (emitter comment) -- a known
+      simplification, not a wire bug. Suite 411->415.
+- [ ] 0x0B ObjectToObjectEffect -- DEFERRED. Carries a u16 Bitmask + a
+      variable-length Message field mid-packet + a conditional tail the server
+      author flagged as wrong ("packet struct is wrong... TODO work out correct
+      structure", PlayerConnection.cpp:1441). Real frames contradict the documented
+      bit layout (header+Message+bits{0,1,2,5,6} computes 49B but the frame is 55B;
+      another off by 6). Decoding the tail would require fabricating field
+      structure -- validate interactively against the live client instead.
+- [ ] Remaining GenericRecord-fallthrough opcodes worth decoding next (server->
+      client, by frequency): 0x64 ClientDamage (6542), 0x5A VerbRequest (3017,
+      mostly client->server), 0x17 RequestTarget (1262, client->server), 0x6A
+      ClientSound (1399), 0x20/0x21/0x22 message lines (1097/43/8), 0x9E/0x9D
+      Starbase_Avatar_Change (1581/610), 0x46 ComponentPos (577), 0x66
+      OpenInterface (544), 0x2C Action (732), 0x12/0x13/0x14 Turn/Tilt/Move
+      (149/103/456). Each needs its server emitter read + real-frame byte-diff.
 - [ ] Long-tail records with ZERO frames in any of the 3 captures (need other
       captures): 0x6F GlobalTicket, 0xD0 GuildMessageSector. Defer until a capture
       containing them is located. AuxMobIndex/AuxHulkIndex 0x1B version-1 diff

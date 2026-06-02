@@ -27,6 +27,8 @@ public static class PacketRecordRegistry
             0x0007 => new RemoveRecord(payload),
             0x0008 => new SimplePosRecord(payload),
             0x0009 => new ObjectEffectRecord(payload),
+            0x000A => new PointEffectRecord(payload),
+            0x000E => new ObjectToObjectLinkedEffectRecord(payload),
             0x000F => new RemoveEffectRecord(payload),
             0x0010 => new DecalRecord(payload),
             0x0011 => new ColorizationRecord(payload),

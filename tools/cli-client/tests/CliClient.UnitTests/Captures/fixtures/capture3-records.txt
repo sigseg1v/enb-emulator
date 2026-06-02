@@ -834,3 +834,38 @@ hex: 06 00 00 00 05 00 00 00 00 00 00 00 00 00 00 00
       c7 4a 3c 3e 00 00 00 00 ca 4f 1a 3e 5c 59 2a 3f
       00 00 00 00 c7 4a 3c 3e 00 00 00 00 ca 4f 1a 3e
       5c 59 2a 3f 00 00 00 00
+
+
+[pointeffect_satellite_7392]
+provenance: PointEffect 0x0A -- one-shot point effect, EffectID 1013, scale 129.982 (capture_1.rar, Packet #7392, 40 bytes). Fixed 40-byte layout from Player::PointEffect: obj id, tick+200, world XYZ, i16 duration, i16 effect id, scale, HSV. Zero NB.
+opcode: 0x0A
+payload-bytes: 40
+hex: c0 06 3a 00 70 48 7c 25 7e a4 c1 c7 d8 cd 0e 47
+      59 d5 85 45 00 00 f5 03 7a fb 01 43 00 00 00 00
+      00 00 00 00 00 00 00 00
+
+[pointeffect_satellite_7637]
+provenance: PointEffect 0x0A -- second instance, same EffectID/scale, different position+tick (capture_1.rar, Packet #7637, 40 bytes). Pins that obj id and timestamp advance per spawn while the effect id/scale are constant.
+opcode: 0x0A
+payload-bytes: 40
+hex: a0 07 3a 00 28 86 7c 25 5e 7e be c7 bd e0 0d 47
+      60 59 88 45 00 00 f5 03 7a fb 01 43 00 00 00 00
+      00 00 00 00 00 00 00 00
+
+[linkedeffect_e1_33_e2_3_speed1]
+provenance: LinkedEffect 0x0E -- duration-linked effect source->target, LinkedEffectDescID 33 / EffectDescID 3, speedup 1.0 (capture_1.rar, Packet #7377, 58 bytes). Fixed 58-byte layout from Player::SendObjectToObjectLinkedEffect. Retail populated TargetOffset (55.487,-13.827,0.192); our reimpl zeroes it. Zero NB.
+opcode: 0x0E
+payload-bytes: 58
+hex: 9a 06 3a 00 30 42 7c 25 e3 f9 39 00 00 87 f3 39
+      00 21 00 03 00 46 f2 5d 42 d9 3a 5d c1 8f 97 44
+      3e 00 00 00 00 01 00 00 80 3f 00 00 00 00 00 00
+      00 00 00 00 00 00 00 00 80 3f
+
+[linkedeffect_e1_33_e2_3_speed2]
+provenance: LinkedEffect 0x0E -- same effect ids, speedup 2.0 (capture_1.rar, Packet #7594, 58 bytes). Matches the MOBClass weapon-impact call site that passes (0x21,0x03,2.0); pins the Speedup float at offset 0x36 independently of the effect ids.
+opcode: 0x0E
+payload-bytes: 58
+hex: 79 07 3a 00 c8 7c 7c 25 76 04 3a 00 00 a4 04 3a
+      00 21 00 03 00 cc 1b 14 c2 04 4b 00 42 4c df 15
+      41 00 00 00 00 01 00 00 80 3f 00 00 00 00 00 00
+      00 00 00 00 00 00 00 00 00 40
