@@ -7156,3 +7156,60 @@ rejected all five categories from coverage percentages alone; the
 actual by-name + by-position diff found a real 48-row gap in the one
 category (navs) where the dataset's name+position is enough to build a
 valid runtime row.
+
+## 2026-06-02 -- Two Postgres-migration SQL regressions fixed (found via the boot-log audit, not a test)
+
+Acting on the CLAUDE.md mandate ("log warnings and errors are not
+noise"), audited a live `docker compose logs` boot cycle. ~8700 SQL
+errors per sector-load pass, in two distinct bugs, both silent
+runtime-path regressions from the MySQL->Postgres migration that the
+unit/integration suites never caught (they don't drive these queries
+against a live Postgres). Commit `e1976506`.
+
+**Bug A -- cross-database table read.**
+`SectorContentSQL.cpp::ParseSectorContent` read
+`server_local_field_respawn_times` on its `net7` content connection.
+That table is persisted save-state and lives in the **net7_user**
+database. Under MySQL the two were schemas one connection could span;
+under Postgres databases are isolated, so the read raised
+`relation "server_local_field_respawn_times" does not exist` ~6904x per
+pass and field respawn timers never restored. Fix: open a `net7_user`
+handle in ParseSectorContent and route the per-field respawn read
+through it, matching how `SaveManager` already reads/writes that table.
+
+**Bug B -- unquoted mixed-case identifier (case-fold).**
+`StationLoader.cpp::AddNPCs` joined on bare `starbase_npcs.npc_Id`.
+Postgres folds unquoted identifiers to lowercase, so this became
+`npc_id` -> `column starbase_npcs.npc_id does not exist`; the join
+failed, AddNPCs logged "Error reading with MySQL (NPCs)" and returned,
+and **all** starbase NPCs failed to load on Postgres (1776 pg / 222
+server-side errors per boot). This had silently broken the Phase Y NPC
+import ever reaching the game and all starbase lounge NPCs. Fix:
+backtick-quote `` `starbase_npcs`.`npc_Id` `` so the libpqxx wrapper's
+`translate_dialect()` emits the correct quoted mixed-case identifier.
+This is the **same case-fold class** as the Phase-N canonical incident
+(`"npc_Id"`, `"mission_XML"`, `"EffectID"`), now confirmed to recur in
+runtime-path queries that no test covers.
+
+**Verified.** Rebuilt the server image (NOT just re-`up` -- the
+stale-image trap would have served the old binary), `--force-recreate`,
+full boot loaded 130 sectors + 65 stations with **zero** postgres
+ERROR/FATAL lines since restart (was ~8700); NPC-load errors 222 -> 0.
+
+**Why this is allowed under the server-integrity rule.** No wire
+format, security posture, or accepted-input change -- these restore the
+server's intended pre-migration behaviour (NPCs load, respawn timers
+restore). That is tightening toward fidelity, which the rule explicitly
+welcomes; no primary-source citation required.
+
+**Process lesson / open risk.** The integration suite is blind to this
+whole class: it asserts opcode round-trips but never asserts the boot
+log is clean. A "no `does not exist` / no `Error reading with MySQL` in
+container logs after boot" smoke check would have caught both on the
+first Postgres boot. Tracked as a Phase T follow-up (see
+plans/14-phase-n + plans/20-phase-t notes). There are still
+non-server-code log lines left UNfixed and explicitly out of scope here
+(4x `mission_XML` from a hand-typed psql query, 3 FATAL wrong-role
+connects for non-existent `postgres`/`enb` roles, single-hit
+schema-probe `relation does not exist` lines) -- noted, not yet
+root-caused.

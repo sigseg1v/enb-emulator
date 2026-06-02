@@ -95,6 +95,41 @@ Audit ratchet drove the server-native sprintf-SQL surface from **148 → 0** for
 - [ ] Per-DAO query rewrites where the SQL itself is MySQL-specific (`LIMIT offset, count`, `INTERVAL` arithmetic, etc.).
       Notes: most queries are static `SELECT * FROM table` loaders that work straight-through; this wave is small but needs a query-by-query sweep against a populated Postgres.
 
+### Wave 4 — runtime-path Postgres correctness regressions (2026-06-02, commit e1976506)
+
+Found via the CLAUDE.md boot-log audit, NOT by a test: a live boot
+logged ~8700 SQL errors per sector-load pass in two distinct bugs. Both
+are the kind of MySQL->Postgres divergence the unit/integration suites
+miss because they never drive these specific runtime queries against a
+live Postgres. Full diagnosis in plans/99-decisions-log.md (2026-06-02
+entry). These were NOT injection sites (Wave 2 already parameterised
+both files in c71769a/c8c09fe) -- they are correctness bugs Wave 2's
+parameterisation didn't touch.
+
+- [x] **`StationLoader.cpp::AddNPCs` -- case-fold on `npc_Id`.** Bare
+      `starbase_npcs.npc_Id` in the join ON-clauses folded to `npc_id`
+      on Postgres -> `column ... does not exist` -> the join failed and
+      ALL starbase NPCs silently failed to load (1776 pg / 222
+      server-side errors/boot). Fix: backtick-quote
+      `` `starbase_npcs`.`npc_Id` ``. **Same case-fold class as the
+      Phase-N canonical incident** (`"npc_Id"`/`"mission_XML"`/
+      `"EffectID"`), now confirmed to recur in a runtime-path JOIN.
+- [x] **`SectorContentSQL.cpp::ParseSectorContent` -- cross-database
+      read.** The per-field respawn read hit
+      `server_local_field_respawn_times` on the `net7` content
+      connection, but that table lives in `net7_user` (Postgres DBs are
+      isolated; MySQL schemas were not) -> `relation ... does not exist`
+      ~6904x/pass; respawn timers never restored. Fix: open a
+      `net7_user` handle and route the read through it.
+- [ ] **Regression guard (the gap that let both ship).** The
+      integration suite asserts opcode round-trips but never asserts the
+      boot log is clean. Add a Phase-T smoke check that fails if
+      container logs contain `does not exist` or `Error reading with
+      MySQL` after a boot. This catches the entire case-fold / cross-DB
+      class on the first boot rather than via a manual audit. (Ties into
+      the still-open Wave-2 item "extend postgres_smoke_test to a real
+      DAO round-trip".)
+
 ## Decisions deferred
 
 - libpqxx version pin (recommend tracking whatever ubuntu-24.04 ships; cross-distro pin if needed).
