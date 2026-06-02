@@ -134,6 +134,12 @@ hex: 4e 00 05 4e 6f 77 20 64 6f 63 6b 69 6e 67 20 61
       20 74 68 65 20 53 68 61 27 68 61 27 64 65 6d 2e
       00
 
+[clientsettime_roundtrip]
+provenance: ClientSetTime 0x34 -- round-trip time sync, ServerSent = ServerReceived + 1 tick (capture_1.rar, Set_Client_Time, Length 16). Retail's normal +1 processing latency; the decoder must NOT flag it (only ServerSent < ServerReceived is anomalous).
+opcode: 0x34
+payload-bytes: 12
+hex: d0 1e 10 00 9d 78 7e 25 9e 78 7e 25
+
 [relationship_aaccee]
 provenance: Relationship 0x89 -- ObjectID 0x00AACCEE reaction 2 (capture_3.rar)
 opcode: 0x89

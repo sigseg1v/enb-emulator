@@ -1295,3 +1295,13 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       is clean; root-caused, not a decoder bug. Non-empty Manufacturer confirmed
       on 4 real frames via the survey but not pinned: those frames are large and
       multi-fragment, so byte-exact extraction is seam-artifact-prone.)
+- [x] **ClientSetTime 0x34 false-positive flag removed.** The record flagged
+      `ServerReceived != ServerSent` as an anomaly. That encoded OUR server's
+      quirk (PlayerConnection.cpp sets ServerSent = ServerReceived, zero latency),
+      not the protocol invariant. Retail sends ServerSent = ServerReceived + 1
+      tick (the server's processing latency) -- a normal, well-formed time sync --
+      so the flag cried wolf on every retail frame (3/362 in the corpus, all +1).
+      The real invariant is monotonic: ServerSent >= ServerReceived. Now surfaces
+      the latency as a benign note and flags only ServerSent < ServerReceived
+      (clock running backwards). Pinned `clientsettime_roundtrip` (+1, not flagged)
+      and a synthesised backwards-clock frame (flagged). Suite 342->344.

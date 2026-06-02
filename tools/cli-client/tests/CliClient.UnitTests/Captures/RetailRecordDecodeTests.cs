@@ -48,13 +48,15 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllFourteenFrames()
+    public void Fixture_Loads_AllFifteenFrames()
     {
-        Assert.Equal(14, Frames.Count);
+        Assert.Equal(15, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
         Assert.Equal(456, Frames["itembase_terminal_controller_v9"].Payload.Length);
+        Assert.Equal(0x34, Frames["clientsettime_roundtrip"].Opcode);
+        Assert.Equal(12, Frames["clientsettime_roundtrip"].Payload.Length);
         Assert.Equal(0x1B, Frames["aux_ship_turret"].Opcode);
         Assert.Equal(0x11, Frames["colorization_default"].Opcode);
         Assert.Equal(134, Frames["colorization_default"].Payload.Length);
@@ -270,6 +272,42 @@ public sealed class RetailRecordDecodeTests
         Assert.Contains(
             "\"Now docking at Nishino Research Facility, training grounds of the Sha'ha'dem.\"",
             d);
+    }
+
+    // ── ClientSetTime 0x34 ───────────────────────────────────────────────────
+    // The server processes the time-sync request in nonzero ticks, so retail
+    // sends ServerSent = ServerReceived + 1. The only real anomaly is the clock
+    // running backwards (ServerSent < ServerReceived); a positive latency is
+    // normal and must NOT raise a flag.
+
+    [Fact]
+    public void ClientSetTime_PositiveServerLatency_IsNotFlagged()
+    {
+        string d = Dump("clientsettime_roundtrip");
+
+        Assert.Contains("ClientSent        = 0x00101ED0", d);
+        Assert.Contains("ServerReceived    = 0x257E789D", d);   // 629045405
+        Assert.Contains("ServerSent        = 0x257E789E", d);   // 629045406, +1
+        Assert.Contains("+1 tick server latency", d);
+        // A well-formed +1 round-trip must not be flagged as anomalous.
+        Assert.DoesNotContain("[!]", d);
+        Assert.DoesNotContain("backwards", d);
+    }
+
+    [Fact]
+    public void ClientSetTime_BackwardsClock_IsFlagged()
+    {
+        // Synthesise the genuine anomaly: ServerSent one tick BEFORE
+        // ServerReceived. The fixture's two server stamps are adjacent, so
+        // swapping them produces a backwards-clock frame.
+        var f = Frames["clientsettime_roundtrip"];
+        byte[] p = (byte[])f.Payload.Clone();
+        // serverReceived @4..7, serverSent @8..11 -- swap so sent < received.
+        for (int i = 0; i < 4; i++) (p[4 + i], p[8 + i]) = (p[8 + i], p[4 + i]);
+        string d = PacketRecord.Resolve((ushort)f.Opcode, p).DumpToString();
+
+        Assert.Contains("[!]", d);
+        Assert.Contains("server clock ran backwards", d);
     }
 
     // ── Relationship 0x89 ────────────────────────────────────────────────────

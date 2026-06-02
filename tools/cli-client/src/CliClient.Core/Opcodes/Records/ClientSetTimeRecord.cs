@@ -9,6 +9,15 @@ namespace N7.CliClient.Opcodes.Records;
 /// <summary>
 /// 0x0034 CLIENT_SET_TIME. Wire (struct ClientSetTime, 12 bytes LE):
 ///   int32 ClientSent; int32 ServerReceived; int32 ServerSent.
+///
+/// A round-trip time sync: ClientSent is the client's tick echoed back,
+/// ServerReceived/ServerSent are the server's tick when it received the request
+/// and when it replied. The only invariant is ServerSent &gt;= ServerReceived
+/// (server replies no earlier than it received); the difference is the server's
+/// processing latency for the packet. Retail sends ServerSent = ServerReceived
+/// + 1 tick; our server (PlayerConnection.cpp SendClientSetTime) sets them equal
+/// (zero measured latency). Both are well-formed -- only ServerSent &lt;
+/// ServerReceived (the server clock running backwards) is an anomaly.
 /// </summary>
 public sealed class ClientSetTimeRecord : PacketRecord
 {
@@ -19,10 +28,12 @@ public sealed class ClientSetTimeRecord : PacketRecord
         int clientSent     = ReadI32LE(Payload, 0);
         int serverReceived = ReadI32LE(Payload, 4);
         int serverSent     = ReadI32LE(Payload, 8);
+        int processTicks   = serverSent - serverReceived;
         FHex(sb, 0, "ClientSent",     clientSent);
         FHex(sb, 4, "ServerReceived", serverReceived);
-        FHex(sb, 8, "ServerSent",     serverSent);
-        if (serverReceived != serverSent)
-            Flag(sb, $"ServerReceived != ServerSent ({serverReceived} vs {serverSent})");
+        FHex(sb, 8, "ServerSent",     serverSent,
+             processTicks >= 0 ? $"(+{processTicks} tick server latency)" : null);
+        if (processTicks < 0)
+            Flag(sb, $"ServerSent < ServerReceived ({serverSent} < {serverReceived}) -- server clock ran backwards");
     }
 }
