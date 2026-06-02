@@ -195,47 +195,68 @@ will provide newer references when each task is approved.
   Acceptance: the in-game job terminal in any starbase returns at
   least one available mission for a fresh character at level-
   appropriate range.
-  **STATUS: BLOCKED -- reconstruct dataset has no `mission_XML`; runtime is
-  already authoritative. See "Finding 2026-06-01" below.** The runtime
-  `missions` table already holds **364** missions and **all 364 carry a
-  non-empty `mission_XML`** -- the script the server actually executes.
-  The wiki `missions/missions.jsonl` is human walkthrough prose (giver,
-  reward text, narrative steps) with NO XML and no mission_key. A
-  name-only mission row would make the job terminal advertise a mission
-  the server cannot run. Real unblock needs the Net-7 mission XML dump.
+  **STATUS: BLOCKED -- diffed 2026-06-02, no importable row.** The diff
+  WAS done this time (per the Y4 lesson), not rejected on percentages:
+  the dataset `missions/missions.jsonl` has **587** distinct mission
+  names; **430 are genuinely absent** from the runtime `missions` by
+  name (only 157 / 26% overlap). So the gap is real and large -- but it
+  is **not importable**, for a reason specific to missions and absent
+  for navs: the server *executes* a mission by running its
+  `mission_XML` (a `<Mission><Stage><Condition><Tree><Branch>` script
+  with completion triggers + integer `mission_key`/`mission_type`). All
+  364 runtime missions carry that XML; every one of the 430 absent
+  dataset entries is walkthrough **prose** (giver NPC, prerequisite
+  list, "reward 5000 explore XP") with NO XML, no key, no stage/
+  condition/dialog structure. A row with empty `mission_XML` would make
+  the job terminal advertise a mission the server cannot run (player
+  accepts, nothing fires) -- a broken/divergent object the
+  server-integrity rules forbid, and the XML CANNOT be synthesized from
+  prose. There is also no empty column on the 157 name-matches to
+  enrich: the runtime XML already carries giver + reward, and
+  mission_id/name/key/type/minSecurityLevel are all populated. Contrast
+  with Y4: a nav is fully functional from name + position + per-sector
+  field derivation; a mission is not functional without its script.
+  Real unblock needs a Net-7 mission-XML dump.
   (Note: the plan's `mission_step`/`mission_dialog`/`mission_npc_link`
   tables do not exist in `db/postgres/schema.sql`; the runtime keeps the
   whole mission in `missions.mission_XML`.)
 
-- [!] **Y7: Mob catalog import** -- (was on the user's data list:
-  `mobs/mobs.jsonl`). **BLOCKED -- runtime already authoritative.** The
-  runtime `mob_base` holds **2042** mob templates with real
-  `base_asset_id`, `faction_id`, and AI scripts (carrying original
-  Byakhee/Skeletor 2009 dev annotations); `mob_items` holds **8583**
-  authoritative loot rows; `sector_objects_mob` holds 1385 spawn rows.
-  77% of the 1127 wiki mob names already exist by name in `mob_base`.
-  The wiki rows have no asset/faction/AI and mostly "?" stats. Injecting
-  would create asset-less mobs. Real unblock needs a Net-7 mob dump.
+- [!] **Y7: Mob catalog import** -- (`mobs/mobs.jsonl`).
+  **BLOCKED -- diffed 2026-06-02, no importable row.** The runtime
+  `mob_base` holds **2042** mob templates with real `base_asset_id`,
+  `faction_id`, and AI scripts; `mob_items` holds 8583 loot rows;
+  `sector_objects_mob` holds 1385 spawn rows. The diff: 1113 dataset
+  mob names, **242 absent** from `mob_base` by name (21%) -- but **0 of
+  the 242 carry an asset or template id**, and a `mob_base` row without
+  `base_asset_id` cannot be spawned or rendered (non-functional). Many
+  absent entries are placeholders (e.g. one is literally named
+  `''pls update when known''`, stats=null, abilities=null). Nothing to
+  enrich on the matches either (asset/faction/AI already populated).
+  Real unblock needs a Net-7 mob dump with the integer asset/faction/AI.
 
-- [!] **Y8: Item-drop table import** -- (was on the user's data list:
-  `items/item_drops.jsonl`). **BLOCKED -- runtime already authoritative.**
-  `mob_items` (mob_id -> item_base_id, drop_chance, qty) already holds
-  **8583** loot rows. The wiki maps item-name -> mob-name with drop
-  rates that are mostly "?" (no numeric drop_chance). Of 933 distinct
-  wiki mob refs, 720 resolve to `mob_base` by name -- i.e. the data is
-  largely a name-level restatement of rows that already exist with real
-  drop chances. Injecting fabricated drop_chance values onto authoritative
-  mobs would corrupt loot tables. Real unblock needs a Net-7 drop dump.
+- [!] **Y8: Item-drop table import** -- (`items/item_drops.jsonl`).
+  **BLOCKED -- diffed 2026-06-02, no importable row.** `mob_items`
+  (mob_id -> item_base_id, `drop_chance`, qty) already holds **8583**
+  loot rows. The diff: 2415 item_drops rows -- but **0** dropSource
+  entries carry a numeric drop rate (no `rate` field at all; mob refs
+  are riddled with "?" and garbage like `D3SC3PL24F1M1H`). `drop_chance`
+  is the load-bearing column and it simply does not exist in the
+  dataset; fabricating it onto authoritative mobs would corrupt the
+  loot tables. Real unblock needs a Net-7 drop dump with numeric rates.
 
-- [!] **Y9: Prospecting / resource import** -- (was on the user's data
-  list: `prospecting/prospecting.jsonl` + `prospect_fields.jsonl`).
-  **BLOCKED -- runtime already authoritative.** `sector_objects_harvestable`
-  (+ `_oretypes` / `_restypes`) holds **882** harvestable fields keyed by
-  `resource_id` (a sector_object_id); `item_base` holds the ore/resource
-  items (from Y5). The wiki gives resource-name -> nav distribution with
-  no `resource_id` linkage to the runtime fields. Injecting would need
-  fabricated ids and would not connect to the authoritative spawn fields.
-  Real unblock needs a Net-7 harvestable dump.
+- [!] **Y9: Prospecting / resource import** --
+  (`prospecting/prospecting.jsonl` + `prospect_fields.jsonl`).
+  **BLOCKED -- diffed 2026-06-02, no importable row.**
+  `sector_objects_harvestable` holds **882** harvestable fields keyed
+  by `resource_id` (a sector_object_id), with spawn mechanics
+  (`spawn_radius`, `pop_rock_chance`, `respawn_timer`, `res_count`,
+  `max_field_radius`). The diff: 3545 dataset rows -- but **0** carry
+  any id field, and the dataset has NONE of the runtime mechanics
+  columns (its keys are resource/nodeType/level/sector/refinesTo/
+  navDistribution -- descriptive lore). There is no way to link a
+  dataset row to a runtime field without fabricating `resource_id`, and
+  nothing to populate the mechanics with. Real unblock needs a Net-7
+  harvestable dump.
 
 ## Finding 2026-06-01..02: per-category diff of the reconstruct dataset
 
@@ -253,15 +274,15 @@ at (-152.74, -63.89) is the runtime nav "Sado Pit" in sector 1076 at
 
 A by-name + by-position diff per category yields:
 
-| category | runtime table | runtime rows | verdict |
-|---|---|---|---|
-| sectors/navs | `sector_objects` | 9382 | **48-marker gap imported (Y4)** after type-filter + name/position dedup |
-| npcs | `starbase_npcs` | -- | **156-NPC gap imported (Y1)** after roster dedup |
-| items | `item_base` | -- | **5003-row catalog imported (Y5)**, real itemIds |
-| mobs | `mob_base` | 2042 | no importable gap -- no asset/faction/AI, "?" stats |
-| missions | `missions` | 364 (all w/ XML) | no importable gap -- dataset has no `mission_XML` |
-| item drops | `mob_items` | 8583 | no importable gap -- drop rates mostly "?" |
-| prospecting | `sector_objects_harvestable` | 882 | no importable gap -- no `resource_id` linkage |
+| category | runtime table | runtime rows | absent-by-name | verdict |
+|---|---|---|---|---|
+| sectors/navs | `sector_objects` | 9382 | -- | **48-marker gap imported (Y4)** after type-filter + name/position dedup |
+| npcs | `starbase_npcs` | -- | -- | **156-NPC gap imported (Y1)** after roster dedup |
+| items | `item_base` | -- | -- | **5003-row catalog imported (Y5)**, real itemIds |
+| mobs | `mob_base` | 2042 | 242 / 1113 | no importable row -- 0 of the 242 carry an asset/template id (unspawnable) |
+| missions | `missions` | 364 (all w/ XML) | 430 / 587 | no importable row -- 0 carry `mission_XML` (the executable script; cannot synthesize from prose) |
+| item drops | `mob_items` | 8583 | -- | no importable row -- 0 of 2415 rows carry a numeric `drop_chance` |
+| prospecting | `sector_objects_harvestable` | 882 | -- | no importable row -- 0 of 3545 rows carry a `resource_id` or any spawn-mechanics column |
 
 **What was importable** (Y1 NPCs, Y4 navs, Y5 items): a real diff
 surfaced rows the runtime genuinely lacked, and each carried enough to
@@ -271,17 +292,23 @@ landed via `generate_seed*.py` -> `db/postgres/seed_phase_y*.sql`,
 gated and idempotent, applied by the `schema-init` service.
 
 **What was NOT importable** (mobs, missions, item-drops, prospecting):
-the diff found mostly name-level restatements of rows that already
-exist authoritatively, plus a tail of new names that cannot be turned
-into valid runtime rows because the dataset lacks the load-bearing
-fields -- a mob with no asset/faction/AI, a mission with no XML the
-server can run, a drop row with a "?" chance, a resource with no
-`resource_id` linkage to the spawn fields. Injecting those would
-create broken/divergent objects, which the CLAUDE.md server-integrity
-rules forbid absent a primary-source escape hatch. These categories
-stay blocked pending a Net-7 server dump with the real ids/XML. The
-data remains preserved as the structured JSONL archive in the
-reconstruct backup.
+each was diffed concretely on 2026-06-02 (not rejected on coverage
+percentages -- that was the Y4 mistake). Each has a real absent-by-name
+tail, but in every case **0** of the absent rows can be turned into a
+valid runtime row because the dataset lacks the one load-bearing field
+the runtime requires: a mob needs `base_asset_id` to be spawnable (0 of
+242 absent mobs have one), a mission needs `mission_XML` to run (0 of
+430 absent missions have it; it cannot be synthesized from walkthrough
+prose), a drop row needs a numeric `drop_chance` (0 of 2415 rows have
+one), a harvestable field needs `resource_id` + spawn mechanics (0 of
+3545 rows have any id or mechanics column). The contrast with Y4 is the
+whole point: a nav is fully functional from name + position + per-sector
+field derivation, so its absent tail WAS importable; these four are not.
+Injecting them would create broken/divergent objects, which the
+CLAUDE.md server-integrity rules forbid absent a primary-source escape
+hatch. These categories stay blocked pending a Net-7 server dump with
+the real ids/XML. The data remains preserved as the structured JSONL
+archive in the reconstruct backup.
 
 ## Tracking notes
 

@@ -37,17 +37,24 @@ import argparse
 import glob
 import json
 import os
+import re
 import subprocess
 import sys
 
 DEFAULT_DB_DIR = "/data/dev/enb-emu-data-reconstruct-backup/db"
 
 
+def norm(s) -> str:
+    # Alphanumeric-only fold, identical to generate_seed_navs.py, so a name's
+    # punctuation/whitespace variants compare equal on both sides of the diff.
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
 def psql_names(host, port, user, password, dbname, sql) -> set[str]:
     env = {**os.environ, "PGPASSWORD": password}
     cmd = ["psql", "-h", host, "-p", port, "-U", user, "-d", dbname, "-tA", "-c", sql]
     r = subprocess.run(cmd, env=env, capture_output=True, text=True, check=True)
-    return {line.strip().lower() for line in r.stdout.splitlines() if line.strip()}
+    return {norm(line) for line in r.stdout.splitlines() if line.strip()}
 
 
 def jsonl_iter(path):
@@ -66,7 +73,7 @@ def distinct_names(path, key) -> set[str]:
     for o in jsonl_iter(path):
         v = o.get(key)
         if v:
-            out.add(v.strip().lower())
+            out.add(norm(v))
     return out
 
 
@@ -104,44 +111,73 @@ def main() -> int:
         for o in jsonl_iter(p):
             n = o.get("name")
             if n:
-                wiki_navs.add(n.strip().lower())
+                wiki_navs.add(norm(n))
     print(f"SECTORS    {len(sector_files)} wiki files, {len(wiki_navs)} distinct nav "
           f"names; already authoritative in sector_objects: {pct(len(wiki_navs & rt_navs), len(wiki_navs))}")
 
-    wiki_mobs = distinct_names(os.path.join(d, "mobs/mobs.jsonl"), "name")
-    print(f"MOBS       {len(wiki_mobs)} distinct wiki mob names; already in mob_base: "
-          f"{pct(len(wiki_mobs & rt_mobs), len(wiki_mobs))}")
+    # mobs: absent-by-name, and how many absent rows carry the load-bearing
+    # field a runtime mob_base row requires (an asset / template id). A mob
+    # with no asset id cannot be spawned or rendered, so it is not importable.
+    wiki_mobs: set[str] = set()
+    mob_has_asset: dict[str, bool] = {}
+    for o in jsonl_iter(os.path.join(d, "mobs/mobs.jsonl")):
+        n = o.get("name")
+        if not n:
+            continue
+        key = norm(n)
+        wiki_mobs.add(key)
+        has_asset = any("asset" in k.lower() or "template" in k.lower() for k in o)
+        mob_has_asset[key] = mob_has_asset.get(key, False) or has_asset
+    absent_mobs = wiki_mobs - rt_mobs
+    absent_mobs_with_asset = sum(1 for k in absent_mobs if mob_has_asset.get(k))
+    print(f"MOBS       {len(wiki_mobs)} distinct names; already in mob_base: "
+          f"{pct(len(wiki_mobs & rt_mobs), len(wiki_mobs))}; absent by name={len(absent_mobs)}, "
+          f"of which carry an asset/template id (importable shape)={absent_mobs_with_asset}")
 
+    # missions: absent-by-name. The load-bearing field is mission_XML (the
+    # executable script); the dataset is walkthrough prose and carries none,
+    # so importable=0 by construction regardless of absent count.
     wiki_miss = distinct_names(os.path.join(d, "missions/missions.jsonl"), "name")
-    print(f"MISSIONS   {len(wiki_miss)} distinct wiki mission names; already in missions "
-          f"(all of which carry XML): {pct(len(wiki_miss & rt_miss), len(wiki_miss))}")
+    absent_miss = len(wiki_miss - rt_miss)
+    print(f"MISSIONS   {len(wiki_miss)} distinct names; already in missions "
+          f"(all w/ XML): {pct(len(wiki_miss & rt_miss), len(wiki_miss))}; absent={absent_miss}, "
+          f"of which carry mission_XML (importable shape)=0 (dataset is prose, no XML)")
 
-    items, mobrefs, rows = set(), set(), 0
+    # item_drops: the load-bearing field is a numeric drop_chance. Count how
+    # many dropSource entries actually carry one (vs "?" / missing).
+    items, rows, numeric_rates = set(), 0, 0
     for o in jsonl_iter(os.path.join(d, "items/item_drops.jsonl")):
         rows += 1
         if o.get("item"):
             items.add(o["item"].strip().lower())
         for ds in (o.get("dropSources") or []):
-            m = ds.get("mob")
-            if m and m.strip() not in ("?", ""):
-                mobrefs.add(m.strip().lower())
-    print(f"ITEM_DROPS {rows} rows, {len(items)} items, {len(mobrefs)} distinct mob refs; "
-          f"mob refs resolvable to mob_base: {pct(len(mobrefs & rt_mobs), len(mobrefs))} "
-          f"(runtime mob_items already holds the authoritative loot rows)")
+            rate = ds.get("rate") or ds.get("dropRate") or ds.get("chance")
+            if isinstance(rate, (int, float)):
+                numeric_rates += 1
+            elif isinstance(rate, str) and any(c.isdigit() for c in rate) and "?" not in rate:
+                numeric_rates += 1
+    print(f"ITEM_DROPS {rows} rows, {len(items)} items; dropSource entries carrying a "
+          f"numeric drop_chance (importable shape)={numeric_rates}")
 
-    presources, prows = set(), 0
+    # prospecting: the load-bearing field is resource_id (links to a runtime
+    # sector_object) plus spawn mechanics. Count rows carrying any id field.
+    prows, with_id = 0, 0
     for o in jsonl_iter(os.path.join(d, "prospecting/prospecting.jsonl")):
         prows += 1
-        if o.get("resource"):
-            presources.add(o["resource"].strip().lower())
-    print(f"PROSPECT   {prows} rows, {len(presources)} distinct resources "
-          f"(runtime sector_objects_harvestable holds the authoritative fields)")
+        if any("id" in k.lower() for k in o):
+            with_id += 1
+    print(f"PROSPECT   {prows} rows; rows carrying a resource_id / any id field "
+          f"(importable shape)={with_id}")
 
     print("\nVerdict: the reconstruct dataset is largely a name-level near-duplicate of")
     print("authoritative runtime data in an incompatible form (no asset/faction ids, no")
-    print("XML, /1000 coords), so it cannot be injected wholesale. Import only the genuine")
-    print("gaps a by-name + by-position diff surfaces: Y1 NPCs and Y4 nav markers")
-    print("(generate_seed_navs.py). See plans/25-phase-y-data-import.md.")
+    print("XML, /1000 coords). A per-category by-name (+ by-position for navs) diff finds")
+    print("the genuine importable gaps -- rows the runtime lacks AND that carry the field")
+    print("the runtime row needs. Importable and done: Y1 NPCs, Y4 nav markers")
+    print("(generate_seed_navs.py), Y5 items. NOT importable (absent rows exist but 0 carry")
+    print("the load-bearing field, per the counts above): mobs (asset id), missions")
+    print("(mission_XML), item-drops (numeric drop_chance), prospecting (resource_id).")
+    print("See plans/25-phase-y-data-import.md.")
     return 0
 
 
