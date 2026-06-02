@@ -7442,3 +7442,72 @@ NPC-create preamble our BuildCreatePacket omits is a concrete candidate root
 cause for "can't see other players/NPCs in space"; the decisive test is
 pointing the retail client at OUR server and watching whether station NPCs
 render.
+
+## 2026-06-02 (correction): the "0x001B ShipIndex divergence" was a MISDIAGNOSIS -- the frames are AuxMobIndex + AuxHulkIndex, and 22/25 now decode byte-exact
+
+Supersedes the entry above ("0x001B ShipIndex divergence is a REAL gap, but
+BLOCKED"). That entry's framing of the escape hatch was right; its identification
+of the producing class was WRONG, and the "blocked, needs net-7.org source"
+conclusion fell out of that mistake.
+
+The 25 flagged frames are NOT AuxShipIndex. Byte-exact walking against our own
+`server/src/AuxClasses` source identifies them as:
+
+* **22 AuxMobIndex** -- 20 `BuildCreatePacket` NPC/creature spawns ("Craxel",
+  "Juuona Master", "Jounna Youngling", "Love Bug", "Crystalline Gamma") and 2
+  `BuildClickPacket` target bodies.
+* **3 AuxHulkIndex** -- all gid 0x0001887D "Corpse of Crystalline Gamma": a
+  small corpse create, a 540-byte corpse create carrying full AuxInventory20/40
+  equip+cargo lists, and a hulk diff update.
+
+The producing member is `MOBClass::m_ShipIndex`, whose declared TYPE is
+`AuxMobIndex` (not AuxShipIndex). The name is what misled the earlier pass. The
+old "force the bytes through our 58-field _ShipIndex => IsOrganic='H',
+CombatLevel=2.6 billion, 16 bytes over" observation was real, but it was
+evidence the frames are a DIFFERENT class we already have -- not evidence the
+layout is unknowable. We were running the wrong decoder.
+
+WHAT WAS DONE. A dedicated `AuxMobIndexDecoder` now decodes all 22 MobIndex
+frames byte-exact. It models the AuxMobIndex create/click serialisation that the
+generic AuxBase flag-walk cannot express: a hand-rolled 15-byte flag block (each
+emitted byte is an `ExtendedFlags` byte AND a per-byte mask), cross-byte
+`buffer[N] & mask` field gating, and the `buffer[19]`/`buffer[15]`-gated single
+`0x05` deletion markers for absent QuadrantDamage / Damage decals / Lego. The
+embedded Shield is decoded in the captured form (1 flag byte + EndTime u32 +
+ChangePerTick f32 + StartValue f32 = 13 bytes). Pinned by `MobIndexDecodeTests`;
+the old `shipindex-newer-format-divergence` fixture/test were renamed and split
+(`mobindex-create-click-2026-06-02.txt` for the 22 clean frames;
+`hulkindex-residual-2026-06-02.txt` + `HulkIndexDivergenceTests` for the 3
+HulkIndex frames, still flagged until an AuxHulkIndex decoder lands). 545 CLI
+unit tests green.
+
+THE REAL SERVER DIVERGENCE (localized, proven, NOT changed this pass). The only
+byte-level disagreement between our server's MobIndex and the captured
+client-accepted bytes is the embedded AuxPercent. A compiled harness of our
+actual AuxClasses emits Shield = `86 03`: a 2-flag-byte extended block
+(`ExtendedFlags[2]`, init 0x86 0x03, values gated on byte0 & 0x10/0x20/0x40).
+The capture's Shield is a 1-flag-byte 13-byte block (`03` + 3 values). So our
+`AuxPercent::BuildExtendedPacket` diverges from the live net7 server / retail
+client. PRIMARY SOURCE: capture frame #273 "Craxel" Shield bytes
+`03 AC 48 AF 1F A9 9F 43 37 00 00 80 3F` (+ all 22 MobIndex frames). Aligning our
+AuxPercent toward that is a fidelity TIGHTENING under the escape hatch, but it is
+DEFERRED: AuxPercent is shared by ShipIndex/MobIndex/HulkIndex and every
+percent-typed Aux field (broad blast radius), and only the `flag=0x03`/
+all-three-values case is observed -- the full newer gating rule needs more
+capture variety or net7 source before a safe server edit. Tracked as the next
+server-fidelity item.
+
+CANDIDATE root cause for "0 avatars in space", now sharper than the old "missing
+preamble" theory: our MobIndex create DOES emit the 15-byte flag block and the
+`C3 00 AE 40 ...` preamble -- it matches the capture. Only the Shield percent
+differs. If our 2-flag-byte shield is sent where the client expects 1 byte,
+every MobIndex create misaligns at the Shield field and the client mis-reads the
+rest, which could prevent the NPC/other-player from rendering. Decisive test
+unchanged: point the retail client at OUR server, dock where NPCs spawn, watch
+whether they render; a loopback (127.0.0.1) proxy<->client capture would show
+the exact misalignment.
+
+DECISION: CLI decode of the MobIndex frames is DONE; Wave 337 is `[x]`. Server
+stays unchanged this pass, with the AuxPercent gap recorded as the next scoped
+server-fidelity item (needs more capture variety, not blocked on it). The
+AuxHulkIndex port (nested AuxInventory20/40 + diff) is the follow-on CLI item.

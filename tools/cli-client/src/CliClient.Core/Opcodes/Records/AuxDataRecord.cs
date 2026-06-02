@@ -38,6 +38,12 @@ public sealed class AuxDataRecord : PacketRecord
 
         if (headerOk && TrySchemaWalk(sb)) return;
 
+        // AuxMobIndex create/click do not use the generic "present at bit N+4"
+        // bitmap (they hand-roll a 15-byte masked flag block with cross-byte
+        // gating), so they can't be a registry candidate -- try them only after
+        // the generic walk declines, before reporting divergence.
+        if (headerOk && TryMobIndex(sb)) return;
+
         if (headerOk && EmitBestPartial(sb)) return;
 
         // A version byte of 0 is never a top-level AuxBase build -- every
@@ -176,6 +182,28 @@ public sealed class AuxDataRecord : PacketRecord
     }
 
     /// <summary>
+    /// Decode the payload as an AuxMobIndex create/click body (the hand-rolled
+    /// 15-byte-flag-block layout that the generic AuxWalker cannot model).
+    /// Emits annotations and returns true only on a byte-exact, plausible-string
+    /// consume; otherwise falls through so the generic divergence path runs.
+    /// </summary>
+    private bool TryMobIndex(StringBuilder sb)
+    {
+        var d = new AuxMobIndexDecoder(Payload);
+        if (d.TryDecode() != Payload.Length) return false;
+        if (d.StringPlausibility < 0.9) return false;
+
+        F(sb, 0, 0, "AuxType", $"MobIndex ({d.Variant})");
+        foreach (var a in d.Annos)
+        {
+            string indent = a.Depth > 0 ? new string(' ', a.Depth * 2) : "";
+            if (a.Len > 0 || a.Value.StartsWith("("))
+                F(sb, a.Off, a.Len, indent + a.Name, a.Value);
+        }
+        return true;
+    }
+
+    /// <summary>
     /// No candidate consumed the payload exactly. Emit the furthest-reaching
     /// candidate's partial annotations plus a divergence marker, so the
     /// remaining bytes show as a gap exactly where the schema drifts. Falls
@@ -253,6 +281,16 @@ public sealed class AuxDataRecord : PacketRecord
                 || plaus > bestPlaus + 0.001
                 || (System.Math.Abs(plaus - bestPlaus) <= 0.001 && w.Annos.Count > bestAnnos.Count);
             if (better) { bestAnnos = w.Annos; bestPlaus = plaus; }
+        }
+        // No registry candidate fit -- the entity may be an AuxMobIndex
+        // create/click (NPC/creature), whose bespoke layout the generic walk
+        // can't model. Its top-level Name + CombatLevel still belong in the
+        // world model.
+        if (bestAnnos is null)
+        {
+            var d = new AuxMobIndexDecoder(payload);
+            if (d.TryDecode() == payload.Length && d.StringPlausibility >= 0.9)
+                bestAnnos = d.Annos;
         }
         if (bestAnnos is null) return null;
 

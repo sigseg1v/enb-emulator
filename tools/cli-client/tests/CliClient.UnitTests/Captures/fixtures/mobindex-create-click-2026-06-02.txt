@@ -1,0 +1,223 @@
+# 0x001B AuxMobIndex create/click frames from the live 2026-06-02 net7
+# captures. These are NPC/creature spawns (BuildCreatePacket) and the trimmed
+# bodies sent when a player targets one (BuildClickPacket). The live net-7.org
+# server talked to the real retail Win32 client, which rendered them, so the
+# bytes are primary-source ground truth -- the CLI decoder reproduces them
+# byte-exact via the dedicated AuxMobIndexDecoder. DO NOT edit the bytes.
+# (Formerly mislabelled "newer ShipIndex divergence"; the producing class is
+# AuxMobIndex, whose hand-rolled 15-byte masked flag block is not the generic
+# AuxBase "present at bit N+4" layout.) See plans/11-phase-k-ingame.md.
+
+[mobidx_cap1_273]
+provenance: net7-live-2026-06-02-login-undock-clicknavs-warp-logout.pcap frame 273 (S2C); gid=0x0001872C "Craxel"; AuxMobIndex create -- decodes byte-exact
+opcode: 0x001B
+payload-bytes: 61
+hex: 2C 87 01 00 37 00 01 16 04 00 44 00 00 0C 80 C3
+     00 AE 40 F8 C0 07 06 00 43 72 61 78 65 6C 03 AC
+     48 AF 1F A9 9F 43 37 00 00 80 3F 01 07 00 00 00
+     05 05 05 05 05 00 00 00 00 00 00 00 00
+
+[mobidx_cap1_317]
+provenance: net7-live-2026-06-02-login-undock-clicknavs-warp-logout.pcap frame 317 (S2C); gid=0x000186F6 "Juuona Master"; AuxMobIndex create -- decodes byte-exact
+opcode: 0x001B
+payload-bytes: 68
+hex: F6 86 01 00 3E 00 01 16 04 00 44 00 00 0C 80 C3
+     00 AE 40 F8 C0 07 0D 00 4A 75 75 6F 6E 61 20 4D
+     61 73 74 65 72 03 AC 48 AF 1F A9 9F 43 37 00 00
+     80 3F 01 0A 00 00 00 05 05 05 05 05 00 00 00 00
+     00 00 00 00
+
+[mobidx_cap1_322]
+provenance: net7-live-2026-06-02-login-undock-clicknavs-warp-logout.pcap frame 322 (S2C); gid=0x000186F7 "Jounna Youngling"; AuxMobIndex create -- decodes byte-exact
+opcode: 0x001B
+payload-bytes: 71
+hex: F7 86 01 00 41 00 01 16 04 00 44 00 00 0C 80 C3
+     00 AE 40 F8 C0 07 10 00 4A 6F 75 6E 6E 61 20 59
+     6F 75 6E 67 6C 69 6E 67 03 AC 48 AF 1F A9 9F 43
+     37 00 00 80 3F 01 07 00 00 00 05 05 05 05 05 00
+     00 00 00 00 00 00 00
+
+[mobidx_cap1_369]
+provenance: net7-live-2026-06-02-login-undock-clicknavs-warp-logout.pcap frame 369 (S2C); gid=0x000186FC "Juuona Master"; AuxMobIndex create -- decodes byte-exact
+opcode: 0x001B
+payload-bytes: 68
+hex: FC 86 01 00 3E 00 01 16 04 00 44 00 00 0C 80 C3
+     00 AE 40 F8 C0 07 0D 00 4A 75 75 6F 6E 61 20 4D
+     61 73 74 65 72 03 AC 48 AF 1F A9 9F 43 37 00 00
+     80 3F 01 0A 00 00 00 05 05 05 05 05 00 00 00 00
+     00 00 00 00
+
+[mobidx_cap1_384]
+provenance: net7-live-2026-06-02-login-undock-clicknavs-warp-logout.pcap frame 384 (S2C); gid=0x00018866 "Love Bug"; AuxMobIndex create -- decodes byte-exact
+opcode: 0x001B
+payload-bytes: 63
+hex: 66 88 01 00 39 00 01 16 04 00 44 00 00 0C 80 C3
+     00 AE 40 F8 C0 07 08 00 4C 6F 76 65 20 42 75 67
+     03 AC 48 AF 1F A9 9F 43 37 00 00 80 3F 01 00 00
+     00 00 05 05 05 05 05 00 00 00 00 00 00 00 00
+
+[mobidx_cap2_509]
+provenance: net7-live-2026-06-02-full-workflow.pcap frame 509 (S2C); gid=0x000186FC "Juuona Master"; AuxMobIndex create -- decodes byte-exact
+opcode: 0x001B
+payload-bytes: 68
+hex: FC 86 01 00 3E 00 01 16 04 00 44 00 00 0C 80 C3
+     00 AE 40 F8 C0 07 0D 00 4A 75 75 6F 6E 61 20 4D
+     61 73 74 65 72 03 AC 48 AF 1F A9 9F 43 37 00 00
+     80 3F 01 0A 00 00 00 05 05 05 05 05 00 00 00 00
+     00 00 00 00
+
+[mobidx_cap2_517]
+provenance: net7-live-2026-06-02-full-workflow.pcap frame 517 (S2C); gid=0x000186FB "Jounna Youngling"; AuxMobIndex create -- decodes byte-exact
+opcode: 0x001B
+payload-bytes: 71
+hex: FB 86 01 00 41 00 01 16 04 00 44 00 00 0C 80 C3
+     00 AE 40 F8 C0 07 10 00 4A 6F 75 6E 6E 61 20 59
+     6F 75 6E 67 6C 69 6E 67 03 AC 48 AF 1F A9 9F 43
+     37 00 00 80 3F 01 07 00 00 00 05 05 05 05 05 00
+     00 00 00 00 00 00 00
+
+[mobidx_cap2_523]
+provenance: net7-live-2026-06-02-full-workflow.pcap frame 523 (S2C); gid=0x000186F5 "Juuona Master"; AuxMobIndex create -- decodes byte-exact
+opcode: 0x001B
+payload-bytes: 68
+hex: F5 86 01 00 3E 00 01 16 04 00 44 00 00 0C 80 C3
+     00 AE 40 F8 C0 07 0D 00 4A 75 75 6F 6E 61 20 4D
+     61 73 74 65 72 03 AC 48 AF 1F A9 9F 43 37 00 00
+     80 3F 01 0A 00 00 00 05 05 05 05 05 00 00 00 00
+     00 00 00 00
+
+[mobidx_cap2_546]
+provenance: net7-live-2026-06-02-full-workflow.pcap frame 546 (S2C); gid=0x000186F8 "Jounna Youngling"; AuxMobIndex create -- decodes byte-exact
+opcode: 0x001B
+payload-bytes: 71
+hex: F8 86 01 00 41 00 01 16 04 00 44 00 00 0C 80 C3
+     00 AE 40 F8 C0 07 10 00 4A 6F 75 6E 6E 61 20 59
+     6F 75 6E 67 6C 69 6E 67 03 AC 48 AF 1F A9 9F 43
+     37 00 00 80 3F 01 07 00 00 00 05 05 05 05 05 00
+     00 00 00 00 00 00 00
+
+[mobidx_cap2_551]
+provenance: net7-live-2026-06-02-full-workflow.pcap frame 551 (S2C); gid=0x000186F9 "Jounna Youngling"; AuxMobIndex create -- decodes byte-exact
+opcode: 0x001B
+payload-bytes: 71
+hex: F9 86 01 00 41 00 01 16 04 00 44 00 00 0C 80 C3
+     00 AE 40 F8 C0 07 10 00 4A 6F 75 6E 6E 61 20 59
+     6F 75 6E 67 6C 69 6E 67 03 AC 48 AF 1F A9 9F 43
+     37 00 00 80 3F 01 07 00 00 00 05 05 05 05 05 00
+     00 00 00 00 00 00 00
+
+[mobidx_cap2_932]
+provenance: net7-live-2026-06-02-full-workflow.pcap frame 932 (S2C); gid=0x000187A1 "Crystalline Gamma"; AuxMobIndex create -- decodes byte-exact
+opcode: 0x001B
+payload-bytes: 72
+hex: A1 87 01 00 42 00 01 16 04 00 44 00 00 0C 80 C3
+     00 AE 40 F8 C0 07 11 00 43 72 79 73 74 61 6C 6C
+     69 6E 65 20 47 61 6D 6D 61 03 AC 48 AF 1F A9 9F
+     43 37 00 00 80 3F 01 14 00 00 00 05 05 05 05 05
+     00 00 00 00 00 00 00 00
+
+[mobidx_cap2_974]
+provenance: net7-live-2026-06-02-full-workflow.pcap frame 974 (S2C); gid=0x000187A0 "Crystalline Gamma"; AuxMobIndex create -- decodes byte-exact
+opcode: 0x001B
+payload-bytes: 72
+hex: A0 87 01 00 42 00 01 16 04 00 44 00 00 0C 80 C3
+     00 AE 40 F8 C0 07 11 00 43 72 79 73 74 61 6C 6C
+     69 6E 65 20 47 61 6D 6D 61 03 AC 48 AF 1F A9 9F
+     43 37 00 00 80 3F 01 14 00 00 00 05 05 05 05 05
+     00 00 00 00 00 00 00 00
+
+[mobidx_cap2_991]
+provenance: net7-live-2026-06-02-full-workflow.pcap frame 991 (S2C); gid=0x000187A0; AuxMobIndex click -- decodes byte-exact
+opcode: 0x001B
+payload-bytes: 45
+hex: A0 87 01 00 27 00 01 06 0C 00 00 00 00 00 20 00
+     00 00 00 00 00 78 03 59 20 00 00 4D 72 03 37 00
+     00 80 3F 00 00 0C 46 04 00 4E 6F 6E 65
+
+[mobidx_cap2_1011]
+provenance: net7-live-2026-06-02-full-workflow.pcap frame 1011 (S2C); gid=0x000187A2 "Crystalline Gamma"; AuxMobIndex create -- decodes byte-exact
+opcode: 0x001B
+payload-bytes: 72
+hex: A2 87 01 00 42 00 01 16 04 00 44 00 00 0C 80 C3
+     00 AE 40 F8 C0 07 11 00 43 72 79 73 74 61 6C 6C
+     69 6E 65 20 47 61 6D 6D 61 03 AC 48 AF 1F A9 9F
+     43 37 00 00 80 3F 01 14 00 00 00 05 05 05 05 05
+     00 00 00 00 00 00 00 00
+
+[mobidx_cap2_1021]
+provenance: net7-live-2026-06-02-full-workflow.pcap frame 1021 (S2C); gid=0x000187A5 "Crystalline Gamma"; AuxMobIndex create -- decodes byte-exact
+opcode: 0x001B
+payload-bytes: 72
+hex: A5 87 01 00 42 00 01 16 04 00 44 00 00 0C 80 C3
+     00 AE 40 F8 C0 07 11 00 43 72 79 73 74 61 6C 6C
+     69 6E 65 20 47 61 6D 6D 61 03 AC 48 AF 1F A9 9F
+     43 37 00 00 80 3F 01 14 00 00 00 05 05 05 05 05
+     00 00 00 00 00 00 00 00
+
+[mobidx_cap2_1024]
+provenance: net7-live-2026-06-02-full-workflow.pcap frame 1024 (S2C); gid=0x000187A2; AuxMobIndex click -- decodes byte-exact
+opcode: 0x001B
+payload-bytes: 45
+hex: A2 87 01 00 27 00 01 06 0C 00 00 00 00 00 20 00
+     00 00 00 00 00 78 03 59 20 00 00 4D 72 03 37 00
+     00 80 3F 00 00 0C 46 04 00 4E 6F 6E 65
+
+[mobidx_cap2_1031]
+provenance: net7-live-2026-06-02-full-workflow.pcap frame 1031 (S2C); gid=0x000187A6 "Crystalline Gamma"; AuxMobIndex create -- decodes byte-exact
+opcode: 0x001B
+payload-bytes: 72
+hex: A6 87 01 00 42 00 01 16 04 00 44 00 00 0C 80 C3
+     00 AE 40 F8 C0 07 11 00 43 72 79 73 74 61 6C 6C
+     69 6E 65 20 47 61 6D 6D 61 03 AC 48 AF 1F A9 9F
+     43 37 00 00 80 3F 01 14 00 00 00 05 05 05 05 05
+     00 00 00 00 00 00 00 00
+
+[mobidx_cap2_1056]
+provenance: net7-live-2026-06-02-full-workflow.pcap frame 1056 (S2C); gid=0x000187A1 "Crystalline Gamma"; AuxMobIndex create -- decodes byte-exact
+opcode: 0x001B
+payload-bytes: 72
+hex: A1 87 01 00 42 00 01 16 04 00 44 00 00 0C 80 C3
+     00 AE 40 F8 C0 07 11 00 43 72 79 73 74 61 6C 6C
+     69 6E 65 20 47 61 6D 6D 61 03 AC 48 AF 1F A9 9F
+     43 37 00 00 80 3F 01 14 00 00 00 05 05 05 05 05
+     00 00 00 00 00 00 00 00
+
+[mobidx_cap2_1063]
+provenance: net7-live-2026-06-02-full-workflow.pcap frame 1063 (S2C); gid=0x0001879F "Crystalline Gamma"; AuxMobIndex create -- decodes byte-exact
+opcode: 0x001B
+payload-bytes: 72
+hex: 9F 87 01 00 42 00 01 16 04 00 44 00 00 0C 80 C3
+     00 AE 40 F8 C0 07 11 00 43 72 79 73 74 61 6C 6C
+     69 6E 65 20 47 61 6D 6D 61 03 AC 48 AF 1F A9 9F
+     43 37 00 00 80 3F 01 14 00 00 00 05 05 05 05 05
+     00 00 00 00 00 00 00 00
+
+[mobidx_cap2_1083]
+provenance: net7-live-2026-06-02-full-workflow.pcap frame 1083 (S2C); gid=0x000187A3 "Crystalline Gamma"; AuxMobIndex create -- decodes byte-exact
+opcode: 0x001B
+payload-bytes: 72
+hex: A3 87 01 00 42 00 01 16 04 00 44 00 00 0C 80 C3
+     00 AE 40 F8 C0 07 11 00 43 72 79 73 74 61 6C 6C
+     69 6E 65 20 47 61 6D 6D 61 03 AC 48 AF 1F A9 9F
+     43 37 00 00 80 3F 01 14 00 00 00 05 05 05 05 05
+     00 00 00 00 00 00 00 00
+
+[mobidx_cap2_1239]
+provenance: net7-live-2026-06-02-full-workflow.pcap frame 1239 (S2C); gid=0x000187A4 "Crystalline Gamma"; AuxMobIndex create -- decodes byte-exact
+opcode: 0x001B
+payload-bytes: 72
+hex: A4 87 01 00 42 00 01 16 04 00 44 00 00 0C 80 C3
+     00 AE 40 F8 C0 07 11 00 43 72 79 73 74 61 6C 6C
+     69 6E 65 20 47 61 6D 6D 61 03 AC 48 AF 1F A9 9F
+     43 37 00 00 80 3F 01 14 00 00 00 05 05 05 05 05
+     00 00 00 00 00 00 00 00
+
+[mobidx_cap2_1471]
+provenance: net7-live-2026-06-02-full-workflow.pcap frame 1471 (S2C); gid=0x000187A0 "Crystalline Gamma"; AuxMobIndex create -- decodes byte-exact
+opcode: 0x001B
+payload-bytes: 72
+hex: A0 87 01 00 42 00 01 16 04 00 44 00 00 0C 80 C3
+     00 AE 40 F8 C0 07 11 00 43 72 79 73 74 61 6C 6C
+     69 6E 65 20 47 61 6D 6D 61 03 AC 48 AF 1F A9 9F
+     43 37 00 00 80 3F 01 14 00 00 00 05 05 05 05 05
+     00 00 00 00 00 00 00 00

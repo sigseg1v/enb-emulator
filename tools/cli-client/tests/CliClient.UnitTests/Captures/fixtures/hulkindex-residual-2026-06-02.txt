@@ -1,0 +1,63 @@
+# 0x001B AuxHulkIndex residual frames from the live 2026-06-02 net7 captures
+# (gid 0x0001887D, "Corpse of Crystalline Gamma"): a small corpse create, the
+# full corpse create carrying AuxInventory20/40 equip+cargo lists (540 bytes),
+# and a hulk diff update. Version-controlled GROUND TRUTH for the future
+# AuxHulkIndex port. The CLI decoder flags these DIVERGENT ([!]) because the
+# nested inventory / diff layout is not yet modelled -- NOT because the bytes
+# are wrong. When the AuxHulkIndex decoder lands and these decode CLEANLY this
+# fixture's divergence test FAILS ON PURPOSE, the signal to migrate them out.
+# See plans/11-phase-k-ingame.md.
+
+[hulkidx_cap2_1195]
+provenance: net7-live-2026-06-02-full-workflow.pcap frame 1195 (S2C); gid=0x0001887D; AuxHulkIndex corpse create -- AuxInventory20/40 + diff layout not yet ported
+opcode: 0x001B
+payload-bytes: 43
+hex: 7D 88 01 00 25 00 01 16 E0 03 1B 00 43 6F 72 70
+     73 65 20 6F 66 20 43 72 79 73 74 61 6C 6C 69 6E
+     65 20 47 61 6D 6D 61 05 05 05 05
+
+[hulkidx_cap2_1198]
+provenance: net7-live-2026-06-02-full-workflow.pcap frame 1198 (S2C); gid=0x0001887D; AuxHulkIndex corpse create (full inventory) -- AuxInventory20/40 + diff layout not yet ported
+opcode: 0x001B
+payload-bytes: 540
+hex: 7D 88 01 00 14 02 01 16 EC 0F 1B 00 43 6F 72 70
+     73 65 20 6F 66 20 43 72 79 73 74 61 6C 6C 69 6E
+     65 20 47 61 6D 6D 61 05 05 05 05 F6 FF FF FF FF
+     0F 16 80 FF FE FF FF FF 16 80 FF FE FF FF FF 16
+     80 FF FE FF FF FF 16 80 FF FE FF FF FF 16 80 FF
+     FE FF FF FF 16 80 FF FE FF FF FF 16 80 FF FE FF
+     FF FF 16 80 FF FE FF FF FF 16 80 FF FE FF FF FF
+     16 80 FF FE FF FF FF 16 80 FF FE FF FF FF 16 80
+     FF FE FF FF FF 16 80 FF FE FF FF FF 16 80 FF FE
+     FF FF FF 16 80 FF FE FF FF FF 16 80 FF FE FF FF
+     FF 16 80 FF FE FF FF FF 16 80 FF FE FF FF FF 16
+     80 FF FE FF FF FF 16 80 FF FE FF FF FF F6 FF FF
+     FF FF FF FF FF FF FF 0F 36 07 E3 12 19 00 00 01
+     00 00 00 00 00 80 3F 00 00 80 3F 10 00 39 3A 33
+     38 2E 30 30 5E 32 31 3A 37 2E 32 30 5E 36 07 E3
+     9A 07 00 00 01 00 00 00 00 00 80 3F 00 00 A0 3F
+     10 00 39 3A 33 38 2E 30 30 5E 32 31 3A 37 2E 32
+     30 5E 16 80 FF FE FF FF FF 16 80 FF FE FF FF FF
+     16 80 FF FE FF FF FF 16 80 FF FE FF FF FF 16 80
+     FF FE FF FF FF 16 80 FF FE FF FF FF 16 80 FF FE
+     FF FF FF 16 80 FF FE FF FF FF 16 80 FF FE FF FF
+     FF 16 80 FF FE FF FF FF 16 80 FF FE FF FF FF 16
+     80 FF FE FF FF FF 16 80 FF FE FF FF FF 16 80 FF
+     FE FF FF FF 16 80 FF FE FF FF FF 16 80 FF FE FF
+     FF FF 16 80 FF FE FF FF FF 16 80 FF FE FF FF FF
+     16 80 FF FE FF FF FF 16 80 FF FE FF FF FF 16 80
+     FF FE FF FF FF 16 80 FF FE FF FF FF 16 80 FF FE
+     FF FF FF 16 80 FF FE FF FF FF 16 80 FF FE FF FF
+     FF 16 80 FF FE FF FF FF 16 80 FF FE FF FF FF 16
+     80 FF FE FF FF FF 16 80 FF FE FF FF FF 16 80 FF
+     FE FF FF FF 16 80 FF FE FF FF FF 16 80 FF FE FF
+     FF FF 16 80 FF FE FF FF FF 16 80 FF FE FF FF FF
+     16 80 FF FE FF FF FF 16 80 FF FE FF FF FF 16 80
+     FF FE FF FF FF 16 80 FF FE FF FF FF
+
+[hulkidx_cap2_1269]
+provenance: net7-live-2026-06-02-full-workflow.pcap frame 1269 (S2C); gid=0x0001887D; AuxHulkIndex hulk diff -- AuxInventory20/40 + diff layout not yet ported
+opcode: 0x001B
+payload-bytes: 25
+hex: 7D 88 01 00 13 00 01 02 08 12 00 00 00 00 00 32
+     00 FE FF FF FF 00 00 00 00
