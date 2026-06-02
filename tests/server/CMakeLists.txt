@@ -168,24 +168,17 @@ if(OpenSSL_FOUND)
     )
     gtest_discover_tests(replay_test)
 
-    # Phase K: opcode round-trip against the live proxy. Send MasterJoin
-    # after handshake, expect ServerRedirect. Env-gated like the others.
-    add_executable(master_join_test
-        client/master_join_test.cpp
-        client/handshake_driver.cpp
-        client/tcp_client.cpp
-        client/westwood/westwood_rsa.cpp
-        client/westwood/westwood_rc4.cpp
-    )
-    target_include_directories(master_join_test PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/client
-    )
-    target_link_libraries(master_join_test PRIVATE
-        GTest::gtest_main
-        OpenSSL::Crypto
-        Threads::Threads
-    )
-    gtest_discover_tests(master_join_test)
+    # NOTE: the former master_join_test (Phase K) was removed. It master-joined
+    # with a bogus avatar id (no in-memory Player), so the proxy's UDP handoff
+    # could never get a 0x2009 confirm and spun through its full ~150s cold-start
+    # retry budget before falling back -- no reply could land inside any sane
+    # test timeout. The happy-path MasterJoin -> ServerRedirect round-trip is
+    # covered end-to-end with a REAL session by the Phase-T xUnit suite
+    # (tests/integration/.../Opcodes/MasterJoinTests.cs), which the C++ harness
+    # cannot replicate (no login/character/ticket flow). The proxy's MasterJoin
+    # parse/decrypt/dispatch + connection-liveness path is still exercised here
+    # by replay_test (Replay.LivePostHandshakeReplay replays a real captured
+    # Master_Join frame and fails on a clean peer-close).
 
     # Phase K: VersionRequest dispatch on the global-server port (3805).
     add_executable(version_request_test

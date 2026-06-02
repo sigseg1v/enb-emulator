@@ -40,8 +40,33 @@ ReplayStats RunReplay(TcpClient& client, const std::vector<Packet>& packets,
             ++stats.packets_sent;
         } else {
             std::vector<unsigned char> buf(pkt.bytes.size(), 0);
-            if (!client.RecvExact(buf.data(), static_cast<int>(buf.size()),
-                                  opts.response_timeout_ms)) {
+            if (!opts.require_responses) {
+                // This captured response may be unreproducible from a raw
+                // byte-replay (see ReplayOptions::require_responses). Do a
+                // best-effort single read to classify the outcome:
+                //   n > 0  -- the proxy replied; fall through to the checks.
+                //   n == 0 -- the proxy cleanly CLOSED the connection: a real
+                //             regression (it dropped us on valid traffic).
+                //   n < 0  -- timeout (the dominant case here): the proxy
+                //             accepted our send and is still processing the
+                //             handoff. Record the missing response, continue.
+                int n = client.RecvSome(buf.data(), static_cast<int>(buf.size()),
+                                        opts.response_timeout_ms);
+                if (n == 0) {
+                    stats.last_error = "peer closed connection at packet #" +
+                                       std::to_string(pkt.sequence) +
+                                       " (proxy dropped a live connection)";
+                    return stats;
+                }
+                if (n < 0) {
+                    ++stats.responses_missing;
+                    continue;
+                }
+                // n > 0: a real reply arrived. Trim to what we actually read
+                // so the opcode check below inspects valid bytes.
+                buf.resize(static_cast<size_t>(n));
+            } else if (!client.RecvExact(buf.data(), static_cast<int>(buf.size()),
+                                         opts.response_timeout_ms)) {
                 stats.last_error = "recv failed at packet #" +
                                    std::to_string(pkt.sequence) + ": " +
                                    client.last_error();
@@ -52,7 +77,8 @@ ReplayStats RunReplay(TcpClient& client, const std::vector<Packet>& packets,
             }
             ++stats.packets_received;
 
-            if (opts.verify_response_opcode && pkt.bytes.size() >= 4) {
+            if (opts.verify_response_opcode && pkt.bytes.size() >= 4 &&
+                buf.size() >= 4) {
                 // EnB TCP header: length (LE u16) + opcode (LE u16). We
                 // compare only the opcode (bytes 2-3); the length is
                 // already implied by how many bytes we read.

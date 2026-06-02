@@ -55,22 +55,37 @@ TEST(Replay, PostHandshakeCaptureContainsMasterJoinOpcode) {
 
 // Live: handshake then replay a few captured packets. Env-gated.
 //
-// IMPORTANT — what this test does and does NOT prove:
+// IMPORTANT -- what this test does and does NOT prove:
 //
-// The proxy has a deliberate Phase J option-b fallback in
-// ClientToMasterServer::HandleMasterJoin(): when SendMasterLogin to a real
-// MVAS times out (no MVAS reachable on UDP/3808), the proxy synthesizes
-// its OWN ServerRedirect locally and returns opcode 0x0036 — which is
-// exactly the opcode the capture expects as the response to MasterJoin.
-// That means a response-opcode round-trip test passes mechanically
-// whether or not the UDP plane is working.
+// This harness completes the Net7 RSA/RC4 handshake against the live proxy
+// and then REPLAYS RAW CAPTURED BYTES. The post-handshake capture's only
+// content packet is a Master_Join (0x35) carrying the *retail* avatar_id
+// from the original session (0xF7642540). That avatar is not logged into
+// our server, so:
 //
-// To avoid false-green CI, the strict opcode-round-trip assertion is
-// gated on NET7_TEST_REAL_MVAS=1, which only the cli-integration-test
-// job (full docker-compose stack: mysql + login + proxy + server) sets.
-// In the proxy-only integration-test job, the body still exercises the
-// full handshake + send path (catches regressions there), but does not
-// claim to verify Linux opcode dispatch since it cannot.
+//   * No live MVAS will ever send the 0x2009 confirm for it. The proxy's
+//     SendMasterLogin handoff therefore cannot succeed from a byte-replay.
+//   * The proxy's only possible reply is its cold-start fallback
+//     ServerRedirect, emitted only after kHandoffAttempts (30) x ~5s ~= 150s
+//     (ClientToMasterServer::HandleMasterJoin). That retry window is a
+//     legitimate production feature -- it covers the ~84s server cold start
+//     while every sector UDP port binds -- and must NOT be shortened to suit
+//     a test.
+//
+// Consequence: the captured 0x36 ServerRedirect cannot arrive inside any
+// sane test timeout, in EITHER the proxy-only or the full-stack job. And
+// even if we waited 150s, the reply would be the *fallback* redirect, not a
+// real MVAS dispatch -- so an opcode round-trip would be a false-green, not
+// proof that Linux opcode dispatch works.
+//
+// So this test honestly verifies only what a raw byte-replay CAN verify
+// against a live proxy: the handshake completes and the encrypted
+// post-handshake send path is accepted. The session-backed redirect
+// round-trip is verified instead by the Phase-T xUnit suite
+// (tests/integration/CliClient.IntegrationTests), which logs a REAL avatar
+// in and drives a real sector handshake. require_responses=false records the
+// unreproducible captured response in stats.responses_missing rather than
+// failing on it.
 TEST(Replay, LivePostHandshakeReplay) {
     const char* host = std::getenv("NET7_TEST_PROXY_HOST");
     if (!host) {
@@ -78,9 +93,6 @@ TEST(Replay, LivePostHandshakeReplay) {
     }
     const char* port_env = std::getenv("NET7_TEST_PROXY_PORT");
     uint16_t port = port_env ? static_cast<uint16_t>(std::atoi(port_env)) : 3801;
-
-    const char* real_mvas_env = std::getenv("NET7_TEST_REAL_MVAS");
-    const bool real_mvas = real_mvas_env && std::string(real_mvas_env) == "1";
 
     enbtest::TcpClient client;
     ASSERT_TRUE(client.Connect(host, port, 5000)) << client.last_error();
@@ -99,27 +111,38 @@ TEST(Replay, LivePostHandshakeReplay) {
 
     enbtest::ReplayOptions opts;
     opts.apply_rc4 = true;
-    // Only check the response opcode when a real MVAS is behind the
-    // proxy — otherwise the proxy-local ServerRedirect fallback would
-    // fake a pass. See the comment block above this function.
-    opts.verify_response_opcode = real_mvas;
-    opts.response_timeout_ms = 5000;
+    // The captured ServerRedirect cannot be reproduced from a stale-avatar
+    // byte-replay (see the comment block above): a missing S2C packet is
+    // recorded, not fatal. Keep the timeout short so a hung proxy still
+    // fails fast on the send path rather than blocking CI.
+    opts.require_responses = false;
+    // If a reply ever does arrive, check its opcode -- but the replay is not
+    // expected to elicit one (stale avatar, no confirm), so this only guards.
+    opts.verify_response_opcode = true;
+    opts.response_timeout_ms = 2000;
 
     auto stats = enbtest::RunReplay(client, master, opts, &hs.tx_cipher,
                                     &hs.rx_cipher);
-    EXPECT_GT(stats.packets_sent, 0);
-    EXPECT_GT(stats.packets_received, 0)
-        << "no server responses received — handshake or proxy reply path broken";
+
+    // What we can deterministically prove: the handshake completed (asserted
+    // above) and the encrypted post-handshake send path was accepted.
+    EXPECT_GT(stats.packets_sent, 0)
+        << "no packets sent -- handshake or send path broken";
     EXPECT_EQ(stats.last_error, "")
-        << "replay aborted: " << stats.last_error;
-    if (real_mvas) {
-        EXPECT_EQ(stats.opcode_mismatches, 0)
-            << stats.opcode_mismatches << " response(s) had unexpected opcode";
-    } else {
-        GTEST_LOG_(WARNING)
-            << "NET7_TEST_REAL_MVAS!=1: response-opcode round-trip NOT verified. "
-            << "Proxy may have served a fallback ServerRedirect instead of a "
-            << "real MVAS response. Set NET7_TEST_REAL_MVAS=1 against the full "
-            << "docker-compose stack to actually validate opcode dispatch.";
+        << "replay aborted on the send path: " << stats.last_error;
+
+    // The redirect is expected to be absent (see comment block): a
+    // stale-avatar replay gets no MVAS confirm, and the ~150s fallback
+    // cannot land inside the timeout. Record it for visibility.
+    if (stats.responses_missing > 0) {
+        GTEST_LOG_(INFO)
+            << stats.responses_missing << " captured response(s) not reproduced "
+            << "from byte-replay (expected: stale-avatar Master_Join cannot "
+            << "elicit a live ServerRedirect). The session-backed redirect "
+            << "round-trip is covered by the Phase-T xUnit suite.";
     }
+    // If a response DID arrive, its opcode must match -- but the replay is
+    // not expected to elicit one, so this guards rather than asserts presence.
+    EXPECT_EQ(stats.opcode_mismatches, 0)
+        << stats.opcode_mismatches << " response(s) had unexpected opcode";
 }

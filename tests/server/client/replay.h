@@ -31,11 +31,20 @@ struct ReplayOptions {
     bool apply_rc4 = false;            // most post-handshake traffic is RC4-encrypted
     bool verify_response_opcode = true; // check first 4 bytes of response header
     int response_timeout_ms = 2000;
+    // When false, a Server->Client packet that does not arrive within
+    // response_timeout_ms is recorded in ReplayStats::responses_missing and
+    // the replay continues, instead of being treated as a fatal recv error.
+    // Use this when the captured response cannot be reproduced from a raw
+    // byte-replay -- e.g. a Master_Join carrying a stale retail avatar_id
+    // that no live MVAS will confirm, whose only proxy reply is the ~150s
+    // cold-start fallback ServerRedirect. The send path is still exercised.
+    bool require_responses = true;
 };
 
 struct ReplayStats {
     int packets_sent = 0;
     int packets_received = 0;
+    int responses_missing = 0;  // S2C packets that did not arrive (require_responses=false)
     int opcode_mismatches = 0;
     std::string last_error;
 };
