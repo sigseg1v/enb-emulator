@@ -44,6 +44,12 @@ public sealed class AuxDataRecord : PacketRecord
         // the generic walk declines, before reporting divergence.
         if (headerOk && TryMobIndex(sb)) return;
 
+        // AuxHulkIndex (destroyed-object husk/corpse) also hand-rolls a
+        // create/diff flag layout with nested AuxInventory20/40 item lists that
+        // the generic walk cannot model -- try it after MobIndex, before
+        // reporting divergence.
+        if (headerOk && TryHulkIndex(sb)) return;
+
         if (headerOk && EmitBestPartial(sb)) return;
 
         // A version byte of 0 is never a top-level AuxBase build -- every
@@ -204,6 +210,28 @@ public sealed class AuxDataRecord : PacketRecord
     }
 
     /// <summary>
+    /// Decode the payload as an AuxHulkIndex create/diff body (the husk/corpse
+    /// layout with nested AuxInventory20 equip + AuxInventory40 cargo item
+    /// lists). Emits annotations and returns true only on a byte-exact,
+    /// plausible-string consume; otherwise falls through to the divergence path.
+    /// </summary>
+    private bool TryHulkIndex(StringBuilder sb)
+    {
+        var d = new AuxHulkIndexDecoder(Payload);
+        if (d.TryDecode() != Payload.Length) return false;
+        if (d.StringPlausibility < 0.9) return false;
+
+        F(sb, 0, 0, "AuxType", $"HulkIndex ({d.Variant})");
+        foreach (var a in d.Annos)
+        {
+            string indent = a.Depth > 0 ? new string(' ', a.Depth * 2) : "";
+            if (a.Len > 0 || a.Value.StartsWith("("))
+                F(sb, a.Off, a.Len, indent + a.Name, a.Value);
+        }
+        return true;
+    }
+
+    /// <summary>
     /// No candidate consumed the payload exactly. Emit the furthest-reaching
     /// candidate's partial annotations plus a divergence marker, so the
     /// remaining bytes show as a gap exactly where the schema drifts. Falls
@@ -291,6 +319,14 @@ public sealed class AuxDataRecord : PacketRecord
             var d = new AuxMobIndexDecoder(payload);
             if (d.TryDecode() == payload.Length && d.StringPlausibility >= 0.9)
                 bestAnnos = d.Annos;
+        }
+        // ...or an AuxHulkIndex (destroyed-object husk): its top-level Name is
+        // the corpse's name, which the world model shows for lootable wrecks.
+        if (bestAnnos is null)
+        {
+            var h = new AuxHulkIndexDecoder(payload);
+            if (h.TryDecode() == payload.Length && h.StringPlausibility >= 0.9)
+                bestAnnos = h.Annos;
         }
         if (bestAnnos is null) return null;
 

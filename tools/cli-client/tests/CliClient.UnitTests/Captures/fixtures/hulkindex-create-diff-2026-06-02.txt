@@ -1,15 +1,18 @@
-# 0x001B AuxHulkIndex residual frames from the live 2026-06-02 net7 captures
+# 0x001B AuxHulkIndex frames from the live 2026-06-02 net7 captures
 # (gid 0x0001887D, "Corpse of Crystalline Gamma"): a small corpse create, the
 # full corpse create carrying AuxInventory20/40 equip+cargo lists (540 bytes),
-# and a hulk diff update. Version-controlled GROUND TRUTH for the future
-# AuxHulkIndex port. The CLI decoder flags these DIVERGENT ([!]) because the
-# nested inventory / diff layout is not yet modelled -- NOT because the bytes
-# are wrong. When the AuxHulkIndex decoder lands and these decode CLEANLY this
-# fixture's divergence test FAILS ON PURPOSE, the signal to migrate them out.
-# See plans/11-phase-k-ingame.md.
+# and a hulk diff update. The live net-7.org server sent these to the real
+# retail Win32 client, so the bytes are primary-source GROUND TRUTH.
+#
+# These decode byte-exact via AuxHulkIndexDecoder (create + diff). The on-wire
+# bodyLen field is (payload-6) for the two non-inventory frames but (payload-8)
+# for the inventory-bearing create (1198) -- a live-server quirk, NOT a capture
+# error: the inner-bundle length is the authoritative boundary (43/540/25 bytes
+# for bodyLen 37/532/19). See AuxHulkIndexDecoder.cs and plans/11-phase-k-ingame.md.
+# DO NOT edit the fixture bytes.
 
 [hulkidx_cap2_1195]
-provenance: net7-live-2026-06-02-full-workflow.pcap frame 1195 (S2C); gid=0x0001887D; AuxHulkIndex corpse create -- AuxInventory20/40 + diff layout not yet ported
+provenance: net7-live-2026-06-02-full-workflow.pcap frame 1195 (S2C); gid=0x0001887D; AuxHulkIndex corpse create -- name + 4 deletion markers, no inventory
 opcode: 0x001B
 payload-bytes: 43
 hex: 7D 88 01 00 25 00 01 16 E0 03 1B 00 43 6F 72 70
@@ -17,7 +20,7 @@ hex: 7D 88 01 00 25 00 01 16 E0 03 1B 00 43 6F 72 70
      65 20 47 61 6D 6D 61 05 05 05 05
 
 [hulkidx_cap2_1198]
-provenance: net7-live-2026-06-02-full-workflow.pcap frame 1198 (S2C); gid=0x0001887D; AuxHulkIndex corpse create (full inventory) -- AuxInventory20/40 + diff layout not yet ported
+provenance: net7-live-2026-06-02-full-workflow.pcap frame 1198 (S2C); gid=0x0001887D; AuxHulkIndex corpse create (full inventory: 20 equip + 40 cargo slots, 2 real equipped items)
 opcode: 0x001B
 payload-bytes: 540
 hex: 7D 88 01 00 14 02 01 16 EC 0F 1B 00 43 6F 72 70
@@ -56,7 +59,7 @@ hex: 7D 88 01 00 14 02 01 16 EC 0F 1B 00 43 6F 72 70
      FF FE FF FF FF 16 80 FF FE FF FF FF
 
 [hulkidx_cap2_1269]
-provenance: net7-live-2026-06-02-full-workflow.pcap frame 1269 (S2C); gid=0x0001887D; AuxHulkIndex hulk diff -- AuxInventory20/40 + diff layout not yet ported
+provenance: net7-live-2026-06-02-full-workflow.pcap frame 1269 (S2C); gid=0x0001887D; AuxHulkIndex hulk diff -- one plain CargoInv item update
 opcode: 0x001B
 payload-bytes: 25
 hex: 7D 88 01 00 13 00 01 02 08 12 00 00 00 00 00 32
