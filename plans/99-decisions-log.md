@@ -7207,9 +7207,39 @@ whole class: it asserts opcode round-trips but never asserts the boot
 log is clean. A "no `does not exist` / no `Error reading with MySQL` in
 container logs after boot" smoke check would have caught both on the
 first Postgres boot. Tracked as a Phase T follow-up (see
-plans/14-phase-n + plans/20-phase-t notes). There are still
-non-server-code log lines left UNfixed and explicitly out of scope here
-(4x `mission_XML` from a hand-typed psql query, 3 FATAL wrong-role
-connects for non-existent `postgres`/`enb` roles, single-hit
-schema-probe `relation does not exist` lines) -- noted, not yet
-root-caused.
+plans/14-phase-n + plans/20-phase-t notes).
+
+## 2026-06-02 (addendum) -- Third migration regression: compound table.field lookup, found on the clean-boot re-verification (commit 8f36e7b1)
+
+Re-verifying A+B on a **clean volume-wiped boot** (`down -v` then `up`,
+which forces a fresh schema-init -- the same thing the integration suite
+does every run) confirmed both fixes from scratch (postgres: ZERO
+ERROR/FATAL) AND **proved the earlier single-hit `does not exist` /
+`role "postgres"`/`role "enb"` / `syntax error at or near ":"` lines
+were NOT boot errors** -- none of them appear on a pristine boot. They
+were interactive-psql / profile-gated-tool (pgadmin) artifacts in the
+long-lived dev stack's log. So those are dismissed *with evidence*, as
+the log-error mandate requires, not by hand-wave.
+
+But the clean boot surfaced a THIRD regression the contaminated dev log
+had buried: ~6005 `Field \`item_manufacturer_base.name\` does not exist
+in this table ''` per item-load pass. Root cause: Phase N Wave 1 stubbed
+`sql_result_c::table()` to "" (libpqxx gives a column's table as an OID,
+not a name), but `sql_row_c::operator[](char*)` builds its compound
+"table.field" match key from `table()+field()`, so every table-qualified
+field read in ItemBaseSQL.cpp returned empty. These are `SELECT *` joins
+where item_base AND item_manufacturer_base both have a `name` column
+(item's name at ordinal 7, manufacturer's later), so a bare-name lookup
+would silently return the wrong one -- every item loaded with an empty
+manufacturer, every ammo item with AmmoTypeNum=0. Fix: resolve column
+OID -> relname via pg_class at execute() time, cached per-connection,
+returned from `table()`. Verified: 6005 -> 0; "Dragonclaw Missile" now
+resolves manufacturer "Blacksun" (distinct from the item name).
+
+**Final fresh-boot state:** postgres 0 errors; server log down to exactly
+TWO remaining classes, both **mission-data-quality, not server code** --
+24x `ERROR: Mutually exclusive types in stage N` and 9x `ERROR IN
+MISSION: NPC [N] doesn't exist.` These are the mission validator
+correctly reporting bad rows in the seeded `missions` content (inherited
+from the upstream dump), NOT a code defect; tracked separately. All
+~14700 SQL/wrapper error lines per boot-cycle are gone.

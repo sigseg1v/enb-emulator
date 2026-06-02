@@ -121,14 +121,36 @@ parameterisation didn't touch.
       isolated; MySQL schemas were not) -> `relation ... does not exist`
       ~6904x/pass; respawn timers never restored. Fix: open a
       `net7_user` handle and route the read through it.
-- [ ] **Regression guard (the gap that let both ship).** The
+- [x] **`mysqlplus.cpp::sql_result_c::table()` -- compound `table.field`
+      row lookup broken (commit 8f36e7b1).** Found on the clean-boot
+      re-verification: ~6005 `Field \`item_manufacturer_base.name\` does
+      not exist in this table ''` per item-load pass (5012 manufacturer
+      + 650+292 ammo_type). The Wave-1 rewrite stubbed `table()` to ""
+      because libpqxx exposes a column's table as an OID not a name, but
+      `sql_row_c::operator[](char*)` builds its compound match key from
+      `table()+field()` -- so every `["item_manufacturer_base.name"]` /
+      `["item_ammo_type.name"]` / `["item_ammo_type.sub_category"]` in
+      ItemBaseSQL.cpp fell through and returned empty. These are
+      `SELECT *` joins where BOTH tables carry a `name` column, so a
+      bare-name lookup would silently return the ITEM name as the
+      manufacturer -- every item loaded with an empty manufacturer and
+      every ammo item with AmmoTypeNum=0. **Same empty-payload class as
+      the case-fold incident.** Fix: resolve column table OID -> relname
+      via pg_class at execute() time, cached per-connection, returned
+      from `table()`. NB this was NOT a NET7 vs Postgres dialect issue --
+      it was a wrapper-completeness gap; the MySQL `mysql_fetch_field`
+      gave table names for free.
+- [ ] **Regression guard (the gap that let all three ship).** The
       integration suite asserts opcode round-trips but never asserts the
       boot log is clean. Add a Phase-T smoke check that fails if
-      container logs contain `does not exist` or `Error reading with
-      MySQL` after a boot. This catches the entire case-fold / cross-DB
-      class on the first boot rather than via a manual audit. (Ties into
-      the still-open Wave-2 item "extend postgres_smoke_test to a real
-      DAO round-trip".)
+      container logs contain `does not exist` (postgres `relation`/
+      `column`, OR the NET7-wrapper `Field ... does not exist in this
+      table`) or `Error reading with MySQL` after a clean boot. A clean
+      volume-wiped boot is verified to log ZERO of these now, so the
+      assertion has a true-zero baseline. This catches the entire
+      case-fold / cross-DB / compound-lookup class on the first boot
+      rather than via a manual audit. (Ties into the still-open Wave-2
+      item "extend postgres_smoke_test to a real DAO round-trip".)
 
 ## Decisions deferred
 
