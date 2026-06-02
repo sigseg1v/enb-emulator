@@ -28,16 +28,21 @@ namespace N7.CliClient.IntegrationTests.Verification;
 /// system) -- see <c>CaptureReplayTests.MasterJoin_...</c> which pins
 /// <c>ToSectorId == 0x0000B05F == 45151</c> from MasterJoin frame
 /// 220, and the chat-channel "Sector 45151" strings throughout the
-/// post-dock window. Our tests below use sector 10151 (Luna Station)
-/// because that is the StartSector for the test character's
-/// race/profession (Terran Warrior; race*3+profession = 0). Both
-/// invariants asserted here -- no 0x00A5 emit to self, and 0x007F
-/// payload LE-decode with MANU_TAG|PLAYER_TAG bits set -- are
-/// properties of the <c>SectorManager::StationLogin</c> code path
-/// itself, not of any specific station; they hold for both 10151 and
-/// 45151. The retail capture's bytes are the primary-source proof
-/// that the real Win32 client expects this shape from the StationLogin
-/// path.
+/// post-dock window. Our tests below reach sector 10151 (Luna Station)
+/// because that is the station docked at the test character's home
+/// space sector (Terran Warrior; StartSector[race*3+profession=0] =
+/// 1015, the Luna space sector). Fresh characters spawn in SPACE
+/// (StartSector ids are all &lt; 10000, see server/src/StaticData.h), so
+/// the first login lands in <c>SectorManager::SectorLogin</c>; each test
+/// below performs a SECOND login to drive <c>StationLogin</c> -- create +
+/// first-login at home space 1015, cleanly LOGOFF, then reconnect and
+/// LOGIN to station 10151. Both invariants asserted here -- no 0x00A5
+/// emit to self, and 0x007F payload LE-decode with MANU_TAG|PLAYER_TAG
+/// bits set -- are properties of the <c>SectorManager::StationLogin</c>
+/// code path itself, not of any specific station; they hold for both
+/// 10151 and 45151. The retail capture's bytes are the primary-source
+/// proof that the real Win32 client expects this shape from the
+/// StationLogin path.
 /// </para>
 ///
 /// <para>
@@ -56,6 +61,42 @@ public sealed class DockHandshakeRetailParityTests
     {
         _server = server;
         _client = new ClientFixture(server);
+    }
+
+    /// <summary>
+    /// Reach <c>SectorManager::StationLogin</c> for a fresh character. Fresh
+    /// characters spawn in SPACE (StartSector[race*3+profession] &lt; 10000 --
+    /// server/src/StaticData.h), so the first sector login always lands in
+    /// <c>SectorLogin</c>; a station handshake requires a SECOND login.
+    /// Stage 1: create + first-login at the home space sector. Then cleanly
+    /// 0x00B9 LOGOFF that session so the server runs
+    /// <c>DropPlayerFromGalaxy</c> synchronously (else G_ERROR_ACCOUNT_IN_USE
+    /// on the stage-2 login). Stage 2: reconnect (no char create) and LOGIN to
+    /// the station sector; the <c>ReloadSavedData</c> path preserves sector_num
+    /// from the LOGIN ToSectorID (server/src/PlayerSaves.cpp:289) so
+    /// <c>StationLogin</c> runs. Caller owns the returned session and must
+    /// clean up the created character on <paramref name="slot"/>.
+    /// </summary>
+    private async Task<SectorHandshake.Session> EstablishAtStationAsync(
+        string ticket, string username, int slot,
+        int homeSpaceSectorId, int stationSectorId,
+        string firstName, string shipName, CancellationToken ct)
+    {
+        var homeSession = await SectorHandshake.EstablishAsync(
+            _server, ticket, username, slot, homeSpaceSectorId, firstName, shipName, ct);
+        try
+        {
+            byte[] logoffPayload = new byte[8];
+            await homeSession.Sector.SendAsync(
+                Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload), ct);
+            await SectorHandshake.DrainUntilOpcode(
+                homeSession.Sector, OpcodeId.Known.LogoffConfirmation.Value, ct);
+        }
+        finally
+        {
+            await homeSession.DisposeAsync();
+        }
+        return await SectorHandshake.ReestablishAsync(_server, ticket, slot, stationSectorId, ct);
     }
 
     /// <summary>
@@ -96,17 +137,18 @@ public sealed class DockHandshakeRetailParityTests
     {
         var account = TestAccounts.New(_server);
         const int slot = 0;
-        const int stationSectorId = 10151;  // Luna Station, StartSector[0*3+0] (Terran/Warrior)
+        const int homeSpaceSectorId = 1015;   // Terran Warrior home, StartSector[0*3+0] (Luna space)
+        const int stationSectorId = 10151;    // Luna Station (sector > 9999 -> StationLogin)
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         var login = await _client.AuthLogin.LoginAsync(
             new AuthLoginRequest(account.Username, account.Password), cts.Token);
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
-            _server, login.Ticket!, account.Username, slot, stationSectorId,
+        await using var session = await EstablishAtStationAsync(
+            login.Ticket!, account.Username, slot, homeSpaceSectorId, stationSectorId,
             firstName: "ChevPin", shipName: "ChevPinShip", cts.Token);
 
         try
@@ -156,38 +198,56 @@ public sealed class DockHandshakeRetailParityTests
     /// not a valid manu-id. The capture proves the wire is LE
     /// host-order; the ntohl was a classic CLAUDE.md Trap 1.
     /// </para>
+    ///
+    /// <para>
+    /// Two-stage station handshake. Since fresh characters spawn in SPACE
+    /// in their home sector (StartSector[race*3+profession] &lt; 10000 --
+    /// see server/src/StaticData.h), the FIRST sector login always lands in
+    /// <c>SectorManager::SectorLogin</c>, whose space-arm anchor emits
+    /// <c>SetManufactureID(0)</c> -- a 4-byte ZERO payload with no tag bits.
+    /// Reaching <c>SectorManager::StationLogin</c> (sector &gt; 9999, the
+    /// nonzero manu-lab anchor) therefore requires a SECOND login: create +
+    /// first-login at the home space sector (1015), cleanly LOGOFF that
+    /// session so the server runs <c>DropPlayerFromGalaxy</c> (else
+    /// G_ERROR_ACCOUNT_IN_USE on the second login), then reconnect and LOGIN
+    /// to the station sector (10151). The <c>ReloadSavedData</c> path on the
+    /// second login preserves sector_num from the LOGIN ToSectorID
+    /// (server/src/PlayerSaves.cpp:289), so the station-arm anchor fires.
+    /// Mirrors the two-stage pattern in
+    /// <see cref="N7.CliClient.IntegrationTests.Opcodes.SectorManufactureSetManufactureIdHardeningTests"/>
+    /// Wave 106 (which goes the other direction, station then space).
+    /// </para>
     /// </summary>
     [Fact]
     public async Task StationHandshake_ManufactureSetManufactureIdPayload_DecodesLittleEndianWithTagBits()
     {
         var account = TestAccounts.New(_server);
         const int slot = 0;
-        const int stationSectorId = 10151;  // Luna Station, StartSector[0*3+0] (Terran/Warrior)
+        const int homeSpaceSectorId = 1015;   // Terran Warrior home, StartSector[0*3+0] (Luna space)
+        const int stationSectorId = 10151;    // Luna Station (sector > 9999 -> StationLogin)
         const uint ManuTag = 1u << 31;
         const uint PlayerTag = 1u << 30;
         const uint TagMask = ManuTag | PlayerTag;
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         var login = await _client.AuthLogin.LoginAsync(
             new AuthLoginRequest(account.Username, account.Password), cts.Token);
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
-            _server, login.Ticket!, account.Username, slot, stationSectorId,
+        // Two-stage: create + first-login at home space 1015, LOGOFF, then
+        // reconnect and LOGIN to station 10151 so StationLogin runs. The
+        // station-arm manu-lab anchor at SectorManager.cpp:483 emits the
+        // nonzero SetManufactureID(ntohl(ManuID)); the space-arm zero anchor
+        // (SectorLogin) does NOT fire on the station path, so the nonzero
+        // filter targets the manu-lab emit specifically.
+        await using var session = await EstablishAtStationAsync(
+            login.Ticket!, account.Username, slot, homeSpaceSectorId, stationSectorId,
             firstName: "MfgEndian", shipName: "MfgEndianShip", cts.Token);
 
         try
         {
-            // StationLogin emits two 0x007F frames during the handshake:
-            // the zero-anchor early in HandleSectorLogin (SectorManager.cpp:353
-            // via SectorLogin, only on space-arm) does NOT fire here -- on
-            // the station path only the ManuID anchor at SectorManager.cpp:483
-            // emits. Filter to nonzero payloads so the assertion targets the
-            // manu-lab anchor specifically. If the zero anchor ever migrates
-            // into the station path, this test simply asserts on the
-            // manu-lab emit and ignores the zero one (still correct).
             var mfgPayloads = session.HandshakePayloads
                 .Where(f => f.Opcode == OpcodeId.Known.ManufactureSetManufactureId.Value)
                 .Select(f => f.Payload)

@@ -118,6 +118,7 @@ public static class SectorHandshake
         var globalConn = await EncryptedTcpConnection.ConnectAsync(
             server.GlobalHost, server.GlobalPort, ct);
 
+        bool characterCreated = false;
         try
         {
             await SendGlobalConnectAsync(globalConn, authTicket, ct);
@@ -125,12 +126,13 @@ public static class SectorHandshake
 
             await CreateCharacterOnSlotAsync(
                 globalConn, accountUsername, slot, firstName, shipName, ct);
+            characterCreated = true;
 
             int gameId = await RequestTicketAsync(globalConn, slot, ct);
 
             const int PlayerTag = 1 << 30;
             Assert.True((gameId & PlayerTag) != 0,
-                $"GameID 0x{gameId:X8} missing PLAYER_TAG — GlobalTicketRequest hit the failure path.");
+                $"GameID 0x{gameId:X8} missing PLAYER_TAG -- GlobalTicketRequest hit the failure path.");
 
             var redirect = await DoMasterJoinAsync(server, authTicket, gameId, sectorId, ct);
             Assert.Equal(sectorId, redirect.SectorId);
@@ -153,6 +155,22 @@ public static class SectorHandshake
         }
         catch
         {
+            // Best-effort: if we created the avatar before failing, delete it
+            // so a re-run lands in the empty-slot baseline. A leaked avatar
+            // makes the next run's fixed-name create fail with GlobalError
+            // code=1 (name already taken). Reuse the still-open global
+            // connection -- opening a second one would trip the server's
+            // duplicate-login force-kick and the delete would silently no-op.
+            if (characterCreated)
+            {
+                try
+                {
+                    using var cleanupCts = new CancellationTokenSource(
+                        TimeSpan.FromSeconds(15));
+                    await DeleteCreatedCharacterAsync(globalConn, slot, cleanupCts.Token);
+                }
+                catch { /* best-effort cleanup; surface the original failure */ }
+            }
             await globalConn.DisposeAsync();
             throw;
         }
@@ -162,16 +180,18 @@ public static class SectorHandshake
     /// Reconnect against an existing avatar (e.g. one created by a prior
     /// <see cref="EstablishAsync"/> call) and re-run the sector handshake
     /// against <paramref name="sectorId"/>. Skips the
-    /// <see cref="CreateCharacterOnSlotAsync"/> step — the slot is
+    /// <see cref="CreateCharacterOnSlotAsync"/> step -- the slot is
     /// expected to already contain a created avatar.
     ///
     /// <para>
-    /// Use case: drive the SPACE-sector <c>SectorManager::SectorLogin</c>
-    /// branch (sector_id ≤ 9999). Every race/class has a station
-    /// <c>StartSector</c> (race × 3 + profession), so the first login
-    /// always lands in <c>SectorManager::StationLogin</c>. A second
-    /// login with a space sector exercises the other branch.
-    /// <c>Player::ReadSavedData</c> takes the
+    /// Use case: drive a sector login at an arbitrary target sector that is
+    /// NOT the character's home StartSector. Fresh characters spawn in SPACE
+    /// in their home sector (StartSector[race*3+profession], all &lt; 10000 --
+    /// see server/src/StaticData.h), so the first login always lands in
+    /// <c>SectorManager::SectorLogin</c>. To reach a STATION
+    /// (<c>SectorManager::StationLogin</c>, sector_id &gt; 9999, e.g. Luna
+    /// Station 10151) or any other non-home sector, a second login is
+    /// required. <c>Player::ReadSavedData</c> takes the
     /// <c>ReloadSavedData</c> path on the second login (avatar_level_info
     /// row now exists from the first login's
     /// <c>ReInitializeSavedData</c>), and that path preserves the
@@ -199,7 +219,7 @@ public static class SectorHandshake
 
             const int PlayerTag = 1 << 30;
             Assert.True((gameId & PlayerTag) != 0,
-                $"GameID 0x{gameId:X8} missing PLAYER_TAG — GlobalTicketRequest hit the failure path.");
+                $"GameID 0x{gameId:X8} missing PLAYER_TAG -- GlobalTicketRequest hit the failure path.");
 
             var redirect = await DoMasterJoinAsync(server, authTicket, gameId, sectorId, ct);
             Assert.Equal(sectorId, redirect.SectorId);
@@ -230,7 +250,7 @@ public static class SectorHandshake
     /// Best-effort post-test cleanup: send 0x0071 GlobalDeleteCharacter
     /// on <paramref name="global"/> for <paramref name="slot"/> and wait
     /// for the refreshed avatar list. Wrap in try/catch at the call site
-    /// — primary test failure has already been reported.
+    /// -- primary test failure has already been reported.
     /// </summary>
     public static async Task DeleteCreatedCharacterAsync(
         EncryptedTcpConnection global, int slot, CancellationToken ct)
@@ -271,7 +291,7 @@ public static class SectorHandshake
             accountUsername: accountUsername,
             firstName: firstName,
             race: 0,        // Terran
-            profession: 0,  // Warrior  →  StartSector[0*3+0] = 10151 Luna Station
+            profession: 0,  // Warrior -> StartSector[0*3+0] = 1015 (Luna space sector, near Luna Station)
             gender: 0,
             shipName: shipName);
 
@@ -450,7 +470,7 @@ public static class SectorHandshake
     }
 
     /// <summary>
-    /// Build the 137-byte Login payload — a packed Login struct
+    /// Build the 137-byte Login payload -- a packed Login struct
     /// (<c>common/include/net7/PacketStructures.h:407-413</c>):
     /// MasterJoin (64) + TimeSent (4) + LoginData (65) + TimeReceived (4).
     /// </summary>

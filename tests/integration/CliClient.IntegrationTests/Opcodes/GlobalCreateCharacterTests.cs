@@ -20,7 +20,7 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 ///
 /// <para>
 /// Wire layout (verbatim 539-byte canonical Win32 GlobalCreateCharacter
-/// struct — proxy and server both <c>(GlobalCreateCharacter *) msg</c>
+/// struct -- proxy and server both <c>(GlobalCreateCharacter *) msg</c>
 /// the buffer directly with no reframing):
 /// <code>
 ///   offset  size  field                  encoding
@@ -46,7 +46,7 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// Linux x86_64 sized the struct at 21B instead of the canonical 17B.
 /// ColorInfo is embedded 8× in ShipData and ShipData is embedded in
 /// GlobalCreateCharacter, so a 4-byte-per-ColorInfo bloat ballooned
-/// ShipData to 226B and GlobalCreateCharacter to 571B — meaning the
+/// ShipData to 226B and GlobalCreateCharacter to 571B -- meaning the
 /// Linux proxy would have stamped a 571-byte payload into the UDP_GLOBAL
 /// frame and the server's <c>(GlobalCreateCharacter *) msg</c> cast
 /// would have misaligned every field after the first ColorInfo. Today
@@ -63,7 +63,7 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// "All fields are in Big Endian format" comment for the avatar-list
 /// equivalent), and <c>AccountManager::CreateCharacter</c> calls
 /// <c>GetAvatarID(account_username, htonl(create-&gt;character_slot))</c>
-/// to swap back to host order — confirming the BE convention.
+/// to swap back to host order -- confirming the BE convention.
 /// </para>
 ///
 /// <para>
@@ -78,7 +78,7 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 ///     with G_ERROR_NICKNAME_USED.
 ///   </item>
 ///   <item>
-///     Documents the round-trip on both sides — the create succeeded
+///     Documents the round-trip on both sides -- the create succeeded
 ///     and the delete also still works against a real-populated slot
 ///     (the existing 0x0071 test only covers the empty-slot no-op path).
 ///   </item>
@@ -131,7 +131,7 @@ public sealed class GlobalCreateCharacterTests
             cts.Token);
 
         // Drain to the initial (empty) GlobalAvatarList. Establishes the
-        // baseline — five empty slots, exactly one galaxy.
+        // baseline -- five empty slots, exactly one galaxy.
         var initial = await DrainUntilOpcode(conn, OpcodeId.Known.GlobalAvatarList.Value, cts.Token);
         var initialDecoded = (GlobalAvatarList)new GlobalAvatarListCodec()
             .DecodeInbound(initial.Payload.Span);
@@ -149,7 +149,7 @@ public sealed class GlobalCreateCharacterTests
             shipName:            ShipName);
 
         // Sanity-check the local size matches canonical Win32 wire size
-        // — if the C# builder ever drifts to 571 (the pre-ColorInfo-fix
+        // -- if the C# builder ever drifts to 571 (the pre-ColorInfo-fix
         // size) or anything else, the server's struct cast misaligns
         // silently. Fail loudly here instead.
         Assert.Equal(539, createPayload.Length);
@@ -166,17 +166,20 @@ public sealed class GlobalCreateCharacterTests
             .DecodeInbound(afterCreate.Payload.Span);
 
         // Slot 0 should now carry our character. Race/profession verify
-        // the inner AvatarData round-tripped correctly — these read at
+        // the inner AvatarData round-tripped correctly -- these read at
         // the post-fix codec offsets (46/50) which match the packed
         // struct's actual layout.
         var slot0 = afterCreateDecoded.Avatars[0];
         Assert.Equal(CharacterFirstName, slot0.Data.FirstName);
         Assert.Equal(0, slot0.Data.Race);
         Assert.Equal(0, slot0.Data.Profession);
-        // sector_id is BE on the wire. StartSector[0*3+0] = 10151 (Terran
-        // Warrior, Luna). Server's BuildAvatarList runs ntohl on it before
-        // packing, so the codec's BE read recovers 10151.
-        Assert.Equal(10151, slot0.Info.SectorId);
+        // sector_id is BE on the wire. StartSector[0*3+0] = 1015 (Terran
+        // Warrior, Luna space sector near Luna Station -- fresh characters
+        // spawn in space, not docked inside the home station; the space
+        // sector ids are all < 10000, see server/src/StaticData.h). Server's
+        // BuildAvatarList runs ntohl on it before packing, so the codec's BE
+        // read recovers 1015.
+        Assert.Equal(1015, slot0.Info.SectorId);
         // account_id_lsb encodes the seeded account ID (9_000_003). Server
         // stores via ntohl, codec reads BE.
         Assert.Equal(account.Id, slot0.Info.AccountIdLsb);
@@ -200,7 +203,7 @@ public sealed class GlobalCreateCharacterTests
             .DecodeInbound(afterDelete.Payload.Span);
 
         // All slots back to empty. The character was created and torn
-        // down via the live wire — no leftover state for the next test.
+        // down via the live wire -- no leftover state for the next test.
         Assert.All(afterDeleteDecoded.Avatars,
             slot => Assert.Equal(string.Empty, slot.Data.FirstName));
     }
@@ -229,7 +232,7 @@ public sealed class GlobalCreateCharacterTests
         BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(4, 4), characterSlot);
         BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(8, 4), 0);  // tutorial_status
 
-        // account_username[65] — NUL-padded ASCII. AccountManager's
+        // account_username[65] -- NUL-padded ASCII. AccountManager's
         // GetAccountID does an exact lookup on this, so it must match
         // the seeded account name byte-for-byte.
         var usernameBytes = Encoding.ASCII.GetBytes(accountUsername);
@@ -249,7 +252,7 @@ public sealed class GlobalCreateCharacterTests
         //   50..53  profession
         //   54..57  gender
         //   58..61  mood_type
-        //   62..240 personality + appearance blob (zero-filled — the
+        //   62..240 personality + appearance blob (zero-filled -- the
         //           server stores it verbatim; the create-character UI
         //           normally fills it but the server doesn't validate
         //           the appearance fields so zeros are accepted).
@@ -275,7 +278,7 @@ public sealed class GlobalCreateCharacterTests
         //   12  wing          int32 LE
         //   16  decal         int32 LE
         //   20  ship_name[26] ASCII (forbidden-words check is on the
-        //                     non-NUL bytes — "TestShip" is in neither
+        //                     non-NUL bytes -- "TestShip" is in neither
         //                     RestrictedWords nor RestrictedShips)
         //   46  ship_name_color[3] floats (unused server-side, zero-filled)
         //   58  8 × ColorInfo (17B each), zero-filled
