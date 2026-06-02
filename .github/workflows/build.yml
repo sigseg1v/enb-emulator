@@ -28,6 +28,19 @@ jobs:
       - name: No U+FFFD replacement chars in tracked source
         run: bash tools/check_no_mojibake.sh
 
+  sql-injection-audit:
+    name: sql-injection-audit (parameterised-query gate)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: No dynamic SQL string-building in server-native code
+        # Phase N drove the server-native sprintf/strcat-SQL surface to
+        # zero; every DB call goes through the wrapper's parameterised
+        # path. This gate fails the build if a new injection site lands.
+        # #ifdef WIN32-walled blocks (dead on Linux) are exempt by the
+        # script. Baseline is 0, so a non-zero exit means a regression.
+        run: bash tools/sql_injection_audit.sh
+
   cmake-configure:
     name: cmake-configure (server, ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
