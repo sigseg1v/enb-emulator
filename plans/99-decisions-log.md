@@ -7265,3 +7265,76 @@ server-integrity / fidelity rule forbids. Recorded here as a known
 content-integrity gap in the runtime dump (distinct from the Phase Y
 reconstruct-dataset gaps -- this is the *authoritative* data referencing
 rows it doesn't contain).
+
+## 2026-06-02 (addendum 2) -- Phase N Wave 3 dialect sweep + case-insensitive name-collation fidelity fix
+
+Worked the Phase N Wave 3 backlog item ("per-DAO query rewrites where the
+SQL itself is MySQL-specific"). Two parts: an audit that came back empty
+for SQL *syntax*, and one real divergence in collation *semantics*.
+
+**Syntax audit (empty, as the plan predicted).** Swept every server-native
+SQL string (`server/src`, `login-server/Net7SSL`) for the classic MySQL->
+Postgres syntax divergences: `LIMIT n,m`, `IFNULL`, MySQL `IF()` ternary,
+`REPLACE INTO`, `ON DUPLICATE KEY`, `LAST_INSERT_ID`, `AUTO_INCREMENT`,
+MySQL date funcs (`UNIX_TIMESTAMP`/`FROM_UNIXTIME`/`DATE_ADD`/...),
+`RAND`/`GROUP_CONCAT`/`STRAIGHT_JOIN`, `CAST AS UNSIGNED`, `CONVERT()`,
+`INSERT IGNORE`, `GROUP BY` non-aggregate permissiveness, `SET @var`,
+multi-statement literals, and DDL-in-code. ZERO real hits -- the only
+matches were vendored MySQL error-code headers (`server/src/mysql/*.h`),
+C++ `unsigned int` declarations, and commented-out log lines. Confirms the
+DAOs are static `SELECT * FROM table` loaders that run straight through
+libpqxx. The three real Postgres-migration bugs (case-fold / cross-DB /
+compound-lookup, fixed earlier today) were the actual Wave-4 surface;
+they were wrapper/semantic, not query-syntax.
+
+**Collation semantics (real, fixed).** The source `net7_user` dump declares
+every table `latin1` with no per-column override -> all string columns
+collated `latin1_swedish_ci`, which is case-INSENSITIVE. `convert.sh`'s
+sed pipeline strips every `COLLATE`/`DEFAULT CHARSET`/`CHARACTER SET`
+clause (it must -- they are MySQL-only tokens), and `net7_user` is created
+`LC_COLLATE 'C.UTF-8'` (byte-exact / case-SENSITIVE). That silently
+flipped three behaviours the server relies on:
+  * `accounts.username`        -- login lookup (`LinuxAuth.cpp:259`,
+    `WHERE username = $1`); "Bob" no longer matched "bob".
+  * `avatar_data.first_name`   -- `AccountManager::IsUsernameUnique`
+    (`AccountManager.cpp:316`); character names are unique case-fold on
+    the real server, so "Zelgar" and "zelgar" could now BOTH be created.
+  * `forbidden_names.nickname` -- `AccountManager::IsForbiddenName`
+    (`AccountManager.cpp:302`) + the table PRIMARY KEY; a case-sensitive
+    forbidden-name filter is bypassed by recapitalising one letter.
+
+Proven, not asserted. BEFORE (current schema): `'Zelgar' = 'zelgar'`
+returns false; inserting `'BadWord'` then `'badword'` into
+`forbidden_names` yielded TWO distinct rows (real-server PK: one, second
+insert rejected). AFTER: all three columns `citext`; the second
+`forbidden_names` insert fails `duplicate key ... forbidden_names_pkey`;
+`WHERE nickname='badword'` finds the `BadWord` row.
+
+**Fix.** `convert.sh` appends a fidelity block to the generated `seed.sql`
+(same mechanism as the existing IDENTITY-reset append), gated to the
+`net7_user` convert only: `CREATE EXTENSION IF NOT EXISTS citext;` then
+`ALTER COLUMN ... TYPE citext` for the three columns, plus `CHECK
+(char_length(...) <= N)` to preserve the varchar length caps citext drops
+(40/20/255). citext gives MySQL `_ci` equality + uniqueness transparently
+-- NO DAO query change, so Phase N's "wrapper/DDL only, don't rewrite the
+DAOs" anti-scope holds. Applies cleanly on a fresh schema-init boot
+(`CREATE EXTENSION` + 6 `ALTER TABLE`, zero errors); the new boot-log
+health guard would have caught any error the ALTERs produced.
+
+**Server-integrity note.** This TIGHTENS toward the real server (CLAUDE.md:
+"changes that tighten toward fidelity are always welcome"). Primary source
+is the authoritative `db/mysql/net7_user.sql` dump's `latin1_swedish_ci`
+table collation + `db/mysql/init/00-create-databases.sql`'s explicit
+`COLLATE latin1_swedish_ci`. The migration to case-SENSITIVE was the
+divergence; restoring `_ci` semantics is the correction. Net7Mysql's
+`avatar_data`/`accounts`/`forbidden_names` on the live retail-era DB
+behaved case-insensitively for these lookups by virtue of that collation.
+
+**Related, lower-impact, NOT changed:** `SaveManager.cpp:1236/1259`
+(`friends_lists.name` / `ignore_lists.name` deletes) and any other
+name-keyed comparison are still byte-exact; they were also `_ci` on the
+real server but the failure mode is benign (a friend-remove that no-ops on
+a case-mismatched name) and they are keyed primarily by `avatar_id`. Left
+as-is to keep the change scoped to the three behaviourally load-bearing
+columns; noted here so a future pass can extend citext if a divergence is
+observed.

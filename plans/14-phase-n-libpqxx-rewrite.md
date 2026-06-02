@@ -84,16 +84,36 @@ Audit ratchet drove the server-native sprintf-SQL surface from **148 → 0** for
 - [x] **login-server/Net7Mysql/Tab2.cpp (3 sites)** — walled in `#ifdef WIN32` (commit c8c09fe). Tab2.cpp is a Windows MFC `CDialog` admin tab; Net7Mysql has no CMakeLists.txt and the kyp-era mysqlplus bundled inside it has no AddParam API. Wrapping it under WIN32 follows the audit script's documented escape for "truly dead-on-Linux code awaiting a Phase J rewrite" — the actual fix is an Avalonia rewrite of the admin UI in Phase L.
 - [x] **Multi-line audit detection** (commit 75a4ba4). The original audit was line-anchored and missed `sprintf_s(buf, sizeof(buf),\n    "SELECT ...", x);` even though it's the same shape and risk. The script now opens a `CROSS_LINE_WINDOW=8` lookahead when it sees an unsafe-build line with unbalanced parens and a trailing comma, and reports the original line when a subsequent line contains a SQL keyword *inside a string literal* (the literal requirement avoids the obvious false-positive of bare identifiers like `XML_TAG_ID_FOO_UPDATE` in switch cases). Verified with a synthetic injection: detection works and exit code goes to 1.
 - [ ] Extend `postgres_smoke_test` to a real DAO round-trip + hostile-input case (currently only the wrapper test exercises this; the DAO test still uses raw libpq).
-- [ ] Wire `tools/sql_injection_audit.sh` to CI as a non-zero-exit gate (it runs today as a manual probe; the baseline is now at zero, so CI integration is unblocked).
+- [x] Wire `tools/sql_injection_audit.sh` to CI as a non-zero-exit gate (DONE 2026-06-02). Added the `sql-injection-audit` job to `.github/workflows/build.yml` (modeled on `check-no-mojibake`: checkout + run script). The script exits 1 on any flagged site, 0 at the current baseline; verified locally at exit 0.
 
-### Pre-existing bug to fix opportunistically
+### Pre-existing bug to fix opportunistically (DONE 2026-06-02)
 
-`sql_var_c::operator unsigned long()` is implemented as `(unsigned long)atoi(value)` — atoi truncates to int32, so any value ≥ 0x80000000 sign-extends. Caught by `ExecuteParamsMixedTypesAndNull` test (test now uses 0x12345678 to dodge it; pre-existing bug noted in the test comment). Fix is one-liner (`(unsigned long)strtoul(value, nullptr, 10)`) but deferred until the DAO sweep so it lands with read-side coverage.
+- [x] `sql_var_c::operator unsigned long()` was `(unsigned long)atoi(value)` -- atoi parses as int32, so any value >= 0x80000000 sign-extended to a huge unsigned long. Fixed to `strtoul(value, nullptr, 10)`. Also fixed `operator long()` (`(long)atoi` -> `strtol`) which truncated to 32 bits before widening to 64-bit `long`. `operator unsigned int()` was already on strtoul. Regression coverage: `ExecuteParamsMixedTypesAndNull` now binds+reads `0xFFFFFFFE` (was 0x12345678, which dodged the bug) and the comment reflects the fix.
 
-### Wave 3 — dialect cleanup (DEFERRED)
+### Wave 3 -- dialect cleanup (DONE 2026-06-02)
 
-- [ ] Per-DAO query rewrites where the SQL itself is MySQL-specific (`LIMIT offset, count`, `INTERVAL` arithmetic, etc.).
-      Notes: most queries are static `SELECT * FROM table` loaders that work straight-through; this wave is small but needs a query-by-query sweep against a populated Postgres.
+- [x] Per-DAO query rewrites where the SQL itself is MySQL-specific (`LIMIT offset, count`, `INTERVAL` arithmetic, etc.).
+      Notes: **syntax sweep came back EMPTY** (as predicted). Swept all
+      server-native SQL strings for `LIMIT n,m` / `IFNULL` / MySQL `IF()`
+      ternary / `REPLACE INTO` / `ON DUPLICATE KEY` / `LAST_INSERT_ID` /
+      `AUTO_INCREMENT` / MySQL date funcs / `RAND` / `GROUP_CONCAT` /
+      `STRAIGHT_JOIN` / `CAST AS UNSIGNED` / `CONVERT` / `INSERT IGNORE` /
+      `GROUP BY` non-aggregate / `SET @var` / multi-statement / DDL-in-code.
+      Zero real hits -- only vendored MySQL error-code headers, C++
+      `unsigned int` decls, and commented log lines. DAOs are static
+      `SELECT * FROM table` loaders that run straight through libpqxx.
+- [x] **Collation divergence (the one real Wave-3 finding).** The
+      MySQL->Postgres conversion silently dropped `latin1_swedish_ci`
+      (case-insensitive) -> `C.UTF-8` (case-sensitive). `convert.sh` now
+      appends a citext fidelity block to the generated `net7_user`
+      `seed.sql`: `accounts.username` / `avatar_data.first_name` /
+      `forbidden_names.nickname` become `citext` (+ length CHECKs), so
+      login lookup, character-name uniqueness, and the forbidden-name
+      filter/PK match case-insensitively as on the real server.
+      Transparent to the DAOs (no query change). Verified before/after at
+      the SQL layer (forbidden_names PK now rejects a recapitalised dup).
+      Primary source: the dump's `latin1_swedish_ci` collation. Full
+      writeup in plans/99-decisions-log.md (2026-06-02 addendum 2).
 
 ### Wave 4 — runtime-path Postgres correctness regressions (2026-06-02, commit e1976506)
 
