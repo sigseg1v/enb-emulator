@@ -113,14 +113,15 @@ public sealed class MoveCommand : ICommandHandler
         }
         var client = _ctx.SectorUdp;
 
-        // NOTE: the server only runs the movement/nav loop for players that are
-        // InSpace() (server PlayerManager.cpp:476 RunPlayerUpdate). A freshly
-        // created character is DOCKED, so MVAS + throttle here do nothing until
-        // the avatar launches. Undocking is not a one-shot: 0x004E Action=1 ->
-        // SectorManager::LaunchIntoSpace -> SendServerHandoff, i.e. a sector
-        // re-login that the CLI must drive (InSpace flips in Player::FinishLogin
-        // afterwards). Until that launch handshake exists, this flight is a
-        // no-op against a docked avatar -- see plans/19.
+        // MVAS position is the SAME feed for both bodies: it walks the on-foot
+        // AVATAR while docked and flies the SHIP while in space. Server-side
+        // UpdatePositionFromMVAS -> SetPosition + SendLocationAndSpeed runs
+        // gated on Active() (true when docked), NOT on InSpace(), so a docked
+        // avatar moves without any undock. We deliberately do NOT send a ship
+        // throttle (0x0014 MOVE) -- that is ship-only (it fires engine
+        // contrails / formation-engine ops) and is wrong for an on-foot avatar.
+        // (Space NAV exposure additionally needs the ship InSpace + a throttle
+        // to open Player::CheckNavs; that is the separate launch path, plans/19.)
         float speed = _ctx.World.SelfSpeed(id) is { } s && s > 0 ? s : DefaultSpeed;
         int freq = Math.Clamp(client.Frequency, 1, 60);
         int intervalMs = Math.Max(1000 / freq, 25);
@@ -130,14 +131,6 @@ public sealed class MoveCommand : ICommandHandler
         await output.WriteLineAsync(
             $"move: ({start0.X:0.0}, {start0.Y:0.0}, {start0.Z:0.0}) -> ({tx:0.0}, {ty:0.0}, {tz:0.0})  " +
             $"speed={speed:0}u/s rate={freq}Hz step={stepDist:0}u player=0x{id:X8}").ConfigureAwait(false);
-
-        // Engage forward thrust over the sector channel (0x0014 MOVE, type 2).
-        // The MVAS feed sets POSITION, but the server only sweeps for in-range
-        // navs (Player::CheckNavs) while the avatar has non-zero speed, and
-        // speed comes from the throttle (Player::Move -> m_Accelerating), not
-        // from the position feed. Without this the avatar teleports silently
-        // and no navs expose.
-        await SendThrottle(id, type: 2, ct).ConfigureAwait(false);
 
         (float X, float Y, float Z) cur = start0;
         int ticks = 0;
@@ -159,8 +152,6 @@ public sealed class MoveCommand : ICommandHandler
             }
             // Settle on the target so the server registers arrival.
             client.SendPosition(id, tx, ty, tz, (0, 0, 0));
-            // Kill thrust (0x0014 MOVE, type 4) so we coast to a stop.
-            await SendThrottle(id, type: 4, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
@@ -175,18 +166,5 @@ public sealed class MoveCommand : ICommandHandler
             $"  flew {ticks} ticks; {client.ReceivedDatagrams} datagrams in; server reports {where}. " +
             "Run `list` for navs/objects in range.").ConfigureAwait(false);
         return 0;
-    }
-
-    // 0x0014 MOVE { int32 GameID; byte type } over the sector channel.
-    // type 2 = forward thrust, 4 = kill thrust (server/src/PlayerConnection.cpp
-    // HandleMove -> Player::Move). Routed client->proxy->server upstream, which
-    // is unaffected by the downstream UDP reroute.
-    private async Task SendThrottle(int gameId, int type, CancellationToken ct)
-    {
-        if (_ctx.Sector is null) return;
-        byte[] mp = new byte[5];
-        BinaryPrimitives.WriteInt32LittleEndian(mp.AsSpan(0, 4), gameId);
-        mp[4] = (byte)type;
-        await _ctx.Sector.SendAsync(Net.Packet.ForOpcode(0x0014, mp), ct).ConfigureAwait(false);
     }
 }
