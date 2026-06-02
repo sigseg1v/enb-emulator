@@ -101,14 +101,25 @@ will provide newer references when each task is approved.
   ObjectEffect frames per persistent-buff slot.
   **STATUS: AWAITING USER APPROVAL + REFERENCE DATA.**
 
-- [ ] **Y4: Sector map / system topology import** -- populate
+- [!] **Y4: Sector map / system topology import** -- populate
   `sector`, `sector_link`, `system`, `nav_object`, `gate` and the
   associated coordinates / faction-region tables so warp routes and
   the in-game galaxy map match retail. Closes the `m_ObjectMgr->SendAllNavs`
   curatorial gap on the SectorLogin (space-arm) path -- not the
   station path -- but is a prerequisite for any post-Phase-K cross-
   sector navigation testing.
-  **STATUS: AWAITING USER APPROVAL + REFERENCE DATA.**
+  **STATUS: BLOCKED -- wiki scrape is the WRONG source; runtime is
+  already authoritative. See "Finding 2026-06-01" below.** The runtime
+  `sector_objects` table already holds **9382** authoritative navs with
+  real `base_asset_id` and runtime coordinates; `sectors` has 130 rows.
+  The wiki `sectors/json/*.jsonl` is the SAME navs at 1/1000 the
+  coordinate scale with no asset ids (proof: wiki "Sado Pit"
+  (-152.74,-63.89) == runtime "Sado Pit" (-152740,-63860) in sector
+  1076). 85% of the 2286 wiki nav names already exist by name in
+  `sector_objects`. Injecting them would create wrong-position,
+  asset-less duplicate navs -- divergence forbidden by the
+  server-integrity rules. Real unblock needs a Net-7 server dump with
+  integer asset ids + runtime coords, not the wiki scrape.
 
 - [~] **Y5: Item catalog import** -- populate `item_base` /
   `item_categories` / `item_subcategories` with the wiki-scraped item
@@ -143,14 +154,97 @@ will provide newer references when each task is approved.
   `item_type.id` map and per-type stat field translators, OR
   source a real Net-7 dump that already has the integer ids.
 
-- [ ] **Y6: Mission / quest catalog import** -- populate
-  `mission`, `mission_step`, `mission_dialog`, `mission_npc_link`
-  tables so mission terminals (`0x0011` `Hijackee` interactions,
+- [!] **Y6: Mission / quest catalog import** -- populate the `missions`
+  table so mission terminals (`0x0011` `Hijackee` interactions,
   job-terminal flows) return real missions instead of empty lists.
   Acceptance: the in-game job terminal in any starbase returns at
   least one available mission for a fresh character at level-
   appropriate range.
-  **STATUS: AWAITING USER APPROVAL + REFERENCE DATA.**
+  **STATUS: BLOCKED -- wiki scrape has no `mission_XML`; runtime is
+  already authoritative. See "Finding 2026-06-01" below.** The runtime
+  `missions` table already holds **364** missions and **all 364 carry a
+  non-empty `mission_XML`** -- the script the server actually executes.
+  The wiki `missions/missions.jsonl` is human walkthrough prose (giver,
+  reward text, narrative steps) with NO XML and no mission_key. A
+  name-only mission row would make the job terminal advertise a mission
+  the server cannot run. Real unblock needs the Net-7 mission XML dump.
+  (Note: the plan's `mission_step`/`mission_dialog`/`mission_npc_link`
+  tables do not exist in `db/postgres/schema.sql`; the runtime keeps the
+  whole mission in `missions.mission_XML`.)
+
+- [!] **Y7: Mob catalog import** -- (was on the user's data list:
+  `mobs/mobs.jsonl`). **BLOCKED -- runtime already authoritative.** The
+  runtime `mob_base` holds **2042** mob templates with real
+  `base_asset_id`, `faction_id`, and AI scripts (carrying original
+  Byakhee/Skeletor 2009 dev annotations); `mob_items` holds **8583**
+  authoritative loot rows; `sector_objects_mob` holds 1385 spawn rows.
+  77% of the 1127 wiki mob names already exist by name in `mob_base`.
+  The wiki rows have no asset/faction/AI and mostly "?" stats. Injecting
+  would create asset-less mobs. Real unblock needs a Net-7 mob dump.
+
+- [!] **Y8: Item-drop table import** -- (was on the user's data list:
+  `items/item_drops.jsonl`). **BLOCKED -- runtime already authoritative.**
+  `mob_items` (mob_id -> item_base_id, drop_chance, qty) already holds
+  **8583** loot rows. The wiki maps item-name -> mob-name with drop
+  rates that are mostly "?" (no numeric drop_chance). Of 933 distinct
+  wiki mob refs, 720 resolve to `mob_base` by name -- i.e. the data is
+  largely a name-level restatement of rows that already exist with real
+  drop chances. Injecting fabricated drop_chance values onto authoritative
+  mobs would corrupt loot tables. Real unblock needs a Net-7 drop dump.
+
+- [!] **Y9: Prospecting / resource import** -- (was on the user's data
+  list: `prospecting/prospecting.jsonl` + `prospect_fields.jsonl`).
+  **BLOCKED -- runtime already authoritative.** `sector_objects_harvestable`
+  (+ `_oretypes` / `_restypes`) holds **882** harvestable fields keyed by
+  `resource_id` (a sector_object_id); `item_base` holds the ore/resource
+  items (from Y5). The wiki gives resource-name -> nav distribution with
+  no `resource_id` linkage to the runtime fields. Injecting would need
+  fabricated ids and would not connect to the authoritative spawn fields.
+  Real unblock needs a Net-7 harvestable dump.
+
+## Finding 2026-06-01: the wiki reconstruct backup is NOT a runtime-import source
+
+The user pointed at `/data/dev/enb-emu-data-reconstruct-backup/db`
+(items/missions/mobs/npcs/prospecting/sectors) and granted blanket
+permission to "do all the import phases." Investigation
+(`tools/dataimport-jsonl/analyze_wiki_coverage.py`, reproducible against
+the dev Postgres) shows that for **every** category except NPCs (Y1) and
+items (Y5, which had real integer itemIds and dedup), the authoritative
+runtime tables are **already fully populated** and the wiki JSONL is a
+name-level near-duplicate in an **incompatible form**:
+
+| category | runtime table | runtime rows | wiki overlap by name | why wiki can't be injected |
+|---|---|---|---|---|
+| sectors/navs | `sector_objects` | 9382 | 85% of 2286 | /1000 coords, no asset ids |
+| mobs | `mob_base` | 2042 | 77% of 1127 | no asset/faction/AI, "?" stats |
+| missions | `missions` | 364 (all w/ XML) | 25% of 588 | no `mission_XML` |
+| item drops | `mob_items` | 8583 | 77% of 933 mob refs | drop rates mostly "?" |
+| prospecting | `sector_objects_harvestable` | 882 | n/a | no `resource_id` linkage |
+
+The decisive proof: the wiki `sectors/json/ABA.jsonl` nav "Sado Pit" at
+map coords (-152.74, -63.89) is the same authoritative runtime nav "Sado
+Pit" in sector 1076 at (-152740, -63860) -- identical object, runtime
+coords == wiki coords * 1000, already present with a real `base_asset_id`.
+
+**This is exactly what the Phase Y process gate already requires**: a
+PRIMARY source (MySQL/Net-7 server dump, packet capture, or first-hand
+doc), NOT a wiki scrape. The Y1 note itself flags the JSONL as "wiki-
+scraped, NOT a Net-7 server dump". Injecting it into the runtime tables
+would create wrong-position/asset-less duplicate objects and non-runnable
+missions -- divergence the CLAUDE.md server-integrity rules forbid, with
+no primary-source escape hatch available.
+
+**Decision (autonomous, overnight):** do NOT inject any of these five
+categories into the runtime tables. The data is already preserved as a
+structured JSONL archive in the reconstruct backup. If the user later
+wants it queryable in Postgres, the right shape is opt-in `wiki_*`
+REFERENCE tables the server never reads (no fidelity risk) -- but that is
+preservation-only with no current consumer (the CLI is a network client,
+not a DB client), so it is deferred pending an explicit "yes, build the
+reference tables even though nothing reads them yet" rather than built
+unsupervised. NPCs (Y1) and items (Y5) remain the only wiki categories
+that were safely importable, because they carried real ids and deduped
+against the authoritative roster.
 
 ## Tracking notes
 
