@@ -403,17 +403,27 @@ void ObjectManager::HandleTempCreation(Object *object)
 //These two methods are an attempt to cut down on sector load times
 //First we send all normal navs, there's never too many of these
 //and any Deco that's within 10000k
+//
+//The retail server sends every sector nav at entry regardless of whether
+//the player has previously discovered it -- undiscovered navs arrive as
+//creates with no HAS_VISITED flag (they render as undiscovered '?' map
+//nodes), and they are sent independent of player range. Gating on
+//ExposedNavList here only sent already-discovered navs, leaving a fresh
+//character's sector map empty until they physically flew into each nav's
+//radar bubble. The per-player visited state is encoded by SendObject from
+//ExploredNavList, so sending all navs up front does not award discovery
+//or change the explored set.
 void ObjectManager::SendAllNavs(Player *player)
 {
     Object *obj;
 	u32 index;
 
-	for (index = 0; index < m_StaticSectorList.size(); index++) 
+	for (index = 0; index < m_StaticSectorList.size(); index++)
 	{
         obj = m_StaticSectorList[index];
 		if (obj->ObjectType() != OT_DECO && obj->Active())
         {
-            if (((obj->ObjectType() == OT_PLANET) || obj->GetEIndex(player->ExposedNavList())) && !obj->GetIndex(player->ObjectRangeList()) )
+            if (((obj->ObjectType() == OT_PLANET) || obj->IsNav()) && !obj->GetIndex(player->ObjectRangeList()) )
             {
                 obj->SendObject(player);
                 obj->SetEIndex(player->ExposedNavList());
