@@ -48,14 +48,15 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllElevenFrames()
+    public void Fixture_Loads_AllThirteenFrames()
     {
-        Assert.Equal(11, Frames.Count);
+        Assert.Equal(13, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x1B, Frames["aux_ship_turret"].Opcode);
         Assert.Equal(0x11, Frames["colorization_default"].Opcode);
         Assert.Equal(134, Frames["colorization_default"].Payload.Length);
+        Assert.Equal(0x97, Frames["galaxymap_system_aragoth"].Opcode);
         Assert.Equal(0x61, Frames["avatardesc_ace"].Opcode);
         Assert.Equal(260, Frames["avatardesc_ace"].Payload.Length);
     }
@@ -179,6 +180,35 @@ public sealed class RetailRecordDecodeTests
         Assert.Contains("\"Io\"", d);
         Assert.Contains("\"Nishino Research Facility\"", d);
         Assert.Contains("map update", d);           // Type 4
+    }
+
+    // 0x97 is multiplexed on a leading Type. Our server only emits Type 4, but
+    // retail uses 3/5/6/7/8/9 for nav/map detail -- the record must dispatch and
+    // surface the embedded (verifiable) name instead of mis-reading the Type-4
+    // string layout over them.
+
+    [Fact]
+    public void GalaxyMap_Type5_DecodesStarSystemName()
+    {
+        string d = Dump("galaxymap_system_aragoth");
+
+        Assert.Contains("Type", d);
+        Assert.Contains("nav/map-detail subtype", d);
+        Assert.Contains("\"Aragoth\"", d);
+        // Must NOT pretend the Type-4 layout applies.
+        Assert.DoesNotContain("map update", d);
+        Assert.DoesNotContain("PlayerID", d);
+        Assert.DoesNotContain("expected 375", d);
+    }
+
+    [Fact]
+    public void GalaxyMap_Type9_DecodesSectorName()
+    {
+        string d = Dump("galaxymap_sector_earth");
+
+        Assert.Contains("nav/map-detail subtype", d);
+        Assert.Contains("\"Earth\"", d);
+        Assert.DoesNotContain("PlayerID", d);
     }
 
     // ── MessageString 0x1D ───────────────────────────────────────────────────

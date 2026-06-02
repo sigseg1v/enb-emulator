@@ -71,6 +71,24 @@ hex: 04 00 00 00 29 00 00 00 1e 14 00 00 53 6f 6c 00
       72 63 68 20 46 61 63 69 6c 69 74 79 00 77 01 00
       00
 
+[galaxymap_system_aragoth]
+provenance: GalaxyMap 0x97 Type 5 -- star system 'Aragoth' (capture_3.rar)
+opcode: 0x97
+payload-bytes: 63
+hex: 05 00 00 00 37 00 00 00 03 00 00 00 03 00 00 00
+      41 72 61 67 6f 74 68 00 00 00 00 00 9a 99 99 3e
+      00 00 80 3f 00 00 00 00 00 00 c0 c0 00 00 00 00
+      00 00 80 3f 03 00 00 00 99 99 3f 03 00 00 00
+
+[galaxymap_sector_earth]
+provenance: GalaxyMap 0x97 Type 9 -- sector 'Earth' (capture_3.rar)
+opcode: 0x97
+payload-bytes: 64
+hex: 09 00 00 00 38 00 00 00 6c 00 00 00 24 04 00 00
+      f7 03 00 00 45 61 72 74 68 00 06 00 00 00 00 00
+      00 00 00 00 00 40 cd cc cc 3d 3d cd cc cc 3d 00
+      00 00 00 00 80 3f 00 00 00 00 80 3f 00 00 00 00
+
 [messagestring_docking]
 provenance: MessageString 0x1D -- docking banner (green, color 5) (capture_3.rar)
 opcode: 0x1D
