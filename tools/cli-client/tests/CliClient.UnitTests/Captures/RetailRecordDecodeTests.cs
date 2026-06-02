@@ -14,7 +14,7 @@ namespace N7.CliClient.UnitTests.Captures;
 /// validated the item codec. Where <see cref="RetailCaptureTests"/> pins the
 /// round-trip <em>codecs</em>, this pins the read-only <em>records</em>:
 /// AuxDataRecord, ItemBaseRecord, GalaxyMapRecord, MessageStringRecord,
-/// RelationshipRecord, AvatarDescriptionRecord.
+/// RelationshipRecord, AvatarDescriptionRecord, ServerHandoffRecord.
 ///
 /// Every frame in <c>capture3-records.txt</c> is complete -- the capture
 /// dump's "Length = N bytes" equals payload+4 (and Aux BodyLen == payload-6),
@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllEighteenFrames()
+    public void Fixture_Loads_AllTwentyFrames()
     {
-        Assert.Equal(18, Frames.Count);
+        Assert.Equal(20, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -69,6 +69,10 @@ public sealed class RetailRecordDecodeTests
         Assert.Equal(0x97, Frames["galaxymap_system_aragoth"].Opcode);
         Assert.Equal(0x61, Frames["avatardesc_ace"].Opcode);
         Assert.Equal(260, Frames["avatardesc_ace"].Payload.Length);
+        Assert.Equal(0x3A, Frames["serverhandoff_friendship7_to_glenn"].Opcode);
+        Assert.Equal(115, Frames["serverhandoff_friendship7_to_glenn"].Payload.Length);
+        Assert.Equal(0x3A, Frames["serverhandoff_glenn_to_asteroidbelt"].Opcode);
+        Assert.Equal(135, Frames["serverhandoff_glenn_to_asteroidbelt"].Payload.Length);
     }
 
     // ── ItemBase 0x25 ────────────────────────────────────────────────────────
@@ -521,5 +525,97 @@ public sealed class RetailRecordDecodeTests
         Assert.Contains("hair_color", d);           // appearance block decoded
         Assert.Contains("skin_color", d);
         Assert.DoesNotContain("truncated", d);
+    }
+
+    // ── ServerHandoff 0x3A ───────────────────────────────────────────────────
+    // The sector-transition redirect. Two byte-order traps live here and both
+    // have shipped real crashes: ToSectorID/FromSectorID are ntohl'd at emit so
+    // they are BIG-endian on the wire (every other MasterJoin field is host LE),
+    // and the 20-byte Ticket is opaque binary that must render losslessly. These
+    // are real retail handoffs, so the embedded sector/system names double as a
+    // sanity check that the field offsets are right.
+
+    [Fact]
+    public void ServerHandoff_Friendship7ToGlenn_DecodesHandoffWithBinaryTicket()
+    {
+        string d = Dump("serverhandoff_friendship7_to_glenn");
+
+        // ToSectorID/FromSectorID are BE on the wire (00 00 11 A3 -> 4515). A
+        // host-LE misread would yield 0xA3110000 -- the exact ServerRedirect
+        // byte-order class of bug. FromSectorID is genuinely 0 here.
+        Assert.Contains("ToSectorID        = 4515  (BE -- ntohl at emit)", d);
+        Assert.Contains("FromSectorID      = 0  (BE -- ntohl at emit)", d);
+        Assert.Contains("PlayerLevel       = 0", d);
+
+        // The 20-byte Ticket is binary on the wire (retail filled it with random
+        // bytes). It must render as lossless hex with NO ASCII gloss -- the gloss
+        // only appears when every byte is printable-or-NUL, which this is not.
+        Assert.Contains(
+            "Ticket            = d0 0f a7 14 12 5f 3f 1f aa 48 da 9e ca 0d 64 04 7b 08 c8 e7",
+            d);
+        Assert.DoesNotContain("Ticket            = d0 0f a7 14 12 5f 3f 1f aa 48 da 9e ca 0d 64 04 7b 08 c8 e7  \"", d);
+
+        // The four-AddString tail, including the EMPTY FromSystem -- a bare 00 00
+        // length prefix. The decoder must consume it as a zero-length string, not
+        // skip it (which would shift ToSector/ToSystem by two bytes).
+        Assert.Contains("FromSector        = \"Friendship 7 Recreation Port\"", d);
+        Assert.Contains("FromSystem        = \"\"", d);
+        Assert.Contains("ToSector          = \"Glenn\"", d);
+        Assert.Contains("ToSystem          = \"Beta Hydri\"", d);
+
+        // Whole 115-byte payload consumed: no overrun flag, no short-read.
+        Assert.DoesNotContain("[!]", d);
+        Assert.DoesNotContain("overruns", d);
+        Assert.DoesNotContain("truncated", d);
+    }
+
+    [Fact]
+    public void ServerHandoff_GlennToAsteroidBelt_DecodesFullyPopulatedQuartet()
+    {
+        string d = Dump("serverhandoff_glenn_to_asteroidbelt");
+
+        Assert.Contains("ToSectorID        = 1077  (BE -- ntohl at emit)", d);   // 0x0435 BE
+        Assert.Contains("FromSectorID      = 0  (BE -- ntohl at emit)", d);
+
+        // Distinct binary ticket from the other frame -- proves the field is read
+        // per-frame, not a constant.
+        Assert.Contains(
+            "Ticket            = 28 fa 82 03 19 2a aa e3 1b f3 4e bb 9c 78 8d 27 33 d1 2d 4f",
+            d);
+
+        // All four AddStrings non-empty (the complement to the empty-FromSystem
+        // frame). The parenthesised FromSector also proves '(' / ')' survive the
+        // ASCII string read intact.
+        Assert.Contains("FromSector        = \"Glenn Sector (Beta Hydri System)\"", d);
+        Assert.Contains("FromSystem        = \"Beta Hydri\"", d);
+        Assert.Contains("ToSector          = \"Asteroid Belt Beta\"", d);
+        Assert.Contains("ToSystem          = \"Sol\"", d);
+
+        Assert.DoesNotContain("[!]", d);
+        Assert.DoesNotContain("overruns", d);
+        Assert.DoesNotContain("truncated", d);
+    }
+
+    [Fact]
+    public void ServerHandoff_PrintableTicket_GetsAsciiGloss()
+    {
+        // Our own server fills the ticket with printable "username-rand" ASCII
+        // (AccountManager.cpp StationAuthEx), unlike retail's random bytes. When
+        // every ticket byte is printable-or-NUL the decoder appends a quoted ASCII
+        // gloss so our server's tickets stay human-readable. Synthesise that case
+        // by overwriting the binary ticket in the capture frame with ASCII.
+        var f = Frames["serverhandoff_friendship7_to_glenn"];
+        byte[] p = (byte[])f.Payload.Clone();
+        byte[] ascii = System.Text.Encoding.ASCII.GetBytes("playername-4242");
+        for (int i = 0; i < 20; i++) p[44 + i] = i < ascii.Length ? ascii[i] : (byte)0;
+        string d = PacketRecord.Resolve((ushort)f.Opcode, p).DumpToString();
+
+        // Hex stays lossless (the trailing NUL pad is shown), and the gloss drops
+        // the NULs to read back the clean name.
+        Assert.Contains(
+            "Ticket            = 70 6c 61 79 65 72 6e 61 6d 65 2d 34 32 34 32 00 00 00 00 00  \"playername-4242\"",
+            d);
+        // The surrounding fields are untouched by the ticket edit.
+        Assert.Contains("ToSector          = \"Glenn\"", d);
     }
 }
