@@ -7582,3 +7582,41 @@ ALSO QUEUED (owner-requested 2026-06-02): rename the MySQL-named DB layer
 (server/src/mysql/, USE_MYSQL_* macros, *SQL.cpp loaders, g_MySQL_* globals) to
 Postgres-neutral names so filenames stop implying MySQL -- it is a libpqxx shim.
 Tracked in plans/09-phase-i-dev-env.md "Deferred" as a pure mechanical rename.
+
+---
+
+## 2026-06-02 -- CI spam-failure: the live-replay ctest was architecturally impossible, not flaky (Phase K Wave 340)
+
+DECISION: the failing `Replay.LivePostHandshakeReplay` (and the deleted
+`MasterJoin.LiveMasterJoinReturnsServerRedirect`) C++ live tests are corrected to
+verify only what a raw byte-replay against a live proxy CAN verify -- handshake
+completes + encrypted post-handshake send path accepted + the proxy does not drop
+the connection -- and the redirect round-trip assertion is removed. The proxy's
+SendMasterLogin retry budget (kHandoffAttempts=30, ~150s) was NOT shortened.
+
+WHY: both tests replay/send a Master_Join carrying a stale retail avatar id that
+has no live in-memory Player on our server. The proxy's UDP handoff therefore can
+never receive a 0x2009 confirm, so the only possible reply is the cold-start
+fallback ServerRedirect emitted only after ~150s -- far past any sane test
+timeout, in BOTH the proxy-only and full-stack jobs. The old premise that
+`NET7_TEST_REAL_MVAS=1` made the opcode round-trip "meaningful" was false: even
+the 150s fallback is opcode 0x36, so an opcode check would be a false-green, not
+proof of MVAS dispatch. The real_mvas gate was inert and was removed (no dead
+code). The session-backed MasterJoin -> ServerRedirect round-trip is properly
+verified with a REAL logged-in avatar by the Phase-T xUnit suite
+(Opcodes/MasterJoinTests.cs), which the C++ harness structurally cannot replicate
+(no login/character/ticket flow). master_join_test.cpp asserted the same
+impossible round-trip with a bogus avatar and was deleted.
+
+INTEGRITY NOTE: NO server/proxy/login wire behaviour changed -- this is a
+test-harness + CI correction only. The proxy's legitimate cold-start retry budget
+is preserved; the test was wrong, not the proxy (CLAUDE.md: "If a tool needs
+something the server doesn't expose, the tool is wrong, not the server").
+Connection-liveness regression coverage is preserved: replay_test still replays a
+real captured Master_Join frame and a clean peer-close (RecvSome==0) stays fatal.
+
+ALSO this turn (same CI sweep): added `libsodium-dev` to the cmake-configure /
+cmake-build CI apt blocks (Phase X had added the dep to CMake + Dockerfiles but
+not CI -- commit 513c4b1a) and restored 8 license headers whose © byte had been
+mojibake'd to U+FFFD by an earlier Read->Edit re-encode (commit f92cc129). Both
+verified green. Commits: 513c4b1a, f92cc129, 9f0f62b8.
