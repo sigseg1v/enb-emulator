@@ -246,6 +246,19 @@ public static class SectorEnterDriver
                     int startId = reply.Payload.Length >= 4
                         ? BinaryPrimitives.ReadInt32LittleEndian(reply.Payload.Span[..4])
                         : 0;
+
+                    // Faithful login completion: the real client replies to
+                    // 0x0005 START with 0x0006 START_ACK. The proxy turns that
+                    // into 0x3004 PLAYER_SHIP_SENT to the server, which is what
+                    // drives Player::FinishLogin -> SetInSpace(true). Without it
+                    // the avatar stays !InSpace forever, so the server's
+                    // UpdatePlayerVisibilityList early-returns and we never see
+                    // (or are seen by) other players in the sector -- even
+                    // though sector chat already works (that path keys off the
+                    // sector player-list, set at HandleSectorLogin3, not InSpace).
+                    // See proxy/ClientToServer_linux_stubs.cpp ENB_OPCODE_0006.
+                    await SendStartAckAsync(conn, startId, ct);
+
                     return (conn, startId, frames);
                 }
             }
@@ -258,6 +271,30 @@ public static class SectorEnterDriver
             await conn.DisposeAsync();
             throw;
         }
+    }
+
+    /// <summary>
+    /// Reply to 0x0005 START with 0x0006 START_ACK, echoing the start id as
+    /// a 4-byte little-endian int (matches PlayerConnection::SendStart's wire
+    /// shape). The server's HandleStartAck ignores the payload; the proxy
+    /// reads the leading int for its log line and -- crucially -- emits
+    /// 0x3004 PLAYER_SHIP_SENT on our behalf, completing the in-space login.
+    /// </summary>
+    public static async Task SendStartAckAsync(
+        EncryptedTcpConnection conn, int startId, CancellationToken ct)
+        => await conn.SendAsync(BuildStartAckPacket(startId), ct);
+
+    /// <summary>
+    /// The 0x0006 START_ACK frame: a single 4-byte little-endian start id,
+    /// echoing the value from the 0x0005 START frame (the on-wire shape the
+    /// real client uses -- see PlayerConnection::SendStart, which writes the
+    /// id as an int32). Exposed for byte-pinning tests.
+    /// </summary>
+    public static Packet BuildStartAckPacket(int startId)
+    {
+        byte[] payload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(payload, startId);
+        return Packet.ForOpcode(OpcodeId.Known.StartAck.Value, payload);
     }
 
     public static Packet BuildLoginPacket(string authTicket, int gameId, int sectorId)

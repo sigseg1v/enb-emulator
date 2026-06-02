@@ -1105,3 +1105,39 @@ number instead of a reason.
       uniqueness rules stay server-authoritative (surfaced via the decoded text).
       Files: `Repl/SectorEnterDriver.cs`, `Repl/Commands/CreateCommand.cs`.
       Tests: +`GlobalErrorMessageTests`. Suite 266->281, all green.
+
+## In-space login: CLI now sends 0x0006 START_ACK (cross-visibility fix, 2026-06-01)
+
+Live-play report: two CLI clients (and the real client) in the same sector saw
+each other's *chat* but `list` showed `0 avatars` and no mobs -- "can't see
+other players". Built a scripted 2-client harness
+(`tools/cli-client/test-two-client-chat.sh`: spawns cli1=c1/chara + cli2=c2/charb
+in sector 1015, each connect/login/enter/chat/list) to repro deterministically.
+
+Root cause (NOT a server bug -- server was faithful): the CLI's sector handshake
+drained to 0x0005 START and returned **without replying 0x0006 START_ACK**. The
+real client always acks START; the proxy turns that ack into 0x3004
+PLAYER_SHIP_SENT (`proxy/ClientToServer_linux_stubs.cpp` ENB_OPCODE_0006), which
+drives server `FinishLogin` -> `SetInSpace(true)`. With no START_ACK the avatar
+stays `!InSpace`, so `RunPlayerUpdate` skips the in-space block and
+`UpdatePlayerVisibilityList` early-returns -- the avatar is in nobody's range
+list (no players, no mobs visible, and invisible to others). Sector chat still
+worked because `BroadcastChat` keys off the sector player-list (set at
+HandleSectorLogin3 "fully logged in"), not the range list. The proxy already
+auto-acks the 0x2020/0x2021 login *stages*, so login reached "fully logged in"
+without the CLI; only START_ACK was missing. See memory
+`project_inspace-startack-visibility`.
+
+- [x] `SectorEnterDriver.DoSectorLoginUntilStartAsync` now sends 0x0006
+      START_ACK on seeing 0x0005 START, via new pure `BuildStartAckPacket(int)`
+      / `SendStartAckAsync`. START_ACK echoes the start id as 4-byte LE (matches
+      `PlayerConnection::SendStart` int32 wire shape).
+- [x] Verified end-to-end on the live stack: both clients' `list` now report
+      `(1 avatars, 2 navs)` showing the OTHER char by name at d=0.0, AND the mob
+      spawns (Needlenose lvl 5) that were previously invisible -- the whole
+      in-space awareness loop was gated on InSpace. Harness asserts chat both
+      ways + `>=1 avatars` both ways; all 4 PASS.
+- [x] Byte-pinned the frame in `StartAckPacketTests` (opcode 0x0006, 4-byte LE
+      start id, full wire `08 00 06 00 <id LE>`, round-trip preservation).
+      Files: `Repl/SectorEnterDriver.cs`, `test-two-client-chat.sh`,
+      `tests/.../StartAckPacketTests.cs`. Suite 281->288, all green.
