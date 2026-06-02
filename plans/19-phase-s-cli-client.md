@@ -1370,3 +1370,67 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       and a content-pinning test for both effects' strings, the BE-float DescVars
       (5460.0, 27.5), flags, the 16-byte filler, and the honest `????` field
       0x1E. Commit 2eebc361. Suite 347->348.
+
+### Captures-to-CLI decode sweep (continued)
+
+- [x] Full decode survey across ALL 36 registered records over the 99,804-frame
+      corpus (harness re-run on the true `(NB)` undecoded-byte marker, not
+      incidental `?`): EVERY record fully consumes every real capture frame. The
+      ONLY non-clean results are AuxDataRecord's 2824 honest `[!] PARTIAL`
+      version-1 diff tails (already deferred) and ItemBase's 1 corrupt-duplicate
+      frame (working as intended). No decoder has a real gap -- so the remaining
+      captures-to-CLI work is TEST COVERAGE, not decoder bugs.
+- [x] ServerHandoff 0x3A: rendered the 20-byte Ticket as lossless hex (was a
+      lossy `?`-string via ReadNulString that also truncated at the first NUL),
+      with an ASCII gloss when all-printable (our server's "username-rand"
+      tickets per AccountManager.cpp). Added two capture_1.rar fixtures (#646
+      Friendship 7 -> Glenn with empty FromSystem + binary ticket; #3086 Glenn ->
+      Asteroid Belt Beta fully-populated quartet) + a synthetic printable-ticket
+      gloss test. Pins the BE-on-wire ToSectorID/FromSectorID trap. Commit
+      f2344a75. Suite 348->351.
+- [x] 0x36 ServerRedirect (THE historical ntohl crash packet): pinned two
+      capture_1.rar frames (#656 sector 4515, #3097 sector 1077) + a byte-order
+      regression lock proving ServerRedirect's LE SectorID and the paired
+      ServerHandoff's BE ToSectorID decode to the same sector. Commit 684b3334.
+      Suite 351->354.
+- [x] 0x3E AdvancedPositionalUpdate (40772 frames, most common packet): pinned
+      minimal (Bitmask 0x0000) + maximal (0x01FF, every conditional incl.
+      ImpartedVelocity block + UpdatePeriod) frames. Commit 6144a650. Suite
+      354->356.
+- [x] 0xA5 ClientChatEvent: pinned join (#556 'Ace' on General, empty message,
+      dual-LastName quirk) + a 141-char Market WTB broadcast (#17943) + a
+      TryExtract round-trip. Suite 356->359.
+- [x] 0x04 Create / 0x19 SetTarget / 0x07 Remove: pinned 3 Create
+      (#370/#376/#849, incl. BaseAsset 0xFFFF unsigned discipline + Scale 0.25
+      fractional), 2 SetTarget (clear sentinel + GameID-0 edge; corpus has zero
+      real-target frames so a synthetic live-target test proves the gloss fires
+      only for 0xFFFFFFFF), 2 Remove. Create #370 GameID 0x06EE13DE cross-links
+      the AdvPos minimal frame. Commit 5892f61e. Suite 359->368.
+- [x] 0x09 ObjectEffect / 0x0F RemoveEffect / 0x40 ConstantPos: pinned 2
+      ObjectEffect (bitmask 0x03 corpus frames + a synthetic bitmask-0x7F that
+      locks the conditional offset math, incl. the u16 Duration), 2 RemoveEffect,
+      3 ConstantPos (origin identity-quat, real position, non-identity rotation).
+      CrossOpcode GameID agreement Create/AdvPos/ObjectEffect (0x06EE13DE) and
+      Create/ConstantPos (0x06EE13F7). Commit 31aaba75. Suite 368->377.
+- [x] 0x92 CameraControl DECODER BUG FIX: read Message+GameID as host-LE; both
+      are BE on the wire (every Player::SendCameraControl caller pre-swaps --
+      ntohl(GameID) + pre-swapped Message literal). Proof: object 0x000001C2
+      (==450) correlates across CameraControl #1712 / SetTarget #1368 / VerbUpdate
+      #1372; a LE read gives 0xC2010000 (no object). Same ntohl trap class as the
+      ServerRedirect crash. Also tidied VerbUpdate's ugly "DIS_TOOFAR= Verb"
+      label. Pinned 2 VerbUpdate (BE GameID+Counts, LE int16 entries; empty pass +
+      both passes), 2 CameraControl, 2 Navigation (packed 14B, unaligned int32
+      NavType at offset 9). Commit 0865a585. Suite 377->384.
+- [x] 0x10 Decal / 0xB2 NameDecal / 0xB4 Subparts / 0x9C WarpIndex: pinned 2
+      Decal (24B item stride), 2 NameDecal (incl. tinted RGB 0.89/0.592/0.341 +
+      ship name "Revenge of the Jenquai"), 1 Subparts (4 variable-length bone
+      paths, BE GameID), 2 WarpIndex (index + -1 sentinel). Subparts stores
+      0x06EE13DE big-endian while Create stores it LE -- now SIX decoders agree on
+      that object's id across mixed endianness (CrossOpcode_Object06EE13DE). Commit
+      0d9fae9f. Suite 384->392.
+- [ ] Long-tail records still unpinned (all <=10 frames in capture_1, lower
+      value/higher edge-case risk): 0x05 Start, 0x08 SimplePos, 0x37 ClientAvatar,
+      0x3C ClientType, 0x3F PlanetPos, 0x42 ServerParameters, 0x47 ClientShip,
+      0x4F StarbaseSet, 0x7F ManufactureSetManufactureId. Zero in capture_1 (may
+      be in other captures): 0x52 LoungeNpc, 0x6F GlobalTicket, 0xD0
+      GuildMessageSector. Pin the ones that decode a real frame cleanly.
