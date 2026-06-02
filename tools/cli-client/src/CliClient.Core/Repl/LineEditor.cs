@@ -31,15 +31,17 @@ public sealed class LineEditor : ILineInput
     private readonly Func<IReadOnlyList<CommandSpec>> _specs;
     private readonly int _pollMs;
     private readonly IKeySource? _keys;
+    private readonly LivePrompt? _live;
 
-    public LineEditor(Func<IReadOnlyList<CommandSpec>> specs, int pollMs = 15)
-        : this(specs, null, pollMs) { }
+    public LineEditor(Func<IReadOnlyList<CommandSpec>> specs, LivePrompt? live = null, int pollMs = 15)
+        : this(specs, null, live, pollMs) { }
 
     // Test seam: inject a deterministic key source instead of the console.
-    internal LineEditor(Func<IReadOnlyList<CommandSpec>> specs, IKeySource? keys, int pollMs = 15)
+    internal LineEditor(Func<IReadOnlyList<CommandSpec>> specs, IKeySource? keys, LivePrompt? live = null, int pollMs = 15)
     {
         _specs = specs ?? throw new ArgumentNullException(nameof(specs));
         _keys = keys;
+        _live = live;
         _pollMs = pollMs;
     }
 
@@ -73,6 +75,10 @@ public sealed class LineEditor : ILineInput
         string preMenu = string.Empty;
         int promptLen = VisibleLength(prompt);   // exclude ANSI bytes from column math
 
+        // Let async writers (chat echo from the sector drain) interleave above
+        // the prompt without clobbering it for the life of this line.
+        _live?.Activate(output);
+
         Render(prompt, promptLen, buffer, cursor, inMenu, menu, menuIndex, output);
 
         while (true)
@@ -81,6 +87,7 @@ public sealed class LineEditor : ILineInput
             if (next is null)
             {
                 // Cancelled, EOF, or the console went away -- give up cleanly.
+                _live?.Deactivate();
                 output.WriteLine();
                 output.Flush();
                 return null;
@@ -97,6 +104,9 @@ public sealed class LineEditor : ILineInput
                         inMenu = false;
                         break;
                     }
+                    // Stop coordinating before the final draw so a concurrent
+                    // async write takes the plain path past the committed line.
+                    _live?.Deactivate();
                     // Final clean draw (no ghost), then newline + return.
                     output.Write('\r');
                     output.Write("\x1b[2K");
@@ -298,13 +308,17 @@ public sealed class LineEditor : ILineInput
                 sb.Append(ColorGhost(text, ghostFit, inMenu));
         }
 
-        output.Write(sb.ToString());
-
         // Park the real cursor at promptLen + cursor (past the grey ghost).
-        output.Write('\r');
+        // Folded into the same sequence so the whole prompt line is one atomic
+        // write -- which is also exactly what LivePrompt replays to restore the
+        // line after printing an async chat line above it.
+        sb.Append('\r');
         int col = promptLen + cursor;
-        if (col > 0) output.Write($"\x1b[{col}C");
-        output.Flush();
+        if (col > 0) sb.Append($"\x1b[{col}C");
+
+        string composed = sb.ToString();
+        if (_live is not null) _live.Emit(output, composed);
+        else { output.Write(composed); output.Flush(); }
     }
 
     /// <summary>

@@ -179,6 +179,14 @@ public sealed class SessionContext : IAsyncDisposable
     /// <summary>Where chat echo lines go. Defaults to <see cref="Console.Out"/>.</summary>
     public TextWriter ChatOutput { get; set; } = Console.Out;
 
+    /// <summary>
+    /// Optional coordinator with the interactive <see cref="LineEditor"/>. When
+    /// set and a prompt is on screen, chat echo is printed *above* the prompt
+    /// (which is then redrawn) instead of clobbering the line the user is typing
+    /// on. Null on the non-interactive path -- chat then writes plainly.
+    /// </summary>
+    public LivePrompt? LivePrompt { get; set; }
+
     private readonly object _chatGate = new();
 
     private CancellationTokenSource? _dumpDrainCts;
@@ -417,6 +425,10 @@ public sealed class SessionContext : IAsyncDisposable
             incoming ? AnsiPalette.Green : AnsiPalette.BrightCyan, line);
         lock (_chatGate)
         {
+            // When the interactive editor has a prompt on screen, slot the chat
+            // line in above it and let the prompt redraw beneath; otherwise
+            // (piped output, between lines, mid-command) write it plainly.
+            if (LivePrompt is { } lp && lp.TryWriteLineAbove(colored)) return;
             ChatOutput.WriteLine(colored);
             ChatOutput.Flush();
         }

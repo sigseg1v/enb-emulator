@@ -1141,3 +1141,36 @@ without the CLI; only START_ACK was missing. See memory
       start id, full wire `08 00 06 00 <id LE>`, round-trip preservation).
       Files: `Repl/SectorEnterDriver.cs`, `test-two-client-chat.sh`,
       `tests/.../StartAckPacketTests.cs`. Suite 281->288, all green.
+
+## Async chat no longer clobbers the prompt line (2026-06-01)
+
+The chat echo fires from the background sector-drain thread
+(`SessionContext.OnPacketReceived` -> `EchoChat` -> `WriteChatLine`). The
+interactive `LineEditor` draws prompt+buffer+grey-ghost on one line and parks
+the cursor there, then blocks polling for a key. A chat frame arriving in that
+window was written straight to the console, so it fused onto / appeared to
+prepend the line being typed ("the chat msg overwrites my prompt completion").
+
+- [x] New `Repl/LivePrompt.cs`: a thread-safe coordinator shared by the editor
+      and the session. The editor publishes (on every render) the exact escape
+      sequence that redraws its current prompt line; `TryWriteLineAbove(text)`
+      -- under the same lock the editor renders under -- erases the prompt line,
+      prints the message on its own line, then replays the redraw so the prompt
+      reappears untouched beneath. Returns false when no interactive prompt is
+      active (piped output / between lines / mid-command) so the caller writes
+      plainly. Non-TTY path is unchanged (never Activated).
+- [x] `LineEditor` Activates/Deactivates the coordinator per line and folds the
+      cursor-park into the single composed render string it emits through it.
+      `SessionContext.WriteChatLine` routes through `LivePrompt.TryWriteLineAbove`
+      first, plain `ChatOutput.WriteLine` fallback, all under `_chatGate`.
+      `Program.cs` builds one `LivePrompt`, hands it to the editor and the
+      session.
+- [x] Tests `LivePromptTests` (7): inactive->false, active-but-unrendered->false,
+      erase+print+redraw byte-pin, message-on-own-line (not fused), deactivate->
+      false, reactivate-without-render->no stale replay, and an editor
+      integration test that injects an async write in the real blocked-on-key
+      window and asserts it lands above the rendered prompt. Suite 288->295.
+- [x] Live 2-client harness re-run on the rebuilt CLI image: chat both ways +
+      `>=1 avatars` both ways, all 4 PASS, exit 0 (non-TTY path unaffected).
+      Files: `Repl/LivePrompt.cs`, `Repl/LineEditor.cs`, `Repl/SessionContext.cs`,
+      `CliClient.App/Program.cs`, `tests/.../LivePromptTests.cs`.

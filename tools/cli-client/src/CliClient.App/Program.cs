@@ -59,13 +59,18 @@ if (args[0] is "repl" or "start")
         && authPortEnv > 0 && authPortEnv <= 65535)
         sessionCtx.AuthPort = authPortEnv;
 
+    // Shared coordinator so async chat echo (from the sector drain thread)
+    // prints above the prompt instead of clobbering the line being typed.
+    var livePrompt = new LivePrompt();
+    sessionCtx.LivePrompt = livePrompt;
+
     // The line editor needs the live command set (for context-aware
     // completion); the repl needs the editor at construction. Break the
     // cycle with a captured local the editor's callback reads at run time.
     Repl repl = null!;
     var editor = new LineEditor(() => repl.Commands
         .Select(h => new CommandSpec(h.Name, h.Available, h.Placeholder, h.Priority))
-        .ToList());
+        .ToList(), livePrompt);
     // State-aware, coloured prompt: tracks offline -> connected -> user ->
     // user@sector. Plain automatically when colour is off (piped/NO_COLOR).
     string Prompt() =>
@@ -323,7 +328,7 @@ static void PrintHelp()
                             [--global-host h] [--global-port p] [--strict-tls]
                             log in, connect, send one ClientChat packet, exit.
                             NOTE: server expects --game-id to match the avatar
-                            currently attached to the session — Phase K's avatar
+                            currently attached to the session -- Phase K's avatar
                             handoff must be live for this to do anything visible.
 
         hard rules (see plans/19-phase-s-cli-client.md):
