@@ -316,3 +316,48 @@ hex: 03 00 00 00 00 00 00 00 08 00 53 63 72 61 62 62
       68 65 20 67 65 6d 73 74 6f 6e 65 73 20 61 6e 64
       20 74 68 61 74 27 73 20 61 6c 6c 20 49 27 64 20
       6e 65 65 64 2e 00 00 00 00 00 00
+
+[create_friendship_06ee13de]
+provenance: Create 0x04 -- spawns object GameID 0x06EE13DE (capture_1.rar, Packet #370, Length=27). Scale 1.0, BaseAsset 0x0650, Type 1, HSV (0,0,0). This GameID is the SAME object the advpos_minimal_bitmask0 fixture (Packet #372) then position-updates -- a Create-then-move cross-validation across two opcodes in the same capture.
+opcode: 0x04
+payload-bytes: 23
+hex: de 13 ee 06 00 00 80 3f 50 06 01 00 00 00 00 00
+      00 00 00 00 00 00 00
+
+[create_asset_ffff_type39]
+provenance: Create 0x04 -- GameID 0x06EE13F7 (capture_1.rar, Packet #376, Length=27). BaseAsset 0xFFFF (the all-bits sentinel) and Type 39 (0x27). Pins the unsigned-short BaseAsset reading 65535 rather than -1, and a non-1 Type.
+opcode: 0x04
+payload-bytes: 23
+hex: f7 13 ee 06 00 00 80 3f ff ff 27 00 00 00 00 00
+      00 00 00 00 00 00 00
+
+[create_scaled_quarter]
+provenance: Create 0x04 -- GameID 0x00000086 (capture_1.rar, Packet #849, Length=27). Scale 0.25 (float 0x3E800000, wire 00 00 80 3e) -- the only non-1.0 scale in the corpus 0x04 frames. BaseAsset 0x0614, Type 37. Proves the float Scale slot decodes a fractional value, not just 1.0.
+opcode: 0x04
+payload-bytes: 23
+hex: 86 00 00 00 00 00 80 3e 14 06 25 00 00 00 00 00
+      00 00 00 00 00 00 00
+
+[settarget_clear_basic]
+provenance: SetTarget 0x19 -- GameID 0x000001C2 clears its target (capture_1.rar, Packet #1368, Length=12). TargetID 0xFFFFFFFF is the no-target sentinel; every 0x19 frame in the corpus carries it (the player only ever deselects, never selects, in this capture). Pins the "(no target)" gloss.
+opcode: 0x19
+payload-bytes: 8
+hex: c2 01 00 00 ff ff ff ff
+
+[settarget_clear_gameid0]
+provenance: SetTarget 0x19 -- GameID 0x00000000 clears its target (capture_1.rar, Packet #3756, Length=12). Edge case: a zero GameID is left as-is (not flagged), TargetID 0xFFFFFFFF -> "(no target)". Guards against a decoder that special-cases GameID 0.
+opcode: 0x19
+payload-bytes: 8
+hex: 00 00 00 00 ff ff ff ff
+
+[remove_obj_355a56]
+provenance: Remove 0x07 -- despawns GameID 0x00355A56 (capture_1.rar, Packet #977, Length=8). The whole 4-byte body is one little-endian GameID; pins the LE read (wire 56 5a 35 00 -> 0x00355A56).
+opcode: 0x07
+payload-bytes: 4
+hex: 56 5a 35 00
+
+[remove_obj_163d32]
+provenance: Remove 0x07 -- despawns GameID 0x00163D32 (capture_1.rar, Packet #1459, Length=8). Second Remove sample with a distinct GameID so the fixture isn't single-witness.
+opcode: 0x07
+payload-bytes: 4
+hex: 32 3d 16 00

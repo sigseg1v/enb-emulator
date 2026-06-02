@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllTwentySixFrames()
+    public void Fixture_Loads_AllThirtyThreeFrames()
     {
-        Assert.Equal(26, Frames.Count);
+        Assert.Equal(33, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -85,6 +85,20 @@ public sealed class RetailRecordDecodeTests
         Assert.Equal(37, Frames["chatevent_join_general"].Payload.Length);
         Assert.Equal(0xA5, Frames["chatevent_market_wtb"].Opcode);
         Assert.Equal(187, Frames["chatevent_market_wtb"].Payload.Length);
+        Assert.Equal(0x04, Frames["create_friendship_06ee13de"].Opcode);
+        Assert.Equal(23, Frames["create_friendship_06ee13de"].Payload.Length);
+        Assert.Equal(0x04, Frames["create_asset_ffff_type39"].Opcode);
+        Assert.Equal(23, Frames["create_asset_ffff_type39"].Payload.Length);
+        Assert.Equal(0x04, Frames["create_scaled_quarter"].Opcode);
+        Assert.Equal(23, Frames["create_scaled_quarter"].Payload.Length);
+        Assert.Equal(0x19, Frames["settarget_clear_basic"].Opcode);
+        Assert.Equal(8, Frames["settarget_clear_basic"].Payload.Length);
+        Assert.Equal(0x19, Frames["settarget_clear_gameid0"].Opcode);
+        Assert.Equal(8, Frames["settarget_clear_gameid0"].Payload.Length);
+        Assert.Equal(0x07, Frames["remove_obj_355a56"].Opcode);
+        Assert.Equal(4, Frames["remove_obj_355a56"].Payload.Length);
+        Assert.Equal(0x07, Frames["remove_obj_163d32"].Opcode);
+        Assert.Equal(4, Frames["remove_obj_163d32"].Payload.Length);
     }
 
     // ── ItemBase 0x25 ────────────────────────────────────────────────────────
@@ -812,5 +826,143 @@ public sealed class RetailRecordDecodeTests
         Assert.StartsWith("WTB Warp Kazas", ev.Value.Message);
         Assert.EndsWith("all I'd need.", ev.Value.Message);
         Assert.Equal("", ev.Value.OtherPlayer);
+    }
+
+    // ── Create 0x04 ──────────────────────────────────────────────────────────
+    // Spawn an object: int32 GameID, float Scale, u16 BaseAsset, byte Type, then
+    // three floats of HSV tint. 23 bytes, fixed. The fields are small and fixed,
+    // so the point of pinning is the type discipline -- Scale as a float (not an
+    // int), BaseAsset as an unsigned short (0xFFFF reads 65535, not -1), and the
+    // HSV triple landing on the last 12 bytes.
+
+    [Fact]
+    public void Create_Friendship_DecodesGameIdScaleAssetType()
+    {
+        string d = Dump("create_friendship_06ee13de");
+
+        Assert.Contains("GameID            = 0x06EE13DE", d);
+        Assert.Contains("Scale             = 1.0", d);
+        Assert.Contains("BaseAsset         = 0x0650  (1616)", d);
+        Assert.Contains("Type              = 1", d);
+        Assert.Contains("HSV               = (0.0, 0.0, 0.0)", d);
+        // All 23 bytes consumed -- no trailing gap.
+        Assert.DoesNotContain("(NB)", d);
+        Assert.DoesNotContain("truncated", d);
+    }
+
+    [Fact]
+    public void Create_AssetSentinel_ReadsBaseAssetUnsigned()
+    {
+        string d = Dump("create_asset_ffff_type39");
+
+        Assert.Contains("GameID            = 0x06EE13F7", d);
+        // 0xFFFF must read as 65535 (unsigned short), NOT -1. A signed read here
+        // would mislabel the asset id and break the asset lookup.
+        Assert.Contains("BaseAsset         = 0xFFFF  (65535)", d);
+        Assert.DoesNotContain("(-1)", d);
+        Assert.Contains("Type              = 39", d);
+        Assert.DoesNotContain("(NB)", d);
+    }
+
+    [Fact]
+    public void Create_ScaledQuarter_DecodesFractionalScale()
+    {
+        string d = Dump("create_scaled_quarter");
+
+        Assert.Contains("GameID            = 0x00000086", d);
+        // Scale is a real float: 0x3E800000 == 0.25, not the 1.0 every other
+        // sample carries. Proves the slot is read as f32, not skipped as a const.
+        Assert.Contains("Scale             = 0.25", d);
+        Assert.Contains("BaseAsset         = 0x0614  (1556)", d);
+        Assert.Contains("Type              = 37", d);
+        Assert.DoesNotContain("(NB)", d);
+    }
+
+    [Fact]
+    public void Create_And_AdvPos_AgreeOnGameId()
+    {
+        // Cross-opcode validation in the same capture: object 0x06EE13DE is first
+        // spawned by Create (Packet #370) and then position-updated by
+        // AdvancedPositionalUpdate (Packet #372). Both decoders must read the same
+        // GameID from the same 4 little-endian bytes -- if either had the wrong
+        // offset or endianness, the ids would not match and the two packets could
+        // never be correlated into one object's lifecycle.
+        var create = PacketRecord.Resolve(
+            (ushort)0x04, Frames["create_friendship_06ee13de"].Payload).DumpToString();
+        var advpos = PacketRecord.Resolve(
+            (ushort)0x3E, Frames["advpos_minimal_bitmask0"].Payload).DumpToString();
+        Assert.Contains("GameID            = 0x06EE13DE", create);
+        Assert.Contains("GameID            = 0x06EE13DE", advpos);
+    }
+
+    // ── SetTarget 0x19 ───────────────────────────────────────────────────────
+    // int32 GameID, int32 TargetID, both little-endian, no byte-swap. TargetID
+    // 0xFFFFFFFF is the "no target" sentinel. Every 0x19 frame in the corpus
+    // carries it (this capture's player only deselects, never selects), so the
+    // real frames pin the clear path and a synthetic frame pins the live-target
+    // path -- the gloss must appear for the sentinel and ONLY the sentinel.
+
+    [Fact]
+    public void SetTarget_Clear_DecodesNoTargetSentinel()
+    {
+        string d = Dump("settarget_clear_basic");
+
+        Assert.Contains("GameID            = 0x000001C2", d);
+        Assert.Contains("TargetID          = 0xFFFFFFFF  (-1)  (no target)", d);
+        Assert.DoesNotContain("(NB)", d);
+        Assert.DoesNotContain("truncated", d);
+    }
+
+    [Fact]
+    public void SetTarget_GameIdZero_IsNotSpecialCased()
+    {
+        // A zero GameID is a legitimate value and must decode as 0x00000000 with
+        // no flag -- guards against a decoder that treats 0 as "missing".
+        string d = Dump("settarget_clear_gameid0");
+
+        Assert.Contains("GameID            = 0x00000000", d);
+        Assert.Contains("TargetID          = 0xFFFFFFFF  (-1)  (no target)", d);
+        Assert.DoesNotContain("[!]", d);
+        Assert.DoesNotContain("(NB)", d);
+    }
+
+    [Fact]
+    public void SetTarget_LiveTarget_HasNoNoTargetGloss()
+    {
+        // No corpus frame selects a real target, so synthesise one: keep the
+        // real GameID, set TargetID to a real object id (0x005A0499). The
+        // "(no target)" gloss must NOT appear -- it is reserved for 0xFFFFFFFF.
+        var f = Frames["settarget_clear_basic"];
+        byte[] p = (byte[])f.Payload.Clone();
+        p[4] = 0x99; p[5] = 0x04; p[6] = 0x5A; p[7] = 0x00;   // TargetID = 0x005A0499 LE
+        string d = PacketRecord.Resolve((ushort)f.Opcode, p).DumpToString();
+
+        Assert.Contains("TargetID          = 0x005A0499", d);
+        Assert.DoesNotContain("(no target)", d);
+        Assert.DoesNotContain("(NB)", d);
+    }
+
+    // ── Remove 0x07 ──────────────────────────────────────────────────────────
+    // Despawn an object. The whole 4-byte body is one little-endian GameID.
+
+    [Fact]
+    public void Remove_DecodesGameIdLittleEndian()
+    {
+        string d = Dump("remove_obj_355a56");
+
+        // Wire bytes 56 5a 35 00 -> 0x00355A56. A big-endian read would yield
+        // 0x565A3500 and despawn the wrong object.
+        Assert.Contains("GameID            = 0x00355A56", d);
+        Assert.DoesNotContain("(NB)", d);
+        Assert.DoesNotContain("truncated", d);
+    }
+
+    [Fact]
+    public void Remove_SecondSample_DecodesDistinctGameId()
+    {
+        string d = Dump("remove_obj_163d32");
+
+        Assert.Contains("GameID            = 0x00163D32", d);
+        Assert.DoesNotContain("(NB)", d);
     }
 }
