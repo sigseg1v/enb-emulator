@@ -701,8 +701,7 @@ void Resource::FormStaticPacket()
 	AddData(msg, (short)BaseAsset(), index); 
 	AddData(msg, Scale(), index); 
 	AddData(msg, HSV0(), index);  
-	//AddData(msg, HSV1(), index);  //I don't think we'll ever need these
-	//AddData(msg, HSV2(), index); 
+	AddData(msg, HSV1(), index);  // 2nd HSV channel -- retail resource_create sends it (value 0); HSV2 not sent for resources
 	AddData(msg, PosX(), index);        
 	AddData(msg, PosY(), index);        
 	AddData(msg, PosZ(), index);        

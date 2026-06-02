@@ -183,4 +183,26 @@ public sealed class LiveTraceDecodeTests
         Assert.Contains("TractorSpeed      = 350.0", d);
         Assert.Contains("Position", d);
     }
+
+    // ── 0x2019 RESOURCE_OBJECT_CREATE -- two HSV channels before position ─────
+    // The @14 float is 0.0 in every sampled frame, so it cannot be a position
+    // coordinate -- it is the 2nd HSV channel (HSV1). The retail layout is
+    // Scale + HSV0 + HSV1 + Pos(3) + Orient(4). Our Resource::FormStaticPacket
+    // originally had the HSV1 emit commented out, dropping this float and
+    // shifting the whole tail; the server was fixed to un-comment it. This pins
+    // HSV1 as a distinct field and the position landing AFTER it (X is the large
+    // ~49370 coordinate, not the 0.0 that the pre-fix mislabelling produced).
+    [Fact]
+    public void ResourceObjectCreate_Asteroid_DecodesTwoHsvChannelsThenPosition()
+    {
+        string d = Dump("resource_obj_00");
+
+        Assert.Contains("Scale             = 1.0", d);
+        Assert.Contains("HSV0              = 20.0", d);
+        Assert.Contains("HSV1              = 0.0", d);
+        Assert.Contains("Position          = (49370.6, 283.1, 885)", d);
+        Assert.Contains("NameLen           = 8", d);
+        Assert.Contains("Name              = \"Asteroid\"", d);
+        Assert.DoesNotContain("Extra", d);
+    }
 }
