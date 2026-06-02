@@ -1204,3 +1204,39 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       `SelfSpeed` (drives the flight step size) and an unknown/no-aux object
       returns null. Extended the existing `ShipAux` helper non-breakingly with an
       optional flag-13 MaxSpeed field. Suite 315->326.
+
+### Retail-capture decode validation: records cross-checked vs capture_3 (2026-06-01)
+
+- [x] Ran the `PacketRecord` decode path (the REPL `dump` view) over real frames
+      pulled from `archive/kyp-snapshot/capturedPackets/capture_3.rar` -- the same
+      "feed retail bytes in, see if they make sense" method that got the item
+      codec right. Wrote a throwaway harness against `CliClient.Core` to extract +
+      decode every frame of the high-value opcodes. Findings (all decode to
+      sensible content): ItemBase 0x25 fully decodes real ore/device items
+      ("Sand"->"Refines to: Silicon", "Chemical Resistance Item C" with the live
+      ActEffect tooltip); Aux 0x1B ShipIndex yields real mob names+CombatLevel
+      ("Starbase Guardian Turret" lvl 66, "Shinwa Patrol Cruiser" lvl 25); Aux
+      Harvestable yields nav/resource names ("Sector Gate to Jupiter", "Halon");
+      GalaxyMap 0x97 -> "Sol"/"Io"/"Nishino Research Facility"; MessageString 0x1D,
+      Relationship 0x89, AvatarDescription 0x61 ("Ace" + full appearance) all clean.
+- [x] Pinned 10 COMPLETE retail frames as fixtures (`Captures/fixtures/
+      capture3-records.txt`) + content tests (`Captures/RetailRecordDecodeTests.cs`,
+      11): each frame verified complete (dump "Length = N" == payload+4, and Aux
+      BodyLen == payload-6) so a future failure is the decoder, never a truncated
+      fixture. Asserts decoded VALUES (quoted strings, not the raw ASCII gutter):
+      two ItemBase ores incl. Name/Description/MaxStack/Flags/TechLevel/Cost, two
+      ShipIndex (summary + dump agree on Name+CombatLevel+HullPoints), two
+      Harvestable, GalaxyMap system/sector/station, MessageString docking banner
+      (color 5), Relationship ObjectID/Reaction/IsAttacking, AvatarDescription
+      Name/Race/Profession/appearance. Suite 326->337.
+- [!] **Aux 0x1B schema-catalog gap (real, not noise).** Of 5063 COMPLETE Aux
+      frames in capture_3 (108 more are dump-truncated and excluded), only 2450
+      (48.4%) decode via an EXACT schema-walk. Breakdown of the rest: 1325 match
+      NO schematised candidate (fall to the AddString scanner -- likely husk/loot/
+      effect Aux classes we have not ported from server/src/AuxClasses/*); ~1270
+      START matching but diverge mid-walk (464 Harvestable, 451 ShipIndex-extended,
+      355 ShipIndex). The names/levels we DO extract are correct; the gap is
+      breadth of schema coverage, not correctness of the existing four schemas.
+      FOLLOW-UP: port the missing AuxClasses BuildPacket layouts into `AuxSchemas`
+      and audit the Harvestable/ShipIndex field lists against captures (each new
+      schema validated by an exact-consumption count rising on the real corpus).

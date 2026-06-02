@@ -1,0 +1,111 @@
+# Retail capture fixtures -- DECODE path (PacketRecord.DumpToString), not codecs.
+# Verbatim DECRYPTED opcode bodies (the 4-byte size+opcode header already
+# stripped) pulled from archive/kyp-snapshot/capturedPackets/capture_3.rar.
+# Each frame is COMPLETE: the dump's "Length = N bytes" line equals payload+4,
+# and for Aux frames the on-wire BodyLen field equals payload-6. Consumed by
+# RetailRecordDecodeTests. See capture3-frames.txt for the file format.
+
+[itembase_sand]
+provenance: ItemBase 0x25 -- refinable ore 'Sand' (ItemTemplateID 0x167) (capture_3.rar)
+opcode: 0x25
+payload-bytes: 98
+hex: 00 00 01 67 ff ff ff ff ff ff ff ff 0d 00 00 00
+      02 0d 00 00 00 08 00 4c 65 76 65 6c 20 31 00 11
+      00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+      77 05 d1 00 01 00 00 00 07 00 00 01 2c 00 00 00
+      00 80 00 00 00 04 00 53 61 6e 64 13 00 52 65 66
+      69 6e 65 73 20 74 6f 3a 20 53 69 6c 69 63 6f 6e
+      00 00
+
+[itembase_oxium_ore]
+provenance: ItemBase 0x25 -- refinable ore 'Oxium Ore' (ItemTemplateID 0x4FB) (capture_3.rar)
+opcode: 0x25
+payload-bytes: 101
+hex: 00 00 04 fb ff ff ff ff ff ff ff ff 0d 00 00 00
+      02 0d 00 00 00 08 00 4c 65 76 65 6c 20 36 00 11
+      00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+      71 05 cb 00 06 00 00 02 f2 00 00 01 2c 00 00 00
+      00 80 00 00 00 09 00 4f 78 69 75 6d 20 4f 72 65
+      11 00 52 65 66 69 6e 65 73 20 74 6f 3a 20 4f 78
+      69 75 6d 00 00
+
+[aux_ship_turret]
+provenance: Aux 0x1B ShipIndex -- 'Starbase Guardian Turret' CombatLevel 66 (capture_3.rar)
+opcode: 0x1B
+payload-bytes: 69
+hex: 6f 0a 00 00 3f 00 01 16 30 00 40 00 00 08 80 03
+      00 be 40 f8 d0 07 18 00 53 74 61 72 62 61 73 65
+      20 47 75 61 72 64 69 61 6e 20 54 75 72 72 65 74
+      80 d8 a0 48 80 d8 a0 48 42 00 00 00 05 05 05 05
+      05 00 00 00 00
+
+[aux_ship_cruiser]
+provenance: Aux 0x1B ShipIndex -- 'Shinwa Patrol Cruiser' CombatLevel 25 (capture_3.rar)
+opcode: 0x1B
+payload-bytes: 75
+hex: 02 0b 00 00 45 00 01 16 30 80 40 10 00 0c 80 03
+      00 bc 00 f8 c0 07 15 00 53 68 69 6e 77 61 20 50
+      61 74 72 6f 6c 20 43 72 75 69 73 65 72 00 c0 84
+      44 00 c0 84 44 00 19 00 00 00 02 00 00 00 05 05
+      05 05 05 01 00 00 00 00 00 00 00
+
+[aux_harvestable_gate]
+provenance: Aux 0x1B Harvestable -- nav 'Sector Gate to Jupiter' (capture_3.rar)
+opcode: 0x1B
+payload-bytes: 32
+hex: 24 0a 00 00 1a 00 01 12 16 00 53 65 63 74 6f 72
+      20 47 61 74 65 20 74 6f 20 4a 75 70 69 74 65 72
+
+[aux_harvestable_halon]
+provenance: Aux 0x1B Harvestable -- resource node 'Halon' (capture_3.rar)
+opcode: 0x1B
+payload-bytes: 15
+hex: 61 e2 84 00 09 00 01 12 05 00 48 61 6c 6f 6e
+
+[galaxymap_sol_io]
+provenance: GalaxyMap 0x97 -- Sol / Io / Nishino Research Facility (capture_3.rar)
+opcode: 0x97
+payload-bytes: 49
+hex: 04 00 00 00 29 00 00 00 1e 14 00 00 53 6f 6c 00
+      49 6f 00 4e 69 73 68 69 6e 6f 20 52 65 73 65 61
+      72 63 68 20 46 61 63 69 6c 69 74 79 00 77 01 00
+      00
+
+[messagestring_docking]
+provenance: MessageString 0x1D -- docking banner (green, color 5) (capture_3.rar)
+opcode: 0x1D
+payload-bytes: 81
+hex: 4e 00 05 4e 6f 77 20 64 6f 63 6b 69 6e 67 20 61
+      74 20 4e 69 73 68 69 6e 6f 20 52 65 73 65 61 72
+      63 68 20 46 61 63 69 6c 69 74 79 2c 20 74 72 61
+      69 6e 69 6e 67 20 67 72 6f 75 6e 64 73 20 6f 66
+      20 74 68 65 20 53 68 61 27 68 61 27 64 65 6d 2e
+      00
+
+[relationship_aaccee]
+provenance: Relationship 0x89 -- ObjectID 0x00AACCEE reaction 2 (capture_3.rar)
+opcode: 0x89
+payload-bytes: 9
+hex: 00 aa cc ee 02 00 00 00 00
+
+[avatardesc_ace]
+provenance: AvatarDescription 0x61 -- 'Ace' (AvatarID 0x0084E1E9) (capture_3.rar)
+opcode: 0x61
+payload-bytes: 260
+hex: e9 e1 84 00 41 63 65 00 00 00 00 00 00 00 00 00
+      00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+      00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+      00 02 01 00 00 00 02 00 00 00 00 00 00 00 00 00
+      00 00 00 00 01 01 01 05 00 00 02 00 00 00 00 00
+      00 00 00 3f 00 00 00 3f 00 00 80 3f 91 9c 9c 3e
+      83 86 06 3f bf b8 38 3f 91 9c 9c 3e 83 86 06 3f
+      bf b8 38 3f a1 a0 20 3f c6 bf 3f 3f e3 df 5f 3f
+      f8 fe 7e 3f f2 e9 69 3f c5 c7 47 3f b6 bb 3b 3f
+      d4 d5 55 3f 84 84 04 3f f1 f3 73 3f 00 fe 7d 3f
+      00 fe 7d 3f c6 bf 3f 3f dc d8 58 3f 83 88 08 3f
+      f1 f3 73 3f 00 fe 7d 3f f8 fc 7c 3f 02 00 00 00
+      00 00 00 00 00 00 00 00 02 00 00 00 00 00 00 00
+      00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 80
+      3f 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+      00 00 00 80 3f 00 00 00 00 96 9b 45 66 66 86 3f
+      66 66 86 3f
