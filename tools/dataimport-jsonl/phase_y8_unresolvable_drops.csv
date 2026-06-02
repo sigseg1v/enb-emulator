@@ -1,0 +1,552 @@
+reason,mob_name,item_name,resolved_mob_ids,resolved_item_ids,note
+mob_missing,''pls update when known'',Diamond Scale,,3800,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,7th Circle Chavez Mechanic,Petit-Grand Ogun,,2706,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,7th Circle Chavez Scout,Grand Petro,,2057,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,7th Circle Chavez Scout,Petit Ayza,,1866,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,7th Circle Chavez Scout,Petit-Grand Petro,,1971,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ah Kung Ghost Spectre,Laser Scope Novem,,2472,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ah Kung Initiate Dragon,Silver Scale,,3708,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Au Kung Elite Red Dragon,BlackBox T62,,1496,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Au Kung Elite Red Dragon,BlackBox U88,,1562,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Audrey the Weed Popper,Armadillo Plate L3,,1887,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Audrey the Weed Popper,Cat's Paw L3,,1888,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Audrey the Weed Popper,Dolphin Tail L3,,1890,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Audrey the Weed Popper,Eagle Wing L3,,1891,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Audrey the Weed Popper,Leopard Spots L3,,1893,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Audrey the Weed Popper,"RE-X1 ""Brown Dwarf"" Mk. III",,3214,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Audrey the Weed Popper,"RE-X7 ""Supergiant"" Mk. III",,3206,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Audrey the Weed Popper,"SH-X1 ""Terrier"" Mk. III",,3662,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Audrey the Weed Popper,"SH-X4 ""Akita"" Mk. III",,3663,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Audrey the Weed Popper,"SH-X7 ""Mastiff"" Mk. III",,3659,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Audrey the Weed Poppper,Armadillo Plate L3,,1887,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Audrey the Weed Poppper,Cat's Paw L3,,1888,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Audrey the Weed Poppper,Dolphin Tail L3,,1890,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Audrey the Weed Poppper,Eagle Wing L3,,1891,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Audrey the Weed Poppper,Leopard Spots L3,,1893,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Audrey the Weed Poppper,"RE-X1 ""Brown Dwarf"" Mk. III",,3214,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Audrey the Weed Poppper,"RE-X7 ""Supergiant"" Mk. III",,3206,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Audrey the Weed Poppper,"SH-X1 ""Terrier"" Mk. III",,3662,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Audrey the Weed Poppper,"SH-X4 ""Akita"" Mk. III",,3663,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Audrey the Weed Poppper,"SH-X7 ""Mastiff"" Mk. III",,3659,mob name not in mob_base -- needs a Phase Y6 mob_base row
+item_missing,Awned Xiphoid Sickle,Basic Eye Stalk,102,,item name not in item_base -- needs a Phase Y7 item_base row
+mob_missing,Bardon Nesrith,Jackal,,874,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Bardon Nesrith,Shark Fin L4,,1980,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Bardon Nesrith,Silent Harrier,,2550,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Bardon Nesrith,Sleeping Great Dane,,972,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Belter Sam the Starstruck,Badger's Claw L4,,6388,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Belter Sam the Starstruck,Belter's Fury - Chemical,,6516,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Belter Sam the Starstruck,Belter's Fury - Explosive,,6517,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Belters,Landing Strut,,6044,mob name not in mob_base -- needs a Phase Y6 mob_base row
+item_missing,Bio-Wraith,Half-Eaten Alient Space Suit,145,,item name not in item_base -- needs a Phase Y7 item_base row
+item_missing,Bio-Wraith,Mutilated Parts,145,,item name not in item_base -- needs a Phase Y7 item_base row
+mob_missing,Black Leviathan,Sumter VII,,3742,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Blackbeard's Cultist,Prismatic Dragon Wing,,2644,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Blinding Voltai Wisp,Normandy Max,,3796,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Blood Commander Pacoma,Onyx Ogun,,2729,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Boatswain Gibbens,Black Power IX,,6129,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Boatswain Gibbens,Black Power VIII,,6132,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Body Stealers,Decayed Human Bones,,4017,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Bogeril Greyhair,Manifesto Fragment 1,,5097,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Bogeril Greyhair,Manifesto Fragment 2,,5098,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Bogeril Greyhair,Manifesto Fragment 4,,5100,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Bogeril Greyhair,Varnished Gunrack,,5733,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Bogeril Militia kenel,Manifesto Fragment 3,,5099,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Bogeril Militia ser'jin,Manifesto Fragment 1,,5097,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Bogeril Militia ser'jin,Manifesto Fragment 4,,5100,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Bogeril Militia ser'jin,Manifesto Fragment 5,,5101,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Bogeril Militya Sar'jin,Playin' Possum,,3863,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Booboomba,BooBoomba's Ritual Stick,,5920,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Brain,Corona Australis Minor PR 5,,2112,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Brawns,"DV-PR-X3 ""Buckler"" Mk. V",,2069,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Buddy Herlinsson ''(Free Spacers)'',"ML-X4 ""Orb Weaver"" Mk. III",,2684,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,"CL41 Gelatinous Ceelite spawned from L8 Pop ""rocks""",Ninja's Kama M7,,3137,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Captain Fernando Ortiz,Baron Cimetiere's Afefe,,2536,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Captain Fernando Ortiz,Baron Cimetiere's Ala,,3655,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Captain Fernando Ortiz,Baron Cimetiere's Eje,,3227,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Captain Fernando Ortiz,BlackBox G12,,1273,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Captain Fernando Ortiz,Chavez Hydroponics Equipment,,5449,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Captain Fernando Ortiz,Chavez Pictozine,,5450,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Captain Fernando Ortiz,Ironwood Reliquary,,3966,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Captain Wei-han Zeng,Angry Blue Gaze,,780,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Centuria Patrol Guard,Waterloo V,,3701,mob name not in mob_base -- needs a Phase Y6 mob_base row
+item_missing,Centuriata Warrior,Warrior Heart Beta,2052,,item name not in item_base -- needs a Phase Y7 item_base row
+mob_missing,Centurion Magnus,Titus VI,,3282,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Centurion Magnus,Warrior's Heart Alpha,,3284,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Centurion Magnus,Waterloo VI,,3720,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez,BlackBox G12,,1273,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez,CE3K Model 2,,1274,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez,"DV-IR-X3 ""Tower"" Mk. VI",,2169,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez,Malicious Gaze,,768,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez,Ogun Plasma Missile,,554,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez ''(suspected)'',Dragonflight Copper,,2553,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Juan Garcia,Communications Array,,6048,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Juan Garcia,Cygnus NGC 8,,3324,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Juan Garcia,"DV-EN-X3 ""GreaseMonkey"" Mk. VIII",,2347,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Juan Garcia,"DV-EP-X3 ""GreaseMonkey Plus"" Mk. VIII",,2348,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Juan Garcia,ML-X10 EMP Missile,,717,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Juan Garcia,Musca Major RS 8,,2403,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Juan Garcia,No 1 Most Jolting EMP Beam AA,,1131,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Juan Garcia,Phoenix Major BTE 8,,2404,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Juan Garcia,Sensor-Reflective Plating,,6050,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Juan Garcia,Telescopium Major BISR 8,,2410,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Pablo Ruiz,BlackBox T62,,1496,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Pablo Ruiz,Communication Antenna,,6041,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Pablo Ruiz,Communications Array,,6048,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Pablo Ruiz,Cyclo Power Exchange,,1568,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Pablo Ruiz,Cygnus NGC 8,,3324,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Pablo Ruiz,"DV-EN-X3 ""GreaseMonkey"" Mk. VIII",,2347,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Pablo Ruiz,Lepus Major IFSS 8,,2401,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Pablo Ruiz,No 1 Most Jolting EMP Beam AA,,1131,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Pablo Ruiz,Sensor-Reflective Plating,,6050,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Salvador Vasquez,Banded Hawk,,2632,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Salvador Vasquez,Communications Array,,6048,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Salvador Vasquez,Lepus Major IFSS 8,,2401,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Salvador Vasquez,ML-X10 EMP Missile,,717,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Salvador Vasquez,Phoenix Major BTE 8,,2404,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Salvador Vasquez,Sensor-Reflective Plating,,6050,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Sergio Medina,Banded Hawk,,2632,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Sergio Medina,Communications Array,,6048,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Sergio Medina,Cygnus NGC 8,,3324,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Sergio Medina,"DV-EN-X3 ""GreaseMonkey"" Mk. VIII",,2347,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Sergio Medina,Lepus Major IFSS 8,,2401,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Sergio Medina,ML-X10 EMP Missile,,717,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Sergio Medina,Phoenix Major BTE 8,,2404,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Sergio Medina,Sensor-Reflective Plating,,6050,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Sergio Medina,Telescopium Major BISR 8,,2410,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Victor Rodriguez,Banded Hawk,,2632,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Victor Rodriguez,Communications Array,,6048,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Victor Rodriguez,Cygnus NGC 8,,3324,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Victor Rodriguez,"DV-EN-X3 ""GreaseMonkey"" Mk. VIII",,2347,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Victor Rodriguez,ML-X10 EMP Missile,,717,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Victor Rodriguez,No 1 Most Jolting EMP Beam AA,,1131,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Victor Rodriguez,Phoenix Major BTE 8,,2404,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Victor Rodriguez,Sensor-Reflective Plating,,6050,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez Commander Victor Rodriguez,Telescopium Major BISR 8,,2410,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez General Hugo Valdez,Crimson MegaHurtz,,2325,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Chavez General Hugo Valdez,Jade MegaHurtz,,2324,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Cologne Class Destroyer,Small Solar Panel,,1291,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Commander Basilica Hands,Black Force IX,,6128,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Commander Basilica Hands,Black Force VIII,,6131,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Commander Basilica Hands,Black Peg Leg IX,,6135,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Commander Basilica Hands,Black Peg Leg VIII,,6173,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Communications Array SDX,Command Interface DK 8,,6450,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Communications Array SDX,"DV-IR-X5 ""Tower"" Mk. IX",,2457,mob name not in mob_base -- needs a Phase Y6 mob_base row
+item_missing,Corpril Ableson,Glop 'n Saws,1892,,item name not in item_base -- needs a Phase Y7 item_base row
+item_missing,Corpril Ableson,Junior Malik,1892,,item name not in item_base -- needs a Phase Y7 item_base row
+item_missing,Corpril Ableson,Sticks and Stones,1892,,item name not in item_base -- needs a Phase Y7 item_base row
+mob_missing,Corrupted Bullyeye,Dense Bullywere Chitin,,5358,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Craxel,BlackBox G12,,1273,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Crystaline Beta,Fornax Borealis Minor RE 5,,2115,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Crystalline Architect,Crystalline Schematic,,6430,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,D3SC3PL24F1M1H,1M1HSP13N,,2821,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Dai Dai Lo Initaite Red Dragon,CE3K Eruption II,,1444,mob name not in mob_base -- needs a Phase Y6 mob_base row
+item_missing,Dai Lo Veteran Red Dragon,Nebula Smart 8 LS Processor Structure,314,,item name not in item_base -- needs a Phase Y7 item_base row
+mob_missing,Devil Dish,Glamour Goo,,3972,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Dzurai Spawn,"PL-X1 ""Switchblade"" Mk. II",,3043,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,EarthCorps Tigershark Fighter,Yumm-O Beer,,5000,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Earthcorps Tigershark Class Fighte,Not Weak Shield Model X,,3635,mob name not in mob_base -- needs a Phase Y6 mob_base row
+item_missing,Einherjar Skulk,Berserk Rounds,445,,item name not in item_base -- needs a Phase Y7 item_base row
+mob_missing,Einjahar Skald,Roaring Lion,,1077,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Enraged Ascendant Voltoi,Imbued Synthesized Crystal,,3952,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Enraged Ascentdant Voltoi,Imbued Synthesized Crystal,,3952,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Enraptured Bogeril Elder,Bogeril Fragment 1,,4021,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Enraptured Bogeril Elder,Bogeril Fragment 2,,4022,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Enraptured Bogeril Elder,Bogeril Fragment 3,,4023,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Enraptured Bogeril Elder,Bogeril Fragment 4,,4024,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Enraptured Bogeril Elder,Bogeril Fragment 5,,4025,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Enraptured Bogeril Elder,Manifesto Fragment 1,,5097,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Enraptured Bogeril Elder,Manifesto Fragment 2,,5098,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Enraptured Bogeril Elder,Manifesto Fragment 5,,5101,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Etherial Defender,Explorer's Force,,3348,mob name not in mob_base -- needs a Phase Y6 mob_base row
+both_missing,Evil Snowman,Stolen Candy Cane,,,neither name resolves -- needs both mob_base and item_base rows
+both_missing,Evil Snowman,Stolen Present,,,neither name resolves -- needs both mob_base and item_base rows
+item_missing,Fat Platy,Basic Eye Stalk,488,,item name not in item_base -- needs a Phase Y7 item_base row
+mob_missing,Festive Gourd,Eyeball Popper,,1792,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Fledgeling Grek,Grek Hide,,4034,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Flickering Voltai Deviant,Pleiades LGS 7,,3305,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Free Spacer,"CE-X5 ""Welsh"" Mk. VI",,2595,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Free Spacer Patriarch,Badger's Claw L9,,6393,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Free Spacer Patriarch,"CE-X8 ""Apaloosa"" Mk. VII",,2609,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Free Spacer Patriarch,Most Becoming Class 2 Shield,,3728,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Free Spacer Patriarch,"RE-X9 ""Supernova"" Mk. VIII",,3319,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Free Spacer Patriarch,Ursa NGC 7,,2610,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Free Spacer Patriarch,Warrior's Pride Gamma,,3323,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Free Spacer Protector & Sentinel,Hunting Falcon,,2591,mob name not in mob_base -- needs a Phase Y6 mob_base row
+item_missing,Frenzied Hippocampus Mutant,Bill Henderson,548,,item name not in item_base -- needs a Phase Y7 item_base row
+mob_missing,Frost Drake,Icy Spine,,5709,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Fuijan Freighter II Red Dragon,Gazing Eye,,1814,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Fujian Freighter III Red Dragon,Porcelain Dog Figurine,,5595,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Gelatinous Ceelite,Brimstone Z2 Anvil,,1626,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Gelatinous Ceelite,"DV-PSI-X2 ""Profiler"" Mk. VI",,2164,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Gelatinous Ceelite,"DV-RW-X3 ""Quagmire"" Mk. VI",,2165,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Gelatinous Ceelite,Hydra NGC 7,,1087,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Gelatinous Ceelite,Ninja's Kama M7,,3137,mob name not in mob_base -- needs a Phase Y6 mob_base row
+both_missing,Gelatinous Ceelite,Ninja's Kama Projectile Ammo,,,neither name resolves -- needs both mob_base and item_base rows
+mob_missing,Gelatinous Ceelite,Orange Dragonfly Explosive Missile,,650,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Gelatinous Ceelite,Orange Dragonfly M7,,2797,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,"Gelatinous Ceelite spawned from L8 Pop ""rocks""",Ninja's Kama M7,,3137,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ghost of Christmas Future,Ouija Board,,7184,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ghost of Christmas Past,Ouija Board,,7184,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ghost of Christmas Present,Ouija Board,,7184,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Great Mantichora,"RE-X7 ""Supergiant"" Mk. IV",,3228,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Grissom Space Patrol 4,Attacking Great Dane,,1104,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Grupta the Sander,Crystalline Aparatus,,2606,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Grupta the Sander,Vibrant Barrier,,2176,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Gunner Morton,Black Speed IX,,6130,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Gunner Morton,Black Speed VIII,,6133,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Hadean Hijacker,Quasar III MRB 7,,6411,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Hanger Bay,Armadillo Plate L9,,2432,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Hanger Bay,Basilisk's Dread Fury,,2416,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Hanger Bay,Cat's Paw L9,,2433,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Hanger Bay,Chameleon Skin L9,,2434,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Hanger Bay,Gorgon's Dread Glare,,2418,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Hanger Bay,Mah-jongg Tile IX,,6222,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Hanger Bay,Mah-jongg Tile VIII,,6221,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Haywire Drone,Haywire's Circuit Breaker,,772,mob name not in mob_base -- needs a Phase Y6 mob_base row
+item_missing,Hung Kwan Initiate Red Dragon,Fishbowl Raid,653,,item name not in item_base -- needs a Phase Y7 item_base row
+item_missing,Hung Kwan Initiate Red Dragon,Tada-O Gate Raid,653,,item name not in item_base -- needs a Phase Y7 item_base row
+mob_missing,Hung Kwan Novie Red Dragon,Harpy's Dire Avarice,,2225,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Hyperia Explorer,Armadillo Plate L3,,1887,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Hyperia Explorer,Cat's Paw L4,,1973,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Hyperia Explorer,Chameleon Skin L4,,1974,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Hyperia Explorer,Dolphin Tail L4,,1975,mob name not in mob_base -- needs a Phase Y6 mob_base row
+both_missing,Hyperia Explorer,Harrier,,,neither name resolves -- needs both mob_base and item_base rows
+mob_missing,Hyperia Explorer,Shark Fin L2,,1830,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Hyperia Explorer,Turtle Shell L3,,1896,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,"Infinity - Go Bot, Infinity - Short Circuit",Dull Warp Kaza,,1787,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,"Infinity - Go Bot, Infinity - Short Circuit",Warp Kaza,,1841,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ing Zhi Wong Elite Guard,"DV-ER-X5 ""Heater"" Mk. IX",,2448,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ing Zhi Wong Elite Guard,Laser Scope Novem,,2472,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ing Zhi Wong Elite Guard,Mah-jongg Tile VIII,,6221,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ing Zhi Wong Elite Guard,Sensor-Reflective Plating,,6050,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ing Zhi Wong Fighter Escort,"DV-ER-X5 ""Heater"" Mk. IX",,2448,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ing Zhi Wong Fighter Escort,"DV-RW-X5 ""Quagmire"" Mk. IX",,2453,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ing Zhi Wong Fighter Escort,Harpy's Dread Gorge,,2419,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ing Zhi Wong Fighter Escort,Mah-jongg Tile IX,,6222,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ing Zhi Wong Fighter Escort,Mah-jongg Tile VIII,,6221,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ing Zhi Wong Fighter Escort,Sensor-Reflective Plating,,6050,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Insane Critter,Executioner's Finger,,3023,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Irradiated Researcher,Crystal Talisman,,5355,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Jove's City Looters,Debris,,3814,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,"Large Dactuul, Great Dactuul",Dactuul Heart,,7050,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Leviathan,Gnawed Bone,,3995,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Looted Cargo Swarm,Sponge Chloride,,3974,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Love Bug,Chewy Heart Candies,,5497,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Love Bug,Elfman Heart Pops,,5539,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Love Bug,Frosted Heart Cookie,,5513,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Mabonae Balrog,Faye DDO 60,,1014,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Mabonae Balrog,Ostarae Energy Sac,,5806,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Mabonae Balrog,Ostarae Hide,,5726,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Mabonae Balrog,Ostarae Sac,,5807,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Mabonae Balrog,Ostarae Stalk,,5808,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Mabonae Balrog,Pyxis Borealis Minor IS 6,,2212,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Mabonae Balrog,Sextans Minor ISR 6,,2215,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Mabonae Balrog,Ward of Muck,,2170,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Mabonae Calyx,Antlia Minor BCSR 5,,2106,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Mabonae Calyx,Aquila Minor IBWS 5,,2108,mob name not in mob_base -- needs a Phase Y6 mob_base row
+item_missing,Mabonae Culler,Mabonae Gas Sack,812,,item name not in item_base -- needs a Phase Y7 item_base row
+mob_missing,Mabonae Cultivator,Eratosthenes M4,,884,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Mabonae Cultivator,Halley DDO 40,,2561,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Mabonae Cultivator,Pluton IC40,,3242,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Mabonae Cultivator,Pyxis Australis II BIS 4,,2029,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Mabonae Cultivator,Ronin Yoroi Shield San,,3690,mob name not in mob_base -- needs a Phase Y6 mob_base row
+item_missing,Mabonae Reaper,Mabonae Gas Sack,814,,item name not in item_base -- needs a Phase Y7 item_base row
+mob_missing,Mabonae Sporemother,"DV-CR-X3 ""Targe"" Mk. VI",,2168,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Mabonae Sporemother,Lepus Minor IFSS 6,,2207,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Mabonae Sporemother,Samurai Yoroi Shield Ichi,,3755,mob name not in mob_base -- needs a Phase Y6 mob_base row
+item_missing,Mabonae Tepal,Mabonae Gas Sack,817,,item name not in item_base -- needs a Phase Y7 item_base row
+mob_missing,Mad Professor,Ethereal Residue,,5540,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Mai Jai Novice Red Dragon,Copper Scale,,3626,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Mangel the Grinder,The Titan's Heart,,2171,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Mangel the Grinder,Vibrant Power Crystal,,2175,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Manitor Mana,Purple Dragon Laser M8,,1128,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Manitor Might,Grand Dhambier,,3295,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Manitor Might,Ninja's Kakute M7,,3136,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Manitor Might,Orange Kirin EMP Laser M7,,1075,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Manitor Might,"SH-X6 ""Doberman"" Mk. VII",,3754,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Manticor,Sekiwake Sumo Shield M4,,3693,mob name not in mob_base -- needs a Phase Y6 mob_base row
+item_missing,Master Moon Dweller,Antlia III BTSE 3,844,,item name not in item_base -- needs a Phase Y7 item_base row
+item_missing,Master Moon Dweller,Antlia III BTSE 4,844,,item name not in item_base -- needs a Phase Y7 item_base row
+mob_missing,Mature Dzurai,Cat's Paw L3,,1888,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Mature Scuttlebug,Rabid Scuttlebug Control Bar,,4011,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Mazzaroth Womb,Delphinus Prime IWS 9,,6675,mob name not in mob_base -- needs a Phase Y6 mob_base row
+both_missing,Mazzaroth Womb,Warrior's Resolve,,,neither name resolves -- needs both mob_base and item_base rows
+mob_missing,Merus Militia Baker,Encrypted Valentine Cookie,,6989,mob name not in mob_base -- needs a Phase Y6 mob_base row
+both_missing,Merus Militia Baker,Lagarto,,,neither name resolves -- needs both mob_base and item_base rows
+both_missing,Merus Militia Baker,MOB,,,neither name resolves -- needs both mob_base and item_base rows
+both_missing,Merus Militia Baker,Primus,,,neither name resolves -- needs both mob_base and item_base rows
+both_missing,Merus Militia Baker,Sector,,,neither name resolves -- needs both mob_base and item_base rows
+mob_missing,Merus Militia Bomber,Falkirk Alpha,,3631,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Merus Militia Bomber,Sting Unus,,1806,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Merus Militia Fighter,Bricole Explosive Missile,,536,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Merus Militia Fighter,Bricole Prime,,2667,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Merus Militia Fighter,Shelter Unus,,1805,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Merus Militia Mechanic,Dull Warp Kaza,,1787,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Merus Militia Solider,Decay Unus,,1801,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Mobile Science Lab,Athanor Athena,,1619,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Mobile Science Lab,Athanor Immortal Shell Casing,,1621,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Mobile Science Lab,Cracked Focusing Lens,,6033,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Mobile Science Lab,Elephant Hide L9,,2437,mob name not in mob_base -- needs a Phase Y6 mob_base row
+both_missing,Mobile Science Lab,Mutilated Parts,,,neither name resolves -- needs both mob_base and item_base rows
+mob_missing,Mobile Science Lab,Refresh Novem,,2476,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Mobile Science Lab,Refuge Novem,,2477,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Mobile Science Lab,Rhinoceros Horn L9,,2439,mob name not in mob_base -- needs a Phase Y6 mob_base row
+both_missing,Mobile Science Lab,signature,,,neither name resolves -- needs both mob_base and item_base rows
+item_missing,Moon Dweller,Antlia III BTSE 3,"909,1907",,item name not in item_base -- needs a Phase Y7 item_base row
+item_missing,Moon Dweller,Antlia III BTSE 4,"909,1907",,item name not in item_base -- needs a Phase Y7 item_base row
+item_missing,Mordana Cruiser Avenger,Glorious Kimono Shield M8,2006,,item name not in item_base -- needs a Phase Y7 item_base row
+mob_missing,Mordana Dusk Class Frigate III,Most Excellent ML Type A,,2826,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Mordana Dusk Class Frigate/Destroyer,Veil NGC 9,,3344,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Mudled Belter Drone,Brown Dragon Laser Ichi,,777,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Naglfar,Chameleon Skin L6,,2146,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Naglfar,More Superb ML Type B,,2725,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Nesshix the Hand,Eye of Destruction,,1163,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Nesshix the Hand,Ten-Gu Bile Cannon,,3166,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Nesshix the Hand,Ten-Gu Bile Launcher,,2822,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ostarea Cultivator,Lexington Duo,,3697,mob name not in mob_base -- needs a Phase Y6 mob_base row
+both_missing,Ostarea Cultivator,Ostarea Energy Sac,,,neither name resolves -- needs both mob_base and item_base rows
+both_missing,Ostarea Cultivator,Ostarea Fur,,,neither name resolves -- needs both mob_base and item_base rows
+both_missing,Ostarea Cultivator,Ostarea Hide,,,neither name resolves -- needs both mob_base and item_base rows
+both_missing,Ostarea Cultivator,Ostarea Sac,,,neither name resolves -- needs both mob_base and item_base rows
+both_missing,Ostarea Cultivator,Ostarea Stalk,,,neither name resolves -- needs both mob_base and item_base rows
+mob_missing,Ostarea Cultivator,Scutums II CSR 4,,2032,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ostarea Seeder,Cartilage,,5940,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ostarea Seeder,Complex Nerve Cluster,,5929,mob name not in mob_base -- needs a Phase Y6 mob_base row
+both_missing,Ostarea Seeder,Hyper-Active Nerve Clustere,,,neither name resolves -- needs both mob_base and item_base rows
+mob_missing,Ostarea Seeder,Most Adorable Class 3 Shield,,3682,mob name not in mob_base -- needs a Phase Y6 mob_base row
+both_missing,Ostarea Seeder,Ostarea Fur,,,neither name resolves -- needs both mob_base and item_base rows
+both_missing,Ostarea Seeder,Ostarea Hide,,,neither name resolves -- needs both mob_base and item_base rows
+both_missing,Ostarea Seeder,Ostarea Sac,,,neither name resolves -- needs both mob_base and item_base rows
+mob_missing,Ostarea Seeder,Pulsating Blood Vessel,,5944,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ostarea Seeder,Spinal Nerve Cluster,,5934,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ostarea Seeder,Translucent Membrane,,5933,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Osterae Cultivator,Lexington Duo,,3697,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Osterae Cultivator,Scutums II CSR 4,,2032,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Osterae Sagut,Barrier of Ooze,,3739,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Osterae Sagut,Ichor Balls,,705,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Osterae Sagut,Ichor Cannon,,3159,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Osterae Sagut,Ostarae Energy Sac,,5806,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Osterae Sagut,Ostarae Frond,,5213,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Osterae Sagut,Ostarae Fur,,5769,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Osterae Sagut,Ostarae Neuron,,5811,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Osterae Sagut,Ostarae Sac,,5807,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Osterae Seeder,Most Adorable Class 3 Shield,,3682,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Osterae Seeder,Scutums II CSR 4,,2032,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Osterae Torus,Corona Borealis Minor IPSS 6,,2203,mob name not in mob_base -- needs a Phase Y6 mob_base row
+item_missing,Pax Gravitas,Rallying Cry,2050,,item name not in item_base -- needs a Phase Y7 item_base row
+mob_missing,Proto Ancient Dzurai,Black Fox,,946,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Proto Ancient Dzurai,Red Fox,,873,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,R2FL2CT4R,CL45D2DM3RR4RH2PT1,,7096,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,R2FL2CT4R,CL45D2DM3RR4RH2X1,,7098,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,R2FL2CT4R,Chitin Bits,,3818,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,R2FL2CT4R,Chitinous Patch,,5938,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,R2FL2CT4R,Combined V'rix Chitin,,1185,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,R2FL2CT4R,V'rix Modified Rosette,,1114,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Rahu the Cultivator,Charged Zenshai Energy Shard,,6894,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Rahu the Cultivator,Delphinus Major IWS 8,,6674,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Rahu the Cultivator,Harvester of Souls,,1151,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Raman The Polisher,Crystalline Dynamo,,2625,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Raman The Polisher,Martyr's Heart,,5178,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Raman The Polisher,Shield Energy Converter,,5884,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Raman The Polisher,The Titan's Heart,,2171,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Red Dragon ''(suspected)'',Attacking Wing,,2598,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Red Dragon ''(suspected)'',Chimaera's Fell Rile,,2045,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Red Dragon ''(suspected)'',Searching Wing,,2560,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,"Red Dragon Carrier, Chi Lung",Brimstone Elixir,,1677,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,"Red Dragon Carrier, Chi Lung",Brimstone Warden,,1686,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,"Red Dragon Carrier, Chi Lung",Decay Novem,,2470,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,"Red Dragon Carrier, Chi Lung",Mah-jongg Tile IX,,6222,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,"Red Dragon Carrier, Chi Lung",Mah-jongg Tile VIII,,6221,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,"Red Dragon Carrier, Chi Lung",Pyxis Borealis Prime IS 9,,2497,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,"Red Dragon Carrier, Chi Lung",Satyr's Dread Derangement,,2427,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,"Red Dragon Carrier, Chi Lung",Sensor-Reflective Plating,,6050,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,"Red Dragon Carrier, Chi Lung",Unused Escape Pod,,6060,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,"Red Dragon Carrier, Chi Lung",Wyvern's Dread Gore,,2428,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Red Dragon Elite Guard,Golden Dragon Laser Ni,,1123,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Red Dragon Elite Guard,Porcelain Rat Figurine,,6701,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,"Red Dragon Elite Guard for ""Player""",Golden Dragon Laser Ni,,1123,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,"Red Dragon Elite Guard for ""Player""",Porcelain Rat Figurine,,6701,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Red Dragon Offcial,Shieldgen LT,,1818,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Red Dragon Refit Station Guard,Dragontooth Projectile,,530,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Red Dragon Refit Station Guard,Emergency Transponder Beacon,,6029,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Red Dragon Refit Station Guard,Insulated Casing,,6030,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Red Dragon Refit Station Guard,Magnetic Stabilizer Ring,,6027,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Red Dragon Refit Station Guard,Manticore's Twinge,,1963,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Red Dragon Refit Station Guard,Mutilating Dragontooth Gun,,3071,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Red Dragon Refit Station Guard,Thrust Regulator,,6026,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Red Dragon Relay Station,Red Dragon Intelligence TC1,,5549,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Red Dragon Smuggler,Yumm-O Vodka,,5001,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Red Dragon Station Guard,CE3K KlugazerII Datacore,,1194,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Red Dragon Station Guard,Communication Antenna,,6041,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Red Dragon Station Guard,Cracked Infrared Sensor,,6047,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Red Dragon Station Guard,Dragonfire Missile,,583,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Red Dragon Station Guard,Evolver PowR6,,1202,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Red Dragon Station Guard,Harpy's Dire Greed,,2319,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Red Dragon Station Guard,Mah-jongg tile VII,,6220,mob name not in mob_base -- needs a Phase Y6 mob_base row
+both_missing,Red Dragon Station Guard,Ninja's Kama Plasma Ammos,,,neither name resolves -- needs both mob_base and item_base rows
+mob_missing,Red Dragon Station Guard,Porcelain Rat Figurine,,6701,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Renegade Progen Esque,Nice ML Class Z2,,2701,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Renegade Progen Esque,Titus V,,3265,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Renegade Progen Reclaimer,BooBoomba's Lucky Charm,,5919,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Renegade Progen Reclaimer,Quicksilver Phoenix,,2001,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Resonating Voltai Deviant,Pleiades LGS 7,,3305,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Resource Hound,Scavenger's Laser,,6441,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Rock Golem,Golem Hide,,5755,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Rocky the Golem,Heart of Stone,,6500,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Rogue Battlebug,Spinning Steel Gunrack,,7042,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Rogue Militia Bugmaster,Golden Washboard,,7056,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Rogue Militia Corpril,Data Fragment UL,,3958,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Rogue Militia Corpril,Heavy Junk Slugs,,7044,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Rogue Militia Corpril,Souped-up Junk-a-pult,,7043,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Rogue Militia Kernel,Emblazoned Red Militia Kerchief,,6120,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Rogue Militia Kernel,Golden Washboard,,7056,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Rogue Militia Kernel,Legendary Liquor,,7041,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Rogue Militia Kernel,Spinning Steel Gunrack,,7042,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Rogue Militia Kernel,Warlock Arch,,1744,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Rogue Militia Kernel,Whittled Steel Hot Mama,,6184,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Rogue Militia Privet,Data Fragment UR,,3959,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Rogue Militia Privet,Heavy Junk Slugs,,7044,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Rogue Militia Privet,Souped-up Junk-a-pult,,7043,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Rogue Militia Sar'jint,Data Fragment LL,,3956,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Rogue Militia Sar'jint,Emblazoned Red Militia Kerchief,,6120,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Rogue Militia Sar'jint,Heavy Junk Slugs,,7044,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Rogue Militia Sar'jint,Keg of Bogeril Brew,,7039,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Rogue Militia Sar'jint,Souped-up Junk-a-pult,,7043,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Rogue Militia Sar'jint,Whittled Steel Hot Mama,,6184,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Rogue Militia Sar'jint,Whittled Steel Thumpin' Stick,,3993,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Rogue Progen Decurion,Longbow Prime,,3115,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Rogue Progen Tribuni,Sunburst XF7,,1614,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Roland Holmes,Wiseguy's Amico,,3247,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Rouge Drone Type Chen,Coma Prime RSR 9,,2486,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Rouge Drone Type Chen,Hercules Prime IESS 9,,2491,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Saam Lo Scalemaster Red Dragon,Warp Kaza,,1841,mob name not in mob_base -- needs a Phase Y6 mob_base row
+item_missing,Scooter,Signature,1670,,item name not in item_base -- needs a Phase Y7 item_base row
+mob_missing,Scuttle Larvae,"DV-CR-X1 ""Targe"" Mk. I",,1774,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Servant of Edward Teach,Basilisk's Fell Aura,,2043,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Seventh Circle Mechanic,"DV-ER-X3 ""Heater"" Mk. VI",,2160,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Shakaku,Sculptor II IPS 4,,2031,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Sharim Archeologist,Ceres 5P,,957,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Sharim Archeologist,Encke DDO 50,,3266,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Sharim Archeologist,Eratosthenes M5,,956,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Sharim Archeologist,Quasar II MRB 5,,6409,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Shinwa Combat Drones,BlackBox X93,,1623,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Shinwa Combat Drones,CE3K MG-13,,1195,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Shinwa Elite Patrol Cruiser,Corona Australis Minor PR 6,,2202,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Shinwa Pilgrims,Debris,,3814,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Shinwa Pilgrims,Dissonance Recombinator,,1851,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Shinzen bully,Mercurius IC20,,2519,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Shivers the Drake,Heart of Frost,,6499,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Shouskin Shakaku,Chamaeleon Minor ICS 5,,2110,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Shusen Maplot,Ninja's Hoko M1,,3025,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Shusen Maplot,Ninja's Hoko M2,,3041,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Shuzen Vandal,Ninja's Hoko Impact Ammo,,511,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Shuzen bully,Executioner's Hand,,3031,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Shuzen bully,Ninja's Tanto Impact Ammo,,512,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Shuzen maplot,Ninja's Hoko Impact Ammo,,511,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Silas Craven,Baron Kriminel's Afefe,,6519,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Silas Craven,Baron Kriminel's Ala,,6523,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Silas Craven,Baron Kriminel's Baka,,6521,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Silas Craven,Baron Kriminel's Rada,,6522,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Silas Craven,Baron Kriminel's Xango,,6520,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Silas Craven,Unused Escape Pod,,6060,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Singe the Wraith,Heart of Fire,,6497,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Smuggler,Alpha BBO,,3824,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Spindles,Musca II RS 4,,2027,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Stone Parasites,Dark Matter Infused Catalyst,,3976,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Suicidal Critter,Executioner's Hand,,3031,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Suicidal Critter,Nero Primoris,,3189,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Suicidal Critter,Prosecutor Alpha,,763,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Sulami Pickpocket,Sol Grain,,5110,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Sulami Pickpocket,Spices,,4029,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Sulami Pickpocket,War Novels,,5314,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Sundiver Calph,Atrophy Septem,,2273,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Sundiver Umayyad,"DV-RS-X3 ""Guardian"" Mk. VII",,2248,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Sundiver Umayyad,"DV-RS-X3 ""Guardian"" Mk. VIII",,2349,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Sundiver Umayyad,Mangonel Chemical Missile,,605,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Sundiver Umayyad,Mangonel Plasma Missile,,606,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Sundiver Umayyad,Mangonel Tria,,2784,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Sundiver Umayyad,No 1 Most Value PL Type Zet,,3157,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Sundiver Umayyad,Sun Diver Slop Type 3,,5739,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Sundiver Umayyad,Sun Diver Slop Type 4,,5740,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Sundiver Umayyad,Value Chemical Bullet,,719,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Sundiver Umayyad,Value Impact Bullet,,720,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Sundiver Umayyad,Value Plasma Bullet,,721,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Tang Kai Heng,Tang's Alacrity,,6471,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Tang Kai Heng,Tang's Vigor,,6470,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ten'Shao Takauji,Wrath of the Kokura,,1000,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ten'shao Nagato,Corona Australis Major PR 7,,2293,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ten'shao Nagato,Corona Borealis Major IPSS 7,,2294,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ten'sho Kengi,Corona Borealis Major IPSS 8,,2397,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ten-Gu ?,Brimstone Hades PSC-XP,,1681,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ten-Gu Blightr,Brimstone Elixir,,1677,mob name not in mob_base -- needs a Phase Y6 mob_base row
+item_missing,Terrible Gazer,Broken Oxygen Pump,1427,,item name not in item_base -- needs a Phase Y7 item_base row
+mob_missing,The Wrangler,Focus of the Hunter,,6412,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,The Wrangler,Most Barbed Harpoon Laser O5,,6416,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Trader Joe,InfinitiCorp ExecReport Cy864,,5553,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,"Unknown, please update if found",Ten-Gu Cranium,,1736,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Uth'ach-Ti,Bulwark of the Reaver,,3771,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,V'rix ''(suspected)'',1M1HS1NG2R,,1160,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,V'rix ''(suspected)'',V'rix Modified Coyote,,922,mob name not in mob_base -- needs a Phase Y6 mob_base row
+item_missing,V'rix Malakia,V'rix Proposal,1503,,item name not in item_base -- needs a Phase Y7 item_base row
+mob_missing,Vicious Ten-Gu Flayer,Brimstone Elixir,,1677,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,"Vindis Drone Generation 2, 3",CE3K Dielectric Plate,,1627,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,"Vindis Drone Generation 2,3",Athanor Immortal Shell Casing,,1621,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,"Vindis Drone Generation 2,3",Athanor Luna,,1622,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,"Vindis Drone Generation 2,3",Longbow Prime,,3115,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Vindis Drones,Half-Eaten Terran Space Suit,,5964,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Wandering Juonna,Wanderer,,2528,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Wizened Scuttlebug,Manifesto Epilogue,,3975,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Womb Feeder,Animal Tooth,,5969,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Womb Feeder,Fiberous Tumor,,5968,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Womb Protector,Animal Tooth,,5969,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Womb Protector,Fiberous Tumor,,5968,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Xax,Alien Appendage,,5974,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Xax,Black Razor,,1125,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Xax,Brimstone Alchemist,,1673,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Xax,Cygnus NGC 9,,3347,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Xax,Golden Dragon Laser San,,1168,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Xax,Vibrant Barrier,,2176,mob name not in mob_base -- needs a Phase Y6 mob_base row
+item_missing,Xiphoid Lancet,Basic Eye Stalk,1564,,item name not in item_base -- needs a Phase Y7 item_base row
+mob_missing,Ya Zi Long,Athanor Astral Mounts,,1666,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ya Zi Long,Augustus IX,,3350,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ya Zi Long,BlackBox CoreCage IV,,5200,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ya Zi Long,CE3K X93 Relay,,1689,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ya Zi Long,Diamond Scale,,3800,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ya Zi Long,Hunting Hawk,,2646,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ya Zi Long,Tactical Computer Nine,,6456,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Ya Zi Long,Ya Zi Long's Hellbore,,6452,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Zenrei Tempest Guardian,Zenrei Cannon,,3177,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Zenrei Tempest Guardian,Zenrei Force Matrix,,3767,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Zenrei Tempest Guardian,Zenrei Force Projector,,2367,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Zenshai,Amazing Shield Model Z,,3744,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Zenshai,Eagle Wing L6,,2148,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Zenshai,Yttrium,,3825,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Zenshai ??,"DV-PSI-X1 ""Profiler"" Mk. IV",,1991,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Zenshai Dreamer,Draco UGC 5,,3259,mob name not in mob_base -- needs a Phase Y6 mob_base row
+item_missing,Zenshai EM Dozer,Disintegrated Zenshai Fragments,1597,,item name not in item_base -- needs a Phase Y7 item_base row
+item_missing,Zenshai EM Dreamer,Disintegrated Zenshai Fragments,1598,,item name not in item_base -- needs a Phase Y7 item_base row
+item_missing,Zenshai Messiah,Disintegrated Zenshai Fragments,1611,,item name not in item_base -- needs a Phase Y7 item_base row
+mob_missing,Zenshai Plasma Dowser,Crushed Zenshai Fragments,,5749,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Zenshai Plasma Dowser,Drone System,,5699,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Zenshai Plasma Dowser,Eagle Wing L5,,2062,mob name not in mob_base -- needs a Phase Y6 mob_base row
+item_missing,Zenshai Plasma Dozer,Disintegrated Zenshai Fragments,1613,,item name not in item_base -- needs a Phase Y7 item_base row
+mob_missing,Zenth'ren-Ti the Dark One,Devastating Gaze,,1161,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Zenth'ren-Ti the Dark One,Eye of the Dark One,,1174,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Zzixix,Power of the Elements,,2087,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,Zzixix,The Privateer's Sickle,,6990,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,[[Grupta the Sander ]]|| 36 ||This mob's name is reported on Named Mobs . Has two CL35 Faceted Amethyst Titans as wingmen.,Crystal Force Emitter,,2177,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,a type of drone,Flash Tube,,1213,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,sum kinda drone,Washboard,,3815,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,unknown mob,"CE-X4 ""Breton"" Mk. IV",,2555,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,unknown mob,DV-WP-X5 ''Roadrunner Plus'' Mk. IX,,2455,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,unknown mob,"DV-WR-X4 ""Lazarus"" Mk. IX",,2450,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,unknown mob,"DV-WS-X2 ""Roadrunner"" Mk. IV",,1993,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,unknown mob,"DV-WS-X3 ""Roadrunner"" Mk. VI",,2166,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,unknown mob,"DV-WS-X4 ""Roadrunner"" Mk. VII",,2255,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,unknown mob,"DV-WS-X4 ""Roadrunner"" Mk. VIII",,2356,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,unknown mob,Harpy's Dread Gorge,,2419,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,unknown mob,Pegasus UGC 4,,2552,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,unknown mob,Yokozuna Sumo Shield M9,,3810,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,unknown yet,V'rix Modified Kama Plasma Ammo,,5085,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,various Ten-gu,Ten-Gu Rib,,1740,mob name not in mob_base -- needs a Phase Y6 mob_base row
+mob_missing,various waves of Mordana ships,Nova Lance,,1146,mob name not in mob_base -- needs a Phase Y6 mob_base row

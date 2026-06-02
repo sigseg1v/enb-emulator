@@ -241,20 +241,61 @@ will provide newer references when each task is approved.
   enrich on the matches either (asset/faction/AI already populated).
   Real unblock needs a Net-7 mob dump with the integer asset/faction/AI.
 
-- [!] **Y8: Item-drop table import** -- (`items/item_drops.jsonl`).
-  **BLOCKED -- diffed 2026-06-02, no importable row.** `mob_items`
-  (mob_id -> item_base_id, `drop_chance`, qty) already holds **8583**
-  loot rows. The diff: 2415 item_drops rows -- but **0** dropSource
-  entries carry a numeric drop rate (no `rate` field at all; mob refs
-  are riddled with "?" and garbage like `D3SC3PL24F1M1H`). `drop_chance`
-  is the load-bearing column and it simply does not exist in the
-  dataset; fabricating it onto authoritative mobs would corrupt the
-  loot tables. Real unblock needs a Net-7 drop dump with numeric rates.
-  A full importer WAS written 2026-06-02 to pressure-test this verdict
-  (fabricated `drop_chance` from same-type averages + 59 invented
-  `mob_base` rows) and then deleted as dead code -- it confirmed the
-  block. See decisions-log "Phase Y8 drop-table importer built,
-  evaluated, and REJECTED" for why this differs from the Y9 unblock.
+- [x] **Y8: Item-drop table import** -- (`mobs/mobs.jsonl` +
+  `items/item_drops.jsonl`). **IMPORTER BUILT 2026-06-02; 2582 mob_items
+  rows generated. The earlier "BLOCKED -- no importable row" verdict
+  below was WRONG and is superseded.** The prior pass declared the
+  dataset non-importable because **0 of 2415** dropSource rows carry a
+  numeric `drop_chance` -- a field-presence heuristic. That is the exact
+  same mistake the Y9 entry and this file's Y4 lesson warn against: it
+  measured a *field's presence* instead of running the actual *(mob,item)
+  link diff* against the runtime. The drop RATE was never the gap; the
+  drop LINK is. The owner explicitly approved generating the rate, which
+  removes the only real objection.
+  - **The diff.** Union the drop links from both sources -- mobs.jsonl
+    `drops[].item` (3479) + item_drops.jsonl `dropSources[].mob` (3917)
+    = **3706 distinct (mob,item) name pairs**. Resolve each end against
+    `mob_base.name` / `item_base.name` (normalized). 3159 resolve on both
+    ends; of those **1061 already exist** in `mob_items` (any id-combo)
+    and **2089 are a genuine gap**. After excluding 232 links whose mob
+    name is a placeholder ("unknown"/"various"/... -- these collide with
+    real `mob_base` rows literally named "Unknown") and fanning the 208
+    multi-CL-variant mobs across their ids, **2582 mob_items rows** are
+    emitted (every gap item name resolves to exactly one item id -- 0
+    same-name tiers, so item resolution is unambiguous).
+  - **Generated payload.** The 4 payload columns are GENERATED, grounded
+    in the runtime distribution of the existing 8450 rows so synth rows
+    are shape-identical to the most common real ones: `drop_chance`=10.0
+    (a common real value just under the ~13 runtime mean; the loader
+    truncates to unsigned char -> stores 10), `usage_chance`=0, `type`=1
+    (unused by the server at runtime), `qty`=1 (all modal). A single
+    documented constant beats a fabricated per-row formula: there is no
+    rarity signal in the source and false precision is worse than honest
+    uniformity. Re-tunable in one place in the generator.
+  - **Runtime reality (verified, not assumed).** `mob_items` IS loaded
+    live: `MOBContent::LoadMOBContent` (`server/src/MOBDatabaseSQL.cpp`,
+    `USE_MYSQL_SECTOR` path) runs `SELECT * FROM mob_items` through the
+    libpqxx shim into `MOBData::m_Loot` (struct `LootNode`). Two
+    consumers: the GM `DisplayLoot` debug print, and the weapon-loadout
+    selector (`MOBClass.cpp:281`) which picks the mob's actual weapon/
+    ammo/engine from the loot list by `item_base_id` SubCategory. Adding
+    equip-category loot to a mob can therefore influence its combat
+    loadout -- but the owner confirmed mobs canonically drop their
+    weapons + gear, so the entries are content-correct. No husk drop-roll
+    keyed on `drop_chance` was found; the rate is currently inert at
+    runtime (loaded, printed, not yet rolled).
+  - Importer: `tools/dataimport-jsonl/generate_seed_drops.py` ->
+    `db/postgres/seed_phase_y_drops.sql` (synth ids >= 100000, gated
+    DELETE-then-INSERT, ON CONFLICT DO NOTHING, idempotent). Wired into
+    docker-compose schema-init (gated on `mob_items.id=100000`). APPLIED
+    + verified live: 2582 rows, all joins resolve. Re-running the
+    generator against the post-apply DB emits 0 (gap closed; idempotent).
+  - **551 links could NOT be imported** (500 mob name not in `mob_base`,
+    30 item name not in `item_base`, 21 neither) -> written to
+    `tools/dataimport-jsonl/phase_y8_unresolvable_drops.csv` for the
+    owner. These need new mob_base/item_base rows (Y6/Y7 territory),
+    deferred to **Y10** (owner-confirmation-gated; do not auto-start).
+  - See decisions-log "Phase Y8 UNBLOCKED" for the correction record.
 
 - [x] **Y9: Prospecting / resource import** --
   (`prospecting/prospecting.jsonl`). **IMPORTER BUILT 2026-06-02; 529
@@ -296,6 +337,27 @@ will provide newer references when each task is approved.
   read-only in the build task); apply via the schema-init service or
   `psql -f db/postgres/seed_phase_y_prospecting.sql`.
 
+- [ ] **Y10: Owner-confirmation-gated import of the unresolvable drop
+  links.** **DO NOT AUTO-START -- this phase only runs when the owner
+  explicitly populates the missing rows and says go.** The Y8 import
+  closed every drop link whose mob AND item already exist in the
+  runtime. The remaining **551 links** (in
+  `tools/dataimport-jsonl/phase_y8_unresolvable_drops.csv`) reference a
+  mob (500), an item (30), or both (21) that the runtime has no row for.
+  They cannot be synthesized from positional/name data alone -- they
+  need real `mob_base` (Y6/Y7-class) and `item_base` (Y7-class) rows
+  with their own asset ids, factions, stats, categories, etc., which
+  the reconstruct dataset does not carry in importable form. The CSV is
+  the worklist: each row gives `reason`, `mob_name`, `item_name`, and
+  whichever end DID resolve (`resolved_mob_ids` / `resolved_item_ids`).
+  **Process:** the owner fills in the missing mob/item definitions (or
+  confirms each is intentionally out of scope); only then does a
+  follow-up importer create those base rows and the drop links. The
+  agent ASKS for this input and waits -- it never fabricates mob_base /
+  item_base rows on its own (that was the failure mode the original Y8
+  "build-then-reject" pass fell into). The CSV's `''pls update when
+  known''`-style junk mob names should be dropped, not filled.
+
 ## Finding 2026-06-01..02: per-category diff of the reconstruct dataset
 
 The user pointed at `/data/dev/enb-emu-data-reconstruct-backup/db`
@@ -319,7 +381,7 @@ A by-name + by-position diff per category yields:
 | items | `item_base` | -- | -- | **5003-row catalog imported (Y5)**, real itemIds |
 | mobs | `mob_base` | 2042 | 242 / 1113 | no importable row -- 0 of the 242 carry an asset/template id (unspawnable) |
 | missions | `missions` | 364 (all w/ XML) | 430 / 587 | no importable row -- 0 carry `mission_XML` (the executable script; cannot synthesize from prose) |
-| item drops | `mob_items` | 8583 | -- | no importable row -- 0 of 2415 rows carry a numeric `drop_chance` |
+| item drops | `mob_items` | 8450 | -- | **2582-row gap imported (Y8, 2026-06-02)** -- the "no importable row" verdict was a field-presence mistake (it measured `drop_chance` presence, not the (mob,item) link diff); the drop LINK is the gap, the RATE is owner-approved generated. 551 links whose mob/item lacks a runtime row -> CSV, deferred to Y10 |
 | prospecting | `sector_objects_harvestable` | 882 | -- | **529-node gap importer BUILT (Y9, 2026-06-02)** -- the "no resource_id" verdict was an id-diff mistake; resource+nav NAMES resolve (99%/93%) and a node is constructable from name+position+per-sector mechanics, exactly like Y4 navs |
 
 **What was importable** (Y1 NPCs, Y4 navs, Y5 items): a real diff
@@ -329,24 +391,33 @@ derived per-sector fields; items had real integer itemIds). All three
 landed via `generate_seed*.py` -> `db/postgres/seed_phase_y*.sql`,
 gated and idempotent, applied by the `schema-init` service.
 
-**What was NOT importable** (mobs, missions, item-drops, prospecting):
-each was diffed concretely on 2026-06-02 (not rejected on coverage
-percentages -- that was the Y4 mistake). Each has a real absent-by-name
-tail, but in every case **0** of the absent rows can be turned into a
-valid runtime row because the dataset lacks the one load-bearing field
-the runtime requires: a mob needs `base_asset_id` to be spawnable (0 of
-242 absent mobs have one), a mission needs `mission_XML` to run (0 of
-430 absent missions have it; it cannot be synthesized from walkthrough
-prose), a drop row needs a numeric `drop_chance` (0 of 2415 rows have
-one), a harvestable field needs `resource_id` + spawn mechanics (0 of
-3545 rows have any id or mechanics column). The contrast with Y4 is the
-whole point: a nav is fully functional from name + position + per-sector
-field derivation, so its absent tail WAS importable; these four are not.
-Injecting them would create broken/divergent objects, which the
-CLAUDE.md server-integrity rules forbid absent a primary-source escape
-hatch. These categories stay blocked pending a Net-7 server dump with
-the real ids/XML. The data remains preserved as the structured JSONL
-archive in the reconstruct backup.
+**What was importable on a second look** (Y8 drops, Y9 prospecting):
+both were initially rejected with a *field-presence* heuristic -- "0 of
+N rows carry the load-bearing field, therefore nothing is importable" --
+and both verdicts were WRONG for the same reason. The load-bearing field
+(`drop_chance` for Y8, `resource_id` for Y9) was never the gap. The gap
+is the LINK (which mob drops which item; which resource spawns at which
+field), and the link resolves by name + position to runtime ids exactly
+like Y4 navs. Y8: 2582 (mob,item) links importable, rate owner-approved
+generated. Y9: 529 nodes constructable from name + per-sector mechanics.
+The lesson, now stated three times in this file (Y4, Y9, Y8): **run the
+finest-key diff before declaring "no gap" -- never substitute a
+field-presence count for it.**
+
+**What remains NOT importable** (mobs, missions, and the Y8/Y9 tails
+whose endpoints don't exist yet): a mob needs `base_asset_id` to be
+spawnable (0 of 242 absent mobs have one), a mission needs `mission_XML`
+to run (0 of 430 absent missions have it; it cannot be synthesized from
+walkthrough prose), and the 551 Y8 drop links + the prospecting tail
+that reference a mob/item the runtime has no row for cannot be
+materialized without first creating those base rows. Those base rows
+need real asset/template ids the reconstruct dataset does not carry, so
+they stay blocked pending a Net-7 server dump -- tracked as **Y6/Y7**
+(mob/mission catalog) and **Y10** (owner-confirmation-gated drop tail).
+Injecting them with fabricated ids would create broken/divergent
+objects, which the CLAUDE.md server-integrity rules forbid absent a
+primary-source escape hatch. The data remains preserved as the
+structured JSONL archive in the reconstruct backup.
 
 ## Tracking notes
 

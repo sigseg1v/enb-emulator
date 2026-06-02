@@ -7511,3 +7511,74 @@ DECISION: CLI decode of the MobIndex frames is DONE; Wave 337 is `[x]`. Server
 stays unchanged this pass, with the AuxPercent gap recorded as the next scoped
 server-fidelity item (needs more capture variety, not blocked on it). The
 AuxHulkIndex port (nested AuxInventory20/40 + diff) is the follow-on CLI item.
+
+---
+
+## 2026-06-02 -- Phase Y8 UNBLOCKED: mob drop-table import (2582 rows) + the field-presence-heuristic error, corrected
+
+CONTEXT: Y8 (item-drop / mob loot import) had been marked `[!] BLOCKED` with the
+reasoning "0 of 2415 dropSource rows carry a numeric drop_chance, the load-
+bearing column does not exist in the dataset, so nothing is importable." A full
+importer had even been written to "pressure-test" the block, then deleted as
+dead code, and a prior decisions-log entry recorded the block as deliberate.
+
+THE OWNER CHALLENGED THIS and was right. The verdict was WRONG, and wrong for the
+exact same reason Y9 was wrongly blocked: it substituted a FIELD-PRESENCE COUNT
+for the actual LINK DIFF. The drop RATE was never the gap. The gap is the LINK --
+which mob drops which item -- and that resolves by name to runtime ids just like
+Y4 navs and Y9 prospecting nodes.
+
+THE REAL DIFF (tools/dataimport-jsonl/generate_seed_drops.py, /tmp/y8_gap.py):
+- Union drop links from both sources: mobs.jsonl `drops[].item` + item_drops.jsonl
+  `dropSources[].mob` = 3706 distinct (mob,item) name pairs.
+- Resolve each end against mob_base.name / item_base.name (normalized).
+  3159 resolve on both ends; 1061 already in mob_items (8450 existing); 2089 gap.
+- Exclude 232 links whose mob name is a placeholder ("unknown"/"various"/...) --
+  these collide with real mob_base rows literally named "Unknown" (placeholder
+  content); importing them would fabricate drops onto unrelated rows.
+- Fan the 208 multi-CL-variant mobs across their ids (every gap item name resolves
+  to exactly ONE item id -- 0 same-name tiers). Result: 2582 mob_items rows.
+
+GENERATED PAYLOAD (owner-approved): the source carries dropRatesAvailable=false
+everywhere, so the 4 payload columns are GENERATED, grounded in the runtime
+distribution of the 8450 existing rows so synth rows are shape-identical to the
+most common real ones: drop_chance=10.0 (a common real value just under the ~13
+mean; loader truncates to unsigned char -> 10), usage_chance=0, type=1 (unused at
+runtime), qty=1 (all modal). A single documented constant beats a fabricated per-
+row formula: no rarity signal exists in the source, and false precision is worse
+than honest uniformity. This is a content/preservation-fidelity decision the
+owner owns; it is NOT a server-code change, so the server-integrity rule's
+primary-source requirement does not gate it (that rule governs server/proxy/login
+WIRE behaviour, not reference-data content). The owner also confirmed mobs
+canonically drop weapons + gear, so equip-category loot entries are correct.
+
+RUNTIME REALITY (verified, not assumed): mob_items IS loaded live --
+MOBContent::LoadMOBContent (server/src/MOBDatabaseSQL.cpp, USE_MYSQL_SECTOR path)
+runs `SELECT * FROM mob_items` through the libpqxx shim into MOBData::m_Loot
+(struct LootNode). Consumers: the GM DisplayLoot print and the weapon-loadout
+selector (MOBClass.cpp:281, picks the mob's weapon/ammo/engine from the loot list
+by item_base_id SubCategory). No husk drop-roll keyed on drop_chance was found --
+the rate is loaded and printed but not yet rolled, so it is currently inert.
+
+DELIVERY: db/postgres/seed_phase_y_drops.sql (synth ids >=100000, gated DELETE-
+then-INSERT, ON CONFLICT DO NOTHING, idempotent), wired into docker-compose
+schema-init gated on mob_items.id=100000. APPLIED + verified live: 2582 rows, all
+joins resolve, re-running the generator against the post-apply DB emits 0 (gap
+closed; idempotent).
+
+UNRESOLVABLE TAIL -> CSV (owner-requested): 551 links whose mob (500) / item (30)
+/ both (21) have no runtime row went to tools/dataimport-jsonl/
+phase_y8_unresolvable_drops.csv (reason + whichever end resolved). These need new
+mob_base/item_base rows (Y6/Y7 territory). Deferred to a new **Y10** phase that is
+OWNER-CONFIRMATION-GATED: the agent asks the owner to populate the missing
+mob/item definitions and waits -- it does NOT auto-start and does NOT fabricate
+base rows on its own (that was the original Y8 build-then-reject failure mode).
+
+LESSON (now stated three times across plans/25 -- Y4, Y9, Y8): run the finest-key
+diff before declaring "no gap." Never substitute a field-presence count for it.
+"The runtime is authoritative" means diff carefully, not skip the diff.
+
+ALSO QUEUED (owner-requested 2026-06-02): rename the MySQL-named DB layer
+(server/src/mysql/, USE_MYSQL_* macros, *SQL.cpp loaders, g_MySQL_* globals) to
+Postgres-neutral names so filenames stop implying MySQL -- it is a libpqxx shim.
+Tracked in plans/09-phase-i-dev-env.md "Deferred" as a pure mechanical rename.
