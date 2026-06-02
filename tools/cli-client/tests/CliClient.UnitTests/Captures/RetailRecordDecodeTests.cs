@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllFortySixFrames()
+    public void Fixture_Loads_AllFiftyThreeFrames()
     {
-        Assert.Equal(46, Frames.Count);
+        Assert.Equal(53, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -125,6 +125,20 @@ public sealed class RetailRecordDecodeTests
         Assert.Equal(14, Frames["nav_obj_c5_type1"].Payload.Length);
         Assert.Equal(0x99, Frames["nav_obj_94_type2"].Opcode);
         Assert.Equal(14, Frames["nav_obj_94_type2"].Payload.Length);
+        Assert.Equal(0x10, Frames["decal_obj_06ee13de"].Opcode);
+        Assert.Equal(54, Frames["decal_obj_06ee13de"].Payload.Length);
+        Assert.Equal(0x10, Frames["decal_obj_3ad922"].Opcode);
+        Assert.Equal(54, Frames["decal_obj_3ad922"].Payload.Length);
+        Assert.Equal(0xB2, Frames["namedecal_revenge_jenquai"].Opcode);
+        Assert.Equal(48, Frames["namedecal_revenge_jenquai"].Payload.Length);
+        Assert.Equal(0xB2, Frames["namedecal_blitzer_colored"].Opcode);
+        Assert.Equal(48, Frames["namedecal_blitzer_colored"].Payload.Length);
+        Assert.Equal(0xB4, Frames["subparts_obj_06ee13de"].Opcode);
+        Assert.Equal(54, Frames["subparts_obj_06ee13de"].Payload.Length);
+        Assert.Equal(0x9C, Frames["warpindex_one"].Opcode);
+        Assert.Equal(4, Frames["warpindex_one"].Payload.Length);
+        Assert.Equal(0x9C, Frames["warpindex_none"].Opcode);
+        Assert.Equal(4, Frames["warpindex_none"].Payload.Length);
     }
 
     // ── ItemBase 0x25 ────────────────────────────────────────────────────────
@@ -1261,5 +1275,133 @@ public sealed class RetailRecordDecodeTests
         Assert.Contains("GameID            = 0x000001C2", settarget);
         Assert.Contains("GameID            = 0x000001C2  (450)", verb);
         Assert.Contains("GameID            = 0x000001C2  (450)", camera);
+    }
+
+    // ── Decal 0x10 ───────────────────────────────────────────────────────────
+    // int32 GameID, int16 DecalCount, then DecalCount * 24-byte DecalItem
+    // (Index, decal_id, float H/S/V, float opacity). The per-item stride is the
+    // bug surface: a wrong DecalItem size lands item N's fields on the wrong byte.
+
+    [Fact]
+    public void Decal_TwoItems_DecodesBothDecalItems()
+    {
+        string d = Dump("decal_obj_06ee13de");
+
+        Assert.Contains("GameID            = 0x06EE13DE", d);
+        Assert.Contains("DecalCount        = 2", d);
+        Assert.Contains("[0] Index       = 0x00000001", d);
+        Assert.Contains("[0] DecalID     = 0x00000019  (25)", d);
+        Assert.Contains("[0] H/S/V       = 1, 1, 1", d);
+        Assert.Contains("[0] Opacity     = 1.0", d);
+        // The second item only lands correctly if the first consumed exactly 24B.
+        Assert.Contains("[1] Index       = 0x00000002", d);
+        Assert.Contains("[1] DecalID     = 0x00000019  (25)", d);
+        Assert.DoesNotContain("(NB)", d);
+        Assert.DoesNotContain("too short", d);
+    }
+
+    [Fact]
+    public void Decal_SecondObject_DecodesDistinctDecalId()
+    {
+        string d = Dump("decal_obj_3ad922");
+
+        Assert.Contains("GameID            = 0x003AD922", d);
+        Assert.Contains("[0] DecalID     = 0x00000053  (83)", d);
+        Assert.Contains("[1] DecalID     = 0x00000053  (83)", d);
+        Assert.DoesNotContain("(NB)", d);
+    }
+
+    // ── NameDecal 0xB2 ───────────────────────────────────────────────────────
+    // int32 GameID, char Name[32] (NUL-terminated), float RGB[3]. 48 bytes. The
+    // name read must stop at the NUL and skip the zero pad so RGB lands at 36.
+
+    [Fact]
+    public void NameDecal_DecodesShipNameAndWhiteRgb()
+    {
+        string d = Dump("namedecal_revenge_jenquai");
+
+        Assert.Contains("GameID            = 0x06EE13DE", d);
+        Assert.Contains("Name              = \"Revenge of the Jenquai\"", d);
+        Assert.Contains("RGB               = (1.0, 1.0, 1.0)", d);
+        Assert.DoesNotContain("(NB)", d);
+        Assert.DoesNotContain("truncated", d);
+    }
+
+    [Fact]
+    public void NameDecal_DecodesTintedRgb()
+    {
+        string d = Dump("namedecal_blitzer_colored");
+
+        Assert.Contains("GameID            = 0x003AFED3", d);
+        Assert.Contains("Name              = \"Blitzer\"", d);
+        // A real non-white tint -- all three RGB floats are distinct, so the
+        // offset-36 RGB block is read in full (not a 1.0 constant).
+        Assert.Contains("RGB               = (0.89, 0.592, 0.341)", d);
+        Assert.DoesNotContain("(NB)", d);
+    }
+
+    // ── Subparts 0xB4 ────────────────────────────────────────────────────────
+    // int32 GameID (BE), int32 NumSubParts (BE), then NumSubParts pairs of a
+    // NUL-terminated bone path and a BE int32 asset id. Variable-length strings
+    // mean every later field's offset depends on the prior bone's length.
+
+    [Fact]
+    public void Subparts_DecodesFourBonesAndAssets()
+    {
+        string d = Dump("subparts_obj_06ee13de");
+
+        Assert.Contains("GameID            = 0x06EE13DE  (116265950)  (BE -- ntohl at emit)", d);
+        Assert.Contains("NumSubParts       = 4", d);
+        Assert.Contains("[0] Bone        = \"~01\"", d);
+        Assert.Contains("[0] AssetID     = 0x0000066B  (1643)", d);
+        // The variable-length bone paths -- each later entry only parses if the
+        // prior NUL-terminated string consumed exactly to its terminator.
+        Assert.Contains("[1] Bone        = \"~01/~03_01\"", d);
+        Assert.Contains("[1] AssetID     = 0x00000732  (1842)", d);
+        Assert.Contains("[2] Bone        = \"~01/~03_02\"", d);
+        Assert.Contains("[3] Bone        = \"~02\"", d);
+        Assert.Contains("[3] AssetID     = 0x00000683  (1667)", d);
+        Assert.DoesNotContain("(NB)", d);
+        Assert.DoesNotContain("truncated", d);
+    }
+
+    // ── WarpIndex 0x9C ───────────────────────────────────────────────────────
+    // A single LE int32 warp index; -1 is the "no warp" sentinel.
+
+    [Fact]
+    public void WarpIndex_DecodesIndexOne()
+    {
+        string d = Dump("warpindex_one");
+
+        Assert.Contains("Index             = 1", d);
+        Assert.DoesNotContain("(none)", d);
+        Assert.DoesNotContain("(NB)", d);
+    }
+
+    [Fact]
+    public void WarpIndex_NegativeOne_GetsNoneGloss()
+    {
+        string d = Dump("warpindex_none");
+
+        Assert.Contains("Index             = -1  (none)", d);
+        Assert.DoesNotContain("(NB)", d);
+    }
+
+    // Object 0x06EE13DE is read by SIX different decoders in this capture, all
+    // from the same logical id: Create (#370, LE), AdvPos (#372, LE), ObjectEffect
+    // (#372, LE), Decal (#372, LE), NameDecal (#372, LE) and Subparts (#370, BE).
+    // The Subparts frame stores the id big-endian while the rest store it little-
+    // endian, so this also locks the mixed-endian agreement -- every decoder must
+    // resolve the same object or its packets fall out of the lifecycle.
+    [Fact]
+    public void CrossOpcode_Object06EE13DE_AgreesAcrossSixDecoders()
+    {
+        foreach (var name in new[] {
+            "create_friendship_06ee13de", "advpos_minimal_bitmask0",
+            "objeffect_obj_06ee13de", "decal_obj_06ee13de",
+            "namedecal_revenge_jenquai", "subparts_obj_06ee13de" })
+        {
+            Assert.Contains("GameID            = 0x06EE13DE", Dump(name));
+        }
     }
 }

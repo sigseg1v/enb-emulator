@@ -443,3 +443,58 @@ provenance: Navigation 0x99 -- nav beacon for GameID 0x00000094 (==148) (capture
 opcode: 0x99
 payload-bytes: 14
 hex: 94 00 00 00 00 c0 da 46 01 02 00 00 00 00
+
+[decal_obj_06ee13de]
+provenance: Decal 0x10 -- two hull decals on GameID 0x06EE13DE (capture_1.rar, Packet #372, Length=58). int32 GameID (LE), int16 DecalCount=2, then 2 x DecalItem(24B): Index, decal_id, float H/S/V, float opacity. Both items DecalID 0x19 (25), HSV (1,1,1), opacity 1.0. Same object as Create #370 / AdvPos #372 / ObjectEffect #372 -- a fifth decoder reading id 0x06EE13DE.
+opcode: 0x10
+payload-bytes: 54
+hex: de 13 ee 06 02 00 01 00 00 00 19 00 00 00 00 00
+      80 3f 00 00 80 3f 00 00 80 3f 00 00 80 3f 02 00
+      00 00 19 00 00 00 00 00 80 3f 00 00 80 3f 00 00
+      80 3f 00 00 80 3f
+
+[decal_obj_3ad922]
+provenance: Decal 0x10 -- two hull decals on GameID 0x003AD922 (capture_1.rar, Packet #946, Length=58). DecalID 0x53 (83) -- distinct from the 0x06EE13DE frame, so the DecalItem array is not single-witness. Proves the per-item 24-byte stride lands the second item's fields exactly.
+opcode: 0x10
+payload-bytes: 54
+hex: 22 d9 3a 00 02 00 01 00 00 00 53 00 00 00 00 00
+      80 3f 00 00 80 3f 00 00 80 3f 00 00 80 3f 02 00
+      00 00 53 00 00 00 00 00 80 3f 00 00 80 3f 00 00
+      80 3f 00 00 80 3f
+
+[namedecal_revenge_jenquai]
+provenance: NameDecal 0xB2 -- ship name plate for GameID 0x06EE13DE (capture_1.rar, Packet #372, Length=52). Fixed 48 bytes: int32 GameID (LE), char Name[32] (NUL-terminated), float RGB[3]. Name "Revenge of the Jenquai", RGB (1,1,1) white. The NUL-terminated name read must stop at the terminator and skip the zero pad to land RGB at offset 36.
+opcode: 0xB2
+payload-bytes: 48
+hex: de 13 ee 06 52 65 76 65 6e 67 65 20 6f 66 20 74
+      68 65 20 4a 65 6e 71 75 61 69 00 00 00 00 00 00
+      00 00 00 00 00 00 80 3f 00 00 80 3f 00 00 80 3f
+
+[namedecal_blitzer_colored]
+provenance: NameDecal 0xB2 -- ship name plate for GameID 0x003AFED3 (capture_1.rar, Packet #857, Length=52). Name "Blitzer" with a NON-white RGB (0.89, 0.592, 0.341) -- a real tinted name plate, complementing the white frame and proving all three RGB floats decode (not just a 1.0 constant).
+opcode: 0xB2
+payload-bytes: 48
+hex: d3 fe 3a 00 42 6c 69 74 7a 65 72 00 00 00 00 00
+      00 b0 71 40 00 00 00 00 00 00 00 00 00 00 00 00
+      20 5a 3c 1c e3 e3 63 3f 9a 97 17 3f 9f ae ae 3e
+
+[subparts_obj_06ee13de]
+provenance: Subparts 0xB4 -- four equipped-part bones on GameID 0x06EE13DE (capture_1.rar, Packet #370, Length=58). int32 GameID and NumSubParts are BIG-endian (ntohl at emit); each entry is a NUL-terminated bone path + BE int32 asset id. Bones "~01"/"~01/~03_01"/"~01/~03_02"/"~02", assets 0x066B/0x0732/0x0732/0x0683. GameID stored BE here (wire 06 ee 13 de) but LE in Create #370 (wire de 13 ee 06) -- SAME object 0x06EE13DE, opposite byte orders: a cross-endianness check like the ServerHandoff/ServerRedirect sector pair.
+opcode: 0xB4
+payload-bytes: 54
+hex: 06 ee 13 de 00 00 00 04 7e 30 31 00 00 00 06 6b
+      7e 30 31 2f 7e 30 33 5f 30 31 00 00 00 07 32 7e
+      30 31 2f 7e 30 33 5f 30 32 00 00 00 07 32 7e 30
+      32 00 00 00 06 83
+
+[warpindex_one]
+provenance: WarpIndex 0x9C -- a single LE int32 warp index = 1 (capture_1.rar, Packet #1502, Length=8).
+opcode: 0x9C
+payload-bytes: 4
+hex: 01 00 00 00
+
+[warpindex_none]
+provenance: WarpIndex 0x9C -- warp index 0xFFFFFFFF == -1, the "no warp" sentinel (capture_1.rar, Packet #1692, Length=8). Pins the "(none)" gloss.
+opcode: 0x9C
+payload-bytes: 4
+hex: ff ff ff ff
