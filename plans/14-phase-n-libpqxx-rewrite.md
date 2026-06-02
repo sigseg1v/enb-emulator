@@ -140,17 +140,33 @@ parameterisation didn't touch.
       from `table()`. NB this was NOT a NET7 vs Postgres dialect issue --
       it was a wrapper-completeness gap; the MySQL `mysql_fetch_field`
       gave table names for free.
-- [ ] **Regression guard (the gap that let all three ship).** The
-      integration suite asserts opcode round-trips but never asserts the
-      boot log is clean. Add a Phase-T smoke check that fails if
-      container logs contain `does not exist` (postgres `relation`/
-      `column`, OR the NET7-wrapper `Field ... does not exist in this
-      table`) or `Error reading with MySQL` after a clean boot. A clean
-      volume-wiped boot is verified to log ZERO of these now, so the
-      assertion has a true-zero baseline. This catches the entire
-      case-fold / cross-DB / compound-lookup class on the first boot
-      rather than via a manual audit. (Ties into the still-open Wave-2
-      item "extend postgres_smoke_test to a real DAO round-trip".)
+- [x] **Regression guard (the gap that let all three ship).** The
+      integration suite asserted opcode round-trips but never that the
+      boot log is clean. Added `Smoke/BootLogHealthTests.cs` (Phase T)
+      with two `[Fact]`s on a `ServerFixture`-owned clean boot:
+      - `Postgres_HasNoSchemaDoesNotExistErrors` -- fails if the postgres
+        log has an `ERROR:` line matching `(relation|column) ... does
+        not exist` (catches the case-fold + cross-DB classes: Bug A/B).
+      - `Server_HasNoSqlReadFailures` -- fails if the server log has
+        `does not exist in this table` (the compound-lookup class: Bug C)
+        or `Error reading with MySQL` (any DAO SELECT failure).
+
+      Both have a verified true-zero baseline on a volume-wiped boot.
+      Supporting changes:
+      - `ServerFixture.CaptureServiceLogsAsync(service)` -- reads a
+        service's full `docker compose logs`; works in both owns-compose
+        and `CLI_INTEGRATION_SKIP_COMPOSE=1` modes.
+      - The postgres assertion is scoped to lines carrying
+        `app=net7-server`: `mysqlplus.cpp::grabdb` now tags every server
+        libpqxx connection `application_name=net7-server`, and
+        docker-compose puts `%a` in postgres `log_line_prefix`. This
+        stops ad-hoc `psql`/pgadmin on a shared dev stack from tripping
+        the guard -- only the server's own SQL counts. Verified
+        end-to-end: a `net7-server`-tagged failing query logs
+        `app=net7-server`; a differently-tagged one does not match.
+      Committed alongside this plan update. (The Wave-2 item "extend
+      postgres_smoke_test to a real DAO round-trip" stays open -- this is
+      a log-health guard, complementary to a positive round-trip check.)
 
 ## Decisions deferred
 

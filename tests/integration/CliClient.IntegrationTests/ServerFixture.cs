@@ -118,6 +118,20 @@ public sealed class ServerFixture : IAsyncLifetime
             $"Last logs tail:\n{lastTail[Math.Max(0, lastTail.Length - 2000)..]}");
     }
 
+    /// <summary>
+    /// Captures the full <c>docker compose logs</c> for one service.
+    /// Used by the boot-log-health guard (<c>Smoke/BootLogHealthTests</c>).
+    /// Works in both owns-compose and externally-managed
+    /// (<c>CLI_INTEGRATION_SKIP_COMPOSE=1</c>) modes -- it only reads logs.
+    /// </summary>
+    public async Task<string> CaptureServiceLogsAsync(string service)
+    {
+        var (exit, stdout, stderr) = await RunCaptureAsync(
+            "docker", $"compose logs --no-color --no-log-prefix {service}",
+            TimeSpan.FromSeconds(30));
+        return exit == 0 ? stdout : stdout + stderr;
+    }
+
     private static async Task<(int ExitCode, string Stdout, string Stderr)> RunCaptureAsync(
         string fileName, string arguments, TimeSpan timeout)
     {

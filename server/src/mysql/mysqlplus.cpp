@@ -281,6 +281,12 @@ OPENDB *sql_connection_c::grabdb()
         dsn += " dbname="; dsn += (database ? database : "");
         if (user)     { dsn += " user=";     dsn += user; }
         if (password) { dsn += " password="; dsn += password; }
+        // Tag every server-originated connection so postgres logs attribute
+        // each line to us (log_line_prefix carries %a). Lets the boot-log
+        // health guard scope "does not exist" errors to the server's own SQL
+        // and ignore ad-hoc psql / tooling on a shared dev stack. Connection
+        // metadata only -- no wire/security/input-acceptance effect.
+        dsn += " application_name=net7-server";
 
         try {
             net7_db_handle *h = new net7_db_handle;
