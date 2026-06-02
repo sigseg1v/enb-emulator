@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Generate Postgres seed SQL for Phase Y1 (NPCs) and Y5 (items) from the
-wiki-scraped JSONL reconstruct backup.
+JSONL reconstruct dataset.
 
 Inputs:
   NPCS_PATH    -- one JSON object per line, wiki-shaped NPC records

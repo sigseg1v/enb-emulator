@@ -156,3 +156,7 @@ deploy/certs/*.crt
 
 # Local-only scratch space. Never committed.
 /scratch/
+
+# Python bytecode (import tooling under tools/dataimport-jsonl/ etc.)
+__pycache__/
+*.pyc

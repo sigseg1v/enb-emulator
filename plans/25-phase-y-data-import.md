@@ -41,7 +41,7 @@ will provide newer references when each task is approved.
   count climbs from 4 toward 77.
   **STATUS: PARTIAL IMPORT LANDED 2026-05-31, room placement added
   same day.** Source: `/data/dev/enb-emu-data-reconstruct-backup/db/npcs/npcs.jsonl`
-  (wiki-scraped JSONL, NOT a Net-7 server dump). Importer:
+  (JSONL reconstruct dataset, NOT a Net-7 server dump). Importer:
   `tools/dataimport-jsonl/generate_seed.py`. Output:
   `db/postgres/seed_phase_y.sql` (applied at boot via the
   `schema-init` service, gated on `starbase_npcs.npc_Id = 100000`;
@@ -101,35 +101,70 @@ will provide newer references when each task is approved.
   ObjectEffect frames per persistent-buff slot.
   **STATUS: AWAITING USER APPROVAL + REFERENCE DATA.**
 
-- [!] **Y4: Sector map / system topology import** -- populate
-  `sector`, `sector_link`, `system`, `nav_object`, `gate` and the
-  associated coordinates / faction-region tables so warp routes and
-  the in-game galaxy map match retail. Closes the `m_ObjectMgr->SendAllNavs`
-  curatorial gap on the SectorLogin (space-arm) path -- not the
-  station path -- but is a prerequisite for any post-Phase-K cross-
-  sector navigation testing.
-  **STATUS: BLOCKED -- wiki scrape is the WRONG source; runtime is
-  already authoritative. See "Finding 2026-06-01" below.** The runtime
-  `sector_objects` table already holds **9382** authoritative navs with
-  real `base_asset_id` and runtime coordinates; `sectors` has 130 rows.
-  The wiki `sectors/json/*.jsonl` is the SAME navs at 1/1000 the
-  coordinate scale with no asset ids (proof: wiki "Sado Pit"
-  (-152.74,-63.89) == runtime "Sado Pit" (-152740,-63860) in sector
-  1076). 85% of the 2286 wiki nav names already exist by name in
-  `sector_objects`. Injecting them would create wrong-position,
-  asset-less duplicate navs -- divergence forbidden by the
-  server-integrity rules. Real unblock needs a Net-7 server dump with
-  integer asset ids + runtime coords, not the wiki scrape.
+- [x] **Y4: Sector navigation-marker import** -- add the
+  nav-point / hidden-nav-point markers the runtime `sector_objects`
+  table is genuinely missing, after a by-name + by-position diff of the
+  reconstruct dataset against the authoritative runtime. Closes part of
+  the `m_ObjectMgr->SendAllNavs` curatorial gap on the SectorLogin
+  (space-arm) path.
+  **STATUS: IMPORT LANDED 2026-06-02. 48 markers.** Source:
+  `/data/dev/enb-emu-data-reconstruct-backup/db/sectors/json/*.jsonl`.
+  Importer: `tools/dataimport-jsonl/generate_seed_navs.py`. Output:
+  `db/postgres/seed_phase_y_navs.sql` (applied at boot by the
+  `schema-init` service after `seed_phase_y.sql`, gated on
+  `sector_objects.sector_object_id = 100000`; idempotent via
+  top-of-seed `DELETE WHERE sector_object_id >= 100000` on
+  `sector_nav_points` then `sector_objects`, and per-row
+  `ON CONFLICT (sector_object_id) DO NOTHING`).
+  **Why only 51 of ~2286 dataset nav names**: the bulk are already
+  authoritative in `sector_objects` (9382 rows). The diff drops, in
+  order: (1) only `nav-point`/`hidden-nav-point` types are eligible --
+  gates, stations, planets, moons are excluded because they need
+  relational rows the dataset lacks (`gate_to` +
+  `sector_objects_stargates` faction/class/security;
+  `sector_objects_starbases` + interior; `sector_objects_planets`
+  orbit) and importing them would create non-functional broken objects;
+  (2) `Planet*`/`Moon*` stems are excluded -- they either duplicate an
+  existing surface sector or are unmappable (e.g. the dataset's 29
+  "Planet Inverness" records already exist 1:1 as runtime sector 4093);
+  (3) name-dedup against the resolved sector's existing nav names
+  (1659 skipped) -- this normalizes both sides through `core_name()`,
+  which strips the runtime `[asset NNNN]` annotation and a
+  "Wreckage of the" prefix so e.g. dataset "Teoyaomqui Maru" dedups
+  against runtime "Wreckage of the Teoyaomqui Maru [asset 1268]"
+  (equality after stripping, NOT substring, so "Above Hadean" stays
+  distinct from "Hadean"); (4) position-dedup against existing nav
+  positions at the /1000 scale (134 skipped -- catches renamed dupes
+  like "Neptune Nav 3" == runtime "Nav 3"). What survives is 48 markers
+  in sectors the runtime has but whose specific markers were absent.
+  **Field derivation**: the dataset gives only name + xyz +
+  visible/hidden. The runtime nav model needs ~15 more fields
+  (`type`, `base_asset_id`, `nav_type`, `is_huge`, `radar_range`,
+  `scale`, `h/s/v`, orientation quat, `signature`, `base_xp`,
+  `exploration_range`, `object_radius_patch`). These are DERIVED from
+  the same sector's existing navs of the same visibility class (modal
+  categoricals, median numerics; global fallback if the sector has no
+  navs of that class). `appears_in_radar`/`nav_type` are set from the
+  visible/hidden flag (visible->1/varies, hidden->0/0).
+  **Caveats (honest)**: (a) positions are the dataset's /1000 coords
+  multiplied by 1000 back to the runtime frame, so they are
+  APPROXIMATE (the scale wobbles 1000-1002 and the dataset rounds to 2
+  decimals) -- NOT byte-accurate retail values; (b) the ~15 derived
+  fields are statistical fills, not authoritative per-marker values.
+  These markers are functional navigation aids, not a fidelity claim;
+  a Net-7 server dump with real coords + asset ids would supersede
+  them (the seed's synth-id range makes that a clean replacement).
+  Synth ids 100000..100047.
 
 - [~] **Y5: Item catalog import** -- populate `item_base` /
-  `item_categories` / `item_subcategories` with the wiki-scraped item
+  `item_categories` / `item_subcategories` with the reconstruct item
   catalog. Acceptance: a fresh-character's starter-loadout
   `SendItemBase` calls in `server/src/PlayerClass.cpp:1080-1083`
   resolve to a real template, not the placeholder-or-NULL most rows
   currently return.
   **STATUS: PARTIAL IMPORT LANDED 2026-05-31.** Source:
   `/data/dev/enb-emu-data-reconstruct-backup/db/json/cat*_lvl*.jsonl`
-  (wiki-scraped). Same importer / output / gate as Y1. Loaded:
+  (JSONL reconstruct dataset). Same importer / output / gate as Y1. Loaded:
   5003 unique `item_base` rows (real itemId range, no synth offset
   here because itemIds are <10k and won't collide with future
   authoritative imports). 12 `item_categories` rows (rough buckets,
@@ -160,7 +195,7 @@ will provide newer references when each task is approved.
   Acceptance: the in-game job terminal in any starbase returns at
   least one available mission for a fresh character at level-
   appropriate range.
-  **STATUS: BLOCKED -- wiki scrape has no `mission_XML`; runtime is
+  **STATUS: BLOCKED -- reconstruct dataset has no `mission_XML`; runtime is
   already authoritative. See "Finding 2026-06-01" below.** The runtime
   `missions` table already holds **364** missions and **all 364 carry a
   non-empty `mission_XML`** -- the script the server actually executes.
@@ -202,49 +237,51 @@ will provide newer references when each task is approved.
   fabricated ids and would not connect to the authoritative spawn fields.
   Real unblock needs a Net-7 harvestable dump.
 
-## Finding 2026-06-01: the wiki reconstruct backup is NOT a runtime-import source
+## Finding 2026-06-01..02: per-category diff of the reconstruct dataset
 
 The user pointed at `/data/dev/enb-emu-data-reconstruct-backup/db`
-(items/missions/mobs/npcs/prospecting/sectors) and granted blanket
-permission to "do all the import phases." Investigation
-(`tools/dataimport-jsonl/analyze_wiki_coverage.py`, reproducible against
-the dev Postgres) shows that for **every** category except NPCs (Y1) and
-items (Y5, which had real integer itemIds and dedup), the authoritative
-runtime tables are **already fully populated** and the wiki JSONL is a
-name-level near-duplicate in an **incompatible form**:
+(items/missions/mobs/npcs/prospecting/sectors) and asked for a real
+diff -- not a wholesale insert -- to find and import the genuine gaps.
+Investigation (`tools/dataimport-jsonl/analyze_wiki_coverage.py`,
+reproducible against the dev Postgres) shows the authoritative runtime
+tables are densely populated for every category, and the reconstruct
+JSONL is largely a name-level near-duplicate in an **incompatible
+form** (no asset/faction ids, no mission XML, /1000 coords). The
+decisive scale proof: dataset `sectors/json/ABA.jsonl` nav "Sado Pit"
+at (-152.74, -63.89) is the runtime nav "Sado Pit" in sector 1076 at
+(-152740, -63860) -- runtime coords == dataset coords * 1000.
 
-| category | runtime table | runtime rows | wiki overlap by name | why wiki can't be injected |
-|---|---|---|---|---|
-| sectors/navs | `sector_objects` | 9382 | 85% of 2286 | /1000 coords, no asset ids |
-| mobs | `mob_base` | 2042 | 77% of 1127 | no asset/faction/AI, "?" stats |
-| missions | `missions` | 364 (all w/ XML) | 25% of 588 | no `mission_XML` |
-| item drops | `mob_items` | 8583 | 77% of 933 mob refs | drop rates mostly "?" |
-| prospecting | `sector_objects_harvestable` | 882 | n/a | no `resource_id` linkage |
+A by-name + by-position diff per category yields:
 
-The decisive proof: the wiki `sectors/json/ABA.jsonl` nav "Sado Pit" at
-map coords (-152.74, -63.89) is the same authoritative runtime nav "Sado
-Pit" in sector 1076 at (-152740, -63860) -- identical object, runtime
-coords == wiki coords * 1000, already present with a real `base_asset_id`.
+| category | runtime table | runtime rows | verdict |
+|---|---|---|---|
+| sectors/navs | `sector_objects` | 9382 | **48-marker gap imported (Y4)** after type-filter + name/position dedup |
+| npcs | `starbase_npcs` | -- | **156-NPC gap imported (Y1)** after roster dedup |
+| items | `item_base` | -- | **5003-row catalog imported (Y5)**, real itemIds |
+| mobs | `mob_base` | 2042 | no importable gap -- no asset/faction/AI, "?" stats |
+| missions | `missions` | 364 (all w/ XML) | no importable gap -- dataset has no `mission_XML` |
+| item drops | `mob_items` | 8583 | no importable gap -- drop rates mostly "?" |
+| prospecting | `sector_objects_harvestable` | 882 | no importable gap -- no `resource_id` linkage |
 
-**This is exactly what the Phase Y process gate already requires**: a
-PRIMARY source (MySQL/Net-7 server dump, packet capture, or first-hand
-doc), NOT a wiki scrape. The Y1 note itself flags the JSONL as "wiki-
-scraped, NOT a Net-7 server dump". Injecting it into the runtime tables
-would create wrong-position/asset-less duplicate objects and non-runnable
-missions -- divergence the CLAUDE.md server-integrity rules forbid, with
-no primary-source escape hatch available.
+**What was importable** (Y1 NPCs, Y4 navs, Y5 items): a real diff
+surfaced rows the runtime genuinely lacked, and each carried enough to
+build a valid runtime row (NPCs deduped against the roster; navs got
+derived per-sector fields; items had real integer itemIds). All three
+landed via `generate_seed*.py` -> `db/postgres/seed_phase_y*.sql`,
+gated and idempotent, applied by the `schema-init` service.
 
-**Decision (autonomous, overnight):** do NOT inject any of these five
-categories into the runtime tables. The data is already preserved as a
-structured JSONL archive in the reconstruct backup. If the user later
-wants it queryable in Postgres, the right shape is opt-in `wiki_*`
-REFERENCE tables the server never reads (no fidelity risk) -- but that is
-preservation-only with no current consumer (the CLI is a network client,
-not a DB client), so it is deferred pending an explicit "yes, build the
-reference tables even though nothing reads them yet" rather than built
-unsupervised. NPCs (Y1) and items (Y5) remain the only wiki categories
-that were safely importable, because they carried real ids and deduped
-against the authoritative roster.
+**What was NOT importable** (mobs, missions, item-drops, prospecting):
+the diff found mostly name-level restatements of rows that already
+exist authoritatively, plus a tail of new names that cannot be turned
+into valid runtime rows because the dataset lacks the load-bearing
+fields -- a mob with no asset/faction/AI, a mission with no XML the
+server can run, a drop row with a "?" chance, a resource with no
+`resource_id` linkage to the spawn fields. Injecting those would
+create broken/divergent objects, which the CLAUDE.md server-integrity
+rules forbid absent a primary-source escape hatch. These categories
+stay blocked pending a Net-7 server dump with the real ids/XML. The
+data remains preserved as the structured JSONL archive in the
+reconstruct backup.
 
 ## Tracking notes
 

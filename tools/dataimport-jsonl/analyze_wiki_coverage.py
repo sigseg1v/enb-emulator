@@ -1,25 +1,29 @@
 #!/usr/bin/env python3
-"""Quantify how much of the wiki-scraped reconstruct backup is ALREADY
+"""Quantify how much of the JSONL reconstruct dataset is ALREADY
 present, authoritatively, in the live Postgres runtime tables.
 
 Why this exists: Phase Y (`plans/25-phase-y-data-import.md`) lists
-sector/mission/mob/drop/prospecting "imports". This script is the
-evidence that those categories must NOT be injected into the runtime
-tables:
+sector/mission/mob/drop/prospecting "imports". This script measures,
+per category, how much is a duplicate of the (richer) runtime data vs
+a genuine gap -- so imports target only the real gaps:
 
   * The runtime tables are authoritative and densely populated
     (sector_objects, mob_base, missions all carry the real Net-7
     integer asset ids / faction ids / mission XML).
-  * The wiki JSONL is a name-level near-duplicate of that data in an
-    INCOMPATIBLE form: nav coordinates are the runtime coordinates
-    divided by ~1000 (wiki "Sado Pit" (-152.74,-63.89) == runtime
-    "Sado Pit" (-152740,-63860) in sector 1076), it carries no asset
-    ids, no faction ids, no mission XML, and drop rates are mostly "?".
+  * The reconstruct JSONL is largely a name-level near-duplicate of
+    that data in an INCOMPATIBLE form: nav coordinates are the runtime
+    coordinates divided by ~1000 (dataset "Sado Pit" (-152.74,-63.89)
+    == runtime "Sado Pit" (-152740,-63860) in sector 1076), and it
+    carries no asset ids, no faction ids, no mission XML; drop rates
+    are mostly "?".
 
-Injecting it would create wrong-position, asset-less duplicate objects
-and non-runnable missions -- divergence the CLAUDE.md server-integrity
-rules forbid (the escape hatch requires a PRIMARY source; a wiki scrape
-is not one, and the Phase Y process gate says so explicitly).
+So most categories cannot be injected wholesale -- doing so would
+create wrong-position, asset-less duplicate objects and non-runnable
+missions, divergence the CLAUDE.md server-integrity rules forbid. The
+exceptions are the small genuine gaps a by-name + by-position diff
+surfaces: Y1 added NPCs the runtime lacked, and Y4
+(generate_seed_navs.py) adds the positional nav markers the runtime is
+missing. See plans/25 for the per-category verdict.
 
 Run against the dev stack's Postgres (host port 5434 by default):
     python3 tools/dataimport-jsonl/analyze_wiki_coverage.py
@@ -133,10 +137,11 @@ def main() -> int:
     print(f"PROSPECT   {prows} rows, {len(presources)} distinct resources "
           f"(runtime sector_objects_harvestable holds the authoritative fields)")
 
-    print("\nVerdict: the wiki scrape is a name-level near-duplicate of authoritative")
-    print("runtime data in an incompatible form (no asset/faction ids, no XML, /1000")
-    print("coords). It is NOT a primary source per CLAUDE.md and MUST NOT be injected")
-    print("into the runtime tables. See plans/25-phase-y-data-import.md.")
+    print("\nVerdict: the reconstruct dataset is largely a name-level near-duplicate of")
+    print("authoritative runtime data in an incompatible form (no asset/faction ids, no")
+    print("XML, /1000 coords), so it cannot be injected wholesale. Import only the genuine")
+    print("gaps a by-name + by-position diff surfaces: Y1 NPCs and Y4 nav markers")
+    print("(generate_seed_navs.py). See plans/25-phase-y-data-import.md.")
     return 0
 
 

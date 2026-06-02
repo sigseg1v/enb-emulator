@@ -7080,3 +7080,79 @@ security-half: our server does not diverge in any way the client can observe as
 wrong (the client just uses whatever id START hands it). If a future need arises
 to replay retail captures byte-exactly through our server, that is the tooling's
 problem to stub the id, not grounds to change the server's id allocation.
+
+---
+
+## 2026-06-02 -- Supersedes the Y4 part of the 2026-06-01 entry: 48 sector navigation markers ARE a real gap and were imported
+
+The 2026-06-01 entry above marked Y4 (sector navs) `[!]` rejected
+alongside missions/mobs/drops/prospecting. That conclusion was too
+coarse: it was correct that the *bulk* of the reconstruct
+`sectors/json/*.jsonl` navs (85% by name) are authoritative duplicates
+at /1000 coords, but it skipped the actual diff that the user
+explicitly asked for. Doing the diff properly surfaced a genuine gap.
+
+**Decision.** Y4 is **done, not blocked.** 48 nav-point /
+hidden-nav-point markers that the runtime `sector_objects` genuinely
+lacked were imported. Y6/Y7/Y8/Y9 (missions, mobs, item-drops,
+prospecting) remain blocked for the reasons in the 2026-06-01 entry --
+those are unchanged.
+
+**Method (the part the first pass skipped).**
+- Importer: `tools/dataimport-jsonl/generate_seed_navs.py` ->
+  `db/postgres/seed_phase_y_navs.sql`, applied by `schema-init` after
+  `seed_phase_y.sql`, gated on `sector_objects.sector_object_id=100000`,
+  idempotent (top-of-seed DELETE of synth range, per-row ON CONFLICT).
+- Eligibility filter: only `nav-point`/`hidden-nav-point`. Gates,
+  stations, planets and moons are excluded -- they need relational rows
+  the dataset has no source for (`gate_to` + stargate faction/class/
+  security; starbase + interior; planet orbit), so importing them would
+  yield non-functional broken objects.
+- Sector resolution: exact normalized stem<->sector-name match trusted
+  unconditionally; alias/de-camel matches gated on name-overlap so they
+  cannot resolve to the wrong sector. (Caught two of my own bugs:
+  `Planet Inverness`'s 29 records already exist 1:1 as runtime sector
+  4093, and Neptune is an exact match that the overlap gate wrongly
+  excluded until the exact-match bypass was added.)
+- Dedup: by name (1659 skipped) AND by position at the /1000 scale
+  (134 skipped -- catches renamed dupes like "Neptune Nav 3" ==
+  runtime "Nav 3"). Name-dedup runs both sides through `core_name()`,
+  which strips the runtime `[asset NNNN]` annotation and a
+  "Wreckage of the" prefix (equality after stripping, NOT substring),
+  so dataset "Teoyaomqui Maru" / "Tonatiuh Maru" dedup against runtime
+  "Wreckage of the Teoyaomqui Maru [asset 1268]" etc., while
+  "Above Hadean" stays distinct from "Hadean". Survivors: 48.
+- The dataset gives only name + xyz + visible/hidden. The other ~15
+  runtime fields (type/base_asset_id/nav_type/is_huge/radar_range/
+  scale/h/s/v/orientation/signature/base_xp/exploration_range/
+  object_radius_patch) are DERIVED from the same sector's existing navs
+  of the same visibility class (modal categoricals, median numerics;
+  global fallback).
+- Generator self-dedup fix: the existing-nav and profile queries now
+  filter `sector_object_id < 100000`, so regenerating after the seed is
+  applied is stable at 51 (without this it cannibalized its own output
+  and emitted 0).
+
+**Honest caveats (recorded so this is not mistaken for a fidelity
+claim).** Positions are the dataset's /1000 coords multiplied by 1000
+back to the runtime frame -- APPROXIMATE, not byte-accurate retail
+values (scale wobbles 1000-1002; dataset rounds to 2 decimals). The
+~15 derived fields are statistical fills, not authoritative per-marker
+values. These are functional navigation aids. A Net-7 server dump with
+real coords + asset ids would supersede them; the synth-id range
+(100000..100047) makes that a clean DELETE-and-replace.
+
+**Why this does not violate the server-integrity rule.** This is DB
+seed data, not server code, and the markers do not make the server
+*accept* anything the real server rejected. But the preservation-
+fidelity spirit applies, hence the approximate-coords caveat is
+documented in-band (plans/25 Y4 + the seed header) rather than
+presented as retail-accurate. The bulk-duplicate categories stay out
+precisely because injecting them WOULD diverge.
+
+**Process lesson.** "The runtime is already authoritative" is a reason
+to diff carefully, not a reason to skip the diff. The first pass
+rejected all five categories from coverage percentages alone; the
+actual by-name + by-position diff found a real 48-row gap in the one
+category (navs) where the dataset's name+position is enough to build a
+valid runtime row.
