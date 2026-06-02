@@ -239,6 +239,28 @@ public sealed class RetailRecordDecodeTests
         Assert.DoesNotContain("too short", d);
     }
 
+    [Fact]
+    public void Colorization_ServerCountConvention_DecodesSameEightBlocks()
+    {
+        // Our server (PlayerClass.cpp) writes ItemCount=8 for the SAME 8-block,
+        // 134-byte body where retail writes 4. The decoder derives the block
+        // count from the payload length, so a live count=8 frame must decode to
+        // the identical four slots -- otherwise the CLI would mis-read every
+        // colorization our own server sends.
+        var f = Frames["colorization_default"];
+        byte[] p = (byte[])f.Payload.Clone();
+        Assert.Equal(4, p[4]);            // retail count
+        p[4] = 8;                         // tada-o server count, same body
+        string d = PacketRecord.Resolve((ushort)f.Opcode, p).DumpToString();
+
+        Assert.Contains("ItemCount", d);
+        Assert.Contains("flat blocks", d);   // note recognises the server convention
+        Assert.Contains("[0] primary", d);
+        Assert.Contains("[3] secondary", d);
+        Assert.DoesNotContain("???", d);
+        Assert.DoesNotContain("trailing bytes", d);
+    }
+
     // ── AvatarDescription 0x61 ───────────────────────────────────────────────
 
     [Fact]
