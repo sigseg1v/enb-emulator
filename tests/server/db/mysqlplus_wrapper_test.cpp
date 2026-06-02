@@ -180,12 +180,12 @@ TEST(MysqlplusWrapper, ExecuteParamsMixedTypesAndNull) {
 
     sql_query_c q(&conn);
     q.AddParam(7);
-    // 31-bit value — sql_var_c::operator unsigned long() is implemented
-    // on atoi() and sign-extends anything above 0x80000000 (pre-existing
-    // bug in the Wave 1 rewrite, preserved bug-for-bug from the legacy
-    // libmysqlclient wrapper). Don't trip it here; this test is about
-    // round-tripping the bound parameter, not about read-side casts.
-    q.AddParam((unsigned long)0x12345678UL);
+    // High-bit value above 0x80000000. sql_var_c::operator unsigned long()
+    // now reads via strtoul; the original (unsigned long)atoi() truncated to
+    // a 32-bit (signed) int and sign-extended anything >= 0x80000000 to a
+    // bogus huge unsigned long. This binds + reads back 0xFFFFFFFE to lock
+    // that read-side fix in (Phase N pre-existing-bug item).
+    q.AddParam((unsigned long)0xFFFFFFFEUL);
     q.AddParam(3.5);
     q.AddParamNull();
     ASSERT_NE(q.execute_params(
@@ -199,7 +199,7 @@ TEST(MysqlplusWrapper, ExecuteParamsMixedTypesAndNull) {
     sql_row_c row;
     result.fetch_row(&row);
     EXPECT_EQ((int)row[0], 7);
-    EXPECT_EQ((unsigned long)row[1], 0x12345678UL);
+    EXPECT_EQ((unsigned long)row[1], 0xFFFFFFFEUL);
     EXPECT_DOUBLE_EQ((double)row[2], 3.5);
     EXPECT_STREQ((const char *)row[3], "t");   // Postgres bool true → "t"
 }

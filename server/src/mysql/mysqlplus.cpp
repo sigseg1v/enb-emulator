@@ -594,12 +594,17 @@ sql_var_c::operator int ()
 
 sql_var_c::operator long ()
 {
-    return value ? (long)atoi(value) : 0;
+    // strtol, not atoi: atoi parses as 32-bit int, so a value that needs
+    // more than 32 bits is truncated before widening to 64-bit long.
+    return value ? strtol(value, nullptr, 10) : 0;
 }
 
 sql_var_c::operator unsigned long ()
 {
-    return value ? (unsigned long)atoi(value) : 0;
+    // strtoul, not (unsigned long)atoi: atoi returns a (possibly negative)
+    // 32-bit int, so any value >= 0x80000000 sign-extends to a huge unsigned
+    // long. Matches operator unsigned int() which was already fixed.
+    return value ? strtoul(value, nullptr, 10) : 0;
 }
 
 #ifndef WIN32
