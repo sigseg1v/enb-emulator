@@ -89,6 +89,12 @@ bool SectorContentParser::ParseSectorContent(long parse_id)
 	}
 
 	sql_connection_c connection( "net7", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
+	// Field respawn timers are persisted save-state and live in the net7_user
+	// database, not the net7 content database. Postgres databases are isolated
+	// (unlike MySQL schemas), so the per-field respawn read below cannot run on
+	// the content connection -- it needs its own user-DB handle. SaveManager
+	// already reads/writes this table on net7_user; this matches that.
+	sql_connection_c user_connection( "net7_user", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
 	sql_query_c SectorTb( &connection );
     sql_result_c result;
     sql_result_c object_result;
@@ -388,7 +394,7 @@ bool SectorContentParser::ParseSectorContent(long parse_id)
 				current_object->SetCreateType(37); //we want to display field centres to devs
 				if (new_object)
 				{
-					sql_query_c FldUpdate(&connection);
+					sql_query_c FldUpdate(&user_connection);
 					sql_result_c FldResult;
 
 					FldUpdate.AddParam((long)object_uid);

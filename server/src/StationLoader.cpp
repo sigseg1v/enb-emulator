@@ -328,9 +328,9 @@ void StationLoader::AddNPCs(StationTemplate *current_station, long room_id, sql_
     stnNPCs.AddParam(room_id);
     if ( !stnNPCs.execute_params(
             "SELECT * FROM `starbase_npcs` left join `starbase_npc_avatar_templates`"
-            " on starbase_npcs.npc_Id = starbase_npc_avatar_templates.avatar_template_id"
+            " on `starbase_npcs`.`npc_Id` = starbase_npc_avatar_templates.avatar_template_id"
             " left join `starbase_vendors`"
-            " on starbase_npcs.npc_Id = starbase_vendors.vendor_id"
+            " on `starbase_npcs`.`npc_Id` = starbase_vendors.vendor_id"
             " WHERE `room_id` = ?" ) )
     {
         LogMessage( "Error reading with MySQL (NPCs)\n" );
