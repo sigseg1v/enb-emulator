@@ -2,6 +2,7 @@
 // Part of the Earth & Beyond emulator preservation project.
 // License: LICENSES/enb-emulator
 
+using System.Buffers.Binary;
 using N7.CliClient.Logging;
 using N7.CliClient.Net;
 using N7.CliClient.Opcodes;
@@ -193,6 +194,19 @@ public sealed class SessionContext : IAsyncDisposable
     private Task? _dumpDrainTask;
     private MvasClient? _mvas;
 
+    // The server drops any player whose LastAccessTime is older than 120s
+    // (PlayerManager.cpp idle check -> DropPlayerFromGalaxy). A live retail
+    // client never trips this because its Net7Proxy streams MVAS position to
+    // the server continuously (UDPProxyMVAS.cpp). A headless REPL session has
+    // no such stream, so it must keep itself alive. 0x0044 REQUEST_TIME is the
+    // lightest faithful choice: retail clients sent it for clock sync, the
+    // server just echoes the time back (HandleRequestTime), and -- like every
+    // inbound opcode -- its dispatch resets LastAccessTime
+    // (PlayerConnection.cpp:645). 30s gives a 4x margin under the 120s window.
+    private static readonly TimeSpan KeepaliveInterval = TimeSpan.FromSeconds(30);
+    private CancellationTokenSource? _keepaliveCts;
+    private Task? _keepaliveTask;
+
     /// <summary>
     /// Lazily-created MVAS position emitter for the active host. Used by the
     /// <c>move</c> command to feed position updates the way a real client's
@@ -256,6 +270,63 @@ public sealed class SessionContext : IAsyncDisposable
                 try { DumpOutput.WriteLine($"[sector-drain] {ex.GetType().Name}: {ex.Message}"); } catch { }
             }
         });
+    }
+
+    /// <summary>
+    /// Start a background keepalive that sends a 0x0044 REQUEST_TIME over the
+    /// active sector connection every <see cref="KeepaliveInterval"/> so the
+    /// server's 120s idle reaper does not drop an in-sector REPL session that
+    /// is just sitting at the prompt. Idempotent; no-op if no sector
+    /// connection is active. The send is serialized with all other writers by
+    /// <see cref="EncryptedTcpConnection"/>'s send gate. Started by <c>enter</c>
+    /// once the sector connection is live; stopped on dispose.
+    /// </summary>
+    public void StartKeepalive()
+    {
+        if (_keepaliveTask is { IsCompleted: false }) return;
+        var conn = _sector;
+        if (conn is null) return;
+
+        var cts = new CancellationTokenSource();
+        _keepaliveCts = cts;
+        _keepaliveTask = Task.Run(async () =>
+        {
+            try
+            {
+                while (!cts.IsCancellationRequested)
+                {
+                    await Task.Delay(KeepaliveInterval, cts.Token).ConfigureAwait(false);
+                    var payload = new byte[4];
+                    BinaryPrimitives.WriteInt32LittleEndian(payload, Environment.TickCount);
+                    await conn.SendAsync(
+                        Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, payload),
+                        cts.Token).ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException) { /* expected on stop */ }
+            catch (Exception ex)
+            {
+                // The connection died (the drain will also see EOF). Surface
+                // it once and let the loop end -- nothing to keep alive.
+                try { DumpOutput.WriteLine($"[keepalive] stopped: {ex.GetType().Name}: {ex.Message}"); } catch { }
+            }
+        });
+    }
+
+    /// <summary>Cancel the background keepalive task. Idempotent.</summary>
+    public async Task StopKeepaliveAsync()
+    {
+        var cts = _keepaliveCts;
+        var task = _keepaliveTask;
+        _keepaliveCts = null;
+        _keepaliveTask = null;
+        if (cts is null) return;
+        try { cts.Cancel(); } catch { }
+        if (task is not null)
+        {
+            try { await task.ConfigureAwait(false); } catch { }
+        }
+        cts.Dispose();
     }
 
     /// <summary>Cancel the background sector drain task. Idempotent.</summary>
@@ -436,6 +507,7 @@ public sealed class SessionContext : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        await StopKeepaliveAsync().ConfigureAwait(false);
         await StopSectorDrainAsync().ConfigureAwait(false);
         if (SectorUdp is not null) { await SectorUdp.StopAsync().ConfigureAwait(false); SectorUdp.Dispose(); SectorUdp = null; }
         _mvas?.Dispose();

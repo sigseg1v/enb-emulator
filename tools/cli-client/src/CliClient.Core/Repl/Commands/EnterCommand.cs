@@ -135,6 +135,11 @@ public sealed class EnterCommand : ICommandHandler
         // dump-on tail without a foreground reader.
         _ctx.StartSectorDrain();
 
+        // Keep the session alive past the server's 120s idle reaper. A live
+        // client relies on its proxy's MVAS position stream for this; a
+        // headless REPL has none, so it sends its own periodic REQUEST_TIME.
+        _ctx.StartKeepalive();
+
         _ctx.World.Render(output, result.GameId);
         return 0;
     }

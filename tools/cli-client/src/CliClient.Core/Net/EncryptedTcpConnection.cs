@@ -46,6 +46,15 @@ public sealed class EncryptedTcpConnection : IAsyncDisposable
     private readonly WestwoodRC4 _cryptOut = new();
     private readonly byte[] _readBuffer = new byte[PacketHeader.WireSize];
 
+    // Serializes writers only. The outbound RC4 cipher is stateful: two
+    // concurrent SendAsync calls would interleave their _cryptOut.Transform
+    // passes and emit a permanently desynced keystream that the server can
+    // never decrypt. The REPL now has more than one writer -- a foreground
+    // command (chat/move) plus the background keepalive -- so sends must be
+    // serialized. Reads are unaffected (independent _cryptIn, single-owner
+    // drain), so this is a send-only gate, not a full connection lock.
+    private readonly SemaphoreSlim _sendGate = new(1, 1);
+
     /// <summary>Endpoint we're connected to -- for diagnostics / logs.</summary>
     public string Host { get; }
     public int Port { get; }
@@ -166,9 +175,19 @@ public sealed class EncryptedTcpConnection : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(packet);
 
         byte[] wire = packet.ToWireBytes();
-        _cryptOut.Transform(wire);
-        await _stream.WriteAsync(wire, cancellationToken).ConfigureAwait(false);
-        await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        await _sendGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            // _cryptOut.Transform + the socket write are one indivisible step:
+            // the keystream advances exactly once per frame, in send order.
+            _cryptOut.Transform(wire);
+            await _stream.WriteAsync(wire, cancellationToken).ConfigureAwait(false);
+            await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _sendGate.Release();
+        }
         PacketSent?.Invoke(packet);
     }
 
@@ -242,5 +261,6 @@ public sealed class EncryptedTcpConnection : IAsyncDisposable
         }
         catch { /* swallow on close */ }
         _tcp.Dispose();
+        _sendGate.Dispose();
     }
 }
