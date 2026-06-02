@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllTwentyTwoFrames()
+    public void Fixture_Loads_AllTwentyFourFrames()
     {
-        Assert.Equal(22, Frames.Count);
+        Assert.Equal(24, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -77,6 +77,10 @@ public sealed class RetailRecordDecodeTests
         Assert.Equal(10, Frames["serverredirect_to_glenn"].Payload.Length);
         Assert.Equal(0x36, Frames["serverredirect_to_asteroidbelt"].Opcode);
         Assert.Equal(10, Frames["serverredirect_to_asteroidbelt"].Payload.Length);
+        Assert.Equal(0x3E, Frames["advpos_minimal_bitmask0"].Opcode);
+        Assert.Equal(42, Frames["advpos_minimal_bitmask0"].Payload.Length);
+        Assert.Equal(0x3E, Frames["advpos_full_bitmask01ff"].Opcode);
+        Assert.Equal(98, Frames["advpos_full_bitmask01ff"].Payload.Length);
     }
 
     // ── ItemBase 0x25 ────────────────────────────────────────────────────────
@@ -679,5 +683,71 @@ public sealed class RetailRecordDecodeTests
         int h2 = handoff2[23] | handoff2[22] << 8 | handoff2[21] << 16 | handoff2[20] << 24;
         Assert.Equal(1077, r2);
         Assert.Equal(h2, r2);
+    }
+
+    // ── AdvancedPositionalUpdate 0x3E ────────────────────────────────────────
+    // The single most common packet in the game (>40k frames in the corpus). The
+    // wire layout is a 9-bit Bitmask followed by 10 mandatory slots and up to 13
+    // conditional floats whose presence -- and therefore the byte OFFSET of every
+    // later field -- is gated bit by bit. That conditional offset math is the
+    // whole bug surface, so pin both the empty-bitmask base case and the
+    // all-bits-set maximal case.
+
+    [Fact]
+    public void AdvPos_MinimalBitmask0_DecodesTheTenMandatorySlots()
+    {
+        string d = Dump("advpos_minimal_bitmask0");
+
+        Assert.Contains("Bitmask           = 0x0000", d);
+        Assert.Contains("GameID            = 0x06EE13DE", d);
+        Assert.Contains("TimeStamp         = 0x256F41AC", d);
+        Assert.Contains("Position          = 79389.33, -18882.79, 7.041", d);
+        Assert.Contains("Orientation       = -0, 0, -0.23, 0.973", d);
+        Assert.Contains("MovementID        = 0x00000004", d);
+
+        // Bitmask 0 means NONE of the conditional fields are present -- the
+        // decoder must stop after MovementID, not read past it.
+        Assert.DoesNotContain("CurrentSpeed", d);
+        Assert.DoesNotContain("ImpartedVelocity", d);
+        Assert.DoesNotContain("UpdatePeriod", d);
+        // All 42 bytes accounted for, no undecoded gap.
+        Assert.DoesNotContain("(NB)", d);
+        Assert.DoesNotContain("truncated", d);
+    }
+
+    [Fact]
+    public void AdvPos_FullBitmask01FF_DecodesEveryConditionalField()
+    {
+        string d = Dump("advpos_full_bitmask01ff");
+
+        Assert.Contains("Bitmask           = 0x01FF", d);
+        Assert.Contains("GameID            = 0x003A567F", d);
+        Assert.Contains("Position          = -100599.2, -6780.533, -3125.321", d);
+        Assert.Contains("MovementID        = 0x00000B49", d);
+
+        // Every conditional field, in wire order. The distinctive (non-zero)
+        // values are pinned exactly; a wrong offset for any earlier bit would
+        // shift these and change the float.
+        Assert.Contains("CurrentSpeed      = 0.112", d);
+        Assert.Contains("SetSpeed          = 0.149", d);
+        Assert.Contains("Acceleration", d);
+        Assert.Contains("RotY", d);
+        Assert.Contains("DesiredY          = -0.058", d);
+        Assert.Contains("RotZ", d);
+        Assert.Contains("DesiredZ          = 2.283", d);
+        // The 0x0080 block: ImpartedVelocity[3] + Spin + Roll + Pitch.
+        Assert.Contains("ImpartedVelocity  = 0.003, -0.004, 0", d);
+        Assert.Contains("ImpartedSpin", d);
+        Assert.Contains("ImpartedRoll", d);
+        Assert.Contains("ImpartedPitch", d);
+
+        // UpdatePeriod is the LAST field (bit 0x0100). It only lands on the right
+        // byte if all 13 preceding conditional floats consumed exactly 4 bytes
+        // each -- it is the canary for the whole conditional layout.
+        Assert.Contains("UpdatePeriod      = 0x00000B54", d);
+
+        // Whole 98-byte payload consumed: no undecoded gap, no truncation flag.
+        Assert.DoesNotContain("(NB)", d);
+        Assert.DoesNotContain("truncated", d);
     }
 }

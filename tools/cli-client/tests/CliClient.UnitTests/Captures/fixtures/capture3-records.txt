@@ -271,3 +271,23 @@ provenance: ServerRedirect 0x36 (Client_Redirect) -- redirect to sector 0x0435=1
 opcode: 0x36
 payload-bytes: 10
 hex: 35 04 00 00 23 e8 99 9f af 0d
+
+[advpos_minimal_bitmask0]
+provenance: AdvancedPositionalUpdate 0x3E -- minimal frame, Bitmask 0x0000 (capture_1.rar, Packet #372, Length=46). No conditional fields: exactly the 10 mandatory slots (GameID, TimeStamp, Position[3], Orientation[4], MovementID). Pins the base 42-byte layout that every 0x3E frame shares.
+opcode: 0x3E
+payload-bytes: 42
+hex: 00 00 de 13 ee 06 ac 41 6f 25 aa 0e 9b 47 93 85
+      93 c6 01 4e e1 40 00 00 00 80 00 00 00 00 c3 df
+      6b be a9 1d 79 3f 04 00 00 00
+
+[advpos_full_bitmask01ff]
+provenance: AdvancedPositionalUpdate 0x3E -- maximal frame, Bitmask 0x01FF (capture_1.rar, Packet #39989, Length=102). EVERY conditional bit set: CurrentSpeed/SetSpeed/Acceleration/RotY/DesiredY/RotZ/DesiredZ (7 floats), the 0x0080 ImpartedVelocity block (ImpartedVelocity[3]+Spin+Roll+Pitch, 6 floats), and the 0x0100 UpdatePeriod. Exercises every conditional offset in the decoder -- the trailing UpdatePeriod (0x00000B54=2900) only lands on the right byte if all 13 conditional floats consumed exactly.
+opcode: 0x3E
+payload-bytes: 98
+hex: ff 01 7f 56 3a 00 44 2b a2 25 95 7b c4 c7 44 e4
+      d3 c5 24 55 43 c5 2e b7 6c bc 86 ee c9 bb 28 72
+      6b 3f 43 d9 c8 be 49 0b 00 00 e0 86 e4 3d ea 59
+      18 3e 73 02 c3 38 bf b5 a4 b9 29 8b 6c bd bf b5
+      a4 b9 9b 1f 12 40 fd 2a 61 3b 1d 62 84 bb aa e9
+      9f 39 37 27 c7 b8 37 27 c7 38 fa 54 02 b6 54 0b
+      00 00
