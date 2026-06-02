@@ -103,16 +103,24 @@ public sealed class MoveCommand : ICommandHandler
             // the TCP drain and stand up the UDP client feeding the same hooks.
             await _ctx.StopSectorDrainAsync().ConfigureAwait(false);
             var udp = new SectorUdpClient(
-                _ctx.Host, _ctx.MvasPort, _ctx.ReplayInboundFrame,
+                _ctx.EffectiveMvasHost, _ctx.MvasPort, _ctx.ReplayInboundFrame,
                 msg => { try { _ctx.DumpOutput.WriteLine(msg); } catch { } });
             udp.Start(ct);
             _ctx.SectorUdp = udp;
             await output.WriteLineAsync(
-                $"sector UDP client up on local port {udp.LocalPort} -> {_ctx.Host}:{_ctx.MvasPort}; " +
+                $"sector UDP client up on local port {udp.LocalPort} -> {_ctx.EffectiveMvasHost}:{_ctx.MvasPort}; " +
                 "live sector stream now arrives here").ConfigureAwait(false);
         }
         var client = _ctx.SectorUdp;
 
+        // NOTE: the server only runs the movement/nav loop for players that are
+        // InSpace() (server PlayerManager.cpp:476 RunPlayerUpdate). A freshly
+        // created character is DOCKED, so MVAS + throttle here do nothing until
+        // the avatar launches. Undocking is not a one-shot: 0x004E Action=1 ->
+        // SectorManager::LaunchIntoSpace -> SendServerHandoff, i.e. a sector
+        // re-login that the CLI must drive (InSpace flips in Player::FinishLogin
+        // afterwards). Until that launch handshake exists, this flight is a
+        // no-op against a docked avatar -- see plans/19.
         float speed = _ctx.World.SelfSpeed(id) is { } s && s > 0 ? s : DefaultSpeed;
         int freq = Math.Clamp(client.Frequency, 1, 60);
         int intervalMs = Math.Max(1000 / freq, 25);

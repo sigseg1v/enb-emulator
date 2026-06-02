@@ -40,6 +40,11 @@ if (args[0] is "repl" or "start")
     replRegistry.Register(new GlobalTicketCodec());
 
     await using var sessionCtx = new SessionContext(replRegistry);
+    // Override the MVAS/sector UDP host (defaults to the connect host). Used to
+    // run the CLI inside the docker network, where the proxy (TCP) and the
+    // server's MVAS port 3806 live on different container IPs.
+    sessionCtx.MvasHost = Environment.GetEnvironmentVariable("N7_MVAS_HOST");
+    sessionCtx.AuthHost = Environment.GetEnvironmentVariable("N7_AUTH_HOST");
 
     // The line editor needs the live command set (for context-aware
     // completion); the repl needs the editor at construction. Break the

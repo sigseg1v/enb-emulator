@@ -60,7 +60,7 @@ public sealed class LoginCommand : ICommandHandler
         try
         {
             var auth = new AuthLoginClient(
-                _ctx.Host, _ctx.AuthPort,
+                _ctx.EffectiveAuthHost, _ctx.AuthPort,
                 acceptUntrustedCertificates: _ctx.AcceptUntrustedTls);
             login = await auth.LoginAsync(new AuthLoginRequest(user, pass), ct).ConfigureAwait(false);
         }

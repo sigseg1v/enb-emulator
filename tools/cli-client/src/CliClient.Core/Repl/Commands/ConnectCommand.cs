@@ -62,23 +62,23 @@ public sealed class ConnectCommand : ICommandHandler
         if (port.HasValue) _ctx.AuthPort = port.Value;
 
         await output.WriteLineAsync(
-            $"target: auth={_ctx.Host}:{_ctx.AuthPort} global={_ctx.Host}:{_ctx.GlobalPort} " +
+            $"target: auth={_ctx.EffectiveAuthHost}:{_ctx.AuthPort} global={_ctx.Host}:{_ctx.GlobalPort} " +
             $"master={_ctx.Host}:{_ctx.MasterPort} sector={_ctx.Host}:{_ctx.SectorPort}")
             .ConfigureAwait(false);
 
         try
         {
             using var tcp = new TcpClient();
-            await tcp.ConnectAsync(_ctx.Host, _ctx.AuthPort, ct).ConfigureAwait(false);
+            await tcp.ConnectAsync(_ctx.EffectiveAuthHost, _ctx.AuthPort, ct).ConfigureAwait(false);
             _ctx.Connected = true;
             await output.WriteLineAsync(
-                $"probe: {_ctx.Host}:{_ctx.AuthPort} accepting TCP").ConfigureAwait(false);
+                $"probe: {_ctx.EffectiveAuthHost}:{_ctx.AuthPort} accepting TCP").ConfigureAwait(false);
             return 0;
         }
         catch (Exception ex)
         {
             await output.WriteLineAsync(
-                $"probe failed: {_ctx.Host}:{_ctx.AuthPort} -- {ex.Message}").ConfigureAwait(false);
+                $"probe failed: {_ctx.EffectiveAuthHost}:{_ctx.AuthPort} -- {ex.Message}").ConfigureAwait(false);
             return 1;
         }
     }

@@ -42,6 +42,30 @@ public sealed class SessionContext : IAsyncDisposable
     /// </summary>
     public int MvasPort { get; set; } = MvasClient.DefaultPort;
 
+    /// <summary>
+    /// Host the MVAS/sector UDP client dials. Defaults to <see cref="Host"/>
+    /// (the proxy, which is also where the server's published ports live on a
+    /// single-host docker setup). Override when the proxy and the server are
+    /// reachable at different addresses -- e.g. running the CLI INSIDE the
+    /// docker network, where the proxy is the proxy container but the MVAS port
+    /// 3806 is on the server container. Set via the N7_MVAS_HOST env var.
+    /// </summary>
+    public string? MvasHost { get; set; }
+
+    /// <summary>The MVAS host actually used (<see cref="MvasHost"/> or <see cref="Host"/>).</summary>
+    public string EffectiveMvasHost => string.IsNullOrEmpty(MvasHost) ? Host : MvasHost;
+
+    /// <summary>
+    /// Auth/login host override (defaults to <see cref="Host"/>). Needed when
+    /// the login server and the proxy are at different addresses -- e.g. the
+    /// CLI running INSIDE the docker network, where auth is the login container
+    /// and the TCP planes are the proxy container. Set via N7_AUTH_HOST.
+    /// </summary>
+    public string? AuthHost { get; set; }
+
+    /// <summary>The auth host actually used (<see cref="AuthHost"/> or <see cref="Host"/>).</summary>
+    public string EffectiveAuthHost => string.IsNullOrEmpty(AuthHost) ? Host : AuthHost;
+
     /// <summary>Accept self-signed TLS certs (true for the docker dev stack).</summary>
     public bool AcceptUntrustedTls { get; set; } = true;
 
@@ -145,7 +169,7 @@ public sealed class SessionContext : IAsyncDisposable
     /// <c>move</c> command to feed position updates the way a real client's
     /// proxy would. Reused so the UDP sequence counter stays monotonic.
     /// </summary>
-    public MvasClient Mvas => _mvas ??= new MvasClient(Host, MvasPort);
+    public MvasClient Mvas => _mvas ??= new MvasClient(EffectiveMvasHost, MvasPort);
 
     /// <summary>
     /// Full-duplex sector UDP client, live once the player starts driving its

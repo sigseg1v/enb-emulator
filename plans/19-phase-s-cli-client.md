@@ -890,3 +890,62 @@ way, found and fixed a real server bug.
         reliability layer), effectively replacing the proxy. That is a separate
         subsystem, out of scope for the passive observer. The verified emitter
         is the wire primitive that work would build on.
+
+## Movement root cause: InSpace() / undock (2026-06-02)
+
+Drove the CLI as a full UDP client and chased "navs don't populate" all the way
+down. The earlier IP-mismatch / slirp4netns theories were RULED OUT by running
+the CLI inside the docker network; the true blocker is server-side dock state.
+
+- [x] Ran the CLI INSIDE the docker network (self-contained publish in an
+      ubuntu:24.04 container on `enb-emulator_default`, invariant globalization)
+      to take rootless-docker slirp4netns out of the picture. Added host
+      overrides so the CLI can address the split dev stack: `N7_AUTH_HOST`
+      (login container :443), connect-host (proxy container), `N7_MVAS_HOST`
+      (server container :3806). Files: `SessionContext` (EffectiveAuthHost /
+      EffectiveMvasHost), `ConnectCommand`, `LoginCommand`, `Program.cs`.
+- [!] In-network gave the SAME result as host (server accepts MVAS -- "MVAS
+      synched and locked in" -- but only ~2 datagrams back, no nav frames). So
+      the sparse reverse-push is NOT (for the CLI) the slirp4netns pitfall the
+      launcher config documents -- that pitfall is real but it's about the
+      PROXY's login-ack path, not our nav stream. The IP mismatch also isn't the
+      nav blocker: the throttle (0x0014 MOVE) is sent before the first MVAS, so
+      it matches the proxy session IP and lands; the only "Player IP mismatch"
+      logged is the final type-4 stop (harmless).
+- [x] TRUE ROOT CAUSE: the server only runs the movement/nav loop
+      (`Player::CalcNewPosition` -> `Player::CheckNavs`) for players that are
+      `InSpace()` -- `PlayerManager::RunPlayerUpdate` gates on it
+      (server/src/PlayerManager.cpp:476). A freshly created character is DOCKED,
+      so the loop never runs and no amount of MVAS/throttle exposes navs.
+- [x] Undock is NOT a one-shot opcode. `0x004E STARBASE_REQUEST` Action=1 ->
+      `SectorManager::LaunchIntoSpace` (server/src/PlayerConnection.cpp:9897),
+      which calls `SendServerHandoff(...)` -- i.e. a sector RE-LOGIN. `InSpace`
+      is set only in `Player::FinishLogin` (PlayerClass.cpp:3878) after that
+      handshake completes. Sending the bare opcode just gates the avatar out and
+      the server drops it ("Removed from sector"). Removed the harmful
+      auto-undock from `move`; the helper would need to drive the full launch
+      handoff.
+- [ ] NEXT STEP for live nav exposure: a `launch`/undock flow in the CLI that
+      sends 0x004E Action=1, consumes the resulting ServerHandoff, re-runs the
+      sector login handshake (reuse `SectorEnterDriver`), and lands the avatar
+      InSpace(). Then the existing `move` (throttle + MVAS) drives
+      CheckNavs and navs/objects fan in. Everything up to that point is built
+      and verified; this is the remaining piece.
+
+## The "move proxy to WINE" question -- answered (2026-06-02)
+
+- The Net7Proxy is documented to run on the CLIENT host in real deploys
+  (docs/03-network-protocol.md:192). The docker-compose proxy container is a
+  dev-only arrangement. So the proxy-vs-CLI IP split is a dev artifact, not a
+  real-deploy problem (a real client+local-proxy is one IP for session+MVAS).
+- Moving the proxy back to WINE/host is the WRONG move: the launcher config
+  (tools/launchnet7-avalonia/LaunchNet7.cfg:42-49) documents that a host-side
+  proxy reintroduces the rootless-docker slirp4netns UDP conntrack failure on
+  the MVASauth:3806 reverse-push -> stage-3 login-ack timeout, which is exactly
+  why the proxy was moved INTO docker. And it wouldn't fly a real client anyway:
+  `engine_read_process` (the position scrape) is stubbed `return false`
+  unconditionally (proxy/Net7.cpp:288) -- the scrape is gone from BOTH the Linux
+  and Windows builds of this fork. So WINE buys nothing here and breaks login.
+- Net: don't move the proxy. The CLI's path to flying is the launch/undock
+  handshake above (server-side dock state), which is unrelated to where the
+  proxy runs.
