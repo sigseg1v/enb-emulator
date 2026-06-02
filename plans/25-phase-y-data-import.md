@@ -91,7 +91,11 @@ will provide newer references when each task is approved.
   sees today. Touches: SkillsList wire-frame contents at zone-in,
   the `0x001B` AuxData ship-stats frame that includes derived skill
   bonuses, and the per-equip skill-gated install checks.
-  **STATUS: AWAITING USER APPROVAL + REFERENCE DATA.**
+  **STATUS: AWAITING USER APPROVAL + REFERENCE DATA.** A full file
+  inventory of the reconstruct backup (2026-06-02) confirms it carries
+  NO skills data file (only items/missions/mobs/npcs/prospecting/sectors
+  + html/mediawiki source). So this is not a gap the current dataset can
+  close -- it genuinely needs a user-supplied skill table.
 
 - [ ] **Y3: Buff / item-effect definitions import** -- populate the
   `item_effect_data` / buff tables that drive
@@ -99,7 +103,10 @@ will provide newer references when each task is approved.
   Closes the gap that makes our fresh-character `m_Effects.SendEffects`
   iterate an empty list while retail emits one or more `0x0009`
   ObjectEffect frames per persistent-buff slot.
-  **STATUS: AWAITING USER APPROVAL + REFERENCE DATA.**
+  **STATUS: AWAITING USER APPROVAL + REFERENCE DATA.** Same as Y2: the
+  2026-06-02 file inventory of the reconstruct backup shows no buff /
+  item-effect data file present, so the current dataset cannot close
+  this gap -- it needs a user-supplied effect table.
 
 - [x] **Y4: Sector navigation-marker import** -- add the
   nav-point / hidden-nav-point markers the runtime `sector_objects`
@@ -256,7 +263,12 @@ will provide newer references when each task is approved.
   navDistribution -- descriptive lore). There is no way to link a
   dataset row to a runtime field without fabricating `resource_id`, and
   nothing to populate the mechanics with. Real unblock needs a Net-7
-  harvestable dump.
+  harvestable dump. Both prospecting files were inspected:
+  `prospect_fields.jsonl` (145 rows) has keys
+  `system/sector/nav/levelMin/levelMax/types/density/densityWeight/roamingCL`
+  -- it describes which resource classes appear near a *named* nav at
+  what level, again with no `resource_id` and no numeric spawn mechanic,
+  so it is non-importable for the same reason.
 
 ## Finding 2026-06-01..02: per-category diff of the reconstruct dataset
 
