@@ -292,10 +292,8 @@ int main(int argc, char* argv[])
 		g_Galaxy_Name[sizeof(g_Galaxy_Name)-1] = '\0';
 	}
 
-#ifdef SQL_ENABLE
 	printf("Database: Host: %s, User: %s\n", g_DB_Host, g_DB_User);
 	printf("Ticket: Host: %s, User: %s\n", g_Ticket_Host, g_Ticket_User);
-#endif
 	// make sure logs directory exists
 	if (_access(SERVER_LOGS_PATH,0))
 		_mkdir(SERVER_LOGS_PATH);

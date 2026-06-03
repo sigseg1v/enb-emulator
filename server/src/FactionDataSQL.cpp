@@ -19,7 +19,6 @@
 
 #include "Net7.h"
 
-#ifdef USE_PG_SECTOR
 
 #include "FactionDataSQL.h"
 #include "db/sqlplus.h"
@@ -212,4 +211,3 @@ long Factions::GetFactionCount()
     return (m_faction_count);
 }
 
-#endif

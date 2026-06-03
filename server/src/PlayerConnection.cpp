@@ -9141,13 +9141,11 @@ bool Player::HandleMobCreateRequest(char *param)
 		}
 	}
 
-#ifdef SQL_ENABLE
 	/*if (AdminLevel() < 90)
 	{
 		SendVaMessage("createmob has been suspended temporarily - will be replaced by createspawn very soon\n");
 		return true;
 	}*/
-#endif
 
 	mob_count = g_ServerMgr->MOBList()->GetMOBCount();
 
@@ -9633,7 +9631,6 @@ bool Player::HandleBassetRequest(char *param)
 
 bool Player::SendLoungeNPC(long StationID)
 {
-#ifdef USE_PG_STATIONS
 	struct StationLounge LoungeData;
 	unsigned char bufferd[10000];
 	unsigned char *buffer = bufferd;
@@ -9731,9 +9728,6 @@ bool Player::SendLoungeNPC(long StationID)
 	//DumpBuffer(bufferd, Size);
 
 	return true;
-#else
-	return false;
-#endif
 }
 
 //Not too sure on the data structure of this packet
@@ -9912,7 +9906,6 @@ void Player::HandleStarbaseRequest(unsigned char *data)
 		// Save our current NPC to make it easier to find
 		m_CurrentNPC = NPC;
 
-#ifdef USE_PG_STATIONS
 		// Get talk tree for NPC
 		// and save to m_CurrentTalkTree
 		if (NPC && NPC->NPCInteraction.talk_tree.NumNodes > 0)
@@ -9928,7 +9921,6 @@ void Player::HandleStarbaseRequest(unsigned char *data)
 			SendOpcode(ENB_OPCODE_0054_TALK_TREE, (unsigned char *) m_TalkTreeBuffer, length);
 		}
 		else
-#endif
 		{
 			SendOpcode(ENB_OPCODE_0054_TALK_TREE, (unsigned char *) string, sizeof(string));
 			m_CurrentTalkTree = (0);

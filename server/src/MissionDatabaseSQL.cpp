@@ -19,7 +19,6 @@
 
 #include "Net7.h"
 
-#ifdef USE_PG_SECTOR
 
 #include "MissionDatabaseSQL.h"
 #include "db/sqlplus.h"
@@ -200,4 +199,3 @@ bool MissionHandler::GetMissionStartNPC(long NPC_id)
 	return m_StarterNPCs[NPC_id];
 }
 
-#endif

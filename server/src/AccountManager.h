@@ -98,32 +98,6 @@ private:
 	bool	UpdateTicket(int Index, char * Ticket);
 	void	UpdateLoginTime(long account_id);
 
-    //Methods for use in NON-SQL mode only
-#ifndef USE_PG_ACCOUNT_DATA
-
-    struct _User
-    {
-	    char * UserName;
-	    char * Password;
-	    char * Ticket;
-	    bool InUse;
-	    long Status;	//0=Player 10=donor 20=Helper 30=Beta Tester 50=GM 60=DGM 70=HGM 80=developer 100=Admin -1=Banned -2=Disabled
-	    long ID;
-    } ATTRIB_PACKED;
-
-     AccountManager::_User * GetUserFromID(long account_id);
-     AccountManager::_User * GetUserFromUsername(char *username);
-
-    _User m_Accounts[MAX_ACCOUNTS];
-	int m_NumAccounts;
-
-public:
-    int NumAccounts();
-    long GetAccountID(int index);
-
-    bool CreateCharacterDatabasePath(char *buffer, long avatar_id);
-
-#endif
 
 private:
     AccountTicket * m_Tickets;

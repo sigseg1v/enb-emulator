@@ -19,7 +19,6 @@
 
 #include "Net7.h"
 
-#ifdef USE_PG_STATIONS
 
 #include "TalkTreeParser.h"
 #include "StringManager.h"
@@ -354,4 +353,3 @@ bool TalkTreeParser::ParseMissions(MissionTree *tree, char *data)
 	return true;
 }
 
-#endif

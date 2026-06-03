@@ -19,7 +19,6 @@
 
 #include "Net7.h"
 
-#ifdef USE_PG_ITEMS
 
 #include "ItemBaseParser.h"
 #include "StringManager.h"
@@ -730,5 +729,4 @@ bool ItemBaseParser::LoadItemBase(ItemBase ** GlobalDB)
 
     return (success);
 }
-#endif
 

@@ -19,7 +19,6 @@
 
 #include "Net7.h"
 
-#ifdef USE_PG_SECTOR
 
 #include "BuffDatabaseSQL.h"
 #include "db/sqlplus.h"
@@ -112,4 +111,3 @@ long BuffContent::GetBuffEffectTime(char *buff)
 	return -1;
 }
 
-#endif

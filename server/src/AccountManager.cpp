@@ -32,7 +32,6 @@
 #include "db/sqlplus.h"
 #include "SaveManager.h"
 
-#ifdef USE_PG_ACCOUNT_DATA
 // Phase X: lazy one-shot libsodium init. sodium_init() is thread-safe
 // and idempotent. Lives outside any single AccountManager method so
 // both ValidateAccount and the mutating paths share it.
@@ -66,28 +65,18 @@ static std::string HashPasswordToPhc(const char *plaintext)
     }
     return std::string(out);
 }
-#endif
 
-#ifdef USE_PG_ACCOUNT_DATA
 sql_connection_c m_SQL_Conn;
-#endif
 
 AccountManager::AccountManager()
 {
     SetupTickets();
-#ifdef USE_PG_ACCOUNT_DATA
 	m_SQL_Conn.connect("net7_user", g_DB_Host, g_DB_User, g_DB_Pass);
-#else
-    m_NumAccounts = 0;
-	LoadAccounts();
-#endif
 }
 
 AccountManager::~AccountManager()
 {
-#ifdef USE_PG_ACCOUNT_DATA
     m_SQL_Conn.disconnect();
-#endif
 
     AccountTicket * ticket;
     while (m_Tickets)
@@ -118,7 +107,6 @@ void AccountManager::SetupTickets()
     memset(m_Tickets->next->next->next->next, 0, sizeof(AccountTicket));
 }
 
-#ifdef USE_PG_ACCOUNT_DATA
 
     void AccountManager::UpdateLoginTime(long account_id)
     {
@@ -785,258 +773,6 @@ void AccountManager::SetupTickets()
         return true;
     }
 
-#else
-
-    void AccountManager::LoadAccounts()
-    {
-        if (m_NumAccounts != 0)
-        {
-            LogMessage("Flat file accounts already loaded. Restart server to import changes\n");
-            return;
-        }
-
-	    m_Mutex.Lock();
-
-	    char buffer[256];
-	    char filename[MAX_PATH];
-	    sprintf(filename, "%saccounts.txt", SERVER_DATABASE_PATH);
-	    FILE *f = fopen(filename, "r");
-	    if (f)
-	    {
-		    while (!feof(f))
-		    {
-			    if (fgets(buffer, sizeof(buffer), f))
-			    {
-				    // ignore records starting with a semicolon
-				    if (buffer[0] != ';')
-				    {
-					    char *username = buffer;
-					    char *password = strstr(buffer, ",");
-					    if (password)
-					    {
-						    *password++ = 0;
-						    char *status = strstr(password, ",");
-						    if (status)
-						    {
-							    *status++ = 0;
-							    m_Accounts[m_NumAccounts].ID = m_NumAccounts;
-							    m_Accounts[m_NumAccounts].UserName = g_StringMgr->GetStr(username);
-							    m_Accounts[m_NumAccounts].Password = g_StringMgr->GetStr(password);
-                                m_Accounts[m_NumAccounts].Ticket = g_StringMgr->NullStr();
-							    m_Accounts[m_NumAccounts].Status = atoi(status);
-							    m_Accounts[m_NumAccounts].InUse = false;
-							    m_NumAccounts++;
-						    }
-					    }
-				    }
-			    }
-		    }
-		    fclose(f);
-	    }
-
-	    m_Mutex.Unlock();
-
-        printf("Loaded %d accounts from file\n", m_NumAccounts);
-    }
-
-     AccountManager::_User * AccountManager::GetUserFromID(long account_id)
-    {
-        for (int i=0; i<m_NumAccounts; i++)
-        {
-            if (m_Accounts[i].ID == account_id)
-            {
-                return &m_Accounts[i];
-            }
-        }
-
-	    return 0;
-    }
-
-     AccountManager::_User * AccountManager::GetUserFromUsername(char *username)
-    {
-        for (int i=0; i<m_NumAccounts; i++)
-        {
-            if (strcasecmp(m_Accounts[i].UserName, username) == 0)
-            {
-                return &m_Accounts[i];
-            }
-        }
-
-	    return 0;
-    }
-
-    int AccountManager::NumAccounts()
-    {
-        return m_NumAccounts;
-    }
-
-    long AccountManager::GetAccountID(int index)
-    {
-        return index < m_NumAccounts ? m_Accounts[index].ID : -1;
-    }
-
-    //Create the path to a charachter's database given an accountID, buffer must be long enough (MAX_PATH)
-    bool AccountManager::CreateCharacterDatabasePath(char *buffer, long avatar_id)
-    {
-        _User * u = GetUserFromID((avatar_id - 1) / 5);
-        if (!u)
-        {
-            return false;
-        }
-
-        sprintf(buffer, "%sUser_%s_Slot_%d.dat", SERVER_USER_PATH, u->UserName, avatar_id);
-        return true;
-    }
-
-    long AccountManager::GetAccountStatus(char *username)
-    {
-        _User * u = GetUserFromUsername(username);
-        return u ? u->Status : -2;
-    }
-
-    long AccountManager::GetAccountID(char *username)
-    {
-        _User * u = GetUserFromUsername(username);
-        return u ? u->ID : -1;
-    }
-
-    //Validates the username/password set, returns the account if valid
-    long AccountManager::ValidateAccount(char *username, char *password)
-    {
-        for (int i=0; i<m_NumAccounts; i++)
-        {
-            if (strcmp(m_Accounts[i].UserName, username) == 0)
-            {
-                if (m_Accounts[i].InUse)
-                {
-                    LogMessage("ValidateUserAccount: Account `%s` already in use!\n", username);
-                    return -1;
-                }
-                else if (strcmp(m_Accounts[i].Password, password) != 0)
-                {
-		            LogMessage("ValidateUserAccount: Invalid password: `%s` for user: `%s`\n", password, username);
-                    return -1;
-                }
-                else
-                {
-                    return m_Accounts[i].ID;
-                }
-            }
-        }
-
-        LogMessage("ValidateUserAccount: Could not find user: `%s`\n", username);
-        return -1;
-    }
-
-    bool AccountManager::AddUser(char *username, char *password, char *access)
-    {
-        LogMessage("Cannot add users when using flat file for accounts!\n");
-        return false;
-    }
-
-    bool AccountManager::SetAccountStatus(char *username, long status)
-    {
-        LogMessage("Cannot set access level when using flat file for accounts!\n");
-        return false;
-    }
-
-    bool AccountManager::ChangePassword(char *username, char *password)
-    {
-        LogMessage("Cannot change password when using flat file for accounts!\n");
-        return false;
-    }
-
-    bool AccountManager::IsUsernameUnique(char *name)
-    {
-        CharacterDatabase database;
-        int account_count = g_AccountMgr->NumAccounts();
-        long account_id, avatar_id;
-
-        for (int i=0; i<account_count; i++)
-        {
-            account_id = g_AccountMgr->GetAccountID(i);
-
-            for (long j=0; j<5; j++)
-            {
-                avatar_id = account_id * 5 + j;
-
-                if (ReadDatabase(&database, avatar_id))
-                {
-                    if (strcasecmp(database.avatar.avatar_first_name, name) == 0)
-                    {
-                        return false;
-                    }
-                }
-            }
-
-        }
-	    
-        return true;
-    }
-
-    void AccountManager::DeleteCharacter(long avatar_id)
-    {
-        char filename[MAX_PATH];
-        if (!CreateCharacterDatabasePath(filename, avatar_id))
-        {
-            return;
-        }
-
-        LogDebug("Deleting %s\n", filename);	
-        DeleteFile(filename);
-
-	    sprintf(filename, "%sCharInfo-%d.chr", SERVER_USER_PATH, avatar_id);
-
-        LogDebug("Deleting %s\n", filename);
-        DeleteFile(filename);
-    }
-
-    bool AccountManager::SaveDatabase(CharacterDatabase * database, long avatar_id)
-    {
-        char filename[MAX_PATH];
-        if (!CreateCharacterDatabasePath(filename, avatar_id))
-        {
-            return false;
-        }
-
-        //Write the flat file database
-        FILE *f = fopen(filename, "wb");
-        if (f)
-        {
-            fwrite(database, 1, sizeof(CharacterDatabase), f);
-            fclose(f);
-            return true;
-        }
-
-        return false;
-    }
-
-    //Read the avatar database for the player given an avatarID
-    bool AccountManager::ReadDatabase(CharacterDatabase *database, long avatar_id)
-    {
-        char filename[MAX_PATH];
-        if (!CreateCharacterDatabasePath(filename, avatar_id))
-        {
-            return false;
-        }
-
-        //Read the database from the character file
-        FILE *f = fopen(filename, "rb");
-        if (f)
-        {
-            if (fread(database, 1, sizeof(CharacterDatabase), f) == sizeof(CharacterDatabase))
-            {
-                fclose(f);
-                return true;
-            }
-
-            fclose(f);
-        }
-
-        return false;
-    }
-
-#endif
 
 //Returns the avatar ID (base 1) for a player's character, or -1 on error
 long AccountManager::GetAvatarID(char *username, int slot)
@@ -1067,9 +803,7 @@ char * AccountManager::IssueTicket(char *username, char *password)
     }
 
     //If using SQL, update the last login time
-#ifdef USE_PG_ACCOUNT_DATA
     UpdateLoginTime(account);
-#endif
 
     return BuildTicket(username);
 }

@@ -22,9 +22,7 @@
 
 #include "ItemBase.h"
 
-#ifdef USE_PG_ITEMS
 #include "db/sqlplus.h"
-#endif
 
 class ItemBaseParser
 {
@@ -35,13 +33,11 @@ public:
 public:
     bool LoadItemBase(ItemBase **);
 
-#ifdef USE_PG_ITEMS
 private:
 	sql_result_c * ItemBaseParser::SqlQuery(sql_connection_c *connection, char * QueryString);
 	// One-parameter overload: ? placeholder is filled with `param` via the
 	// wire protocol. Used for the ItemID-indexed lookups in LoadItemBase().
 	sql_result_c * SqlQueryP1(sql_connection_c *connection, const char *sql, long param);
-#endif
 };
 
 

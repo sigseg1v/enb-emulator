@@ -19,9 +19,6 @@
 
 #include "Net7.h"
 
-#ifndef USE_PG_SECTOR
-#error "BUILD ERROR: USE_PG_SECTOR IS NOW ESSENTIAL"
-#endif
 
  
 

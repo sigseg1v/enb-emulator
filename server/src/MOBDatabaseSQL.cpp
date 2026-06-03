@@ -19,7 +19,6 @@
 
 #include "Net7.h"
 
-#ifdef USE_PG_SECTOR
 
 #include "MOBDatabase.h"
 #include "db/sqlplus.h"
@@ -292,4 +291,3 @@ long MOBContent::GetMOBCount()
     return (m_highest_id);
 }
 
-#endif

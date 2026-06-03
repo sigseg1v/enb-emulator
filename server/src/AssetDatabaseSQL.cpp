@@ -19,7 +19,6 @@
 
 #include "Net7.h"
 
-#ifdef USE_PG_SECTOR
 
 #include "AssetDatabase.h"
 #include "db/sqlplus.h"
@@ -111,4 +110,3 @@ long AssetContent::GetAssetCount()
     return (m_highest_id);
 }
 
-#endif

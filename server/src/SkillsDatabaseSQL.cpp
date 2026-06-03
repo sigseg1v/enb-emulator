@@ -19,7 +19,6 @@
 
 #include "Net7.h"
 
-#ifdef USE_PG_SECTOR
 
 #include "SkillsDatabase.h"
 #include "db/sqlplus.h"
@@ -140,4 +139,3 @@ char* SkillsContent::GetSkillDescription(long skill_id)
 	}
 }
 
-#endif

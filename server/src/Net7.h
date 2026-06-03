@@ -25,26 +25,13 @@
 #define BUILD_VER   1302
 #define VER_TYPE	"UDP Beta"
 
-#define SQL_ENABLE
-
 //#define DEV_SERVER
 
 //#define SSL_IN_NET7PROXY
 
 //#define DEV_QUICK_START  // This is for server devs to quick start a server locally for development. Most sectors will be missing
 
-#ifdef SQL_ENABLE
-    #define USE_PG_ACCOUNT_DATA
-	#define USE_PG_STATIONS
-    #define USE_PG_SECTOR 
-    #define USE_PG_ITEMS
-#endif
-
-#ifdef USE_PG_ACCOUNT_DATA
     #define SQL_ACCOUNT_STRING " - SQL Accounts"
-#else
-    #define SQL_ACCOUNT_STRING ""
-#endif
 
 //#define BETA_TESTING
 

@@ -31,9 +31,6 @@
 #include "PacketMethods.h"
 #include <float.h>
 
-#ifndef USE_PG_ACCOUNT_DATA
-#error "BUILD ERROR: USE_PG_ACCOUNT IS NOW ESSENTIAL"
-#endif
 
 extern sql_connection_c m_SQL_Conn;
 
