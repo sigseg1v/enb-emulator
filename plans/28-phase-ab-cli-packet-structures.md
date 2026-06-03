@@ -25,9 +25,20 @@ change server behaviour (CLAUDE.md server-integrity rules bind #1).
 In progress -- 2026-06-03. Created as the verification backbone for the
 Phase-AA fabrication band. See §0 for the honest scope correction and §4 for
 the deliberate ordering inversion (this harness must precede the high-risk
-proxy fabrication, not follow it). **§2 landed (commit 3fcb7973):** the two
-compact-band gap decoders (0x2012 START_PROSPECT + 0x2013 TRACTOR_ORE) +
-`CompactMineRecordTests` byte-pin; 617/617 unit tests green.
+proxy fabrication, not follow it).
+
+- **§1 landed** (`FabricationBandCoverageTests`, commit 0e2c16cd): 11-opcode
+  fabrication-band ratchet.
+- **§2 landed** (commit 3fcb7973): the two compact-band gap decoders
+  (0x2012 START_PROSPECT + 0x2013 TRACTOR_ORE) + `CompactMineRecordTests`.
+- **§3 spec half landed** (commit 9276d632): `ProspectBeamFabricationSpecTests`
+  pins the 0x2012->0x000B fabrication contract incl. the Duration cap; the
+  **live** round-trip is `[!]` blocked behind Phase K (see §3).
+- **§5 landed** (commits dbe93970 + dae171ea): dual-emitter drift resolved
+  (Z-8); proxy beam Duration capped at 32000 to match the authoritative
+  range-list emitter.
+
+621/621 unit tests green.
 
 ---
 
@@ -68,7 +79,7 @@ not "port everything." Concretely:
 CLAUDE.md now states the rule. This section makes it checkable.
 
 - [x] **Fabrication-band ratchet landed** (`FabricationBandCoverageTests`,
-      commit pending): pins every opcode in the documented fabrication band --
+      commit 0e2c16cd): pins every opcode in the documented fabrication band --
       the compact server->proxy sources (0x2012/0x2013/0x2014/0x2018/0x2019) and
       the client-facing targets the proxy fabricates (0x0004/0x0007/0x000B/
       0x000F/0x001B/0x0046) -- to its EXACT dedicated record type. Deleting or
@@ -114,14 +125,28 @@ A Phase-T integration test that drives the LIVE proxy + server stack and
 byte-pins the client-facing bytes the proxy fabricates. This is what makes the
 remaining Phase-AA fabrication implementable without crashing the real client.
 
-- [ ] Mining round-trip test: establish a sector session via the existing
-      `SectorHandshake` helper, trigger the prospect/mine path, drain the
-      client-leg frames, and assert a `0x000B` OBJECT_TO_OBJECT_EFFECT arrives
-      whose decoded fields (via `ObjectToObjectEffectRecord`) match the
-      fabricated beam: Bitmask 0x0007, GameID=prospector, TargetID=asteroid,
-      EffectDescID=0x00BF, EffectID/TimeStamp/Duration present. Pin the bytes.
-- [ ] This converts the Phase-AA 0x2012->0x0b fabrication from "compiles and
-      looks right" to "regression breaks the build."
+- [x] **Spec half landed** (commit 9276d632): `ProspectBeamFabricationSpecTests`
+      re-states in C# the exact 0x000B bytes `UDPClient::StartProspecting`
+      fabricates, decodes them with the production `ObjectToObjectEffectRecord`,
+      and pins Bitmask 0x0007, GameID=prospector, TargetID=asteroid,
+      EffectDescID=0x00BF, EffectID/TimeStamp/Duration, plus the Duration cap.
+      It is honestly labelled a SPEC, not a live capture: it is the byte
+      reference the live harness will assert equality against, and it
+      regression-guards the cap. It does NOT auto-catch proxy C++ drift (only
+      the live harness can) -- that limit is documented in the test.
+- [!] **Live round-trip BLOCKED behind Phase K.** Establishing a sector
+      session and triggering a real mine is not possible in the integration
+      suite today: a fresh character starts DOCKED at a starbase (sector id >
+      9999; `StartSector[]` 10151..10551, `MAX_SECTOR_ID` 9999 at Net7.h:363),
+      mining requires being in open space near an asteroid, and the dock->space
+      transition is itself under active crash-bisection (Phase K, Task #38;
+      `SectorStartAckTests` documents the gate). There is no in-space start to
+      drive, so the live mining round-trip cannot run until Phase K lands the
+      undock/dock->space path. Do NOT fake it with a synthesized "capture."
+- [ ] When Phase K unblocks: drive the prospect/mine path, drain the
+      client-leg frames, assert the `0x000B` arrives with the fields above, and
+      assert byte-equality against `FabricateBeamBody` from the spec test (so
+      the spec and the live behaviour are tied together).
 - [ ] Mirror the fixture discipline in CLAUDE.md "Wire format" step 4: add a
       capture fixture + `CaptureReplayTests` `[Fact]` if a paired retail frame
       exists for the same effect; cite the capture file + frame in the commit.
@@ -173,13 +198,30 @@ CLI -- the server emitter is authoritative per CLAUDE.md):
       Speedup@0x800). Comment-only -- field declaration order preserved; the
       struct is field-addressed and never memcpy'd to the wire on this path
       (verified: only `memset(&x,0,sizeof)` uses exist). Proxy rebuilt clean.
+- [x] **Uncapped Duration in the proxy beam fabrication -- FIXED** (commit
+      dae171ea). `UDPClient::StartProspecting` wrote Duration as
+      `(drain_ms & 0xFFFF)` with no cap. The client reads the field SIGNED, so
+      a value > 32767 ms wraps negative and the beam does not render; a full
+      ore stack mines for well over 32.7s. The authoritative range-list emitter
+      `Object::SendObjectToObjectEffectRL` caps at 32000 (ObjectClass.cpp:884-885)
+      for exactly this reason. Mirrored the cap in the proxy; the prior comment
+      (which cited the uncapped single-player path and a ~65s wrap) was wrong
+      and is corrected. Linux + Win64 proxy rebuilt clean.
 
 ---
 
 ## Open items summary
 
-- [ ] §1 three-way ratchet test (CI-enforced equality floor).
-- [ ] §2 `StartProspectRecord` (0x2012) + `TractorOreRecord` (0x2013) + registry + floor bump.
-- [ ] §3 mining fabrication-verification integration test (byte-pin the 0x000B beam).
-- [ ] §4 gate: harness precedes the remaining Phase-AA fabrication.
-- [ ] §5 resolve the dual-emitter + stale-comment drift findings.
+- [x] §1 fabrication-band ratchet test (commit 0e2c16cd).
+- [x] §2 `StartProspectRecord` (0x2012) + `TractorOreRecord` (0x2013) + registry + byte-pin (commit 3fcb7973).
+- [~] §3 fabrication verification: SPEC half landed (commit 9276d632); LIVE
+      mining round-trip `[!]` blocked behind Phase K (no in-space start;
+      dock->space under crash-bisection).
+- [ ] §4 gate: the §3 LIVE harness must precede the remaining Phase-AA
+      fabrication (0x2013/0x2014 tractor/loot, 0x2018/0x2019 spawn) -- those
+      have un-citable fields that crash the Win32 client if wrong, so they stay
+      blocked on the live harness, which is blocked on Phase K. The spec half
+      alone is NOT sufficient to unblock them (a C# spec cannot validate proxy
+      C++ output against the real client).
+- [x] §5 dual-emitter + stale-comment + uncapped-Duration drift findings
+      resolved (commits dbe93970, dae171ea).
