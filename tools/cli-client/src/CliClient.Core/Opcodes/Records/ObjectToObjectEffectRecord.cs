@@ -17,9 +17,11 @@ namespace N7.CliClient.Opcodes.Records;
 ///   uint16 EffectDescID   @10
 ///   char   Message[]      @12   (null-terminated)
 /// Then, ONLY when the matching bit is set, in this exact order -- matching the
-/// server emitter Object::SendObjectToObjectEffect (server/src/ObjectClass.cpp
-/// lines 870-925), which is the authoritative wire layout (and differs from the
-/// PacketStructures.h comment, which is stale):
+/// authoritative range-list emitter Object::SendObjectToObjectEffectRL
+/// (server/src/ObjectClass.cpp lines ~855-928), which is the capture-validated
+/// wire layout. (The single-player twin Player::SendObjectToObjectEffect in
+/// PlayerConnection.cpp:1394 diverges above bit 0x04 -- see plans/26 Z-8 -- but
+/// agrees on bits 0x01/0x02/0x04, the only bits any live caller sets.)
 ///   bit0  0x001  int32  EffectID
 ///   bit1  0x002  uint32 TimeStamp
 ///   bit2  0x004  int16  Duration
