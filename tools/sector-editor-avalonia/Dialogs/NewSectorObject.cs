@@ -7,6 +7,7 @@
 using System;
 using System.Data;
 using System.Drawing;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
@@ -177,7 +178,7 @@ namespace SectorEditorAvalonia.Dialogs
             };
 
             var ok = new Button { Content = "OK", Width = 80 };
-            ok.Click += (_, _) => Commit();
+            ok.Click += async (_, _) => await Commit();
             var place = new Button { Content = "Place", Width = 80 };
             place.Click += (_, _) =>
             {
@@ -241,7 +242,7 @@ namespace SectorEditorAvalonia.Dialogs
             r["sound_effect_range"] = b.SoundEffectRange;
         }
 
-        private void Commit()
+        private async Task Commit()
         {
             if (_lastInsertId == 0)
             {
@@ -300,16 +301,20 @@ namespace SectorEditorAvalonia.Dialogs
                     _newRow["sound_effect_range"] = 30000;
 
                 _sectorObjectsSql.getSectorObject().Rows.Add(_newRow);
-                _sectorObjectsSql.newRow(_newRow);
+                // newRow issues the blocking sector_objects INSERT (+ subtable
+                // inserts); keep it off the UI thread (AC.4). It writes the
+                // freshly-minted id back onto _newRow, read on the UI thread below.
+                DataRow rowToInsert = _newRow;
+                await Task.Run(() => _sectorObjectsSql.newRow(rowToInsert));
             }
 
             switch (_type2)
             {
                 case 0:
-                    if (ValidateMobs(_lastInsertId)) { _sw?.addNewObject(_type2, _newRow); Close(); }
+                    if (await ValidateMobs(_lastInsertId)) { _sw?.addNewObject(_type2, _newRow); Close(); }
                     break;
                 case 38:
-                    if (ValidateHarvestables(_lastInsertId)) { _sw?.addNewObject(_type2, _newRow); Close(); }
+                    if (await ValidateHarvestables(_lastInsertId)) { _sw?.addNewObject(_type2, _newRow); Close(); }
                     break;
                 default:
                     _sw?.addNewObject(_type2, _newRow);
@@ -329,7 +334,7 @@ namespace SectorEditorAvalonia.Dialogs
             _ => 0,
         };
 
-        private bool ValidateMobs(int id)
+        private async Task<bool> ValidateMobs(int id)
         {
             _lastInsertId = id;
             if (_lastInsertId == 0)
@@ -341,7 +346,8 @@ namespace SectorEditorAvalonia.Dialogs
             }
 
             string query = "SELECT * FROM mob_spawn_group where spawn_group_id='" + _lastInsertId + "';";
-            DataTable groupMobs = Database.executeQuery(Database.DatabaseName.net7, query);
+            DataTable groupMobs = await Task.Run(() =>
+                Database.executeQuery(Database.DatabaseName.net7, query));
 
             if (groupMobs.Rows.Count == 0)
             {
@@ -356,7 +362,7 @@ namespace SectorEditorAvalonia.Dialogs
             return true;
         }
 
-        private bool ValidateHarvestables(int id)
+        private async Task<bool> ValidateHarvestables(int id)
         {
             _lastInsertId = id;
             if (_lastInsertId == 0)
@@ -368,7 +374,8 @@ namespace SectorEditorAvalonia.Dialogs
             }
 
             string q2 = "SELECT * FROM sector_objects_harvestable_restypes where group_id='" + _lastInsertId + "';";
-            DataTable loadTypes = Database.executeQuery(Database.DatabaseName.net7, q2);
+            DataTable loadTypes = await Task.Run(() =>
+                Database.executeQuery(Database.DatabaseName.net7, q2));
 
             if (loadTypes.Rows.Count == 0)
             {
@@ -382,7 +389,7 @@ namespace SectorEditorAvalonia.Dialogs
             }
             if (_hp.MobSpawnRadius > 0)
             {
-                if (!ValidateMobs(_lastInsertId)) return false;
+                if (!await ValidateMobs(_lastInsertId)) return false;
                 if (_hp.MobSpawnRadius == 0)
                 {
                     _notify.ShowError("Since you have mobs guardians your Maximum spawn radius must be > 0.");

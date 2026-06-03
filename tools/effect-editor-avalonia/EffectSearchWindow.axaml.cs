@@ -1,5 +1,6 @@
 using System;
 using System.Data;
+using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using CommonTools.Database;
@@ -30,22 +31,24 @@ namespace EffectEditorAvalonia
         public EffectSearchWindow()
         {
             InitializeComponent();
+            // Keep the blocking DB call off the UI thread (AC.4) so the window's
+            // close button stays responsive while the query runs.
+            Opened += async (_, _) => await ReloadAsync();
+        }
+
+        async Task ReloadAsync()
+        {
             try
             {
-                Reload();
+                var dt = await Task.Run(() => DB.Instance.executeQuery(
+                    "SELECT \"EffectID\",\"Description\",\"Tooltip\" FROM item_effect_base",
+                    null, null));
+                c_Grid.ItemsSource = dt?.DefaultView;
             }
             catch (Exception ex)
             {
                 Title = "Effect Search (no DB: " + ex.Message + ")";
             }
-        }
-
-        void Reload()
-        {
-            var dt = DB.Instance.executeQuery(
-                "SELECT \"EffectID\",\"Description\",\"Tooltip\" FROM item_effect_base",
-                null, null);
-            c_Grid.ItemsSource = dt?.DefaultView;
         }
 
         async void OnDelete(object sender, RoutedEventArgs e)
@@ -64,10 +67,11 @@ namespace EffectEditorAvalonia
             var res = await box.ShowWindowDialogAsync(this);
             if (res != ButtonResult.Yes) return;
 
-            DB.Instance.executeCommand(
+            string eidStr = eid.ToString();
+            await Task.Run(() => DB.Instance.executeCommand(
                 "DELETE FROM item_effect_base WHERE \"EffectID\" = @eid",
-                new[] { "eid" }, new[] { eid.ToString() });
-            Reload();
+                new[] { "eid" }, new[] { eidStr }));
+            await ReloadAsync();
         }
 
         async void OnOk(object sender, RoutedEventArgs e)

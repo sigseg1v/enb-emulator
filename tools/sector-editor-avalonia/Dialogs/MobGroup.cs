@@ -6,6 +6,7 @@
 
 using System.Collections.Generic;
 using System.Data;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
@@ -21,7 +22,7 @@ namespace SectorEditorAvalonia.Dialogs
     // appear multiple times, identified by (mob_id, group_index)).
     public class MobGroupDialog : Window
     {
-        private readonly int _id;
+        private int _id;
         private readonly MobsSQL _mobs;
         private readonly DataGrid _leftGrid;
         private readonly DataGrid _rightGrid;
@@ -30,12 +31,16 @@ namespace SectorEditorAvalonia.Dialogs
         public MobGroupDialog(MobsSQL mobs)
         {
             _mobs = mobs;
-            _id = ResolveGroupId();
 
             Title = "Mob Spawn Group";
             Width = 720;
             Height = 460;
 
+            // getMobTable() returns the table MobsSQL loaded once in its ctor, so
+            // binding the left grid here is in-memory only. The DB work --
+            // ResolveGroupId() and the group pre-fill -- is deferred to Opened so
+            // the constructor stays cheap and the window can close while the DB is
+            // slow or unreachable (AC.4).
             _leftGrid = new DataGrid
             {
                 ItemsSource = _mobs.getMobTable().DefaultView,
@@ -54,12 +59,13 @@ namespace SectorEditorAvalonia.Dialogs
                 IsReadOnly = true,
                 AutoGenerateColumns = true,
             };
-            PopulateRightFromDb();
+
+            Opened += async (_, _) => await LoadAsync();
 
             var add = new Button { Content = "Add ›", Width = 80 };
-            add.Click += (_, _) => AddSelectedToGroup();
+            add.Click += async (_, _) => await AddSelectedToGroup();
             var remove = new Button { Content = "‹ Remove", Width = 80 };
-            remove.Click += (_, _) => RemoveSelectedFromGroup();
+            remove.Click += async (_, _) => await RemoveSelectedFromGroup();
             var ok = new Button { Content = "OK", Width = 80 };
             ok.Click += (_, _) => Close();
 
@@ -86,6 +92,35 @@ namespace SectorEditorAvalonia.Dialogs
             Content = grid;
         }
 
+        // Deferred DB load (AC.4). Resolve the group id and fetch the group's
+        // current mobs off the UI thread, then populate the right grid on the UI
+        // thread after the await.
+        private async Task LoadAsync()
+        {
+            int id = await Task.Run(() => ResolveGroupId());
+            _id = id;
+
+            string mobsQuery = "SELECT * FROM mob_spawn_group where spawn_group_id='" + _id + "';";
+            DataTable groupMobsTable = await Task.Run(() =>
+                Database.executeQuery(Database.DatabaseName.net7, mobsQuery));
+
+            // Populate the grid-bound table on the UI thread.
+            foreach (DataRow r in groupMobsTable.Rows)
+            {
+                string mobId = r["mob_id"].ToString();
+                foreach (DataRow mr in _mobs.getMobTable().Rows)
+                {
+                    if (mr["mob_id"].ToString() == mobId)
+                    {
+                        var nr = _rightTable.NewRow();
+                        nr["id"] = mobId;
+                        nr["name"] = mr["name"].ToString();
+                        _rightTable.Rows.Add(nr);
+                    }
+                }
+            }
+        }
+
         private static int ResolveGroupId()
         {
             // Postgres has no information_schema.tables.Auto_increment; the next
@@ -104,26 +139,6 @@ namespace SectorEditorAvalonia.Dialogs
             return id != 0 ? EditorGlobals.SelectedObjectId : autoID;
         }
 
-        private void PopulateRightFromDb()
-        {
-            string mobsQuery = "SELECT * FROM mob_spawn_group where spawn_group_id='" + _id + "';";
-            DataTable groupMobsTable = Database.executeQuery(Database.DatabaseName.net7, mobsQuery);
-            foreach (DataRow r in groupMobsTable.Rows)
-            {
-                string mobId = r["mob_id"].ToString();
-                foreach (DataRow mr in _mobs.getMobTable().Rows)
-                {
-                    if (mr["mob_id"].ToString() == mobId)
-                    {
-                        var nr = _rightTable.NewRow();
-                        nr["id"] = mobId;
-                        nr["name"] = mr["name"].ToString();
-                        _rightTable.Rows.Add(nr);
-                    }
-                }
-            }
-        }
-
         private int CountInRight(string mobId)
         {
             int n = 0;
@@ -131,8 +146,10 @@ namespace SectorEditorAvalonia.Dialogs
             return n;
         }
 
-        private void AddSelectedToGroup()
+        private async Task AddSelectedToGroup()
         {
+            // Read all control/table values needed for the query on the UI thread
+            // BEFORE entering Task.Run; never touch a control inside the lambda.
             if (_leftGrid.SelectedItem is not DataRowView leftRow) return;
             string mobId = leftRow.Row["mob_id"].ToString();
             string name = leftRow.Row["name"].ToString();
@@ -140,7 +157,7 @@ namespace SectorEditorAvalonia.Dialogs
 
             string insert = "INSERT INTO mob_spawn_group (spawn_group_id, mob_id, group_index) VALUES ('" + _id +
                             "', '" + mobId + "', '" + groupIndex + "');";
-            Database.executeQuery(Database.DatabaseName.net7, insert);
+            await Task.Run(() => Database.executeQuery(Database.DatabaseName.net7, insert));
 
             var nr = _rightTable.NewRow();
             nr["id"] = mobId;
@@ -148,7 +165,7 @@ namespace SectorEditorAvalonia.Dialogs
             _rightTable.Rows.Add(nr);
         }
 
-        private void RemoveSelectedFromGroup()
+        private async Task RemoveSelectedFromGroup()
         {
             if (_rightGrid.SelectedItem is not DataRowView rightRow) return;
             string mobId = rightRow.Row["id"].ToString();
@@ -169,7 +186,7 @@ namespace SectorEditorAvalonia.Dialogs
 
             string remove = "DELETE FROM mob_spawn_group where spawn_group_id='" + _id +
                             "' and mob_id='" + mobId + "' and group_index='" + index + "';";
-            Database.executeQuery(Database.DatabaseName.net7, remove);
+            await Task.Run(() => Database.executeQuery(Database.DatabaseName.net7, remove));
             _rightTable.Rows.RemoveAt(rowIndex);
         }
     }

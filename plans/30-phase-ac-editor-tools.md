@@ -186,18 +186,28 @@ is still open.
       - `DBErrorReporter.Show` is marshaled to the UI thread via
         `Dispatcher.UIThread.Post` (DB errors now originate on worker threads;
         the message box must be created on the UI thread).
-- [~] Unconditional X-close, the harder half: in Avalonia the title-bar X is
+- [x] Unconditional X-close, the harder half: in Avalonia the title-bar X is
       dispatched on the UI thread, so it can only ever be processed when the UI
-      thread is NOT blocked. The Login path is now non-blocking. The editor MAIN
-      windows still run some data-load/save queries synchronously on the UI
-      thread; with the warm, reachable local connection those return fast, but a
-      down DB still blocks each call up to `Timeout=5`/`Command Timeout=30`.
-      Moving each editor's data-load off the UI thread is per-editor work tracked
-      under AC.6 -- there is NO central trick that makes a blocked UI thread
-      closable, so the only real fix is keeping I/O off it everywhere.
+      thread is NOT blocked. There is NO central trick that makes a blocked UI
+      thread closable -- the only real fix is keeping ALL DB I/O off it. Done
+      across every editor: each editor's data-load is deferred to
+      `Opened += async (_,_) => await ...` and runs in `Task.Run`; every
+      New/Copy/Save/Delete/Add/Remove handler wraps its DB call in
+      `await Task.Run(...)`, reading control values on the UI thread first and
+      applying results back after the await. Coverage:
+      - item editor: built off-thread from the start (AC.5) -- 5 Task.Run sites.
+      - mob editor: 3 Task.Run sites. faction editor: 2 sites.
+      - sector editor: 15 sites (incl. the MobGroup / HarvestableResTypes /
+        NewSectorObject dialogs, whose constructor DB work moved to `Opened`).
+      - effect editor: 15 sites across MainWindow / EditItemWindow /
+        EffectSearchWindow / ItemBrowseWindow.
+      So a down or slow DB can no longer wedge any editor's UI thread; the X
+      closes immediately while a query is in flight. The `Timeout=5` /
+      `Command Timeout=30` connection bounds remain as a second-line guard.
 - [ ] Verify (real-client/manual): with the DB host unreachable, each tool still
-      opens, reports the failure, and the X closes it immediately. Login path
-      verified by code review + build; per-editor verification is AC.6.
+      opens, reports the failure, and the X closes it immediately. Verified by
+      code review + 0/0 build + headless smoke for all editors; a final manual
+      GUI pass with the DB down is the owner's to confirm, non-blocking.
 
 ### AC.5 -- Port the Item Editor to Avalonia (`tools/item-editor-avalonia`)
 
@@ -225,12 +235,53 @@ is still open.
 
 ### AC.6 -- Verify across the suite
 
-- [ ] Sector / Mob / Mission / Item (and the rest) all: launch via `just`,
-      Login with no typing (or skip), load data from `net7`, make an edit,
-      produce a `.sql` changeset, and close cleanly via the X button.
-- [ ] Re-apply a generated changeset against `net7` and confirm the edit lands
-      and the live server reflects it (closes the loop on "the editors edit a
-      dead DB").
+This was the real bulk of the phase, exactly as predicted at line 101. The
+AC.1 MySQL->Npgsql migration silently broke EVERY per-editor write path:
+they compiled clean but threw at runtime on MySQL-only SQL Npgsql/Postgres
+does not accept. Audited and fixed all four editors (mob, faction, sector,
+effect), then live-verified each fix against the running `net7` DB rather
+than trusting the build. Committed 7fd01446.
+
+- [x] Per-editor raw-SQL audit + fix (the ~163 literals AC.1 deferred here):
+      - `?word` -> `@name` (Npgsql has NO positional `?` binding)
+      - `INSERT .. SET` -> `INSERT (cols) VALUES (..)`
+      - `LAST_INSERT_ID()` -> `INSERT .. RETURNING "<pk>"` on IDENTITY tables,
+        or `SELECT COALESCE(MAX("pk"),0)+1` on non-identity (mob_base, item_base)
+      - `SELECT Auto_increment FROM information_schema` (MySQL-only) ->
+        `MAX("pk")+1` in sector MobGroup / HarvestableResTypes dialogs
+      - quote every mixed-case / reserved / digit-leading identifier
+        (`EffectID`, `PDA_text`, `"unique"`, `"type"`, `"2d_asset"`, ...)
+- [x] EquipEffect bytea landmine: `item_effect_container.EquipEffect` is bytea
+      (MySQL `binary(1)`) holding ASCII `'1'`(0x31)/`'0'`(0x30). Effect editor
+      compared it to integer `1` -> `operator does not exist: bytea = integer`.
+      Fixed the 3 sites to string literal `'1'` (coerces to bytea 0x31, the
+      exact byte in all 2198 rows). NO schema retype -- the column is faithful
+      to the MySQL source and the server never reads it (server's EquipEffect
+      is `item_base.effect_id`, per ItemBaseSQL.cpp:177).
+- [x] HIDDEN PRODUCTION BUG found only by running live: every IDENTITY sequence
+      was stranded at `last_value=1` while data occupied ids up to ~200528
+      (schema.sql + Phase Y seeds bulk-load explicit ids without advancing the
+      sequence). Any editor "new row" via `INSERT .. RETURNING` would have
+      generated 1,2,3... and collided -- broken in prod despite compiling.
+      Fix: `db/postgres/sync_sequences.sql` (generic over all public identity
+      columns, idempotent), wired unconditionally into `schema-init`. Verified
+      factions/faction_matrix now allocate 100028/1415.
+- [x] `DB.executeQuery` now records mutating statements in the ChangeTracker so
+      `INSERT .. RETURNING` (which goes through executeQuery, not executeCommand)
+      lands in the generated changeset; `IsMutating` filters SELECTs out.
+- [x] All seven editor projects build 0 warn / 0 err.
+- [x] Live write-path verification against `net7` (rolled-back txns): item_base
+      UPDATE, item_base/mob_base MAX+1, factions/faction_matrix/item_effects/
+      item_effect_base/mob_items/systems/sectors/sector_objects/mob_spawn_group/
+      item_effect_container RETURNING -- all execute.
+- [x] Changeset re-apply loop closed: a tracker-style inlined changeset
+      (`@param` -> `'literal'`, numerics as quoted strings coerced via Postgres
+      "unknown" type) re-applies against `net7`. Proven on item_base id=507:
+      UPDATE 1, value became `ReplayTest`/lvl 5 in-txn, rolled back to
+      `Dragonclaw Missile`. The editors no longer edit a dead DB.
+- [ ] Live-server-reflects-the-edit (full GUI launch via `just`, real edit
+      persisted, server picks it up): SQL layer is proven; the remaining piece
+      is a manual GUI pass by the owner. Tracked, non-blocking.
 
 ## Dependencies / ordering
 

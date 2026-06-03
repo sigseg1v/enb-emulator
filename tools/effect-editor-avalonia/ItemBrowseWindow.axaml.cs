@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using CommonTools.Database;
@@ -85,9 +86,12 @@ namespace EffectEditorAvalonia
             }
 
             DataTable dt;
+            string[] keyArr = keys.ToArray();
+            string[] valArr = vals.ToArray();
             try
             {
-                dt = DB.Instance.executeQuery(sql, keys.ToArray(), vals.ToArray());
+                // Keep the blocking DB call off the UI thread (AC.4).
+                dt = await Task.Run(() => DB.Instance.executeQuery(sql, keyArr, valArr));
             }
             catch (Exception ex)
             {

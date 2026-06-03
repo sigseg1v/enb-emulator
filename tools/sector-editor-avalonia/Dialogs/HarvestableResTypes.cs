@@ -6,6 +6,7 @@
 
 using System.Collections.Generic;
 using System.Data;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
@@ -46,41 +47,30 @@ namespace SectorEditorAvalonia.Dialogs
             ("Organic Hulk 01",         1132),
         };
 
-        private readonly int _id;
+        private int _id;
         private readonly ListBox _left = new ListBox();
         private readonly ListBox _right = new ListBox();
 
         public HarvestableResTypesDialog()
         {
-            // Original derived _id either from the currently-selected
-            // sector object (if it exists) or from sector_objects'
-            // Auto_increment. Avalonia port preserves the same logic.
-            _id = ResolveGroupId();
-
             Title = "Harvestable Resource Types";
             Width = 560;
             Height = 380;
 
+            // Populating the left catalog is in-memory only. The DB work -- the
+            // _id resolution (original derived it either from the currently-
+            // selected sector object or from sector_objects' next id) and the
+            // right-list pre-fill -- is deferred to Opened so the constructor stays
+            // cheap and the window can close while the DB is slow or unreachable
+            // (AC.4).
             foreach (var (name, _) in Catalog) _left.Items.Add(name);
 
-            // Pre-fill the right list from the DB.
-            string q = "SELECT * FROM sector_objects_harvestable_restypes where group_id='" + _id + "';";
-            DataTable loadTypes = Database.executeQuery(Database.DatabaseName.net7, q);
-            foreach (DataRow i in loadTypes.Rows)
-            {
-                int t = int.Parse(i["type"].ToString());
-                string name = NameFor(t);
-                if (name != null)
-                {
-                    _left.Items.Remove(name);
-                    _right.Items.Add(name);
-                }
-            }
+            Opened += async (_, _) => await LoadAsync();
 
             var add = new Button { Content = "Add ›", Width = 80 };
-            add.Click += (_, _) => MoveLeftToRight();
+            add.Click += async (_, _) => await MoveLeftToRight();
             var remove = new Button { Content = "‹ Remove", Width = 80 };
-            remove.Click += (_, _) => MoveRightToLeft();
+            remove.Click += async (_, _) => await MoveRightToLeft();
             var ok = new Button { Content = "OK", Width = 80 };
             ok.Click += (_, _) => Close();
 
@@ -105,6 +95,31 @@ namespace SectorEditorAvalonia.Dialogs
             grid.Children.Add(buttons);
 
             Content = grid;
+        }
+
+        // Deferred DB load (AC.4). Resolve the group id and fetch the field's
+        // current restypes off the UI thread, then move the matching catalog
+        // entries from the left list to the right on the UI thread after await.
+        private async Task LoadAsync()
+        {
+            int id = await Task.Run(() => ResolveGroupId());
+            _id = id;
+
+            string q = "SELECT * FROM sector_objects_harvestable_restypes where group_id='" + _id + "';";
+            DataTable loadTypes = await Task.Run(() =>
+                Database.executeQuery(Database.DatabaseName.net7, q));
+
+            // Mutate the ListBoxes on the UI thread.
+            foreach (DataRow i in loadTypes.Rows)
+            {
+                int t = int.Parse(i["type"].ToString());
+                string name = NameFor(t);
+                if (name != null)
+                {
+                    _left.Items.Remove(name);
+                    _right.Items.Add(name);
+                }
+            }
         }
 
         private static int ResolveGroupId()
@@ -137,26 +152,27 @@ namespace SectorEditorAvalonia.Dialogs
             return 1823; // Original default fallback.
         }
 
-        private void MoveLeftToRight()
+        private async Task MoveLeftToRight()
         {
+            // Read the selected control value on the UI thread before Task.Run.
             if (_left.SelectedItem == null) return;
             string item = _left.SelectedItem.ToString();
             int type = TypeFor(item);
             _right.Items.Add(item);
             _left.Items.Remove(item);
-            Database.executeQuery(Database.DatabaseName.net7,
-                "INSERT INTO sector_objects_harvestable_restypes (group_id, type) VALUES ('" + _id + "', '" + type + "');");
+            string insert = "INSERT INTO sector_objects_harvestable_restypes (group_id, type) VALUES ('" + _id + "', '" + type + "');";
+            await Task.Run(() => Database.executeQuery(Database.DatabaseName.net7, insert));
         }
 
-        private void MoveRightToLeft()
+        private async Task MoveRightToLeft()
         {
             if (_right.SelectedItem == null) return;
             string item = _right.SelectedItem.ToString();
             int type = TypeFor(item);
             _left.Items.Add(item);
             _right.Items.Remove(item);
-            Database.executeQuery(Database.DatabaseName.net7,
-                "DELETE FROM sector_objects_harvestable_restypes where group_id='" + _id + "' and type='" + type + "';");
+            string delete = "DELETE FROM sector_objects_harvestable_restypes where group_id='" + _id + "' and type='" + type + "';";
+            await Task.Run(() => Database.executeQuery(Database.DatabaseName.net7, delete));
         }
     }
 }

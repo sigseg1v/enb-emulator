@@ -4,6 +4,7 @@
 
 using System;
 using System.Data;
+using System.Threading.Tasks;
 using Avalonia.Controls;
 using N7.Sql;
 using SectorEditorAvalonia.Dialogs;
@@ -50,7 +51,7 @@ namespace SectorEditorAvalonia.Windows
             // DB layer; we just switch it on for this session.
             CommonTools.Database.DB.Instance.ChangeTracker.Enabled = true;
 
-            Opened += (_, _) => SafeBoot();
+            Opened += async (_, _) => await SafeBoot();
             c_Exit.Click += (_, _) => Close();
             c_About.Click += (_, _) => new AboutBox().ShowDialog(this);
             c_Settings.Click += (_, _) => new SettingsDialog().ShowDialog(this);
@@ -61,7 +62,7 @@ namespace SectorEditorAvalonia.Windows
             c_Save.Click += (_, _) => { c_Status.Text = "(save: stub — DAO updateRow paths persist on edit)"; };
             c_ExportChanges.Click += async (_, _) => await ExportChangesToSql();
 
-            c_Tree.SelectionChanged += (_, _) => OnTreeSelectionChanged();
+            c_Tree.SelectionChanged += async (_, _) => await OnTreeSelectionChanged();
         }
 
         // Write the recorded mutating SQL to a user-chosen .sql file. The
@@ -103,15 +104,21 @@ namespace SectorEditorAvalonia.Windows
             }
         }
 
-        private void SafeBoot()
+        private async Task SafeBoot()
         {
+            // All DAO constructors issue blocking DB queries; keep them off the
+            // UI thread so the close button stays live while the DB is slow or
+            // unreachable (AC.4). Build the tree on the UI thread after the await.
             try
             {
-                _systems = new SystemsSql();
-                _sectors = new SectorsSql();
-                _factions = new FactionSql();
-                _mobs = new MobsSQL();
-                _baseAssets = new BaseAssetSQL();
+                await Task.Run(() =>
+                {
+                    _systems = new SystemsSql();
+                    _sectors = new SectorsSql();
+                    _factions = new FactionSql();
+                    _mobs = new MobsSQL();
+                    _baseAssets = new BaseAssetSQL();
+                });
 
                 EditorGlobals.Factions = new FactionLookupAdapter(_factions);
 
@@ -141,26 +148,30 @@ namespace SectorEditorAvalonia.Windows
             c_Tree.ItemsSource = items;
         }
 
-        private void OnTreeSelectionChanged()
+        private async Task OnTreeSelectionChanged()
         {
             if (c_Tree.SelectedItem is not TreeViewItem tvi) return;
             if (tvi.Tag is not ValueTuple<string, string> tag) return;
             var (kind, name) = tag;
 
-            if (kind == "sector") LoadSector(name);
-            else if (kind == "system") LoadSystem(name);
+            if (kind == "sector") await LoadSector(name);
+            else if (kind == "system") await LoadSystem(name);
         }
 
-        private void LoadSector(string sectorName)
+        private async Task LoadSector(string sectorName)
         {
             try
             {
+                // findRowsByName runs against the in-memory sectors DataTable, but
+                // constructing SectorObjectsSql issues a blocking join query; keep
+                // that off the UI thread (AC.4). Build the canvas/grid on the UI
+                // thread after the await.
                 DataRow[] rows = _sectors.findRowsByName(sectorName);
                 if (rows.Length == 0) { c_Status.Text = "no sector named " + sectorName; return; }
 
                 EditorGlobals.SectorID = int.Parse(rows[0]["sector_id"].ToString());
 
-                _sectorObjects = new SectorObjectsSql(sectorName);
+                _sectorObjects = await Task.Run(() => new SectorObjectsSql(sectorName));
                 _objectsTable = _sectorObjects.getSectorObject();
                 _gridSink = new DataGridSyncSink(c_ObjectsGrid, _objectsTable);
 
@@ -176,10 +187,14 @@ namespace SectorEditorAvalonia.Windows
             }
         }
 
-        private void LoadSystem(string systemName)
+        private async Task LoadSystem(string systemName)
         {
             try
             {
+                // findRowsByName / getRowsBySystemID read the in-memory systems and
+                // sectors DataTables (no DB round-trip), so they are cheap. There is
+                // no blocking DB call on this path; this stays async only so the tree
+                // selection handler can await both load paths uniformly.
                 DataRow[] systemRows = _systems.findRowsByName(systemName);
                 if (systemRows.Length == 0) { c_Status.Text = "no system named " + systemName; return; }
 
@@ -196,6 +211,7 @@ namespace SectorEditorAvalonia.Windows
             {
                 c_Status.Text = "failed to load system: " + ex.Message;
             }
+            await Task.CompletedTask;
         }
 
         private void OpenNewDispatcher()

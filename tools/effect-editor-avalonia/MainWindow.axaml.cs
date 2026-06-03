@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using CommonTools.Database;
@@ -60,30 +61,47 @@ namespace EffectEditorAvalonia
                 c_TargetTypeGrp.IsEnabled = c_EffectTypeCbo.SelectedIndex != 0;
             };
 
+            // The var-type combos are static (no DB) so fill them now.
+            FillVarTypes(c_VarType1);
+            FillVarTypes(c_VarType2);
+            FillVarTypes(c_VarType3);
+            FillVarTypes(c_ConstType1);
+            FillVarTypes(c_ConstType2);
+            SelectFirst(c_VarType1); SelectFirst(c_VarType2); SelectFirst(c_VarType3);
+            SelectFirst(c_ConstType1); SelectFirst(c_ConstType2);
+
+            // Keep the blocking DB-backed combo fills off the UI thread (AC.4)
+            // so the close button stays responsive while they run.
+            Opened += async (_, _) => await OnLoadAsync();
+        }
+
+        async Task OnLoadAsync()
+        {
             try
             {
-                FillStats(c_VarStat1);
-                FillStats(c_VarStat2);
-                FillStats(c_VarStat3);
-                FillStats(c_ConstStat1);
-                FillStats(c_ConstStat2);
+                // Read both lookup tables on the background thread, then apply
+                // the results to the combos back on the UI thread.
+                DataTable statsDt = null, buffsDt = null;
+                await Task.Run(() =>
+                {
+                    statsDt = DB.Instance.executeQuery("SELECT Stat_Name FROM item_effect_stats", null, null);
+                    buffsDt = DB.Instance.executeQuery("SELECT buff_name FROM buffs", null, null);
+                });
 
-                FillVarTypes(c_VarType1);
-                FillVarTypes(c_VarType2);
-                FillVarTypes(c_VarType3);
-                FillVarTypes(c_ConstType1);
-                FillVarTypes(c_ConstType2);
+                FillStats(c_VarStat1, statsDt);
+                FillStats(c_VarStat2, statsDt);
+                FillStats(c_VarStat3, statsDt);
+                FillStats(c_ConstStat1, statsDt);
+                FillStats(c_ConstStat2, statsDt);
 
-                FillBuffs(c_EffectBuff);
+                FillBuffs(c_EffectBuff, buffsDt);
 
                 SelectFirst(c_VarStat1); SelectFirst(c_VarStat2); SelectFirst(c_VarStat3);
                 SelectFirst(c_ConstStat1); SelectFirst(c_ConstStat2);
-                SelectFirst(c_VarType1); SelectFirst(c_VarType2); SelectFirst(c_VarType3);
-                SelectFirst(c_ConstType1); SelectFirst(c_ConstType2);
             }
             catch (Exception ex)
             {
-                // Headless smoke ctor -- no DB available. Don't crash.
+                // Headless smoke / no DB available. Don't crash.
                 c_Status.Text = "Init: " + ex.Message;
             }
         }
@@ -104,36 +122,37 @@ namespace EffectEditorAvalonia
             cbo.Items.Add(CodeValue.Formatted(5, "Duration"));
         }
 
-        static void FillStats(ComboBox cbo)
+        static void FillStats(ComboBox cbo, DataTable dt)
         {
             cbo.Items.Clear();
-            var dt = DB.Instance.executeQuery("SELECT Stat_Name FROM item_effect_stats", null, null);
             if (dt == null) return;
             foreach (DataRow r in dt.Rows)
                 cbo.Items.Add(r["Stat_Name"].ToString());
         }
 
-        static void FillBuffs(ComboBox cbo)
+        static void FillBuffs(ComboBox cbo, DataTable dt)
         {
             cbo.Items.Clear();
-            var dt = DB.Instance.executeQuery("SELECT buff_name FROM buffs", null, null);
             if (dt == null) return;
             foreach (DataRow r in dt.Rows)
                 cbo.Items.Add(r["buff_name"].ToString());
         }
 
-        // Port of Form1.LoadEffect(int).
-        void LoadEffect(int id)
+        // Port of Form1.LoadEffect(int). Keeps the blocking DB read off the UI
+        // thread (AC.4); the int id is captured before Task.Run and the row is
+        // applied to controls after the await resumes on the UI context.
+        async Task LoadEffectAsync(int id)
         {
             _effectId = id;
-            var dt = DB.Instance.executeQuery(
+            string eid = id.ToString();
+            var dt = await Task.Run(() => DB.Instance.executeQuery(
                 "SELECT \"EffectType\",\"Name\",\"Description\",\"Tooltip\",flag1,flag2," +
                 "\"Constant1Value\",\"Constant1Stat\",\"Constant1Type\"," +
                 "\"Constant2Value\",\"Constant2Stat\",\"Constant2Type\"," +
                 "\"Var1Stat\",\"Var1Type\",\"Var2Stat\",\"Var2Type\",\"Var3Stat\",\"Var3Type\"," +
                 "\"VisualEffect\",\"Buff_Name\" " +
                 "FROM item_effect_base WHERE \"EffectID\" = @eid",
-                new[] { "eid" }, new[] { id.ToString() });
+                new[] { "eid" }, new[] { eid }));
             if (dt == null || dt.Rows.Count == 0) return;
             DataRow r = dt.Rows[0];
 
@@ -181,7 +200,7 @@ namespace EffectEditorAvalonia
             var dlg = new EffectSearchWindow();
             await dlg.ShowDialog(this);
             if (dlg.SelectedEffectId >= 0)
-                LoadEffect(dlg.SelectedEffectId);
+                await LoadEffectAsync(dlg.SelectedEffectId);
         }
 
         async void OnSave(object sender, RoutedEventArgs e)
@@ -241,7 +260,9 @@ namespace EffectEditorAvalonia
                 _effectId.ToString(),
             };
 
-            int n = DB.Instance.executeCommand(sql, keys, vals);
+            // Controls were read above to build keys/vals; the DB write now runs
+            // off the UI thread (AC.4) and the status is set after the await.
+            int n = await Task.Run(() => DB.Instance.executeCommand(sql, keys, vals));
             c_Status.Text = $"Saved EffectID {_effectId} ({n} row{(n == 1 ? "" : "s")})";
         }
 
@@ -260,9 +281,10 @@ namespace EffectEditorAvalonia
                 "0,'NO_STAT',0,0,'NO_STAT',0,'NO_STAT',0,'NO_STAT',0,'NO_STAT',0,'BUFF_NONE') " +
                 "RETURNING \"EffectID\" AS id";
 
-            var dt = DB.Instance.executeQuery(insert, null, null);
+            // Keep the blocking INSERT off the UI thread (AC.4).
+            var dt = await Task.Run(() => DB.Instance.executeQuery(insert, null, null));
             if (dt != null && dt.Rows.Count > 0)
-                LoadEffect(Convert.ToInt32(dt.Rows[0]["id"]));
+                await LoadEffectAsync(Convert.ToInt32(dt.Rows[0]["id"]));
             else
                 await Show("Insert failed", "Could not retrieve new EffectID.", MsBoxIcon.Error);
         }

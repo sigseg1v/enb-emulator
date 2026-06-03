@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Globalization;
+using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
@@ -63,9 +64,16 @@ namespace EffectEditorAvalonia
 
             for (int i = 0; i < 5; i++) _slots[i] = MakeRow(i);
 
+            // Keep the blocking effect-list query off the UI thread (AC.4) so the
+            // close button stays responsive while it runs.
+            Opened += async (_, _) => await OnLoadAsync();
+        }
+
+        async Task OnLoadAsync()
+        {
             try
             {
-                LoadEffects();
+                await Task.Run(() => LoadEffects());
                 FillCombos();
             }
             catch (Exception ex)
@@ -165,24 +173,46 @@ namespace EffectEditorAvalonia
             {
                 _currentItem = dlg.SelectedItemBaseId;
                 c_ItemIdBox.Text = _currentItem.ToString();
-                LoadItemData();
+                await LoadItemDataAsync();
             }
         }
 
-        void OnLoad(object sender, RoutedEventArgs e)
+        async void OnLoad(object sender, RoutedEventArgs e)
         {
             if (!int.TryParse(c_ItemIdBox.Text, out _currentItem)) return;
-            LoadItemData();
+            await LoadItemDataAsync();
         }
 
         void OnClose(object sender, RoutedEventArgs e) => Close();
 
-        void LoadItemData()
+        async Task LoadItemDataAsync()
         {
-            // Item name lookup.
-            var nameDt = DB.Instance.executeQuery(
-                "SELECT name FROM item_base WHERE id = @id",
-                new[] { "id" }, new[] { _currentItem.ToString() });
+            // _currentItem is a field (not a control); capture it for the
+            // background queries, then apply the results back to controls after
+            // the await resumes on the UI context (AC.4).
+            string id = _currentItem.ToString();
+            DataTable nameDt = null, eff = null, con = null;
+            await Task.Run(() =>
+            {
+                // Item name lookup.
+                nameDt = DB.Instance.executeQuery(
+                    "SELECT name FROM item_base WHERE id = @id",
+                    new[] { "id" }, new[] { id });
+
+                eff = DB.Instance.executeQuery(
+                    "SELECT \"ItemEffectID\",\"item_effect_base_id\",\"Var1Data\",\"Var2Data\",\"Var3Data\" FROM item_effects WHERE \"ItemID\" = @id",
+                    new[] { "id" }, new[] { id });
+
+                con = DB.Instance.executeQuery(
+                    "SELECT \"EffectContainerID\",\"RechargeTime\",\"_Range\",\"EnergyUse\" " +
+                    // EquipEffect is bytea (MySQL binary(1)); it stores the ASCII
+                    // byte '1' (0x31) / '0' (0x30), never an integer. Compare with
+                    // the string literal '1' (coerces to bytea 0x31) -- "= 1"
+                    // throws "operator does not exist: bytea = integer".
+                    "FROM item_effect_container WHERE \"EquipEffect\" = '1' AND \"ItemID\" = @id",
+                    new[] { "id" }, new[] { id });
+            });
+
             c_ItemName.Text = (nameDt != null && nameDt.Rows.Count > 0)
                 ? nameDt.Rows[0][0]?.ToString() ?? ""
                 : "(item not found)";
@@ -194,10 +224,6 @@ namespace EffectEditorAvalonia
                 slot.EffectBox.SelectedIndex = 0;
                 slot.Var1.Text = ""; slot.Var2.Text = ""; slot.Var3.Text = "";
             }
-
-            var eff = DB.Instance.executeQuery(
-                "SELECT \"ItemEffectID\",\"item_effect_base_id\",\"Var1Data\",\"Var2Data\",\"Var3Data\" FROM item_effects WHERE \"ItemID\" = @id",
-                new[] { "id" }, new[] { _currentItem.ToString() });
 
             int x = 0;
             if (eff != null)
@@ -217,14 +243,6 @@ namespace EffectEditorAvalonia
             }
 
             _currentContainer = 0;
-            var con = DB.Instance.executeQuery(
-                "SELECT \"EffectContainerID\",\"RechargeTime\",\"_Range\",\"EnergyUse\" " +
-                // EquipEffect is bytea (MySQL binary(1)); it stores the ASCII
-                // byte '1' (0x31) / '0' (0x30), never an integer. Compare with
-                // the string literal '1' (coerces to bytea 0x31) -- "= 1"
-                // throws "operator does not exist: bytea = integer".
-                "FROM item_effect_container WHERE \"EquipEffect\" = '1' AND \"ItemID\" = @id",
-                new[] { "id" }, new[] { _currentItem.ToString() });
             if (con != null && con.Rows.Count > 0)
             {
                 DataRow r = con.Rows[0];
@@ -344,38 +362,43 @@ namespace EffectEditorAvalonia
                 return;
             }
 
-            for (int x = 0; x < 5; x++) SaveEffectSlot(x);
+            for (int x = 0; x < 5; x++) await SaveEffectSlotAsync(x);
+
+            // Read the container controls on the UI thread before the DB write
+            // (AC.4) -- Avalonia controls are UI-thread-only.
+            string itemId   = _currentItem.ToString();
+            string coolDown = c_CoolDown.Text ?? "0";
+            string energy   = c_EnergyUse.Text ?? "0";
+            string range    = c_Range.Text ?? "0";
 
             // Container row.
             if (_currentContainer == 0)
             {
                 // EffectContainerID is GENERATED BY DEFAULT AS IDENTITY --
                 // omit it and read the new id back via RETURNING (executeQuery).
-                var idDt = DB.Instance.executeQuery(
+                var idDt = await Task.Run(() => DB.Instance.executeQuery(
                     "INSERT INTO item_effect_container (\"ItemID\",\"RechargeTime\",\"EnergyUse\",\"_Range\",\"EquipEffect\") " +
                     "VALUES (@id,@rt,@eu,@rg,'1') " +
                     "RETURNING \"EffectContainerID\" AS id",
                     new[] { "id", "rt", "eu", "rg" },
-                    new[] { _currentItem.ToString(), c_CoolDown.Text ?? "0",
-                            c_EnergyUse.Text ?? "0", c_Range.Text ?? "0" });
+                    new[] { itemId, coolDown, energy, range }));
                 if (idDt != null && idDt.Rows.Count > 0)
                     _currentContainer = Convert.ToInt32(idDt.Rows[0]["id"]);
             }
             else
             {
-                DB.Instance.executeCommand(
+                string containerId = _currentContainer.ToString();
+                await Task.Run(() => DB.Instance.executeCommand(
                     "UPDATE item_effect_container SET \"RechargeTime\"=@rt,\"EnergyUse\"=@eu,\"_Range\"=@rg,\"EquipEffect\"='1' " +
                     "WHERE \"ItemID\"=@id AND \"EffectContainerID\"=@cid",
                     new[] { "rt", "eu", "rg", "id", "cid" },
-                    new[] { c_CoolDown.Text ?? "0", c_EnergyUse.Text ?? "0",
-                            c_Range.Text ?? "0", _currentItem.ToString(),
-                            _currentContainer.ToString() });
+                    new[] { coolDown, energy, range, itemId, containerId }));
             }
 
             c_Status.Text = $"Saved item {_currentItem}.";
         }
 
-        void SaveEffectSlot(int slotIndex)
+        async Task SaveEffectSlotAsync(int slotIndex)
         {
             var slot = _slots[slotIndex];
             int comboIdx = slot.EffectBox.SelectedIndex;
@@ -384,9 +407,10 @@ namespace EffectEditorAvalonia
             // DELETE: had a row, combo reset to "(none)".
             if (slot.CurrentItemEffectId != 0 && comboIdx == 0)
             {
-                DB.Instance.executeCommand(
+                string delEid = slot.CurrentItemEffectId.ToString();
+                await Task.Run(() => DB.Instance.executeCommand(
                     "DELETE FROM item_effects WHERE \"ItemEffectID\" = @eid",
-                    new[] { "eid" }, new[] { slot.CurrentItemEffectId.ToString() });
+                    new[] { "eid" }, new[] { delEid }));
                 slot.CurrentItemEffectId = 0;
                 return;
             }
@@ -400,29 +424,33 @@ namespace EffectEditorAvalonia
 
             int effId = _effects[comboIdx].EffectId;
 
+            // Read every control value on the UI thread before going off-thread
+            // for the DB write (AC.4) -- Avalonia controls are UI-thread-only.
+            string itemId = _currentItem.ToString();
+            string effIdStr = effId.ToString();
+            string v1 = slot.Var1.Text, v2 = slot.Var2.Text, v3 = slot.Var3.Text;
+
             if (slot.CurrentItemEffectId == 0)
             {
                 // ItemEffectID is GENERATED BY DEFAULT AS IDENTITY -- omit it
                 // and read the new id back via RETURNING (executeQuery).
-                var idDt = DB.Instance.executeQuery(
+                var idDt = await Task.Run(() => DB.Instance.executeQuery(
                     "INSERT INTO item_effects (\"ItemID\",\"item_effect_base_id\",\"Var1Data\",\"Var2Data\",\"Var3Data\") " +
                     "VALUES (@id,@eb,@v1,@v2,@v3) " +
                     "RETURNING \"ItemEffectID\" AS id",
                     new[] { "id", "eb", "v1", "v2", "v3" },
-                    new[] { _currentItem.ToString(), effId.ToString(),
-                            slot.Var1.Text, slot.Var2.Text, slot.Var3.Text });
+                    new[] { itemId, effIdStr, v1, v2, v3 }));
                 if (idDt != null && idDt.Rows.Count > 0)
                     slot.CurrentItemEffectId = Convert.ToInt32(idDt.Rows[0]["id"]);
             }
             else
             {
-                DB.Instance.executeCommand(
+                string curEid = slot.CurrentItemEffectId.ToString();
+                await Task.Run(() => DB.Instance.executeCommand(
                     "UPDATE item_effects SET \"item_effect_base_id\"=@eb,\"Var1Data\"=@v1,\"Var2Data\"=@v2,\"Var3Data\"=@v3 " +
                     "WHERE \"ItemID\"=@id AND \"ItemEffectID\"=@eid",
                     new[] { "eb", "v1", "v2", "v3", "id", "eid" },
-                    new[] { effId.ToString(),
-                            slot.Var1.Text, slot.Var2.Text, slot.Var3.Text,
-                            _currentItem.ToString(), slot.CurrentItemEffectId.ToString() });
+                    new[] { effIdStr, v1, v2, v3, itemId, curEid }));
             }
         }
 
