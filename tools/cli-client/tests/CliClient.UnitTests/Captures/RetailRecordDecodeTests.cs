@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllEightyThreeFrames()
+    public void Fixture_Loads_AllEightyFourFrames()
     {
-        Assert.Equal(83, Frames.Count);
+        Assert.Equal(84, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -2059,5 +2059,59 @@ public sealed class RetailRecordDecodeTests
         Assert.DoesNotContain("break formation", d);
         Assert.DoesNotContain("???", d);             // all 5 bytes decoded
         Assert.DoesNotContain("[!]", d);
+    }
+
+    // ── ComponentPositionalUpdate 0x46 ───────────────────────────────────────
+    // 64-byte packed struct: an embedded SimplePositionalUpdate (48B, the SAME
+    // layout as 0x08) plus a 4-field tractor tail starting at offset 48. The
+    // header's "this[68]" tail comments are off-by-8; the retail frame's
+    // "Length = 68 bytes" (== payload 64 + 4) proves the tail is contiguous.
+
+    [Fact]
+    public void ComponentPos_DecodesEmbeddedSimplePosPlusTractorTail_LittleEndian()
+    {
+        string d = Dump("componentpos_tractor_player");
+
+        // Embedded SimplePositionalUpdate half (offsets 0..47).
+        Assert.Contains("[0000] GameID", d);
+        Assert.Contains("0x0084E261", d);
+        Assert.Contains("[0004] TimeStamp", d);
+        Assert.Contains("0x251B7ACC", d);
+        Assert.Contains("[0008] Position", d);
+        Assert.Contains("(-23448.31, 57909.05, 266.981)", d);
+        Assert.Contains("[0014] Orientation", d);             // offset 20 (0x14)
+        Assert.Contains("(0.0, 0.0, 0.0, 1.0)", d);           // identity quaternion
+        Assert.Contains("[0024] Velocity", d);                // offset 36 (0x24)
+        Assert.Contains("(0.0, 0.0, 0.0)", d);                // stationary
+
+        // Tractor tail (offsets 48..63) -- the part 0x08 does NOT carry.
+        Assert.Contains("[0030] ImpartedDecay", d);           // offset 48 (0x30), NOT 0x44/this[68]
+        Assert.Contains("ImpartedDecay     = 9.8", d);
+        Assert.Contains("[0034] TractorSpeed", d);            // offset 52 (0x34)
+        Assert.Contains("TractorSpeed      = 250.0", d);
+        Assert.Contains("[0038] TractorID", d);               // offset 56 (0x38)
+        Assert.Contains("0x0084E1E9", d);                     // beam acts on the same player as batches 6/7
+        Assert.Contains("(object the beam acts on)", d);
+        Assert.Contains("[003C] TractorEffectID", d);         // offset 60 (0x3C)
+        Assert.Contains("0x0084E262", d);
+
+        Assert.DoesNotContain("???", d);                      // all 64 bytes decoded
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void ComponentPos_FirstFortyEightBytes_MatchSimplePosLayout()
+    {
+        // The embedded simple half must decode identically whether fed through the
+        // 0x46 record or a standalone 0x08 SimplePosRecord -- same GameID/TimeStamp/
+        // Position/Orientation/Velocity field lines for the first 48 bytes. This
+        // locks the "0x46 reuses SimplePositionalUpdate verbatim" invariant.
+        var full = Frames["componentpos_tractor_player"].Payload;
+        var simpleHalf = full.AsSpan(0, 48).ToArray();
+
+        string viaSimple = new SimplePosRecord(simpleHalf).DumpToString();
+        Assert.Contains("0x0084E261", viaSimple);
+        Assert.Contains("(-23448.31, 57909.05, 266.981)", viaSimple);
+        Assert.Contains("(0.0, 0.0, 0.0, 1.0)", viaSimple);
     }
 }

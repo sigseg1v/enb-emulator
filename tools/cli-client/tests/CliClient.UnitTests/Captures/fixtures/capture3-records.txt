@@ -919,3 +919,12 @@ provenance: Move 0x14 (client->server) -- same player 0x0084E1E9, Type 0 (engine
 opcode: 0x14
 payload-bytes: 5
 hex: e9 e1 84 00 00
+
+[componentpos_tractor_player]
+provenance: ComponentPositionalUpdate 0x46 (server->client) -- component 0x0084E261 at Position (-23448.31,57909.05,266.981) (single-float 7-sig-fig render), identity Orientation (0,0,0,1), zero Velocity, ImpartedDecay 9.8, TractorSpeed 250.0, TractorID 0x0084E1E9 (the same player as the batch-6/7 frames -- the beam acts on the player), TractorEffectID 0x0084E262 (capture_3.rar, Packet #1676, Server->Client). 64-byte packed ComponentPositionalUpdate = embedded SimplePositionalUpdate (48B, same layout as 0x08) + ImpartedDecay/TractorSpeed/TractorID/TractorEffectID tail at offset 48. "Length = 68 bytes" == payload 64 + 4 confirms the tail is contiguous (the this[68] header comments are off-by-8). All fields raw LE -- Player::SendComponentPositionalUpdate direct-assigns then memcpys.
+opcode: 0x46
+payload-bytes: 64
+hex: 61 e2 84 00 cc 7a 1b 25 9e 30 b7 c6 0c 35 62 47
+      96 7d 85 43 00 00 00 00 00 00 00 00 00 00 00 00
+      00 00 80 3f 00 00 00 00 00 00 00 00 00 00 00 00
+      cd cc 1c 41 00 00 7a 43 e9 e1 84 00 62 e2 84 00

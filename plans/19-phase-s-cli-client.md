@@ -1515,6 +1515,27 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       capture3-records.txt 80->83 frames; +4 tests (Turn, Tilt, routing, Move);
       RetailRecordDecodeTests 95->99; full UnitTests suite 559 green. No server
       change (CLI decode-only).
+- [x] ComponentPositionalUpdate (batch 8, 2026-06-03): 0x46, the highest-
+      frequency remaining undecoded opcode (577 frames across the captures, 182 in
+      capture_3). 64-byte packed ComponentPositionalUpdate = an embedded
+      SimplePositionalUpdate (48B, byte-identical to 0x08) + a tractor tail
+      {float ImpartedDecay; float TractorSpeed; int32 TractorID; int32
+      TractorEffectID} starting at payload offset 48. Caught a header-comment trap:
+      PacketStructures.h annotates the tail "this[68].." which is off-by-8 (12+48
+      = this[60], not 68) -- the real frame's "Length = 68 bytes" == payload 64 + 4
+      proves the ATTRIB_PACKED struct is contiguous, so the tail is at offset 48.
+      Emitter Player::SendComponentPositionalUpdate direct-assigns every field then
+      SendOpcode(..., &update, sizeof(update)) memcpys -- all raw LE. The decoder
+      mirrors SimplePosRecord for the embedded half (no shared positional helper
+      exists; ~6 lines duplicated, matching the standalone-record idiom) and a test
+      cross-checks that the first 48 bytes decode identically through SimplePosRecord.
+      Note: 0.0## on a single-precision float caps at ~7 sig figs, so the pinned
+      Position renders (-23448.31, 57909.05, 266.981), not the 3-dp math value.
+      Files: Records/ComponentPositionalUpdateRecord.cs + 1 registry line. Pinned
+      capture_3 Packet #1676 (Server->Client) -- TractorID 0x0084E1E9 is the same
+      player as batches 6/7. capture3-records.txt 83->84 frames; +2 tests;
+      RetailRecordDecodeTests 99->101; full UnitTests suite 561 green. No server
+      change (CLI decode-only).
 - [ ] 0x0B ObjectToObjectEffect -- DEFERRED. Carries a u16 Bitmask + a
       variable-length Message field mid-packet + a conditional tail the server
       author flagged as wrong ("packet struct is wrong... TODO work out correct
@@ -1523,15 +1544,13 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       another off by 6). Decoding the tail would require fabricating field
       structure -- validate interactively against the live client instead.
 - [ ] Remaining GenericRecord-fallthrough opcodes worth decoding next, after
-      batch-6 cleared 0x9E/0x9D/0x5A/0x17/0x2C and batch-7 cleared 0x12/0x13/0x14
-      (and 0x64 ClientDamage, 0x6A ClientSound, 0x20 PriorityMessage, 0x66
-      OpenInterface already had decoders -- the old list was stale on those):
-      0x21/0x22 PushMessage variants (43/8 frames), 0x46 ComponentPositionalUpdate
-      (577 frames -- embeds SimplePositionalUpdate (48B) + ImpartedDecay /
-      TractorSpeed / TractorID / TractorEffectID = 64B). Each needs its server
-      emitter read + real-frame byte-diff. 0x46 is the obvious next batch by
-      frequency, but its inner SimplePositionalUpdate quantization must be decoded
-      to match 0x3E/0x08 first.
+      batch-6 cleared 0x9E/0x9D/0x5A/0x17/0x2C, batch-7 cleared 0x12/0x13/0x14, and
+      batch-8 cleared 0x46 (and 0x64 ClientDamage, 0x6A ClientSound, 0x20
+      PriorityMessage, 0x66 OpenInterface already had decoders -- the old list was
+      stale on those): 0x21/0x22 PushMessage variants (43/8 frames). Each needs its
+      server emitter read + real-frame byte-diff. These are low-frequency and the
+      PushMessage family carries variable-length strings, so confirm the on-wire
+      length-prefix discipline against a real frame before decoding the tail.
 - [ ] Long-tail records with ZERO frames in any of the 3 captures (need other
       captures): 0x6F GlobalTicket, 0xD0 GuildMessageSector. Defer until a capture
       containing them is located. AuxMobIndex/AuxHulkIndex 0x1B version-1 diff
