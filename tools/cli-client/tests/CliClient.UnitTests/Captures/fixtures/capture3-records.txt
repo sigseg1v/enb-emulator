@@ -983,3 +983,15 @@ opcode: 0x28
 payload-bytes: 21
 hex: 06 ed 2a d7 00 00 00 01 00 00 00 01 00 00 00 04
       00 00 00 08 00
+
+[starbaseroomchange_move_0_to_1]
+provenance: Starbase_Room_Change 0x9F (client->server) -- AvatarID 11193582 (0x00AACCEE), NewRoom 1, OldRoom 0 (capture_3.rar packet #611, Client->Server). 12-byte struct StarbaseRoomChange {int32 AvatarID; int32 NewRoom; int32 OldRoom}, all LE: Player::HandleStarbaseRoomChange casts the buffer and reads NewRoom/OldRoom with no ntohl. AvatarID is the player's GameID. This frame is a clean room transition (room 0 -> room 1). Note the struct order: NewRoom precedes OldRoom on the wire.
+opcode: 0x9F
+payload-bytes: 12
+hex: ee cc aa 00 01 00 00 00 00 00 00 00
+
+[starbaseroomchange_player_06ed2ad7]
+provenance: Starbase_Room_Change 0x9F (client->server) -- AvatarID 116206295 (0x06ED2AD7), NewRoom 0, OldRoom -1 (capture_3.rar packet #14287, Client->Server). Same 12-byte all-LE struct. OldRoom -1 + NewRoom 0 is the "just entered station, no room yet" case the handler special-cases. AvatarID read LE (bytes D7 2A ED 06) == 0x06ED2AD7 == the SAME player whose InventorySort 0x28 ID (bytes 06 ED 2A D7, read BE) decoded to 0x06ED2AD7 -- a cross-convention lock proving 0x28's int32 are BE while 0x9F's are LE, both naming one player.
+opcode: 0x9F
+payload-bytes: 12
+hex: d7 2a ed 06 00 00 00 00 ff ff ff ff

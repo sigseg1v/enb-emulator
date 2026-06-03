@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllNinetyTwoFrames()
+    public void Fixture_Loads_AllNinetyFourFrames()
     {
-        Assert.Equal(92, Frames.Count);
+        Assert.Equal(94, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -2324,5 +2324,49 @@ public sealed class RetailRecordDecodeTests
         int idBE = p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3];
         Assert.Equal(116206295, idBE);
         Assert.Equal(0x06ED2AD7, idBE);
+    }
+
+    // ── StarbaseRoomChange 0x9F ──────────────────────────────────────────────
+    // 12-byte struct {int32 AvatarID; int32 NewRoom; int32 OldRoom}, all LE
+    // (HandleStarbaseRoomChange reads with no ntohl). NewRoom precedes OldRoom.
+
+    [Fact]
+    public void StarbaseRoomChange_FieldsLittleEndian_NewRoomBeforeOldRoom()
+    {
+        string d = Dump("starbaseroomchange_move_0_to_1");
+
+        Assert.Contains("[0000] AvatarID", d);
+        Assert.Contains("0x00AACCEE", d);                  // EE CC AA 00 LE == 11193582
+        Assert.Contains("[0004] NewRoom", d);
+        Assert.Contains("NewRoom           = 1", d);
+        Assert.Contains("[0008] OldRoom", d);
+        Assert.Contains("OldRoom           = 0", d);
+        Assert.DoesNotContain("???", d);                   // all 12 bytes decoded
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void StarbaseRoomChange_EnterStationSentinel()
+    {
+        string d = Dump("starbaseroomchange_player_06ed2ad7");
+        Assert.Contains("0x06ED2AD7", d);                  // D7 2A ED 06 LE == 116206295
+        Assert.Contains("NewRoom           = 0", d);
+        Assert.Contains("OldRoom           = -1", d);
+        Assert.Contains("(LE; -1 = just entered station)", d);
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void StarbaseRoomChange_LittleEndianAvatarId_MatchesInventorySortBigEndianId()
+    {
+        // One player, two opcodes, opposite byte orders -- both decode to the
+        // same GameID 0x06ED2AD7. 0x28 ntohl's its int32 (BE on the wire);
+        // 0x9F reads raw (LE on the wire). The wire bytes are mirror images.
+        var room = Frames["starbaseroomchange_player_06ed2ad7"].Payload;
+        var sort = Frames["inventorysort_cargo_by_name"].Payload;
+        int roomAvatarLE = room[0] | room[1] << 8 | room[2] << 16 | room[3] << 24;
+        int sortIdBE     = sort[0] << 24 | sort[1] << 16 | sort[2] << 8 | sort[3];
+        Assert.Equal(0x06ED2AD7, roomAvatarLE);
+        Assert.Equal(roomAvatarLE, sortIdBE);
     }
 }
