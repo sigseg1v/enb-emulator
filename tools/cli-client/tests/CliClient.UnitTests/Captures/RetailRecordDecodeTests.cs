@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllOneHundredThreeFrames()
+    public void Fixture_Loads_AllOneHundredFiveFrames()
     {
-        Assert.Equal(103, Frames.Count);
+        Assert.Equal(105, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -2630,5 +2630,61 @@ public sealed class RetailRecordDecodeTests
         // And the appended local-time string is the client-supplied login timestamp.
         Assert.Equal("07/02/04 22:54:30",
             System.Text.Encoding.ASCII.GetString(login.Payload, 108, 17));
+    }
+
+    // ── ManufactureAction 0x7E ───────────────────────────────────────────────
+    // Terminal button press (leave/retry/refine/refine-stack). 8-byte ManufactureData,
+    // UNIFORM BIG-ENDIAN: HandleManufactureAction reads ntohl(Data) and switches it on
+    // the Manufacture_Action enum. Cross-proven against 0x7C, which carries the SAME
+    // terminal id 10012 byte-reversed (it reads its Data little-endian).
+
+    [Fact]
+    public void ManufactureAction_BigEndian_RefineStack()
+    {
+        string d = Dump("manufactureaction_refine_stack");
+
+        Assert.Contains("[0000] GameID", d);
+        Assert.Contains("0x0000271C", d);                          // 00 00 27 1C BE == 10012
+        Assert.Contains("(BE; manufacture-terminal id", d);
+        Assert.Contains("[0004] Action", d);
+        Assert.Contains("= 3", d);                                 // 00 00 00 03 BE == 3
+        Assert.Contains("ACTION_REFINE_STACK", d);
+        Assert.Contains("HandleManufactureAction ntohl's this", d);
+        Assert.DoesNotContain("???", d);                           // all 8 bytes decoded
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void ManufactureAction_LeaveTerminal_ActionZeroNotFlagged()
+    {
+        string d = Dump("manufactureaction_leave_terminal");
+
+        Assert.Contains("[0004] Action", d);
+        Assert.Contains("= 0", d);                                 // 00 00 00 00 BE == 0
+        Assert.Contains("ACTION_LEAVE_TERMINAL", d);
+        // Action 0 is a VALID enum member here, not an uninitialised sentinel --
+        // the record must not FlagSuspicious it.
+        Assert.DoesNotContain("???", d);
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void ManufactureAction_SameTerminalAs7C_OppositeByteOrder()
+    {
+        // The 0x7E GameID (big-endian) and the same session's 0x7C GameID
+        // (little-endian) are the SAME logical terminal id, 10012 -- stored
+        // byte-reversed because the two handlers read their Data field in opposite
+        // byte orders. This shared value across opposite encodings is the lock that
+        // proves 0x7E is big-endian and 0x7C is little-endian.
+        var action = Frames["manufactureaction_refine_stack"];
+        var refine = Frames["refinerysetitem_template_1237"];
+        int actionTerminal = System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(action.Payload.AsSpan(0, 4));
+        int refineTerminal = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(refine.Payload.AsSpan(0, 4));
+        Assert.Equal(10012, actionTerminal);
+        Assert.Equal(actionTerminal, refineTerminal);
+        // And the bytes really are reversed, not coincidentally equal.
+        Assert.True(action.Payload.AsSpan(0, 4).SequenceEqual(stackalloc byte[] { 0x00, 0x00, 0x27, 0x1C }));
+        Assert.True(refine.Payload.AsSpan(0, 4).SequenceEqual(stackalloc byte[] { 0x1C, 0x27, 0x00, 0x00 }));
+        Assert.Equal((ushort)0x7E, PacketRecord.Resolve((ushort)action.Opcode, action.Payload).Opcode);
     }
 }

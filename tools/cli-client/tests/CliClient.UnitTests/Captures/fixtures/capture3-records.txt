@@ -1057,3 +1057,15 @@ hex: 00 00 00 02 00 00 00 02 40 e5 e7 e8 3e 22 12 01
      68 61 e6 01 68 61 e6 01 a6 e7 e5 40 30 37 2f 30
      32 2f 30 34 20 32 32 3a 35 34 3a 33 30 00 82 00
      b8 96 be 00 00 00 00 00 00
+
+[manufactureaction_refine_stack]
+provenance: ManufactureAction 0x7E (client->server) -- GameID 10012 (0x0000271C), Action 3 = ACTION_REFINE_STACK (capture_3.rar packet #16588, Client->Server, 159.153.232.46:3387). 8-byte struct ManufactureData {int32 GameID; int32 Data}, UNIFORM BIG-ENDIAN. Player::HandleManufactureAction (PlayerManufacturing.cpp:499) reads ntohl(Packet->Data) and switches on the Manufacture_Action enum (PlayerManufacturing.h:21): 0 LEAVE_TERMINAL, 1 RETRY, 2 REFINE, 3 REFINE_STACK. Across the session's eight 0x7E frames the Action reads {0,2,3} big-endian -- all valid enum members -- while little-endian would give {0,0x02000000,0x03000000}, six of eight falling to "Unknown Action". GameID 10012 is the manufacture terminal; the handler never reads it, but it is the SAME terminal the session's 0x7C REFINERY_SET_ITEM carries -- 0x7C reads its Data little-endian and stores 10012 byte-reversed (1C 27 00 00) where 0x7E stores it big-endian (00 00 27 1C). That shared value across opposite encodings pins both packets' byte order.
+opcode: 0x7E
+payload-bytes: 8
+hex: 00 00 27 1c 00 00 00 03
+
+[manufactureaction_leave_terminal]
+provenance: ManufactureAction 0x7E (client->server) -- GameID 10012 (0x0000271C), Action 0 = ACTION_LEAVE_TERMINAL (capture_3.rar packet #234759 line, Client->Server, 159.153.232.46:3387). Same session/terminal as manufactureaction_refine_stack; the player leaving the terminal. Action 0 big-endian is the valid LEAVE_TERMINAL member (it is NOT an uninitialised sentinel here, so it is not flagged) -- pins the enum mapping across two distinct big-endian Action values (0 and 3).
+opcode: 0x7E
+payload-bytes: 8
+hex: 00 00 27 1c 00 00 00 00

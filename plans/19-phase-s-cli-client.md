@@ -1755,6 +1755,26 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       capture3-records.txt 102->103 frames (login_to_sector_10521, #234); 3 tests
       (BE-embed+LE-appendix render, TimeSent-is-LE-not-BE, embedded-MasterJoin matches
       standalone byte-for-byte); full UnitTests suite 592 green. CLI decode-only.
+- [x] ManufactureAction (batch 24, 2026-06-03): 0x7E MANUFACTURE_ACTION (8 frames),
+      client->server, the terminal button press (leave/retry/refine/refine-stack).
+      8-byte struct ManufactureData {int32 GameID; int32 Data}, UNIFORM BIG-ENDIAN.
+      Player::HandleManufactureAction (PlayerManufacturing.cpp:499) reads
+      ntohl(Packet->Data) and switches it on the Manufacture_Action enum
+      (PlayerManufacturing.h:21): 0 LEAVE_TERMINAL, 1 RETRY, 2 REFINE,
+      3 REFINE_STACK. Byte order proven two ways: (1) across the session's eight
+      0x7E frames the Action reads {0,2,3} big-endian -- every value a valid enum
+      member -- whereas LE would give {0,0x02000000,0x03000000}, six of eight
+      falling to the handler's "Unknown Action" default; (2) cross-packet -- GameID
+      10012 (the manufacture terminal, never read by this handler) is the SAME
+      terminal the session's 0x7C REFINERY_SET_ITEM carries, but 0x7C reads its Data
+      LITTLE-endian and stores 10012 byte-reversed (1C 27 00 00) where 0x7E stores
+      it big-endian (00 00 27 1C). The shared logical value across opposite
+      encodings pins BOTH packets' byte order and confirms batch-19's 0x7C LE label
+      was correct. Files: Records/ManufactureActionRecord.cs + 1 registry line.
+      capture3-records.txt 103->105 frames (refine_stack #16588 + leave_terminal);
+      3 tests (BE render+enum-name, Action 0 is valid LEAVE_TERMINAL not flagged,
+      same-terminal-opposite-byte-order lock vs 0x7C); full UnitTests suite 595
+      green. CLI decode-only.
 - [ ] 0x98 GALAXY_MAP_REQUEST -- DEFERRED. 64-byte request body, but
       Player::HandleGalaxyMapRequest() takes NO data argument and just replies
       SendOpcode(GALAXY_MAP_CACHE, 0, 0) -- the server discards the entire request
@@ -1777,14 +1797,13 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       0x12/0x13/0x14, batch-8 0x46, batch-9 0x21/0x22, batch-10 0x27, batch-11 0x9B,
       batch-12 0x1F, batch-13 0xA3, batch-14 0x44, batch-15 0x28, batch-16 0x9F,
       batch-17 0xA0, batch-18 0x55, batch-19 0x7C, batch-20 0x35, batch-21 0x1A,
-      batch-22 0x06, batch-23 0x02
+      batch-22 0x06, batch-23 0x02, batch-24 0x7E
       (0x64/0x6A/0x20/0x66 already had decoders). The "single-digit long tail" note
       written after batch-9 was WRONG -- a re-tally proved several mid-frequency
-      opcodes still fall through. The registry now decodes 82 opcodes. A fresh
+      opcodes still fall through. The registry now decodes 83 opcodes. A fresh
       capture_3 tally (zero-padded, cross-referenced against the registry) gives the
       accurate undecoded remainder, highest first:
-        - 0x7E MANUFACTURE_ACTION    (8)   -- NEXT
-        - 0x4E                       (8)
+        - 0x4E                       (8)   -- NEXT
         - 0x58                       (7)
         - 0xA4                       (6)
         - then a 1-2 frame singleton tail (0xBD/0x79/0x5F/0x5D/0xBF/0xBE/0xBC/0xB9/

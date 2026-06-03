@@ -79,6 +79,7 @@ public static class PacketRecordRegistry
             0x006A => new ClientSoundRecord(payload),
             0x006F => new GlobalTicketRecord(payload),
             0x007C => new RefinerySetItemRecord(payload),
+            0x007E => new ManufactureActionRecord(payload),
             0x007F => new ManufactureSetManufactureIdRecord(payload),
             0x0089 => new RelationshipRecord(payload),
             0x008B => new AttackerUpdatesRecord(payload),
