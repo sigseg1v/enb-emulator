@@ -44,17 +44,23 @@ is safe**: dumpcap finalizes the `.pcapng` (pcapng is flushed block-by-block as
 packets arrive), so the file is complete and not corrupt -- it contains every
 packet captured up to the interrupt.
 
-### Sectors and the port filter (important)
+### Ports captured
 
-The proxy's ports are read **once** at launch and frozen into the capture
-filter for the whole run. When you warp/jump to another sector the proxy opens a
-**new** socket to a different sector server, and that new port is **not** in the
-filter -- its traffic is silently dropped. So if you plan to move between
-sectors, capture **one file per sector**: stop with Ctrl+C and re-launch with a
-distinct `-Prefix` for each (`-Prefix Luna`, then `-Prefix Aganju`, ...), which
-re-resolves the filter against the proxy's then-current sockets. Alternatives:
-list every server port you expect via `-ExtraPorts`, or run unfiltered (don't
-pass ports) and scope the `.pcapng` afterward in Wireshark.
+The filter is the union of three sources:
+
+1. **The EnB port baseline (always on)** -- the known control ports
+   `3500, 3601, 3636, 3805, 3801, 3806, 3807, 3808, 3809, 3810` plus the entire
+   sector-server band **3501-3800** (base `SECTOR_SERVER_PORT` 3501 + up to 300
+   sectors, emitted as a single BPF `portrange`). This is what makes sector
+   warps stay captured: a new sector server's port still falls inside the band,
+   so you do **not** need to re-launch per sector. Pass `-NoBaselinePorts` to
+   drop it and capture only the resolved/extra ports.
+2. **The proxy PID's owned ports** at launch (its current TCP local+remote and
+   UDP local sockets).
+3. **`-ExtraPorts`** -- anything extra you name, on top of the above.
+
+Even so, `-Prefix` per sector is still handy for *organizing* files when you
+want one capture per sector; it is no longer *required* for coverage.
 
 ### Required software (no WSL or MinGW)
 

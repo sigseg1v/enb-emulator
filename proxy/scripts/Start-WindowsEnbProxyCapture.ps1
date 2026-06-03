@@ -38,12 +38,17 @@
     press Ctrl+C (the file is finalized cleanly on stop either way).
 
 .PARAMETER ExtraPorts
-    Additional TCP/UDP ports to include in the filter (e.g. known server ports
-    the proxy talks to: 3500,3601,3636,3806,3808). Useful if the proxy hasn't
-    opened a socket yet at capture start.
+    EXTRA TCP/UDP ports to include on top of the always-on baseline. The
+    baseline (3500,3601,3636,3806,3808 plus the whole sector-server band
+    3501-3800) is ALWAYS in the filter regardless of this parameter, so you only
+    need -ExtraPorts for something outside that set.
 
 .PARAMETER SnapLength
     Bytes captured per packet. 0 (default) = whole packet, matching `-s0`.
+
+.PARAMETER NoBaselinePorts
+    Drop the always-on EnB port baseline and capture ONLY the PID's resolved
+    ports plus -ExtraPorts. Use if you want a tightly-scoped file.
 
 .PARAMETER DumpcapPath
     Explicit path to dumpcap.exe. By default the script looks on PATH and in the
@@ -54,8 +59,8 @@
     .\Start-WindowsEnbProxyCapture.ps1
 
 .EXAMPLE
-    # Capture a specific PID for 120s, also include the sector/MVAS server ports:
-    .\Start-WindowsEnbProxyCapture.ps1 -ProcessId 4812 -DurationSeconds 120 -ExtraPorts 3636,3806
+    # Capture a specific PID for 120s (the EnB port baseline is always included):
+    .\Start-WindowsEnbProxyCapture.ps1 -ProcessId 4812 -DurationSeconds 120
 
 .EXAMPLE
     # Label the file for organizing -- yields captures\Luna-enbproxy-...pcapng:
@@ -86,10 +91,27 @@ param(
     [int]      $DurationSeconds = 0,
     [int[]]    $ExtraPorts      = @(),
     [int]      $SnapLength      = 0,
+    [switch]   $NoBaselinePorts,
     [string]   $DumpcapPath     = ''
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Always-on EnB port baseline. The proxy may not have opened every socket yet at
+# capture start (and warping to a new sector opens a fresh sector-server port),
+# so we ALWAYS include the known control ports and the full sector-server band
+# rather than relying solely on what the PID owns at this instant.
+#   3500  proxy local TCP terminator (PROXY_LOCAL_TCP_PORT)
+#   3601  client<->proxy game leg
+#   3636  client<->proxy aux leg
+#   3806  MVAS login (MVAS_LOGIN_PORT)
+#   3808  UDP master server (UDP_MASTER_SERVER_PORT)
+# plus 3805 (global), 3801 (master), 3807/3809/3810 control/UDP legs, and the
+# sector-server band 3501..3800 (base SECTOR_SERVER_PORT 3501 + up to 300
+# sectors) expressed as a BPF portrange so we don't emit 300 OR-terms.
+$BaselineDiscretePorts = @(3500, 3601, 3636, 3805, 3801, 3806, 3807, 3808, 3809, 3810)
+$SectorPortLow  = 3501
+$SectorPortHigh = 3800
 
 function Test-Admin {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -150,20 +172,14 @@ if ($ProcessId -gt 0) {
 $targetPid = $proc.Id
 Write-Host "Target process: $($proc.ProcessName) (PID $targetPid)" -ForegroundColor Cyan
 
-# --- resolve the ports it owns ---------------------------------------------
+# --- resolve the ports to capture ------------------------------------------
 # Windows can't filter a capture by PID, so we capture machine-wide filtered to
-# the union of TCP local+remote and UDP local ports this PID currently holds.
-#
-# CAVEAT -- ports are read ONCE, here, and baked into a static BPF filter for the
-# whole run. EnB sector servers listen on different ports, and the proxy opens a
-# NEW socket (new remote port) when you warp/jump to another sector. That later
-# port is NOT in this snapshot, so its traffic is silently dropped from the
-# capture. If you are going to move between sectors, prefer ONE capture PER
-# sector: stop (Ctrl+C) and re-launch with a distinct -Prefix for each sector
-# (e.g. -Prefix Luna, then -Prefix Aganju) so the filter is re-resolved against
-# the proxy's then-current sockets. Alternatively pass every server port you
-# expect to touch up-front via -ExtraPorts, or run unfiltered (no ports) and
-# scope the pcap afterward in Wireshark.
+# a set of ports. That set is: the EnB port baseline (always, unless
+# -NoBaselinePorts) + the TCP local+remote and UDP local ports this PID owns
+# right now + -ExtraPorts. The baseline matters because the PID's owned-port
+# snapshot is read ONCE here -- a socket the proxy opens later (notably a new
+# sector-server port when you warp) would otherwise be missed. The baseline
+# already covers the whole 3501..3800 sector band, so warping stays captured.
 $ports = New-Object System.Collections.Generic.HashSet[int]
 Get-NetTCPConnection -OwningProcess $targetPid -ErrorAction SilentlyContinue | ForEach-Object {
     if ($_.LocalPort  -gt 0) { [void]$ports.Add([int]$_.LocalPort)  }
@@ -174,13 +190,20 @@ Get-NetUDPEndpoint -OwningProcess $targetPid -ErrorAction SilentlyContinue | For
 }
 foreach ($p in $ExtraPorts) { if ($p -gt 0) { [void]$ports.Add([int]$p) } }
 
-if ($ports.Count -eq 0) {
-    Write-Warning "PID $targetPid has no open TCP/UDP sockets right now. The capture will run UNFILTERED (whole-machine traffic). Pass -ExtraPorts to scope it, or start the capture after the proxy has connected."
+# Fold in the always-on baseline (discrete ports here; the sector band is added
+# as a portrange in the filter below so we don't enumerate 300 ports).
+$useSectorRange = $false
+if (-not $NoBaselinePorts) {
+    foreach ($p in $BaselineDiscretePorts) { [void]$ports.Add([int]$p) }
+    $useSectorRange = $true
+}
+
+if ($ports.Count -eq 0 -and -not $useSectorRange) {
+    Write-Warning "PID $targetPid has no open TCP/UDP sockets right now and -NoBaselinePorts was given. The capture will run UNFILTERED (whole-machine traffic). Pass -ExtraPorts to scope it."
 }
 $portList = @($ports) | Sort-Object
 if ($portList.Count -gt 0) {
-    Write-Host "Capturing ports: $($portList -join ', ')" -ForegroundColor Cyan
-    Write-Host "Note: these ports are fixed for this run. If you warp to another sector the proxy may open a NEW port that won't be captured -- stop and re-launch per sector with a distinct -Prefix." -ForegroundColor DarkYellow
+    Write-Host "Capturing ports: $($portList -join ', ')$(if ($useSectorRange) { " + sector band $SectorPortLow-$SectorPortHigh" })" -ForegroundColor Cyan
 }
 
 # --- output path -----------------------------------------------------------
@@ -197,11 +220,12 @@ $outFile = Join-Path $OutputDir "$prefixPart`enbproxy-$($proc.ProcessName)-pid$t
 
 # --- build a BPF capture filter --------------------------------------------
 # "port N" matches src OR dst, so the union of the proxy's local+remote ports
-# captures both directions of each socket.
-$filter = ''
-if ($portList.Count -gt 0) {
-    $filter = ($portList | ForEach-Object { "port $_" }) -join ' or '
-}
+# captures both directions of each socket. The sector band goes in as a single
+# "portrange LOW-HIGH" term (BPF native) instead of 300 OR-ed "port" terms.
+$terms = @()
+foreach ($p in $portList) { $terms += "port $p" }
+if ($useSectorRange) { $terms += "portrange $SectorPortLow-$SectorPortHigh" }
+$filter = $terms -join ' or '
 
 # Capture on ALL interfaces (dumpcap takes repeated -i). This mirrors tcpdump's
 # `-i any`; loopback is included when Npcap was installed with loopback support
