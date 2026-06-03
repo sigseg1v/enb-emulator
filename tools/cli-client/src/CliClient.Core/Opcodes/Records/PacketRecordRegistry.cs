@@ -65,6 +65,7 @@ public static class PacketRecordRegistry
             0x004F => new StarbaseSetRecord(payload),
             0x0052 => new LoungeNpcRecord(payload),
             0x0054 => new TalkTreeRecord(payload),
+            0x0055 => new SelectTalkTreeRecord(payload),
             0x0056 => new TalkTreeActionRecord(payload),
             0x005A => new VerbRequestRecord(payload),
             0x005C => new VerbUpdateRecord(payload),

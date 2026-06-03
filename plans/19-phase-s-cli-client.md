@@ -1658,6 +1658,19 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       the shared record with the right Opcode. Files: StarbaseRoomChangeRecord.cs
       (now opcode-parameterized) + 1 registry line. capture3-records.txt 94->95
       frames; 2 tests; full UnitTests suite 578 green. CLI decode-only.
+- [x] SelectTalkTree (batch 18, 2026-06-03): 0x55 SELECT_TALK_TREE (17
+      frames), client->server. 5-byte struct SelectTalkTree {int32 PlayerID; u8
+      Selection}, all LE -- Player::HandleSelectTalkTree (PlayerConnection.cpp:10444)
+      casts the buffer and reads PlayerID/Selection with no ntohl. PlayerID is the
+      targeted NPC: the handler uses only its low 24 bits (& 0x00FFFFFF), so a
+      station NPC reads as a small id (0x141E). Selection is the menu branch index
+      with two reserved values the handler special-cases: 0 = more/back (resolved
+      against m_MoreDestination), 255 = resume tree after a mission debrief.
+      Pinned to capture_3 #652 (NPC 0x141E, branch 230) + #644 (same NPC, Selection
+      0) so both the ordinary-branch and the reserved-0 decode notes lock to real
+      bytes. Files: Records/SelectTalkTreeRecord.cs + 1 registry line.
+      capture3-records.txt 95->97 frames; 3 tests; full UnitTests suite 581 green.
+      CLI decode-only.
 - [ ] 0x0B ObjectToObjectEffect -- DEFERRED. Carries a u16 Bitmask + a
       variable-length Message field mid-packet + a conditional tail the server
       author flagged as wrong ("packet struct is wrong... TODO work out correct
@@ -1669,12 +1682,11 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       tally, not a guess). Cleared so far: batch-6 0x9E/0x9D/0x5A/0x17/0x2C, batch-7
       0x12/0x13/0x14, batch-8 0x46, batch-9 0x21/0x22, batch-10 0x27, batch-11 0x9B,
       batch-12 0x1F, batch-13 0xA3, batch-14 0x44, batch-15 0x28, batch-16 0x9F,
-      batch-17 0xA0 (0x64/0x6A/0x20/0x66 already had decoders). The "single-digit
-      long tail" note written after batch-9 was WRONG -- a re-tally proved several
-      mid-frequency opcodes still fall through. Accurate undecoded remainder by
-      frame count (capture_3), highest first:
-        - 0x55 Select_Talk_Tree      (17)   -- NEXT
-        - 0x98 GalaxyMap (2nd op)    (14)
+      batch-17 0xA0, batch-18 0x55 (0x64/0x6A/0x20/0x66 already had decoders). The
+      "single-digit long tail" note written after batch-9 was WRONG -- a re-tally
+      proved several mid-frequency opcodes still fall through. Accurate undecoded
+      remainder by frame count (capture_3), highest first:
+        - 0x98 GalaxyMap (2nd op)    (14)   -- NEXT
         - 0x7C RefinerySetItemID     (14)
         - 0x35 Master_Join           (14)
         - 0x1A Debug                 (14)

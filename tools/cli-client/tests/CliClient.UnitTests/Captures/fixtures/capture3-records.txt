@@ -1001,3 +1001,15 @@ provenance: Starbase_Room_Change 0xA0 (server->client) -- AvatarID 116204554 (0x
 opcode: 0xA0
 payload-bytes: 12
 hex: 0a 24 ed 06 01 00 00 00 00 00 00 00
+
+[selecttalktree_npc_branch_230]
+provenance: Select_Talk_Tree 0x55 (client->server) -- PlayerID 5150 (0x0000141E), Selection 230 (capture_3.rar packet #652, Client->Server). 5-byte struct SelectTalkTree {int32 PlayerID; u8 Selection}, all LE: Player::HandleSelectTalkTree (PlayerConnection.cpp:10444) casts the buffer and reads PlayerID/Selection with no ntohl. PlayerID is the targeted NPC/object -- the handler only uses its low 24 bits (PlayerID & 0x00FFFFFF), so the small station NPC id 0x141E (read LE from bytes 1E 14 00 00) is the whole value here. Selection 230 is the menu branch the player picked. Selection 0 (back/more) and 255 (resume tree after debrief) are the two reserved values the handler special-cases.
+opcode: 0x55
+payload-bytes: 5
+hex: 1e 14 00 00 e6
+
+[selecttalktree_npc_back_0]
+provenance: Select_Talk_Tree 0x55 (client->server) -- PlayerID 5150 (0x0000141E), Selection 0 (capture_3.rar packet #644, Client->Server). Same 5-byte all-LE struct SelectTalkTree, same NPC 0x141E. Selection 0 is the reserved "more/back" value: Player::HandleSelectTalkTree (PlayerConnection.cpp:10453) maps a 0 selection onto m_MoreDestination when one is pending, otherwise treats it as backing out of an action response. Pinned here so the "(0 = more/back)" decode note is locked to real capture bytes, not a synthetic value.
+opcode: 0x55
+payload-bytes: 5
+hex: 1e 14 00 00 00

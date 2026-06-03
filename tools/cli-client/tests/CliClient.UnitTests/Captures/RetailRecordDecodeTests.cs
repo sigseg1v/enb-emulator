@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllNinetyFiveFrames()
+    public void Fixture_Loads_AllNinetySevenFrames()
     {
-        Assert.Equal(95, Frames.Count);
+        Assert.Equal(97, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -2396,5 +2396,44 @@ public sealed class RetailRecordDecodeTests
         // And the C2S fixture still routes to 0x9F via the same shared record.
         var c = Frames["starbaseroomchange_move_0_to_1"];
         Assert.Equal((ushort)0x9F, PacketRecord.Resolve((ushort)c.Opcode, c.Payload).Opcode);
+    }
+
+    // ── SelectTalkTree 0x55 ──────────────────────────────────────────────────
+    // Client picks an NPC conversation branch. 5-byte struct SelectTalkTree
+    // {int32 PlayerID; u8 Selection}, all LE (HandleSelectTalkTree reads with no
+    // ntohl). PlayerID is the targeted NPC -- only its low 24 bits matter.
+
+    [Fact]
+    public void SelectTalkTree_FieldsLittleEndian_NpcIdAndBranch()
+    {
+        string d = Dump("selecttalktree_npc_branch_230");
+
+        Assert.Contains("[0000] PlayerID", d);
+        Assert.Contains("0x0000141E", d);                       // 1E 14 00 00 LE == 5150
+        Assert.Contains("(5150)", d);
+        Assert.Contains("(LE; low 24 bits = NPC/object id)", d);
+        Assert.Contains("[0004] Selection", d);
+        Assert.Contains("(menu branch index)", d);              // Selection 230 == ordinary branch
+        Assert.DoesNotContain("???", d);                        // all 5 bytes decoded
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void SelectTalkTree_BackSelectionSentinel()
+    {
+        string d = Dump("selecttalktree_npc_back_0");
+
+        Assert.Contains("0x0000141E", d);                       // same NPC, real capture
+        Assert.Contains("[0004] Selection", d);
+        Assert.Contains("(0 = more/back)", d);                  // reserved-value note on real bytes
+        Assert.DoesNotContain("(menu branch index)", d);
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void SelectTalkTree_RoutesToOpcode55()
+    {
+        var f = Frames["selecttalktree_npc_branch_230"];
+        Assert.Equal((ushort)0x55, PacketRecord.Resolve((ushort)f.Opcode, f.Payload).Opcode);
     }
 }
