@@ -171,3 +171,26 @@ format & byte order", Trap 2).
   disappear and the session must NOT drop. Cross-check the server log: there
   should be NO `Player '<name>' Removed from Galaxy` line while you sit idle.
 - **Setup**: `just rebuild proxy && just play-local`, undock, idle 3+ min.
+
+### [ ] CV-05 -- Fresh character starts docked in the home station
+
+- **Change**: `server/src/StaticData.h` `StartSector[]` reverted to the station
+  IDs (`10151`, `10201`, `10251`, `10551`, `10401`, `10521`, `10361`, `10371`,
+  `10301`) it held before commit `80e87f82`. A station id is its containing
+  space sector's `sectors.sector_id * 10 + 1` and is `> 9999`, so
+  `SectorManager::HandleSectorLogin` takes the `StationLogin` branch (gated on
+  `m_SectorID > 9999`), which calls `SetInSpace(false)`. Commit `80e87f82` had
+  changed these to the bare space sector IDs (`< 10000`), spawning new
+  characters in open space instead of docked.
+- **Primary source**: retail new-character behaviour -- a freshly created
+  character begins docked inside the home station for its race/profession
+  (e.g. a Terran Warrior starts in Luna Station, not Luna space). This entry
+  reverts a divergence introduced by `80e87f82`; the prior committed state is
+  the fidelity baseline.
+- **What to look for (play-local / real client)**: create a brand-new
+  character of each race/profession (or at least a Terran Warrior). On first
+  login you must appear DOCKED in the home station UI (station services menu),
+  NOT floating in space. Undocking then puts you in the correct home space
+  sector.
+- **Setup**: `just rebuild server && just play-local`, create a fresh
+  character, observe the first-login state.

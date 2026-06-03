@@ -60,23 +60,23 @@ static long BaseWingAsset[9] =  {1654, 1657, 1660, 1663, 1666, 1669, 1672, 1675,
 
 static long BaseEngineAsset[3] = {1681, 1684, 1687};
 
-// Fresh characters spawn in SPACE in their home sector, not docked
-// inside the home station. The space sector IDs are all < 10000, so
-// SectorManager::HandleSectorLogin takes the SectorLogin path
-// (the StationLogin branch is gated on `m_SectorID > 9999`).
-// Each ID is the `sectors.sector_id` that contains the station the
-// race/profession was historically associated with.
+// Fresh characters spawn DOCKED inside their home station. The station
+// IDs are all > 9999 (a station id is its containing space sector's
+// `sectors.sector_id * 10 + 1`), so SectorManager::HandleSectorLogin
+// takes the StationLogin branch (gated on `m_SectorID > 9999`), which
+// calls SetInSpace(false). This is the retail new-character behaviour:
+// you start docked in the home station for your race/profession.
 static long StartSector[] =
 {
-    1015,       // Terran Warrior   = Enforcer  (Luna sector, near Luna Station)
-    1020,       // Terran Trader    = Tradesman (High Earth, near Loki Station)
-    1025,       // Terran Explorer  = Scout     (Equatorial Earth)
-    1055,       // Jenquai Warrior  = Defender  (Europa, near Ashanti Maru)
-    1040,       // Jenquai Trader   = Seeker    (Ganymede)
-    1052,       // Jenquai Explorer = Explorer  (Io, near Nishino Research Facility)
-    1036,       // Progen Warrior   = Warrior   (Mars Alpha, near Arx Forgus)
-    1037,       // Progen Trader    = Privateer (Mars Gamma)
-    1030,       // Progen Explorer  = Sentinel  (Mars Beta, near Arx Prima)
+    10151,      // Terran Warrior   = Enforcer  (Luna Station)
+    10201,      // Terran Trader    = Tradesman (Loki Station, High Earth)
+    10251,      // Terran Explorer  = Scout     (Equatorial Earth station)
+    10551,      // Jenquai Warrior  = Defender  (Ashanti Maru, Europa)
+    10401,      // Jenquai Trader   = Seeker    (Ganymede station)
+    10521,      // Jenquai Explorer = Explorer  (Nishino Research Facility, Io)
+    10361,      // Progen Warrior   = Warrior   (Arx Forgus, Mars Alpha)
+    10371,      // Progen Trader    = Privateer (Mars Gamma station)
+    10301,      // Progen Explorer  = Sentinel  (Arx Prima, Mars Beta)
 };
 
 // How many hull points awarded at each upgrade level
