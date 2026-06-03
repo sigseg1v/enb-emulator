@@ -1043,3 +1043,17 @@ provenance: Start 0x05 (server->client) -- StartID 5150 (0x0000141E) (capture_3.
 opcode: 0x05
 payload-bytes: 4
 hex: 1e 14 00 00
+
+[login_to_sector_10521]
+provenance: Login 0x02 (client->server) -- the sector-server login packet (capture_3.rar packet #234, Client->Server, 159.153.232.44:3029). 137-byte struct Login: a 64-byte MasterJoin embedded at offset 0, then int32 TimeSent, a 65-byte LoginData (40 unknown + 18-byte local-time string + 7 unknown), then int32 TimeReceived. MIXED-ENDIAN. The embedded MasterJoin (bytes 0..63) is byte-identical to the same session's 0x35 MASTER_JOIN (#224): ToSectorID 10521 big-endian @20, avatar id 0x3E221201:0xF7645CC0 @12. Player::HandleLogin (PlayerConnection.cpp:674) copies m_MasterJoin = login->join_data and reads it in NETWORK byte order (sector_id = ntohl(ToSectorID)), but reads the appended TimeSent directly (m_JoinTime = login->TimeSent, no ntohl) -- proving the LOGIN-appended fields are little-endian: TimeSent reads as 77768 only LE. login_data.timestamp is the client's local-time string "07/02/04 22:54:30". unknown40/unknown7 and TimeReceived are part of the struct but never read by HandleLogin, so shown as raw bytes / labelled LE-by-convention.
+opcode: 0x02
+payload-bytes: 137
+hex: 00 00 00 02 00 00 00 02 40 e5 e7 e8 3e 22 12 01
+     f7 64 5c c0 00 00 29 19 00 00 00 00 00 00 00 00
+     00 00 00 01 00 00 00 01 7f ff ff ff 89 77 24 df
+     40 36 32 dd 42 34 a7 59 6f df 5a 82 13 b2 70 e8
+     c8 2f 01 00 00 fb bc 00 19 00 00 00 08 fb bc 00
+     17 60 7e 00 08 fb bc 00 08 fb bc 00 24 08 b7 00
+     68 61 e6 01 68 61 e6 01 a6 e7 e5 40 30 37 2f 30
+     32 2f 30 34 20 32 32 3a 35 34 3a 33 30 00 82 00
+     b8 96 be 00 00 00 00 00 00

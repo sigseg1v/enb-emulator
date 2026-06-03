@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllOneHundredTwoFrames()
+    public void Fixture_Loads_AllOneHundredThreeFrames()
     {
-        Assert.Equal(102, Frames.Count);
+        Assert.Equal(103, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -2568,5 +2568,67 @@ public sealed class RetailRecordDecodeTests
         Assert.Equal(5150, ackId);
         Assert.Equal(startId, ackId);
         Assert.Equal((ushort)0x06, PacketRecord.Resolve((ushort)ack.Opcode, ack.Payload).Opcode);
+    }
+
+    // ── Login 0x02 ───────────────────────────────────────────────────────────
+    // The sector-server login packet. MIXED-ENDIAN: a 64-byte MasterJoin (network
+    // byte order) embedded at offset 0, then little-endian appended fields. The
+    // split is proven by HandleLogin -- it ntohl's the MasterJoin's ToSectorID but
+    // reads the appended TimeSent directly. The embedded MasterJoin is byte-for-byte
+    // identical to the same session's standalone 0x35 MASTER_JOIN.
+
+    [Fact]
+    public void Login_EmbeddedMasterJoinBigEndian_PlusLittleEndianAppendix()
+    {
+        string d = Dump("login_to_sector_10521");
+
+        // bytes 0..63: embedded MasterJoin, big-endian (reused 0x35 decoder).
+        Assert.Contains("[0014] ToSectorID", d);                  // offset 20
+        Assert.Contains("= 10521", d);                            // 00 00 29 19 BE
+        Assert.Contains("(BE; destination sector -- HandleLogin ntohl's this)", d);
+        Assert.Contains("avatar_id_msb", d);
+        Assert.Contains("0x3E221201", d);                         // BE high 32 bits
+        Assert.Contains("Ticket", d);
+
+        // appended fields, little-endian.
+        Assert.Contains("[0040] TimeSent", d);                    // offset 64 == 0x40
+        Assert.Contains("= 77768", d);                            // C8 2F 01 00 LE
+        Assert.Contains("(LE; client tick -- HandleLogin stores this as m_JoinTime, no ntohl)", d);
+        Assert.Contains("[0044] LoginData.unknown40", d);         // offset 68
+        Assert.Contains("[006C] LoginData.timestamp", d);         // offset 108 == 0x6C
+        Assert.Contains("\"07/02/04 22:54:30\"", d);              // client local-time string
+        Assert.Contains("[007E] LoginData.unknown7", d);          // offset 126 == 0x7E
+        Assert.Contains("[0085] TimeReceived", d);                // offset 133 == 0x85
+
+        Assert.DoesNotContain("???", d);                          // all 137 bytes accounted for
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void Login_TimeSentIsLittleEndian_NotBigEndian()
+    {
+        var f = Frames["login_to_sector_10521"];
+        var span = f.Payload.AsSpan(64, 4);
+        // TimeSent at offset 64: little-endian == 77768 (a small positive tick);
+        // big-endian would be 0xC82F0100 == a large negative. HandleLogin reads it
+        // with NO ntohl, so LE is the truth.
+        Assert.Equal(77768, System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(span));
+        Assert.True(System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(span) < 0);
+        Assert.Equal((ushort)0x02, PacketRecord.Resolve((ushort)f.Opcode, f.Payload).Opcode);
+    }
+
+    [Fact]
+    public void Login_EmbeddedMasterJoinMatchesStandalone()
+    {
+        // The 64-byte MasterJoin embedded at LOGIN offset 0 is byte-identical to the
+        // same session's standalone 0x35 MASTER_JOIN -- the lock that lets LoginRecord
+        // reuse MasterJoinRecord's big-endian decode for that region.
+        var login = Frames["login_to_sector_10521"];
+        var mj = Frames["masterjoin_to_sector_10521"];
+        Assert.Equal(64, mj.Payload.Length);
+        Assert.True(login.Payload.AsSpan(0, 64).SequenceEqual(mj.Payload));
+        // And the appended local-time string is the client-supplied login timestamp.
+        Assert.Equal("07/02/04 22:54:30",
+            System.Text.Encoding.ASCII.GetString(login.Payload, 108, 17));
     }
 }

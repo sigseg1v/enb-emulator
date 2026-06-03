@@ -1733,6 +1733,28 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       two StartIDs are byte-identical. Files: Records/StartAckRecord.cs + 1 registry
       line. capture3-records.txt 100->102 frames (added the 0x05 round-trip half);
       2 tests; full UnitTests suite 589 green. CLI decode-only.
+- [x] Login (batch 23, 2026-06-03): 0x02 LOGIN (14 frames), client->server, the
+      sector-server login packet. 137-byte struct Login: a 64-byte MasterJoin
+      embedded at offset 0, then int32 TimeSent, a 65-byte LoginData (40 unknown +
+      an 18-byte local-time string + 7 unknown), then int32 TimeReceived. This is a
+      MIXED-ENDIAN packet and the split is PROVEN by the consumer, HandleLogin
+      (PlayerConnection.cpp:674): it copies m_MasterJoin = login->join_data and reads
+      that sub-struct in network byte order (sector_id = ntohl(ToSectorID)), but
+      reads the appended TimeSent directly (m_JoinTime = login->TimeSent) with NO
+      ntohl -- so bytes 0..63 are big-endian and the appended fields little-endian.
+      LoginRecord reuses MasterJoinRecord for bytes 0..63 (new internal AppendFieldsTo
+      hook on the 0x35 decoder) then Mark(0,64) so its own gap/coverage map stays
+      correct -- no field-layout duplication. Capture corroboration: the embedded
+      MasterJoin is byte-identical to the same session's standalone 0x35 MASTER_JOIN
+      (#224: ToSectorID 10521, avatar 0x3E221201:0xF7645CC0), and TimeSent reads as a
+      small positive tick (77768) only little-endian. login_data.timestamp is the
+      client local-time string "07/02/04 22:54:30"; unknown40/unknown7 + TimeReceived
+      are part of the struct but HandleLogin never reads them, so shown as raw bytes /
+      labelled LE-by-convention rather than guessed. Files: Records/LoginRecord.cs +
+      1 registry line + the AppendFieldsTo hook on MasterJoinRecord.cs.
+      capture3-records.txt 102->103 frames (login_to_sector_10521, #234); 3 tests
+      (BE-embed+LE-appendix render, TimeSent-is-LE-not-BE, embedded-MasterJoin matches
+      standalone byte-for-byte); full UnitTests suite 592 green. CLI decode-only.
 - [ ] 0x98 GALAXY_MAP_REQUEST -- DEFERRED. 64-byte request body, but
       Player::HandleGalaxyMapRequest() takes NO data argument and just replies
       SendOpcode(GALAXY_MAP_CACHE, 0, 0) -- the server discards the entire request
@@ -1754,14 +1776,14 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       tally, not a guess). Cleared so far: batch-6 0x9E/0x9D/0x5A/0x17/0x2C, batch-7
       0x12/0x13/0x14, batch-8 0x46, batch-9 0x21/0x22, batch-10 0x27, batch-11 0x9B,
       batch-12 0x1F, batch-13 0xA3, batch-14 0x44, batch-15 0x28, batch-16 0x9F,
-      batch-17 0xA0, batch-18 0x55, batch-19 0x7C, batch-20 0x35, batch-21 0x1A
+      batch-17 0xA0, batch-18 0x55, batch-19 0x7C, batch-20 0x35, batch-21 0x1A,
+      batch-22 0x06, batch-23 0x02
       (0x64/0x6A/0x20/0x66 already had decoders). The "single-digit long tail" note
       written after batch-9 was WRONG -- a re-tally proved several mid-frequency
-      opcodes still fall through. The registry now decodes 80 opcodes. A fresh
+      opcodes still fall through. The registry now decodes 82 opcodes. A fresh
       capture_3 tally (zero-padded, cross-referenced against the registry) gives the
       accurate undecoded remainder, highest first:
-        - 0x02 LOGIN                 (14)   -- NEXT (embeds MasterJoin + TimeSent + LoginData)
-        - 0x7E MANUFACTURE_ACTION    (8)
+        - 0x7E MANUFACTURE_ACTION    (8)   -- NEXT
         - 0x4E                       (8)
         - 0x58                       (7)
         - 0xA4                       (6)

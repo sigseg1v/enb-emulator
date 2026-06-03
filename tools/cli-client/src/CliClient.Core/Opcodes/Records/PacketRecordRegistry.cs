@@ -22,6 +22,7 @@ public static class PacketRecordRegistry
     {
         return opcode switch
         {
+            0x0002 => new LoginRecord(payload),
             0x0004 => new CreateRecord(payload),
             0x0005 => new StartRecord(payload),
             0x0006 => new StartAckRecord(payload),

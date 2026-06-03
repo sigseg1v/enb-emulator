@@ -52,4 +52,13 @@ public sealed class MasterJoinRecord : PacketRecord
         for (int i = 0; i < 20; i++) { if (i > 0) ticket.Append(' '); ticket.Append(Payload[44 + i].ToString("X2")); }
         FBytes(sb, 44, 20, "Ticket", ticket.ToString(), "(20-byte session ticket)");
     }
+
+    /// <summary>
+    /// Render the master-join field lines into an existing buffer. The 0x02 LOGIN
+    /// packet embeds this 64-byte struct verbatim at offset 0; LoginRecord reuses
+    /// this rather than duplicating the big-endian field layout. The caller owns
+    /// Mark()ing the 64-byte region on its own coverage map. Offsets printed here
+    /// (0..44) are LOGIN-absolute because the struct sits at LOGIN offset 0.
+    /// </summary>
+    internal void AppendFieldsTo(StringBuilder sb) => WriteFields(sb);
 }
