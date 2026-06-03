@@ -78,6 +78,29 @@ Out of scope / NON-NEGOTIABLE guardrails:
 
 ## Tasks
 
+> **Scope finding (2026-06-03, pre-implementation survey).** The migration is
+> larger than a client-library swap:
+> - The shared `commontools-avalonia` layer is the easy part (Npgsql swap +
+>   parameter convention). But `ColumnData.GetName()` is dual-purpose -- it
+>   builds SQL AND indexes `DataRow`s (`dataRow[columnName]`) -- so quoting can
+>   NOT be centralised there; identifier quoting must happen at each SQL-build
+>   site.
+> - The editors mostly roll their OWN raw SQL: ~163 `SELECT/INSERT/UPDATE/DELETE`
+>   string literals across the 10 editor projects, not routed through the common
+>   helpers. Each must be audited.
+> - The Postgres `net7` schema stores identifiers QUOTED + case-preserved. Most
+>   game tables/columns are lowercase (work unquoted), but **39 identifiers are
+>   mixed-case** (`EName`, `Version`, `npc_Id`, `classSpecific`, `mission_XML`,
+>   `BuyMultiplyer`, ...) and MUST be double-quoted or Postgres folds them to
+>   lowercase -> column-not-found (the case-folding trap from the two-DB memory).
+> - Hard MySQL-isms found in the raw SQL that Postgres outright rejects:
+>   `INSERT INTO t SET col=val` (no Postgres equivalent -> rewrite to
+>   `INSERT (cols) VALUES (...)`), `LAST_INSERT_ID()` (-> `RETURNING` / `lastval()`),
+>   `information_schema ... Auto_increment` (MySQL-only column),
+>   `?param` placeholders (Npgsql needs `@param`).
+> So AC.6 (per-editor raw-SQL audit) is the real bulk of this phase, not AC.1.
+> AC.1 lays the foundation; each editor is then migrated + verified individually.
+
 ### AC.1 -- Migrate `commontools-avalonia` DB layer MySQL -> Postgres (Npgsql)
 
 - [ ] Replace `MySql.Data.MySqlClient` usage in
