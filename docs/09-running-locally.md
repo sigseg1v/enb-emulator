@@ -37,8 +37,6 @@ Opt-in profiles:
 - `--profile postgres`: brings up `postgres` (Postgres 16) and a
   `schema-init` one-shot that applies `db/postgres/schema.sql` and
   `seed.sql`. Staging for the eventual cutover; not the runtime DB.
-- `--profile dev-tools`: phpMyAdmin against the mysql container on
-  `:8081`.
 - `--profile dev-tools-postgres`: pgAdmin against the postgres container
   on `:8080`.
 

@@ -678,9 +678,6 @@ convert-schema:
 pgadmin:
     docker compose --profile dev-tools-postgres up -d pgadmin
 
-phpmyadmin:
-    docker compose --profile dev-tools up -d phpmyadmin
-
 # ---- test ----
 
 # Run the gtest harness + (best-effort) dotnet test.
