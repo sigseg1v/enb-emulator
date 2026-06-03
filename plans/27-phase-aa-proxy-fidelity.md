@@ -21,11 +21,14 @@ CLAUDE.md welcomes.
 ## Status
 
 In progress -- 2026-06-03. Wave 1 (opcode parity Tier-1 + dead-twin
-deletion + docs) landed. Wave 2 diffed the full S->C and C->S opcode maps
-against a known-good reference proxy<->client stream: the S->C consume /
-forward / side-effect sets match exactly, and the one C->S behavioural
-divergence (TURN/TILT throttled unconditionally instead of only-while-
-moving) is fixed. Tier-2 transforms deferred with criteria below.
+deletion + docs) landed. Wave 2 fixed the C->S TURN/TILT throttle (was
+unconditional, now only-while-moving). Wave 3 found that Wave 2's claim
+"S->C consume set matches the reference exactly" was WRONG for the
+fabrication band: the reference EXPANDS `0x2012/0x2013/0x2014` (and
+`0x2018/0x2019`) into full client packets and we drop them -- a real,
+active regression for mining/tractor/loot beam + object-spawn effects.
+The misleading code/plan comments are corrected and the reconstructed
+fabrication spec is captured in §3a; implementation is in progress.
 
 ---
 
@@ -125,11 +128,21 @@ the same set, and the forward gate must accept exactly the same range.
       live to the server, which is the safe default and a valid runtime
       state of the reference proxy (its cache simply stays disabled).
 
-Full confirmed consumed-set (all return "handled"):
+Full set of opcodes the dispatcher returns "handled" for:
 `0x100a, 0x2011, 0x2012, 0x2013, 0x2014, 0x2018, 0x2019, 0x2020, 0x2025,
 0x202a, 0x202b, 0x202d, 0x202e` plus `0x1b`-when-undersize. Everything else
-falls through to the `1..0xFE` forward gate. This matches the reference
-control dispatcher exactly.
+falls through to the `1..0xFE` forward gate.
+
+**CORRECTION (Wave 3):** an earlier revision of this section claimed the
+above "matches the reference control dispatcher exactly." That is FALSE for
+`0x2012/0x2013/0x2014/0x2018/0x2019`. The reference returns "handled" for
+those, but NOT by dropping -- it FABRICATES full client packets from each and
+sends them to the client (then arms an effect-removal timer). We return
+"handled" by dropping and producing nothing. Same return value, opposite
+effect. This is a real S->C parity gap, now tracked as §3a. `0x100a, 0x2011,
+0x2020, 0x2025, 0x202a, 0x202b, 0x202d, 0x202e` and `0x1b`-undersize DO match
+the reference (consume / ack / no-op-while-cache-disabled), as does the
+`1..0xFE` forward gate.
 
 **Wave 2 -- S->C forward-handler (post-gate) per-opcode verification.**
 After the custom dispatcher passes a `0x01..0xFE` opcode, the reference runs
@@ -200,6 +213,70 @@ in-space / 0x3008 if station visibility kick), `0x14`/`0x2c`/`0x9b`/`0x9f`
       server (via the default), which is the safe direction and matches the
       reference's verbatim forward of the same frame. Unblock with the
       position-feed / launcher-handoff port (Tier-2).
+
+## 3a. S->C fabrication band (`0x2012/0x2013/0x2014/0x2018/0x2019`) -- Wave 3
+
+The server sends these as COMPACT control opcodes and relies on the proxy to
+expand each into the real client game packets. The server's own prospect path
+(`server/src/PlayerSkills.cpp`) names the proxy routine `SendProspectAUX` and
+comments "Just send one UDP packet to initiate prospecting" -- there is no
+server-side beam emission for the start phase. The proxy builder family that
+did this (`Connection::QueueObjectLinkedEffect / QueueObjectCreate /
+QueueAuxPacket / QueuePosition / SendCreate ...`) was deleted with the Win32
+twins; only the `Connection.h` declarations survive. So the proxy must rebuild
+these emitters (against the structs already in `common/include/net7/
+PacketStructures.h`) and call them from `HandleCustomOpcode` instead of
+dropping.
+
+Reconstructed spec (every target opcode maps to an existing struct; the
+compact-form field order matches the server's emit code byte-for-byte):
+
+- **`0x2012` START_PROSPECT.** Compact in: `playerGID(0) objGID(4)
+  effectUID(8) prospectTick(12) drainTime(16)` (see `StartProspecting`,
+  PlayerSkills.cpp:691-695). Fabricate:
+  - if `playerGID == local avatar GID`: a `0x1b` prospect-skill AUX (the
+    exact bytes are already hardcoded in server `SendProspectAUX` case 0 --
+    `00 00 00 00 / 15 00 / 00 / 01 00 00 00 / 59 0B 00 00 / <ts> / ...`, the
+    `0x59,0x0B` "always this for prospecting" marker) and a `0x1d`
+    MESSAGE_STRING "Prospect ability activated."
+  - always: `0x0b` OBJECT_TO_OBJECT_EFFECT with `Bitmask=3` (EffectID +
+    TimeStamp present), `GameID=playerGID`, `TargetID=objGID`,
+    `EffectDescID=0xbf`, `EffectID=effectUID`, `TimeStamp=proxy tick`.
+  - arm a timer: after `drainTime` ms, emit `0x0f` REMOVE_EFFECT(effectUID).
+- **`0x2013` TRACTOR_ORE / `0x2014` LOOT_ITEM.** Compact in: `playerGID
+  articleUID articleEffectUID baseAsset tick name(LS) tractorTime
+  tractorSpeed posX posY posZ` (UseTractorBeam / loot path,
+  PlayerSkills.cpp:773-783 / 1144-1154). Fabricate: `0x04` CREATE for the ore
+  article object, a `0x0b` "TRACTOR" effect (EffectDescID 2), a `0x1b` name
+  AUX, a `0x46` positional interpolation toward the ship; arm a timer: after
+  `tractorTime` ms emit `0x07` REMOVE(articleUID). (Loot differs only in the
+  effect-flag ordering -- see the two reference variants.)
+- **`0x2018`/`0x2019` OBJECT_CREATE.** LATENT (server `SendObjectFull` has no
+  caller today). Fabricate `0x04` CREATE + orientation/nav/aux follow-ons
+  from the resource/static descriptor. Implement for completeness but it is
+  not on any live path until the server wires `SendObjectFull`.
+
+Open items before/while implementing:
+- [~] Correct the false "consume = matches reference" comments in the proxy
+      and this plan (DONE -- Wave 3).
+- [ ] Confirm how the proxy resolves the LOCAL avatar's in-space GameID (the
+      reference compares the prospector GID against a stored player GID to
+      gate the local-only AUX+text). `m_PlayerID` holds the account avatar id
+      from `SendMasterLogin`, which may not equal the in-space object GameID;
+      if it does not, capture where the proxy could learn it (the `0x05`
+      START id, or the first self-referential create). The always-path `0x0b`
+      beam does NOT need it; only the local-only AUX+text does.
+- [ ] Implement `0x2012` first (cleanest; type-0 AUX bytes already validated
+      by the server), then `0x2013/0x2014`, then `0x2018/0x2019`.
+- [ ] Byte-pin each fabricated packet. Preferred: a `tests/server` gtest (or
+      an integration `CaptureReplay`-style fixture) that feeds the compact
+      input and asserts the emitted client byte stream. The structs in
+      `PacketStructures.h` are the layout authority; a wrong layout CRASHES
+      the Win32 client (strictly worse than the current missing-effect
+      state), so this must be verified before it is considered done.
+- [ ] Timer follow-ups (`0x0f`/`0x07`) run on a detached thread that sleeps
+      then calls `Connection::SendResponse` (already mutex-guarded, see
+      Connection.cpp). Floor the sleep at 200 ms as the reference does.
 
 ## 4. Tier-2 deferred transforms (documented, NOT yet implemented)
 

@@ -35,17 +35,24 @@
 //      Phase K CLI test client doesn't need the galaxy map; if/when a
 //      real game client lands the cache path needs the Win32 file ported.
 //
-// Launcher-only opcodes left out
-// -------------------------------
-// Win32 HandleCustomOpcode also routes 0x2012-0x2014 (prospect/tractor/
-// loot), 0x2018-0x2019 (static/resource object create), and 0x2011
-// (galaxy map cache request) into Queue* batch builders that depend on
-// the entire ClientToSectorServer.cpp Queue* family -- all WIN32-walled.
-// On Linux these opcodes are stubbed: HandleCustomOpcode returns false
-// for them, so SendClientPacketSequence's bottom path forwards the raw
-// outer opcode (0x2012/0x2013/etc.) via SendResponse. The Phase K CLI
-// test client receives them as opaque payloads, which is the right
-// behaviour for a server-side proxy in the absence of the launcher.
+// Fabrication opcodes -- KNOWN PARITY GAP (Phase AA Wave 3)
+// ---------------------------------------------------------
+// A known-good reference proxy EXPANDS the compact server control opcodes
+// 0x2012-0x2014 (prospect/tractor/loot) and 0x2018-0x2019 (static/resource
+// object create) into full client-facing game packets (0x0b object-to-object
+// effect, 0x04 create, 0x1b aux, 0x46 position, plus 0x0f/0x07 follow-up
+// effect-removal on a timer) and sends them to the client's game receiver.
+// The server emits ONLY the compact form and depends on this expansion.
+// The whole client-facing builder family (Connection::QueueObjectLinkedEffect
+// / QueueObjectCreate / QueueAuxPacket ...) was removed when the dead Win32
+// twins were deleted, leaving only the declarations in Connection.h, so our
+// proxy currently fabricates NOTHING -- it consume-and-drops these in
+// HandleCustomOpcode. The functional consequence is that mining / tractor /
+// loot produce no client-visible beam or object-spawn effect (the server
+// still credits cargo). This is being implemented; see HandleCustomOpcode's
+// per-opcode comment and plans/27 §3a for the reconstructed spec. NOTE: the
+// raw 0x20xx opcode is never forwarded (it would fail the 1..0xFE gate and
+// stall the sequence); the only correct fix is to fabricate.
 //
 // 0x100A MVAS_TERMINATE_S_C is also stubbed: the Win32 path calls
 // ShutdownClient() and _beginthread(ShutdownThread), both of which
@@ -941,27 +948,61 @@ bool UDPClient::HandleCustomOpcode(short opcode, char *ptr, u8 *tcp_packet,
         return true;
 
     case ENB_OPCODE_2011_GALAXY_MAP_CACHE:
+        // Proxy-side galaxy-map cache request. The reference loads its
+        // cached GalaxyMap.dat and marks the cache primed; we do not
+        // implement the proxy-side cache (galaxy data goes live to the
+        // server), so consuming here is the correct no-op for our model.
+        // Must return TRUE: returning false would fall through to the
+        // forward gate, fail the 1..0xFE range, log "bad opcode", and
+        // STALL the whole packet sequence (caller marks PACKET_BLANK,
+        // never advances m_CurrentPacketNum). That stall was the failure
+        // mode behind the Wave 70 first attempt on 0x0098.
+        LogVMessage("UDPClient(Linux): galaxy-map cache request 0x%04x -- consumed\n",
+                    (unsigned short) opcode);
+        return true;
+
     case ENB_OPCODE_2012_START_PROSPECT:
     case ENB_OPCODE_2013_TRACTOR_ORE:
     case ENB_OPCODE_2014_LOOT_ITEM:
     case ENB_OPCODE_2018_STATIC_OBJECT_CREATE:
     case ENB_OPCODE_2019_RESOURCE_OBJECT_CREATE:
-        // Launcher-side responsibility; the cache/prospect/loot/object
-        // helpers are not wired on our side. A known-good reference proxy
-        // consumes these locally (galaxy-map cache, prospecting, tractor,
-        // loot, object create, resource create) and does NOT forward them
-        // over the game-protocol TCP channel to the client's game receiver.
-        // Returning TRUE marks the opcode as handled-and-dropped so the
-        // sequence walker advances normally. Returning false here previously
-        // fell through to the forward gate at SendClientPacketSequence
-        // which set terminate=true and STALLED the entire packet sequence
-        // (caller marks PACKET_BLANK, never advances m_CurrentPacketNum,
-        // every subsequent server reply queues behind the stuck slot until
-        // the test cancellation token fires). That stall was the actual
-        // failure mode behind the Wave 70 first attempt on 0x0098
-        // GALAXY_MAP_REQUEST -- the survival-probe REQUEST_TIME echo
-        // could never get past the 0x2011 stuck slot.
-        LogVMessage("UDPClient(Linux): launcher-side opcode 0x%04x -- silent drop\n",
+        // KNOWN PARITY GAP (Phase AA Wave 3 -- being implemented).
+        //
+        // These are NOT "consume and silently drop" opcodes. A known-good
+        // reference proxy FABRICATES full client-facing game packets from
+        // each of these compact server control opcodes and sends them to
+        // the client's game receiver, then (for prospect/tractor/loot)
+        // spawns a timer that emits a follow-up effect-removal packet:
+        //   0x2012 START_PROSPECT  -> 0x0b OBJECT_TO_OBJECT_EFFECT (mining
+        //        beam, EffectDescID 0xbf) + a 0x1b prospect-skill AUX and a
+        //        0x1d "Prospect ability activated." text (local prospector
+        //        only) + a drain timer that emits 0x0f REMOVE_EFFECT.
+        //   0x2013 TRACTOR_ORE / 0x2014 LOOT_ITEM -> 0x04 CREATE (the ore
+        //        article object) + 0x0b tractor beam + 0x1b name AUX +
+        //        0x46 positional interp + a timer that emits 0x07 REMOVE.
+        //   0x2018/0x2019 OBJECT_CREATE -> 0x04 CREATE + orientation /
+        //        nav / aux follow-ons.
+        // The server emits ONLY the compact form and relies on the proxy to
+        // expand it (see server PlayerSkills.cpp StartProspecting/
+        // UseTractorBeam, whose own comment names the proxy routine
+        // "SendProspectAUX"). The entire client-facing builder family
+        // (Connection::QueueObjectLinkedEffect / QueueObjectCreate /
+        // QueueAuxPacket ...) was removed when the Win32 twins were deleted,
+        // leaving only their declarations in Connection.h -- so our proxy
+        // currently produces NOTHING for these. Net effect today: a player
+        // mining / tractoring / looting gets the server-side cargo result
+        // but NO beam, tractor, or object-spawn effect on any client.
+        //
+        // 0x2012/0x2013/0x2014 are an ACTIVE regression (the server emits
+        // them in normal play). 0x2018/0x2019 are LATENT only (the server's
+        // sole emitter, Player::SendObjectFull, is currently never called).
+        //
+        // Interim behaviour is consume-and-drop (return TRUE): it leaves the
+        // beam missing but keeps the sequence advancing. Forwarding the raw
+        // 0x20xx opcode is NOT an option -- it fails the 1..0xFE gate and
+        // stalls the sequence. The fix is to fabricate, not to forward.
+        // See plans/27 §3a for the full reconstructed spec.
+        LogVMessage("UDPClient(Linux): fabrication opcode 0x%04x NOT YET fabricated -- dropped (parity gap)\n",
                     (unsigned short) opcode);
         return true;
 
