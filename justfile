@@ -200,6 +200,66 @@ rebuild:
     docker compose build proxy server login
     docker compose up -d --force-recreate proxy server login
 
+# Internal helper: print each image's build timestamp and, if the source on
+# disk is NEWER than the built image, print a big STALE-IMAGE banner naming the
+# rebuild command. Used by play-local / play-cli so a relaunch tells you whether
+# you are testing the current binary or an old one. Args:
+#   COMPOSE_ARGS  extra `docker compose` flags (e.g. "-f docker-compose.cli.yml
+#                 -p cli1"); pass "" for the default stack.
+#   SERVICES      space-separated compose service names to inspect.
+#   REBUILD_CMD   the exact command to print in the banner to rebuild them.
+_image-status COMPOSE_ARGS SERVICES REBUILD_CMD:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    read -ra CA <<< "{{COMPOSE_ARGS}}"
+    read -ra SVCS <<< "{{SERVICES}}"
+    declare -A SRC=(
+      [proxy]="proxy common/include/net7"
+      [server]="server/src common/include/net7"
+      [login]="login-server common/include/net7"
+      [cli]="tools/cli-client"
+    )
+    STALE=()
+    echo ">>> image build times (source-newer images are flagged STALE):"
+    for svc in "${SVCS[@]}"; do
+      img=$(docker compose "${CA[@]}" images -q "$svc" 2>/dev/null | head -1)
+      if [ -z "$img" ]; then
+        printf '      %-8s last-image-build: (not built yet -- builds on first run)\n' "$svc:"
+        continue
+      fi
+      created=$(docker image inspect "$img" -f '{{{{.Created}}' 2>/dev/null)
+      ce=$(date -d "$created" +%s 2>/dev/null || echo 0)
+      human=$(date -d "$created" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "$created")
+      # Staleness via git, NOT file mtime: a checkout/rebase rewrites every
+      # source mtime to "now" and would falsely flag everything. The newest
+      # COMMIT touching the source survives checkouts; uncommitted edits are
+      # caught separately by `git status`. Either one means the image predates
+      # the current source.
+      paths="${SRC[$svc]:-}"
+      flag=""
+      commit_ct=$(git log -1 --format=%ct -- $paths 2>/dev/null)
+      if [ -n "$commit_ct" ] && [ "$commit_ct" -gt "$ce" ]; then
+        flag="   <-- STALE (newer commit not built)"; STALE+=("$svc")
+      elif [ -n "$(git status --porcelain -- $paths 2>/dev/null)" ]; then
+        flag="   <-- STALE (uncommitted source edits)"; STALE+=("$svc")
+      fi
+      printf '      %-8s last-image-build: %s%s\n' "$svc:" "$human" "$flag"
+    done
+    if [ "${#STALE[@]}" -gt 0 ]; then
+      echo
+      echo "  ##########################################################################"
+      echo "  ##  !!  STALE IMAGE WARNING  !!"
+      echo "  ##  Running an OLDER binary than the source on disk for: ${STALE[*]}"
+      echo "  ##  Your source changes are NOT in these running containers."
+      echo "  ##"
+      echo "  ##  To rebuild from current source (postgres + pgdata untouched), run:"
+      echo "  ##"
+      echo "  ##      {{REBUILD_CMD}}"
+      echo "  ##"
+      echo "  ##########################################################################"
+      echo
+    fi
+
 # Bring up an interactive CLI client in its own container, paired with its own
 # dedicated proxy, against the running shared stack.
 #
@@ -231,6 +291,7 @@ play-cli UNIT='cli1':
     export STACK_NETWORK="${COMPOSE_PROJECT_NAME}_default"
     echo ">>> CLI unit '{{UNIT}}' -> stack network '$STACK_NETWORK'"
     echo ">>> inside the REPL:  connect cliproxy   then   login <user> <pass>"
+    just _image-status "-f docker-compose.cli.yml -p {{UNIT}}" "cli proxy" "just rebuild-cli {{UNIT}}"
     # `run` (not `up`) gives an interactive TTY so the line editor + colour
     # turn on; --rm cleans up the ephemeral CLI container on exit. We REUSE
     # the existing cli + dedicated-proxy images (no --build): relaunching a
@@ -317,7 +378,8 @@ play-local CLIENT_PATH='':
     # keeps the OLD binary until you rebuild -- the stale-image trap (see
     # CLAUDE.md "Wire format & byte order"). Run `just rebuild` first.
     just run-stack-bg
-    echo ">>> reused the running stack (no rebuild). Changed server/proxy/login C++? run 'just rebuild' first."
+    echo ">>> reused the running stack (no rebuild)."
+    just _image-status "" "proxy server login" "just rebuild"
 
     echo ">>> building launcher (so its output dir exists for settings.json)"
     dotnet build tools/launchnet7-avalonia >/dev/null
