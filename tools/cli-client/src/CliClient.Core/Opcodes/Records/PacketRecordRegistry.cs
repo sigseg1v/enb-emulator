@@ -24,6 +24,7 @@ public static class PacketRecordRegistry
         {
             0x0004 => new CreateRecord(payload),
             0x0005 => new StartRecord(payload),
+            0x0006 => new StartAckRecord(payload),
             0x0007 => new RemoveRecord(payload),
             0x0008 => new SimplePosRecord(payload),
             0x0009 => new ObjectEffectRecord(payload),

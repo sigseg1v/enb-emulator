@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllOneHundredFrames()
+    public void Fixture_Loads_AllOneHundredTwoFrames()
     {
-        Assert.Equal(100, Frames.Count);
+        Assert.Equal(102, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -2536,5 +2536,37 @@ public sealed class RetailRecordDecodeTests
         Assert.Equal(0x00AACCEE, dbgId);
         Assert.Equal(dbgId, roomId);
         Assert.Equal((ushort)0x1A, PacketRecord.Resolve((ushort)dbg.Opcode, dbg.Payload).Opcode);
+    }
+
+    // ── StartAck 0x06 ────────────────────────────────────────────────────────
+    // Client's reply to the 0x05 START: echoes the sector-assigned avatar id and
+    // flips the player Active. HandleStartAck discards the payload, so the field
+    // meaning rests on the 0x05<->0x06 round-trip.
+
+    [Fact]
+    public void StartAck_StartIdLittleEndian()
+    {
+        string d = Dump("startack_avatar_5150");
+
+        Assert.Contains("[0000] StartID", d);
+        Assert.Contains("0x0000141E", d);                          // 1E 14 00 00 LE == 5150
+        Assert.Contains("(LE; echoes the 0x05 START id -- the client's sector-assigned avatar)", d);
+        Assert.DoesNotContain("???", d);                           // all 4 bytes decoded
+        Assert.DoesNotContain("[!]", d);                           // 5150 is non-zero, no suspicious flag
+    }
+
+    [Fact]
+    public void StartAck_EchoesStartId_RoundTrip()
+    {
+        // The 0x06 START_ACK StartID is byte-identical to the 0x05 START StartID
+        // the server sent in the same session -- the round-trip that proves the
+        // field (HandleStartAck itself discards the payload).
+        var ack   = Frames["startack_avatar_5150"];
+        var start = Frames["start_avatar_5150_s2c"];
+        int ackId   = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(ack.Payload.AsSpan(0, 4));
+        int startId = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(start.Payload.AsSpan(0, 4));
+        Assert.Equal(5150, ackId);
+        Assert.Equal(startId, ackId);
+        Assert.Equal((ushort)0x06, PacketRecord.Resolve((ushort)ack.Opcode, ack.Payload).Opcode);
     }
 }

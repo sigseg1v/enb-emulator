@@ -1719,6 +1719,20 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       GameID equals the StarbaseRoomChange AvatarID (the cross-packet LE lock).
       Files: Records/DebugRecord.cs + 1 registry line. capture3-records.txt 99->100
       frames; 2 tests; full UnitTests suite 587 green. CLI decode-only.
+- [x] StartAck (batch 22, 2026-06-03): 0x06 START_ACK (14 frames),
+      client->server, 4-byte body = single LE int32 StartID. The client's reply to
+      the server's 0x05 START: it acks that the in-sector avatar loaded and flips
+      the player Active (Player::HandleStartAck SetActive(true) + SendLoginCamera).
+      HandleStartAck discards the payload, so the field is proven by round-trip, not
+      a server read: the same session's 0x05 START packet carried the identical
+      StartID bytes, echoed back here -- confirmed in three sessions (.44:3029 5150
+      #384->#543, .38:3034 3589, .38:3434 3093). Byte order matches StartRecord
+      (0x05), which already documents StartID as a LE sector-assigned avatar id.
+      Mirrors StartRecord's rendering incl. FlagSuspicious (catches an echoed 0/-1).
+      Pinned to capture_3 #543 + the matching 0x05 #384, with a test asserting the
+      two StartIDs are byte-identical. Files: Records/StartAckRecord.cs + 1 registry
+      line. capture3-records.txt 100->102 frames (added the 0x05 round-trip half);
+      2 tests; full UnitTests suite 589 green. CLI decode-only.
 - [ ] 0x98 GALAXY_MAP_REQUEST -- DEFERRED. 64-byte request body, but
       Player::HandleGalaxyMapRequest() takes NO data argument and just replies
       SendOpcode(GALAXY_MAP_CACHE, 0, 0) -- the server discards the entire request
@@ -1746,8 +1760,7 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       opcodes still fall through. The registry now decodes 80 opcodes. A fresh
       capture_3 tally (zero-padded, cross-referenced against the registry) gives the
       accurate undecoded remainder, highest first:
-        - 0x06 START_ACK             (14)   -- NEXT
-        - 0x02 LOGIN                 (14)   (embeds MasterJoin + TimeSent + LoginData)
+        - 0x02 LOGIN                 (14)   -- NEXT (embeds MasterJoin + TimeSent + LoginData)
         - 0x7E MANUFACTURE_ACTION    (8)
         - 0x4E                       (8)
         - 0x58                       (7)

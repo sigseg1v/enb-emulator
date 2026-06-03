@@ -1031,3 +1031,15 @@ provenance: Debug 0x1A (client->server) -- GameID 11193582 (0x00AACCEE), then co
 opcode: 0x1A
 payload-bytes: 12
 hex: ee cc aa 00 21 00 00 00 00 00 00 00
+
+[startack_avatar_5150]
+provenance: Start_Ack 0x06 (client->server) -- StartID 5150 (0x0000141E) (capture_3.rar packet #543, Client->Server, 159.153.232.44:3029). 4-byte body, a single LE int32. Player::HandleStartAck (PlayerConnection.cpp:1613) discards the payload (it only SetActive(true) + SendLoginCamera), so the field meaning is proven by round-trip rather than a server read: the same session's 0x05 START packet (#384, Server->Client) carried the identical bytes 1E 14 00 00, and the client echoes them back here. Two more sessions confirm the round-trip (.38:3034 3589, .38:3434 3093). Byte order matches StartRecord (0x05), which documents StartID as a little-endian sector-assigned avatar id.
+opcode: 0x06
+payload-bytes: 4
+hex: 1e 14 00 00
+
+[start_avatar_5150_s2c]
+provenance: Start 0x05 (server->client) -- StartID 5150 (0x0000141E) (capture_3.rar packet #384, Server->Client, 159.153.232.44:3029). The server-side half of the START/START_ACK round-trip: this is the 0x05 START whose StartID the client echoes in startack_avatar_5150 above. Already decoded by StartRecord; pinned here so a test can assert the 0x05 StartID and the 0x06 START_ACK StartID are byte-identical.
+opcode: 0x05
+payload-bytes: 4
+hex: 1e 14 00 00
