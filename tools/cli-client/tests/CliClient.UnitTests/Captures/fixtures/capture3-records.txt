@@ -1013,3 +1013,9 @@ provenance: Select_Talk_Tree 0x55 (client->server) -- PlayerID 5150 (0x0000141E)
 opcode: 0x55
 payload-bytes: 5
 hex: 1e 14 00 00 00
+
+[refinerysetitem_template_1237]
+provenance: Refinery_Set_Item_ID 0x7C (client->server) -- GameID 10012 (0x0000271C), Data 1237 (capture_3.rar packet #16584, Client->Server). 8-byte struct ManufactureData {int32 GameID; int32 Data}. Player::HandleRefineSetItem (PlayerManufacturing.cpp:442) reads Data little-endian (long Item = Packet->Data) and only byte-swaps via ntohl if the value exceeds 0xFFFF; 1237 (0x4D5) is under that, so the LE read stands and the hedge branch never fires. GameID 10012 (the refinery context) is not consumed by the handler. Sibling frame #16617 keeps the same GameID and bumps Data to 1239 (player cycling the item to refine) -- both small, both LE.
+opcode: 0x7C
+payload-bytes: 8
+hex: 1c 27 00 00 d5 04 00 00

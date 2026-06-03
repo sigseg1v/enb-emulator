@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllNinetySevenFrames()
+    public void Fixture_Loads_AllNinetyEightFrames()
     {
-        Assert.Equal(97, Frames.Count);
+        Assert.Equal(98, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -2435,5 +2435,34 @@ public sealed class RetailRecordDecodeTests
     {
         var f = Frames["selecttalktree_npc_branch_230"];
         Assert.Equal((ushort)0x55, PacketRecord.Resolve((ushort)f.Opcode, f.Payload).Opcode);
+    }
+
+    // ── RefinerySetItem 0x7C ─────────────────────────────────────────────────
+    // Client picks the item to refine. 8-byte struct ManufactureData {int32
+    // GameID; int32 Data}. HandleRefineSetItem reads Data LE, byte-swapping only
+    // when it exceeds 0xFFFF -- real item template ids stay under that.
+
+    [Fact]
+    public void RefinerySetItem_DataLittleEndian_ItemTemplateId()
+    {
+        string d = Dump("refinerysetitem_template_1237");
+
+        Assert.Contains("[0000] GameID", d);
+        Assert.Contains("0x0000271C", d);                                   // 1C 27 00 00 LE == 10012
+        Assert.Contains("(LE; refinery context, not consumed by the handler)", d);
+        Assert.Contains("[0004] Data", d);
+        Assert.Contains("(LE; item template id to refine)", d);             // 1237 < 0xFFFF: LE read stands
+        Assert.DoesNotContain("big-endian", d);                            // hedge branch NOT taken
+        Assert.DoesNotContain("???", d);                                    // all 8 bytes decoded
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void RefinerySetItem_DataValueIs1237()
+    {
+        var f = Frames["refinerysetitem_template_1237"];
+        // Data is the second int32 (offset 4), little-endian == 1237.
+        Assert.Equal(1237, System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(f.Payload.AsSpan(4, 4)));
+        Assert.Equal((ushort)0x7C, PacketRecord.Resolve((ushort)f.Opcode, f.Payload).Opcode);
     }
 }
