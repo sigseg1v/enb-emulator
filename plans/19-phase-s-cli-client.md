@@ -1646,6 +1646,18 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       0x28=BE / 0x9F=LE. Files: Records/StarbaseRoomChangeRecord.cs + 1 registry
       line. capture3-records.txt 92->94 frames; 3 tests; full UnitTests suite 576
       green. CLI decode-only.
+- [x] StarbaseRoomChange S2C (batch 17, 2026-06-03): 0xA0 (20 frames), the
+      server->client sibling of 0x9F. Byte-identical wire -- all three 0xA0
+      emitters (PlayerClass.cpp:662/739/753) do SendOpcode(0xA0, &SRoomUpdate,
+      sizeof(StarbaseRoomChange)) with AvatarID/NewRoom/OldRoom direct-assigned (no
+      htonl), so it is the same 12-byte all-LE struct. Parameterized the existing
+      StarbaseRoomChangeRecord by opcode (same shared-record pattern as 0x12/0x13,
+      0x21/0x22) -- on 0xA0 AvatarID is the moving player's GameID the client must
+      relocate; NewRoom -1 = left the room. Pinned to capture_3 #14366 (avatar
+      0x06ED240A, room 0->1) + a routing test that 0xA0 and 0x9F both resolve to
+      the shared record with the right Opcode. Files: StarbaseRoomChangeRecord.cs
+      (now opcode-parameterized) + 1 registry line. capture3-records.txt 94->95
+      frames; 2 tests; full UnitTests suite 578 green. CLI decode-only.
 - [ ] 0x0B ObjectToObjectEffect -- DEFERRED. Carries a u16 Bitmask + a
       variable-length Message field mid-packet + a conditional tail the server
       author flagged as wrong ("packet struct is wrong... TODO work out correct
@@ -1656,13 +1668,12 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
 - [~] Remaining GenericRecord-fallthrough opcodes (driven by a fresh capture_3
       tally, not a guess). Cleared so far: batch-6 0x9E/0x9D/0x5A/0x17/0x2C, batch-7
       0x12/0x13/0x14, batch-8 0x46, batch-9 0x21/0x22, batch-10 0x27, batch-11 0x9B,
-      batch-12 0x1F, batch-13 0xA3, batch-14 0x44, batch-15 0x28, batch-16 0x9F
-      (0x64/0x6A/0x20/0x66 already had decoders). The "single-digit long tail" note
-      written after batch-9 was WRONG -- a re-tally proved several mid-frequency
-      opcodes still fall through. Accurate undecoded remainder by frame count
-      (capture_3), highest first:
-        - 0xA0 Starbase_Room_Change (S2C)  (20)  -- NEXT; server->client sibling of 0x9F, same struct
-        - 0x55 Select_Talk_Tree      (17)
+      batch-12 0x1F, batch-13 0xA3, batch-14 0x44, batch-15 0x28, batch-16 0x9F,
+      batch-17 0xA0 (0x64/0x6A/0x20/0x66 already had decoders). The "single-digit
+      long tail" note written after batch-9 was WRONG -- a re-tally proved several
+      mid-frequency opcodes still fall through. Accurate undecoded remainder by
+      frame count (capture_3), highest first:
+        - 0x55 Select_Talk_Tree      (17)   -- NEXT
         - 0x98 GalaxyMap (2nd op)    (14)
         - 0x7C RefinerySetItemID     (14)
         - 0x35 Master_Join           (14)

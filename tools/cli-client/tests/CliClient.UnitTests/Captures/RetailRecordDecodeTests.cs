@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllNinetyFourFrames()
+    public void Fixture_Loads_AllNinetyFiveFrames()
     {
-        Assert.Equal(94, Frames.Count);
+        Assert.Equal(95, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -2368,5 +2368,33 @@ public sealed class RetailRecordDecodeTests
         int sortIdBE     = sort[0] << 24 | sort[1] << 16 | sort[2] << 8 | sort[3];
         Assert.Equal(0x06ED2AD7, roomAvatarLE);
         Assert.Equal(roomAvatarLE, sortIdBE);
+    }
+
+    // ── StarbaseRoomChange S2C 0xA0 ──────────────────────────────────────────
+    // Byte-identical to 0x9F (same struct, same emitter struct), server->client.
+    // Shares StarbaseRoomChangeRecord; routes via the 0xA0 registry entry.
+
+    [Fact]
+    public void StarbaseRoomUpdate_S2C_SameStructAsClientVariant()
+    {
+        string d = Dump("starbaseroomupdate_s2c_move_0_to_1");
+
+        Assert.Contains("[0000] AvatarID", d);
+        Assert.Contains("0x06ED240A", d);                  // 0A 24 ED 06 LE == 116204554
+        Assert.Contains("(LE; moving player GameID)", d);  // S2C-specific note
+        Assert.Contains("NewRoom           = 1", d);
+        Assert.Contains("OldRoom           = 0", d);
+        Assert.DoesNotContain("???", d);                   // all 12 bytes decoded
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void StarbaseRoomUpdate_S2C_RoutesToOpcodeA0()
+    {
+        var f = Frames["starbaseroomupdate_s2c_move_0_to_1"];
+        Assert.Equal((ushort)0xA0, PacketRecord.Resolve((ushort)f.Opcode, f.Payload).Opcode);
+        // And the C2S fixture still routes to 0x9F via the same shared record.
+        var c = Frames["starbaseroomchange_move_0_to_1"];
+        Assert.Equal((ushort)0x9F, PacketRecord.Resolve((ushort)c.Opcode, c.Payload).Opcode);
     }
 }

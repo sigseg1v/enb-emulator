@@ -995,3 +995,9 @@ provenance: Starbase_Room_Change 0x9F (client->server) -- AvatarID 116206295 (0x
 opcode: 0x9F
 payload-bytes: 12
 hex: d7 2a ed 06 00 00 00 00 ff ff ff ff
+
+[starbaseroomupdate_s2c_move_0_to_1]
+provenance: Starbase_Room_Change 0xA0 (server->client) -- AvatarID 116204554 (0x06ED240A), NewRoom 1, OldRoom 0 (capture_3.rar packet #14366, Server->Client). Byte-identical to 0x9F: same 12-byte struct StarbaseRoomChange {int32 AvatarID; int32 NewRoom; int32 OldRoom}, all LE. All three 0xA0 emitters (PlayerClass.cpp:662/739/753) do SendOpcode(0xA0, &SRoomUpdate, sizeof) with AvatarID/NewRoom/OldRoom direct-assigned (no htonl). This is the server telling other clients that avatar 0x06ED240A walked from room 0 to room 1; the receiving client relocates that avatar.
+opcode: 0xA0
+payload-bytes: 12
+hex: 0a 24 ed 06 01 00 00 00 00 00 00 00
