@@ -148,16 +148,27 @@ is still open.
 
 ### AC.3 -- Change-tracking -> generated `.sql` changeset
 
-- [ ] Record which DB records an editing session creates/updates/deletes.
-- [ ] Generate a reviewable `.sql` file capturing those changes (idempotent /
-      re-appliable INSERT/UPDATE/DELETE against the `net7` content DB, Postgres
-      syntax, quoted identifiers).
-- [ ] Start with the **Sector Editor**, but the mechanism must live in
-      `commontools-avalonia` so **all** editors inherit it.
-- [ ] Open design question to resolve in implementation: track at the DB-write
-      boundary in `DB.cs` (capture every mutating command + params) vs a
-      higher-level per-record dirty model. The DB-write boundary is the most
-      uniform place to make it apply to all editors for free -- lean that way.
+- [x] Record which DB records an editing session creates/updates/deletes:
+      `Database/ChangeTracker.cs` captures every mutating statement at the
+      DB-write boundary (`DB.executeCommand` calls `ChangeTracker.Record` after
+      the command succeeds). Off by default (`Enabled`); the host switches it on
+      per session. INSERT/UPDATE/DELETE/REPLACE are recorded; SELECT/SET/etc.
+      ignored (whole-word leading-keyword match).
+- [x] Generate a reviewable `.sql` file: `BuildScript`/`WriteSqlFile` emit a
+      headered, `BEGIN;`/`COMMIT;`-wrapped script of standalone, re-appliable
+      Postgres -- parameter values inlined as escaped literals (`'` -> `''`,
+      `null` -> `NULL`), with prefix-collision-safe `@name` substitution
+      (`@id` won't clobber `@id10`).
+- [x] Mechanism lives in `commontools-avalonia` so **all** editors inherit the
+      capture for free. First consumer wired: the **Sector Editor**
+      (`File -> Export Changes to SQL...`, enables the tracker on startup, writes
+      via a save-file picker). Other editors record automatically; each just
+      needs its own export menu item (added as they are verified, AC.6).
+- [x] Design resolved: DB-write-boundary capture (chosen over a per-record dirty
+      model) -- the single uniform point that covers every editor.
+- [x] Pinned by the commontools smoke (`test/Program.cs` `ChangeTrackerChecks`):
+      disabled-records-nothing, SELECT-ignored, quote-escaping, param-inlining +
+      termination, transaction wrap, prefix-collision, NULL, Clear. All green.
 
 ### AC.4 -- X button ALWAYS closes; never hang the UI on DB errors
 

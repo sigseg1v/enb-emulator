@@ -10,6 +10,8 @@
         <Separator />
         <MenuItem Header="_Save" x:Name="c_Save" />
         <Separator />
+        <MenuItem Header="_Export Changes to SQL..." x:Name="c_ExportChanges" />
+        <Separator />
         <MenuItem Header="_Exit" x:Name="c_Exit" />
       </MenuItem>
       <MenuItem Header="_Tools">

@@ -56,6 +56,16 @@ namespace CommonTools.Database
         private NpgsqlConnection m_connection = null;
 
         /// <summary>
+        ///   <para>Records mutating SQL this session issues, for export as a
+        ///   re-appliable <c>.sql</c> changeset (AC.3). Off by default; the host
+        ///   sets <c>ChangeTracker.Enabled = true</c> for an editing session and
+        ///   calls <c>WriteSqlFile</c> to emit the changeset.</para>
+        ///   <para>Capture is centralized here in the DB layer so every editor
+        ///   inherits change-tracking without per-editor plumbing.</para>
+        /// </summary>
+        public ChangeTracker ChangeTracker { get; } = new ChangeTracker();
+
+        /// <summary>
         /// Constructor
         /// </summary>
         public DB()
@@ -215,6 +225,9 @@ namespace CommonTools.Database
 
                 DateTime start = DateTime.Now;
                 rowsAffected = command.ExecuteNonQuery();
+                // Record AFTER the statement succeeds, so the changeset reflects
+                // edits that actually landed (no-op unless ChangeTracker.Enabled).
+                ChangeTracker.Record(query, parameter, value);
                 if (m_showExecutionTime)
                 {
                     TimeSpan timeSpan = DateTime.Now - start;

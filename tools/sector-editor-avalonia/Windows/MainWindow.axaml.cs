@@ -45,6 +45,11 @@ namespace SectorEditorAvalonia.Windows
             _notify = new AvaloniaNotificationSink(this);
             _pg = new PropertyPanelHost(c_PropertyPanel);
 
+            // Record the session's DB edits so they can be exported as a
+            // re-appliable .sql changeset (AC.3). The capture lives in the shared
+            // DB layer; we just switch it on for this session.
+            CommonTools.Database.DB.Instance.ChangeTracker.Enabled = true;
+
             Opened += (_, _) => SafeBoot();
             c_Exit.Click += (_, _) => Close();
             c_About.Click += (_, _) => new AboutBox().ShowDialog(this);
@@ -54,8 +59,48 @@ namespace SectorEditorAvalonia.Windows
             c_SoundEffects.Click += (_, _) => new SoundEffectsDialog().ShowDialog(this);
             c_Options.Click += (_, _) => OpenOptions();
             c_Save.Click += (_, _) => { c_Status.Text = "(save: stub — DAO updateRow paths persist on edit)"; };
+            c_ExportChanges.Click += async (_, _) => await ExportChangesToSql();
 
             c_Tree.SelectionChanged += (_, _) => OnTreeSelectionChanged();
+        }
+
+        // Write the recorded mutating SQL to a user-chosen .sql file. The
+        // changeset is standalone, re-appliable Postgres (params inlined).
+        private async System.Threading.Tasks.Task ExportChangesToSql()
+        {
+            var tracker = CommonTools.Database.DB.Instance.ChangeTracker;
+            if (tracker.Count == 0)
+            {
+                c_Status.Text = "No DB changes recorded this session.";
+                return;
+            }
+
+            var picker = await StorageProvider.SaveFilePickerAsync(
+                new Avalonia.Platform.Storage.FilePickerSaveOptions
+                {
+                    Title = "Export changes to SQL",
+                    SuggestedFileName = "sector-editor-changeset.sql",
+                    DefaultExtension = "sql",
+                    FileTypeChoices = new[]
+                    {
+                        new Avalonia.Platform.Storage.FilePickerFileType("SQL script")
+                        {
+                            Patterns = new[] { "*.sql" }
+                        }
+                    }
+                });
+
+            if (picker == null) return; // user cancelled
+
+            try
+            {
+                tracker.WriteSqlFile(picker.Path.LocalPath, "Sector Editor (Avalonia)");
+                c_Status.Text = "Wrote " + tracker.Count + " statement(s) to " + picker.Path.LocalPath;
+            }
+            catch (Exception ex)
+            {
+                c_Status.Text = "Export failed: " + ex.Message;
+            }
         }
 
         private void SafeBoot()
