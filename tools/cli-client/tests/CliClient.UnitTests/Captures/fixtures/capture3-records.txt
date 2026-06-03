@@ -1025,3 +1025,9 @@ provenance: Master_Join 0x35 (client->server) -- the first packet the client sen
 opcode: 0x35
 payload-bytes: 64
 hex: 00 00 00 02 00 00 00 02 40 e5 e7 e8 3e 22 12 01 f7 64 5c c0 00 00 29 19 00 00 00 00 00 00 00 00 00 00 00 01 00 00 00 01 7f ff ff ff 89 77 24 df 40 36 32 dd 42 34 a7 59 6f df 5a 82 13 b2 70 e8
+
+[debug_gameid_00aaccee]
+provenance: Debug 0x1A (client->server) -- GameID 11193582 (0x00AACCEE), then constant words 0x21 and 0 (capture_3.rar packet #543, Client->Server, 159.153.232.44:3029). 12-byte body. Player::HandleDebug (PlayerConnection.cpp:10773) is a no-op that only logs "Received Debug packet" and never parses the body; no Debug struct exists. The leading GameID's byte order is cross-proven LE: the SAME session's StarbaseRoomChange 0x9F frames (#553/#611/#1225/#1242) carry the identical EE CC AA 00 as their AvatarID, and 0x9F is proven little-endian (HandleStarbaseRoomChange reads with no ntohl). The two trailing words (0x21, 0) are constant in every captured 0x1A frame; shown LE by convention but flagged unverified since the server discards them.
+opcode: 0x1A
+payload-bytes: 12
+hex: ee cc aa 00 21 00 00 00 00 00 00 00

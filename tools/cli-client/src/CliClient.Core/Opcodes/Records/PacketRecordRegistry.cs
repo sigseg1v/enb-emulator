@@ -38,6 +38,7 @@ public static class PacketRecordRegistry
             0x0014 => new MoveRecord(payload),
             0x0017 => new RequestTargetRecord(payload),
             0x0019 => new SetTargetRecord(payload),
+            0x001A => new DebugRecord(payload),
             0x001B => new AuxDataRecord(payload),
             0x001D => new MessageStringRecord(payload),
             0x001F => new TradeActionRecord(payload),

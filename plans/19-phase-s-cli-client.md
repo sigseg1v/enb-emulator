@@ -1703,6 +1703,22 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       Pinned to capture_3 #224 (ToSectorID 10521, fresh login). Files:
       Records/MasterJoinRecord.cs + 1 registry line. capture3-records.txt 98->99
       frames; 2 tests; full UnitTests suite 585 green. CLI decode-only.
+- [x] Debug (batch 21, 2026-06-03): 0x1A DEBUG (14 frames), client->server,
+      12-byte body. Player::HandleDebug (PlayerConnection.cpp:10773) is a no-op --
+      it only LogDebug's "Received Debug packet" and never parses the body, and
+      there is no Debug struct -- so the field layout is not parser-provable. Only
+      the leading GameID is ground-truthed, and strongly: the 0x1A frame from
+      session .44:3029 (#543) carries GameID EE CC AA 00, the identical value the
+      SAME session's StarbaseRoomChange 0x9F frames (#553/#611/#1225/#1242) carry as
+      their AvatarID, and 0x9F is proven little-endian -- so the Debug GameID is LE
+      (0x00AACCEE) by cross-packet identity. The two trailing words are constant in
+      every captured frame (0x21, 0); decoded LE by convention but explicitly
+      flagged unverified since the server discards them. This is the conservative
+      decode the "near-irrefutable confidence" bar allows: name only the proven
+      GameID, flag the rest. Pinned to capture_3 #543 + a test asserting the Debug
+      GameID equals the StarbaseRoomChange AvatarID (the cross-packet LE lock).
+      Files: Records/DebugRecord.cs + 1 registry line. capture3-records.txt 99->100
+      frames; 2 tests; full UnitTests suite 587 green. CLI decode-only.
 - [ ] 0x98 GALAXY_MAP_REQUEST -- DEFERRED. 64-byte request body, but
       Player::HandleGalaxyMapRequest() takes NO data argument and just replies
       SendOpcode(GALAXY_MAP_CACHE, 0, 0) -- the server discards the entire request
@@ -1724,13 +1740,22 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       tally, not a guess). Cleared so far: batch-6 0x9E/0x9D/0x5A/0x17/0x2C, batch-7
       0x12/0x13/0x14, batch-8 0x46, batch-9 0x21/0x22, batch-10 0x27, batch-11 0x9B,
       batch-12 0x1F, batch-13 0xA3, batch-14 0x44, batch-15 0x28, batch-16 0x9F,
-      batch-17 0xA0, batch-18 0x55, batch-19 0x7C, batch-20 0x35
+      batch-17 0xA0, batch-18 0x55, batch-19 0x7C, batch-20 0x35, batch-21 0x1A
       (0x64/0x6A/0x20/0x66 already had decoders). The "single-digit long tail" note
       written after batch-9 was WRONG -- a re-tally proved several mid-frequency
-      opcodes still fall through. 0x98 examined and DEFERRED (server discards the
-      request body -- no parser to ground a decode; see below). Accurate undecoded
-      remainder by frame count (capture_3), highest first:
-        - 0x1A Debug                 (14)   -- NEXT
+      opcodes still fall through. The registry now decodes 80 opcodes. A fresh
+      capture_3 tally (zero-padded, cross-referenced against the registry) gives the
+      accurate undecoded remainder, highest first:
+        - 0x06 START_ACK             (14)   -- NEXT
+        - 0x02 LOGIN                 (14)   (embeds MasterJoin + TimeSent + LoginData)
+        - 0x7E MANUFACTURE_ACTION    (8)
+        - 0x4E                       (8)
+        - 0x58                       (7)
+        - 0xA4                       (6)
+        - then a 1-2 frame singleton tail (0xBD/0x79/0x5F/0x5D/0xBF/0xBE/0xBC/0xB9/
+          0x87/0x5E/0x33 ...) -- genuine diminishing returns, decode opportunistically.
+      0x98 examined and DEFERRED (server discards the request body -- no parser to
+      ground a decode; see below).
       Each must be grounded in its server emitter/parser for byte order before
       decoding -- never guess. 0x0B stays explicitly deferred (below).
 - [ ] Long-tail records with ZERO frames in any of the 3 captures (need other

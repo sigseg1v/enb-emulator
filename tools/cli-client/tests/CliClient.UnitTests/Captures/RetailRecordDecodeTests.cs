@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllNinetyNineFrames()
+    public void Fixture_Loads_AllOneHundredFrames()
     {
-        Assert.Equal(99, Frames.Count);
+        Assert.Equal(100, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -2502,5 +2502,39 @@ public sealed class RetailRecordDecodeTests
         Assert.Equal(10521, System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(span));
         Assert.NotEqual(10521, System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(span));
         Assert.Equal((ushort)0x35, PacketRecord.Resolve((ushort)f.Opcode, f.Payload).Opcode);
+    }
+
+    // ── Debug 0x1A ───────────────────────────────────────────────────────────
+    // HandleDebug is a no-op; only the leading GameID is ground-truthed, via the
+    // same player's proven-LE StarbaseRoomChange 0x9F in the same session. The two
+    // trailing words are constant and flagged unverified.
+
+    [Fact]
+    public void Debug_GameIdLittleEndian_CrossProvenAgainst9F()
+    {
+        string d = Dump("debug_gameid_00aaccee");
+
+        Assert.Contains("[0000] GameID", d);
+        Assert.Contains("0x00AACCEE", d);                          // EE CC AA 00 LE == 11193582
+        Assert.Contains("StarbaseRoomChange", d);                 // cross-proof named in the note
+        Assert.Contains("[0004] Unknown4", d);
+        Assert.Contains("HandleDebug discards the body", d);       // honest: server doesn't parse it
+        Assert.Contains("[0008] Unknown8", d);
+        Assert.DoesNotContain("???", d);                           // all 12 bytes accounted for
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void Debug_SameGameIdAsStarbaseRoomChange()
+    {
+        // The Debug GameID and the StarbaseRoomChange AvatarID are the SAME player,
+        // both little-endian -- the cross-packet byte-order lock the note relies on.
+        var dbg = Frames["debug_gameid_00aaccee"];
+        var room = Frames["starbaseroomchange_move_0_to_1"];
+        int dbgId  = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(dbg.Payload.AsSpan(0, 4));
+        int roomId = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(room.Payload.AsSpan(0, 4));
+        Assert.Equal(0x00AACCEE, dbgId);
+        Assert.Equal(dbgId, roomId);
+        Assert.Equal((ushort)0x1A, PacketRecord.Resolve((ushort)dbg.Opcode, dbg.Payload).Opcode);
     }
 }
