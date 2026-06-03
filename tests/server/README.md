@@ -71,7 +71,7 @@ CI runs the harness with a sidecar Postgres service (see `.github/workflows/buil
   `postgres_smoke_test` is the raw-libpq connectivity check;
   `sqlplus_wrapper_test` round-trips the libpqxx-backed `db/sqlplus.cpp`
   wrapper end-to-end through the same public API the server uses
-  (incl. parameterised + hostile-literal cases). Both env-gated on
+  (incl. parameterised + hostile-input cases). Both env-gated on
   `NET7_TEST_DB_DSN`.
 - `tests/integration/` is the C# xUnit suite (already live, separate scope)
   that drives `CliClient.Core` against the docker-compose stack -- see

@@ -30,23 +30,6 @@ struct sql_param_bag;         // wraps pqxx::params (parameterised execute)
 // callers that still spell it.
 typedef std::uint64_t my_ulonglong;
 
-// Legacy escape shim. The old mysqlplus pulled `mysql_escape_string` from
-// libmysqlclient; a handful of DAO call sites (SaveManager.cpp) still call
-// it directly. Defined inline so we don't drag the wrapper TU into every
-// includer. Standard single-quote-doubling escape — correct for Postgres
-// with standard_conforming_strings=on (default since 9.1).
-#include <string.h>
-static inline unsigned long mysql_escape_string(char *to, const char *from, unsigned long length)
-{
-    char *dst = to;
-    for (unsigned long i = 0; i < length; ++i) {
-        if (from[i] == '\'' || from[i] == '\\') *dst++ = from[i];
-        *dst++ = from[i];
-    }
-    *dst = '\0';
-    return (unsigned long)(dst - to);
-}
-
 ///////////////////////////////////////////////////////////////////////////////////////
 //// opendbstruct - database connection handle
 
