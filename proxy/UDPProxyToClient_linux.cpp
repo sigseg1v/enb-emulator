@@ -968,9 +968,9 @@ bool UDPClient::HandleCustomOpcode(short opcode, char *ptr, u8 *tcp_packet,
         // Player::MineResource) to every range-list member and relies on each
         // member's proxy to expand it into the client-facing 0x0b
         // OBJECT_TO_OBJECT_EFFECT the game client renders. StartProspecting()
-        // builds that 0x0b byte-for-byte the way the server's own
-        // Player::SendObjectToObjectEffect / Player::ActivateProspectBeam
-        // serialize a timed beam. See plans/27 §3a.
+        // builds that 0x0b byte-for-byte the way the server's authoritative
+        // Object::SendObjectToObjectEffectRL serializes a timed beam (the
+        // Bitmask-0x07 fields Player::ActivateProspectBeam sets). See plans/27 §3a.
         StartProspecting(ptr, tcp_packet, tcp_index);
         return true;
 
@@ -1181,11 +1181,17 @@ void UDPClient::HandleStageConfirm(char *ch_msg, u8 *tcp_packet, short &tcp_inde
 //   [12] startTick       -- server GetNet7TickCount() at beam start
 //   [16] drainMs         -- how long the beam runs before the ore is tractored
 //
-// We build the 0x0b body byte-for-byte the way the server's own
-// Player::SendObjectToObjectEffect (PlayerConnection.cpp) serializes a beam,
-// matching exactly the field set Player::ActivateProspectBeam produces for a
-// *timed* beam: effect_time != 0 -> Bitmask 0x07, EffectDescID 0x00BF, with
-// EffectID, TimeStamp and a u16 Duration. The Duration field lets the client
+// We build the 0x0b body byte-for-byte the way the server's authoritative
+// range-list serializer Object::SendObjectToObjectEffectRL (ObjectClass.cpp
+// ~850-928) lays it out -- that emitter's bit-gated field order is the one
+// validated byte-exact against the retail capture (see the CLI decoder
+// ObjectToObjectEffectRecord). NOTE: the *single-player* twin
+// Player::SendObjectToObjectEffect (PlayerConnection.cpp:1394) DIVERGES from it
+// above bit 0x04 (it even flags its own struct as wrong); the two agree ONLY
+// for bits 0x01/0x02/0x04, which is exactly the set a prospect beam uses
+// (Player::ActivateProspectBeam, *timed* beam effect_time != 0 -> Bitmask 0x07,
+// EffectDescID 0x00BF, EffectID + TimeStamp + u16 Duration). So this
+// fabrication is correct regardless of the divergence. The Duration field lets the client
 // self-expire the effect after drainMs, so no separate REMOVE_EFFECT and no
 // per-beam timer thread is needed (and no thread-lifetime hazard across a
 // mid-mine disconnect). Connection::SendResponse frames [len][opcode][body]
@@ -1213,7 +1219,7 @@ void UDPClient::StartProspecting(char *ch_msg, u8 *tcp_packet, short &tcp_index)
     uint32_t drain_ms       = (uint32_t) ExtractLong(msg, in);
 
     // 0x0b OBJECT_TO_OBJECT_EFFECT body. Field order/layout mirrors
-    // Player::SendObjectToObjectEffect: Bitmask(u16), GameID(int32),
+    // Object::SendObjectToObjectEffectRL: Bitmask(u16), GameID(int32),
     // TargetID(int32), EffectDescID(u16), Message(NULL -> single 0 byte),
     // then the bit-gated fields EffectID(0x01), TimeStamp(0x02), Duration(0x04).
     unsigned char body[64];

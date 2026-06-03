@@ -22,10 +22,12 @@ change server behaviour (CLAUDE.md server-integrity rules bind #1).
 
 ## Status
 
-Not started -- 2026-06-03. Created as the verification backbone for the
+In progress -- 2026-06-03. Created as the verification backbone for the
 Phase-AA fabrication band. See §0 for the honest scope correction and §4 for
 the deliberate ordering inversion (this harness must precede the high-risk
-proxy fabrication, not follow it).
+proxy fabrication, not follow it). **§2 landed (commit 3fcb7973):** the two
+compact-band gap decoders (0x2012 START_PROSPECT + 0x2013 TRACTOR_ORE) +
+`CompactMineRecordTests` byte-pin; 617/617 unit tests green.
 
 ---
 
@@ -85,18 +87,20 @@ Two compact opcodes are NAMED in `OpcodeNames.Generated.cs` (`0x2012`
 START_PROSPECT, `0x2013` TRACTOR_ORE) but fall through to `GenericRecord`.
 Add real decoders mirroring `LootItemRecord`'s shape.
 
-- [ ] `StartProspectRecord` (0x2012). Layout from the server emitter
-      `Player::MineResource` (`server/src/PlayerSkills.cpp`, compact send at
-      :697): int32 playerGID@0, int32 asteroidGID@4, int32 effectUID@8,
-      uint32 prospectTick@12, int32 drainMs@16 = 20 bytes. This is the exact
-      packet our proxy now expands into the `0x000B` beam (Phase AA Wave 3) --
-      so the CLI decoding it closes the loop for byte-pinning that fabrication.
-- [ ] `TractorOreRecord` (0x2013). Layout from `Player::UseTractorBeam`
-      (`server/src/PlayerSkills.cpp`, compact send at :785). Same structural
-      family as `LootItemRecord` (GameID, article UID + effect UID, BaseAsset,
-      prospect/loot tick, LS-prefixed Name, tractor time/speed, PosX/Y/Z).
-      Confirm field-by-field against the emitter before pinning.
-- [ ] Add both to `PacketRecordRegistry` and bump the §1 ratchet floor by two.
+- [x] `StartProspectRecord` (0x2012). Layout from the server emitter
+      `Player::MineResource` (`server/src/PlayerSkills.cpp:691-697`): int32
+      playerGID@0, int32 asteroidGID@4, int32 effectUID@8, uint32
+      prospectTick@12, uint32 drainMs@16 = 20 bytes. This is the exact packet
+      our proxy now expands into the `0x000B` beam (Phase AA Wave 3) -- so the
+      CLI decoding it closes the loop for byte-pinning that fabrication.
+- [x] `TractorOreRecord` (0x2013). Layout from `Player::UseTractorBeam`
+      (`server/src/PlayerSkills.cpp:773-785`) -- confirmed byte-identical to
+      `LootItemRecord` (0x2014): GameID, ArticleUID + ArticleEffectUID,
+      int16 BaseAsset (m_GameBaseAsset is short), u32 ProspectTick, LS-prefixed
+      Name, u32 TractorTime, float TractorSpeed, float PosX/Y/Z.
+- [x] Added both to `PacketRecordRegistry`; `CompactMineRecordTests`
+      synthesises the emitter bytes and pins every field + full consumption
+      (no `???` gap). 617/617 green.
 
 ## 3. Fabrication-verification harness (the actual deliverable)
 
@@ -146,18 +150,23 @@ Reading server + proxy + CLI side by side already turned up disagreements the
 §1 invariant exists to catch. Resolve each (do NOT silently "fix" toward the
 CLI -- the server emitter is authoritative per CLAUDE.md):
 
-- [ ] **Dual 0x000B emitter.** `ObjectToObjectEffectRecord`'s doc cites
-      `Object::SendObjectToObjectEffect` (`server/src/ObjectClass.cpp:870-925`)
-      as authoritative; the Phase-AA proxy beam was grounded in
-      `Player::SendObjectToObjectEffect` (`server/src/PlayerConnection.cpp:1394`)
-      + `ActivateProspectBeam`. Confirm the two server emitters produce the
-      same wire layout (bitmask order + conditional fields). If they diverge,
-      document which the retail capture matches; do not assume.
-- [ ] **Stale struct comment.** `common/include/net7/PacketStructures.h`
-      `struct ObjectToObjectEffect` comment disagrees with the byte-validated
-      layout in `ObjectToObjectEffectRecord`. The CLI doc already flags this as
-      stale. Reconcile the header comment to the validated layout (comment-only;
-      the struct is not memcpy'd on this path).
+- [x] **Dual 0x000B emitter -- RESOLVED, registered as Z-8.** The two server
+      emitters DO diverge above bit 0x04: `Object::SendObjectToObjectEffectRL`
+      (`ObjectClass.cpp ~850-928`) is the authoritative, capture-validated
+      layout; the single-player `Player::SendObjectToObjectEffect`
+      (`PlayerConnection.cpp:1394`) is wrong above 0x04 (its own comment admits
+      it). Both callers of the single-player twin use Bitmask 0x07 (bits
+      0x01/0x02/0x04 only), where the two AGREE, so the divergence is latent and
+      the shipped 0x2012->0x000B beam is correct. Fixed the proxy citation to
+      point at the authoritative RL emitter. Server alignment deferred (plans/26
+      Z-8) -- no live caller exercises the wrong region; high-risk for nil gain.
+- [x] **Stale struct comment -- RECONCILED.** Rewrote the per-field bitmask
+      annotations in `common/include/net7/PacketStructures.h struct
+      ObjectToObjectEffect` to the validated RL layout (TargetOffset@0x40,
+      OutsideTargetRadius@0x08, Scale@0x80, HSV@0x100/0x200/0x400,
+      Speedup@0x800). Comment-only -- field declaration order preserved; the
+      struct is field-addressed and never memcpy'd to the wire on this path
+      (verified: only `memset(&x,0,sizeof)` uses exist). Proxy rebuilt clean.
 
 ---
 

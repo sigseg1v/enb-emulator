@@ -178,6 +178,40 @@ This is the finding that most needed confirming -- the earlier one-line note
   (ServerRedirectRecord) reads LE to match. Closed; listed so the old flag isn't
   re-opened by accident.
 
+### Z-8 `[~]` 0x000B OBJECT_TO_OBJECT_EFFECT -- two server emitters disagree above bit 0x04 (latent)
+
+- **Category**: A (wire-value mismatch), but LATENT -- not currently reachable.
+- **Finding** (surfaced 2026-06-03 reading server/proxy/CLI side by side for
+  Phase AB §5): the 0x000B opcode has TWO server serializers and their bit-gated
+  field order DIVERGES above bit 0x04.
+  - `Object::SendObjectToObjectEffectRL` (server/src/ObjectClass.cpp ~850-928,
+    range-list path): 0x08 OutsideTargetRadius(as long, 4B), 0x10/0x20 nothing,
+    0x40 TargetOffset[3], 0x80 Scale, 0x100/0x200/0x400 HSVShift[0..2],
+    0x800 Speedup. This is the AUTHORITATIVE layout -- the CLI decoder
+    `ObjectToObjectEffectRecord` validated it byte-exact vs the retail capture
+    (bitmask 0x0807 = bits 0,1,2 + Speedup@0x800 consumes to the last byte; the
+    Speedup-at-0x800 bit only exists in THIS layout).
+  - `Player::SendObjectToObjectEffect` (server/src/PlayerConnection.cpp:1394,
+    single-player path): 0x08 TargetOffset, 0x10 OutsideTargetRadius, 0x40 Scale,
+    0x80 HSVShift[3], 0x100 Speedup -- WRONG above 0x04. The function's own
+    comment (:1441) flags "packetstructures.h is wrong... work out correct
+    structure", confirming the author knew this path was unverified.
+- **Why latent / why NOT fixed inline**: both callers of the single-player twin
+  set Bitmask 0x07 only -- `Player::ActivateProspectBeam` (0x03/0x07) and
+  `MOBClass.cpp:1436` (0x07). Bits 0x01/0x02/0x04 (EffectID/TimeStamp/Duration)
+  are IDENTICAL in both emitters, so no live code path exercises the divergent
+  region. There is no functional bug to fix today, and aligning the twin is a
+  server change that, while capture-justified (Z-8 has the primary-source proof
+  the escape hatch requires), is high-risk for zero current benefit. Defer until
+  a caller actually needs bits > 0x04 through the single-player path.
+- **Done in Phase AB**: corrected the proxy fabrication comment to cite the
+  authoritative `Object::SendObjectToObjectEffectRL` (not the divergent twin),
+  and reconciled the stale per-field bitmask annotations in
+  `common/include/net7/PacketStructures.h struct ObjectToObjectEffect` to the
+  validated layout (comment-only; the struct is field-addressed, never memcpy'd
+  to the wire on this path). The shipped 0x2012->0x000B beam uses only the
+  agreeing bits, so it is correct regardless.
+
 ---
 
 ## Open work
@@ -188,6 +222,8 @@ This is the finding that most needed confirming -- the earlier one-line note
 - [ ] Z-2(b): obtain a message[0]==0x02 emote capture to validate buffer[2]=0x01.
 - [ ] Z-3: live-client trace to decide whether StartID id-domain matters. Low pri.
 - [ ] Z-5 / Z-6: galaxy-map sub-types + 0x21 push -- feature work, not this phase.
+- [ ] Z-8: align Player::SendObjectToObjectEffect to the authoritative RL layout
+      IF/WHEN a single-player-path caller needs bits > 0x04 (latent today).
 - [x] Z-4, Z-7: accepted as-is. Z-R1: resolved.
 
 ## Notes

@@ -842,21 +842,31 @@ struct ObjectEffect             // opcode 0x09
 
 struct ObjectToObjectEffect             // opcode 0x0B
 {
-    u16		Bitmask;            // 4 flags for condional fields
-    int32_t    GameID;
+	// Field-addressed storage; the bit<->field WIRE mapping lives in the emitter,
+	// NOT in this declaration order (the struct is never memcpy'd to the wire on
+	// the 0x0B path -- the emitter AddData's each field into a separate buffer).
+	// The AUTHORITATIVE mapping in the per-field comments below is
+	// Object::SendObjectToObjectEffectRL (server/src/ObjectClass.cpp ~850-928),
+	// validated byte-exact vs the retail capture (CLI ObjectToObjectEffectRecord).
+	// The single-player twin Player::SendObjectToObjectEffect
+	// (PlayerConnection.cpp:1394) emits a DIFFERENT order above bit 0x04 and is
+	// wrong there -- but its only callers use bits 0x01/0x02/0x04, where the two
+	// agree, so the divergence is latent (see plans/26 Z-8 / plans/28 §5).
+	u16		Bitmask;
+	int32_t    GameID;
 	int32_t	TargetID;
-    u16		EffectDescID;
-	char	*Message;
-    // the following fields are not always present, inclusion depends on bitmask
-    int32_t    EffectID;           // bit 0 mask 0x0001
-    uint32_t TimeStamp;    // bit 1 mask 0x0002
-	u16		Duration;			// bitmask[2] 2 bytes (time is in milli seconds)
-	float	TargetOffset[3];	// bitmask[3] 12 bytes
-	u16		OutsideTargetRadius;// bitmask[4] 2 bytes
-	u16		unused;				// bitmask[5] 2 bytes
-	float	Scale;				// bitmask[6] 4 bytes
-	float	HSVShift[3];		// bitmask[7] 12 bytes
-	float	Speedup;			// bitmask[8] 4 bytes
+	u16		EffectDescID;
+	char	*Message;           // if set: length-prefixed string; else a single 0 byte
+	// the following fields are not always present; inclusion depends on Bitmask.
+	int32_t    EffectID;           // bit 0x0001
+	uint32_t TimeStamp;            // bit 0x0002
+	u16		Duration;           // bit 0x0004  (2 bytes; milliseconds)
+	float	TargetOffset[3];	// bit 0x0040  (12 bytes)  <- NOT 0x08
+	u16		OutsideTargetRadius;// bit 0x0008  (emitted as (long) -> 4 wire bytes)
+	u16		unused;				// no wire bit (0x0010 / 0x0020 emit nothing)
+	float	Scale;				// bit 0x0080  (4 bytes)  <- NOT 0x40
+	float	HSVShift[3];		// bits 0x0100 / 0x0200 / 0x0400  (one channel per bit)
+	float	Speedup;			// bit 0x0800  (4 bytes)  <- NOT 0x100
 } ATTRIB_PACKED;
 
 struct InitRenderState			// opcode 0x2f
