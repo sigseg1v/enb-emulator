@@ -1598,6 +1598,19 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       confirm/money frames so the fixture exercises both fields. Files:
       Records/TradeActionRecord.cs + 1 registry line. capture3-records.txt 88->89
       frames; 1 test; full UnitTests suite 569 green. CLI decode-only.
+- [x] ClientChatRequest (batch 13, 2026-06-03): 0xA3 CLIENT_CHAT_REQUEST
+      (71 frames). Variable-length client->server, all LE: int32 PlayerID; int32
+      type; three u16-length-prefixed ASCII strings (NO NUL on wire); int32
+      DataSize; optional DataSize-byte trailing block. Player::HandleClientChatRequest
+      (PlayerConnection.cpp:1645) walks the buffer with plain short/int32 reads and
+      no ntohl, so every field is host-order. The `type` field is one of the
+      CCE_*/CCR_* request codes (PacketStructures.h:634); the decoder labels all 31.
+      The three strings carry different things per type (channel name / target nick
+      / message), so they are reported positionally. Pinned to the login channel-join
+      frame (capture_3 #543, Type 6 CCE_ENTER_CHANNEL, String2 "General") -- chosen
+      because it exercises the Len1=0 empty-string path plus two populated strings.
+      Files: Records/ClientChatRequestRecord.cs + 1 registry line. capture3-records.txt
+      89->90 frames; 1 test; full UnitTests suite 570 green. CLI decode-only.
 - [ ] 0x0B ObjectToObjectEffect -- DEFERRED. Carries a u16 Bitmask + a
       variable-length Message field mid-packet + a conditional tail the server
       author flagged as wrong ("packet struct is wrong... TODO work out correct
@@ -1608,12 +1621,11 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
 - [~] Remaining GenericRecord-fallthrough opcodes (driven by a fresh capture_3
       tally, not a guess). Cleared so far: batch-6 0x9E/0x9D/0x5A/0x17/0x2C, batch-7
       0x12/0x13/0x14, batch-8 0x46, batch-9 0x21/0x22, batch-10 0x27, batch-11 0x9B,
-      batch-12 0x1F (0x64/0x6A/0x20/0x66 already had decoders). The "single-digit
-      long tail" note written after batch-9 was WRONG -- a re-tally proved several
-      mid-frequency opcodes still fall through. Accurate undecoded remainder by
-      frame count (capture_3), highest first:
-        - 0xA3 ClientChatRequest     (71)   -- NEXT
-        - 0x44 Request_Time          (66)
+      batch-12 0x1F, batch-13 0xA3 (0x64/0x6A/0x20/0x66 already had decoders). The
+      "single-digit long tail" note written after batch-9 was WRONG -- a re-tally
+      proved several mid-frequency opcodes still fall through. Accurate undecoded
+      remainder by frame count (capture_3), highest first:
+        - 0x44 Request_Time          (66)   -- NEXT
         - 0x28 InventorySort         (31)   -- struct InvSort, PacketStructures.h:253
         - 0x9F Starbase_Room_Change  (21)
         - 0xA0 Starbase_Room_Update  (20)

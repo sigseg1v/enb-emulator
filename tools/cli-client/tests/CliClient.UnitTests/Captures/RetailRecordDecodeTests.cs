@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllEightyNineFrames()
+    public void Fixture_Loads_AllNinetyFrames()
     {
-        Assert.Equal(89, Frames.Count);
+        Assert.Equal(90, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -2249,6 +2249,29 @@ public sealed class RetailRecordDecodeTests
         Assert.Contains("Action            = 0", d);
         Assert.Contains("(open trade window)", d);
         Assert.DoesNotContain("???", d);                  // all 5 bytes decoded
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    // ── ClientChatRequest 0xA3 ───────────────────────────────────────────────
+    // Variable-length, all LE: int32 PlayerID + int32 type + three u16-length-
+    // prefixed ASCII strings (no NUL) + int32 DataSize + optional block.
+    // HandleClientChatRequest walks it with plain short/int32 reads, no ntohl.
+
+    [Fact]
+    public void ClientChatRequest_EnterChannel_AllStringsLittleEndian()
+    {
+        string d = Dump("chatrequest_enter_channel_general");
+
+        Assert.Contains("[0000] PlayerID", d);
+        Assert.Contains("0x0000141E", d);                 // 1E 14 00 00 LE == 5150
+        Assert.Contains("Type              = 6", d);
+        Assert.Contains("(CCE_ENTER_CHANNEL)", d);
+        Assert.Contains("Len1              = 0", d);       // empty-string path
+        Assert.Contains("Len2              = 7", d);
+        Assert.Contains("String2           = \"General\"", d);
+        Assert.Contains("Len3              = 1", d);
+        Assert.Contains("DataSize          = 0", d);
+        Assert.DoesNotContain("???", d);                  // all 26 bytes decoded
         Assert.DoesNotContain("[!]", d);
     }
 }

@@ -963,3 +963,10 @@ provenance: Trade_Action 0x1F (server->client) -- GameID 116205986 (0x06ED29A2),
 opcode: 0x1F
 payload-bytes: 5
 hex: a2 29 ed 06 00
+
+[chatrequest_enter_channel_general]
+provenance: ClientChatRequest 0xA3 (client->server) -- PlayerID 5150 (0x0000141E), Type 6 (CCE_ENTER_CHANNEL), Len1 0, Len2 7 String2 "General", Len3 1 String3 " ", DataSize 0 (capture_3.rar packet #543, Client->Server -- the client auto-joining its default chat channels at login). Variable-length, all LE: int32 PlayerID + int32 type + three u16-length-prefixed ASCII strings (NO NUL on wire) + int32 DataSize + optional trailing block. Player::HandleClientChatRequest walks the buffer with plain short/int32 reads, no ntohl. Picked the ENTER_CHANNEL frame because it exercises the len1=0 (empty-string) path plus two non-empty strings.
+opcode: 0xA3
+payload-bytes: 26
+hex: 1e 14 00 00 06 00 00 00 00 00 07 00 47 65 6e 65
+      72 61 6c 01 00 20 00 00 00 00

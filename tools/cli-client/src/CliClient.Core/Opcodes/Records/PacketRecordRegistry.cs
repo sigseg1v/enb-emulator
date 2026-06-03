@@ -82,6 +82,7 @@ public static class PacketRecordRegistry
             0x009C => new WarpIndexRecord(payload),
             0x009D => new StarbaseAvatarChangeRecord(payload),
             0x009E => new StarbaseAvatarChangeS2CRecord(payload),
+            0x00A3 => new ClientChatRequestRecord(payload),
             0x00A5 => new ClientChatEventRecord(payload),
             0x00B2 => new NameDecalRecord(payload),
             0x00B4 => new SubpartsRecord(payload),
