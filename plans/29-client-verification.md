@@ -43,9 +43,36 @@ format & byte order", Trap 2).
   RELATIONSHIP + `0x0040` CONSTANT_POSITIONAL_UPDATE + `0x001B` AUX-name +
   `0x0099` NAVIGATION sequence, instead of consuming+dropping it.
   (`proxy/UDPProxyToClient_linux.cpp`, `UDPClient::CreateObject`.)
-- **Primary source**: `proxy/local-debug/net7-live-2026-06-02-login-undock-clicknavs-warp-logout.pcap`
-  (cleartext proxy<->server leg) -- 51x `0x2018` frames in the Luna session.
-- **CLI proof**: `StaticObjectCreateRecord` + fabrication byte-pin test.
+- **Primary source**: `proxy/local-debug/net7-live-2026-06-02-login-undock-clicknavs-warp-logout.pcap`.
+  Endpoint check (2026-06-03): this is a capture of the **real net7 retail
+  server** (`216.219.87.147`) talking to a player-side proxy
+  (`192.168.0.150`), on the cleartext server<->proxy UDP leg -- i.e. the
+  canonical primary source CLAUDE.md ranks highest, NOT a capture of our own
+  stack. The 51x `0x2018` frames come from the retail server's sector port
+  (`:3573`).
+- **Our server emits the same opcode (verified in code, 2026-06-03)**: not just
+  the retail server -- OUR server also emits compact `0x2018`/`0x2019` on sector
+  entry, so the proxy expander is live (not dead code). Path:
+  `ObjectManager::SendAllNavs` (ObjectManager.cpp:416) ->
+  `StaticMap::SendObject` (NavTypeClass.cpp:327, calls `SendObjectFull` :353)
+  for navs/gates/stations, and `Resource::SendObject` (ResourceClass.cpp:720,
+  :724) for asteroids. `Player::SendObjectFull` (PlayerConnection.cpp:1113) is
+  the sole `0x2018`/`0x2019` emitter and is reached only via those two.
+  (Planets/decos take the base `Object::SendObject` at ObjectClass.cpp:670 =
+  plain `0x04`+`0x89`, already forwarded -- see CV-03.)
+- **Compact-body layout agreement (verified statically)**: the proxy's
+  `CreateObject` parser reads the exact field offsets the server's
+  `StaticMap::FormStaticPacket` (NavTypeClass.cpp:287) writes -- GameID@0,
+  CreateType@4, BaseAsset@5, Scale@7, HSV@11/15/19, Relationship@23,
+  PosType@24, Pos@25/29/33, Orient@37-49, Signature@53, sig_flags@57, Name@58
+  (length-prefixed). So the parse side is provably correct; the only
+  reconstructed-and-unverified part is the EXPANSION OUTPUT (the client-facing
+  `0x04`/`0x89`/`0x40`/`0x1b`/`0x99` bytes), because the client<->proxy leg is
+  encrypted and absent from any capture. That output is what this CV entry must
+  confirm against the real client.
+- **CLI proof**: `StaticObjectCreateRecord` + fabrication byte-pin test. NOTE:
+  the byte-pin locks what the proxy EMITS (regression guard), not that the
+  emitted format is what the client wants -- only client.exe proves that.
 - **What to look for in client.exe**: zone into **Luna**. The galaxy/sector map
   and the in-space HUD should show navs, the station(s), the gate(s) and any
   decorative objects -- not an empty sector. Click a nav: it should be
