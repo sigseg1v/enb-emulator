@@ -103,22 +103,41 @@ Out of scope / NON-NEGOTIABLE guardrails:
 
 ### AC.1 -- Migrate `commontools-avalonia` DB layer MySQL -> Postgres (Npgsql)
 
-- [ ] Replace `MySql.Data.MySqlClient` usage in
+- [x] Replace `MySql.Data.MySqlClient` usage in
       `tools/commontools-avalonia/Database/DB.cs` with `Npgsql`
       (`NpgsqlConnection`/`NpgsqlDataAdapter`/`NpgsqlCommand`/`NpgsqlTransaction`).
-- [ ] Rewrite `LoginData.ConnStr(...)` to emit a Npgsql connection string
-      (Host/Port/Database/Username/Password/...) for the `net7` content DB.
-- [ ] Audit every SQL string the common layer issues for MySQL-isms (backticks,
-      `LIMIT x,y`, mixed-case unquoted identifiers) and fix to Postgres syntax /
-      quoting. Grep with `-a` (CRLF/non-ASCII trap).
-- [ ] Decide the per-editor target DB explicitly (`net7` for content). Document.
+      Done: `m_mySql*` -> `m_connection`/`m_transaction`; `QueryParameterCharacter`
+      `?` -> `@`; `DATABASE_NAME` `Net7` -> lowercase `net7` (libpq does NOT
+      case-fold the DB name in a connection string). csproj: `MySql.Data` ->
+      `Npgsql 8.0.3`. Build clean (0/0).
+- [x] Rewrite `LoginData.ConnStr(...)` to emit a Npgsql connection string
+      (Host/Port/Database/Username/Password/Timeout/Command Timeout) for the
+      `net7` content DB. Done in `Gui/Login.axaml.cs`.
+- [x] Audit every SQL string the common layer issues for MySQL-isms. Done:
+      fixed the `makeDatabaseVariables` codegen (information_schema queried by
+      `table_schema='public'`, not by DB name; single-quoted column aliases
+      `'table_name'` -> double-quoted `"table_name"`). Grepped with the Grep
+      tool. (The ~163 per-editor literals remain AC.6.)
+- [x] Decide the per-editor target DB explicitly: **`net7`** (content). Host-side
+      it is `localhost:5434` (-> container 5432), creds net7/net7. Documented in
+      `Login.axaml.cs` defaults and `ConnStr`.
+
+**Folded in here (shared files):** AC.2's local-stack defaults + env-var prefill
+(`LoginData.LoadFromEnvironment()` reading `ENB_DB_HOST/PORT/USER/PASS`, default
+port 5434) and AC.4's never-broken-state connection handling (short `Timeout=5`
+so an unreachable host fails fast; `openConnection()` disposes + nulls a failed
+connection instead of caching a half-open one) landed in the same edit, since
+they live in `DB.cs`/`Login.axaml.cs`. The remaining AC.2 (window resize, `just`
+recipe env export) and AC.4 (off-UI-thread DB I/O + unconditional X-close) work
+is still open.
 
 ### AC.2 -- Zero-friction login when launched via `just`
 
 - [ ] When a tool is launched through `just` against the local stack,
       auto-populate the connection from the known local stack
-      (host=localhost, port=5432, db=net7, the dev credentials the compose
-      stack uses) so the user can click Login with no typing -- or skip the
+      (host=localhost, host-port=5434 -> container 5432, db=net7, the dev
+      credentials the compose stack uses) so the user can click Login with no
+      typing -- or skip the
       dialog entirely. Mechanism (env var the `just` recipe sets, a generated
       local config, or a "local stack detected" prefill) to be chosen in
       implementation; prefer an env var the recipe exports so there is no

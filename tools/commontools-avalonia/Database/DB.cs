@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using MySql.Data.MySqlClient;
+using Npgsql;
 using System.Data;
 using System.IO;
 
@@ -22,9 +22,11 @@ namespace CommonTools.Database
     public class DB : Singleton.Get<DB>
     {
         /// <summary>
-        /// The name of the database
+        /// The name of the database. Lowercase: the live Postgres content DB is
+        /// `net7` (created lowercase), and libpq does NOT case-fold the database
+        /// name in a connection string -- passing "Net7" would fail to match.
         /// </summary>
-        public const String DATABASE_NAME = "Net7";
+        public const String DATABASE_NAME = "net7";
 
         public const String SELECT = "SELECT ";
         public const String FROM = " FROM ";
@@ -37,19 +39,21 @@ namespace CommonTools.Database
         private Boolean m_showExecutionTime = false;
 
         /// <summary>
-        /// A MySQL transaction
+        /// A Postgres transaction
         /// </summary>
-        private MySqlTransaction m_mySqlTransaction;
+        private NpgsqlTransaction m_transaction;
 
         /// <summary>
-        ///   <para>MySQL query parameters use the ? character rather than @</para>
+        ///   <para>Npgsql named query parameters use the @ character.</para>
+        ///   <para>(MySQL used ?; Npgsql has no ?-positional support, so the
+        ///   convention is @name and parameters are added by bare name.)</para>
         /// </summary>
-        public const String QueryParameterCharacter = "?";
+        public const String QueryParameterCharacter = "@";
 
         /// <summary>
-        /// The MySQL connection
+        /// The Postgres connection
         /// </summary>
-        private MySqlConnection m_mySqlConnection = null;
+        private NpgsqlConnection m_connection = null;
 
         /// <summary>
         /// Constructor
@@ -59,47 +63,60 @@ namespace CommonTools.Database
         }
 
         /// <summary>
-        /// Open a connection to the database
+        /// Open a connection to the database. On failure the connection is reset
+        /// to null and the error is reported (never left in a broken half-open
+        /// state that wedges the next call); callers get a thrown exception they
+        /// already catch, or -- in the transaction helpers -- a clean rethrow.
         /// </summary>
-        /// <param name="databaseName"></param>
-        /// <returns></returns>
-        public MySqlConnection openConnection()
+        public NpgsqlConnection openConnection()
         {
-            if (m_mySqlConnection == null)
+            if (m_connection == null)
             {
-                m_mySqlConnection = new MySqlConnection(CommonTools.Gui.LoginData.ConnStr(DATABASE_NAME));
+                m_connection = new NpgsqlConnection(CommonTools.Gui.LoginData.ConnStr(DATABASE_NAME));
             }
 
-            if (m_mySqlConnection.State.ToString().Equals("Closed"))
+            if (m_connection.State == ConnectionState.Closed)
             {
-                m_mySqlConnection.Open();
+                try
+                {
+                    m_connection.Open();
+                }
+                catch
+                {
+                    // Drop the dead connection object so a later retry rebuilds
+                    // it from the (possibly corrected) login data instead of
+                    // reusing a broken instance.
+                    try { m_connection.Dispose(); } catch { }
+                    m_connection = null;
+                    throw;
+                }
             }
 
-            return m_mySqlConnection;
+            return m_connection;
         }
 
         public void closeConnection()
         {
-            m_mySqlConnection.Close();
+            if (m_connection != null) m_connection.Close();
         }
 
         public void startTransaction()
         {
             // Ensure the connection is opened
             openConnection();
-            m_mySqlTransaction = m_mySqlConnection.BeginTransaction();
+            m_transaction = m_connection.BeginTransaction();
         }
 
         public void commitTransaction()
         {
-            m_mySqlTransaction.Commit();
-            m_mySqlTransaction = null;
+            m_transaction.Commit();
+            m_transaction = null;
         }
 
         public void rollbackTransaction()
         {
-            m_mySqlTransaction.Rollback();
-            m_mySqlTransaction = null;
+            m_transaction.Rollback();
+            m_transaction = null;
         }
 
         /// <summary>
@@ -111,30 +128,30 @@ namespace CommonTools.Database
         public DataTable executeQuery(String query, String[] parameter, String[] value)
         {
             DataTable dataTable = null;
-            MySqlDataAdapter mySqlDataAdapter = null;
+            NpgsqlDataAdapter dataAdapter = null;
             try
             {
                 dataTable = new DataTable();
                 openConnection();
 
-                mySqlDataAdapter = new MySqlDataAdapter(query, m_mySqlConnection);
-                mySqlDataAdapter.MissingSchemaAction = MissingSchemaAction.AddWithKey;
+                dataAdapter = new NpgsqlDataAdapter(query, m_connection);
+                dataAdapter.MissingSchemaAction = MissingSchemaAction.AddWithKey;
 
                 if (parameter != null && parameter.Length != 0)
                 {
                     for (int parameterIndex = 0; parameterIndex < parameter.Length; parameterIndex++)
                     {
-                        mySqlDataAdapter.SelectCommand.Parameters.Add(new MySqlParameter(parameter[parameterIndex], value[parameterIndex]));
+                        dataAdapter.SelectCommand.Parameters.Add(new NpgsqlParameter(parameter[parameterIndex], value[parameterIndex]));
                     }
                 }
 
-                if (m_mySqlTransaction != null)
+                if (m_transaction != null)
                 {
-                    mySqlDataAdapter.SelectCommand.Transaction = m_mySqlTransaction;
+                    dataAdapter.SelectCommand.Transaction = m_transaction;
                 }
 
                 DateTime start = DateTime.Now;
-                mySqlDataAdapter.Fill(dataTable); // 156.245 milliseconds.
+                dataAdapter.Fill(dataTable); // 156.245 milliseconds.
                 if (m_showExecutionTime)
                 {
                     TimeSpan timeSpan = DateTime.Now - start;
@@ -164,11 +181,11 @@ namespace CommonTools.Database
             }
             finally
             {
-                if (m_mySqlConnection != null)
+                if (m_connection != null)
                 {
                     // Should close here but since we are keeping the connection open
                     // we won't close it here
-                    //m_mySqlConnection.Close();
+                    //m_connection.Close();
                 }
             }
             return dataTable;
@@ -181,23 +198,23 @@ namespace CommonTools.Database
             {
                 openConnection();
 
-                MySqlCommand mySqlCommand = new MySqlCommand(query, m_mySqlConnection);
+                NpgsqlCommand command = new NpgsqlCommand(query, m_connection);
 
                 if (parameter != null && parameter.Length != 0)
                 {
                     for (int parameterIndex = 0; parameterIndex < parameter.Length; parameterIndex++)
                     {
-                        mySqlCommand.Parameters.Add(new MySqlParameter(parameter[parameterIndex], value[parameterIndex]));
+                        command.Parameters.Add(new NpgsqlParameter(parameter[parameterIndex], value[parameterIndex]));
                     }
                 }
 
-                if (m_mySqlTransaction != null)
+                if (m_transaction != null)
                 {
-                    mySqlCommand.Transaction = m_mySqlTransaction;
+                    command.Transaction = m_transaction;
                 }
 
                 DateTime start = DateTime.Now;
-                rowsAffected = mySqlCommand.ExecuteNonQuery();
+                rowsAffected = command.ExecuteNonQuery();
                 if (m_showExecutionTime)
                 {
                     TimeSpan timeSpan = DateTime.Now - start;
@@ -227,11 +244,11 @@ namespace CommonTools.Database
             }
             finally
             {
-                if (m_mySqlConnection != null)
+                if (m_connection != null)
                 {
                     // Should close here but since we are keeping the connection open
                     // we won't close it here
-                    //m_mySqlConnection.Close();
+                    //m_connection.Close();
                 }
             }
             return rowsAffected;
@@ -379,11 +396,17 @@ namespace CommonTools.Database
             String tableEnum;
             String columnAlignedPosition;
 
+            // Postgres puts our tables in the `public` schema (the MySQL build
+            // queried by database-name because in MySQL the schema IS the
+            // database). This is a dev-only codegen path that regenerates
+            // net7.cs; it is not on any runtime path.
+            const String SCHEMA_NAME = "public";
+
             DataTable dataTable;
             dataTable = executeQuery("SELECT DISTINCT table_name "
                                    + "FROM information_schema.columns "
                                    + "WHERE table_schema = '"
-                                   + DATABASE_NAME
+                                   + SCHEMA_NAME
                                    + "'", null, null);
 
             System.IO.FileInfo fileInfo = new System.IO.FileInfo("..\\..\\..\\..\\CommonTools\\Database\\" + DATABASE_NAME + ".cs");
@@ -427,15 +450,18 @@ namespace CommonTools.Database
             query = "SELECT table_name, column_name, data_type "
                     + "FROM information_schema.columns "
                     + "WHERE table_schema = '"
-                    + DATABASE_NAME
+                    + SCHEMA_NAME
                     + "' "
                     + "ORDER BY table_name, ordinal_position";
             makeDatabaseEnum(streamWriter, query, columnAlignedPosition, false, true);
 
+            // Postgres: single quotes are string literals, double quotes are
+            // identifiers. Column aliases must be bare or double-quoted (MySQL's
+            // 'alias' single-quote form is rejected here).
             query = "SELECT "
-                  + "'item_type' as 'table_name', "
-                  + "name as 'column_name', "
-                  + "id as 'data_type' "
+                  + "'item_type' as \"table_name\", "
+                  + "name as \"column_name\", "
+                  + "id as \"data_type\" "
                   + "FROM "
                   + Net7.Tables.item_type.ToString()
                   + " ORDER BY "

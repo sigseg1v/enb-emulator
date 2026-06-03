@@ -6,7 +6,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
-using MySql.Data.MySqlClient;
+using Npgsql;
 using MsBox.Avalonia;
 using MsBox.Avalonia.Enums;
 using MsBoxIcon = MsBox.Avalonia.Enums.Icon;
@@ -68,6 +68,12 @@ namespace CommonTools.Gui
 
         void ReadConfiguration()
         {
+            // Precedence: env vars (set by the `just` launcher for the local
+            // stack) > Config.xml (a previously-saved manual entry) > the local
+            // dev-stack defaults. The env path is what makes "launched via just
+            // -> just click Login" work with zero typing.
+            if (LoginData.LoadFromEnvironment()) return;
+
             try
             {
                 DataSet ds = new DataSet();
@@ -80,10 +86,12 @@ namespace CommonTools.Gui
             }
             catch (Exception)
             {
-                LoginData.Host = "net-7.org";
-                LoginData.Port = 3307;
-                LoginData.User = "";
-                LoginData.Pass = "";
+                // Local dev stack (docker-compose): Postgres `net7` DB, exposed
+                // on host port 5434 (-> container 5432), creds net7/net7.
+                LoginData.Host = "localhost";
+                LoginData.Port = 5434;
+                LoginData.User = "net7";
+                LoginData.Pass = "net7";
             }
         }
 
@@ -116,7 +124,7 @@ namespace CommonTools.Gui
 
         void AcceptedLoginInformation()
         {
-            MySqlConnection conn = null;
+            NpgsqlConnection conn = null;
             m_Cancel = true;
             try
             {
@@ -124,7 +132,7 @@ namespace CommonTools.Gui
                 LoginData.Pass = LoginPassword.Text;
                 LoginData.Host = SQLServer.Text;
                 LoginData.Port = Convert.ToInt32(SQLPort.Text, 10);
-                conn = new MySqlConnection(LoginData.ConnStr(Database.DB.DATABASE_NAME));
+                conn = new NpgsqlConnection(LoginData.ConnStr(Database.DB.DATABASE_NAME));
                 conn.Open();
                 conn.Close();
 
@@ -192,13 +200,35 @@ namespace CommonTools.Gui
 
         public static string ConnStr(string DB)
         {
-            return "Connect Timeout=30"
+            // Short connect timeout so an unreachable host fails fast instead of
+            // wedging the UI (Phase AC.4). Command Timeout bounds slow queries.
+            return "Timeout=5"
+                 + ";Command Timeout=30"
                  + ";Persist Security Info=False"
                  + ";Database=" + DB
                  + ";Host=" + m_Host
                  + ";Port=" + m_Port.ToString()
                  + ";Username=" + m_User
                  + ";Password=" + m_Pass;
+        }
+
+        /// <summary>
+        /// Populate the login data from environment variables, if present. The
+        /// `just` launcher sets these for the local docker stack so an editor
+        /// launched that way needs no manual connection entry. Returns true when
+        /// at least the host was provided (a complete-enough config to use).
+        /// </summary>
+        public static bool LoadFromEnvironment()
+        {
+            string host = Environment.GetEnvironmentVariable("ENB_DB_HOST");
+            if (string.IsNullOrWhiteSpace(host)) return false;
+
+            m_Host = host;
+            string port = Environment.GetEnvironmentVariable("ENB_DB_PORT");
+            m_Port = (!string.IsNullOrWhiteSpace(port) && int.TryParse(port, out int p)) ? p : 5434;
+            m_User = Environment.GetEnvironmentVariable("ENB_DB_USER") ?? "net7";
+            m_Pass = Environment.GetEnvironmentVariable("ENB_DB_PASS") ?? "net7";
+            return true;
         }
 
         public static string ApplicationVersion
