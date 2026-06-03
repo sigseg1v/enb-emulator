@@ -85,13 +85,16 @@ gap is printed at the end and recorded in the seed header.
 Output
 ------
 db/postgres/seed_phase_y_prospecting.sql -- self-contained, idempotent.
-All synth ids live at/above SYNTH_ID_FLOOR (100000): sector_object_id,
-harvestable.resource_id (== the node's sector_object_id), and
-restypes.id. The seed DELETEs that range first (child rows before
-parents) and every INSERT is ON CONFLICT DO NOTHING. Applied after the
-other Phase Y seeds by the docker-compose schema-init service. This
-script READS the DB + JSONL and WRITES the .sql file only; it never
-executes the generated SQL.
+Y9 synth ids (sector_object_id, harvestable.resource_id == the node's
+sector_object_id, restypes.group_id == that id, and restypes.id) are
+allocated from PROSPECTING_ID_BASE (200000) to stay clear of the Y4 navs
+that already occupy [100000, 100048) in the shared sector_objects table.
+The seed DELETEs everything at/above SYNTH_ID_FLOOR (100000) first (child
+rows before parents; sector_objects scoped to type=38 so Y4 navs survive)
+and every INSERT is ON CONFLICT DO NOTHING. Applied after the other Phase
+Y seeds by the docker-compose schema-init service. This script READS the
+DB + JSONL and WRITES the .sql file only; it never executes the generated
+SQL.
 """
 from __future__ import annotations
 
@@ -115,6 +118,14 @@ DEFAULT_PG_PASS = "net7"
 DEFAULT_PG_DB = "net7"
 
 SYNTH_ID_FLOOR = 100_000
+# sector_objects is shared: Phase Y4 navs already own type=37 ids
+# [100000, 100048) allocated from SYNTH_ID_FLOOR. Y9 prospecting nodes are
+# type=38 in the SAME table with the SAME single-column PK, so they MUST
+# allocate from a disjoint band or ON CONFLICT DO NOTHING silently drops the
+# overlapping rows (and mis-attaches harvestable children to Y4 navs). Keep
+# read-filters and DELETEs at SYNTH_ID_FLOOR (they correctly span both bands);
+# only the allocation base moves up.
+PROSPECTING_ID_BASE = 200_000
 DEDUP_EPS = 8000.0  # game units -- a candidate node coincident with an existing
                     # type-38 field within this radius is treated as already present.
 
@@ -435,8 +446,10 @@ def main():
     w("-- matched nav-point's coordinates, plus its harvestable + oretype +")
     w("-- restype rows. Linkage is by NAME (resource->item, sector+nav->object);")
     w("-- field mechanics + rock-asset ids are copied from same-level existing")
-    w("-- fields (no dataset source). All ids >= 100000; child rows deleted")
-    w("-- before parents; every INSERT is ON CONFLICT DO NOTHING (idempotent).")
+    w(f"-- fields (no dataset source). Synth ids >= {PROSPECTING_ID_BASE}, clear of the")
+    w(f"-- Phase Y4 navs that start at {SYNTH_ID_FLOOR} in the shared sector_objects")
+    w("-- table; child rows deleted before parents; every INSERT is ON")
+    w("-- CONFLICT DO NOTHING (idempotent).")
     w("-- This file is applied by the schema-init service; it is NOT executed by")
     w("-- the generator.")
     w("")
@@ -451,8 +464,8 @@ def main():
     w(f"DELETE FROM sector_objects                      WHERE sector_object_id >= {SYNTH_ID_FLOOR} AND type = 38;")
     w("")
 
-    next_node_id = SYNTH_ID_FLOOR
-    next_restype_id = SYNTH_ID_FLOOR
+    next_node_id = PROSPECTING_ID_BASE
+    next_restype_id = PROSPECTING_ID_BASE
     nodes_emitted = 0
     oretype_links = 0
     restype_rows = 0
@@ -501,7 +514,11 @@ def main():
             f"{node_id}, {inum(level)}, {inum(prof['field'])}, {inum(res_count)}, "
             f"{fnum(prof['spawn_radius'])}, {fnum(prof['pop_rock_chance'])}, "
             f"{fnum(prof['max_field_radius'])}, {inum(prof['respawn_timer'])}) "
-            "ON CONFLICT (resource_id) DO NOTHING;"
+            # sector_objects_harvestable has no unique constraint, so a column
+            # conflict target won't bind -- bare DO NOTHING is a valid no-op
+            # here (idempotency is via the DELETE above) and would start
+            # guarding if a unique constraint on resource_id is ever added.
+            "ON CONFLICT DO NOTHING;"
         )
         nodes_emitted += 1
 
@@ -544,7 +561,7 @@ def main():
     e(f"    dropped -- coincident with existing field: {dropped_existing_field}")
     e(f"    dropped -- all resources already known node-drops: {dropped_all_known}")
     e(f"  NODES emitted (type-38 sector_objects + harvestable rows): {nodes_emitted} "
-      f"(sector_object_id {SYNTH_ID_FLOOR}..{next_node_id-1})")
+      f"(sector_object_id {PROSPECTING_ID_BASE}..{next_node_id-1})")
     e(f"  oretype links emitted: {oretype_links}")
     e(f"  restype rock-asset rows emitted: {restype_rows}")
     e(f"  res_count distribution (per node): {dict(sorted(res_count_hist.items()))}")

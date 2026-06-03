@@ -422,6 +422,20 @@ services:
           echo "schema-init: applying /db/seed_phase_y_drops.sql -> net7"
           psql -h postgres -U net7 -d net7 -v ON_ERROR_STOP=1 -f /db/seed_phase_y_drops.sql
         fi
+        # Phase Y9 prospecting seed (harvestable type-38 resource fields absent
+        # from the runtime but present in the reconstruct dataset) -- generated
+        # by generate_seed_prospecting.py. sector_objects is SHARED with Y4
+        # navs, so Y9 nodes allocate from 200000 (Y4 owns [100000,100048)); the
+        # seed DELETEs synth rows (sector_objects scoped to type=38) before
+        # re-inserting, every INSERT is ON CONFLICT DO NOTHING. Gated on the
+        # first synth prospecting node (type=38 sector_object at 200000).
+        if psql -h postgres -U net7 -d net7 -tA \
+             -c "SELECT to_regclass('public.sector_objects') IS NOT NULL AND EXISTS (SELECT 1 FROM sector_objects WHERE sector_object_id = 200000 AND type = 38)" | grep -q t; then
+          echo "schema-init: net7.sector_objects synth prospecting fields already present -- skipping seed_phase_y_prospecting.sql"
+        else
+          echo "schema-init: applying /db/seed_phase_y_prospecting.sql -> net7"
+          psql -h postgres -U net7 -d net7 -v ON_ERROR_STOP=1 -f /db/seed_phase_y_prospecting.sql
+        fi
         echo "schema-init: done"
     restart: "no"
 

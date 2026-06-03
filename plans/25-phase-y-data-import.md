@@ -322,20 +322,45 @@ will provide newer references when each task is approved.
   1-5 per project intent; mechanics columns copied from same-level
   existing fields) + 1-5 `oretypes` rows (resource->item, frequency =
   dataset prob/weight/density apportioned, top-N=res_count) + restypes
-  rock-asset rows (copied from a same-level node). Synth ids >= 100000,
-  gated DELETE-then-INSERT, ON CONFLICT DO NOTHING, idempotent. Field-
-  level dedup drops 136 candidates coincident with an existing type-38
-  field. Result: **529 nodes, 2537 oretype links, 1339 restype rows.**
-  Honest caveats: oretype `frequency` is currently INERT (the server
-  picks ore uniformly -- `ItemBaseManager.cpp ~244` has a "TODO: add
-  frequency weightings"); positions are the matched nav-point's, so a
-  field sits exactly on the nav rather than at the retail offset;
-  rock-asset `type` ids and the 4 mechanics columns are same-level
-  copies, not dataset-attested. `prospect_fields.jsonl` (145 rows) was
-  inspected but adds nothing the per-nav `navDistribution` in
-  prospecting.jsonl does not already carry. **NOT YET APPLIED** (DB is
-  read-only in the build task); apply via the schema-init service or
-  `psql -f db/postgres/seed_phase_y_prospecting.sql`.
+  rock-asset rows (copied from a same-level node). Synth ids >= 200000
+  (see the wiring note below), gated DELETE-then-INSERT, ON CONFLICT DO
+  NOTHING, idempotent. Field-level dedup drops 136 candidates coincident
+  with an existing type-38 field. Result: **529 nodes, 2537 oretype
+  links, 1339 restype rows.** Honest caveats: oretype `frequency` is
+  currently INERT (the server picks ore uniformly --
+  `ItemBaseManager.cpp ~244` has a "TODO: add frequency weightings");
+  positions are the matched nav-point's, so a field sits exactly on the
+  nav rather than at the retail offset; rock-asset `type` ids and the 4
+  mechanics columns are same-level copies, not dataset-attested.
+  `prospect_fields.jsonl` (145 rows) was inspected but adds nothing the
+  per-nav `navDistribution` in prospecting.jsonl does not already carry.
+
+  **WIRED 2026-06-03.** Two bugs were found before wiring and both fixed
+  in the generator:
+  1. **sector_object_id collided with Y4 navs.** Both Y4 navs (type=37)
+     and Y9 fields (type=38) live in `sector_objects` with the same
+     single-column PK, and both allocated from 100000 -- Y4 owns
+     [100000, 100048), so Y9's first 48 ids would have been silently
+     dropped by ON CONFLICT (and their harvestable children mis-attached
+     to Y4 nav objects). Fixed: Y9 now allocates from
+     `PROSPECTING_ID_BASE = 200000`; read-filters and the type=38-scoped
+     DELETE stay at SYNTH_ID_FLOOR=100000 (they correctly span both
+     bands). Verified range: sector_object_id 200000..200528, zero ids
+     in the Y4 band.
+  2. **ON CONFLICT target with no backing constraint.** The
+     `sector_objects_harvestable` INSERT used `ON CONFLICT (resource_id)`
+     but that table has NO unique/PK constraint, so Postgres rejected the
+     whole seed with "no unique or exclusion constraint matching the ON
+     CONFLICT specification". Fixed: bare `ON CONFLICT DO NOTHING`
+     (idempotency is via the DELETE; degrades to a real guard if a
+     unique constraint on resource_id is ever added).
+  Verified by applying the regenerated seed in a transaction against the
+  live net7 (with real Y4 data present) and rolling back: 529 nodes /
+  529 harvestable / 2537 oretypes / 1339 restypes all land, FK-clean, DB
+  untouched after rollback. Wired into `docker-compose.yml` schema-init
+  after the Y8 block, gated on a Y9-specific canary (type=38
+  sector_object at 200000). Applies automatically on the next fresh
+  bring-up; row counts to be confirmed there.
 
 - [ ] **Y10: Owner-confirmation-gated import of the unresolvable drop
   links.** **DO NOT AUTO-START -- this phase only runs when the owner
@@ -382,7 +407,7 @@ A by-name + by-position diff per category yields:
 | mobs | `mob_base` | 2042 | 242 / 1113 | no importable row -- 0 of the 242 carry an asset/template id (unspawnable) |
 | missions | `missions` | 364 (all w/ XML) | 430 / 587 | no importable row -- 0 carry `mission_XML` (the executable script; cannot synthesize from prose) |
 | item drops | `mob_items` | 8450 | -- | **2582-row gap imported (Y8, 2026-06-02)** -- the "no importable row" verdict was a field-presence mistake (it measured `drop_chance` presence, not the (mob,item) link diff); the drop LINK is the gap, the RATE is owner-approved generated. 551 links whose mob/item lacks a runtime row -> CSV, deferred to Y10 |
-| prospecting | `sector_objects_harvestable` | 882 | -- | **529-node gap importer BUILT (Y9, 2026-06-02)** -- the "no resource_id" verdict was an id-diff mistake; resource+nav NAMES resolve (99%/93%) and a node is constructable from name+position+per-sector mechanics, exactly like Y4 navs |
+| prospecting | `sector_objects_harvestable` | 882 | -- | **529-node gap imported + WIRED (Y9, 2026-06-03)** -- the "no resource_id" verdict was an id-diff mistake; resource+nav NAMES resolve (99%/93%) and a node is constructable from name+position+per-sector mechanics, exactly like Y4 navs. Two pre-wiring bugs fixed: id collision with Y4 (now 200000+) and an ON CONFLICT target with no backing constraint |
 
 **What was importable** (Y1 NPCs, Y4 navs, Y5 items): a real diff
 surfaced rows the runtime genuinely lacked, and each carried enough to
@@ -399,10 +424,12 @@ and both verdicts were WRONG for the same reason. The load-bearing field
 is the LINK (which mob drops which item; which resource spawns at which
 field), and the link resolves by name + position to runtime ids exactly
 like Y4 navs. Y8: 2582 (mob,item) links importable, rate owner-approved
-generated. Y9: 529 nodes constructable from name + per-sector mechanics.
-The lesson, now stated three times in this file (Y4, Y9, Y8): **run the
-finest-key diff before declaring "no gap" -- never substitute a
-field-presence count for it.**
+generated. Y9: 529 nodes constructable from name + per-sector mechanics,
+now generated, verified-by-rollback against live net7, and wired into
+schema-init (after fixing an id collision with Y4 and a bad ON CONFLICT
+target -- see the Y9 entry above). The lesson, now stated three times in
+this file (Y4, Y9, Y8): **run the finest-key diff before declaring "no
+gap" -- never substitute a field-presence count for it.**
 
 **What remains NOT importable** (mobs, missions, and the Y8/Y9 tails
 whose endpoints don't exist yet): a mob needs `base_asset_id` to be
