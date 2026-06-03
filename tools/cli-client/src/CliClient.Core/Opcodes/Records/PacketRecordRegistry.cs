@@ -101,6 +101,8 @@ public static class PacketRecordRegistry
             0x00B2 => new NameDecalRecord(payload),
             0x00B4 => new SubpartsRecord(payload),
             0x00BA => new LogoffConfirmationRecord(payload),
+            0x00BC => new CtaRequestRecord(payload),
+            0x00BD => new CtaResponseRecord(payload),
             0x00D0 => new GuildMessageSectorRecord(payload),
             0x2011 => new GalaxyMapCacheRecord(payload),
             0x2014 => new LootItemRecord(payload),

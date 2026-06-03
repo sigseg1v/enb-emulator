@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllOneHundredTwelveFrames()
+    public void Fixture_Loads_AllOneHundredFourteenFrames()
     {
-        Assert.Equal(112, Frames.Count);
+        Assert.Equal(114, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -189,6 +189,10 @@ public sealed class RetailRecordDecodeTests
         Assert.Equal(288, Frames["chatlist_friends_11_two_stations"].Payload.Length);
         Assert.Equal(0xA4, Frames["chatlist_friends_12"].Opcode);
         Assert.Equal(310, Frames["chatlist_friends_12"].Payload.Length);
+        Assert.Equal(0xBC, Frames["cta_request_groupaction5"].Opcode);
+        Assert.Equal(12, Frames["cta_request_groupaction5"].Payload.Length);
+        Assert.Equal(0xBD, Frames["cta_response_requesttype0f"].Opcode);
+        Assert.Equal(9, Frames["cta_response_requesttype0f"].Payload.Length);
     }
 
     // ── ItemBase 0x25 ────────────────────────────────────────────────────────
@@ -2909,5 +2913,61 @@ public sealed class RetailRecordDecodeTests
             Assert.Equal(f.Payload.Length, off);                   // EXACT: no gap, no overrun
             Assert.DoesNotContain("???", Dump(name));
         }
+    }
+
+    // ── CTA request/response 0xBC / 0xBD ─────────────────────────────────────
+    // Group "call to action". Request is all-LE (handler reads direct); response
+    // echoes the request SourceID, which pins the pairing and the byte order.
+
+    [Fact]
+    public void CtaRequest_LittleEndian_Action5()
+    {
+        string d = Dump("cta_request_groupaction5");
+
+        Assert.Contains("[0000] SourceID", d);
+        Assert.Contains("0x00167C88", d);                          // 88 7C 16 00 LE == 1473672
+        Assert.Contains("[0004] TargetID", d);
+        Assert.Contains("[0008] Action", d);
+        Assert.Contains("= 5", d);                                 // 05 00 00 00 LE
+        Assert.Contains("HandleCTARequest reads direct, no ntohl", d);
+        Assert.DoesNotContain("???", d);                           // all 12 bytes decoded
+        Assert.DoesNotContain("[!]", d);                           // TargetID 0 is valid, not flagged
+    }
+
+    [Fact]
+    public void CtaResponse_EchoesSourceId_AndPinsRetailRequestType()
+    {
+        string d = Dump("cta_response_requesttype0f");
+
+        Assert.Contains("[0000] SourceID", d);
+        Assert.Contains("0x00167C88", d);                          // echoes the request SourceID 1473672
+        Assert.Contains("[0004] RequestType", d);
+        Assert.Contains("= 15", d);                                // retail 0x0F (NOT the request Action 5)
+        Assert.Contains("our emitter writes the request Action here instead", d);
+        Assert.Contains("[0008] Success", d);
+        Assert.Contains("= 1", d);
+        Assert.DoesNotContain("???", d);                           // all 9 bytes decoded
+    }
+
+    [Fact]
+    public void Cta_RequestAndResponse_SameSourceId_OnlyLittleEndian()
+    {
+        // The request/response pairing proof: both frames carry the same SourceID at
+        // offset 0, and only the little-endian read makes it a sane id. The retail
+        // response's RequestType field (0x0F) is NOT the request's Action (5),
+        // documenting the server emitter divergence with primary-source bytes.
+        var req = Frames["cta_request_groupaction5"];
+        var resp = Frames["cta_response_requesttype0f"];
+
+        int reqSrcLe = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(req.Payload.AsSpan(0, 4));
+        int respSrcLe = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(resp.Payload.AsSpan(0, 4));
+        Assert.Equal(reqSrcLe, respSrcLe);
+        Assert.Equal(1473672, reqSrcLe);
+
+        int reqAction = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(req.Payload.AsSpan(8, 4));
+        int respField4 = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(resp.Payload.AsSpan(4, 4));
+        Assert.Equal(5, reqAction);
+        Assert.Equal(0x0F, respField4);                            // retail constant, != request Action
+        Assert.NotEqual(reqAction, respField4);
     }
 }

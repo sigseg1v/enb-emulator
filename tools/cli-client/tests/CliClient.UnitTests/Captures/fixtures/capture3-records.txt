@@ -1166,3 +1166,15 @@ hex:
 00 43 61 72 70 65 6e 74 65 72 20 53 65 63 74 6f
 72 20 28 42 65 74 61 20 48 79 64 72 69 20 53 79
 73 74 65 6d 29 2a
+
+[cta_request_groupaction5]
+provenance: CTA_REQUEST 0x00BC (client->server) -- SourceID 1473672 (0x00167C88), TargetID 0, Action 5 (capture_3.rar packet #21493, Client->Server, 159.153.232.38:3434). 12-byte struct CTARequest {int32 SourceID; int32 TargetID; int32 Action}, ALL LITTLE-ENDIAN. Player::HandleCTARequest (PlayerConnection.cpp:7723) reads SourceID/TargetID/Action directly and passes them to PlayerManager::GroupAction with NO ntohl, so all three int32s are host-order LE. SourceID 1473672 is a sane avatar/group id little-endian; big-endian would byte-swap it to ~2.3 billion. The same SourceID is echoed in the matching CTA_RESPONSE #21495, locking the byte order.
+opcode: 0x00BC
+payload-bytes: 12
+hex: 88 7c 16 00 00 00 00 00 05 00 00 00
+
+[cta_response_requesttype0f]
+provenance: CTA_RESPONSE 0x00BD (server->client) -- SourceID 1473672 (0x00167C88), RequestType 0x0F (15), Success 1 (capture_3.rar packet #21495, Server->Client, 159.153.232.38:3434 -- the response to cta_request_groupaction5 #21493). 9 bytes, ALL LITTLE-ENDIAN. Emitter: the CTAResponse[] template in Player::HandleCTARequest (PlayerConnection.cpp:7733) {int32 GameID, int32 RequestType=0x0F, byte Success=0x01}, raw int32 stores (no flip, host-order LE). Field[0] echoes the request SourceID 1473672 (identical to #21493), confirming the pairing and the LE read. DIVERGENCE: retail Field[4] = 0x0F (the template RequestType constant); our emitter (PlayerConnection.cpp:7746) overwrites Field[4] with the request Action instead -- so against our server this field would read the Action value (5), not 0x0F. The decoder pins the retail bytes; the server emitter mismatch is left to a separate review (one frame is not enough to prove the correct general value).
+opcode: 0x00BD
+payload-bytes: 9
+hex: 88 7c 16 00 0f 00 00 00 01

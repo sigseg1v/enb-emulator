@@ -1838,6 +1838,34 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       #16165); 4 tests (names/sectors render, two-named-stations, 12-entry adds Jedda,
       every-frame-walks-to-exact-length-only-LE proof); full UnitTests suite 605 green.
       CLI decode-only.
+- [x] batch-28: 0x00BC CTA_REQUEST (client->server, 12B) + 0x00BD CTA_RESPONSE
+      (server->client, 9B) -- the "call to action" group-action request/response pair,
+      decoded together because the response echoes the request's SourceID, which pins
+      both the pairing and the byte order. CTA_REQUEST wire (struct CTARequest,
+      PacketStructures.h:974): int32 SourceID, int32 TargetID, int32 Action, ALL
+      LITTLE-ENDIAN -- Player::HandleCTARequest (PlayerConnection.cpp:7723) reads all
+      three off the struct directly and passes them straight to
+      PlayerManager::GroupAction with NO ntohl anywhere, so host-order LE on x86.
+      CTA_RESPONSE wire (9B, all LE): int32 SourceID, int32 RequestType, char Success,
+      from the CTAResponse[] byte template the same handler builds
+      (PlayerConnection.cpp:7733) and stores with raw int32 writes (no flip). In the
+      captured pair (capture_3.rar request #21493 / response #21495) SourceID is 1473672
+      little-endian in BOTH frames -- big-endian would byte-swap it into a
+      multi-hundred-million id -- which both confirms the pairing and pins LE.
+      DIVERGENCE (surfaced, NOT fixed -- below the change bar): the retail response
+      shows Field[4] = 0x0F (the template's RequestType constant) and Success = 0x01,
+      but our emitter OVERWRITES Field[4] with the request's Action
+      (PlayerConnection.cpp:7746, "*((int32_t*)&CTAResponse[4]) = myCTARequest->Action"),
+      so against our server that field carries the Action (e.g. 5) instead of 0x0F.
+      One captured frame is insufficient to prove the correct general value, so the
+      server is intentionally left as-is per the "near-irrefutable confidence" bar; the
+      decoder labels Field[4] "RequestType", renders the retail value, and documents the
+      mismatch. Files: Records/CtaRequestRecord.cs + Records/CtaResponseRecord.cs + 2
+      registry lines. capture3-records.txt 112->114 frames (cta_request_groupaction5
+      0x00BC #21493, cta_response_requesttype0f 0x00BD #21495); 3 tests (request LE
+      decode, response echoes-SourceID + pins retail RequestType 0x0F, cross-frame
+      same-SourceID only-LE proof); full UnitTests suite 608 green. CLI decode-only;
+      no server change.
 - [ ] 0x98 GALAXY_MAP_REQUEST -- DEFERRED. 64-byte request body, but
       Player::HandleGalaxyMapRequest() takes NO data argument and just replies
       SendOpcode(GALAXY_MAP_CACHE, 0, 0) -- the server discards the entire request
@@ -1861,13 +1889,13 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       batch-12 0x1F, batch-13 0xA3, batch-14 0x44, batch-15 0x28, batch-16 0x9F,
       batch-17 0xA0, batch-18 0x55, batch-19 0x7C, batch-20 0x35, batch-21 0x1A,
       batch-22 0x06, batch-23 0x02, batch-24 0x7E, batch-25 0x4E, batch-26 0x58,
-      batch-27 0xA4
+      batch-27 0xA4, batch-28 0xBC/0xBD
       (0x64/0x6A/0x20/0x66 already had decoders). The "single-digit long tail" note
       written after batch-9 was WRONG -- a re-tally proved several mid-frequency
-      opcodes still fall through. The registry now decodes 86 opcodes. A fresh
+      opcodes still fall through. The registry now decodes 88 opcodes. A fresh
       capture_3 tally (zero-padded, cross-referenced against the registry) gives the
       accurate undecoded remainder, highest first:
-        - a 1-2 frame singleton tail (0xBD/0x79/0x5F/0x5D/0xBF/0xBE/0xBC/0xB9/
+        - a 1-2 frame singleton tail (0x79/0x5F/0x5D/0xBF/0xBE/0xB9/
           0x87/0x5E/0x33 ...) -- NEXT; genuine diminishing returns, decode opportunistically.
       0x98 examined and DEFERRED (server discards the request body -- no parser to
       ground a decode; see below).
