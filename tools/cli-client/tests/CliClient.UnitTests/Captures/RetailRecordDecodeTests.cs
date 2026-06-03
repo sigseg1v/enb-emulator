@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllOneHundredFiveFrames()
+    public void Fixture_Loads_AllOneHundredSevenFrames()
     {
-        Assert.Equal(105, Frames.Count);
+        Assert.Equal(107, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -2686,5 +2686,59 @@ public sealed class RetailRecordDecodeTests
         Assert.True(action.Payload.AsSpan(0, 4).SequenceEqual(stackalloc byte[] { 0x00, 0x00, 0x27, 0x1C }));
         Assert.True(refine.Payload.AsSpan(0, 4).SequenceEqual(stackalloc byte[] { 0x1C, 0x27, 0x00, 0x00 }));
         Assert.Equal((ushort)0x7E, PacketRecord.Resolve((ushort)action.Opcode, action.Payload).Opcode);
+    }
+
+    // ── StarbaseRequest 0x4E ─────────────────────────────────────────────────
+    // Docked-station request (leave/talk/job/customise). 9-byte StarbaseRequest
+    // {int32 PlayerID; int32 StarbaseID; char Action}, ALL LITTLE-ENDIAN --
+    // HandleStarbaseRequest reads every field directly, no ntohl. PlayerID 5150
+    // cross-locks to the same session's 0x05/0x06 StartID.
+
+    [Fact]
+    public void StarbaseRequest_LittleEndian_TalkNpc()
+    {
+        string d = Dump("starbaserequest_talk_npc");
+
+        Assert.Contains("[0000] PlayerID", d);
+        Assert.Contains("0x0000141E", d);                          // 1E 14 00 00 LE == 5150
+        Assert.Contains("(LE; player avatar id", d);
+        Assert.Contains("[0004] StarbaseID", d);
+        Assert.Contains("0x00000B7B", d);                          // 7B 0B 00 00 LE == 2939
+        Assert.Contains("[0008] Action", d);
+        Assert.Contains("= 4", d);
+        Assert.Contains("(talk to NPC)", d);
+        Assert.DoesNotContain("???", d);                           // all 9 bytes decoded
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void StarbaseRequest_LeaveStation_ActionOne()
+    {
+        string d = Dump("starbaserequest_leave_station");
+
+        Assert.Contains("[0008] Action", d);
+        Assert.Contains("= 1", d);
+        Assert.Contains("(leave station)", d);
+        Assert.Contains("0x00002919", d);                          // StarbaseID 19 29 00 00 LE == 10521
+        Assert.DoesNotContain("???", d);
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void StarbaseRequest_PlayerIdMatchesStartId_SameSession()
+    {
+        // PlayerID in 0x4E (.44:3029) is the same avatar the same session's 0x05
+        // START / 0x06 START_ACK carry as StartID, all little-endian -- the
+        // cross-packet lock that proves 0x4E's PlayerID byte order.
+        var sb = Frames["starbaserequest_talk_npc"];
+        var start = Frames["start_avatar_5150_s2c"];
+        int sbPlayer = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(sb.Payload.AsSpan(0, 4));
+        int startId  = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(start.Payload.AsSpan(0, 4));
+        Assert.Equal(5150, sbPlayer);
+        Assert.Equal(startId, sbPlayer);
+        // Both 0x4E frames are the same player.
+        var leave = Frames["starbaserequest_leave_station"];
+        Assert.True(sb.Payload.AsSpan(0, 4).SequenceEqual(leave.Payload.AsSpan(0, 4)));
+        Assert.Equal((ushort)0x4E, PacketRecord.Resolve((ushort)sb.Opcode, sb.Payload).Opcode);
     }
 }

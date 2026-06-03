@@ -66,6 +66,7 @@ public static class PacketRecordRegistry
             0x0044 => new RequestTimeRecord(payload),
             0x0046 => new ComponentPositionalUpdateRecord(payload),
             0x0047 => new ClientShipRecord(payload),
+            0x004E => new StarbaseRequestRecord(payload),
             0x004F => new StarbaseSetRecord(payload),
             0x0052 => new LoungeNpcRecord(payload),
             0x0054 => new TalkTreeRecord(payload),

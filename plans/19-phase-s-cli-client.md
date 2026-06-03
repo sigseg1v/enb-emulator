@@ -1775,6 +1775,26 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       3 tests (BE render+enum-name, Action 0 is valid LEAVE_TERMINAL not flagged,
       same-terminal-opposite-byte-order lock vs 0x7C); full UnitTests suite 595
       green. CLI decode-only.
+- [x] StarbaseRequest (batch 25, 2026-06-03): 0x4E STARBASE_REQUEST (8 frames),
+      client->server, the docked-station request (leave/talk-to-NPC/job-terminal/
+      accept-job/customise). 9-byte struct StarbaseRequest {int32 PlayerID; int32
+      StarbaseID; char Action}, ALL LITTLE-ENDIAN. Player::HandleStarbaseRequest
+      (PlayerConnection.cpp:9854) reads pkt->PlayerID, pkt->StarbaseID and
+      switch(pkt->Action) DIRECTLY -- no ntohl anywhere in the handler -- so the two
+      int32s are host-order LE and Action is a single byte. Action map: 1 leave
+      station, 4 talk to NPC, 6 activate job terminal, 7 job description, 8/9 accept
+      job, 10 customise avatar, 11 customise starship. Byte order corroborated by the
+      capture: across the session's eight 0x4E frames every PlayerID/StarbaseID is a
+      small sane LE id (5150/10001/10012/15077, 2939/45151/...) and every Action is
+      valid {1,4}; BE would make all ids absurd (0x1E140000+). PlayerID 5150 in
+      session .44:3029 is the SAME avatar the same session's 0x05 START / 0x06
+      START_ACK carry as their LE StartID -- a cross-packet byte-order lock.
+      StarbaseID is a context id (NPC target/job id/sector) whose meaning depends on
+      Action. Files: Records/StarbaseRequestRecord.cs + 1 registry line.
+      capture3-records.txt 105->107 frames (talk_npc #636 + leave_station #18830);
+      3 tests (LE render+action-name, leave-station Action 1 + StarbaseID 10521 LE,
+      PlayerID-matches-StartID cross-session lock); full UnitTests suite 598 green.
+      CLI decode-only.
 - [ ] 0x98 GALAXY_MAP_REQUEST -- DEFERRED. 64-byte request body, but
       Player::HandleGalaxyMapRequest() takes NO data argument and just replies
       SendOpcode(GALAXY_MAP_CACHE, 0, 0) -- the server discards the entire request
@@ -1797,14 +1817,13 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       0x12/0x13/0x14, batch-8 0x46, batch-9 0x21/0x22, batch-10 0x27, batch-11 0x9B,
       batch-12 0x1F, batch-13 0xA3, batch-14 0x44, batch-15 0x28, batch-16 0x9F,
       batch-17 0xA0, batch-18 0x55, batch-19 0x7C, batch-20 0x35, batch-21 0x1A,
-      batch-22 0x06, batch-23 0x02, batch-24 0x7E
+      batch-22 0x06, batch-23 0x02, batch-24 0x7E, batch-25 0x4E
       (0x64/0x6A/0x20/0x66 already had decoders). The "single-digit long tail" note
       written after batch-9 was WRONG -- a re-tally proved several mid-frequency
-      opcodes still fall through. The registry now decodes 83 opcodes. A fresh
+      opcodes still fall through. The registry now decodes 84 opcodes. A fresh
       capture_3 tally (zero-padded, cross-referenced against the registry) gives the
       accurate undecoded remainder, highest first:
-        - 0x4E                       (8)   -- NEXT
-        - 0x58                       (7)
+        - 0x58                       (7)   -- NEXT
         - 0xA4                       (6)
         - then a 1-2 frame singleton tail (0xBD/0x79/0x5F/0x5D/0xBF/0xBE/0xBC/0xB9/
           0x87/0x5E/0x33 ...) -- genuine diminishing returns, decode opportunistically.

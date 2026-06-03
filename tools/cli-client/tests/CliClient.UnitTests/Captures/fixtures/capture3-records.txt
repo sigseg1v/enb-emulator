@@ -1069,3 +1069,15 @@ provenance: ManufactureAction 0x7E (client->server) -- GameID 10012 (0x0000271C)
 opcode: 0x7E
 payload-bytes: 8
 hex: 00 00 27 1c 00 00 00 00
+
+[starbaserequest_talk_npc]
+provenance: Starbase_Request 0x4E (client->server) -- PlayerID 5150 (0x0000141E), StarbaseID 2939 (0x0B7B), Action 4 = talk to NPC (capture_3.rar packet #636, Client->Server, 159.153.232.44:3029). 9-byte struct StarbaseRequest {int32 PlayerID; int32 StarbaseID; char Action}, ALL LITTLE-ENDIAN. Player::HandleStarbaseRequest (PlayerConnection.cpp:9854) reads pkt->PlayerID, pkt->StarbaseID and switch(pkt->Action) directly -- NO ntohl anywhere -- so the int32s are host-order LE and Action is a single byte. Across the session's eight 0x4E frames every PlayerID/StarbaseID is a small sane LE id and every Action is valid {1,4}; big-endian would make them absurd. PlayerID 5150 here is the SAME avatar the same .44:3029 session's 0x05 START / 0x06 START_ACK carry as their LE StartID -- the cross-packet byte-order lock.
+opcode: 0x4E
+payload-bytes: 9
+hex: 1e 14 00 00 7b 0b 00 00 04
+
+[starbaserequest_leave_station]
+provenance: Starbase_Request 0x4E (client->server) -- PlayerID 5150 (0x0000141E), StarbaseID 10521 (0x00002919), Action 1 = leave station (capture_3.rar packet #18830, Client->Server, 159.153.232.44:3029). Same session/player as starbaserequest_talk_npc; Action 1 launches the player into space (HandleStarbaseRequest case 1). Pins the Action enum across two distinct values (1 and 4) and re-confirms PlayerID 5150 LE. StarbaseID 10521 matches the same session's LOGIN ToSectorID -- the home sector -- corroborating the LE read.
+opcode: 0x4E
+payload-bytes: 9
+hex: 1e 14 00 00 19 29 00 00 01
