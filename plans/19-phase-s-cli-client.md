@@ -1866,6 +1866,30 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       decode, response echoes-SourceID + pins retail RequestType 0x0F, cross-frame
       same-SourceID only-LE proof); full UnitTests suite 608 green. CLI decode-only;
       no server change.
+- [x] batch-29: 0x0079 MANUFACTURE_ITEM_CATAGORY (8B, BE) + 0x005D EQUIP_USE (6B,
+      LE) + 0x0087 MISSION_DISMISSAL (8B, BE) -- three small fixed-size client->server
+      structs, each grounded in its handler. 0x79 -> Player::HandleManufactureTerminal
+      (PlayerConnection.cpp:519 -> PlayerManufacturing.cpp:25): struct ManufactureData
+      {int32 GameID, int32 Data}, BOTH BE (handler ntohl's Data, switches it as the
+      terminal mode 0/1/2/4 = exit/MANUFACTURE/ANALIZE/REFINE). Same struct + byte order
+      as the already-decoded 0x7E; the captured terminal id 10012 (00 00 27 1C BE) is
+      the SAME terminal the session's 0x7E carries. 0x5D -> Player::HandleEquipUse
+      (PlayerConnection.cpp:4556): struct EquipUse {int32 GameID, char InvNum, char
+      InvSlot}, all LE; the handler consumes ONLY InvSlot (m_Equip[InvSlot].
+      ManualActivate(), a raw char index -- order-independent), and GameID is LE because
+      it is the EXACT id (3854004 = B4 CE 3A 00 LE) carried by the two 0x58
+      SKILL_ABILITY frames immediately bracketing this packet in the same
+      159.153.232.99:3367 session (one is the skillability_index_44 fixture) -- same
+      ship, same session. 0x87 -> Player::HandleMissionDismissal
+      (PlayerConnection.cpp:11013): struct MissionDismissal {int32 PlayerID, int32
+      MissionID}, BOTH BE (handler ntohl's both); captured PlayerID 10045 / MissionID 2
+      big-endian are sane, little-endian would be hundred-million values. Files:
+      Records/ManufactureItemCategoryRecord.cs + Records/EquipUseRecord.cs +
+      Records/MissionDismissalRecord.cs + 3 registry lines. capture3-records.txt 114->117
+      frames (manufacture_itemcat_refine #16431, equip_use_slot3 #19248,
+      mission_dismiss_mission2 #22805); 5 content tests (mode-refine BE,
+      gameid-matches-0x7E, equip LE slot3, gameid-identical-to-bracketing-0x58,
+      mission-dismiss BE); full UnitTests suite 613 green. CLI decode-only.
 - [ ] 0x98 GALAXY_MAP_REQUEST -- DEFERRED. 64-byte request body, but
       Player::HandleGalaxyMapRequest() takes NO data argument and just replies
       SendOpcode(GALAXY_MAP_CACHE, 0, 0) -- the server discards the entire request
@@ -1889,14 +1913,15 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       batch-12 0x1F, batch-13 0xA3, batch-14 0x44, batch-15 0x28, batch-16 0x9F,
       batch-17 0xA0, batch-18 0x55, batch-19 0x7C, batch-20 0x35, batch-21 0x1A,
       batch-22 0x06, batch-23 0x02, batch-24 0x7E, batch-25 0x4E, batch-26 0x58,
-      batch-27 0xA4, batch-28 0xBC/0xBD
+      batch-27 0xA4, batch-28 0xBC/0xBD, batch-29 0x79/0x5D/0x87
       (0x64/0x6A/0x20/0x66 already had decoders). The "single-digit long tail" note
       written after batch-9 was WRONG -- a re-tally proved several mid-frequency
-      opcodes still fall through. The registry now decodes 88 opcodes. A fresh
+      opcodes still fall through. The registry now decodes 91 opcodes. A fresh
       capture_3 tally (zero-padded, cross-referenced against the registry) gives the
       accurate undecoded remainder, highest first:
-        - a 1-2 frame singleton tail (0x79/0x5F/0x5D/0xBF/0xBE/0xB9/
-          0x87/0x5E/0x33 ...) -- NEXT; genuine diminishing returns, decode opportunistically.
+        - a 1-2 frame singleton tail (0x5F/0xBF/0xBE/0xB9/0x5E/0x33 ...) -- NEXT;
+          genuine diminishing returns, decode opportunistically. 0x5E/0x5F/0x33 form
+          the chat/emote family (see Phase Z divergence note on 0x5F byte@2).
       0x98 examined and DEFERRED (server discards the request body -- no parser to
       ground a decode; see below).
       Each must be grounded in its server emitter/parser for byte order before

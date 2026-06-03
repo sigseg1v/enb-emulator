@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllOneHundredFourteenFrames()
+    public void Fixture_Loads_AllOneHundredSeventeenFrames()
     {
-        Assert.Equal(114, Frames.Count);
+        Assert.Equal(117, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -193,6 +193,12 @@ public sealed class RetailRecordDecodeTests
         Assert.Equal(12, Frames["cta_request_groupaction5"].Payload.Length);
         Assert.Equal(0xBD, Frames["cta_response_requesttype0f"].Opcode);
         Assert.Equal(9, Frames["cta_response_requesttype0f"].Payload.Length);
+        Assert.Equal(0x79, Frames["manufacture_itemcat_refine"].Opcode);
+        Assert.Equal(8, Frames["manufacture_itemcat_refine"].Payload.Length);
+        Assert.Equal(0x5D, Frames["equip_use_slot3"].Opcode);
+        Assert.Equal(6, Frames["equip_use_slot3"].Payload.Length);
+        Assert.Equal(0x87, Frames["mission_dismiss_mission2"].Opcode);
+        Assert.Equal(8, Frames["mission_dismiss_mission2"].Payload.Length);
     }
 
     // ── ItemBase 0x25 ────────────────────────────────────────────────────────
@@ -2969,5 +2975,89 @@ public sealed class RetailRecordDecodeTests
         Assert.Equal(5, reqAction);
         Assert.Equal(0x0F, respField4);                            // retail constant, != request Action
         Assert.NotEqual(reqAction, respField4);
+    }
+
+    // ── Manufacture terminal-mode 0x79 ───────────────────────────────────────
+    // Same struct/byte order as the already-decoded 0x7E (ManufactureData, BE):
+    // GameID 10012 big-endian is the same terminal the session's 0x7E carries.
+
+    [Fact]
+    public void ManufactureItemCategory_BigEndian_RefineMode()
+    {
+        string d = Dump("manufacture_itemcat_refine");
+
+        Assert.Contains("[0000] GameID", d);
+        Assert.Contains("0x0000271C", d);                          // 00 00 27 1C BE == 10012
+        Assert.Contains("[0004] Terminal", d);
+        Assert.Contains("= 4", d);
+        Assert.Contains("MODE_REFINE", d);
+        Assert.Contains("ntohl", d);
+        Assert.DoesNotContain("???", d);
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void ManufactureItemCategory_GameId_MatchesSessionManufactureAction()
+    {
+        // The 0x79 terminal id is the same 10012 the 0x7E ManufactureAction carries,
+        // both big-endian -- the cross-opcode consistency that pins the byte order.
+        var f = Frames["manufacture_itemcat_refine"];
+        int gameIdBe = System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(f.Payload.AsSpan(0, 4));
+        int terminalBe = System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(f.Payload.AsSpan(4, 4));
+        Assert.Equal(10012, gameIdBe);
+        Assert.Equal(4, terminalBe);                               // MODE_REFINE
+    }
+
+    // ── Equip use 0x5D ───────────────────────────────────────────────────────
+    // InvSlot is the only field the handler consumes (a raw char index); GameID is
+    // little-endian, identical to the bracketing 0x58 frames in the same session.
+
+    [Fact]
+    public void EquipUse_LittleEndian_Slot3()
+    {
+        string d = Dump("equip_use_slot3");
+
+        Assert.Contains("[0000] GameID", d);
+        Assert.Contains("0x003ACEB4", d);                          // B4 CE 3A 00 LE == 3854004
+        Assert.Contains("[0004] InvNum", d);
+        Assert.Contains("[0005] InvSlot", d);
+        Assert.Contains("ManualActivate", d);
+        Assert.DoesNotContain("???", d);                           // all 6 bytes decoded
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void EquipUse_GameId_IdenticalToBracketingSkillAbilityFrames()
+    {
+        // The 0x5D GameID is the exact id (3854004) the same .99:3367 session's
+        // 0x58 SKILL_ABILITY frames carry -- only little-endian gives that value.
+        var equip = Frames["equip_use_slot3"];
+        var skill = Frames["skillability_index_44"];
+        int equipIdLe = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(equip.Payload.AsSpan(0, 4));
+        int skillIdLe = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(skill.Payload.AsSpan(0, 4));
+        Assert.Equal(3854004, equipIdLe);
+        Assert.Equal(equipIdLe, skillIdLe);
+        Assert.Equal(3, equip.Payload[5]);                         // InvSlot, the consumed field
+    }
+
+    // ── Mission dismissal 0x87 ───────────────────────────────────────────────
+    // Both fields big-endian: HandleMissionDismissal ntohl's PlayerID and MissionID.
+
+    [Fact]
+    public void MissionDismissal_BigEndian_Mission2()
+    {
+        string d = Dump("mission_dismiss_mission2");
+
+        Assert.Contains("[0000] PlayerID", d);
+        Assert.Contains("0x0000273D", d);                          // 00 00 27 3D BE == 10045
+        Assert.Contains("[0004] MissionID", d);
+        Assert.Contains("= 2", d);
+        Assert.Contains("MissionDismiss", d);
+        Assert.DoesNotContain("???", d);
+        Assert.DoesNotContain("[!]", d);
+
+        var f = Frames["mission_dismiss_mission2"];
+        Assert.Equal(10045, System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(f.Payload.AsSpan(0, 4)));
+        Assert.Equal(2, System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(f.Payload.AsSpan(4, 4)));
     }
 }

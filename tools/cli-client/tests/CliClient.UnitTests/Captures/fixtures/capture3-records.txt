@@ -1178,3 +1178,21 @@ provenance: CTA_RESPONSE 0x00BD (server->client) -- SourceID 1473672 (0x00167C88
 opcode: 0x00BD
 payload-bytes: 9
 hex: 88 7c 16 00 0f 00 00 00 01
+
+[manufacture_itemcat_refine]
+provenance: capture_3.rar packet #16431 (Client->Server) -- select MODE_REFINE at manufacture terminal 10012
+opcode: 0x0079
+payload-bytes: 8
+hex: 00 00 27 1C 00 00 00 04
+
+[equip_use_slot3]
+provenance: capture_3.rar packet #19248 (Client->Server) -- manually activate equipped item in slot 3; GameID identical to the bracketing 0x58 frames in the same .99:3367 session
+opcode: 0x005D
+payload-bytes: 6
+hex: B4 CE 3A 00 02 03
+
+[mission_dismiss_mission2]
+provenance: capture_3.rar packet #22805 (Client->Server) -- dismiss mission id 2
+opcode: 0x0087
+payload-bytes: 8
+hex: 00 00 27 3D 00 00 00 02
