@@ -41,7 +41,7 @@ static int BaseSpeed[] =        {155,  177,  206,  137,  155,  177,  124,  137, 
 static int BaseMass[] =			{40,   35,   30,   45,   40,   35,   50,   45,   40}; // +5 per hull upgrade
 static int BaseManeuver[]=		{70,   60,   50,   70,   60,   50,   80,   70,   60}; // -5 per hull upgrade
 
-#ifdef USE_MYSQL_ITEMS
+#ifdef USE_PG_ITEMS
    static char * BaseShield[] =    {"Repulsion Field Generator", "Reflection Field Generator", "Absorption Field Generator"};
    static char * BaseReactor[] =   {"Terran Chemical Reactor", "Jenquai Compression Reactor", "Progen Radium Reactor"};
    static char * BaseEngine[] =    {"InfinitiCorp XR-24-36-G", "Compression Thrusters", "Chemical Thrusters"};

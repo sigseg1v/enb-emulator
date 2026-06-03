@@ -115,7 +115,7 @@ if(NOT CRYPTOPP_FOUND)
     endif()
 endif()
 
-# Phase N: server/src/mysql/mysqlplus.cpp is now libpqxx-backed. libpqxx
+# Phase N: server/src/db/sqlplus.cpp is now libpqxx-backed. libpqxx
 # pulls libpq in transitively (and ships its own pkg-config / CMake
 # config), so we just need libpqxx.
 find_package(PostgreSQL REQUIRED)

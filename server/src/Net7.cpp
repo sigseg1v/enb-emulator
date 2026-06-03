@@ -53,9 +53,9 @@ char g_Ticket_User[MAX_PATH];
 char g_Ticket_Pass[MAX_PATH];
 char g_Ticket_Host[MAX_PATH];
 char g_Ticket_DB[MAX_PATH];
-char g_MySQL_User[MAX_PATH];
-char g_MySQL_Pass[MAX_PATH];
-char g_MySQL_Host[MAX_PATH];
+char g_DB_User[MAX_PATH];
+char g_DB_Pass[MAX_PATH];
+char g_DB_Host[MAX_PATH];
 char g_Galaxy_Name[MAX_PATH];
 int g_DASE = 0;
 
@@ -178,9 +178,9 @@ int main(int argc, char* argv[])
 	g_Ticket_User[0] = 0;
 	g_Ticket_Pass[0] = 0;
 	g_Ticket_DB[0] = 0;
-	g_MySQL_Host[0] = 0;
-	g_MySQL_User[0] = 0;
-	g_MySQL_Pass[0] = 0;
+	g_DB_Host[0] = 0;
+	g_DB_User[0] = 0;
+	g_DB_Pass[0] = 0;
 	g_Galaxy_Name[0] = 0;
 	g_DASE = false;
 
@@ -217,18 +217,18 @@ int main(int argc, char* argv[])
 				}
 				if (!strcasecmp(VarName, "mysql_user")) 
                 {
-					strcpy_s(g_MySQL_User, sizeof(g_MySQL_User), Info);
-					g_MySQL_User[sizeof(g_MySQL_User)-1] = '\0';
+					strcpy_s(g_DB_User, sizeof(g_DB_User), Info);
+					g_DB_User[sizeof(g_DB_User)-1] = '\0';
                 }
 				if (!strcasecmp(VarName, "mysql_pass")) 
                 {
-					strcpy_s(g_MySQL_Pass, sizeof(g_MySQL_Pass), Info);
-					g_MySQL_Pass[sizeof(g_MySQL_Pass)-1] = '\0';
+					strcpy_s(g_DB_Pass, sizeof(g_DB_Pass), Info);
+					g_DB_Pass[sizeof(g_DB_Pass)-1] = '\0';
 				}
 				if (!strcasecmp(VarName, "mysql_host")) 
                 {
-					strcpy_s(g_MySQL_Host, sizeof(g_MySQL_Host), Info);
-					g_MySQL_Host[sizeof(g_MySQL_Host)-1] = '\0';
+					strcpy_s(g_DB_Host, sizeof(g_DB_Host), Info);
+					g_DB_Host[sizeof(g_DB_Host)-1] = '\0';
 				}
 				if (!strcasecmp(VarName, "ticket_user")) 
                 {
@@ -293,7 +293,7 @@ int main(int argc, char* argv[])
 	}
 
 #ifdef SQL_ENABLE
-	printf("MySQL: Host: %s, User: %s\n", g_MySQL_Host, g_MySQL_User);
+	printf("Database: Host: %s, User: %s\n", g_DB_Host, g_DB_User);
 	printf("Ticket: Host: %s, User: %s\n", g_Ticket_Host, g_Ticket_User);
 #endif
 	// make sure logs directory exists

@@ -26,13 +26,13 @@
 #include "PlayerClass.h"
 #include "ServerManager.h"
 #include "StaticData.h"
-#include "mysql/mysqlplus.h"
+#include "db/sqlplus.h"
 #include "SaveManager.h"
 #include "PacketMethods.h"
 #include <float.h>
 
-#ifndef USE_MYSQL_ACCOUNT_DATA
-#error "BUILD ERROR: USE_MYSQL_ACCOUNT IS NOW ESSENTIAL"
+#ifndef USE_PG_ACCOUNT_DATA
+#error "BUILD ERROR: USE_PG_ACCOUNT IS NOW ESSENTIAL"
 #endif
 
 extern sql_connection_c m_SQL_Conn;
@@ -207,7 +207,7 @@ bool Player::LoadPosition()
 // This may be called from the Global Server or Sector Server
 bool Player::ReadSavedData()
 {
-//	sql_connection_c connection( "net7_user", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
+//	sql_connection_c connection( "net7_user", g_DB_Host, g_DB_User, g_DB_Pass);
 	sql_query_c account_query (&m_SQL_Conn);
 
 	bool success = false;
@@ -270,7 +270,7 @@ void Player::SetHullUpgrade()
 //then again, providing we keep the ptr to the database it should be ok just for reloading
 void Player::ReloadSavedData()
 {
-//	sql_connection_c connection( "net7_user", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
+//	sql_connection_c connection( "net7_user", g_DB_Host, g_DB_User, g_DB_Pass);
 	sql_query_c account_query (&m_SQL_Conn);
 	sql_result_c account_result;
     sql_row_c account_row;

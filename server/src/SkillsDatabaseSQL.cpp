@@ -19,10 +19,10 @@
 
 #include "Net7.h"
 
-#ifdef USE_MYSQL_SECTOR
+#ifdef USE_PG_SECTOR
 
 #include "SkillsDatabase.h"
-#include "mysql/mysqlplus.h"
+#include "db/sqlplus.h"
 #include "StringManager.h"
 
 
@@ -49,20 +49,20 @@ bool SkillsContent::LoadSkillsContent()
 
 	m_updating = true;
 
-	if(!g_MySQL_User || !g_MySQL_Pass) 
+	if(!g_DB_User || !g_DB_Pass) 
     {
 		LogMessage("You need to set a mysql user/pass in the net7.cfg\n");
 		return false;
 	}
 
-	sql_connection_c connection( "net7", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
+	sql_connection_c connection( "net7", g_DB_Host, g_DB_User, g_DB_Pass);
 	sql_query_c SkillsTable( &connection );
     sql_result_c result;
 	sql_result_c *skill_result = &result;
 
     if ( !SkillsTable.execute_params( "SELECT * FROM `skill_levels`" ) )
     {
-        LogMessage( "MySQL Login error/Database error: (User: %s Pass: %s)\n", g_MySQL_User, g_MySQL_Pass );
+        LogMessage( "Database login error: (User: %s Pass: %s)\n", g_DB_User, g_DB_Pass );
         return false;
     }
     

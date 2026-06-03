@@ -2959,7 +2959,7 @@
 				Name="mySql"
 				>
 				<File
-					RelativePath="mysql\mysqlplus.cpp"
+					RelativePath="db\sqlplus.cpp"
 					>
 					<FileConfiguration
 						Name="Release|Win32"
@@ -2981,7 +2981,7 @@
 					</FileConfiguration>
 				</File>
 				<File
-					RelativePath="mysql\mysqlplus.h"
+					RelativePath="db\sqlplus.h"
 					>
 				</File>
 			</Filter>

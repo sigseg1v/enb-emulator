@@ -99,7 +99,7 @@ private:
 	void	UpdateLoginTime(long account_id);
 
     //Methods for use in NON-SQL mode only
-#ifndef USE_MYSQL_ACCOUNT_DATA
+#ifndef USE_PG_ACCOUNT_DATA
 
     struct _User
     {

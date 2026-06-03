@@ -19,7 +19,7 @@
 
 #include "Net7.h"
 #include "StationLoader.h"
-#include "mysql/mysqlplus.h"
+#include "db/sqlplus.h"
 #include "StringManager.h"
 #include "TalkTreeParser.h"
 #include "ServerManager.h"
@@ -75,7 +75,7 @@ StationLoader::~StationLoader()
 
 int StationLoader::GetStationSectorID(int ObjectID)
 {
-	sql_connection_c connection("net7", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
+	sql_connection_c connection("net7", g_DB_Host, g_DB_User, g_DB_Pass);
 	sql_query_c stnSectorID( &connection );
 	sql_result_c Station_result;
 
@@ -84,7 +84,7 @@ int StationLoader::GetStationSectorID(int ObjectID)
 			"SELECT `gate_to` FROM `sector_objects` WHERE `sector_objects`.`sector_object_id` = ?" ) )
 	{
 		printf("\n");
-		LogMessage( "MySQL Login error/Database error: (User: %s Pass: %s)\n", g_MySQL_User, g_MySQL_Pass );
+		LogMessage( "Database login error: (User: %s Pass: %s)\n", g_DB_User, g_DB_Pass );
 		exit(1);
 		return 0;
 	}
@@ -108,13 +108,13 @@ bool StationLoader::LoadStations()
 	int StationCount = 0;
 	int StationsinDB = 0;
 
-	if(!g_MySQL_User || !g_MySQL_Pass)
+	if(!g_DB_User || !g_DB_Pass)
     {
 		LogMessage("You need to set a mysql user/pass in the net7.cfg\n");
 		return 0;
     }
 
-	sql_connection_c connection("net7", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
+	sql_connection_c connection("net7", g_DB_Host, g_DB_User, g_DB_Pass);
 		sql_query_c stnStations( &connection );
 	sql_result_c Station_result;
 
@@ -125,7 +125,7 @@ bool StationLoader::LoadStations()
 	if ( !stnStations.execute_params( "SELECT * FROM `starbases`" ) )
 	{
 		printf("\n");
-		LogMessage( "MySQL Login error/Database error: (User: %s Pass: %s)\n", g_MySQL_User, g_MySQL_Pass );
+		LogMessage( "Database login error: (User: %s Pass: %s)\n", g_DB_User, g_DB_Pass );
 		exit(1);
 		return 0;
 	}
@@ -223,7 +223,7 @@ void StationLoader::AddRooms(StationTemplate *current_station, long station_id, 
     stnRooms.AddParam(station_id);
     if ( !stnRooms.execute_params( "SELECT * FROM `starbase_rooms` WHERE `starbase_id` = ?" ) )
     {
-        LogMessage( "Error reading with MySQL (Rooms)\n" );
+        LogMessage( "Error reading from database (Rooms)\n" );
         return;
     }
     
@@ -278,7 +278,7 @@ void StationLoader::AddTerminals(StationTemplate *current_station, long room_id,
     stnTerms.AddParam(room_id);
     if ( !stnTerms.execute_params( "SELECT * FROM `starbase_terminals` WHERE `room_id` = ?" ) )
     {
-        LogMessage( "Error reading with MySQL (Terms)\n" );
+        LogMessage( "Error reading from database (Terms)\n" );
         return;
     }
     
@@ -333,7 +333,7 @@ void StationLoader::AddNPCs(StationTemplate *current_station, long room_id, sql_
             " on `starbase_npcs`.`npc_Id` = starbase_vendors.vendor_id"
             " WHERE `room_id` = ?" ) )
     {
-        LogMessage( "Error reading with MySQL (NPCs)\n" );
+        LogMessage( "Error reading from database (NPCs)\n" );
         return;
     }
     
@@ -488,7 +488,7 @@ void StationLoader::AddNPCs(StationTemplate *current_station, long room_id, sql_
                         "SELECT `id`,`itemid`,`sell_price`,`buy_price`,`quanity` FROM `starbase_vender_inventory`"
                         " WHERE  `starbase_vender_inventory`.`groupid` = ?" ) )
                 {
-                    LogMessage( "Error reading with MySQL (Vendors)\n" );
+                    LogMessage( "Error reading from database (Vendors)\n" );
                     return;
                 }
                 

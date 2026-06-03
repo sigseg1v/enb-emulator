@@ -19,7 +19,7 @@
 
 #include "Net7.h"
 
-#ifndef USE_MYSQL_SECTOR
+#ifndef USE_PG_SECTOR
 
 #include "SectorContentParser.h"
 #include "XmlParser.h"

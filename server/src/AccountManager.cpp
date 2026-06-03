@@ -29,10 +29,10 @@
 #include <time.h>
 #include <string>
 #include <sodium.h>
-#include "mysql/mysqlplus.h"
+#include "db/sqlplus.h"
 #include "SaveManager.h"
 
-#ifdef USE_MYSQL_ACCOUNT_DATA
+#ifdef USE_PG_ACCOUNT_DATA
 // Phase X: lazy one-shot libsodium init. sodium_init() is thread-safe
 // and idempotent. Lives outside any single AccountManager method so
 // both ValidateAccount and the mutating paths share it.
@@ -68,15 +68,15 @@ static std::string HashPasswordToPhc(const char *plaintext)
 }
 #endif
 
-#ifdef USE_MYSQL_ACCOUNT_DATA
+#ifdef USE_PG_ACCOUNT_DATA
 sql_connection_c m_SQL_Conn;
 #endif
 
 AccountManager::AccountManager()
 {
     SetupTickets();
-#ifdef USE_MYSQL_ACCOUNT_DATA
-	m_SQL_Conn.connect("net7_user", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
+#ifdef USE_PG_ACCOUNT_DATA
+	m_SQL_Conn.connect("net7_user", g_DB_Host, g_DB_User, g_DB_Pass);
 #else
     m_NumAccounts = 0;
 	LoadAccounts();
@@ -85,7 +85,7 @@ AccountManager::AccountManager()
 
 AccountManager::~AccountManager()
 {
-#ifdef USE_MYSQL_ACCOUNT_DATA
+#ifdef USE_PG_ACCOUNT_DATA
     m_SQL_Conn.disconnect();
 #endif
 
@@ -118,7 +118,7 @@ void AccountManager::SetupTickets()
     memset(m_Tickets->next->next->next->next, 0, sizeof(AccountTicket));
 }
 
-#ifdef USE_MYSQL_ACCOUNT_DATA
+#ifdef USE_PG_ACCOUNT_DATA
 
     void AccountManager::UpdateLoginTime(long account_id)
     {
@@ -1067,7 +1067,7 @@ char * AccountManager::IssueTicket(char *username, char *password)
     }
 
     //If using SQL, update the last login time
-#ifdef USE_MYSQL_ACCOUNT_DATA
+#ifdef USE_PG_ACCOUNT_DATA
     UpdateLoginTime(account);
 #endif
 

@@ -1208,7 +1208,7 @@ bool Player::EditFactionStanding(char *param)
 	// Now change database (this is lazy - should do this via the save manager)
 	SendVaMessageC(12, "Now commiting new faction standing for %s [%.1f] to database.", g_ServerMgr->m_FactionData.GetFactionName(faction_id), new_faction_standing);
 	SendVaMessageC(13, "You will need a //killfactions and then to logoff to change character to see new factions in PDA.");
-	sql_connection_c connection( "net7", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
+	sql_connection_c connection( "net7", g_DB_Host, g_DB_User, g_DB_Pass);
 	sql_query_c FactionUpdate(&connection);
 
 	FactionUpdate.AddParam((double)new_faction_standing);

@@ -19,8 +19,8 @@
 
 #include "Net7.h"
 
-#ifndef USE_MYSQL_SECTOR
-#error "BUILD ERROR: USE_MYSQL_SECTOR IS NOW ESSENTIAL"
+#ifndef USE_PG_SECTOR
+#error "BUILD ERROR: USE_PG_SECTOR IS NOW ESSENTIAL"
 #endif
 
  
@@ -28,7 +28,7 @@
 #include "SectorContentParser.h"
 #include "XmlParser.h"
 #include "SectorData.h"
-#include "mysql/mysqlplus.h"
+#include "db/sqlplus.h"
 #include "ObjectClass.h"
 #include "ObjectManager.h"
 #include "ServerManager.h"
@@ -83,18 +83,18 @@ bool SectorContentParser::ParseSectorContent(long parse_id)
 	MOB *turret;
 	MOBSpawn *mobspawn;
 
-	if(!g_MySQL_User || !g_MySQL_Pass) {
+	if(!g_DB_User || !g_DB_Pass) {
 		printf("You need to set a mysql user/pass in the net7.cfg\n");
 		return 0;
 	}
 
-	sql_connection_c connection( "net7", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
+	sql_connection_c connection( "net7", g_DB_Host, g_DB_User, g_DB_Pass);
 	// Field respawn timers are persisted save-state and live in the net7_user
 	// database, not the net7 content database. Postgres databases are isolated
 	// (unlike MySQL schemas), so the per-field respawn read below cannot run on
 	// the content connection -- it needs its own user-DB handle. SaveManager
 	// already reads/writes this table on net7_user; this matches that.
-	sql_connection_c user_connection( "net7_user", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
+	sql_connection_c user_connection( "net7_user", g_DB_Host, g_DB_User, g_DB_Pass);
 	sql_query_c SectorTb( &connection );
     sql_result_c result;
     sql_result_c object_result;
@@ -113,7 +113,7 @@ bool SectorContentParser::ParseSectorContent(long parse_id)
 
     if ( !SectorTb.execute_params( sql ) )
     {
-        printf( "MySQL Login error/Database error: (User: %s Pass: %s)\n", g_MySQL_User, g_MySQL_Pass );
+        printf( "Database login error: (User: %s Pass: %s)\n", g_DB_User, g_DB_Pass );
         return 0;
     }
     
@@ -252,7 +252,7 @@ bool SectorContentParser::ParseSectorContent(long parse_id)
 
 		if ( !GameObjects.execute_params( game_objects_sql ) )
 		{
-			printf( "MySQL Error (GameObjects)\n" );
+			printf( "Database error (GameObjects)\n" );
 			return 0;
 		}
 
@@ -656,7 +656,7 @@ void SectorContentParser::LoadSystems(sql_connection_c *connection)
 
     if ( !Systems.execute( QueryString ) )
     {
-        printf( "MySQL Error (Reading systems database)\n");
+        printf( "Database error (Reading systems database)\n");
         return;
     }
 
@@ -706,7 +706,7 @@ void SectorContentParser::AddResourceTypes(Object *obj, long resource_id, sql_co
     if ( !Resource_types.execute_params(
             "SELECT * FROM `sector_objects_harvestable_restypes` WHERE `group_id` = ?" ) )
     {
-        printf( "MySQL Error (Reading Resouce types for resource_id %ld)\n", resource_id );
+        printf( "Database error (Reading Resouce types for resource_id %ld)\n", resource_id );
         return;
     }
 
@@ -735,7 +735,7 @@ void SectorContentParser::AddMOBTypes(Object *obj, long object_id, sql_connectio
     Mob_types.AddParam(object_id);
     if ( !Mob_types.execute_params( "SELECT * FROM `mob_spawn_group` WHERE `spawn_group_id` = ?" ) )
     {
-        printf( "MySQL Error (Reading mob_spawn_group types for spawn_group_id %ld)\n", object_id );
+        printf( "Database error (Reading mob_spawn_group types for spawn_group_id %ld)\n", object_id );
         return;
     }
 
@@ -766,7 +766,7 @@ void SectorContentParser::AddFieldOreIDs(Object *obj, long object_id, sql_connec
     if ( !Ore_types.execute_params(
             "SELECT * FROM `sector_objects_harvestable_oretypes` WHERE `resource_id` = ?" ) )
     {
-		printf( "MySQL Error (Reading sector_objects_harvestable_oretypes types for resource_id %ld)\n", object_id );
+		printf( "Database error (Reading sector_objects_harvestable_oretypes types for resource_id %ld)\n", object_id );
         return;
     }
 
@@ -803,7 +803,7 @@ void SectorContentParser::LoadSectorOreAvailability(SectorData *sector, sql_conn
 	Ore_types.AddParam((long)sector->sector_id);
     if ( !Ore_types.execute_params( "SELECT * FROM `base_ore_list` WHERE `sector_id` = ?" ) )
     {
-		printf( "MySQL Error (Reading base_ore_list types for sector %d)\n", sector->sector_id );
+		printf( "Database error (Reading base_ore_list types for sector %d)\n", sector->sector_id );
         return;
     }
 
@@ -882,7 +882,7 @@ void SectorContentParser::LoadAsteroidContentSelection(sql_connection_c *connect
 		if ( !Ore_types.execute_params(
 				"SELECT * FROM `asteroid_content_selection` WHERE `asteroid_type` = ?" ) )
 		{
-			printf( "MySQL Error (Reading asteroid_content_selection types for asteroid_type %d)\n", i );
+			printf( "Database error (Reading asteroid_content_selection types for asteroid_type %d)\n", i );
 			return;
 		}
 

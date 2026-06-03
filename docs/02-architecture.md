@@ -671,8 +671,8 @@ wrapper at `server/src/mysql/`. Example pattern from
 `server/src/ServerManager.cpp:172-186`:
 
 ```c
-sql_connection_c connection( "net7_user", g_MySQL_Host,
-                             g_MySQL_User, g_MySQL_Pass);
+sql_connection_c connection( "net7_user", g_DB_Host,
+                             g_DB_User, g_DB_Pass);
 sql_query_c MissionTable( &connection );
 sql_result_c result;
 sprintf_s(QueryString, sizeof(QueryString),

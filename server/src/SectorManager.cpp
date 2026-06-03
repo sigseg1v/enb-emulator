@@ -543,8 +543,8 @@ void SectorManager::StationLogin2(Player *player)
     sprintf_s(lounge_npc, sizeof(lounge_npc), "LoungeNPC_%d.dat", lounge_npc_id);
     
     if (!player->SendLoungeNPC(m_SectorID))	
-    {	// if we cant find it in MySQL load from file
-        LogMessage("Can't load from MySQL Loading from file (%d)\n", m_SectorID);
+    {	// if we cant find it in the database, load from file
+        LogMessage("Can't load from database, loading from file (%d)\n", m_SectorID);
         player->SendDataFileToClient(lounge_npc);
     }
     

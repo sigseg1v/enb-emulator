@@ -40,7 +40,7 @@ SaveManager::SaveManager()
 {
 	m_SaveBuffer = new CircularBuffer(0x80000, SAVE_SLOTS);  //save buffer is only user of this queue, therefore the 'slots' should be the same in both the buffer and queue
 	m_SaveQueue = new MessageQueue("Save", m_SaveBuffer, SAVE_SLOTS, true); //check queue for any overlap corruption
-	m_SQL_Conn.connect("net7_user", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
+	m_SQL_Conn.connect("net7_user", g_DB_Host, g_DB_User, g_DB_Pass);
 	m_ThreadRunning = false;
 	if (pthread_create(&m_Thread, NULL, &LaunchSaveThread, this) != 0)
 		LogMessage("SaveManager: pthread_create failed (%s)\n", strerror(errno));

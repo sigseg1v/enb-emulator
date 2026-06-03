@@ -1,5 +1,5 @@
 ///////////////////////////////////////////////////////////////////////////////////////
-//// mysqlplus.cpp
+//// sqlplus.cpp
 ///////////////////////////////////////////////////////////////////////////////////////
 //
 // Phase N: libpqxx-backed reimplementation of the 7-class wrapper that
@@ -16,7 +16,7 @@
 //     MySQL-isms in DAO query strings are the responsibility of a later
 //     DAO-migration pass.
 
-#include "mysqlplus.h"
+#include "sqlplus.h"
 #include "Net7.h"
 #include <stdio.h>
 #include <assert.h>
@@ -441,8 +441,8 @@ bool sql_query_c::run_query(char *sql)
 {
     if (execute(sql) == 0 && Error() > 0)
     {
-        LogMySQLMsg("Error executing query:\n\n%s\n\n", sql);
-        LogMySQLMsg("Error #%d: %s\n\n", Error(), ErrorMsg());
+        LogSQLMsg("Error executing query:\n\n%s\n\n", sql);
+        LogSQLMsg("Error #%d: %s\n\n", Error(), ErrorMsg());
         return false;
     }
     return true;
@@ -482,8 +482,8 @@ bool sql_query_c::run_query_params(const char *sql)
 {
     if (execute_params(sql) == 0 && Error() > 0)
     {
-        LogMySQLMsg("Error executing parameterised query:\n\n%s\n\n", sql);
-        LogMySQLMsg("Error #%d: %s\n\n", Error(), ErrorMsg());
+        LogSQLMsg("Error executing parameterised query:\n\n%s\n\n", sql);
+        LogSQLMsg("Error #%d: %s\n\n", Error(), ErrorMsg());
         return false;
     }
     return true;

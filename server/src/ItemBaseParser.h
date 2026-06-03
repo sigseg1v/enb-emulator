@@ -22,8 +22,8 @@
 
 #include "ItemBase.h"
 
-#ifdef USE_MYSQL_ITEMS
-#include "mysql/mysqlplus.h"
+#ifdef USE_PG_ITEMS
+#include "db/sqlplus.h"
 #endif
 
 class ItemBaseParser
@@ -35,7 +35,7 @@ public:
 public:
     bool LoadItemBase(ItemBase **);
 
-#ifdef USE_MYSQL_ITEMS
+#ifdef USE_PG_ITEMS
 private:
 	sql_result_c * ItemBaseParser::SqlQuery(sql_connection_c *connection, char * QueryString);
 	// One-parameter overload: ? placeholder is filled with `param` via the

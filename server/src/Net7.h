@@ -34,13 +34,13 @@
 //#define DEV_QUICK_START  // This is for server devs to quick start a server locally for development. Most sectors will be missing
 
 #ifdef SQL_ENABLE
-    #define USE_MYSQL_ACCOUNT_DATA
-	#define USE_MYSQL_STATIONS
-    #define USE_MYSQL_SECTOR 
-    #define USE_MYSQL_ITEMS
+    #define USE_PG_ACCOUNT_DATA
+	#define USE_PG_STATIONS
+    #define USE_PG_SECTOR 
+    #define USE_PG_ITEMS
 #endif
 
-#ifdef USE_MYSQL_ACCOUNT_DATA
+#ifdef USE_PG_ACCOUNT_DATA
     #define SQL_ACCOUNT_STRING " - SQL Accounts"
 #else
     #define SQL_ACCOUNT_STRING ""
@@ -381,9 +381,9 @@ extern char g_Ticket_User[MAX_PATH];
 extern char g_Ticket_Pass[MAX_PATH];
 extern char g_Ticket_Host[MAX_PATH];
 extern char g_Ticket_DB[MAX_PATH];
-extern char g_MySQL_User[MAX_PATH];
-extern char g_MySQL_Pass[MAX_PATH];
-extern char g_MySQL_Host[MAX_PATH];
+extern char g_DB_User[MAX_PATH];
+extern char g_DB_Pass[MAX_PATH];
+extern char g_DB_Host[MAX_PATH];
 extern int g_DASE;
 extern unsigned long g_SSL_receive_time;
 extern unsigned long g_cumulative_mem;
@@ -395,7 +395,7 @@ void UnlockMessageQueue();
 void LogMessage(const char *format, ...);
 void LogDebug(char *format, ...);
 void LogChatMsg(char *format, ...);
-void LogMySQLMsg(char *format, ...);
+void LogSQLMsg(char *format, ...);
 void DumpBuffer(unsigned char *buffer, int length);
 void DumpBufferToFile(unsigned char *buffer, int length, char *filename, bool rawData);
 unsigned long GetNet7TickCount();

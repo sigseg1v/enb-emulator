@@ -24,7 +24,7 @@
 #include <vector>
 #include "XmlParser.h"
 #include <net7/PacketStructures.h>
-#include "mysql/mysqlplus.h"
+#include "db/sqlplus.h"
 #include "TalkTree.h"
 #include "TalkTreeParser.h"
 

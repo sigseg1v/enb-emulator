@@ -19,7 +19,7 @@
 
 #include "Net7.h"
 
-#ifdef USE_MYSQL_STATIONS
+#ifdef USE_PG_STATIONS
 
 #include "TalkTreeParser.h"
 #include "StringManager.h"

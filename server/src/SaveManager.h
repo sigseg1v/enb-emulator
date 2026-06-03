@@ -22,7 +22,7 @@
 
 #include <net7/Mutex.h>
 #include "MessageQueue.h"
-#include "mysql/mysqlplus.h"
+#include "db/sqlplus.h"
 
 #define SAVE_MESSAGE_MAX_LENGTH 1306	// petitions can be very large (1297)
 #define SAVE_SLOTS				32768

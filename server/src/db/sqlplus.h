@@ -1,5 +1,5 @@
 ///////////////////////////////////////////////////////////////////////////////////////
-//// mysqlplus.h
+//// sqlplus.h
 ///////////////////////////////////////////////////////////////////////////////////////
 //
 // Phase N: this header used to be a thin facade over libmysqlclient. The
@@ -8,12 +8,12 @@
 // `sql_row_c`, `sql_var_c`, `sql_field_c`, `sql_query`) and their method
 // signatures, so every caller in server/src/ tracks transparently.
 //
-// The file name and class names are kept for source-stability reasons.
-// "mysql"plus is a historical misnomer at this point — the wrapper now
-// speaks Postgres.
+// Formerly named mysqlplus.{h,cpp} under server/src/mysql/; renamed to
+// sqlplus.{h,cpp} under server/src/db/ once the backend became Postgres,
+// so the file name stops implying MySQL. It is a libpqxx shim.
 
-#ifndef __MYSQLPLUS_H__
-#define __MYSQLPLUS_H__
+#ifndef __SQLPLUS_H__
+#define __SQLPLUS_H__
 
 #include <net7/Mutex.h>
 #include <cstdint>
@@ -21,7 +21,7 @@
 #define _CRT_SECURE_NO_WARNINGS 1		// Disable Warning messages about new Secure Functions in VS2008
 
 // Forward declarations of the internal libpqxx-backed state. Defined in
-// mysqlplus.cpp; callers see them as opaque pointers only.
+// sqlplus.cpp; callers see them as opaque pointers only.
 struct net7_db_handle;        // wraps pqxx::connection
 struct net7_result_holder;    // wraps pqxx::result
 struct sql_param_bag;         // wraps pqxx::params (parameterised execute)

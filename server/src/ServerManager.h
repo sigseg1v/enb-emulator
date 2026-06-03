@@ -82,7 +82,7 @@ public:
 	SectorManager ** GetSectorManagerList();
 	long	GetSectorCount();
 
-	void	ResetMySQLFileTimer();
+	void	ResetSQLLogFileTimer();
     void    ResetChatFileTimer();
     void    ResetLogFileTimer();
 
@@ -161,10 +161,10 @@ public:
 	long				m_SectorID;
     int                 m_LogFileTimer;
     int                 m_ChatFileTimer;
-	int					m_MySQLFileTimer;
+	int					m_SQLLogFileTimer;
     FILE              * m_LogFile;
     FILE              * m_ChatFile;
-	FILE			  * m_MySQLFile;
+	FILE			  * m_SQLLogFile;
 	bool				m_AllowCreate;
 	bool				m_DumpXML;
 

@@ -19,7 +19,7 @@
 
 #include "Net7.h"
 
-#ifndef USE_MYSQL_ITEMS
+#ifndef USE_PG_ITEMS
 
 #include "ItemBaseParser.h"
 #include "StringManager.h"

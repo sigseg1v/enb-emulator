@@ -45,9 +45,9 @@ ServerManager::ServerManager(bool is_master_server, unsigned long ip_address, sh
     m_LogFileTimer = 0;
     m_LogFile = (0);
     m_ChatFileTimer = 0;
-	m_MySQLFileTimer = 0;
+	m_SQLLogFileTimer = 0;
     m_ChatFile = (0);
-	m_MySQLFile = (0);
+	m_SQLLogFile = (0);
 	m_AllowCreate = false;
 	m_DumpXML = false;
     m_SkillList = (0);
@@ -194,7 +194,7 @@ void ServerManager::RunMasterServer()
 
 	// -------------------  This logs everyone out incase of a crash -----------------
 
-	sql_connection_c connection( "net7_user", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
+	sql_connection_c connection( "net7_user", g_DB_Host, g_DB_User, g_DB_Pass);
 	sql_query_c MissionTable( &connection );
     sql_result_c result;
 	sql_result_c *mission_result = &result;
@@ -233,7 +233,7 @@ void ServerManager::RunMasterServer()
 	m_ItemBaseMgr.Initialize();
 	m_SectorContent.LoadSectorContent();
 
-	// Load Stations from MySQL
+	// Load Stations from database
 	m_StationMgr.LoadStations();
  	
 	SkillLoad.LoadSkills();
@@ -486,15 +486,15 @@ void ServerManager::ServerCheck()
     // Check for messages in the Chat Msg queue
     //===========================================
 
-    if (m_MySQLFileTimer)
+    if (m_SQLLogFileTimer)
     {
 		// if the chat file has been idle for 2 seconds, close it
         m_Mutex.Lock();
-        m_MySQLFileTimer--;
-        if (m_MySQLFileTimer == 0 && m_MySQLFile != NULL)
+        m_SQLLogFileTimer--;
+        if (m_SQLLogFileTimer == 0 && m_SQLLogFile != NULL)
         {
-            fclose(m_MySQLFile);  // close the chat file
-			m_MySQLFile = NULL;   // forget the file handle
+            fclose(m_SQLLogFile);  // close the chat file
+			m_SQLLogFile = NULL;   // forget the file handle
         }
         m_Mutex.Unlock();
     }*/
@@ -653,7 +653,7 @@ short ServerManager::SetSectorServerReady(long sector, bool ready)
 }
 
 // This function formats a message and adds it to the message queue
-void LogMySQLMsg(char *format, ...)
+void LogSQLMsg(char *format, ...)
 {
     char buffer[8192];
     char timestr[20];
@@ -669,19 +669,19 @@ void LogMySQLMsg(char *format, ...)
 	time ( &rawtime );
 	timeinfo = localtime ( &rawtime );
 
-	// Add _MySQL to the log file name
-	sprintf_s(LogFile, sizeof(LogFile), "%s_MySQL", g_LogFilename);
+	// Add _SQL to the log file name
+	sprintf_s(LogFile, sizeof(LogFile), "%s_SQL", g_LogFilename);
 	
 	strftime(timestr, 18, "%d/%m/%y %H:%M:%S",timeinfo);
 
     if (g_ServerMgr)
     {
-        g_ServerMgr->ResetMySQLFileTimer(); //m_ChatFileTimer = 40;
-		g_ServerMgr->m_MySQLFile = OpenLogFile(g_ServerMgr->m_MySQLFile, LogFile);
-		if (g_ServerMgr->m_MySQLFile)
+        g_ServerMgr->ResetSQLLogFileTimer(); //m_ChatFileTimer = 40;
+		g_ServerMgr->m_SQLLogFile = OpenLogFile(g_ServerMgr->m_SQLLogFile, LogFile);
+		if (g_ServerMgr->m_SQLLogFile)
 		{
-			fprintf(g_ServerMgr->m_MySQLFile, "%s %s", timestr , buffer);
-			fflush(g_ServerMgr->m_MySQLFile);
+			fprintf(g_ServerMgr->m_SQLLogFile, "%s %s", timestr , buffer);
+			fflush(g_ServerMgr->m_SQLLogFile);
 		}
     }
 
@@ -724,10 +724,10 @@ void LogChatMsg(char *format, ...)
     }
 }
 
-void ServerManager::ResetMySQLFileTimer()
+void ServerManager::ResetSQLLogFileTimer()
 {
     m_Mutex.Lock();
-    g_ServerMgr->m_MySQLFileTimer = 40;
+    g_ServerMgr->m_SQLLogFileTimer = 40;
     m_Mutex.Unlock();
 }
 

@@ -31,7 +31,7 @@ static void AddData(unsigned char *packet, T mydata, int &index)
 ** Every AddData<long>(...) call (e.g. AddData(pptr, obj->GameID(), index) where
 ** GameID returns long) would otherwise emit 8 bytes on Linux, corrupting every
 ** wire offset downstream. Force 4-byte emission via int32_t cast. Same applies
-** to unsigned long. AccountManager / mysqlplus AddData(field, value) is a
+** to unsigned long. AccountManager / sqlplus AddData(field, value) is a
 ** different (member-function) overload and is unaffected.
 */
 template <>

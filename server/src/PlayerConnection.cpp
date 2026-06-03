@@ -8000,7 +8000,7 @@ void Player::ForceLogout()
 bool Player::HandleBaseItemListCreate()
 {
 	//ok we run a query on the item database, find all the ores and populate the base_ore_list table
-	sql_connection_c connection( "net7", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
+	sql_connection_c connection( "net7", g_DB_Host, g_DB_User, g_DB_Pass);
 	sql_result_c result;
 	sql_result_c *ItemList_result = &result;
 	sql_query_c ItemList  (&connection);
@@ -8072,7 +8072,7 @@ bool Player::HandleAggroSetting(char *param)
 
 		//now save new aggro level in MOB DB
 		SendVaMessage("Now commit setting to database.");
-		sql_connection_c connection( "net7", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
+		sql_connection_c connection( "net7", g_DB_Host, g_DB_User, g_DB_Pass);
 		sql_query_c MobUpdate(&connection);
 
 		MobUpdate.AddParam((long)aggro_level);
@@ -8235,7 +8235,7 @@ void Player::HandleSetTurrets()
 	SendVaMessageC(17,"Setting up turrets. This is done as a one-time op to populate the table to get baseline turrets working.");
 	SendVaMessageC(17,"Factions for turrets and specific MOB_ID (from MOB database/editor) will need to be selected afterwards.");
 
-	sql_connection_c connection( "net7", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
+	sql_connection_c connection( "net7", g_DB_Host, g_DB_User, g_DB_Pass);
 	sql_query_c TurretQuery(&connection);
 
 	sql_result_c result;
@@ -8300,7 +8300,7 @@ void Player::HandleSetRespawns()
 {
 	SendVaMessageC(17,"Setting up Respawns. This is done as a one-time op.");
 
-	sql_connection_c connection( "net7", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
+	sql_connection_c connection( "net7", g_DB_Host, g_DB_User, g_DB_Pass);
 	sql_query_c RespawnQuery(&connection);
 
 	Object *obj;
@@ -8551,7 +8551,7 @@ bool Player::HandleNavChangeRequest(char *param, int option)
 		|| obj->ObjectType() == OT_PLANET || obj->ObjectType() == OT_CAPSHIP
 		|| obj->ObjectType() == OT_STATION) )
 	{
-		sql_connection_c connection( "net7", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
+		sql_connection_c connection( "net7", g_DB_Host, g_DB_User, g_DB_Pass);
 		sql_query_c NavUpdate(&connection);
 		StaticMap *s = (StaticMap*)obj;
 
@@ -8630,7 +8630,7 @@ bool Player::HandleChangeFieldRequest(char *param, int option)
 
 	if (obj && value != 0 && obj->ObjectType() == OT_FIELD)
 	{
-		sql_connection_c connection( "net7", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
+		sql_connection_c connection( "net7", g_DB_Host, g_DB_User, g_DB_Pass);
 		sql_query_c FieldUpdate(&connection);
 		Field *f = (Field*)obj;
 
@@ -8995,7 +8995,7 @@ bool Player::HandleCommitRequest(long Target)
 	{
 		float *ori = obj->Orientation();
 		SendVaMessage("Attempting to commit %s to database.", obj->Name());
-		sql_connection_c connection( "net7", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
+		sql_connection_c connection( "net7", g_DB_Host, g_DB_User, g_DB_Pass);
 		sql_query_c PositionUpdate(&connection);
 
 		const long uid = (long)obj->GetDatabaseUID();
@@ -9633,7 +9633,7 @@ bool Player::HandleBassetRequest(char *param)
 
 bool Player::SendLoungeNPC(long StationID)
 {
-#ifdef USE_MYSQL_STATIONS
+#ifdef USE_PG_STATIONS
 	struct StationLounge LoungeData;
 	unsigned char bufferd[10000];
 	unsigned char *buffer = bufferd;
@@ -9912,7 +9912,7 @@ void Player::HandleStarbaseRequest(unsigned char *data)
 		// Save our current NPC to make it easier to find
 		m_CurrentNPC = NPC;
 
-#ifdef USE_MYSQL_STATIONS
+#ifdef USE_PG_STATIONS
 		// Get talk tree for NPC
 		// and save to m_CurrentTalkTree
 		if (NPC && NPC->NPCInteraction.talk_tree.NumNodes > 0)

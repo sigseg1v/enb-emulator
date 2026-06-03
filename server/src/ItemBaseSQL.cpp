@@ -19,13 +19,13 @@
 
 #include "Net7.h"
 
-#ifdef USE_MYSQL_ITEMS
+#ifdef USE_PG_ITEMS
 
 #include "ItemBaseParser.h"
 #include "StringManager.h"
 #include "XmlParser.h"
 #include "ItemBase.h"
-#include "mysql/mysqlplus.h"
+#include "db/sqlplus.h"
 #include "StringManager.h"
 
 long g_ItemCount;
@@ -104,13 +104,13 @@ bool ItemBaseParser::LoadItemBase(ItemBase ** GlobalDB)
 
 	char * m_DamageType[] = {"Impact", "Explosive", "Plasma", "Energy", "Emp", "Chemical", "Absolute", "System", "Effect"};
 
-	if(!g_MySQL_User || !g_MySQL_Pass) 
+	if(!g_DB_User || !g_DB_Pass) 
 	{
 		printf("You need to set a mysql user/pass in the net7.cfg\n");
 		return false;
 	}
 
-	sql_connection_c connection( "net7", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
+	sql_connection_c connection( "net7", g_DB_Host, g_DB_User, g_DB_Pass);
 	sql_query_c ItemLists( &connection );
 	sql_result_c *ItemList_result = 0;
 	sql_row_c ItemList_Data;
@@ -350,7 +350,7 @@ bool ItemBaseParser::LoadItemBase(ItemBase ** GlobalDB)
 			case 11:
 				{
 					// Execute Query
-					// Phase N: mysqlplus.cpp routes through libpqxx; backtick
+					// Phase N: sqlplus.cpp routes through libpqxx; backtick
 					// identifiers get rewritten to double-quotes so they keep
 					// MySQL's case-insensitive match against the actual column
 					// names. Anything bare gets lowercased by Postgres and

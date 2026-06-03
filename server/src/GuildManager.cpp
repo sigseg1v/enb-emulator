@@ -21,14 +21,14 @@
 #include "PlayerClass.h"
 #include "SaveManager.h"
 #include "PacketMethods.h"
-#include "mysql/mysqlplus.h"
+#include "db/sqlplus.h"
 
 void PlayerManager::LoadGuildsFromSQL()
 {
 	char QueryString[128];
 	int id,rank;
 
-	sql_connection_c connection("net7_user", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
+	sql_connection_c connection("net7_user", g_DB_Host, g_DB_User, g_DB_Pass);
 	sql_query_c GuildQuery(&connection);
     sql_result_c result1,result2,result3;
 	sql_row_c GuildData,RankData,MemberData;

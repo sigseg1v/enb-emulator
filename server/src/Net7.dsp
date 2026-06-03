@@ -694,7 +694,7 @@ SOURCE=.\xmlParser\xmlParser_.cpp
 # PROP Default_Filter ""
 # Begin Source File
 
-SOURCE=.\mysql\mysqlplus.cpp
+SOURCE=.\db\sqlplus.cpp
 
 !IF  "$(CFG)" == "Net7 - Win32 Release"
 
@@ -707,7 +707,7 @@ SOURCE=.\mysql\mysqlplus.cpp
 # End Source File
 # Begin Source File
 
-SOURCE=.\mysql\mysqlplus.h
+SOURCE=.\db\sqlplus.h
 # End Source File
 # End Group
 # Begin Source File
