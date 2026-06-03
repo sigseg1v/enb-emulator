@@ -63,6 +63,48 @@ Net-traffic invariant — read this carefully:
 > loopback or downgrade either middleman's outbound transport to
 > plaintext. See §3.3 for the proof on the auth path.
 
+### Net7Proxy is not a dumb relay (captures are NOT directly client-applicable)
+
+Net7Proxy is an active protocol participant, not a passthrough, and this
+matters every time you touch a capture, a dump, a fixture, or a
+reconstruction. On the server->client leg the proxy:
+
+- **strips and re-frames** -- it peels the 12-byte UDP outer header, walks
+  the packed `[length:u16][opcode:u16][payload]` sub-packets, and re-emits
+  each surviving one over its own client-facing TCP framing. The client
+  never sees the UDP outer header or the server's sub-packet packing.
+- **consumes opcodes the client never sees** -- a whole band of control /
+  proxy-management opcodes (galaxy-map cache `0x2011`, prospect/tractor/loot
+  `0x2012`-`0x2014`, object create `0x2018`/`0x2019`, login-stage confirm
+  `0x2020`, the gate-cache band `0x2025`/`0x202a`/`0x202b`/`0x202d`/`0x202e`,
+  MVAS terminate `0x100a`, ...) are handled inside the proxy and forwarded
+  to the client **never**. Only opcodes `0x01..0xFE` reach the client's
+  game receiver; anything outside that range is consumed or treated as a
+  bad opcode and recovered from.
+- **drops malformed / undersized frames** -- e.g. an aux-data (`0x1b`)
+  frame whose framed length is `< 8` bytes is dropped, not relayed.
+- **rewrites payloads in flight** for a few opcodes (e.g. gate-cache
+  timestamp injection on `0x34`).
+- **generates packets the server never sent** -- resend requests, login
+  handoff, `0x3004`/`0x3008` in-space visibility kicks, the MVAS position
+  feed -- and **reassembles** split packets.
+- **encrypts** -- client<->proxy TCP is Westwood RSA + dual RC4 (§3.1);
+  proxy<->server UDP is cleartext (§3.2).
+
+**Therefore a Net7 server-side packet capture can NOT be applied directly
+to `client.exe`, and a client-side capture can NOT be replayed straight at
+the server**, without first working out which side of the proxy the
+capture was taken on and what the proxy does to that opcode in that
+direction. The proxy's per-opcode behaviour is the source of truth:
+`proxy/UDPProxyToClient_linux.cpp` (`HandleCustomOpcode` +
+`SendClientPacketSequence`) for server->client, and
+`proxy/ClientToServer_linux_stubs.cpp` (`ProcessSectorServerOpcode`) for
+client->server. The committed reference captures are under
+`archive/kyp-snapshot/capturedPackets/`; `proxy/local-debug/` is a
+gitignored, local-only scratch dir for your own working captures, taken on
+the **cleartext proxy<->server UDP leg**, not the encrypted client<->proxy
+leg.
+
 ---
 
 ## 2. Packet framing

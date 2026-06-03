@@ -8,8 +8,6 @@
 #define MAX_QUEUE_BUFFER                8192 //4096
 #define SLOT_RANGE						32
 
-#pragma warning(disable:4786) 
-
 #include <net7/PacketStructures.h>
 #include <vector>
 #include <map>
@@ -85,7 +83,7 @@ public:
     Connection *EstablishTCPConnection(long ip_addr, short port = 0);
 	Connection *EstablishGlobalConnection(long ip_addr);
     void    IncommingOpcodePreProcessing(short opcode, char *msg, short bytes, bool tcp = false); //examine incomming opcodes and react accordingly
-	bool	HandleCustomOpcode(short opcode, char *ptr, u8 *tcp_packet, short &tcp_index);
+	bool	HandleCustomOpcode(short opcode, char *ptr, u8 *tcp_packet, short &tcp_index, short length);
 	u8    * GetQueueBuffer()						{ return m_QueueBuffer; }
 	void	ValidAccount(unsigned char *msg, short len);
 	void	ProcessAvatarList(unsigned char *msg, short len);

@@ -7620,3 +7620,83 @@ cmake-build CI apt blocks (Phase X had added the dep to CMake + Dockerfiles but
 not CI -- commit 513c4b1a) and restored 8 license headers whose © byte had been
 mojibake'd to U+FFFD by an earlier Read->Edit re-encode (commit f92cc129). Both
 verified green. Commits: 513c4b1a, f92cc129, 9f0f62b8.
+
+---
+
+## 2026-06-03 -- Phase AA: proxy is one source tree (not two); S->C opcode-parity Tier-1
+
+CONTEXT: The project owner asked (a) whether the proxy had two implementations
+(a Linux one and a Win32 one) -- "that will be a shitshow to test and maintain"
+-- and (b) for the proxy to match a known-good reference proxy's per-opcode
+behaviour so we can handle the same packet shapes, and (c) for the docs +
+CLAUDE.md to record that the proxy is NOT a dumb relay (so captures are not
+applied directly to client.exe), and (d) to evaluate a C# .NET 10 rewrite, and
+(e) to delete dead code.
+
+DECISION 1 -- ONE source tree, two build targets (no second implementation).
+`proxy/` GLOBs all `*.cpp` and compiles them for both the Linux-native target
+(docker, server-side) and the Win32-PE target (MinGW + static OpenSSL, Phase W,
+runs under WINE next to client.exe -- how real players run it). The five
+`#ifdef NET7_LEGACY_WIN32`-walled files (`UDPProxyToClient.cpp`,
+`UDPProxyToGlobal.cpp`, `UDPProxyMVAS.cpp`, `ClientToSectorServer.cpp`,
+`ClientToGlobalServer.cpp`) were DEAD: the macro is defined nowhere (no
+CMake/toolchain/Makefile/justfile/compose sets it) and the `#ifdef` is the
+file-level outer guard, so they were empty translation units in BOTH builds.
+Deleted them (git rm). Re-verified: Linux-native build links clean (17 .cpp, was
+22), Win32-PE cross-build links clean. The maintained S<->C logic lives in the
+non-walled `UDPProxyToClient_linux.cpp` / `UDPClient_linux.cpp` /
+`ClientToServer_linux_stubs.cpp` + shared `Connection.cpp` / `ServerManager.cpp`
+/ `Net7.cpp`. (`_linux` suffix is now a misnomer; rename queued as cosmetic.)
+
+DECISION 2 -- S->C opcode parity Tier-1 (fidelity TIGHTENS, allowed by CLAUDE.md).
+Audited every opcode the S->C path handles against a known-good reference stream.
+Three changes landed in `UDPProxyToClient_linux.cpp` (+ `UDPClient.h` signature):
+  (i)   0x1b AUX_DATA undersize guard: drop a frame whose framed length < 8
+        (cannot hold a payload word; a client parsing a 0-payload aux record
+        crashes). A well-formed aux frame (>= 8) is forwarded VERBATIM -- the
+        proxy does NOT rewrite aux payloads, which confirms the long-running
+        0x001B AuxPercent shield-form divergence (Phase K Waves 337-339) is
+        purely server-side, not a proxy artifact.
+  (ii)  Forward-gate tighten 1..0x0FFE -> 1..0x00FE. Verified by parsing
+        `common/include/net7/Opcodes.h`: 209 opcode defines, highest game opcode
+        0x00DD, ZERO defined in 0xFF..0xFFE. So the tighten rejects no legitimate
+        game opcode; it only stops stray high opcodes from being blindly relayed
+        to (and crashing) the client. Control opcodes (>= 0x1000) are consumed
+        before the gate.
+  (iii) Consume the 0x2025..0x202e gate-cache band (0x2025/0x202a/0x202b/0x202d/
+        0x202e). The reference consumes these locally and forwards nothing; we
+        were missing them, so post-tighten they would fail the gate, log "bad
+        opcode", and STALL the packet sequence. We do not implement the proxy
+        gate cache, so they are no-ops (gate queries go live to the server -- the
+        safe default and a valid runtime state of the reference proxy).
+Confirmed consumed-set now matches the reference exactly:
+0x100a,0x2011,0x2012,0x2013,0x2014,0x2018,0x2019,0x2020,0x2025,0x202a,0x202b,
+0x202d,0x202e + 0x1b-when-undersize.
+
+C->S (`ProcessSectorServerOpcode`) already matched the reference except 0x4e
+starbase-exit handoff (deferred -- needs launcher handoff; forwarding is safe).
+Tier-2 transforms deferred because forward-unmodified is the SAFE direction:
+0x09/0x0b conditional effect drop, 0x34 gate-cache timestamp inject, the
+gate-cache subsystem.
+
+DECISION 3 -- C# .NET 10 proxy rewrite: FUTURE IDEA, not now (owner-confirmed).
+The C++ proxy already builds Win32-PE for WINE, so a C# proxy removes no WINE
+dependency for players (the client is Win32). A faithful rewrite would re-derive
+Westwood RSA + SSL login + dual RC4 + all framing and re-validate byte-for-byte
+-- high risk to replace working, integration-tested code for an upside (shared
+unit harness) already largely covered by the Phase-T suite. Recorded in
+plans/27-phase-aa-proxy-fidelity.md §5.
+
+DECISION 4 -- docs. Added a "The proxy is NOT a dumb relay" section to CLAUDE.md
+(before the wire-format section, so it is read first on packet work), docs/02 §1,
+docs/03 §1, and a README pcap-replay warning: a server-side capture cannot be
+applied directly to client.exe and a client-side capture cannot be replayed
+straight at the server without accounting for proxy transforms.
+
+INTEGRITY NOTE: No server security posture loosened. The gate tighten and the
+undersize-drop both TIGHTEN the proxy toward the protocol (reject inputs a good
+stream never carried), which CLAUDE.md welcomes. The control-opcode consume is
+match-the-reference behaviour. Sourcing kept neutral throughout (clean-room
+observation of a known-good proxy<->client stream + the committed retail captures
+under `archive/kyp-snapshot/capturedPackets/`, plus local-only working captures in
+the gitignored `proxy/local-debug/` scratch dir).

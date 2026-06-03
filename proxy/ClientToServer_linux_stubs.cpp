@@ -1,25 +1,21 @@
 // ClientToServer_linux_stubs.cpp
 //
-// Phase J/K Linux: dispatchers for the Global and Sector server opcode
-// tables. The real Win32 implementations live in ClientToGlobalServer.cpp
-// (286 LOC, ~15 handlers) and ClientToSectorServer.cpp (757 LOC, ~50+
-// handlers); both are WIN32-walled today because the full ports depend
-// on the UDP plane, MySQL access from the proxy process, and Player
-// lifecycle -- all multi-day items.
+// Client->server opcode dispatchers for the Global and Sector planes.
+// This is the single implementation -- the proxy is one source tree built
+// for both Linux-native and Win32-PE, with no separate per-platform copy.
+// Handlers that don't require per-sector Player state are fully
+// implemented here; the rest consume-and-log the frame so it is handled
+// correctly and operators can see what real clients send.
 //
-// Phase K progressive port: handlers that don't require the per-sector
-// Player state land here as real implementations. The global-plane
-// account / avatar-list / ticket / create / delete chain is wired end
-// to end through proxy::m_UDPGlobalClient (proxy/UDPClient_linux.cpp,
-// peer = UDP_GLOBAL_SERVER_PORT 3810) into server::UDP_Connection::
-// HandleGlobalOpcode (server/src/UDP_Global.cpp). Everything else
-// stays a logging stub so the frame is consumed correctly and operators
-// can see what real clients send.
+// The global-plane account / avatar-list / ticket / create / delete chain
+// is wired end to end through proxy::m_UDPGlobalClient
+// (proxy/UDPClient_linux.cpp, peer = UDP_GLOBAL_SERVER_PORT 3810) into
+// server::UDP_Connection::HandleGlobalOpcode (server/src/UDP_Global.cpp).
 //
-// Current Linux handlers:
+// Handlers:
 //   ProcessGlobalServerOpcode:
 //     0x0000 VersionRequest  -> 0x0001 VersionResponse
-//     0x0035 MasterJoin      -> silent drop (matches Win32 TODO no-op)
+//     0x0035 MasterJoin      -> silent drop
 //     0x006D GLOBAL_CONNECT  -> SendTicket(ticket) -> 0x0070 AvatarList
 //     0x006E GLOBAL_TICKET_REQUEST -> SendAvatarLogin(slot) ->
 //                                     0x006F GlobalTicket
@@ -33,14 +29,7 @@
 //     0x003A SERVER_HANDOFF  -> silent no-op
 //
 // Also defines Connection::GlobalError, Connection::SendGlobalTicket,
-// Connection::ProcessGlobalTicket, Connection::SendAvatarList on Linux
-// (the Win32 versions in ClientToGlobalServer.cpp are walled off and
-// would otherwise leave these as undefined symbols).
-//
-// This file is Linux-only (the WIN32 build picks up the real dispatch
-// from ClientToGlobalServer.cpp / ClientToSectorServer.cpp).
-
-#ifndef NET7_LEGACY_WIN32
+// Connection::ProcessGlobalTicket, Connection::SendAvatarList.
 
 #include "Net7.h"
 #include "Connection.h"
@@ -526,5 +515,3 @@ void Connection::ProcessSectorServerOpcode(short opcode, short bytes)
             opcode, bytes, (char *) m_RecvBuffer);
     }
 }
-
-#endif // !WIN32

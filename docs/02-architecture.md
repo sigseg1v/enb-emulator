@@ -66,19 +66,69 @@ A running deployment has between three and five distinct processes:
 
 The `server` binary is built from `server/src/`. The `login` binary
 (historically `Net7SSL.exe`) is built from `login-server/Net7SSL/`. The
-`proxy` binary is built from `proxy/` and runs on the client side — it
+`proxy` binary is built from `proxy/` and runs on the client side -- it
 is what the Earth & Beyond game client actually talks to, because the
-client expects a TCP connection to a local address and this fork moved
-most of the traffic to UDP. The proxy translates between the two.
+client expects an (encrypted) TCP connection to a local address and this
+fork moved most of the server traffic to UDP. The proxy translates
+between the two, and it does far more than translate (see "The proxy is
+not a dumb relay" below).
 
-All three binaries are first-class Linux executables. There is no WINE
-involved on the server side. The legacy TCP cluster
-(`Connection.cpp`, `ConnectionManager.cpp`, `ClientToGlobalServer.cpp`,
-`ClientToMasterServer.cpp`, `ClientToSectorServer.cpp`,
-`TcpListener.h`, `SSL_Listener.cpp`, `SSL_Connection.cpp`) was deleted
-in Phase Q (15 files, 2026-05-23) once it was confirmed dead on Linux.
-Everything that actually goes anywhere is UDP, dispatched through
-`server/src/UDP_*.cpp`.
+The `server` and `login` binaries are first-class Linux executables;
+there is no WINE on the server side. The `proxy` is built from a single
+cross-platform source tree and ships as **one implementation, two build
+targets**:
+
+- **Linux-native** (system OpenSSL) -- the docker `proxy` service, used
+  server-side for our CLI/integration harness.
+- **Win32 PE** (`x86_64-w64-mingw32-g++` via
+  `proxy/cmake/mingw-w64-x86_64.toolchain.cmake`, static OpenSSL) -- the
+  client-side build that runs in the same WINE prefix as `client.exe`,
+  which is how real players run it (the client is a Win32 binary, so the
+  proxy lives alongside it under WINE or on native Windows).
+
+There is no second, platform-forked copy of the proxy: both targets
+compile the same `proxy/*.cpp`. The old `NET7_LEGACY_WIN32`-walled twin
+files (`UDPProxyToClient.cpp`, `UDPProxyToGlobal.cpp`, `UDPProxyMVAS.cpp`,
+`ClientToSectorServer.cpp`, `ClientToGlobalServer.cpp`) were dead code --
+the macro was never defined in any build, so they compiled to empty
+translation units -- and were deleted; the maintained logic lives in
+`UDPProxyToClient_linux.cpp`, `UDPClient_linux.cpp`,
+`ClientToServer_linux_stubs.cpp`, and the shared `Connection.cpp` /
+`ServerManager.cpp` / `Net7.cpp`. (The `_linux` suffix is now a misnomer;
+those files are the cross-platform single source.)
+
+The server's own legacy TCP cluster was deleted in Phase Q (2026-05-23)
+once it was confirmed dead on Linux; everything that goes anywhere on the
+server side is UDP, dispatched through `server/src/UDP_*.cpp`. The proxy
+keeps its own client-facing TCP terminator (`Connection.cpp`,
+`SSL_Listener.cpp`, `SSL_Connection.cpp`, `TcpListener.h`) because it is
+the thing that speaks the client's encrypted TCP.
+
+### The proxy is not a dumb relay
+
+The proxy is an active protocol participant, not a passthrough. On the
+server->client leg it strips the 12-byte UDP outer header, walks the
+packed `[length][opcode][payload]` sub-packets, **consumes** an entire
+band of control / proxy-management opcodes the client never sees
+(galaxy-map cache, prospect/tractor/loot, object create, login-stage
+confirm, the 0x2025..0x202e gate-cache band, MVAS terminate, ...),
+**drops** malformed or undersized frames, **rewrites** a few payloads in
+flight, **generates** packets the server never sent (resend requests,
+login handoff, 0x3004/0x3008 visibility kicks, the MVAS position feed),
+**reassembles** split packets, and **re-frames** everything that survives
+onto its own client-facing TCP framing. Only opcodes `0x01..0xFE` are
+ever forwarded to the client's game receiver; anything else is consumed
+or rejected. It also **encrypts**: client<->proxy TCP is Westwood RSA +
+dual RC4, while proxy<->server UDP is cleartext.
+
+The practical consequence -- spelled out in CLAUDE.md and in
+`docs/03-network-protocol.md` -- is that a Net7 server-side packet capture
+can **not** be applied directly to `client.exe`, and a client-side capture
+can **not** be replayed straight at the server, without first accounting
+for what the proxy does to that opcode in that direction. The proxy's
+per-opcode behaviour (`proxy/UDPProxyToClient_linux.cpp`,
+`proxy/ClientToServer_linux_stubs.cpp`) is the source of truth for that
+mapping.
 
 ### Three roles, one binary
 

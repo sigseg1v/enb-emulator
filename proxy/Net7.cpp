@@ -1,13 +1,9 @@
 // Net7.cpp
 //
-// Phase M: server-native-Linux only. The 2010-era Win32 client-launcher
-// code paths (CreateProcess + Detours + WriteProcessMemory patching of
-// the client) were deleted — Net7Proxy is the server-side TCP entry
-// point for the Westwood RSA+RC4 handshake (MASTER_SERVER_PORT, 3801)
-// and has no business spawning a client. Function declarations remain
-// in proxy/Net7.h so legacy WIN32-walled translation units
-// (UDPProxyMVAS.cpp, UDPProxyToClient.cpp, UDPProxyToGlobal.cpp) still
-// link; the bodies are no-op stubs on Linux.
+// Phase M: server-native build. The 2010-era client-launcher code paths
+// (process spawn + in-memory client patching) were removed -- Net7Proxy
+// is the server-side TCP entry point for the Westwood RSA+RC4 handshake
+// (MASTER_SERVER_PORT, 3801) and has no business spawning a client.
 
 #include "Net7.h"
 #include "ServerManager.h"
@@ -54,13 +50,6 @@ void Usage()
 	printf("Net7Proxy Usage:\n\n");
 	printf("Starts E&B client to interface with server:\n");
 	printf("   Net7Proxy /ADDRESS:(ip address)\n");
-}
-
-// Server-side: the Win32 StartENBClient() spawned ENB.exe + attached
-// Detours. None of that applies on Linux. Stubbed as a no-op success.
-bool StartENBClient()
-{
-    return true;
 }
 
 // SERVER-SIDE main. Net7Proxy here is the TCP entry point for the
@@ -280,20 +269,9 @@ unsigned long GetNet7TickCount()
     return ((Net7TickMs() - g_StartTick) & 0x7FFFFFFF);
 }
 
-// Client-process functions are no-ops server-side. They remain because
-// WIN32-walled translation units (UDPProxyMVAS.cpp, UDPProxyToClient.cpp,
-// UDPProxyToGlobal.cpp) name them in their declarations / dispatch.
-bool GetProcessHandle() { return true; }
-bool engine_open_process(char * /*processwindowtitle*/) { return false; }
-bool engine_read_process(void*, void*, uint32_t) { return false; }
-void PatchClient() { /* no client to patch server-side */ }
-bool ClientStillRunning() { return true; }
+// ShutdownClient is a no-op server-side (there is no game client in this
+// process); kept because the master-server teardown path calls it.
 bool ShutdownClient() { return true; }
-
-void WaitForEngineReady()
-{
-    // Server-side: there is no client engine to wait for.
-}
 
 void WaitForLogin()
 {

@@ -84,9 +84,7 @@
 // (UDPClient.h, which retains its original header).
 //
 // New code is contributed under the project default license
-// (CC BY-NC-SA 3.0 — LICENSES/enb-emulator).
-
-#ifndef NET7_LEGACY_WIN32
+// (CC BY-NC-SA 3.0 -- LICENSES/enb-emulator).
 
 #include "Net7.h"
 #include "UDPClient.h"
@@ -891,5 +889,3 @@ char *UDPClient::DeleteCharacter(long character_slot)
     }
     return NULL;
 }
-
-#endif  // !WIN32

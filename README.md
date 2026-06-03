@@ -138,6 +138,24 @@ sudo nsenter -t <PID> -n tcpdump -i any -nn -s0 -w network-capture.pcap
 
 Dumping the proxy is a good idea as it's unencrypted. You can convert to hex with hexdump -C
 
+> **Net7Proxy is not a dumb relay.** It is an active protocol participant:
+> on the server->client leg it strips the UDP outer header, consumes a
+> whole band of control opcodes the client never sees (galaxy-map cache,
+> prospect/loot, object create, the `0x2025`-`0x202e` gate-cache band, MVAS
+> terminate, ...), drops malformed frames, rewrites a few payloads, fabricates
+> packets the server never sent (resends, login handoff, visibility kicks,
+> the MVAS feed), reassembles split packets, and re-frames everything onto
+> its own encrypted client-facing TCP. Only opcodes `0x01..0xFE` ever reach
+> the client. **So a server-side capture cannot be applied directly to
+> `client.exe`, and a client-side capture cannot be replayed straight at the
+> server**, without first accounting for what the proxy does to that opcode.
+> The proxy's per-opcode behaviour (`proxy/UDPProxyToClient_linux.cpp`,
+> `proxy/ClientToServer_linux_stubs.cpp`) is the source of truth; see
+> `docs/03-network-protocol.md` §1 and CLAUDE.md. (`proxy/local-debug/` is a
+> gitignored scratch dir for your own working captures, taken on the cleartext
+> proxy<->server UDP leg, not the encrypted client<->proxy leg; the committed
+> reference captures live in `archive/kyp-snapshot/capturedPackets/`.)
+
 **Replaying a raw pcap capture (server->proxy UDP traffic):**
 
 The Net-7 server sends sector S2C data as 0x2016/0x201A PACKET_SEQUENCE UDP frames.

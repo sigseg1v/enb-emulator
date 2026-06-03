@@ -83,8 +83,6 @@
 // New code is contributed under the project default license
 // (CC BY-NC-SA 3.0 -- LICENSES/enb-emulator).
 
-#ifndef NET7_LEGACY_WIN32
-
 #include "Net7.h"
 #include "UDPClient.h"
 #include <net7/Opcodes.h>
@@ -883,26 +881,52 @@ void UDPClient::SendLoginPacketSequence(char *msg, EnbUdpHeader *header)
 }
 
 // ---------------------------------------------------------------------------
-// HandleCustomOpcode -- Win32 intercepts a small set of UDP-only opcodes
-// here. The Linux subset:
-//   * 0x2020 LOGIN_STAGE_S_C -- ACK back to the server with 0x2021
+// HandleCustomOpcode -- the proxy's server->client control dispatcher. It
+// runs BEFORE the forward gate and decides, per opcode, whether the proxy
+// consumes the frame (return true -> the client never sees it) or lets it
+// fall through to be forwarded (return false). This mirrors a known-good
+// reference proxy's per-opcode behaviour. What we consume:
+//   * 0x1b AUX_DATA -- DROP only when the framed length is < 8 (undersized
+//     /malformed); a well-formed aux frame falls through and is forwarded
+//     verbatim (the proxy does NOT rewrite aux payloads).
+//   * 0x2020 LOGIN_STAGE_S_C -- ACK back to the server with 0x2021.
 //   * 0x100A MVAS_TERMINATE_S_C -- set g_ShuttingDown so the sequence
-//                                  walker exits; no engine teardown
-//                                  (launcher-side)
-// Everything else (0x2011 galaxy-map cache, 0x2012-0x2014 prospect /
-// tractor / loot, 0x2018-0x2019 static / resource object create) returns
-// false so the caller forwards the raw outer opcode via SendResponse.
-// Those branches all depend on WIN32-walled Queue* helpers in
-// ClientToSectorServer.cpp; porting them is a separate Wave.
+//     walker exits (no launcher-side engine teardown on our side).
+//   * 0x2011/0x2012-0x2014/0x2018/0x2019 launcher-side opcodes -- consume
+//     and drop (cache/prospect/loot/object-create helpers are not wired
+//     here; the reference proxy never forwards them to the client either).
+//   * 0x2025/0x202a/0x202b/0x202d/0x202e -- proxy-control / gate-cache band;
+//     consume and drop (we do not implement the proxy-side gate cache).
+// Everything else returns false and is forwarded subject to the 1..0xFE gate
+// in SendClientPacketSequence.
 // ---------------------------------------------------------------------------
 bool UDPClient::HandleCustomOpcode(short opcode, char *ptr, u8 *tcp_packet,
-                                   short &tcp_index)
+                                   short &tcp_index, short length)
 {
     (void) tcp_packet;
     (void) tcp_index;
 
     switch (opcode)
     {
+    case ENB_OPCODE_001B_AUX_DATA:
+        // Aux-data frames carry a variable-length payload describing other
+        // ships / mobs / hulks in range. A frame whose framed length (the
+        // [length][opcode] header field, which counts the 4-byte header)
+        // is under 8 bytes cannot hold even one payload word -- it is a
+        // truncated / malformed frame. Clean-room observation of a known-
+        // good proxy<->client stream shows the upstream proxy DROPS such
+        // undersized aux frames rather than relaying them; a Win32 client
+        // that parses a 0-payload aux record walks off the end of its
+        // record array and crashes. Consume-and-drop (return true) so the
+        // sequence walker advances past the junk frame. A well-formed aux
+        // frame (length >= 8) falls through to the default and is forwarded
+        // verbatim -- the proxy does NOT rewrite aux payloads.
+        if (length < 8) {
+            LogMessage("UDPClient(Linux): dropping undersized AUX_DATA frame "
+                       "(length 0x%x < 8)\n", (unsigned) length);
+            return true;
+        }
+        return false;
     case ENB_OPCODE_2020_LOGIN_STAGE_S_C:
         HandleStageConfirm(ptr, tcp_packet, tcp_index);
         return true;
@@ -922,15 +946,14 @@ bool UDPClient::HandleCustomOpcode(short opcode, char *ptr, u8 *tcp_packet,
     case ENB_OPCODE_2014_LOOT_ITEM:
     case ENB_OPCODE_2018_STATIC_OBJECT_CREATE:
     case ENB_OPCODE_2019_RESOURCE_OBJECT_CREATE:
-        // Launcher-side responsibility; not implemented on the Linux
-        // server-side proxy. The Win32 proxy consumes these locally
-        // (UDPProxyToClient.cpp HandleCustomOpcode: SendCachedGalaxyMap,
-        // StartProspecting, TractorOre, LootItem, CreateObject,
-        // CreateResource) -- it does NOT forward them over the game-
-        // protocol TCP channel to the client's game receiver. Returning
-        // TRUE marks the opcode as handled-and-dropped so the sequence
-        // walker advances normally. Returning false here previously fell
-        // through to the < 0x0FFF guard at SendClientPacketSequence
+        // Launcher-side responsibility; the cache/prospect/loot/object
+        // helpers are not wired on our side. A known-good reference proxy
+        // consumes these locally (galaxy-map cache, prospecting, tractor,
+        // loot, object create, resource create) and does NOT forward them
+        // over the game-protocol TCP channel to the client's game receiver.
+        // Returning TRUE marks the opcode as handled-and-dropped so the
+        // sequence walker advances normally. Returning false here previously
+        // fell through to the forward gate at SendClientPacketSequence
         // which set terminate=true and STALLED the entire packet sequence
         // (caller marks PACKET_BLANK, never advances m_CurrentPacketNum,
         // every subsequent server reply queues behind the stuck slot until
@@ -939,6 +962,30 @@ bool UDPClient::HandleCustomOpcode(short opcode, char *ptr, u8 *tcp_packet,
         // GALAXY_MAP_REQUEST -- the survival-probe REQUEST_TIME echo
         // could never get past the 0x2011 stuck slot.
         LogVMessage("UDPClient(Linux): launcher-side opcode 0x%04x -- silent drop\n",
+                    (unsigned short) opcode);
+        return true;
+
+    // Gate-cache / proxy-control opcodes in the 0x2025..0x202e band. These
+    // are not named in the opcode catalog because they never reach the
+    // client's game receiver: clean-room observation of a known-good
+    // proxy<->client stream shows the upstream proxy CONSUMES every one of
+    // them locally and forwards NOTHING to the client. They drive a proxy-
+    // side jump-gate destination cache (an optimisation that lets the proxy
+    // answer some gate queries without a server round-trip). We do not
+    // implement that cache, so gate queries always go live to the server --
+    // the safe, lower-throughput default, and a valid runtime state of the
+    // reference proxy (its cache simply stays disabled). The critical point
+    // is that these MUST be consumed here: if they fell through to the
+    // post-gate forward path they would fail the 1..0xFE opcode gate, be
+    // logged as "bad opcode", and STALL the entire packet sequence (the
+    // same failure mode the launcher-side group above documents). Consume
+    // and drop:
+    case 0x2025:   // proxy-control (reference: consume, no client output)
+    case 0x202a:   // proxy-control (reference: consume, no client output)
+    case 0x202b:   // proxy-control no-op (reference: consume, no client output)
+    case 0x202d:   // force gate caching   (no-op while our cache is disabled)
+    case 0x202e:   // enable gate caching  (no-op while our cache is disabled)
+        LogVMessage("UDPClient(Linux): proxy-control opcode 0x%04x -- silent drop\n",
                     (unsigned short) opcode);
         return true;
 
@@ -992,10 +1039,22 @@ bool UDPClient::SendClientPacketSequence(char *msg)
             break;
         }
 
-        if (!HandleCustomOpcode(opcode, ptr + 4, tcp_packet, tcp_index)) {
+        if (!HandleCustomOpcode(opcode, ptr + 4, tcp_packet, tcp_index, length)) {
             LogVMessage("UDPClient(Linux): <SERVER->CLIENT UDP> ----> 0x%04x [0x%x]\n",
                         (unsigned short) opcode, (unsigned) length);
-            if (opcode > 0x0000 && opcode < 0x0FFF) {
+            // Game-opcode gate. The real protocol only ever puts opcodes in
+            // 0x01..0xFE on this forward path; the highest game opcode in the
+            // catalog is 0x00DD and nothing is defined in 0xFF..0xFFE. Clean-
+            // room observation of a known-good proxy<->client stream shows the
+            // upstream proxy ACCEPTS exactly 1..0xFE here and treats anything
+            // else as a bad opcode (recover + abort the packet). We had been
+            // forwarding the whole 1..0xFFE range, which is looser than the
+            // protocol and than the reference -- a stray high opcode (e.g. a
+            // mis-handled control opcode) would be blindly relayed to the
+            // client and crash it. Tighten to 1..0xFE; control opcodes (>=
+            // 0x1000) are already consumed by HandleCustomOpcode above and
+            // never reach this gate.
+            if (opcode > 0x0000 && (unsigned short) opcode <= 0x00FE) {
                 IncommingOpcodePreProcessing(opcode, ptr + 4, length - 4);
                 if (should_drop_s2c((unsigned short) opcode)) {
                     LogVMessage("UDPClient(Linux): bisection: DROP inner 0x%04x [0x%x]\n",
@@ -1095,5 +1154,3 @@ void UDPClient::KillTCPConnection()
 {
     // intentional no-op on Linux
 }
-
-#endif  // !WIN32

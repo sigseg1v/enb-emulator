@@ -199,16 +199,8 @@ void LogDebug(char *format, ...);
 void LogChatMsg(char *format, ...);
 void DumpBuffer(unsigned char *buffer, int length);
 void DumpBufferToFile(unsigned char *buffer, int length, char *filename, bool rawData);
-// engine_* + ClientStillRunning + PatchClient + ShutdownClient are no-op
-// stubs on Linux (server-native build). They remain declared because
-// WIN32-walled translation units name them in their declarations.
-bool engine_open_process(char * processwindowtitle);
-bool engine_read_process(void* lpBaseAddress, void* lpBuffer, uint32_t nSize);
-bool GetProcessHandle();
-bool StartENBClient();
-void PatchClient();
-bool ClientStillRunning();
-void WaitForEngineReady();
+// ShutdownClient is a no-op server-side stub (no game client in this
+// process); kept for the master-server teardown path.
 bool ShutdownClient();
 void WaitForLogin();
 unsigned long GetNet7TickCount();

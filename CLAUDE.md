@@ -155,6 +155,64 @@ If you log something and it doesn't matter, demote it to debug or
 delete the log line. A log line that says "Error" but doesn't mean
 "Error" is a worse bug than a silent failure.
 
+## The proxy is NOT a dumb relay (READ before using ANY capture or dump)
+
+Net7Proxy sits between the EnB client and the server, and it is an active
+protocol participant -- not a passthrough. Treating a server-side packet
+capture as if it were the byte stream the client receives (or vice-versa)
+is wrong and will waste your time. Concretely, on the server<->client path
+the proxy:
+
+- **Strips and re-frames.** Server->client UDP arrives as a 12-byte outer
+  header followed by packed `[length:u16][opcode:u16][payload]` sub-packets.
+  The proxy peels the outer header, walks the sub-packets, and re-emits each
+  one to the client over its own TCP framing. The client never sees the UDP
+  outer header or the server's sub-packet packing.
+- **Consumes opcodes the client never sees.** A whole band of control /
+  proxy-management opcodes (galaxy-map cache, prospect/tractor/loot,
+  static/resource object create, login-stage confirm, the 0x2025..0x202e
+  gate-cache band, MVAS terminate, ...) are handled *inside* the proxy and
+  never forwarded. The client's game receiver only ever sees opcodes
+  `0x01..0xFE`; anything else is consumed, dropped, or treated as a bad
+  opcode and recovered from. A capture full of 0x20xx opcodes does not mean
+  the client ever parsed them.
+- **Drops malformed / undersized frames** (e.g. an aux-data frame whose
+  framed length is < 8 bytes) so the client never has to.
+- **Rewrites payloads in flight** for a few opcodes (gate-cache timestamp
+  injection, etc.) -- the bytes on the server side are not the bytes the
+  client decodes.
+- **Generates packets the server never sent** -- resend requests, login
+  handoff, 0x3004/0x3008 visibility kicks, MVAS position feed -- and
+  reassembles split packets.
+- **Encrypts.** Client<->proxy TCP is Westwood RSA + dual RC4 streams;
+  proxy<->server UDP is cleartext. A cleartext server-side capture has no
+  direct relationship to the on-wire client bytes.
+
+**Consequence for packet work (captures, parsing, reconstruction, dumps,
+fixtures):** a Net7 server-side packet capture can NOT be applied directly
+to `client.exe`, and a client-side capture can NOT be replayed straight at
+the server, without first accounting for what the proxy does to that
+opcode. Before you pin bytes, build a fixture, or "replay a capture,"
+identify which side of the proxy the capture was taken on and what the
+proxy does to that opcode in that direction. The proxy's per-opcode
+behaviour is the single source of truth here: see
+`proxy/UDPProxyToClient_linux.cpp` (server->client demux, `HandleCustomOpcode`
++ `SendClientPacketSequence`) and `proxy/ClientToServer_linux_stubs.cpp`
+(client->server dispatch, `ProcessSectorServerOpcode`). The committed
+reference captures are under `archive/kyp-snapshot/capturedPackets/`;
+`proxy/local-debug/` is a gitignored, local-only scratch dir for your own
+working captures -- when present, those are taken on the cleartext
+proxy<->server UDP leg, NOT the encrypted client<->proxy leg. Read any
+capture knowing which leg it came from.
+
+There is exactly ONE proxy implementation. `proxy/` builds as a single
+cross-platform source tree: Linux-native (server-side, no WINE) for docker,
+and Win32 PE via the MinGW toolchain (`proxy/cmake/mingw-w64-x86_64.toolchain.cmake`)
+for the client side under WINE / native Windows -- which is how real players
+run it. Do not add a second, platform-forked copy of any proxy translation
+unit; fix the one source. (The old `NET7_LEGACY_WIN32`-walled twin files were
+deleted -- they were dead code that only invited drift.)
+
 ## Wire format & byte order (READ before touching ANY packet emitter)
 
 The EnB protocol predates portable serialization. Almost every packet
