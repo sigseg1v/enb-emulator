@@ -21,7 +21,11 @@ CLAUDE.md welcomes.
 ## Status
 
 In progress -- 2026-06-03. Wave 1 (opcode parity Tier-1 + dead-twin
-deletion + docs) landed. Tier-2 transforms deferred with criteria below.
+deletion + docs) landed. Wave 2 diffed the full S->C and C->S opcode maps
+against a known-good reference proxy<->client stream: the S->C consume /
+forward / side-effect sets match exactly, and the one C->S behavioural
+divergence (TURN/TILT throttled unconditionally instead of only-while-
+moving) is fixed. Tier-2 transforms deferred with criteria below.
 
 ---
 
@@ -127,20 +131,75 @@ Full confirmed consumed-set (all return "handled"):
 falls through to the `1..0xFE` forward gate. This matches the reference
 control dispatcher exactly.
 
-## 3. Client->server opcode parity (audited -- Wave 1)
+**Wave 2 -- S->C forward-handler (post-gate) per-opcode verification.**
+After the custom dispatcher passes a `0x01..0xFE` opcode, the reference runs
+a forward handler that decides FORWARD vs CONSUME and applies side-effects.
+Diffed every case:
 
-`ProcessSectorServerOpcode` (`ClientToServer_linux_stubs.cpp`) already
-matches the reference C->S handler for: `0x02` LOGIN, `0x06` START_ACK
-(forward + 0x3004/0x3008 visibility), `0x12` TURN / `0x13` TILT (250 ms
-throttle when moving), `0x14` MOVE, `0x2c` ACTION, `0x9b` WARP, `0x9f`
-STARBASE_ROOM_CHANGE, `0xb9` LOGOFF, `0x3a` HANDOFF, default -> forward.
+- `0x3a` SERVER_HANDOFF and `0xba` LOGOFF_CONFIRMATION both FORWARD to the
+  client (the handler returns "forward") *after* applying connection-state
+  side-effects (clear the connection-active flags, reset the sequence
+  reassembly state on handoff, clear player-id + drive the UI to character
+  selection on logoff). We mirror this exactly: our
+  `UDPClient::IncommingOpcodePreProcessing` applies the same side-effects and
+  the opcode is then forwarded verbatim through the gate. CONFIRMED MATCH --
+  these are *not* consumed, contrary to a first reading.
+- `0x09` / `0x0b` (timed static / obj2obj effects) are conditionally
+  CONSUMED when the effect carries a positive/short-band duration (the
+  reference re-emits them on its own timer). We forward both unconditionally.
+  See §4 -- still deferred; forwarding-extra is the safe direction and the
+  exact duration predicate wants a capture before we add a drop.
+- `0x34` gate-cache timestamp REWRITE -- §4 deferred (gate-cache subsystem
+  not implemented; the rewrite source is inert without it).
+- `0x04` / `0x07` basset-tracking snoops are gated on the reference's
+  large-packet mode flag (never enabled in our runtime), so they are inert;
+  we forward both verbatim. No action.
 
-- [!] **`0x4e` starbase-exit handoff** is the one missing C->S case. The
-      reference, when an in-starbase flag is set, logs "Leaving Starbase"
-      and issues a launcher handoff request. Deferred: it depends on
-      proxy-internal starbase state + the launcher handoff path, neither of
-      which is wired on our side yet. Forwarding `0x4e` (current behaviour)
-      is the safe direction. Unblock when the launcher handoff lands.
+## 3. Client->server opcode parity (Tier-1, DONE -- Wave 2)
+
+Diffed `ProcessSectorServerOpcode` (`ClientToServer_linux_stubs.cpp`)
+case-for-case against a known-good reference C->S sector dispatch. The
+reference handles exactly `0x02` LOGIN, `0x06` START_ACK, `0x12` TURN,
+`0x13` TILT, `0x14` MOVE, `0x2c` ACTION, `0x4e` starbase-exit, `0x9b` WARP,
+`0x9f` STARBASE_ROOM_CHANGE, `0xb9` LOGOFF, and a `default -> forward`.
+Our case set now matches that exactly. Confirmed-matching behaviours:
+`0x02` (activate connection state + forward), `0x06` (forward + 0x3004 if
+in-space / 0x3008 if station visibility kick), `0x14`/`0x2c`/`0x9b`/`0x9f`
+(forward verbatim), `0xb9` (set sentinel + forward), default forward.
+
+- [x] **`0x12` TURN / `0x13` TILT throttle now gated on MOVING.** The
+      reference drops a turn/tilt ONLY when it is both within the 250 ms
+      window AND the avatar is moving (the speed float at payload offset 4
+      is non-zero); a stationary avatar's turns ALL pass or the ship
+      stutters under in-place mouse-look. We had been throttling
+      unconditionally -- dropping legitimate stationary turns -- which §3
+      previously *described* as "throttle when moving" without the code
+      actually doing it. Fixed: read the payload-offset-4 speed float
+      (m_RecvBuffer[4], byte-aligned with the reference's payload+4) and
+      drop iff `tick <= last + 250 && speed != 0.0`. This is a
+      tighten-toward-fidelity change: it forwards MORE client turns (the
+      exact ones the retail client+server pair exchanged), changes no wire
+      bytes, and loosens no server posture (TURN is a normal gameplay
+      opcode the server already accepts at any cadence).
+- [x] **Removed the redundant `0x3a` C->S case.** `0x3a` SERVER_HANDOFF is
+      a *server->client* opcode: the proxy consumes its side-effects in
+      `UDPClient::IncommingOpcodePreProcessing` on the S->C path and then
+      forwards it to the client. The reference C->S sector dispatch has NO
+      `0x3a` case; ours had a no-op-then-forward case that was both
+      misleading and behaviourally identical to the default forward. Dropped
+      it so a (non-real) client-originated `0x3a` falls to the default
+      forward exactly as the reference does.
+
+- [!] **`0x4e` starbase-exit launcher handoff** is the one reference C->S
+      side-effect we do not replicate. The reference, when an in-starbase
+      flag is set, logs "Leaving Starbase" and spawns a launcher-handoff
+      retransmit thread (MVAS sub-op 0x4e, up to 10x at 1s until the server
+      confirms). Both the in-starbase state and the launcher handoff are
+      proxy-internal machinery tied to the position feed, which only
+      functions alongside the Win32 client. We still FORWARD `0x4e` to the
+      server (via the default), which is the safe direction and matches the
+      reference's verbatim forward of the same frame. Unblock with the
+      position-feed / launcher-handoff port (Tier-2).
 
 ## 4. Tier-2 deferred transforms (documented, NOT yet implemented)
 
