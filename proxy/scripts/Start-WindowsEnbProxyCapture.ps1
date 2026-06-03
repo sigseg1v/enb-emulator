@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     Capture the Net7Proxy's network traffic on Windows, by process, to a
-    timestamped pcap/pcapng under .\captures\ -- the Windows counterpart to the
+    timestamped pcapng under .\captures\ -- the Windows counterpart to the
     Linux `nsenter -t <PID> -n tcpdump -i any -s0 -w ...` flow.
 
 .DESCRIPTION
@@ -12,19 +12,13 @@
     same conversation the Linux capture does (the proxy <-> server cleartext UDP
     legs and the client <-> proxy TCP legs), minus unrelated host noise.
 
-    Two capture backends are supported, auto-detected in this order:
+    Capture is done with dumpcap, which ships with Wireshark and uses the Npcap
+    driver. It produces a real .pcapng, supports BPF capture filters and
+    loopback, and is byte-for-byte the format our tooling already reads -- the
+    closest match to the Linux tcpdump output. dumpcap is REQUIRED: if it is not
+    found, the script fails (no fallback).
 
-      1. dumpcap (preferred) -- ships with Wireshark and uses the Npcap driver.
-         Produces a real .pcapng, supports BPF capture filters and loopback,
-         and is byte-for-byte the format our tooling already reads. This is the
-         closest match to the Linux tcpdump output.
-
-      2. pktmon (fallback) -- built into Windows 10 1809+ and Windows 11, so it
-         needs NOTHING installed. Captures to an .etl, which the script then
-         converts to .pcapng via `pktmon pcapng`. Filters are limited to
-         port/protocol (no PID), which is exactly what we feed it.
-
-    NEITHER backend requires WSL or MinGW.
+    Does NOT require WSL or MinGW.
 
 .PARAMETER ProcessName
     Process image name to find (without .exe). Default: Net7Proxy.
@@ -32,16 +26,16 @@
 .PARAMETER ProcessId
     Capture this exact PID instead of searching by name. Overrides ProcessName.
 
+.PARAMETER Prefix
+    Optional label prepended (with a dash) to the capture file name, for
+    organizing files -- e.g. -Prefix Luna yields "Luna-enbproxy-...pcapng".
+
 .PARAMETER OutputDir
     Folder for capture files. Default: .\captures (created if missing).
 
 .PARAMETER DurationSeconds
     Stop automatically after this many seconds. 0 (default) = run until you
     press Ctrl+C (the file is finalized cleanly on stop either way).
-
-.PARAMETER Backend
-    Auto (default), Dumpcap, or Pktmon. Auto prefers dumpcap, falls back to
-    pktmon.
 
 .PARAMETER ExtraPorts
     Additional TCP/UDP ports to include in the filter (e.g. known server ports
@@ -51,6 +45,10 @@
 .PARAMETER SnapLength
     Bytes captured per packet. 0 (default) = whole packet, matching `-s0`.
 
+.PARAMETER DumpcapPath
+    Explicit path to dumpcap.exe. By default the script looks on PATH and in the
+    standard Wireshark install dirs.
+
 .EXAMPLE
     # Capture Net7Proxy until Ctrl+C (run from an elevated PowerShell):
     .\Start-WindowsEnbProxyCapture.ps1
@@ -59,28 +57,36 @@
     # Capture a specific PID for 120s, also include the sector/MVAS server ports:
     .\Start-WindowsEnbProxyCapture.ps1 -ProcessId 4812 -DurationSeconds 120 -ExtraPorts 3636,3806
 
+.EXAMPLE
+    # Label the file for organizing -- yields captures\Luna-enbproxy-...pcapng:
+    .\Start-WindowsEnbProxyCapture.ps1 -Prefix Luna
+
 .NOTES
     Run from an ELEVATED PowerShell (Run as administrator) -- packet capture
-    needs admin on both backends.
+    needs admin.
 
-    Software to install for the dumpcap backend:
+    Stopping with Ctrl+C is safe: dumpcap catches the console Ctrl+C, stops the
+    capture loop, and finalizes the .pcapng. pcapng is flushed block-by-block as
+    packets arrive, so the file is complete and NOT corrupt -- it holds every
+    packet captured up to the moment you pressed Ctrl+C.
+
+    Required software (dumpcap backend; nothing else):
       - Npcap         https://npcap.com  (the capture driver; tick
                       "Support loopback traffic" during install)
       - Wireshark     https://www.wireshark.org  (provides dumpcap.exe; the
                       Wireshark installer bundles a compatible Npcap)
-    The pktmon backend needs nothing installed (built into Windows).
 #>
 
 [CmdletBinding()]
 param(
     [string]   $ProcessName     = 'Net7Proxy',
     [int]      $ProcessId       = 0,
+    [string]   $Prefix          = '',
     [string]   $OutputDir       = '.\captures',
     [int]      $DurationSeconds = 0,
-    [ValidateSet('Auto', 'Dumpcap', 'Pktmon')]
-    [string]   $Backend         = 'Auto',
     [int[]]    $ExtraPorts      = @(),
-    [int]      $SnapLength      = 0
+    [int]      $SnapLength      = 0,
+    [string]   $DumpcapPath     = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -92,6 +98,12 @@ function Test-Admin {
 }
 
 function Find-Dumpcap {
+    param([string]$Explicit)
+    if ($Explicit) {
+        if (Test-Path $Explicit) { return $Explicit }
+        Write-Error "dumpcap not found at -DumpcapPath '$Explicit'."
+        exit 1
+    }
     $cmd = Get-Command dumpcap.exe -ErrorAction SilentlyContinue
     if ($cmd) { return $cmd.Source }
     foreach ($p in @(
@@ -107,7 +119,20 @@ if (-not (Test-Admin)) {
     exit 1
 }
 
-# --- resolve the target process -------------------------------------------
+# --- dumpcap is required; fail early if it's missing -----------------------
+$dumpcap = Find-Dumpcap -Explicit $DumpcapPath
+if (-not $dumpcap) {
+    Write-Error @"
+dumpcap.exe was not found. This script requires it (no fallback).
+Install:
+  - Npcap      https://npcap.com  (tick "Support loopback traffic")
+  - Wireshark  https://www.wireshark.org  (provides dumpcap.exe)
+Then re-run, or pass -DumpcapPath 'C:\path\to\dumpcap.exe'.
+"@
+    exit 1
+}
+
+# --- resolve the target process --------------------------------------------
 if ($ProcessId -gt 0) {
     $proc = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
     if (-not $proc) { Write-Error "No process with PID $ProcessId is running."; exit 1 }
@@ -128,6 +153,17 @@ Write-Host "Target process: $($proc.ProcessName) (PID $targetPid)" -ForegroundCo
 # --- resolve the ports it owns ---------------------------------------------
 # Windows can't filter a capture by PID, so we capture machine-wide filtered to
 # the union of TCP local+remote and UDP local ports this PID currently holds.
+#
+# CAVEAT -- ports are read ONCE, here, and baked into a static BPF filter for the
+# whole run. EnB sector servers listen on different ports, and the proxy opens a
+# NEW socket (new remote port) when you warp/jump to another sector. That later
+# port is NOT in this snapshot, so its traffic is silently dropped from the
+# capture. If you are going to move between sectors, prefer ONE capture PER
+# sector: stop (Ctrl+C) and re-launch with a distinct -Prefix for each sector
+# (e.g. -Prefix Luna, then -Prefix Aganju) so the filter is re-resolved against
+# the proxy's then-current sockets. Alternatively pass every server port you
+# expect to touch up-front via -ExtraPorts, or run unfiltered (no ports) and
+# scope the pcap afterward in Wireshark.
 $ports = New-Object System.Collections.Generic.HashSet[int]
 Get-NetTCPConnection -OwningProcess $targetPid -ErrorAction SilentlyContinue | ForEach-Object {
     if ($_.LocalPort  -gt 0) { [void]$ports.Add([int]$_.LocalPort)  }
@@ -144,95 +180,52 @@ if ($ports.Count -eq 0) {
 $portList = @($ports) | Sort-Object
 if ($portList.Count -gt 0) {
     Write-Host "Capturing ports: $($portList -join ', ')" -ForegroundColor Cyan
+    Write-Host "Note: these ports are fixed for this run. If you warp to another sector the proxy may open a NEW port that won't be captured -- stop and re-launch per sector with a distinct -Prefix." -ForegroundColor DarkYellow
 }
 
 # --- output path -----------------------------------------------------------
 if (-not (Test-Path $OutputDir)) { New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null }
-$stamp    = Get-Date -Format 'yyyyMMdd-HHmmss'
-$baseName = "enbproxy-$($proc.ProcessName)-pid$targetPid-$stamp"
+$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+# Optional -Prefix label, sanitized of path-illegal characters, prepended with
+# a dash so e.g. -Prefix Luna -> "Luna-enbproxy-...".
+$prefixPart = ''
+if (-not [string]::IsNullOrWhiteSpace($Prefix)) {
+    $clean = ($Prefix -replace '[\\/:*?"<>|]', '_').Trim()
+    if ($clean) { $prefixPart = "$clean-" }
+}
+$outFile = Join-Path $OutputDir "$prefixPart`enbproxy-$($proc.ProcessName)-pid$targetPid-$stamp.pcapng"
 
-# --- pick a backend --------------------------------------------------------
-$dumpcap = Find-Dumpcap
-$useDumpcap = switch ($Backend) {
-    'Dumpcap' { if (-not $dumpcap) { Write-Error "dumpcap.exe not found. Install Wireshark + Npcap, or use -Backend Pktmon."; exit 1 }; $true }
-    'Pktmon'  { $false }
-    default   { [bool]$dumpcap }   # Auto
+# --- build a BPF capture filter --------------------------------------------
+# "port N" matches src OR dst, so the union of the proxy's local+remote ports
+# captures both directions of each socket.
+$filter = ''
+if ($portList.Count -gt 0) {
+    $filter = ($portList | ForEach-Object { "port $_" }) -join ' or '
 }
 
-if ($useDumpcap) {
-    # ---------------------- dumpcap (Npcap) backend ------------------------
-    $outFile = Join-Path $OutputDir "$baseName.pcapng"
-
-    # Build a BPF capture filter. "port N" matches src OR dst, so the union of
-    # the proxy's local+remote ports captures both directions of each socket.
-    $filter = ''
-    if ($portList.Count -gt 0) {
-        $filter = ($portList | ForEach-Object { "port $_" }) -join ' or '
-    }
-
-    # Capture on ALL interfaces (dumpcap takes repeated -i). This mirrors
-    # tcpdump's `-i any`; loopback is included when Npcap was installed with
-    # loopback support (proxy<->server on localhost rides loopback).
-    $ifaceArgs = @()
-    & $dumpcap -D 2>$null | ForEach-Object {
-        if ($_ -match '^\s*(\d+)\.') { $ifaceArgs += @('-i', $Matches[1]) }
-    }
-    if ($ifaceArgs.Count -eq 0) { $ifaceArgs = @('-i', '1') }  # fall back to first
-
-    $dcArgs = $ifaceArgs + @('-s', $SnapLength, '-w', $outFile)
-    if ($filter)             { $dcArgs += @('-f', $filter) }
-    if ($DurationSeconds -gt 0) { $dcArgs += @('-a', "duration:$DurationSeconds") }
-
-    Write-Host "Backend: dumpcap ($dumpcap)" -ForegroundColor Green
-    Write-Host "Writing: $outFile" -ForegroundColor Green
-    if ($DurationSeconds -gt 0) { Write-Host "Stopping after $DurationSeconds s." }
-    else { Write-Host "Press Ctrl+C to stop and finalize the file." -ForegroundColor Yellow }
-
-    & $dumpcap @dcArgs
-    Write-Host "Done. Capture saved to $outFile" -ForegroundColor Green
+# Capture on ALL interfaces (dumpcap takes repeated -i). This mirrors tcpdump's
+# `-i any`; loopback is included when Npcap was installed with loopback support
+# (proxy<->server on localhost rides loopback).
+$ifaceArgs = @()
+& $dumpcap -D 2>$null | ForEach-Object {
+    if ($_ -match '^\s*(\d+)\.') { $ifaceArgs += @('-i', $Matches[1]) }
 }
-else {
-    # ---------------------- pktmon (built-in) backend ----------------------
-    if (-not (Get-Command pktmon.exe -ErrorAction SilentlyContinue)) {
-        Write-Error "Neither dumpcap nor pktmon is available. Install Wireshark+Npcap (recommended), or use a Windows build with pktmon (10 1809+/11)."
-        exit 1
-    }
-    if ($portList.Count -eq 0) {
-        Write-Error "pktmon needs at least one port to filter on (it cannot capture by PID). Re-run once the proxy has open sockets, or pass -ExtraPorts."
-        exit 1
-    }
+if ($ifaceArgs.Count -eq 0) { $ifaceArgs = @('-i', '1') }  # fall back to first
 
-    $etlFile    = Join-Path $OutputDir "$baseName.etl"
-    $pcapngFile = Join-Path $OutputDir "$baseName.pcapng"
+$dcArgs = $ifaceArgs + @('-s', $SnapLength, '-w', $outFile)
+if ($filter)               { $dcArgs += @('-f', $filter) }
+if ($DurationSeconds -gt 0) { $dcArgs += @('-a', "duration:$DurationSeconds") }
 
-    Write-Host "Backend: pktmon (built-in)" -ForegroundColor Green
+Write-Host "Backend: dumpcap ($dumpcap)" -ForegroundColor Green
+Write-Host "Writing: $outFile" -ForegroundColor Green
+if ($DurationSeconds -gt 0) { Write-Host "Stopping after $DurationSeconds s." }
+else { Write-Host "Press Ctrl+C to stop and finalize the file." -ForegroundColor Yellow }
 
-    # Clear any leftover filters from a previous run, then add one per port.
-    # Each `filter add` is OR'd, so this matches any of the proxy's ports.
-    & pktmon filter remove 2>$null | Out-Null
-    foreach ($p in $portList) {
-        & pktmon filter add "enbproxy-$p" -p $p | Out-Null
-    }
-
-    # --pkt-size 0 = whole packet (the -s0 equivalent); --comp nics captures
-    # the physical/virtual NICs.
-    & pktmon start --capture --pkt-size 0 --comp nics --file-name $etlFile | Out-Null
-    Write-Host "Writing: $etlFile" -ForegroundColor Green
-
-    try {
-        if ($DurationSeconds -gt 0) {
-            Write-Host "Capturing for $DurationSeconds s..."
-            Start-Sleep -Seconds $DurationSeconds
-        } else {
-            Write-Host "Press Ctrl+C to stop." -ForegroundColor Yellow
-            while ($true) { Start-Sleep -Seconds 1 }
-        }
-    }
-    finally {
-        & pktmon stop | Out-Null
-        & pktmon filter remove 2>$null | Out-Null
-        Write-Host "Converting $etlFile -> $pcapngFile ..." -ForegroundColor Green
-        & pktmon pcapng $etlFile -o $pcapngFile | Out-Null
-        Write-Host "Done. Capture saved to $pcapngFile (raw ETL kept at $etlFile)" -ForegroundColor Green
-    }
-}
+# Invoke dumpcap as a native child so Ctrl+C reaches it directly: Windows
+# delivers CTRL_C_EVENT to every process in the console group, and dumpcap's
+# console-control handler stops the capture loop and CLOSES the pcapng cleanly.
+# pcapng is written block-by-block with each block flushed as it is captured, so
+# a Ctrl+C stop yields a complete, non-corrupt file containing every packet up
+# to the interrupt (it is NOT a kill -9 that would truncate mid-block).
+& $dumpcap @dcArgs
+Write-Host "Done. Capture saved to $outFile" -ForegroundColor Green
