@@ -108,6 +108,8 @@ public static class PacketRecordRegistry
             0x00BD => new CtaResponseRecord(payload),
             0x00D0 => new GuildMessageSectorRecord(payload),
             0x2011 => new GalaxyMapCacheRecord(payload),
+            0x2012 => new StartProspectRecord(payload),
+            0x2013 => new TractorOreRecord(payload),
             0x2014 => new LootItemRecord(payload),
             0x2018 => new StaticObjectCreateRecord(payload),
             0x2019 => new ResourceObjectCreateRecord(payload),
