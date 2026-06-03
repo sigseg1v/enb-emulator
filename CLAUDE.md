@@ -262,8 +262,11 @@ in-flight player/session state, which corrupts interactive testing.
 The cost is that you OWN the rebuild step when you change C++:
 
 - Changed `server/`, `proxy/`, or `login-server/`? Run **`just rebuild`**
-  (it `docker compose build`s those three and `up -d --force-recreate`s
-  them; postgres + pgdata are untouched), then relaunch.
+  (it `docker compose build`s those three -- the layer cache makes an
+  unchanged service a no-op -- then `up -d`s them, recreating only the
+  containers whose image actually changed, so an unchanged service does
+  not bounce; postgres + pgdata are untouched). Scope it with an arg:
+  `just rebuild proxy`. Then relaunch.
 - Changed CliClient code or the unit proxy? Run **`just rebuild-cli <UNIT>`**
   before `just play-cli <UNIT>`.
 

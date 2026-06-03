@@ -189,16 +189,19 @@ run-stack-bg: init
 # Convenience: legacy name. Same as run-stack-bg.
 dev: run-stack-bg
 
-# Rebuild the server / login / proxy images from current source and recreate
-# JUST those containers. Run this after changing C++ in server/, proxy/, or
-# login-server/. `just play-local` / `run-stack-bg` deliberately REUSE running
-# containers so a relaunch never wipes player state -- which means a plain
-# relaunch keeps serving the OLD binary until you rebuild. This is the one
-# recipe that intentionally force-recreates (and only server/login/proxy;
-# postgres + its pgdata volume are untouched).
-rebuild:
-    docker compose build proxy server login
-    docker compose up -d --force-recreate proxy server login
+# Rebuild + restart ONLY what actually changed. `docker compose build`
+# recompiles just the images whose build context changed (Docker's layer cache
+# makes an unchanged service a near-instant no-op -- no recompile); then plain
+# `up -d` (deliberately NOT --force-recreate) recreates only the containers
+# whose image ID actually changed, so an unchanged server/login keeps running
+# and does NOT bounce or lose in-flight state. Scope it tighter with an arg:
+# `just rebuild proxy` touches only the proxy. Run this after changing C++ in
+# server/, proxy/, or login-server/ -- `just play-local` / `run-stack-bg`
+# deliberately REUSE running containers, so without a rebuild a relaunch keeps
+# serving the OLD binary. postgres + its pgdata volume are never touched.
+rebuild SERVICES='proxy server login':
+    docker compose build {{SERVICES}}
+    docker compose up -d {{SERVICES}}
 
 # Internal helper: print each image's build timestamp and, if the source on
 # disk is NEWER than the built image, print a big STALE-IMAGE banner naming the
