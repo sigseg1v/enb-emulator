@@ -133,19 +133,18 @@ is still open.
 
 ### AC.2 -- Zero-friction login when launched via `just`
 
-- [ ] When a tool is launched through `just` against the local stack,
-      auto-populate the connection from the known local stack
-      (host=localhost, host-port=5434 -> container 5432, db=net7, the dev
-      credentials the compose stack uses) so the user can click Login with no
-      typing -- or skip the
-      dialog entirely. Mechanism (env var the `just` recipe sets, a generated
-      local config, or a "local stack detected" prefill) to be chosen in
-      implementation; prefer an env var the recipe exports so there is no
-      committed credential file.
-- [ ] Keep a manual-entry path for non-local use, but it must NOT be the
-      default friction for the common (local) case.
-- [ ] Enlarge the Login window (the ~290x195 dialog is too small); make it
-      resizable.
+- [x] Auto-populate the connection when launched through `just`. Mechanism:
+      the justfile exports `ENB_DB_HOST/PORT/USER/PASS`
+      (`env_var_or_default`, defaulting to localhost/5434/net7/net7) at the top,
+      so every `launch-*` recipe inherits them; `LoginData.LoadFromEnvironment()`
+      (AC.1) reads them and prefills the dialog. No committed credential file.
+      The user just clicks Login. Verified `just --evaluate` resolves all four.
+- [x] Manual-entry path preserved: if `ENB_DB_HOST` is unset (e.g. running the
+      editor outside `just`), `ReadConfiguration` falls back to Config.xml, then
+      to the local-stack defaults -- the textboxes remain editable either way.
+- [x] Enlarge + make the Login window resizable: 290x195 fixed -> 440x280 with
+      `MinWidth=360 MinHeight=240`, `CanResize=True`, larger margins. Builds
+      clean (common lib + sector-editor).
 
 ### AC.3 -- Change-tracking -> generated `.sql` changeset
 

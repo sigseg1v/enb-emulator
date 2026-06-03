@@ -8,6 +8,16 @@
 IMAGE_REGISTRY := env_var_or_default("IMAGE_REGISTRY", "ghcr.io/anthropics/enb-emulator")
 IMAGE_TAG      := env_var_or_default("IMAGE_TAG", "dev")
 
+# Connection to the local content DB (`net7`), exported so the Avalonia editors
+# launched via `just launch-*` prefill their Login dialog with zero typing --
+# the user can just click Login (CommonTools.Gui.LoginData.LoadFromEnvironment).
+# These mirror the docker-compose stack's host-side binding (localhost:5434 ->
+# container 5432, creds net7/net7). Override any with the matching env var.
+export ENB_DB_HOST := env_var_or_default("ENB_DB_HOST", "localhost")
+export ENB_DB_PORT := env_var_or_default("ENB_DB_PORT", "5434")
+export ENB_DB_USER := env_var_or_default("ENB_DB_USER", "net7")
+export ENB_DB_PASS := env_var_or_default("ENB_DB_PASS", "net7")
+
 # Per-worktree docker compose project name, derived from the current git
 # branch so parallel worktrees don't fight over the same container set.
 # main/master/detached-HEAD collapse to plain `enb-emulator`. Already-prefixed
@@ -76,11 +86,12 @@ stop-docker-proxy:
 # to skip straight to a specific editor.
 #
 # All editors that talk to the DB connect via the Login dialog on
-# startup — point it at the dev stack (`just init` first, then
-# host=localhost port=5434 user=net7 pass=net7; Phase N: Postgres, was
-# MySQL on 3307 before). Tools that don't talk to the DB (toolslauncher,
-# launchnet7, enbpatcher, toolspatcher, w3d-parser, talktreeeditor) skip
-# the login dialog.
+# startup. Launched through `just`, the dialog is PREFILLED from the
+# exported ENB_DB_* vars (localhost:5434 / net7 / net7 -- the dev stack;
+# `just init` first), so you just click Login: no typing. Phase N moved
+# the content DB to Postgres `net7` (was MySQL on 3307). Tools that don't
+# talk to the DB (toolslauncher, launchnet7, enbpatcher, toolspatcher,
+# w3d-parser, talktreeeditor) skip the login dialog.
 
 # Central launcher GUI — button per editor; spawns Avalonia projects.
 launch:

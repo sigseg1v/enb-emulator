@@ -2,10 +2,11 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="CommonTools.Gui.Login"
         Title="Login"
-        Width="290" Height="195"
-        CanResize="False"
+        Width="440" Height="280"
+        MinWidth="360" MinHeight="240"
+        CanResize="True"
         WindowStartupLocation="CenterScreen">
-    <Grid Margin="14" RowDefinitions="Auto,Auto,Auto,Auto,*,Auto"
+    <Grid Margin="20" RowDefinitions="Auto,Auto,Auto,Auto,*,Auto"
                      ColumnDefinitions="Auto,*">
         <TextBlock Grid.Row="0" Grid.Column="0" Text="Username:" VerticalAlignment="Center" Margin="0,0,12,8"/>
         <TextBox   Grid.Row="0" Grid.Column="1" x:Name="LoginUsername" Margin="0,0,0,8"/>
