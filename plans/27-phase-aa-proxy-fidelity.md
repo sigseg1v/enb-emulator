@@ -374,6 +374,27 @@ rule -- CLI parse landing first.
       empty for the generic-accept branch). Emitter PlayerConnection.cpp:10016
       / :10027.
 - [x] Byte-pin tests: `SectorMiscRecordTests` (6 facts, all green; suite 634).
+
+Second batch (fixed-layout, server-emitted, `RenderStateAndMiscRecordTests`):
+- [x] **`0x0026` CHANGE_BASE_ASSET** (24B LE; PlayerConnection.cpp:3623).
+- [x] **`0x002A` SET_ZBAND** (8B LE; :1110) / **`0x002B` SET_BBOX** (16B LE; :1100).
+- [x] **`0x002F` INIT_RENDER_STATE** (8B LE; :1482) / **`0x0032`
+      DEACTIVATE_RENDER_STATE** (4B LE; :1500).
+- [x] **`0x004A` CREATE_ATTACHMENT** (12B, all BE via ntohl; :1155).
+- [x] **`0x00A2` NOTIFY_EMOTE** (8B LE; :10398).
+- [x] **`0x00D2` GUILD_PLAYER_PERMISSIONS** (16B, all BE via htonl; PlayerGuild.cpp:785).
+
+Third batch (variable-length, server-emitted, `VariableLengthRecordTests`):
+- [x] **`0x0053` FIND_MEMBER** (count LE + count*16B records, records all BE;
+      PlayerConnection.cpp:11228 / PlayerManager.cpp:1284,1292).
+- [x] **`0x005F` AVATAR_EMOTE_RESPONSE** (int16 ChatSize + u8 type + int32 GameID
+      LE + msg[ChatSize]; PlayerConnection.cpp:10243).
+- [x] **`0x00BE` CONFIRMED_ACTION_OFFER** (int32 BE + int32 BE + int16 len + text;
+      PlayerConnection.cpp:863, pins the exact server literal). Suite 656.
+
+Remaining server-emitted variable opcodes still on GenericRecord (next):
+`0x001E` GROUP, `0x00A6` CLIENT_CHAT_ERROR, `0x00C8`/`0x00CC`/`0x00D3` guild
+(AddDataLS string builders).
 - [ ] **`0x0081` RECUSTOMIZE_SHIP_START** -- deferred: carries a 194-byte
       embedded `ShipData` struct with no existing CLI decoder. Needs a shared
       ShipData reader first.
