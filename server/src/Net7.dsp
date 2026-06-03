@@ -114,15 +114,7 @@ SOURCE=.\StationLoader.cpp
 # PROP Default_Filter ""
 # Begin Source File
 
-SOURCE=.\ItemBaseParser.cpp
-# End Source File
-# Begin Source File
-
 SOURCE=.\MissionParser.cpp
-# End Source File
-# Begin Source File
-
-SOURCE=.\SectorContentParser.cpp
 # End Source File
 # Begin Source File
 

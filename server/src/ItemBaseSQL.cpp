@@ -1,4 +1,4 @@
-// ItemBaseParser.cpp
+// ItemBaseSQL.cpp
 /* Net-7 Entertainment: Net-7 Earth and Beyond emulator project
 **
 ** This code/content is licensed under the Creative Commons license, it is interactive content. You can view the terms of our:
