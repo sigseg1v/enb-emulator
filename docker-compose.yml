@@ -234,14 +234,14 @@ services:
     extra_hosts:
       - "local.net-7.org:127.0.0.1"
     environment:
-      # Phase J/N: LinuxAuth.cpp reads these to talk to the DB. They are
-      # named MYSQL_* for backwards compatibility with the env-var contract
-      # baked into the binary; Phase N migrated the implementation to
-      # libpqxx (Postgres) without renaming the env vars.
-      MYSQL_HOST: "postgres:5432"
-      MYSQL_USER: "net7"
-      MYSQL_PASS: "net7"
-      MYSQL_DB: "net7_user"
+      # LinuxAuth.cpp reads these to talk to the DB (Postgres since Phase N).
+      # Renamed MYSQL_*->DB_* in the login-server/proxy MySQL-name cleanup;
+      # the env-var contract is a closed loop (only set here, only read by
+      # LinuxAuth's EnvOr), so the rename is a coordinated code+compose change.
+      DB_HOST: "postgres:5432"
+      DB_USER: "net7"
+      DB_PASS: "net7"
+      DB_NAME: "net7_user"
     volumes:
       # SSL_Listener.cpp reads "<g_DomainName>.cer" and "<g_DomainName>.pem"
       # from CWD; the same certs the server container uses also work here.

@@ -151,10 +151,10 @@ std::string BuildDsn()
     //   - net7        — game content
     //   - net7_user   — accounts (this file only touches this one)
     // The schema-init container creates both at startup.
-    const char *host_env = EnvOr("MYSQL_HOST", g_MySQL_Host[0] ? g_MySQL_Host : "postgres:5432");
-    const char *user     = EnvOr("MYSQL_USER", g_MySQL_User[0] ? g_MySQL_User : "net7");
-    const char *pass     = EnvOr("MYSQL_PASS", g_MySQL_Pass[0] ? g_MySQL_Pass : "net7");
-    const char *db       = EnvOr("MYSQL_DB",   "net7_user");
+    const char *host_env = EnvOr("DB_HOST", g_DB_Host[0] ? g_DB_Host : "postgres:5432");
+    const char *user     = EnvOr("DB_USER", g_DB_User[0] ? g_DB_User : "net7");
+    const char *pass     = EnvOr("DB_PASS", g_DB_Pass[0] ? g_DB_Pass : "net7");
+    const char *db       = EnvOr("DB_NAME",   "net7_user");
 
     char host_buf[256];
     strncpy(host_buf, host_env, sizeof(host_buf) - 1);

@@ -37,9 +37,9 @@ const char *g_EventName  = "Net7SSLSlot";
 char g_LogFilename[MAX_PATH]   = {0};
 char g_InternalIP[MAX_PATH]    = {0};
 char g_DomainName[MAX_PATH]    = "localhost";
-char g_MySQL_User[MAX_PATH]    = {0};
-char g_MySQL_Pass[MAX_PATH]    = {0};
-char g_MySQL_Host[MAX_PATH]    = {0};
+char g_DB_User[MAX_PATH]    = {0};
+char g_DB_Pass[MAX_PATH]    = {0};
+char g_DB_Host[MAX_PATH]    = {0};
 char g_Galaxy_Name[MAX_PATH]   = {0};
 int  g_DASE                    = 0;
 unsigned long g_receive_time   = 0;
@@ -129,7 +129,6 @@ void LockMessageQueue()   {}
 void UnlockMessageQueue() {}
 void LogDebug(char * /*format*/, ...)    {}
 void LogChatMsg(char * /*format*/, ...)  {}
-void LogMySQLMsg(char * /*format*/, ...) {}
 void DumpBuffer(unsigned char * /*b*/, int /*l*/) {}
 void DumpBufferToFile(unsigned char * /*b*/, int /*l*/, char * /*f*/, bool /*r*/) {}
 char* GetSectorName(long /*sector_id*/) { return nullptr; }

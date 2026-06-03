@@ -634,7 +634,7 @@ SSL_DenyList::SSL_DenyList()
 	//just a bunch of vectors
 	char query_str[256];
 	sql_connection_c SQL_Conn;
-	SQL_Conn.connect("net7_user", g_MySQL_Host, g_MySQL_User, g_MySQL_Pass);
+	SQL_Conn.connect("net7_user", g_DB_Host, g_DB_User, g_DB_Pass);
 	sql_query_c ssl_query (&SQL_Conn);
 	sql_result_c ssl_result;
     sql_row_c ssl_row;

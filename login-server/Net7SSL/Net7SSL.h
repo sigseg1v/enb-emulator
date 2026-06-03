@@ -3,20 +3,6 @@
 #ifndef _NET_7SSL_H_INCLUDED_
 #define _NET_7SSL_H_INCLUDED_
 
-#define SQL_ENABLE
-#ifdef SQL_ENABLE
-    #define USE_MYSQL_ACCOUNT_DATA
-	#define USE_MYSQL_STATIONS
-    #define USE_MYSQL_SECTOR 
-    #define USE_MYSQL_ITEMS
-#endif
-
-#ifdef USE_MYSQL_ACCOUNT_DATA
-    #define SQL_ACCOUNT_STRING " - SQL Accounts"
-#else
-    #define SQL_ACCOUNT_STRING ""
-#endif
-
 //#define BETA_TESTING
 
 //If you use this setting, server will be local-cert login only
@@ -196,9 +182,9 @@
 extern char g_LogFilename[MAX_PATH];
 extern char g_InternalIP[MAX_PATH];
 extern char g_DomainName[MAX_PATH];
-extern char g_MySQL_User[MAX_PATH];
-extern char g_MySQL_Pass[MAX_PATH];
-extern char g_MySQL_Host[MAX_PATH];
+extern char g_DB_User[MAX_PATH];
+extern char g_DB_Pass[MAX_PATH];
+extern char g_DB_Host[MAX_PATH];
 extern int g_DASE;
 extern unsigned long g_receive_time;
 extern long g_PlayerCount;
@@ -212,7 +198,6 @@ void UnlockMessageQueue();
 void LogMessage(const char *format, ...);
 void LogDebug(char *format, ...);
 void LogChatMsg(char *format, ...);
-void LogMySQLMsg(char *format, ...);
 void DumpBuffer(unsigned char *buffer, int length);
 void DumpBufferToFile(unsigned char *buffer, int length, char *filename, bool rawData);
 char* GetSectorName(long sector_id);
