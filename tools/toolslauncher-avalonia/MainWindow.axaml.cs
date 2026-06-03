@@ -48,14 +48,13 @@ namespace ToolsLauncherAvalonia
         readonly Settings _settings = Settings.Load();
 
         // (display name, avalonia project name, "(not yet ported)" stub).
-        // Phase L Tier 12e closeout (2026-05-24): sector-editor flipped to
-        // Ported=true. Item Editor remains the only un-ported editor (original
-        // is tools/itemeditor/ — never had a csproj in the upstream repo).
+        // Phase AC.5 (2026-06-03): item-editor flipped to Ported=true -- the
+        // last editor is now ported onto the fixed Npgsql/net7 base.
         readonly List<(string Label, string Project, bool Ported)> _editors = new()
         {
             ("Effect Editor",   "effect-editor-avalonia",       true),
             ("Faction Editor",  "faction-editor-avalonia",      true),
-            ("Item Editor",     "item-editor-avalonia",         false),
+            ("Item Editor",     "item-editor-avalonia",         true),
             ("Mission Editor",  "missioneditor-avalonia",       true),
             ("Mob Editor",      "mob-editor-avalonia",          true),
             ("Sector Editor",   "sector-editor-avalonia",       true),

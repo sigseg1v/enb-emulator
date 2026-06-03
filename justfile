@@ -109,6 +109,10 @@ launch-effect-editor:
 launch-faction-editor:
     dotnet run --project tools/faction-editor-avalonia
 
+# item_base data editor (DB).
+launch-item-editor:
+    dotnet run --project tools/item-editor-avalonia
+
 # Mission / quest authoring (DB).
 launch-mission-editor:
     dotnet run --project tools/missioneditor-avalonia

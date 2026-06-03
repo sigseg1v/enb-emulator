@@ -199,18 +199,29 @@ is still open.
       opens, reports the failure, and the X closes it immediately. Login path
       verified by code review + build; per-editor verification is AC.6.
 
-### AC.5 -- Port the Item Editor to Avalonia (`tools/itemeditor-avalonia`)
+### AC.5 -- Port the Item Editor to Avalonia (`tools/item-editor-avalonia`)
 
-- [ ] Create `tools/itemeditor-avalonia/` mirroring the existing
+- [x] Create `tools/item-editor-avalonia/` mirroring the existing
       `*-avalonia` editor pattern (SDK-style csproj, net10.0, Avalonia 11.2.3,
       references `commontools-avalonia/CommonToolsAvalonia.csproj`,
-      Nullable=disable to match the suite). ~14K LOC across the WinForms
-      itemeditor (Database / Editors / Record Managers / Search / Widgets).
-- [ ] Port it ONTO the AC.1--AC.4 base (Postgres DB layer, zero-friction login,
-      change-tracking, never-hang UI) -- not onto the old MySQL base.
-- [ ] Flip the `toolslauncher-avalonia` `Ported` flag for Item Editor so it is
+      Nullable=disable to match the suite). Functional re-creation (DataGrid +
+      detail panel over `item_base`, not a 1:1 of the 12K-LOC WinForms tree):
+      `ItemsSQL.cs` DAO, `ItemRow` VM, `App`/`Program`/`MainWindow`/`AboutBox`.
+- [x] Port it ONTO the AC.1--AC.4 base: zero-friction login handoff,
+      `ChangeTracker.Enabled=true` + `File > Export Changes to SQL...`, all DB
+      I/O on `Task.Run` so the X button never hangs.
+- [x] DAO written in CORRECT Postgres from the start (the older ported DAOs
+      still carry MySQL-isms -- `INSERT...SET` / `LAST_INSERT_ID()` / `?n` --
+      and are broken against `net7`; AC.6 fixes those). This one: every
+      identifier double-quoted (so reserved-word cols `"unique"`/`"type"` and
+      digit-leading `"2d_asset"`/`"3d_asset"` are valid), `@name` params,
+      new-row id via `COALESCE(MAX("id"),0)+1` (no sequence on the PK).
+- [x] Flip the `toolslauncher-avalonia` `Ported` flag for Item Editor so it is
       no longer greyed `(not yet ported)`.
-- [ ] Build clean: `dotnet build` 0 warnings / 0 errors; launches via `just`.
+- [x] Build clean: `dotnet build` 0 warnings / 0 errors; `--smoke` instantiates
+      all 3 windows; `just launch-item-editor` recipe added.
+- Real-DB verification (load/edit/save/changeset against `net7`) folded into
+  AC.6 end-to-end pass.
 
 ### AC.6 -- Verify across the suite
 
