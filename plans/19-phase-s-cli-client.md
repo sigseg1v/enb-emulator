@@ -1559,6 +1559,22 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       Resolve(0x21).Opcode/Resolve(0x22).Opcode. capture3-records.txt 84->86
       frames; +3 tests; RetailRecordDecodeTests 101->104; full UnitTests suite 564
       green. No server change (CLI decode-only).
+- [x] InventoryMove (batch 10, 2026-06-03): 0x27 INVENTORY_MOVE, found via a
+      fresh capture_3 opcode-frequency re-tally (315 frames -- a genuine miss;
+      higher than 0x46/0x2C/0x66 which were already done, so the prior "remaining
+      is long-tail" note was wrong). 24-byte struct InvMove {int32 GameID; FromInv;
+      FromSlot; ToInv; ToSlot; Num}, ALL SIX fields big-endian -- the uniform-BE
+      cousin of 0x5A VerbRequest. Player::HandleInventoryMove (PlayerConnection.cpp:
+      2474) reads every field through ntohl, so the client sends network byte
+      order. Proven by GameID-read-BE == 8708585 == the same player as the LE-id
+      0x17/0x2C frames (a naive all-LE read would yield a garbage 0xE9E18400
+      GameID); a cross-convention id-equality test locks it. FromInv/ToInv select
+      the container (handler switches 1=cargo/2=equip/...); ToSlot/Num == -1 are
+      the client's "unspecified" sentinels. Files: Records/InventoryMoveRecord.cs +
+      1 registry line. Pinned 1 verbatim capture_3 frame + 2 tests (field decode +
+      BE/LE id-equality). capture3-records.txt 86->87 frames;
+      RetailRecordDecodeTests 104->108; full UnitTests suite 566 green. No server
+      change (CLI decode-only).
 - [ ] 0x0B ObjectToObjectEffect -- DEFERRED. Carries a u16 Bitmask + a
       variable-length Message field mid-packet + a conditional tail the server
       author flagged as wrong ("packet struct is wrong... TODO work out correct

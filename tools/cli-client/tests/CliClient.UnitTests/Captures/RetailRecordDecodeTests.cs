@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllEightySixFrames()
+    public void Fixture_Loads_AllEightySevenFrames()
     {
-        Assert.Equal(86, Frames.Count);
+        Assert.Equal(87, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -2161,5 +2161,42 @@ public sealed class RetailRecordDecodeTests
         var queue = Frames["queuemessage_group_bonus"];
         Assert.Equal((ushort)0x22, PacketRecord.Resolve((ushort)push.Opcode, push.Payload).Opcode);
         Assert.Equal((ushort)0x21, PacketRecord.Resolve((ushort)queue.Opcode, queue.Payload).Opcode);
+    }
+
+    // ── InventoryMove 0x27 ───────────────────────────────────────────────────
+    // 24-byte struct InvMove, ALL SIX int32 fields big-endian (every one ntohl'd
+    // in Player::HandleInventoryMove) -- the uniform-BE cousin of 0x5A. The
+    // GameID read BE equals the same player as the LE-id frames, locking the
+    // convention; a naive all-LE read would yield a garbage 0xE9E18400 GameID.
+
+    [Fact]
+    public void InventoryMove_AllSixFieldsBigEndian()
+    {
+        string d = Dump("inventorymove_cargo_slot1");
+
+        Assert.Contains("[0000] GameID", d);
+        Assert.Contains("0x0084E1E9", d);             // 00 84 E1 E9 read BE == 8708585, the player
+        Assert.Contains("(BE -- ntohl at parse)", d);
+        Assert.Contains("FromInv           = 18", d);  // 00 00 00 12 BE
+        Assert.Contains("FromSlot          = 1", d);   // 00 00 00 01 BE
+        Assert.Contains("ToInv             = 0", d);   // 00 00 00 00 BE
+        Assert.Contains("ToSlot            = -1", d);  // FF FF FF FF BE sentinel
+        Assert.Contains("Num               = -1", d);  // FF FF FF FF BE sentinel
+        Assert.DoesNotContain("???", d);               // all 24 bytes decoded
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void InventoryMove_BigEndianGameId_MatchesLittleEndianFrames()
+    {
+        // Same player issued LE-id frames (0x17/0x2C) and this BE-id 0x27.
+        // Read each with its own convention -> identical GameID. A wrong all-LE
+        // read of 0x27 would give 0xE9E18400, not 0x0084E1E9.
+        var inv = Frames["inventorymove_cargo_slot1"].Payload;
+        var req = Frames["requesttarget_player_targets_2617"].Payload;
+        int invGameBE = inv[0] << 24 | inv[1] << 16 | inv[2] << 8 | inv[3];   // BE
+        int reqGameLE = req[0] | req[1] << 8 | req[2] << 16 | req[3] << 24;   // LE
+        Assert.Equal(8708585, reqGameLE);
+        Assert.Equal(reqGameLE, invGameBE);
     }
 }
