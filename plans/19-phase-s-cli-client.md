@@ -1475,6 +1475,25 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       Fidelity note pinned in the 0x0E test: retail populated TargetOffset
       (55.487,-13.827,0.192); our reimpl zeroes it (emitter comment) -- a known
       simplification, not a wire bug. Suite 411->415.
+- [x] High-frequency undecoded sweep (batch 6, 2026-06-03): the five biggest
+      GenericRecord-fallthrough opcodes from the capture_3 frequency tally, each
+      decoded byte-exact and cross-verified against the server source (not just
+      "looks sane" -- the actual emitter/parser proves the byte order):
+      0x9E StarbaseAvatarChange_S2C (28B, the SINGLE most-frequent undecoded
+      opcode at 1516 frames; emitter Player::SendStarbaseAvatarChange direct-assign
+      LE; field order differs from 0x9D -- no RoomType, Room appended last),
+      0x9D StarbaseAvatarChange (28B C2S; parser HandleStarbaseAvatarChange reads
+      raw LE and branches ActionFlag==0x41 "broadcast", which the pinned frame
+      carries), 0x5A VerbRequest (12B, MIXED endian: SubjectID/ObjectID BE via
+      ntohl, Action LE via raw read -- proven by HandleVerbRequest AND by the BE
+      ids equalling the same player's 0x17 ids read LE), 0x17 RequestTarget (8B,
+      raw LE, same layout as 0x19 SET_TARGET), 0x2C Action (16B ActionPacket, all
+      raw LE). Files: Records/{StarbaseAvatarChangeS2C,StarbaseAvatarChange,
+      VerbRequest,RequestTarget,Action}Record.cs + 5 registry lines. Pinned 5
+      verbatim capture_3 frames (#14227/#553/#1479/#1475/#1663) in
+      capture3-records.txt (75->80 frames) + 6 content tests incl. a cross-packet
+      BE-vs-LE id-equality lock for 0x5A. RetailRecordDecodeTests 89->95; full
+      UnitTests suite 555 green. No server change (CLI decode-only).
 - [ ] 0x0B ObjectToObjectEffect -- DEFERRED. Carries a u16 Bitmask + a
       variable-length Message field mid-packet + a conditional tail the server
       author flagged as wrong ("packet struct is wrong... TODO work out correct
@@ -1482,13 +1501,13 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       bit layout (header+Message+bits{0,1,2,5,6} computes 49B but the frame is 55B;
       another off by 6). Decoding the tail would require fabricating field
       structure -- validate interactively against the live client instead.
-- [ ] Remaining GenericRecord-fallthrough opcodes worth decoding next (server->
-      client, by frequency): 0x64 ClientDamage (6542), 0x5A VerbRequest (3017,
-      mostly client->server), 0x17 RequestTarget (1262, client->server), 0x6A
-      ClientSound (1399), 0x20/0x21/0x22 message lines (1097/43/8), 0x9E/0x9D
-      Starbase_Avatar_Change (1581/610), 0x46 ComponentPos (577), 0x66
-      OpenInterface (544), 0x2C Action (732), 0x12/0x13/0x14 Turn/Tilt/Move
-      (149/103/456). Each needs its server emitter read + real-frame byte-diff.
+- [ ] Remaining GenericRecord-fallthrough opcodes worth decoding next, after the
+      batch-6 sweep cleared 0x9E/0x9D/0x5A/0x17/0x2C (and 0x64 ClientDamage, 0x6A
+      ClientSound, 0x20 PriorityMessage, 0x66 OpenInterface already had decoders --
+      the old list was stale on those): 0x21/0x22 PushMessage variants (43/8),
+      0x46 ComponentPos (577), 0x12/0x13/0x14 Turn/Tilt/Move (149/103/456). Each
+      needs its server emitter read + real-frame byte-diff. The Turn/Tilt/Move trio
+      is the obvious next batch (high frequency, likely small fixed structs).
 - [ ] Long-tail records with ZERO frames in any of the 3 captures (need other
       captures): 0x6F GlobalTicket, 0xD0 GuildMessageSector. Defer until a capture
       containing them is located. AuxMobIndex/AuxHulkIndex 0x1B version-1 diff

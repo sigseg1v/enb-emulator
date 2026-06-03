@@ -869,3 +869,35 @@ hex: 79 07 3a 00 c8 7c 7c 25 76 04 3a 00 00 a4 04 3a
       00 21 00 03 00 cc 1b 14 c2 04 4b 00 42 4c df 15
       41 00 00 00 00 01 00 00 80 3f 00 00 00 00 00 00
       00 00 00 00 00 00 00 00 00 40
+
+[requesttarget_player_targets_2617]
+provenance: RequestTarget 0x17 (client->server) -- player 0x0084E1E9 selects target 2617 (capture_3.rar, Packet #1475, Client->Server). GameID/TargetID both raw LE -- Player::HandleRequestTarget reads request->TargetID with no ntohl. Same layout as 0x19 SET_TARGET.
+opcode: 0x17
+payload-bytes: 8
+hex: e9 e1 84 00 39 0a 00 00
+
+[action_player_target]
+provenance: Action 0x2C (client->server) -- player 0x0084E1E9, Action 17, Target 0x0084DC75, OptionalVar 0 (capture_3.rar, Packet #1663, Client->Server). All four int32 fields raw LE (Player::HandleAction, no ntohl). Fixed 16-byte ActionPacket form (not the string-carrying ActionPacket2).
+opcode: 0x2C
+payload-bytes: 16
+hex: e9 e1 84 00 11 00 00 00 75 dc 84 00 00 00 00 00
+
+[verbrequest_subject_object_action1]
+provenance: VerbRequest 0x5A (client->server) -- MIXED endian. SubjectID 0x0084E1E9 (BE) / ObjectID 2617 (BE) equal the SAME player's 0x17 RequestTarget ids read LE; Action 1 (LE) is the UpdateVerbs(true) trigger (capture_3.rar, Packet #1479, Client->Server). Source: Player::HandleVerbRequest ntohl(SubjectID)/ntohl(ObjectID) but pkt->Action == 1 raw.
+opcode: 0x5A
+payload-bytes: 12
+hex: 00 84 e1 e9 00 00 0a 39 01 00 00 00
+
+[starbaseavatarchange_c2s_broadcast]
+provenance: StarbaseAvatarChange 0x9D (client->server) -- AvatarID 0x00AACCEE, RoomType 0, Orient 0.0, Position (17.487,12.238,4.111), ActionFlag 0x41 = broadcast (capture_3.rar, Packet #553, Client->Server). All fields raw LE (Player::HandleStarbaseAvatarChange); ActionFlag 0x41 triggers SendStarbaseAvatarList.
+opcode: 0x9D
+payload-bytes: 28
+hex: ee cc aa 00 00 00 00 00 00 00 00 00 b0 e4 8b 41
+      a0 cf 43 41 b0 8b 83 40 41 00 00 00
+
+[starbaseavatarchange_s2c_room1]
+provenance: StarbaseAvatarChange_S2C 0x9E (server->client) -- AvatarID 0x06EC4715, Orient -0.014, Position (-30.322,-44.953,-0.194), ActionFlag 9, Room 1 (capture_3.rar, Packet #14227, Server->Client). Distinct field order from 0x9D: no RoomType slot, Room appended last. All fields LE (Player::SendStarbaseAvatarChange direct-assign + memcpy).
+opcode: 0x9E
+payload-bytes: 28
+hex: 15 47 ec 06 18 5c 69 bc 76 93 f2 c1 99 cf 33 c2
+      00 19 47 be 09 00 00 00 01 00 00 00

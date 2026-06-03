@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllSeventyFiveFrames()
+    public void Fixture_Loads_AllEightyFrames()
     {
-        Assert.Equal(75, Frames.Count);
+        Assert.Equal(80, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -1872,5 +1872,127 @@ public sealed class RetailRecordDecodeTests
         Assert.Contains("EffectDescID      = 3", d);
         Assert.Contains("Speedup           = 2.0", d);
         Assert.DoesNotContain("(NB)", d);
+    }
+
+    // ── RequestTarget 0x17 ───────────────────────────────────────────────────
+    // Client->server target selection. Identical 8-byte layout to 0x19 SET_TARGET;
+    // both read raw host LE (Player::HandleRequestTarget, GetObjectFromID(TargetID)).
+
+    [Fact]
+    public void RequestTarget_DecodesGameIdAndTargetId_LittleEndian()
+    {
+        string d = Dump("requesttarget_player_targets_2617");
+
+        Assert.Contains("GameID", d);
+        Assert.Contains("0x0084E1E9", d);            // E9 E1 84 00 LE == 8708585
+        Assert.Contains("TargetID", d);
+        Assert.Contains("0x00000A39", d);            // 39 0A 00 00 LE == 2617
+        Assert.Contains("(2617)", d);
+        Assert.DoesNotContain("???", d);             // all 8 bytes decoded
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    // ── Action 0x2C ──────────────────────────────────────────────────────────
+    // Fixed 16-byte ActionPacket, all four int32 raw LE (Player::HandleAction).
+
+    [Fact]
+    public void Action_DecodesGameIdActionTargetOptVar_LittleEndian()
+    {
+        string d = Dump("action_player_target");
+
+        Assert.Contains("GameID", d);
+        Assert.Contains("0x0084E1E9", d);            // same player as the RequestTarget frame
+        Assert.Contains("Action", d);
+        Assert.Contains("[0004] Action", d);         // Action int32 at offset 4
+        Assert.Contains("Target", d);
+        Assert.Contains("0x0084DC75", d);            // 75 DC 84 00 LE == 8707189
+        Assert.Contains("OptionalVar", d);
+        Assert.DoesNotContain("???", d);             // all 16 bytes decoded
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    // ── VerbRequest 0x5A ─────────────────────────────────────────────────────
+    // The mixed-endian regression lock. SubjectID/ObjectID are big-endian (ntohl
+    // at parse); Action is little-endian (raw host read, pkt->Action == 1). The
+    // BE-read ids here equal the SAME player's 0x17 RequestTarget ids read LE.
+
+    [Fact]
+    public void VerbRequest_SubjectAndObjectAreBigEndian_ActionIsLittleEndian()
+    {
+        string d = Dump("verbrequest_subject_object_action1");
+
+        Assert.Contains("SubjectID", d);
+        Assert.Contains("0x0084E1E9", d);            // 00 84 E1 E9 read BE == 8708585
+        Assert.Contains("(BE -- ntohl at parse)", d);
+        Assert.Contains("ObjectID", d);
+        Assert.Contains("0x00000A39", d);            // 00 00 0A 39 read BE == 2617
+        Assert.Contains("Action", d);
+        Assert.Contains("(LE -- raw host read)", d);
+        Assert.Contains("[0008] Action", d);
+        Assert.DoesNotContain("???", d);             // all 12 bytes decoded
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void VerbRequest_BigEndianIds_MatchRequestTargetLittleEndianIds()
+    {
+        // Cross-packet proof of the endianness split: the SAME player issued a
+        // 0x17 RequestTarget (ids LE) then a 0x5A VerbRequest (ids BE) against the
+        // same object. Read each with its own convention -> identical ids.
+        var verb = Frames["verbrequest_subject_object_action1"].Payload;
+        var req  = Frames["requesttarget_player_targets_2617"].Payload;
+
+        int verbSubjectBE = verb[0] << 24 | verb[1] << 16 | verb[2] << 8 | verb[3];      // BE
+        int verbObjectBE  = verb[4] << 24 | verb[5] << 16 | verb[6] << 8 | verb[7];      // BE
+        int reqGameLE     = req[0] | req[1] << 8 | req[2] << 16 | req[3] << 24;          // LE
+        int reqTargetLE   = req[4] | req[5] << 8 | req[6] << 16 | req[7] << 24;          // LE
+
+        Assert.Equal(8708585, reqGameLE);
+        Assert.Equal(2617, reqTargetLE);
+        Assert.Equal(reqGameLE, verbSubjectBE);
+        Assert.Equal(reqTargetLE, verbObjectBE);
+        Assert.Equal(1, verb[8] | verb[9] << 8 | verb[10] << 16 | verb[11] << 24);       // Action LE
+    }
+
+    // ── StarbaseAvatarChange 0x9D / 0x9E ─────────────────────────────────────
+    // Two distinct 28-byte layouts. 0x9D (client->server) has a RoomType slot and
+    // ends with ActionFlag; 0x9E (server->client) has no RoomType, Orient sits
+    // right after AvatarID, and Room is appended last. Pin both so a future "merge
+    // the two layouts" edit breaks here.
+
+    [Fact]
+    public void StarbaseAvatarChange_C2S_DecodesRoomTypeOrientPositionActionFlag()
+    {
+        string d = Dump("starbaseavatarchange_c2s_broadcast");
+
+        Assert.Contains("AvatarID", d);
+        Assert.Contains("0x00AACCEE", d);
+        Assert.Contains("RoomType", d);
+        Assert.Contains("[0004] RoomType", d);             // RoomType int32 at offset 4
+        Assert.Contains("Orient            = 0.0", d);
+        Assert.Contains("Position          = (17.487, 12.238, 4.111)", d);
+        Assert.Contains("ActionFlag", d);
+        Assert.Contains("[0018] ActionFlag", d);           // ActionFlag at offset 24 (0x18)
+        Assert.Contains("0x00000041", d);                  // 0x41 broadcast
+        Assert.Contains("broadcast", d);
+        Assert.DoesNotContain("???", d);                   // all 28 bytes decoded
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void StarbaseAvatarChange_S2C_DecodesOrientPositionFlagRoom_DistinctLayout()
+    {
+        string d = Dump("starbaseavatarchange_s2c_room1");
+
+        Assert.Contains("AvatarID", d);
+        Assert.Contains("0x06EC4715", d);
+        Assert.Contains("[0004] Orient", d);               // Orient right after AvatarID (no RoomType)
+        Assert.Contains("Position          = (-30.322, -44.953, -0.194)", d);
+        Assert.Contains("[0014] ActionFlag", d);           // ActionFlag at offset 20 (0x14)
+        Assert.Contains("Room", d);
+        Assert.Contains("[0018] Room", d);                 // Room appended last, offset 24 (0x18)
+        Assert.DoesNotContain("RoomType", d);              // the C2S-only slot must NOT appear
+        Assert.DoesNotContain("???", d);                   // all 28 bytes decoded
+        Assert.DoesNotContain("[!]", d);
     }
 }
