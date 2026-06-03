@@ -97,6 +97,7 @@ public static class PacketRecordRegistry
             0x007C => new RefinerySetItemRecord(payload),
             0x007E => new ManufactureActionRecord(payload),
             0x007F => new ManufactureSetManufactureIdRecord(payload),
+            0x0081 => new RecustomizeShipStartRecord(payload),
             0x0083 => new RecustomizeAvatarStartRecord(payload),
             0x0087 => new MissionDismissalRecord(payload),
             0x0089 => new RelationshipRecord(payload),

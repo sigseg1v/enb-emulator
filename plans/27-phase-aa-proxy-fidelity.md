@@ -418,10 +418,18 @@ shared `TryReadCString` helper (raw bytes up to+including a NUL = AddDataSN) to
       AddDataSN Title/Sponsor/Reward; PlayerConnection.cpp:9950 /
       SectorManager.cpp:1521). Parser is end-of-buffer driven. Suite 665.
 
-- [ ] **`0x0081` RECUSTOMIZE_SHIP_START** -- deferred: carries a 194-byte
-      embedded `ShipData` struct with no existing CLI decoder. Needs a shared
-      ShipData reader first. This is the only remaining server-emitted 0x00xx
-      opcode that still falls through to `GenericRecord`.
+- [x] **`0x0081` RECUSTOMIZE_SHIP_START** (`RecustomizeShipStartRecordTests`):
+      verbatim 262-byte RecustomizeShipStart struct -- 194-byte ShipData (5
+      int32 ids, 26-byte NUL name, float[3] name colour, 8x 17-byte ColorInfo =
+      HSV float[3] + char flat + int32 metal) + int32 costs[12] LE + int32
+      PlayerID BE (htonl) + int32 unknown[4]. PacketStructures.h:196,1103 /
+      emitter PlayerConnection.cpp:10042. Suite 665 -> 667.
+
+With 0x0081 done, **every server-emitted 0x00xx opcode is now fully parsed**
+by the CLI (no GenericRecord fall-through in the 0x00 band). The remaining
+unregistered opcodes are control-band (0x10xx/0x20xx/0x30xx/0x40xx/0x78xx) that
+the proxy consumes/fabricates and the client never parses, plus client->server
+opcodes the CLI does not receive.
 
 These are pure CLI parser additions for opcodes the server ALREADY emits, so
 no server/proxy change and no `KnownUnimplemented`/`TestedOpcodes` migration
