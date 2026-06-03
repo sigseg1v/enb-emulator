@@ -162,16 +162,32 @@ is still open.
 
 ### AC.4 -- X button ALWAYS closes; never hang the UI on DB errors
 
-- [ ] The window close button must close the window unconditionally, even mid
-      DB call. No DB operation may run synchronously on the UI thread such that
-      a hang or exception wedges the window.
-- [ ] Root-cause and fix the `Error within DB.executeQuery()` hang (likely a
-      synchronous DB call on the UI thread against the wrong/unreachable
-      MySQL host that blocks until TCP timeout, plus an unhandled exception
-      path that leaves the UI wedged). Move DB I/O off the UI thread; surface
-      errors as a dismissable message, not a hang.
-- [ ] Verify: with the DB host unreachable, the tool still opens, reports the
-      connection failure, and the X button closes it immediately.
+- [x] Root-caused the `Error within DB.executeQuery()` hang: editors were
+      pointed at the unreachable legacy MySQL host (`net-7.org:3307`), and the
+      Login window's connect + version queries ran SYNCHRONOUSLY on the UI
+      thread -- the socket blocked until the (default ~30s) TCP timeout, freezing
+      the window and its X button. Fixed at three levels:
+      - AC.1 repoints editors at the reachable local `net7` Postgres + adds
+        `Timeout=5` (the connect can no longer block for 30s).
+      - `Login.AcceptedLoginInformation()` is now async: UI is read on the UI
+        thread, then `conn.Open()` + `getVersion`/`setVersion` run on a worker
+        thread via `Task.Run`. The UI thread (and the X button) stay responsive
+        throughout; re-entrancy is guarded with `m_loginInProgress`.
+      - `DBErrorReporter.Show` is marshaled to the UI thread via
+        `Dispatcher.UIThread.Post` (DB errors now originate on worker threads;
+        the message box must be created on the UI thread).
+- [~] Unconditional X-close, the harder half: in Avalonia the title-bar X is
+      dispatched on the UI thread, so it can only ever be processed when the UI
+      thread is NOT blocked. The Login path is now non-blocking. The editor MAIN
+      windows still run some data-load/save queries synchronously on the UI
+      thread; with the warm, reachable local connection those return fast, but a
+      down DB still blocks each call up to `Timeout=5`/`Command Timeout=30`.
+      Moving each editor's data-load off the UI thread is per-editor work tracked
+      under AC.6 -- there is NO central trick that makes a blocked UI thread
+      closable, so the only real fix is keeping I/O off it everywhere.
+- [ ] Verify (real-client/manual): with the DB host unreachable, each tool still
+      opens, reports the failure, and the X closes it immediately. Login path
+      verified by code review + build; per-editor verification is AC.6.
 
 ### AC.5 -- Port the Item Editor to Avalonia (`tools/itemeditor-avalonia`)
 

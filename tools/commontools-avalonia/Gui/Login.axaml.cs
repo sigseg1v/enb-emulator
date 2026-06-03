@@ -27,9 +27,12 @@ namespace CommonTools.Gui
             InitializeComponent();
             // Route DB error MessageBoxes through our toolkit. Stays installed
             // even if Login is closed — host can override if they need to.
+            // Marshal to the UI thread: DB calls run on worker threads now, and
+            // the message box must be created/shown on the UI thread.
             Database.DBErrorReporter.Show = (title, body) =>
-                MessageBoxManager.GetMessageBoxStandard(title, body, ButtonEnum.Ok, MsBoxIcon.Error)
-                                 .ShowWindowAsync();
+                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                    MessageBoxManager.GetMessageBoxStandard(title, body, ButtonEnum.Ok, MsBoxIcon.Error)
+                                     .ShowWindowAsync());
 
             Opened += (_, _) =>
             {
@@ -37,7 +40,7 @@ namespace CommonTools.Gui
                 DisplayConfiguration();
             };
 
-            LoginButton.Click += (_, _) => AcceptedLoginInformation();
+            LoginButton.Click += async (_, _) => await AcceptedLoginInformation();
             ExitLogin.Click   += (_, _) => { m_Cancel = true; Close(); };
 
             foreach (var tb in new[] { LoginUsername, LoginPassword, SQLServer, SQLPort })
@@ -55,11 +58,11 @@ namespace CommonTools.Gui
         public bool isValid() => !m_Cancel;
         public void updateVersion() => m_updateVersion = true;
 
-        void OnTextBoxKey(object sender, KeyEventArgs e)
+        async void OnTextBoxKey(object sender, KeyEventArgs e)
         {
             if (e.Key == Key.Enter || e.Key == Key.Return)
             {
-                AcceptedLoginInformation();
+                await AcceptedLoginInformation();
             }
         }
 
@@ -122,48 +125,76 @@ namespace CommonTools.Gui
             w.WriteEndDocument();
         }
 
-        void AcceptedLoginInformation()
+        // Guards against re-entrancy (Enter held down / double-click) while a
+        // login attempt is already running off-thread.
+        bool m_loginInProgress;
+
+        async System.Threading.Tasks.Task AcceptedLoginInformation()
         {
-            NpgsqlConnection conn = null;
+            if (m_loginInProgress) return;
+            m_loginInProgress = true;
             m_Cancel = true;
+
+            // Read UI on the UI thread, THEN do all blocking DB I/O on a worker
+            // thread. The connect + version queries used to run synchronously
+            // here on the UI thread: an unreachable/slow host froze the window
+            // (and its X button) until the socket timed out. Keeping I/O off the
+            // UI thread is what makes the window stay closable mid-login (AC.4).
+            LoginData.User = LoginUsername.Text;
+            LoginData.Pass = LoginPassword.Text;
+            LoginData.Host = SQLServer.Text;
+            try { LoginData.Port = Convert.ToInt32(SQLPort.Text, 10); }
+            catch (Exception)
+            {
+                await ShowError("Invalid Port", "SQL Port must be a number.");
+                m_loginInProgress = false;
+                return;
+            }
+
+            var assemblyName = System.Reflection.Assembly.GetEntryAssembly()?.GetName();
+            string connStr = LoginData.ConnStr(Database.DB.DATABASE_NAME);
+
             try
             {
-                LoginData.User = LoginUsername.Text;
-                LoginData.Pass = LoginPassword.Text;
-                LoginData.Host = SQLServer.Text;
-                LoginData.Port = Convert.ToInt32(SQLPort.Text, 10);
-                conn = new NpgsqlConnection(LoginData.ConnStr(Database.DB.DATABASE_NAME));
-                conn.Open();
-                conn.Close();
-
-                var assemblyName = System.Reflection.Assembly.GetEntryAssembly()?.GetName();
-                if (assemblyName == null)
+                // result codes: 0 = ok, 1 = version updated (stop), 2 = outdated.
+                // currentVersion is filled for the outdated message.
+                string currentVersion = null;
+                int outcome = await System.Threading.Tasks.Task.Run(() =>
                 {
-                    // Library-only host (no entry assembly) — skip version check.
-                    if (m_HasChanged) WriteConfiguration();
-                    m_Cancel = false;
-                    Close();
-                    return;
-                }
+                    using (var conn = new NpgsqlConnection(connStr))
+                    {
+                        conn.Open();
+                        conn.Close();
+                    }
 
-                if (m_updateVersion)
+                    if (assemblyName == null) return 0; // library-only host: skip version check
+
+                    if (m_updateVersion)
+                    {
+                        Database.DB.Instance.setVersion(assemblyName.Name, assemblyName.Version.ToString());
+                        return 1;
+                    }
+
+                    currentVersion = Database.DB.Instance.getVersion(assemblyName.Name);
+                    if (assemblyName.Version.ToString().CompareTo(currentVersion) != 0) return 2;
+                    return 0;
+                });
+
+                if (outcome == 1)
                 {
-                    Database.DB.Instance.setVersion(assemblyName.Name, assemblyName.Version.ToString());
-                    MessageBoxManager.GetMessageBoxStandard("Version Updated",
+                    await ShowWarning("Version Updated",
                         "Database entry for " + assemblyName.Name + " has been updated to "
-                        + LoginData.ApplicationVersion,
-                        ButtonEnum.Ok, MsBoxIcon.Warning).ShowWindowDialogAsync(this);
+                        + LoginData.ApplicationVersion);
+                    m_loginInProgress = false;
                     return;
                 }
-
-                string currentVersion = Database.DB.Instance.getVersion(assemblyName.Name);
-                if (assemblyName.Version.ToString().CompareTo(currentVersion) != 0)
+                if (outcome == 2)
                 {
-                    MessageBoxManager.GetMessageBoxStandard("Incorrect Version",
+                    await ShowWarning("Incorrect Version",
                         assemblyName.Name + " " + LoginData.ApplicationVersion
                         + " is outdated.\nPlease update your editor to "
-                        + LoginData.FormattedVersion(currentVersion),
-                        ButtonEnum.Ok, MsBoxIcon.Warning).ShowWindowDialogAsync(this);
+                        + LoginData.FormattedVersion(currentVersion));
+                    m_loginInProgress = false;
                     return;
                 }
 
@@ -173,16 +204,18 @@ namespace CommonTools.Gui
             }
             catch (Exception ex)
             {
-                MessageBoxManager.GetMessageBoxStandard(
-                    "Connection Error",
-                    ex.Message + "\n" + ex.StackTrace,
-                    ButtonEnum.Ok, MsBoxIcon.Error).ShowWindowDialogAsync(this);
-            }
-            finally
-            {
-                if (conn != null) conn.Close();
+                await ShowError("Connection Error", ex.Message + "\n" + ex.StackTrace);
+                m_loginInProgress = false;
             }
         }
+
+        System.Threading.Tasks.Task ShowError(string title, string body) =>
+            MessageBoxManager.GetMessageBoxStandard(title, body, ButtonEnum.Ok, MsBoxIcon.Error)
+                             .ShowWindowDialogAsync(this);
+
+        System.Threading.Tasks.Task ShowWarning(string title, string body) =>
+            MessageBoxManager.GetMessageBoxStandard(title, body, ButtonEnum.Ok, MsBoxIcon.Warning)
+                             .ShowWindowDialogAsync(this);
     }
 
     public static class LoginData
