@@ -94,6 +94,39 @@ public static class SectorHandshake
 
         public async ValueTask DisposeAsync()
         {
+            // Clean logoff before closing the sockets. A bare socket close
+            // strands the server's Player as Active() forever: the 30s
+            // account-in-use reap (UDP_Global.cpp ProcessTicketInfo ->
+            // PlayerManager::CheckAccountInUse) only frees players already
+            // flagged inactive, and a dirty disconnect never flips that
+            // flag. Across a serial run these stranded Active players pile
+            // up until the server's player pool is exhausted and the global
+            // plane stops issuing 0x0070 GLOBAL_AVATAR_LIST -- the
+            // session-accumulation "wedge" that only a server restart
+            // cleared (a proxy recycle cannot, the leak is server-side). An
+            // explicit 0x00B9 LOGOFF_REQUEST runs
+            // Player::HandleLogoffRequest -> DropPlayerFromGalaxy ->
+            // SetActive(false) synchronously, freeing the slot exactly as a
+            // real client quitting does. Best-effort: a half-dead or wedged
+            // sector link must not hang teardown.
+            try
+            {
+                using var logoffCts = new CancellationTokenSource(
+                    TimeSpan.FromSeconds(5));
+                byte[] logoffPayload = new byte[8];
+                await Sector.SendAsync(
+                    Packet.ForOpcode(
+                        OpcodeId.Known.LogoffRequest.Value, logoffPayload),
+                    logoffCts.Token);
+                await DrainUntilOpcode(
+                    Sector, OpcodeId.Known.LogoffConfirmation.Value,
+                    logoffCts.Token);
+            }
+            catch
+            {
+                // best-effort; fall through to the socket close regardless
+            }
+
             await Sector.DisposeAsync();
             await Global.DisposeAsync();
         }
@@ -137,9 +170,11 @@ public static class SectorHandshake
     /// ConstantPositionalUpdate, Create, ManufactureSet) -- is therefore only
     /// reachable on a SECOND login. This helper runs stage 1 (create avatar +
     /// complete the forced home-space login via <see cref="EstablishAsync"/>),
-    /// cleanly logs off with an explicit 0x00B9 LOGOFF_REQUEST so the server
-    /// runs DropPlayerFromGalaxy synchronously (avoids G_ERROR_ACCOUNT_IN_USE
-    /// on stage 2), then runs stage 2 (<see cref="ReestablishAsync"/> to
+    /// disposes the home session -- whose teardown logs off cleanly with a
+    /// 0x00B9 LOGOFF_REQUEST so the server runs DropPlayerFromGalaxy
+    /// synchronously (avoids G_ERROR_ACCOUNT_IN_USE on stage 2, see
+    /// <see cref="Session.DisposeAsync"/>) -- then runs stage 2
+    /// (<see cref="ReestablishAsync"/> to
     /// <paramref name="stationSectorId"/>, whose ToSectorID the second login
     /// preserves -- see <see cref="ReestablishAsync"/>). Returns the station
     /// Session; the caller asserts on its <see cref="Session.HandshakeFrames"/>.
@@ -159,11 +194,10 @@ public static class SectorHandshake
             server, authTicket, accountUsername, slot, homeSpaceSectorId,
             firstName, shipName, ct);
 
-        byte[] logoffPayload = new byte[8];
-        await homeSession.Sector.SendAsync(
-            Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload), ct);
-        await DrainUntilOpcode(
-            homeSession.Sector, OpcodeId.Known.LogoffConfirmation.Value, ct);
+        // Disposing the home session logs it off cleanly (0x00B9 ->
+        // DropPlayerFromGalaxy, see Session.DisposeAsync), dropping the
+        // stage-1 Player synchronously so stage 2's relogin on the same
+        // account does not hit G_ERROR_ACCOUNT_IN_USE.
         await homeSession.DisposeAsync();
 
         return await ReestablishAsync(server, authTicket, slot, stationSectorId, ct);
