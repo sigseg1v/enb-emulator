@@ -1231,10 +1231,14 @@ void UDPClient::StartProspecting(char *ch_msg, u8 *tcp_packet, short &tcp_index)
     AddData(body, (char) 0, idx);                 // Message NULL -> one 0 byte
     AddData(body, (int32_t) effect_uid, idx);     // 0x01 EffectID
     AddData(body, (uint32_t) start_tick, idx);    // 0x02 TimeStamp
-    // 0x04 Duration is a u16 (ms). The server truncates identically
-    // (ActivateProspectBeam: Duration = short(effect_time)); mirror it so the
-    // bytes match. Mines longer than ~65s share the server's wrap quirk.
-    AddData(body, (short) (drain_ms & 0xFFFF), idx);
+    // 0x04 Duration (ms): the client reads this field SIGNED, so a value
+    // > 32767 wraps negative and the beam does NOT render. The server's
+    // authoritative emitter Object::SendObjectToObjectEffectRL caps it at 32000
+    // for exactly this reason (server/src/ObjectClass.cpp:884-885). A full ore
+    // stack mines for well over 32.7s, so without the cap the beam would vanish
+    // mid-mine. Mirror the server cap so a long mine still shows the beam.
+    short duration = (drain_ms > 32000) ? (short) 32000 : (short) drain_ms;
+    AddData(body, duration, idx);
 
     g_ServerMgr->m_SectorConnection->SendResponse(
         ENB_OPCODE_000B_OBJECT_TO_OBJECT_EFFECT, body, (short) idx);
