@@ -105,7 +105,32 @@ public static class SectorHandshake
     /// <see cref="DeleteCreatedCharacterAsync"/> (typically in a finally
     /// block) so a re-run lands in the empty-slot baseline.
     /// </summary>
-    public static async Task<Session> EstablishAsync(
+    public static Task<Session> EstablishAsync(
+        ServerFixture server,
+        string authTicket,
+        string accountUsername,
+        int slot,
+        int sectorId,
+        string firstName,
+        string shipName,
+        CancellationToken ct)
+        => WithProxyRecycleOnWedgeAsync(
+            server, ct,
+            () => EstablishOnceAsync(
+                server, authTicket, accountUsername, slot, sectorId,
+                firstName, shipName, ct),
+            // On retry the redo recreates the avatar on the same slot with
+            // the same fixed name; clear any avatar the wedged attempt left
+            // behind (its in-attempt delete ran on a connection the proxy
+            // recycle then dropped) so the redo's create does not collide.
+            clearSlot: c => TryDeleteCharacterAsync(server, authTicket, slot, c));
+
+    // One establish attempt: open a fresh global conn, create the avatar,
+    // master-join, and drive the sector handshake to 0x0005 START. Throws
+    // ProxyWedgeException (via MasterJoinThenSectorLoginAsync) when the proxy
+    // wedge stalls the handshake; the public EstablishAsync wrapper recycles
+    // the proxy and retries with fresh connections.
+    private static async Task<Session> EstablishOnceAsync(
         ServerFixture server,
         string authTicket,
         string accountUsername,
@@ -134,12 +159,9 @@ public static class SectorHandshake
             Assert.True((gameId & PlayerTag) != 0,
                 $"GameID 0x{gameId:X8} missing PLAYER_TAG -- GlobalTicketRequest hit the failure path.");
 
-            var redirect = await DoMasterJoinAsync(server, authTicket, gameId, sectorId, ct);
-            Assert.Equal(sectorId, redirect.SectorId);
-            Assert.Equal(server.SectorPort, redirect.ServerEndPoint.Port);
-
-            var (sectorConn, startId, handshakePayloads) = await DoSectorLoginUntilStartAsync(
-                server, authTicket, gameId, sectorId, ct);
+            var (sectorConn, startId, handshakePayloads) =
+                await MasterJoinThenSectorLoginAsync(
+                    server, authTicket, gameId, sectorId, ct);
 
             return new Session
             {
@@ -200,7 +222,20 @@ public static class SectorHandshake
     /// (<c>server/src/PlayerSaves.cpp:289-291</c>).
     /// </para>
     /// </summary>
-    public static async Task<Session> ReestablishAsync(
+    public static Task<Session> ReestablishAsync(
+        ServerFixture server,
+        string authTicket,
+        int slot,
+        int sectorId,
+        CancellationToken ct)
+        => WithProxyRecycleOnWedgeAsync(
+            server, ct,
+            () => ReestablishOnceAsync(server, authTicket, slot, sectorId, ct));
+            // No clearSlot: the avatar is expected to already exist; the redo
+            // reconnects against it rather than recreating it.
+
+    // One reconnect attempt against an existing avatar; see ReestablishAsync.
+    private static async Task<Session> ReestablishOnceAsync(
         ServerFixture server,
         string authTicket,
         int slot,
@@ -221,11 +256,9 @@ public static class SectorHandshake
             Assert.True((gameId & PlayerTag) != 0,
                 $"GameID 0x{gameId:X8} missing PLAYER_TAG -- GlobalTicketRequest hit the failure path.");
 
-            var redirect = await DoMasterJoinAsync(server, authTicket, gameId, sectorId, ct);
-            Assert.Equal(sectorId, redirect.SectorId);
-
-            var (sectorConn, startId, handshakePayloads) = await DoSectorLoginUntilStartAsync(
-                server, authTicket, gameId, sectorId, ct);
+            var (sectorConn, startId, handshakePayloads) =
+                await MasterJoinThenSectorLoginAsync(
+                    server, authTicket, gameId, sectorId, ct);
 
             return new Session
             {
@@ -243,6 +276,146 @@ public static class SectorHandshake
         {
             await globalConn.DisposeAsync();
             throw;
+        }
+    }
+
+    // -- Single-client-proxy session-accumulation wedge mitigation -----------
+    // The Net7Proxy is a documented single-client bridge. Driving hundreds of
+    // serial connect->login->disconnect cycles through ONE instance latches
+    // per-session proxy state that, after ~40 logins, wedges every later
+    // sector login: the handshake stalls before the 0x0005 START frame at
+    // stage 12 (the stage whose confirm coincides with the first in-game
+    // position fan-out). A controlled experiment isolated the wedge to the
+    // PROXY: restarting ONLY the proxy container (server, login, postgres
+    // untouched) recovers the suite, while re-establishing the handshake in
+    // place does NOT -- the latched state survives a fresh master-join. So
+    // the mitigation is a proxy RECYCLE, not an in-place retry. The precise
+    // never-reset proxy global is a real proxy defect tracked in
+    // plans/11-phase-k-ingame.md; until it is fixed at source, the suite
+    // recycles the proxy on the wedge.
+    //
+    // This is a TEST-INFRA mitigation, NOT a server-fidelity relaxation: no
+    // wire bytes change, and the server only ever sees a clean disconnect +
+    // fresh reconnect -- exactly what it would see if the client crashed and
+    // relaunched. The escalation lives at the establish level (not inside the
+    // handshake) because clearing the wedge drops the caller-owned global
+    // connection too, so the whole session -- fresh global conn, avatar,
+    // sector -- must be re-established, not just the sector leg.
+    private const int EstablishMaxAttempts = 3;
+    private static readonly TimeSpan SectorHandshakeAttemptTimeout =
+        TimeSpan.FromSeconds(18);
+
+    /// <summary>
+    /// Signals that a sector handshake stalled before the 0x0005 START frame
+    /// because the proxy hit its single-client session-accumulation wedge.
+    /// Caught by <see cref="WithProxyRecycleOnWedgeAsync"/>, which recycles
+    /// the proxy (<see cref="ServerFixture.RestartProxyAsync"/>) and retries
+    /// the whole establish with fresh connections.
+    /// </summary>
+    private sealed class ProxyWedgeException : Exception
+    {
+        public ProxyWedgeException(int sectorId, int gameId)
+            : base($"sector={sectorId}, game=0x{gameId:X8} stalled before " +
+                   $"0x0005 START within " +
+                   $"{SectorHandshakeAttemptTimeout.TotalSeconds:F0}s")
+        {
+        }
+    }
+
+    /// <summary>
+    /// Run <paramref name="attempt"/>; on a <see cref="ProxyWedgeException"/>
+    /// recycle the proxy and retry with fresh connections, up to
+    /// <see cref="EstablishMaxAttempts"/>. <paramref name="clearSlot"/> (if
+    /// supplied) runs after the recycle to guarantee an empty character slot
+    /// before a create-path redo. Any other exception propagates unchanged.
+    /// </summary>
+    private static async Task<Session> WithProxyRecycleOnWedgeAsync(
+        ServerFixture server,
+        CancellationToken ct,
+        Func<Task<Session>> attempt,
+        Func<CancellationToken, Task>? clearSlot = null)
+    {
+        for (int n = 1; ; n++)
+        {
+            try
+            {
+                return await attempt();
+            }
+            catch (ProxyWedgeException ex)
+                when (n < EstablishMaxAttempts && !ct.IsCancellationRequested)
+            {
+                // Surfaced loudly -- the wedge is a real proxy defect, not
+                // noise.
+                Console.Error.WriteLine(
+                    $"[SectorHandshake] establish attempt {n}/{EstablishMaxAttempts} " +
+                    $"hit the proxy session-accumulation wedge ({ex.Message}); " +
+                    $"recycling the proxy and retrying with fresh connections.");
+
+                await server.RestartProxyAsync(ct);
+
+                if (clearSlot is not null)
+                {
+                    try { await clearSlot(ct); }
+                    catch { /* best-effort; a real collision surfaces on redo */ }
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Open a fresh global connection, delete the avatar on
+    /// <paramref name="slot"/>, and close. Used after a proxy recycle to
+    /// guarantee an empty slot before a create-path redo (the wedged
+    /// attempt's own delete ran on a connection the recycle then dropped).
+    /// The prior global connection is dead post-recycle, so this fresh one
+    /// does not trip the server's duplicate-login force-kick.
+    /// </summary>
+    private static async Task TryDeleteCharacterAsync(
+        ServerFixture server, string authTicket, int slot, CancellationToken ct)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(15));
+
+        var conn = await EncryptedTcpConnection.ConnectAsync(
+            server.GlobalHost, server.GlobalPort, cts.Token);
+        try
+        {
+            await SendGlobalConnectAsync(conn, authTicket, cts.Token);
+            await DrainUntilOpcode(conn, OpcodeId.Known.GlobalAvatarList.Value, cts.Token);
+            await DeleteCreatedCharacterAsync(conn, slot, cts.Token);
+        }
+        finally
+        {
+            await conn.DisposeAsync();
+        }
+    }
+
+    private static async Task<(EncryptedTcpConnection conn, int startId,
+        IReadOnlyList<(ushort Opcode, byte[] Payload)> frames)>
+        MasterJoinThenSectorLoginAsync(
+            ServerFixture server, string authTicket, int gameId, int sectorId,
+            CancellationToken ct)
+    {
+        using var attemptCts =
+            CancellationTokenSource.CreateLinkedTokenSource(ct);
+        attemptCts.CancelAfter(SectorHandshakeAttemptTimeout);
+        try
+        {
+            var redirect = await DoMasterJoinAsync(
+                server, authTicket, gameId, sectorId, attemptCts.Token);
+            Assert.Equal(sectorId, redirect.SectorId);
+            Assert.Equal(server.SectorPort, redirect.ServerEndPoint.Port);
+
+            return await DoSectorLoginUntilStartAsync(
+                server, authTicket, gameId, sectorId, attemptCts.Token);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // Stalled before 0x0005 START within the attempt window: the
+            // proxy's session-accumulation wedge. Re-establishing in place
+            // does NOT clear it (verified empirically) -- only a proxy
+            // recycle does. Signal the establish-level retry.
+            throw new ProxyWedgeException(sectorId, gameId);
         }
     }
 

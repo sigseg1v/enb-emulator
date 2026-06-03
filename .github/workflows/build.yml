@@ -273,7 +273,12 @@ jobs:
     # process, and asserts opcode-by-opcode against the running server.
     # No `needs:` chain so this runs in parallel with cmake-build /
     # ctest / integration-test for fast feedback.
-    timeout-minutes: 20
+    # The integration suite is fully serial (one ServerCollection,
+    # ~360 tests x ~4s) at ~24 min, plus stack bring-up (~3 min), the C++
+    # ctest step (~2 min), and the proxy-recycle self-heal that clears the
+    # single-client session-accumulation wedge (~8 recycles x ~33s). 45 min
+    # covers the whole job with margin; 20 min truncated it mid-suite.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: Install .NET 10 SDK
@@ -288,16 +293,16 @@ jobs:
             -addext "subjectAltName=DNS:localhost,DNS:local.net-7.org,IP:127.0.0.1" \
             -keyout deploy/certs/localhost.pem \
             -out    deploy/certs/localhost.cer
-      - name: Bring up docker-compose stack (mysql + login + proxy + server)
+      - name: Bring up docker-compose stack (postgres + login + proxy + server)
         run: |
-          docker compose up -d --wait mysql login proxy server
+          docker compose up -d --wait postgres login proxy server
           docker compose ps
       - name: Build CliClient.IntegrationTests
         run: |
           dotnet build tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
             --configuration Debug
       - name: Build + run C++ ctest with a real MVAS behind the proxy
-        # Here the full docker-compose stack is up (mysql + login + proxy +
+        # Here the full docker-compose stack is up (postgres + login + proxy +
         # server), so the proxy's UDPConnection::SendMasterLogin genuinely
         # reaches a live MVAS -- this exercises the real proxy->MVAS UDP
         # handoff path, not just the socket-level timeout the proxy-only job
@@ -344,7 +349,7 @@ jobs:
       - name: Stack logs on failure
         if: failure()
         run: |
-          echo "=== mysql ===";  docker compose logs mysql  || true
+          echo "=== postgres ==="; docker compose logs postgres || true
           echo "=== login ===";  docker compose logs login  || true
           echo "=== proxy ===";  docker compose logs proxy  || true
           echo "=== server ==="; docker compose logs server || true

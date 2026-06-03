@@ -63,6 +63,26 @@ public sealed class ServerFixture : IAsyncLifetime
 
     private bool _ownsCompose;
 
+    // Serialises proxy recycles and de-dups bursts. The Net7Proxy is a
+    // documented single-client bridge; driving hundreds of serial
+    // connect->login->disconnect cycles through one instance latches
+    // per-session proxy state that wedges every later sector login at
+    // stage 12 (the stage whose confirm coincides with the first in-game
+    // position fan-out). A controlled experiment proved the wedge is
+    // PROXY-side and accumulation-dependent: restarting ONLY the proxy
+    // (server untouched) recovers the suite, while re-establishing the
+    // handshake in place does NOT. SectorHandshake recycles the proxy on
+    // that wedge via RestartProxyAsync. The precise never-reset proxy
+    // global is tracked as a real proxy defect in
+    // plans/11-phase-k-ingame.md -- this is the test-infra mitigation, not
+    // a server-fidelity change (no wire bytes change; the server only sees
+    // a clean disconnect + fresh reconnect, exactly as if the client had
+    // crashed and relaunched).
+    private readonly SemaphoreSlim _proxyRestartLock = new(1, 1);
+    private DateTime _lastProxyRestartUtc = DateTime.MinValue;
+    private static readonly TimeSpan ProxyRestartDedupWindow =
+        TimeSpan.FromSeconds(12);
+
     public ServerFixture()
     {
         PostgresConnectionString =
@@ -130,6 +150,104 @@ public sealed class ServerFixture : IAsyncLifetime
             "docker", $"compose logs --no-color --no-log-prefix {service}",
             TimeSpan.FromSeconds(30));
         return exit == 0 ? stdout : stdout + stderr;
+    }
+
+    /// <summary>
+    /// Recycle the proxy container to clear accumulated per-session proxy
+    /// state (the single-client wedge -- see the <c>_proxyRestartLock</c>
+    /// note above). Runs <c>docker compose restart proxy</c>, then waits for
+    /// the fresh process to finish booting before returning, so a caller's
+    /// fresh master-join does not race a half-booted proxy. The server,
+    /// login, and postgres containers are left untouched, so the loaded
+    /// sector threads survive and no <c>WaitForServerSectorAsync</c> re-poll
+    /// is needed.
+    ///
+    /// <para>
+    /// Readiness is gated on the proxy's own boot log, NOT a bare TCP
+    /// port-probe. The listener sockets accept connections very early in
+    /// boot -- before the proxy has re-resolved the game server and bound
+    /// its two UDP planes to it -- so a port-probe returns while the proxy
+    /// still cannot serve a login, and the very next handshake wedges again.
+    /// The last line a freshly-booted proxy prints before it is able to
+    /// relay a login is the global UDP bind ("... (unconnected default
+    /// peer)" in <c>UDPClient_linux.cpp::ResolveGameServerIP</c>); we poll
+    /// the log tail for it. Because a <c>restart</c> (not recreate) preserves
+    /// the log stream and no client reconnects while this lock is held, that
+    /// marker in the tail is unambiguously the fresh process's.
+    /// </para>
+    ///
+    /// <para>
+    /// Serialised and de-duped: a single wedge stalls every subsequent
+    /// login, so several handshakes may request a recycle inside the same
+    /// wedge window. One restart clears it for all of them; requests within
+    /// <see cref="ProxyRestartDedupWindow"/> of the last completed restart
+    /// are no-ops. Works in both owns-compose and
+    /// <c>CLI_INTEGRATION_SKIP_COMPOSE=1</c> modes -- it only needs the
+    /// compose CLI and the running stack, both present in CI.
+    /// </para>
+    /// </summary>
+    public async Task RestartProxyAsync(CancellationToken ct = default)
+    {
+        await _proxyRestartLock.WaitAsync(ct);
+        try
+        {
+            if (DateTime.UtcNow - _lastProxyRestartUtc < ProxyRestartDedupWindow)
+                return;
+
+            Console.Error.WriteLine(
+                "[ServerFixture] recycling the proxy container to clear the " +
+                "single-client session-accumulation wedge (server untouched).");
+
+            await RunComposeAsync("restart proxy", TimeSpan.FromSeconds(60));
+
+            // Listeners accept early in boot; the port-probe only confirms
+            // the new container is up. The authoritative gate is the boot-log
+            // marker below -- the proxy cannot relay a login until it has
+            // bound its UDP planes to the game server.
+            await WaitForPortAsync(GlobalHost, GlobalPort, TimeSpan.FromSeconds(30));
+            await WaitForPortAsync(MasterHost, MasterPort, TimeSpan.FromSeconds(30));
+            await WaitForPortAsync(SectorHost, SectorPort, TimeSpan.FromSeconds(30));
+            await WaitForProxyBootCompleteAsync(TimeSpan.FromSeconds(30), ct);
+
+            _lastProxyRestartUtc = DateTime.UtcNow;
+        }
+        finally
+        {
+            _proxyRestartLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Block until the freshly-restarted proxy logs its boot-complete marker
+    /// -- the global UDP plane bind ("... (unconnected default peer)"), the
+    /// last line printed before it can relay a login. See the readiness note
+    /// on <see cref="RestartProxyAsync"/>. A <c>restart</c> preserves the log
+    /// stream, so we read the tail (where the fresh boot lines land; no
+    /// client reconnects while the restart lock is held) and poll until the
+    /// marker appears. Matches on the IP-independent suffix so a loopback
+    /// DNS-fallback boot is NOT silently accepted as ready -- if the proxy
+    /// fell back to 127.0.0.1 it is broken and the next handshake should
+    /// fail loudly rather than be masked here.
+    /// </summary>
+    private static async Task WaitForProxyBootCompleteAsync(TimeSpan timeout, CancellationToken ct)
+    {
+        const string BootCompleteMarker = "(unconnected default peer)";
+        var deadline = DateTime.UtcNow + timeout;
+        string lastTail = "";
+        while (DateTime.UtcNow < deadline)
+        {
+            ct.ThrowIfCancellationRequested();
+            var (exit, stdout, stderr) = await RunCaptureAsync(
+                "docker", "compose logs --no-color --no-log-prefix --tail 25 proxy",
+                TimeSpan.FromSeconds(10));
+            lastTail = exit == 0 ? stdout : stdout + stderr;
+            if (lastTail.Contains(BootCompleteMarker, StringComparison.Ordinal))
+                return;
+            await Task.Delay(ProbeInterval, ct);
+        }
+        throw new TimeoutException(
+            $"Proxy did not log its boot-complete marker '{BootCompleteMarker}' " +
+            $"within {timeout.TotalSeconds:F0}s of restart. Last log tail:\n{lastTail}");
     }
 
     private static async Task<(int ExitCode, string Stdout, string Stderr)> RunCaptureAsync(
