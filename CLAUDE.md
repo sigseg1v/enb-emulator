@@ -248,34 +248,44 @@ host-order on the wire.
 
 ### Trap 2: stale docker images mask the source fix
 
-`just play-local` / `just run-stack-bg` use `docker compose up -d`,
-which reuses the existing image if the source has changed but the
-image hasn't been rebuilt. Fixing a bug in `proxy/`, `server/src/`,
-or `login-server/` and then re-running `play-local` will silently
-hand the old binary to the client and reproduce the original crash
-verbatim -- it will look like the fix did nothing.
+`docker compose up -d` alone reuses the existing image if the source
+has changed but the image hasn't been rebuilt. If a launcher only did
+`up -d`, fixing a bug in `proxy/`, `server/src/`, or `login-server/`
+and then re-running it would silently hand the old binary to the
+client and reproduce the original crash verbatim -- it would look like
+the fix did nothing.
 
-`play-local` and `play-cli` deliberately REUSE running containers --
-they do NOT auto-build or force-recreate. This is intentional: an
-auto-build on every launch silently restarts the server and wipes
-in-flight player/session state, which corrupts interactive testing.
-The cost is that you OWN the rebuild step when you change C++:
+`play-local` and `play-cli` therefore **build-if-stale by default**:
+each runs `docker compose build` first (the layer cache makes an
+unchanged service a near-instant no-op -- no recompile, no restart),
+then `up -d`, which recreates ONLY the containers whose image ID
+actually changed. So if nothing changed, nothing rebuilds and nothing
+bounces; if you changed C++, the new binary is built and only that one
+container restarts. This is what kills the stale-image trap at the
+source. (`play-cli` builds only its own CLI unit -- it brings the
+SHARED server/login/proxy up with `--no-recreate`, so launching a CLI
+never rebuilds or bounces the shared stack and never disturbs another
+player's session.)
 
+Escape hatch: **`ENB_NOREBUILD=1`** forces a pure attach -- skip the
+build entirely and start only missing containers (`--no-recreate`
+leaves every running container, and its in-flight player/session
+state, exactly as-is). Use it when you KNOW the running binaries are
+current and must not bounce.
+
+To rebuild explicitly without launching a client:
 - Changed `server/`, `proxy/`, or `login-server/`? Run **`just rebuild`**
-  (it `docker compose build`s those three -- the layer cache makes an
-  unchanged service a no-op -- then `up -d`s them, recreating only the
-  containers whose image actually changed, so an unchanged service does
-  not bounce; postgres + pgdata are untouched). Scope it with an arg:
-  `just rebuild proxy`. Then relaunch.
-- Changed CliClient code or the unit proxy? Run **`just rebuild-cli <UNIT>`**
-  before `just play-cli <UNIT>`.
+  (builds those three, recreating only the containers whose image
+  actually changed; postgres + pgdata untouched). Scope it with an
+  arg: `just rebuild proxy`.
+- Changed CliClient code or the unit proxy? Run **`just rebuild-cli <UNIT>`**.
 
-Both `play-local` and `play-cli` print a one-line reminder to this
-effect on every launch. If you change C++ and test via docker WITHOUT
-rebuilding, the running container keeps the old binary -- that is the
-stale-image trap, now your responsibility to avoid, not the recipe's.
-Do NOT re-add an unconditional `docker compose build` to `play-local`
-or `play-cli`; use the explicit `rebuild` / `rebuild-cli` recipes.
+Both launchers print each image's build time and flag any image that
+MAY be out of date (source on disk newer than the built image -- you
+will mainly see this under `ENB_NOREBUILD=1`, or for the shared server
+under `play-cli`). Do NOT remove the default `docker compose build`
+step from `play-local` / `play-cli` -- it is the stale-image guard;
+gate extra disruption behind `ENB_NOREBUILD` instead.
 
 ### Process when adding or changing a packet emitter
 

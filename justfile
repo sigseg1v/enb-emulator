@@ -223,7 +223,7 @@ _image-status COMPOSE_ARGS SERVICES REBUILD_CMD:
       [cli]="tools/cli-client"
     )
     STALE=()
-    echo ">>> image build times (source-newer images are flagged STALE):"
+    echo ">>> image build times (an image OLDER than its source is flagged):"
     for svc in "${SVCS[@]}"; do
       img=$(docker compose "${CA[@]}" images -q "$svc" 2>/dev/null | head -1)
       if [ -z "$img" ]; then
@@ -242,19 +242,21 @@ _image-status COMPOSE_ARGS SERVICES REBUILD_CMD:
       flag=""
       commit_ct=$(git log -1 --format=%ct -- $paths 2>/dev/null)
       if [ -n "$commit_ct" ] && [ "$commit_ct" -gt "$ce" ]; then
-        flag="   <-- STALE (newer commit not built)"; STALE+=("$svc")
+        flag="   <-- MAY be out of date (newer commit not built into this image)"; STALE+=("$svc")
       elif [ -n "$(git status --porcelain -- $paths 2>/dev/null)" ]; then
-        flag="   <-- STALE (uncommitted source edits)"; STALE+=("$svc")
+        flag="   <-- MAY be out of date (uncommitted source edits not built)"; STALE+=("$svc")
       fi
       printf '      %-8s last-image-build: %s%s\n' "$svc:" "$human" "$flag"
     done
     if [ "${#STALE[@]}" -gt 0 ]; then
       echo
       echo "  ##########################################################################"
-      echo "  ##  !!  STALE IMAGE WARNING  !!"
-      echo "  ##  Running an OLDER binary than the source on disk for: ${STALE[*]}"
-      echo "  ##  Your source changes are NOT in these running containers."
+      echo "  ##  image(s) MAY be out of date: ${STALE[*]}"
+      echo "  ##  The source on disk is newer than the built image, so these containers"
+      echo "  ##  MAY be running an older binary than your current source."
       echo "  ##"
+      echo "  ##  (The default launch already builds-if-stale; you will mainly see this"
+      echo "  ##   when ENB_NOREBUILD=1 is set, or for the shared server under play-cli.)"
       echo "  ##  To rebuild from current source (postgres + pgdata untouched), run:"
       echo "  ##"
       echo "  ##      {{REBUILD_CMD}}"
@@ -286,24 +288,34 @@ _image-status COMPOSE_ARGS SERVICES REBUILD_CMD:
 play-cli UNIT='cli1':
     #!/usr/bin/env bash
     set -euo pipefail
-    # Ensure the shared stack is up so its network + server/login/postgres exist.
-    just run-stack-bg
+    # Ensure the shared stack is up WITHOUT ever bouncing it. Launching a CLI
+    # must never restart the shared server/login/proxy or wipe another player's
+    # in-flight session, so `--no-recreate` starts only missing containers and
+    # leaves running ones (and their state) untouched. play-cli NEVER rebuilds
+    # the shared server -- use `just play-local` or `just rebuild` for that.
+    just init
+    docker compose up -d --no-recreate server login proxy
     # The CLI unit attaches to the shared stack network by name. It's derived
     # from COMPOSE_PROJECT_NAME (per-worktree), so pass it through rather than
     # hardcoding `enb-emulator_default`.
     export STACK_NETWORK="${COMPOSE_PROJECT_NAME}_default"
     echo ">>> CLI unit '{{UNIT}}' -> stack network '$STACK_NETWORK'"
     echo ">>> inside the REPL:  connect cliproxy   then   login <user> <pass>"
+    # BUILD-IF-STALE for THIS cli unit (its cli + dedicated proxy). The layer
+    # cache makes an unchanged unit a near-instant no-op, so a relaunch with no
+    # code change does not rebuild. If you changed CliClient or the proxy, the
+    # new image is built here. ENB_NOREBUILD=1 skips the build and reuses the
+    # existing images as-is.
+    if [ -n "${ENB_NOREBUILD:-}" ]; then
+        echo ">>> ENB_NOREBUILD=1 -- reusing existing cli/proxy images as-is (no build)"
+    else
+        echo ">>> build-if-stale for cli unit '{{UNIT}}' (layer cache skips unchanged); set ENB_NOREBUILD=1 to skip"
+        docker compose -f docker-compose.cli.yml -p {{UNIT}} build
+    fi
     just _image-status "-f docker-compose.cli.yml -p {{UNIT}}" "cli proxy" "just rebuild-cli {{UNIT}}"
     # `run` (not `up`) gives an interactive TTY so the line editor + colour
-    # turn on; --rm cleans up the ephemeral CLI container on exit. We REUSE
-    # the existing cli + dedicated-proxy images (no --build): relaunching a
-    # unit reuses what's already built instead of rebuilding every time. The
+    # turn on; --rm cleans up the ephemeral CLI container on exit. The
     # dedicated proxy stays up (unless-stopped) for re-runs of the same unit.
-    #
-    # Changed CliClient code or the proxy? Run `just rebuild-cli {{UNIT}}`
-    # first -- otherwise this reuses the OLD image and your change is absent.
-    echo ">>> reusing existing cli/proxy images. Changed CLI or proxy code? run 'just rebuild-cli {{UNIT}}' first."
     docker compose -f docker-compose.cli.yml -p {{UNIT}} run --rm cli
 
 # Rebuild a CLI unit's cli + dedicated-proxy images from current source. Run
@@ -370,18 +382,29 @@ play-local CLIENT_PATH='':
     fi
 
     echo ">>> bringing up local stack (postgres + server + login + proxy)"
-    # REUSE already-running containers. `run-stack-bg` is `up -d`, which is a
-    # no-op for a container that is already up with its current image -- so
-    # launching the client does NOT restart the server or wipe in-flight
-    # player/session state. Images build automatically on first run, and
-    # after `just down` the next `up -d` recreates the containers from the
-    # existing images. This recipe never force-recreates on its own.
+    just init
+    # BUILD-IF-STALE (default). `docker compose build` recompiles ONLY the
+    # services whose build context actually changed -- Docker's layer cache
+    # makes an unchanged service a near-instant no-op -- then `up -d` recreates
+    # ONLY the containers whose image ID changed. So if you changed nothing,
+    # nothing rebuilds and nothing restarts: your in-flight session is left
+    # alone. If you changed server/ proxy/ login-server/ C++, the new binary is
+    # built and only that one container bounces. This is what kills the
+    # stale-image trap (testing an OLD binary because the container was never
+    # rebuilt -- see CLAUDE.md "Wire format & byte order").
     #
-    # Changed C++ in server/ proxy/ login-server/ ? The running container
-    # keeps the OLD binary until you rebuild -- the stale-image trap (see
-    # CLAUDE.md "Wire format & byte order"). Run `just rebuild` first.
-    just run-stack-bg
-    echo ">>> reused the running stack (no rebuild)."
+    # ENB_NOREBUILD=1 forces a PURE ATTACH: skip the build entirely and start
+    # only containers that are missing. `--no-recreate` leaves every running
+    # container -- and its in-flight player/session state -- exactly as-is.
+    # Use it when you KNOW the running binaries are current and must not bounce.
+    if [ -n "${ENB_NOREBUILD:-}" ]; then
+        echo ">>> ENB_NOREBUILD=1 -- skipping build; starting only missing containers, running state untouched"
+        docker compose up -d --no-recreate server login proxy
+    else
+        echo ">>> build-if-stale (layer cache skips unchanged services); set ENB_NOREBUILD=1 to skip"
+        docker compose build server login proxy
+        docker compose up -d server login proxy
+    fi
     just _image-status "" "proxy server login" "just rebuild"
 
     echo ">>> building launcher (so its output dir exists for settings.json)"

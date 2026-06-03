@@ -222,6 +222,34 @@ Tear a unit's proxy down when finished:
 just stop-cli cli1
 ```
 
+### Rebuilds on launch (`ENB_NOREBUILD`)
+
+`just play-local` and `just play-cli` **build-if-stale by default**: they run
+`docker compose build` first, which Docker's layer cache turns into a
+near-instant no-op for any service whose source did not change, then bring the
+stack up so that **only** a container whose image actually changed is recreated.
+So if you changed nothing, nothing rebuilds and nothing restarts -- and if you
+changed C++ in `server/`, `proxy/`, or `login-server/`, the new binary is built
+and only that container bounces. This is what avoids the *stale-image trap*
+(testing an old binary because the container was never rebuilt). `play-cli`
+never rebuilds or recreates the **shared** server/login/proxy -- it only builds
+its own CLI unit -- so launching a CLI never disturbs another player's session.
+
+Set **`ENB_NOREBUILD=1`** to force a pure attach: skip the build entirely and
+start only containers that are missing, leaving every running container -- and
+its in-flight player/session state -- exactly as-is. Use it when you know the
+running binaries are current and must not bounce:
+
+```bash
+ENB_NOREBUILD=1 just play-local      # attach the WINE client, rebuild nothing
+ENB_NOREBUILD=1 just play-cli cli2   # attach a second CLI, rebuild nothing
+```
+
+Both launchers print each image's build time and flag any image that *may* be
+out of date (its source on disk is newer than the built image). To rebuild
+explicitly without launching anything, use `just rebuild` (server/login/proxy)
+or `just rebuild-cli <UNIT>` (a CLI unit).
+
 One catch: the server force-kicks a duplicate login **per account** (this is
 correct retail behaviour and is deliberately not bypassed). Give each
 concurrent client a **distinct account**, not the same login twice.
