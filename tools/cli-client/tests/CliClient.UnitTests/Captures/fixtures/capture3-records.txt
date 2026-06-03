@@ -976,3 +976,10 @@ provenance: Request_Time 0x44 (client->server) -- ClientTick 80574 (0x00013ABE) 
 opcode: 0x44
 payload-bytes: 4
 hex: be 3a 01 00
+
+[inventorysort_cargo_by_name]
+provenance: InventorySort 0x28 (client->server) -- ID 116206295 (0x06ED2AD7), TargetInv 1 (cargo), Sort1 1 (name), Sort2 4, Sort3 8, Reverse 0 (capture_3.rar packet #15262, Client->Server). 21-byte struct InvSort: five int32 + a trailing u8 Reverse. The five int32s are all big-endian -- Player::HandleInventorySort reads each through ntohl (same uniform-BE convention as 0x27 InventoryMove); Reverse is a raw byte. TargetInv 1=cargo/3=vault; Sort keys 1=name/5=category/10=value (4/8 secondary/tertiary no-ops). This frame is a sort-cargo-by-name request.
+opcode: 0x28
+payload-bytes: 21
+hex: 06 ed 2a d7 00 00 00 01 00 00 00 01 00 00 00 04
+      00 00 00 08 00

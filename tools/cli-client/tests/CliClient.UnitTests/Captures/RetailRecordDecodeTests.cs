@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllNinetyOneFrames()
+    public void Fixture_Loads_AllNinetyTwoFrames()
     {
-        Assert.Equal(91, Frames.Count);
+        Assert.Equal(92, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -2289,5 +2289,40 @@ public sealed class RetailRecordDecodeTests
         Assert.Contains("(LE; client ms tick, echoed in 0x34 reply)", d);
         Assert.DoesNotContain("???", d);                   // all 4 bytes decoded
         Assert.DoesNotContain("[!]", d);
+    }
+
+    // ── InventorySort 0x28 ───────────────────────────────────────────────────
+    // 21-byte struct InvSort: five int32 (all BE, ntohl'd like 0x27) + a trailing
+    // u8 Reverse. TargetInv selects the container; Sort1..3 are the sort keys.
+
+    [Fact]
+    public void InventorySort_FiveInt32BigEndian_PlusReverseByte()
+    {
+        string d = Dump("inventorysort_cargo_by_name");
+
+        Assert.Contains("[0000] ID", d);
+        Assert.Contains("0x06ED2AD7", d);                  // BE == 116206295
+        Assert.Contains("TargetInv         = 1", d);
+        Assert.Contains("(BE; cargo)", d);
+        Assert.Contains("Sort1             = 1", d);
+        Assert.Contains("(BE; sort by name)", d);
+        Assert.Contains("Sort2             = 4", d);
+        Assert.Contains("Sort3             = 8", d);
+        Assert.Contains("[0014] Reverse", d);              // offset 20 = 0x14
+        Assert.Contains("Reverse           = 0", d);
+        Assert.Contains("(ascending)", d);
+        Assert.DoesNotContain("???", d);                   // all 21 bytes decoded
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void InventorySort_BigEndianId_NaiveLittleEndianWouldBeGarbage()
+    {
+        // The five int32s use the same uniform-BE convention as 0x27. Reading ID
+        // little-endian would give 0xD72AED06, not the 0x06ED2AD7 the server sees.
+        var p = Frames["inventorysort_cargo_by_name"].Payload;
+        int idBE = p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3];
+        Assert.Equal(116206295, idBE);
+        Assert.Equal(0x06ED2AD7, idBE);
     }
 }

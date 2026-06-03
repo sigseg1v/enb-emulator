@@ -46,6 +46,7 @@ public static class PacketRecordRegistry
             0x0022 => new PushMessageRecord(payload, 0x0022),
             0x0025 => new ItemBaseRecord(payload),
             0x0027 => new InventoryMoveRecord(payload),
+            0x0028 => new InventorySortRecord(payload),
             0x002C => new ActionRecord(payload),
             0x0030 => new ActivateRenderStateRecord(payload, 0x0030),
             0x0031 => new ActivateRenderStateRecord(payload, 0x0031),
