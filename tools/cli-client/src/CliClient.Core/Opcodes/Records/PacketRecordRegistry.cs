@@ -72,6 +72,7 @@ public static class PacketRecordRegistry
             0x0054 => new TalkTreeRecord(payload),
             0x0055 => new SelectTalkTreeRecord(payload),
             0x0056 => new TalkTreeActionRecord(payload),
+            0x0058 => new SkillAbilityRecord(payload),
             0x005A => new VerbRequestRecord(payload),
             0x005C => new VerbUpdateRecord(payload),
             0x0061 => new AvatarDescriptionRecord(payload),

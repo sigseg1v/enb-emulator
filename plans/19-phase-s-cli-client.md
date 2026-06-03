@@ -1795,6 +1795,24 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       3 tests (LE render+action-name, leave-station Action 1 + StarbaseID 10521 LE,
       PlayerID-matches-StartID cross-session lock); full UnitTests suite 598 green.
       CLI decode-only.
+- [x] SkillAbility (batch 26, 2026-06-03): 0x58 SKILL_ABILITY (7 frames),
+      client->server, the ability-hotbar activation. 12-byte struct SkillUse {int32
+      GameID; int32 Action; int32 AbilityIndex}, ALL LITTLE-ENDIAN. Player::
+      HandleSkillAbility (PlayerAbilitys.cpp:23) reads Action->AbilityIndex directly
+      as an index into m_AbilityList[0..138) (MAX_ABILITY_IDS, PlayerSkills.h:275)
+      with NO ntohl. Byte order proven by the bound: across the session's seven 0x58
+      frames AbilityIndex reads {44,123,131} little-endian -- all inside [0,138) --
+      whereas big-endian gives 0x2C000000 / 0x7B000000 / 0x83000000, all far past the
+      bound, so every frame would fall to the handler's "not yet working" rejection.
+      GameID is the caster ship/avatar id (sane LE multi-million values; BE would be
+      negative); not read by this handler. The struct's middle Action field is 0 in
+      all seven frames and unused, so shown LE-by-convention and labelled unused (not
+      FlagSuspicious'd -- a genuine constant 0, not uninitialised garbage). The record
+      Flags an out-of-range AbilityIndex as a diagnostic (never fires on the valid
+      captured frames). Files: Records/SkillAbilityRecord.cs + 1 registry line.
+      capture3-records.txt 107->109 frames (index_123 #12720 + index_44 #263886);
+      3 tests (LE render+Action-unused, index 44 in range, every-frame-in-range-
+      only-LE bound proof); full UnitTests suite 601 green. CLI decode-only.
 - [ ] 0x98 GALAXY_MAP_REQUEST -- DEFERRED. 64-byte request body, but
       Player::HandleGalaxyMapRequest() takes NO data argument and just replies
       SendOpcode(GALAXY_MAP_CACHE, 0, 0) -- the server discards the entire request
@@ -1817,14 +1835,13 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       0x12/0x13/0x14, batch-8 0x46, batch-9 0x21/0x22, batch-10 0x27, batch-11 0x9B,
       batch-12 0x1F, batch-13 0xA3, batch-14 0x44, batch-15 0x28, batch-16 0x9F,
       batch-17 0xA0, batch-18 0x55, batch-19 0x7C, batch-20 0x35, batch-21 0x1A,
-      batch-22 0x06, batch-23 0x02, batch-24 0x7E, batch-25 0x4E
+      batch-22 0x06, batch-23 0x02, batch-24 0x7E, batch-25 0x4E, batch-26 0x58
       (0x64/0x6A/0x20/0x66 already had decoders). The "single-digit long tail" note
       written after batch-9 was WRONG -- a re-tally proved several mid-frequency
-      opcodes still fall through. The registry now decodes 84 opcodes. A fresh
+      opcodes still fall through. The registry now decodes 85 opcodes. A fresh
       capture_3 tally (zero-padded, cross-referenced against the registry) gives the
       accurate undecoded remainder, highest first:
-        - 0x58                       (7)   -- NEXT
-        - 0xA4                       (6)
+        - 0xA4                       (6)   -- NEXT
         - then a 1-2 frame singleton tail (0xBD/0x79/0x5F/0x5D/0xBF/0xBE/0xBC/0xB9/
           0x87/0x5E/0x33 ...) -- genuine diminishing returns, decode opportunistically.
       0x98 examined and DEFERRED (server discards the request body -- no parser to

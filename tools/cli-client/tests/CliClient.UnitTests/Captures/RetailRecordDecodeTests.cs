@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllOneHundredSevenFrames()
+    public void Fixture_Loads_AllOneHundredNineFrames()
     {
-        Assert.Equal(107, Frames.Count);
+        Assert.Equal(109, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -2740,5 +2740,55 @@ public sealed class RetailRecordDecodeTests
         var leave = Frames["starbaserequest_leave_station"];
         Assert.True(sb.Payload.AsSpan(0, 4).SequenceEqual(leave.Payload.AsSpan(0, 4)));
         Assert.Equal((ushort)0x4E, PacketRecord.Resolve((ushort)sb.Opcode, sb.Payload).Opcode);
+    }
+
+    // ── SkillAbility 0x58 ────────────────────────────────────────────────────
+    // Activate a skill from the hotbar. 12-byte SkillUse {int32 GameID; int32 Action;
+    // int32 AbilityIndex}, ALL LITTLE-ENDIAN -- HandleSkillAbility reads AbilityIndex
+    // directly as an index into m_AbilityList[0..138), no ntohl. LE keeps the index in
+    // range; BE would push it to billions and the server would reject every frame.
+
+    [Fact]
+    public void SkillAbility_LittleEndian_Index123()
+    {
+        string d = Dump("skillability_index_123");
+
+        Assert.Contains("[0000] GameID", d);
+        Assert.Contains("0x0084E1E9", d);                          // E9 E1 84 00 LE == 8708585
+        Assert.Contains("[0004] Action", d);
+        Assert.Contains("(LE; unused by HandleSkillAbility", d);
+        Assert.Contains("[0008] AbilityIndex", d);
+        Assert.Contains("= 123", d);                               // 7B 00 00 00 LE == 123, in [0,138)
+        Assert.Contains("HandleSkillAbility reads this directly, no ntohl", d);
+        Assert.DoesNotContain("???", d);                           // all 12 bytes decoded
+        Assert.DoesNotContain("[!]", d);                           // 123 in range, Action 0 not flagged
+    }
+
+    [Fact]
+    public void SkillAbility_Index44_InRange()
+    {
+        string d = Dump("skillability_index_44");
+
+        Assert.Contains("[0008] AbilityIndex", d);
+        Assert.Contains("= 44", d);                                // 2C 00 00 00 LE == 44
+        Assert.DoesNotContain("???", d);
+        Assert.DoesNotContain("[!]", d);                           // 44 in [0,138), no out-of-range flag
+    }
+
+    [Fact]
+    public void SkillAbility_EveryFrameIndexInRange_OnlyLittleEndian()
+    {
+        // The decisive byte-order proof: read little-endian, both captured indices sit
+        // inside [0,138); read big-endian they explode past two billion and the server
+        // would reject every frame as "not yet working".
+        foreach (var name in new[] { "skillability_index_123", "skillability_index_44" })
+        {
+            var f = Frames[name];
+            int le = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(f.Payload.AsSpan(8, 4));
+            uint be = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(f.Payload.AsSpan(8, 4));
+            Assert.InRange(le, 0, 137);
+            Assert.True(be >= 138, $"{name}: big-endian index {be} should be out of range");
+            Assert.Equal((ushort)0x58, PacketRecord.Resolve((ushort)f.Opcode, f.Payload).Opcode);
+        }
     }
 }

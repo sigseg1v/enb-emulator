@@ -1081,3 +1081,15 @@ provenance: Starbase_Request 0x4E (client->server) -- PlayerID 5150 (0x0000141E)
 opcode: 0x4E
 payload-bytes: 9
 hex: 1e 14 00 00 19 29 00 00 01
+
+[skillability_index_123]
+provenance: SkillAbility 0x58 (client->server) -- GameID 8708585 (0x0084E1E9), Action 0, AbilityIndex 123 (capture_3.rar packet #12720, Client->Server, 159.153.232.38:3034). 12-byte struct SkillUse {int32 GameID; int32 Action; int32 AbilityIndex}, ALL LITTLE-ENDIAN. Player::HandleSkillAbility (PlayerAbilitys.cpp:23) reads Action->AbilityIndex directly as an index into m_AbilityList[0..138) (MAX_ABILITY_IDS, PlayerSkills.h:275) with NO ntohl. Across the session's seven 0x58 frames AbilityIndex reads {44,123,131} little-endian -- all inside [0,138) -- while big-endian would give 0x7B000000 / 0x2C000000 / 0x83000000, all far past the bound and rejected as "not yet working". GameID 8708585 is the caster ship/avatar id (sane LE; BE would be negative); the handler never reads it. The middle Action field is 0 in all seven frames and unused by the handler.
+opcode: 0x58
+payload-bytes: 12
+hex: e9 e1 84 00 00 00 00 00 7b 00 00 00
+
+[skillability_index_44]
+provenance: SkillAbility 0x58 (client->server) -- GameID 3854004 (0x003ACEB4), Action 0, AbilityIndex 44 (capture_3.rar packet #263886, Client->Server, 159.153.232.99:3367). A different session/caster than skillability_index_123; AbilityIndex 44 little-endian is again inside [0,138). Pins the index byte order across two distinct values (44 and 123) and two sessions.
+opcode: 0x58
+payload-bytes: 12
+hex: b4 ce 3a 00 00 00 00 00 2c 00 00 00
