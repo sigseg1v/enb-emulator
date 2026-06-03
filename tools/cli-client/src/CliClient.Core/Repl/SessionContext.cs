@@ -207,6 +207,20 @@ public sealed class SessionContext : IAsyncDisposable
     private CancellationTokenSource? _keepaliveCts;
     private Task? _keepaliveTask;
 
+    // The retail client pings the MVAS port with 0x3005 COMMS_ALIVE on a
+    // periodic timer (~30s) regardless of whether the avatar is moving, which
+    // refreshes the same LastAccessTime the 120s idle reaper checks
+    // (server/src/UDP_MVAS.cpp HandleKeepCommsAlive -> SetLastAccessTime). Our
+    // MvasClient otherwise only emits 0x1004 while the avatar is MOVING, so an
+    // idle in-space CLI avatar would send nothing on the MVAS leg. This mirrors
+    // the real client's keepalive on the same UDP MVAS endpoint the 0x1004
+    // position feed goes to.
+    public const int CommsAliveIntervalSeconds = 30;
+    private static readonly TimeSpan CommsAliveInterval =
+        TimeSpan.FromSeconds(CommsAliveIntervalSeconds);
+    private CancellationTokenSource? _commsAliveCts;
+    private Task? _commsAliveTask;
+
     /// <summary>
     /// Lazily-created MVAS position emitter for the active host. Used by the
     /// <c>move</c> command to feed position updates the way a real client's
@@ -320,6 +334,57 @@ public sealed class SessionContext : IAsyncDisposable
         var task = _keepaliveTask;
         _keepaliveCts = null;
         _keepaliveTask = null;
+        if (cts is null) return;
+        try { cts.Cancel(); } catch { }
+        if (task is not null)
+        {
+            try { await task.ConfigureAwait(false); } catch { }
+        }
+        cts.Dispose();
+    }
+
+    /// <summary>
+    /// Start a background loop that sends a 0x3005 COMMS_ALIVE on the MVAS UDP
+    /// endpoint every <see cref="CommsAliveInterval"/>, mirroring the retail
+    /// client's periodic keepalive. Runs whether or not the avatar is moving,
+    /// for as long as the MVAS session is active. Idempotent; no-op until a
+    /// <see cref="GameId"/> has been allocated (the server keys the refresh on
+    /// it). Started by <c>enter</c> alongside the TCP keepalive; stopped on
+    /// dispose. Uses the shared <see cref="Mvas"/> emitter so the UDP sequence
+    /// counter stays monotonic with the position feed.
+    /// </summary>
+    public void StartCommsAlive()
+    {
+        if (_commsAliveTask is { IsCompleted: false }) return;
+        if (GameId is null) return;
+
+        var cts = new CancellationTokenSource();
+        _commsAliveCts = cts;
+        _commsAliveTask = Task.Run(async () =>
+        {
+            try
+            {
+                while (!cts.IsCancellationRequested)
+                {
+                    await Task.Delay(CommsAliveInterval, cts.Token).ConfigureAwait(false);
+                    if (GameId is { } id) Mvas.SendCommsAlive(id);
+                }
+            }
+            catch (OperationCanceledException) { /* expected on stop */ }
+            catch (Exception ex)
+            {
+                try { DumpOutput.WriteLine($"[comms-alive] stopped: {ex.GetType().Name}: {ex.Message}"); } catch { }
+            }
+        });
+    }
+
+    /// <summary>Cancel the background COMMS_ALIVE loop. Idempotent.</summary>
+    public async Task StopCommsAliveAsync()
+    {
+        var cts = _commsAliveCts;
+        var task = _commsAliveTask;
+        _commsAliveCts = null;
+        _commsAliveTask = null;
         if (cts is null) return;
         try { cts.Cancel(); } catch { }
         if (task is not null)
@@ -508,6 +573,7 @@ public sealed class SessionContext : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await StopKeepaliveAsync().ConfigureAwait(false);
+        await StopCommsAliveAsync().ConfigureAwait(false);
         await StopSectorDrainAsync().ConfigureAwait(false);
         if (SectorUdp is not null) { await SectorUdp.StopAsync().ConfigureAwait(false); SectorUdp.Dispose(); SectorUdp = null; }
         _mvas?.Dispose();

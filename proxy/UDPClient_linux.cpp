@@ -110,6 +110,10 @@ static void *LaunchUDPCRecvThreadLinux(void *arg)
     return NULL;
 }
 
+// Defined further down (next to the MVAS keepalive impl); forward-declared
+// here so FixedClientComm can spawn it.
+static void *LaunchUDPCKeepaliveThreadLinux(void *arg);
+
 // ---------------------------------------------------------------------------
 // Address helpers
 // ---------------------------------------------------------------------------
@@ -284,6 +288,8 @@ UDPClient::UDPClient(short port, short connection_type, long ip_addr,
     m_ticket_length        = 0;
     m_PacketTimer          = 0;
     m_PacketResendTimer    = 0;
+    m_KeepaliveStarted     = false;
+    m_KeepaliveSeq         = 0;
     m_Listen_Socket        = -1;
     m_recv_thread_running  = false;
 
@@ -680,6 +686,98 @@ short UDPClient::SendMasterLogin(long avatar_id, long sector_id,
 void UDPClient::FixedClientComm()
 {
     SendResponse((short) 0, ENB_OPCODE_200F_COMM_PORT, NULL, 0);
+
+    // Once the avatar is in-game (FixedClientComm runs on the sector-plane
+    // m_UDPClient, which is connect()'d to MVAS_LOGIN_PORT and has had its
+    // m_PlayerID set by the avatar-login confirm), start the MVAS idle
+    // keepalive so a stationary in-space avatar refreshes LastAccessTime and
+    // never trips the server's 2-minute reaper. Guarded so a sector re-login
+    // does not stack threads -- the surviving thread picks up the new
+    // m_PlayerID on its next tick.
+    if (!m_KeepaliveStarted)
+    {
+        pthread_t tid;
+        if (pthread_create(&tid, NULL,
+                           &LaunchUDPCKeepaliveThreadLinux, this) == 0)
+        {
+            pthread_detach(tid);
+            m_KeepaliveStarted = true;
+        }
+        else
+        {
+            LogMessage("UDPClient(Linux): keepalive pthread_create failed: %s\n",
+                       strerror(errno));
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MVAS idle keepalive (Linux server-side proxy)
+//
+// The real Net7Proxy streams a 0x3005 PLAYER_COMMS_ALIVE to the server's MVAS
+// handler port (MVAS_LOGIN_PORT/3806) every ~30s for the logged-in avatar,
+// independent of movement. The server's idle reaper
+// (server/src/PlayerManager.cpp SendUDPOpcodes / SendUDPPlayerOpcodes:
+// `LastAccessTime + 2*60000 < now` -> DropPlayerFromGalaxy ->
+// DropPlayerFromSector, which removes the ship from every other client's
+// view) fires on any in-game player that has gone 2 minutes without a refresh.
+// server/src/UDP_MVAS.cpp HandleKeepCommsAlive resolves GetPlayer(player_id)
+// and refreshes LastAccessTime; it sends 0x100A MVAS_TERMINATE back ONLY when
+// the id does not resolve, so the keepalive must carry the live GameID
+// (m_PlayerID), which it does.
+//
+// Primary source: cleartext proxy<->server capture
+// proxy/local-debug/net7-live-2026-06-02-login-undock-clicknavs-warp-logout.pcap
+// -- 4x P->S 0x3005 to udp/3806 spaced 30.0/30.1/30.1s, each a bare 12-byte
+// EnbUdpHeader { size=12, opcode=0x3005, player_id=<GameID>, sequence } with
+// no body (e.g. 0c 00 05 30 2a99 0340 01000000).
+// ---------------------------------------------------------------------------
+static void *LaunchUDPCKeepaliveThreadLinux(void *arg)
+{
+    ((UDPClient *) arg)->MVASKeepaliveThread();
+    return NULL;
+}
+
+void UDPClient::SendServerKeepalive()
+{
+    if (!m_ConnectionActive || m_PlayerID == 0) return;
+
+    unsigned char buf[sizeof(EnbUdpHeader)];
+    EnbUdpHeader *h    = (EnbUdpHeader *) buf;
+    h->size            = (short) sizeof(EnbUdpHeader);
+    h->opcode          = ENB_OPCODE_3005_PLAYER_COMMS_ALIVE;
+    h->player_id       = m_PlayerID;
+    h->packet_sequence = ++m_KeepaliveSeq;
+
+    // MUST target MVAS_LOGIN_PORT (3806) explicitly, NOT port 0. This
+    // UDPClient (g_ServerMgr->m_UDPClient / udp_to_master) is connect()'d to
+    // UDP_MASTER_SERVER_PORT (3808) -- a port-0 send() would route the
+    // keepalive to the master plane, where there is no comms-alive handler,
+    // so LastAccessTime would never refresh and the reaper would still fire.
+    // UDP_Send(port != 0, ...) uses sendto() to (m_IPAddr, port) = server:3806,
+    // which is where UDP_MVAS.cpp HandleKeepCommsAlive lives. (Linux permits
+    // sendto() to a port other than the connected peer on a SOCK_DGRAM, and
+    // the success path emits no reply, so the connected socket's recv filter
+    // dropping a hypothetical 3806-sourced reply is harmless.) UDP_Send only
+    // touches m_Listen_Socket + a local sockaddr, never m_SendBuffer, so this
+    // is race-free with the RecvThread handlers that do use m_SendBuffer.
+    UDP_Send(MVAS_LOGIN_PORT, (const char *) buf, sizeof(EnbUdpHeader));
+}
+
+void UDPClient::MVASKeepaliveThread()
+{
+    const int KEEPALIVE_PERIOD_SEC = 30;   // capture cadence: 30.0/30.1/30.1s
+
+    while (!g_ServerShutdown && m_recv_thread_running)
+    {
+        // Sleep the period in 1s slices so shutdown is noticed promptly.
+        for (int i = 0; i < KEEPALIVE_PERIOD_SEC &&
+                        !g_ServerShutdown && m_recv_thread_running; ++i)
+        {
+            usleep(1000 * 1000);
+        }
+        SendServerKeepalive();
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -47,4 +47,42 @@ public sealed class MvasClientTests
         Assert.Equal(0.2f, BinaryPrimitives.ReadSingleLittleEndian(dg.AsSpan(28, 4)));
         Assert.Equal(0.3f, BinaryPrimitives.ReadSingleLittleEndian(dg.AsSpan(32, 4)));
     }
+
+    [Fact]
+    public void BuildCommsAlive_IsHeaderOnly_ByteExact()
+    {
+        // 0x3005 COMMS_ALIVE is the bare 12-byte EnbUdpHeader with no payload:
+        // the proxy emits it header-only (proxy/UDPClient_linux.cpp
+        // SendServerKeepalive, sent to server udp/3806) and the server reads
+        // only hdr->player_id (server/src/UDP_MVAS.cpp HandleKeepCommsAlive ->
+        // SetLastAccessTime).
+        byte[] dg = MvasClient.BuildCommsAlive(playerId: 0x40000029, sequence: 3);
+
+        Assert.Equal(12, dg.Length);                                              // header only
+        Assert.Equal(12, BinaryPrimitives.ReadInt16LittleEndian(dg.AsSpan(0, 2)));  // size = total
+        Assert.Equal(0x3005, BinaryPrimitives.ReadUInt16LittleEndian(dg.AsSpan(2, 2)));
+        Assert.Equal(0x40000029, BinaryPrimitives.ReadInt32LittleEndian(dg.AsSpan(4, 4)));
+        Assert.Equal(3, BinaryPrimitives.ReadInt32LittleEndian(dg.AsSpan(8, 4)));
+    }
+
+    [Fact]
+    public void BuildCommsAlive_MatchesRetailCaptureFrame()
+    {
+        // Primary source: cleartext proxy<->server capture
+        // proxy/local-debug/net7-live-2026-06-02-login-undock-clicknavs-warp-logout.pcap
+        // -- the real proxy's idle keepalive to udp/3806 is a bare 12-byte
+        // EnbUdpHeader with no body, e.g. the first frame:
+        //   0c 00 05 30 2a 99 03 40 01 00 00 00
+        //   size=0x000c opcode=0x3005 player_id=0x4003992a sequence=1
+        // The CLI emitter (and the Linux proxy's SendServerKeepalive, which
+        // builds the identical header) must reproduce these bytes exactly.
+        byte[] expected =
+        {
+            0x0c, 0x00, 0x05, 0x30, 0x2a, 0x99, 0x03, 0x40, 0x01, 0x00, 0x00, 0x00,
+        };
+
+        byte[] dg = MvasClient.BuildCommsAlive(playerId: 0x4003992a, sequence: 1);
+
+        Assert.Equal(expected, dg);
+    }
 }

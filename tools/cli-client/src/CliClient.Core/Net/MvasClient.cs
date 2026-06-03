@@ -37,6 +37,7 @@ public sealed class MvasClient : IDisposable
 
     private const int HeaderSize = 12;                // sizeof(EnbUdpHeader)
     private const ushort SendPositionOpcode = 0x1004; // ENB_OPCODE_1004_MVAS_SEND_POSITION_C_S
+    private const ushort CommsAliveOpcode = 0x3005;   // ENB_OPCODE_3005_PLAYER_COMMS_ALIVE
 
     private readonly Socket _sock;
     private readonly IPEndPoint _ep;
@@ -85,6 +86,33 @@ public sealed class MvasClient : IDisposable
     {
         byte[] dg = BuildDatagram(
             playerId, Interlocked.Increment(ref _sequence), x, y, z, heading);
+        _sock.SendTo(dg, _ep);
+    }
+
+    /// <summary>
+    /// Build (without sending) one COMMS_ALIVE keepalive datagram. This is the
+    /// 12-byte <c>EnbUdpHeader</c> with NO payload (<c>size</c> = 12): the
+    /// retail client pings the MVAS port with this on a periodic timer so the
+    /// server keeps the avatar in-world while it is idle. The server keys the
+    /// refresh on the header's <c>player_id</c> alone -- it reads no body
+    /// (proxy/UDPProxyToClient_linux.cpp SendCommsAlive emits NULL/0;
+    /// server/src/UDP_MVAS.cpp HandleKeepCommsAlive reads only hdr->player_id
+    /// and calls SetLastAccessTime).
+    /// </summary>
+    public static byte[] BuildCommsAlive(int playerId, int sequence)
+    {
+        byte[] dg = new byte[HeaderSize];
+        BinaryPrimitives.WriteInt16LittleEndian(dg.AsSpan(0, 2), HeaderSize);
+        BinaryPrimitives.WriteUInt16LittleEndian(dg.AsSpan(2, 2), CommsAliveOpcode);
+        BinaryPrimitives.WriteInt32LittleEndian(dg.AsSpan(4, 4), playerId);
+        BinaryPrimitives.WriteInt32LittleEndian(dg.AsSpan(8, 4), sequence);
+        return dg;
+    }
+
+    /// <summary>Send one COMMS_ALIVE keepalive ping for the player.</summary>
+    public void SendCommsAlive(int playerId)
+    {
+        byte[] dg = BuildCommsAlive(playerId, Interlocked.Increment(ref _sequence));
         _sock.SendTo(dg, _ep);
     }
 

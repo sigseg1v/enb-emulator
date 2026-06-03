@@ -39,6 +39,10 @@ public:
     void    SetBroadcast(SOCKET socket);
     void    RecvThread();
     void    MVASThread();
+    // Linux MVAS idle-keepalive loop (see impl comment in UDPClient_linux.cpp).
+    // Public because a free-function pthread trampoline invokes it, mirroring
+    // RecvThread/MVASThread.
+    void    MVASKeepaliveThread();
     bool    VerifyConnection();
 
 	unsigned long checksum(char *buffer, int size);		// checksum
@@ -140,6 +144,15 @@ private:
     //keepalive
     void    SendClientAlive();
     void    SendCommsAlive();
+    // Linux server-side proxy: the periodic 0x3005 PLAYER_COMMS_ALIVE the real
+    // Net7Proxy streams to the server's MVAS port (every ~30s, movement-
+    // independent) so a stationary in-space avatar never trips the server's
+    // 2-minute idle reaper. The full Win32 MVASThread (UDPProxyMVAS.cpp) also
+    // reads ship position out of the client process and streams 0x1004; that
+    // half has no client process to read on the server-side Linux proxy and is
+    // not needed for the idle-timer refresh. Defined in UDPClient_linux.cpp.
+    // MVASKeepaliveThread is declared in the public section (trampoline-called).
+    void    SendServerKeepalive();
 
 private:
     long m_Port;
@@ -181,6 +194,13 @@ private:
     // Linux unconnected-socket flag — see ctor comment above. Win32 ignores.
     bool m_Unconnected;
 	unsigned long m_PacketResendTimer;
+
+    // MVAS idle-keepalive (Linux): started once per session on the sector
+    // plane in FixedClientComm(); m_KeepaliveSeq fills the EnbUdpHeader
+    // sequence field (server ignores it -- HandleKeepCommsAlive reads only
+    // player_id -- but the real proxy increments it, so we mirror that).
+    bool    m_KeepaliveStarted;
+    int32_t m_KeepaliveSeq;
 
     PacketList m_Packets;
     short m_PacketTimeout;

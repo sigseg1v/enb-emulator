@@ -974,33 +974,49 @@ bool UDPClient::HandleCustomOpcode(short opcode, char *ptr, u8 *tcp_packet,
         StartProspecting(ptr, tcp_packet, tcp_index);
         return true;
 
+    case ENB_OPCODE_2018_STATIC_OBJECT_CREATE:
+        // FABRICATE static sector content (navs / gates / stations / decos).
+        // The server emits only the compact 0x2018 (StaticMap::FormStaticPacket,
+        // server/src/NavTypeClass.cpp) to every range-list member and relies on
+        // each member's proxy to expand it into the client-facing object-create
+        // sequence the game client renders. Without this expansion the sector
+        // map and in-space HUD are EMPTY -- no navs, no station, no gate.
+        // CreateObject() rebuilds that sequence (0x04 CREATE + 0x89 RELATIONSHIP
+        // + 0x40 CONSTANT_POSITIONAL_UPDATE + 0x1b AUX-name + 0x99 NAVIGATION)
+        // byte-for-byte the way the server's authoritative Object::SendObject
+        // serializes a non-static object. See plans/27 §3a and CV-01.
+        CreateObject(ptr, tcp_packet, tcp_index);
+        return true;
+
+    case ENB_OPCODE_2019_RESOURCE_OBJECT_CREATE:
+        // FABRICATE resource fields (asteroids). The server emits only the
+        // compact 0x2019 (Resource::FormStaticPacket, server/src/ResourceClass.cpp)
+        // and relies on the proxy to expand it. CreateResource() rebuilds the
+        // 0x04 CREATE (Type=38) + 0x40 position + 0x1b resource-name sequence
+        // (Resource::SendObject / SendPosition / SendAuxNameResource). Without
+        // it, mineable fields are invisible. See plans/27 §3a and CV-02.
+        CreateResource(ptr, tcp_packet, tcp_index);
+        return true;
+
     case ENB_OPCODE_2013_TRACTOR_ORE:
     case ENB_OPCODE_2014_LOOT_ITEM:
-    case ENB_OPCODE_2018_STATIC_OBJECT_CREATE:
-    case ENB_OPCODE_2019_RESOURCE_OBJECT_CREATE:
-        // KNOWN PARITY GAP (Phase AA -- 0x2012 fabricated above; these remain).
-        //
-        // These are NOT "consume and silently drop" opcodes. A known-good
-        // reference proxy FABRICATES full client-facing game packets from
-        // each of these compact server control opcodes and sends them to
-        // the client's game receiver, then (for tractor/loot) emits a
-        // follow-up effect-removal packet once the pull completes:
+        // KNOWN PARITY GAP (0x2012 / 0x2018 / 0x2019 fabricated above; these
+        // two remain). These are NOT "consume and silently drop" opcodes. A
+        // known-good reference proxy FABRICATES full client-facing game packets
+        // from each of these compact server control opcodes and sends them to
+        // the client's game receiver, then emits a follow-up effect-removal
+        // packet once the pull completes:
         //   0x2013 TRACTOR_ORE / 0x2014 LOOT_ITEM -> 0x04 CREATE (the ore
         //        article object) + 0x0b tractor beam + 0x1b name AUX +
         //        0x46 positional interp + a later 0x07 REMOVE.
-        //   0x2018/0x2019 OBJECT_CREATE -> 0x04 CREATE + orientation /
-        //        nav / aux follow-ons.
         // The server emits ONLY the compact form and relies on the proxy to
         // expand it (see server PlayerSkills.cpp UseTractorBeam / the loot
-        // path). The client-facing builder family was removed when the Win32
-        // twins were deleted, leaving only declarations in Connection.h -- so
-        // our proxy still produces NOTHING for these. Net effect today: a
-        // player tractoring / looting gets the server-side cargo result but
-        // NO tractor beam or ore-spawn effect on any client.
-        //
-        // 0x2013/0x2014 are an ACTIVE regression (the server emits them in
-        // normal play). 0x2018/0x2019 are LATENT only (the server's sole
-        // emitter, Player::SendObjectFull, is currently never called).
+        // path). The client-facing builder family for these two was not yet
+        // reconstructed, so our proxy still produces NOTHING for them: a player
+        // tractoring / looting gets the server-side cargo result but NO tractor
+        // beam or ore-spawn effect on any client. These are an ACTIVE regression
+        // (the server emits them in normal play) and need the live tractor/loot
+        // harness (plans/28 §4) to capture the exact follow-on sequence.
         //
         // Interim behaviour is consume-and-drop (return TRUE): it leaves the
         // tractor missing but keeps the sequence advancing. Forwarding the raw
@@ -1246,6 +1262,245 @@ void UDPClient::StartProspecting(char *ch_msg, u8 *tcp_packet, short &tcp_index)
     LogVMessage("UDPClient(Linux): fabricated prospect beam 0x0b "
                 "src=%ld tgt=%ld fx=%ld dur=%ums\n",
                 prospector_gid, asteroid_gid, effect_uid, (unsigned) drain_ms);
+}
+
+// ---------------------------------------------------------------------------
+// CreateObject -- expand a compact 0x2018 STATIC_OBJECT_CREATE into the
+// client-facing object-create sequence.
+//
+// The server emits navs / gates / stations / decorations as a single compact
+// 0x2018 control packet (StaticMap::FormStaticPacket, server/src/NavTypeClass.cpp)
+// to every range-list member and relies on each member's proxy to expand it
+// into the same multi-opcode sequence the server sends DIRECTLY for a
+// non-static object (Object::SendObject). The compact body never reaches the
+// client (only 0x01..0xFE do), so without this expansion every nav / station /
+// gate / deco is invisible and the sector map is empty.
+//
+// Compact 0x2018 body layout (FormStaticPacket order):
+//   GameID i32@0, CreateType u8@4, BaseAsset u16@5, Scale f32@7,
+//   HSV0/1/2 f32@11/15/19, Reaction u8@23, PosType u8@24,
+//   PosX/Y/Z f32@25/29/33, Orient[4] f32@37/41/45/49,
+//   Signature f32@53, SigFlags u8@57, Name (u16 len + chars)@58.
+//
+// SigFlags bit layout (NavTypeClass.cpp): low nibble = NavType; 0x10 HAS_NAV
+// (emit a 0x99 NAVIGATION), 0x20 IS_NAV (nav vs. deco aux name), 0x40 IS_HUGE,
+// 0x80 HAS_VISITED.
+//
+// Emitted sequence mirrors Object::SendObject; each builder is cited:
+//   0x04 CREATE              (Player::SendCreate,                  :1505)
+//   0x89 RELATIONSHIP        (Player::SendRelationship, :10703; ObjectID = ntohl(GameID))
+//   0x40 CONSTANT_POSITIONAL (Player::SendConstantPositionalUpdate, :1202)
+//   0x1b AUX name per CreateType (SendSimpleAuxName / SendResourceName /
+//                                 SendAuxNameSignature)
+//   0x99 NAVIGATION          (Player::SendNavigation, :1140) iff HAS_NAV set
+// ---------------------------------------------------------------------------
+void UDPClient::CreateObject(char *ch_msg, u8 *tcp_packet, short &tcp_index)
+{
+    (void) tcp_packet;
+    (void) tcp_index;
+
+    if (!g_ServerMgr || !g_ServerMgr->m_SectorConnection) return;
+
+    const u8 HAS_NAV_BIT     = 0x10;
+    const u8 IS_NAV_BIT      = 0x20;
+    const u8 IS_HUGE_BIT     = 0x40;
+    const u8 HAS_VISITED_BIT = 0x80;
+
+    unsigned char *msg = (unsigned char *) ch_msg;
+    int in = 0;
+    long  game_id     = ExtractLong(msg, in);   // @0
+    u8    create_type = ExtractU8(msg, in);     // @4
+    short base_asset  = ExtractShort(msg, in);  // @5
+    float scale       = ExtractFloat(msg, in);  // @7
+    float hsv0        = ExtractFloat(msg, in);  // @11
+    float hsv1        = ExtractFloat(msg, in);  // @15
+    float hsv2        = ExtractFloat(msg, in);  // @19
+    u8    reaction    = ExtractU8(msg, in);     // @23
+    u8    pos_type    = ExtractU8(msg, in);     // @24
+    float px          = ExtractFloat(msg, in);  // @25
+    float py          = ExtractFloat(msg, in);  // @29
+    float pz          = ExtractFloat(msg, in);  // @33
+    float o0          = ExtractFloat(msg, in);  // @37
+    float o1          = ExtractFloat(msg, in);  // @41
+    float o2          = ExtractFloat(msg, in);  // @45
+    float o3          = ExtractFloat(msg, in);  // @49
+    float signature   = ExtractFloat(msg, in);  // @53
+    u8    sig_flags   = ExtractU8(msg, in);     // @57
+    char  name[256];
+    ExtractDataLS(msg, name, in);               // @58
+    (void) pos_type;  // static objects are constant-position (see 0x40 below)
+
+    unsigned char body[256];
+    int idx;
+
+    // 0x04 CREATE (23 bytes): GameID, Scale, BaseAsset, Type, HSV[3].
+    idx = 0;
+    AddData(body, (int32_t) game_id, idx);
+    AddData(body, scale, idx);
+    AddData(body, base_asset, idx);
+    AddData(body, (char) create_type, idx);
+    AddData(body, hsv0, idx);
+    AddData(body, hsv1, idx);
+    AddData(body, hsv2, idx);
+    g_ServerMgr->m_SectorConnection->SendResponse(ENB_OPCODE_0004_CREATE, body, (short) idx);
+
+    // 0x89 RELATIONSHIP (9 bytes): ObjectID is byte-swapped on the wire (the
+    // server does ntohl(ObjectID); AddDataFlip4 reproduces it exactly), then
+    // Reaction (i32), IsAttacking (char).
+    idx = 0;
+    AddDataFlip4(body, game_id, idx);
+    AddData(body, (int32_t) reaction, idx);
+    AddData(body, (char) 0, idx);
+    g_ServerMgr->m_SectorConnection->SendResponse(ENB_OPCODE_0089_RELATIONSHIP, body, (short) idx);
+
+    // 0x40 CONSTANT_POSITIONAL_UPDATE (32 bytes): GameID, Position[3], Orient[4].
+    idx = 0;
+    AddData(body, (int32_t) game_id, idx);
+    AddData(body, px, idx);
+    AddData(body, py, idx);
+    AddData(body, pz, idx);
+    AddData(body, o0, idx);
+    AddData(body, o1, idx);
+    AddData(body, o2, idx);
+    AddData(body, o3, idx);
+    g_ServerMgr->m_SectorConnection->SendResponse(ENB_OPCODE_0040_CONSTANT_POSITIONAL_UPDATE, body, (short) idx);
+
+    // 0x1b AUX name -- format chosen by CreateType (StaticMap::SendAuxDataPacket).
+    idx = 0;
+    if (create_type == 37)
+    {
+        // SendAuxNameSignature (:2144): [GameID][innerLen=len+9][0x01][0x72]
+        // [strLen=len][name][nav u8][sig f32]. Nav objects keep their name and
+        // nav=1; non-nav deco gets placeholder "d" / nav=0. Sig clamps >= 3000.
+        char nav = (sig_flags & IS_NAV_BIT) ? 1 : 0;
+        if (!nav) { name[0] = 'd'; name[1] = '\0'; }
+        int   len = (int) strlen(name);
+        float sig = (signature < 3000.0f) ? 3000.0f : signature;
+        AddData(body, (int32_t) game_id, idx);
+        AddData(body, (short) (len + 9), idx);
+        AddData(body, (char) 0x01, idx);
+        AddData(body, (char) 0x72, idx);
+        AddData(body, (short) len, idx);
+        AddDataS(body, name, idx);
+        AddData(body, nav, idx);
+        AddData(body, sig, idx);
+        g_ServerMgr->m_SectorConnection->SendResponse(ENB_OPCODE_001B_AUX_DATA, body, (short) idx);
+    }
+    else if (create_type == 3 || create_type == 4 || create_type == 11 || create_type == 12)
+    {
+        // SendSimpleAuxName / SendResourceName (:2120 / :1956, identical layout):
+        // [GameID][innerLen=nameLen+4][0x1201][strLen=nameLen][name].
+        int name_len = (int) strlen(name);
+        AddData(body, (int32_t) game_id, idx);
+        AddData(body, (short) (name_len + 4), idx);
+        AddData(body, (short) 0x1201, idx);
+        AddData(body, (short) name_len, idx);
+        AddDataS(body, name, idx);
+        g_ServerMgr->m_SectorConnection->SendResponse(ENB_OPCODE_001B_AUX_DATA, body, (short) idx);
+    }
+    // CreateType 40/41 (and any other): no aux name (matches the server switch).
+
+    // 0x99 NAVIGATION (14 bytes) iff the server flagged HAS_NAV:
+    // GameID, Signature+5000, PlayerHasVisited, NavType, IsHuge.
+    if (sig_flags & HAS_NAV_BIT)
+    {
+        idx = 0;
+        AddData(body, (int32_t) game_id, idx);
+        AddData(body, signature + 5000.0f, idx);
+        AddData(body, (char) ((sig_flags & HAS_VISITED_BIT) ? 1 : 0), idx);
+        AddData(body, (int32_t) (sig_flags & 0x0F), idx);
+        AddData(body, (char) ((sig_flags & IS_HUGE_BIT) ? 1 : 0), idx);
+        g_ServerMgr->m_SectorConnection->SendResponse(ENB_OPCODE_0099_NAVIGATION, body, (short) idx);
+    }
+
+    LogVMessage("UDPClient(Linux): expanded 0x2018 static object gid=%ld type=%u '%s'%s\n",
+                game_id, (unsigned) create_type, name,
+                (sig_flags & HAS_NAV_BIT) ? " +nav" : "");
+}
+
+// ---------------------------------------------------------------------------
+// CreateResource -- expand a compact 0x2019 RESOURCE_OBJECT_CREATE (asteroid
+// / mineable field) into the client-facing sequence.
+//
+// As with 0x2018, the server emits only the compact form (Resource::
+// FormStaticPacket, server/src/ResourceClass.cpp) and relies on the proxy to
+// expand it. Resources carry no CreateType and only two HSV channels in the
+// compact body; the server uses CreateType 38 for them (Resource::
+// SendAuxDataPacket case 38) and there is no relationship or navigation frame.
+//
+// Compact 0x2019 body layout (FormStaticPacket order):
+//   GameID i32@0, BaseAsset u16@4, Scale f32@6, HSV0/1 f32@10/14,
+//   PosX/Y/Z f32@18/22/26, Orient[4] f32@30/34/38/42, Name (u16 len)@46.
+//
+// Emitted sequence (Resource::SendObject / SendPosition / SendAuxDataPacket):
+//   0x04 CREATE (Type=38, HSV2=0)
+//   0x40 CONSTANT_POSITIONAL_UPDATE
+//   0x1b AUX name -- SendAuxNameResource format (:2178)
+// ---------------------------------------------------------------------------
+void UDPClient::CreateResource(char *ch_msg, u8 *tcp_packet, short &tcp_index)
+{
+    (void) tcp_packet;
+    (void) tcp_index;
+
+    if (!g_ServerMgr || !g_ServerMgr->m_SectorConnection) return;
+
+    unsigned char *msg = (unsigned char *) ch_msg;
+    int in = 0;
+    long  game_id    = ExtractLong(msg, in);   // @0
+    short base_asset = ExtractShort(msg, in);  // @4
+    float scale      = ExtractFloat(msg, in);  // @6
+    float hsv0       = ExtractFloat(msg, in);  // @10
+    float hsv1       = ExtractFloat(msg, in);  // @14
+    float px         = ExtractFloat(msg, in);  // @18
+    float py         = ExtractFloat(msg, in);  // @22
+    float pz         = ExtractFloat(msg, in);  // @26
+    float o0         = ExtractFloat(msg, in);  // @30
+    float o1         = ExtractFloat(msg, in);  // @34
+    float o2         = ExtractFloat(msg, in);  // @38
+    float o3         = ExtractFloat(msg, in);  // @42
+    char  name[256];
+    ExtractDataLS(msg, name, in);              // @46
+    int   name_len = (int) strlen(name);
+
+    unsigned char body[256];
+    int idx;
+
+    // 0x04 CREATE: GameID, Scale, BaseAsset, Type=38, HSV0, HSV1, HSV2=0.
+    idx = 0;
+    AddData(body, (int32_t) game_id, idx);
+    AddData(body, scale, idx);
+    AddData(body, base_asset, idx);
+    AddData(body, (char) 38, idx);
+    AddData(body, hsv0, idx);
+    AddData(body, hsv1, idx);
+    AddData(body, 0.0f, idx);
+    g_ServerMgr->m_SectorConnection->SendResponse(ENB_OPCODE_0004_CREATE, body, (short) idx);
+
+    // 0x40 CONSTANT_POSITIONAL_UPDATE: GameID, Position[3], Orient[4].
+    idx = 0;
+    AddData(body, (int32_t) game_id, idx);
+    AddData(body, px, idx);
+    AddData(body, py, idx);
+    AddData(body, pz, idx);
+    AddData(body, o0, idx);
+    AddData(body, o1, idx);
+    AddData(body, o2, idx);
+    AddData(body, o3, idx);
+    g_ServerMgr->m_SectorConnection->SendResponse(ENB_OPCODE_0040_CONSTANT_POSITIONAL_UPDATE, body, (short) idx);
+
+    // 0x1b AUX name -- SendAuxNameResource (:2178):
+    // [GameID][innerLen=nameLen+5][0x01][0x16][0x04][strLen=nameLen][name].
+    idx = 0;
+    AddData(body, (int32_t) game_id, idx);
+    AddData(body, (short) (name_len + 5), idx);
+    AddData(body, (char) 0x01, idx);
+    AddData(body, (char) 0x16, idx);
+    AddData(body, (char) 0x04, idx);
+    AddData(body, (short) name_len, idx);
+    AddDataS(body, name, idx);
+    g_ServerMgr->m_SectorConnection->SendResponse(ENB_OPCODE_001B_AUX_DATA, body, (short) idx);
+
+    LogVMessage("UDPClient(Linux): expanded 0x2019 resource gid=%ld '%s'\n", game_id, name);
 }
 
 // ---------------------------------------------------------------------------

@@ -7700,3 +7700,51 @@ match-the-reference behaviour. Sourcing kept neutral throughout (clean-room
 observation of a known-good proxy<->client stream + the committed retail captures
 under `archive/kyp-snapshot/capturedPackets/`, plus local-only working captures in
 the gitignored `proxy/local-debug/` scratch dir).
+
+================================================================================
+2026-06-03 -- POLICY CHANGE: server is no longer frozen; it may be changed for
+proven correctness (owner-directed)
+================================================================================
+
+Owner directive: "we have a running server on an old version with questionable
+implementation and for future work we WILL need to start rewriting the server.
+So drop the 'cant modify server' requirement but replace with 'can modify server
+IF we can confirm from trace or proxy traffic or client.exe analysis that it must
+change to be correct AND we must have accompanying full parsing of the packet in
+the cli client and tests to make sure we fully understand the format before
+changing it. We also need client.exe to work so need to add steps / a list of
+things to get the user to verify asynchronously to confirm the changes work with
+the real client and not only the CLI -- but this doesnt block progress as we can
+verify at any time later as long as we are keeping track."
+
+What changed in CLAUDE.md: the "Server integrity rules" section was rewritten as
+"Server modification rules". The old absolute "the server stays as-is; the tool
+adapts" default is GONE. The server MAY now be changed when ALL THREE hold:
+  A. Primary-source proof the change is what correctness requires (capture /
+     proxy-traffic / client-binary behavioural analysis / first-hand docs /
+     paired retail-vs-our trace with byte agreement).
+  B. Full CLI parse + tests of the packet land FIRST (understanding-before-change
+     is mandatory; a server wire change without the CLI byte-pin is incomplete).
+  C. A real-client (client.exe) verification entry is appended to the new running
+     checklist plans/29-client-verification.md (async, non-blocking; the change
+     is not DONE until the owner confirms it against the real client).
+
+What did NOT change (still non-negotiable): never weaken the server's security
+posture for a tooling consumer's *convenience* (a tool wanting it easier is the
+tool being wrong, not the server); every server/proxy wire change still carries a
+primary-source citation in its commit message, now PLUS a pointer to the CLI
+parse+test and the CV-NN checklist id.
+
+New artifact: plans/29-client-verification.md (Phase 29) -- the running async
+client.exe verification checklist mandated by clause C. Seeded with CV-01
+(static sector content 0x2018 expansion), CV-02 (resources 0x2019 expansion),
+CV-03 (Luna planet renders), CV-04 (idle ship does not vanish / keepalive).
+
+Why now: the project is moving from "preserve the inherited server byte-for-byte
+and freeze it" toward "rewrite the server correctly". Freezing a known-bad
+implementation blocks that. The three gates keep the preservation discipline
+(prove it, understand it, verify it on the real client) while permitting forward
+motion. Note the dock->space / InSpace path now works in practice (owner zoned a
+play-local AND a play-cli avatar into Luna; they see each other + chat), so the
+Phase-K sub-blocker that had gated the in-space fabrication/verification work
+(plans/27 §3a §4, plans/28 §3-live) is effectively lifted for the happy path.

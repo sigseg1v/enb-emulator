@@ -90,33 +90,36 @@ The source of truth for "what's done / what's next" across invocations is the `p
 - **No secrets, credentials, or per-developer config** (`*.user`, `.suo`, `.env`).
 - **Preserve license headers** (see above).
 
-## Server integrity rules (CRITICAL — read before touching the server for ANY reason)
+## Server modification rules (CRITICAL -- read before touching the server for ANY reason)
 
-The server's job is to be a faithful re-implementation of the **real Earth & Beyond server** as it talked to the **real Earth & Beyond Win32 client**. Two things follow from that and they are non-negotiable:
+The server is an OLD, questionable-quality implementation inherited from upstream, and the long-term plan is to rewrite it. So unlike the earlier "the server is frozen" stance, "the server stays as-is" is NOT the automatic answer any more: the server CAN be changed to make it CORRECT. But "correct" has a high, evidence-based bar, and a tooling consumer's convenience never clears it. The goal is unchanged -- faithfully reproduce how the **real Earth & Beyond server** talked to the **real Win32 client** -- we are now just allowed to *fix the server toward* that target, not only freeze it.
 
-1. **NEVER weaken, relax, or loosen the server's security posture to satisfy a tooling consumer.** This includes the CLI client (Phase S), the integration test suite (Phase T), the editor suite, packet-capture replay tooling, fuzzers, debug harnesses — *anything*. Concretely: do not disable authentication checks, do not widen rate limits, do not accept malformed packets the real server would reject, do not bypass session-state guards, do not turn on debug-only opcodes, do not expand visibility/scope filters, do not log secrets, do not return more data than the real server would have. If a tool needs something the server doesn't expose, the tool is wrong, not the server.
+Two things stay non-negotiable:
 
-2. **NEVER make the server accept inputs or behaviour the real server did not.** This is the accuracy half of the same coin. The whole project is preservation; if our server starts diverging from the real server, the preservation value evaporates. New permissiveness is divergence.
+1. **NEVER weaken the server's security posture for a tooling consumer's convenience.** This includes the CLI client (Phase S), the integration test suite (Phase T), the editor suite, packet-capture replay tooling, fuzzers, debug harnesses -- *anything*. Do not disable authentication checks, widen rate limits, accept malformed packets the real server would reject, bypass session-state guards, turn on debug-only opcodes, expand visibility/scope filters, log secrets, or return more data than the real server would, *because a tool finds it easier*. A tool wanting something just to make the tool's life easier is the tool being wrong, not the server.
 
-**The only escape hatch** — and this is the *only* one — is a proof from a primary source that the real EnB server-and-client pair allowed the behaviour in question. Acceptable primary sources, in roughly decreasing order of weight:
+2. **A server change must be a CORRECTNESS change, proven against a primary source.** A change that makes us diverge from the real server's observable behaviour destroys preservation value. A change is allowed only when a primary source shows the server is currently WRONG (or incomplete) measured against the real server-and-client pair.
 
-- A **packet capture** of the live retail server (the RARs in `archive/kyp-snapshot/capturedPackets/` are the canonical reference set) showing the real server doing the thing.
-- A **decompilation / disassembly** of the retail client or server binary showing the code path that produced the behaviour.
-- **First-hand documentation** from a Net-7 developer or Westwood / EA engineer (RTFs in `archive/kyp-snapshot/Documents/`, Net-7 server architecture doc, GMCommands.txt, etc.).
-- A **reproducible trace** from a Win32 client running against our server alongside a captured trace from the same operation against the retail server, with byte-level agreement.
+**When you MAY change the server.** You may change `server/src/`, `login-server/Net7Mysql/`, `login-server/Net7SSL/` (and `proxy/`) when ALL THREE of these hold:
 
-What is **NOT** an acceptable justification:
+**A. Primary-source proof** that the change is what correctness requires. Acceptable sources, in roughly decreasing order of weight:
+- A **packet capture** of the live retail server (the RARs in `archive/kyp-snapshot/capturedPackets/` are the canonical set), or a local cleartext proxy<->server capture, showing the real behaviour.
+- **Behavioural analysis of the retail client or server binary** showing the code path that produced the behaviour.
+- **First-hand documentation** from a Net-7 developer or Westwood / EA engineer (RTFs in `archive/kyp-snapshot/Documents/`, the Net-7 server architecture doc, GMCommands.txt, etc.).
+- A **reproducible trace** from a Win32 client against our server alongside a captured trace of the same operation against the retail server, with byte-level agreement.
 
-- "The CLI client needs it."
-- "The integration test would be easier."
-- "It's faster to develop this way."
-- "It only matters in test mode."
-- "We can put it behind a `#ifdef DEV` flag." *No*. Dev flags rot, get accidentally turned on in prod, and silently widen the attack surface — and even when they don't, they corrupt the preservation goal.
-- "The kyp/tada-o source already had it like this." Maybe; verify against capture/decomp before treating that as authority. The upstream forks added their own divergence.
+**B. Full CLI parsing + tests of the packet land FIRST.** Before the server-side wire change, the opcode/packet must be fully parsed in the C# CLI client (a `CliClient.Core` record) and pinned by tests, so we provably understand the format byte-for-byte BEFORE changing how the server emits or accepts it. Understanding-before-change is mandatory: a server wire change without the accompanying CLI parse + test is incomplete and gets rejected. (The "three places in sync" rule -- server + proxy + CLI -- already binds; this makes the CLI half a *precondition*, not a follow-up.)
 
-**Process**: if a contributor (human or agent) believes a server change is justified by the escape hatch, the change MUST be accompanied by a commit-message citation of the primary source (capture filename + frame number, decompiled function name, document section). Reviewers reject the change otherwise. If no primary source exists, the answer is "the server stays as-is; the tool adapts."
+**C. A real-client (client.exe) verification step is tracked.** The CLI proves the *format*; only the real Win32 client proves the *game still works*. Every server/proxy wire change the CLI alone cannot fully validate gets an entry appended to `plans/29-client-verification.md` -- the running checklist of things for the project owner to confirm against the real client. This does NOT block progress: keep implementing, the owner verifies asynchronously whenever convenient. But the change is not DONE until its checklist entry is confirmed, and you must never silently assume a change works with the real client because the CLI passed.
 
-This rule applies to `server/src/`, `login-server/Net7Mysql/`, `login-server/Net7SSL/`, and `proxy/`. It does NOT restrict changes that *tighten* the server toward greater fidelity (e.g. rejecting an input the real server rejected but we currently accept) -- those are always welcome.
+What is still **NOT** a justification on its own (none is a correctness proof):
+- "The CLI client needs it" / "the integration test would be easier" / "it's faster this way" / "it only matters in test mode."
+- "We can hide it behind a `#ifdef DEV` flag." *No*. Dev flags rot, get turned on in prod, and silently widen the attack surface.
+- "The kyp/tada-o source already had it like this." The upstream forks added their own divergence -- verify against capture / client behaviour before treating upstream as authority.
+
+**Process**: any server/proxy wire-behaviour change MUST carry, in its commit message, (1) the primary-source citation (capture filename + frame number, the analysed function, or the document section), (2) a pointer to the CLI parse + test that landed first, and (3) the `plans/29-client-verification.md` entry id for the real-client check. Reviewers reject the change otherwise.
+
+Changes that purely *tighten* the server toward fidelity (rejecting an input the real server rejected but we currently accept) remain always-welcome and need only the primary-source citation.
 
 ## Log warnings and errors are not noise (CRITICAL)
 

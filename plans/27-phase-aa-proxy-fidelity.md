@@ -251,10 +251,21 @@ compact-form field order matches the server's emit code byte-for-byte):
   AUX, a `0x46` positional interpolation toward the ship; arm a timer: after
   `tractorTime` ms emit `0x07` REMOVE(articleUID). (Loot differs only in the
   effect-flag ordering -- see the two reference variants.)
-- **`0x2018`/`0x2019` OBJECT_CREATE.** LATENT (server `SendObjectFull` has no
-  caller today). Fabricate `0x04` CREATE + orientation/nav/aux follow-ons
-  from the resource/static descriptor. Implement for completeness but it is
-  not on any live path until the server wires `SendObjectFull`.
+- **`0x2018`/`0x2019` OBJECT_CREATE.** DONE (Wave -- this session). The earlier
+  "LATENT, no caller today" note was WRONG: the live capture
+  `proxy/local-debug/net7-live-2026-06-02-login-undock-clicknavs-warp-logout.pcap`
+  shows the server emitting **51x `0x2018`** STATIC_OBJECT_CREATE (navs /
+  stations / gates / decos) and **34x `0x2019`** RESOURCE_OBJECT_CREATE
+  (asteroids) on a normal Luna session -- and our proxy was DROPPING all of
+  them, which is why Luna rendered empty (no navs, no planet, no roids). Now
+  `UDPClient::CreateObject` expands `0x2018` -> `0x04` CREATE + `0x89`
+  RELATIONSHIP + `0x40` CONSTANT_POSITIONAL_UPDATE + `0x1b` AUX-name + `0x99`
+  NAVIGATION, and `UDPClient::CreateResource` expands `0x2019` -> `0x04`
+  CREATE(Type=38) + `0x40` position + `0x1b` resource-name
+  (`proxy/UDPProxyToClient_linux.cpp`). Byte-pinned in the CLI by
+  `StaticContentFabricationSpecTests`. (Only the RELATIONSHIP ObjectID is
+  big-endian -- ntohl at the server `PlayerConnection.cpp` emit site; every
+  other field stays host/LE. See CLAUDE.md Trap 1.)
 
 Open items before/while implementing:
 - [x] Correct the false "consume = matches reference" comments in the proxy
@@ -277,7 +288,11 @@ Open items before/while implementing:
       `SendMasterLogin`, which may not equal the in-space object GameID; if it
       does not, learn it from the `0x05` START id or the first self-create.
       The always-path beam does NOT need it; only this local branch does.
-- [ ] `0x2013`/`0x2014` TRACTOR/LOOT, then `0x2018`/`0x2019` OBJECT_CREATE.
+- [x] `0x2018`/`0x2019` OBJECT_CREATE -- expanded by `UDPClient::CreateObject`
+      / `CreateResource`; byte-pinned by `StaticContentFabricationSpecTests`;
+      CV-01/CV-02 queued for real-client confirmation. (This was the empty-Luna
+      bug; the LATENT note above was wrong.)
+- [ ] `0x2013`/`0x2014` TRACTOR/LOOT (still need the live mine/loot harness).
 - [ ] **Byte-pin each fabricated packet.** No `tests/server` gtest can reach
       the proxy fabrication (it fires only when the live server emits 0x2012
       during a real mine). The byte-pin therefore lands in the new C# CLI
@@ -287,6 +302,57 @@ Open items before/while implementing:
       the server serializer" but NOT yet verified against a client. The
       structs in `PacketStructures.h` + the server serializers are the layout
       authority; a wrong layout CRASHES the Win32 client.
+
+## 3b. MVAS idle keepalive (proxy->server) -- DONE (this session)
+
+The proxy must keep a logged-in avatar's server-side idle timer alive. The
+server reaps any in-game player at `LastAccessTime + 2*60000`
+(`server/src/PlayerManager.cpp` `SendUDPOpcodes` / `SendUDPPlayerOpcodes` ->
+`DropPlayerFromGalaxy` -> `DropPlayerFromSector`), which removes the ship from
+every other client's view -- the "my ship disappeared after sitting idle" bug.
+
+- **Confirmed mechanism (primary source = live server log)**: `clienta`
+  logged in 15:17:58, `Removed from Galaxy` 15:20:09 = 2m11s, no refresh
+  between.
+- **Why it broke**: the upstream Win32 `UDPProxyMVAS.cpp` (ship-position
+  scrape + MVAS keepalive) was never ported and is ABSENT from the repo;
+  `MVASThread()` is declared but defined/started nowhere. Neither proxy build
+  sent any `0x3005`/`0x1004` to the server's MVAS port, so an idle avatar
+  behind the proxy was always reaped at 2 min.
+- **Primary source for the fix shape**: cleartext capture
+  `net7-live-2026-06-02-login-undock-clicknavs-warp-logout.pcap` (re-parsed
+  2026-06-03). The real proxy emits 0x3005 on TWO synchronized ~30s streams:
+  (1) bare keepalive from its MVAS socket (sport 43471) to udp/**3806**, first
+  frame `0c 00 05 30 2a 99 03 40 01 00 00 00` (12-byte EnbUdpHeader, no body,
+  dedicated low sequence 1,2,2,2); and (2) a 0x3005 from its main socket
+  (sport 40208) to the active **sector** port (3636, then 3573 after a warp),
+  on that socket's shared incrementing sequence. We replicate stream (1) only
+  (server's authoritative refresh path); stream (2) is deferred -- it would
+  have to ride the sector socket's live packet-sequence counter for no extra
+  reaper benefit. The dead `SendCommsAlive()` -> `m_ClientPort` stub maps to
+  stream (2).
+- [x] `UDPClient::MVASKeepaliveThread` + `SendServerKeepalive`
+      (`proxy/UDPClient_linux.cpp`, both build targets): a 30s loop started once
+      per session in `FixedClientComm()` that sends the 12-byte `0x3005`
+      carrying the live `m_PlayerID` to the server's MVAS port
+      (`MVAS_LOGIN_PORT`/3806).
+      **Port correction (2026-06-03)**: the first cut used `UDP_Send(0, ...)`,
+      which `send()`s to the socket's connected peer -- but this UDPClient
+      (`g_ServerMgr->m_UDPClient`) is connect()'d to `UDP_MASTER_SERVER_PORT`/
+      **3808**, not 3806. The master plane has no comms-alive handler, so the
+      keepalive refreshed nothing. Fixed to `UDP_Send(MVAS_LOGIN_PORT, ...)`
+      (explicit `sendto(server:3806)`; Linux permits sendto to a non-peer port
+      on a connected SOCK_DGRAM -- verified empirically).
+      `UDP_MVAS.cpp HandleKeepCommsAlive` resolves `GetPlayer` and refreshes
+      `LastAccessTime` (sends `0x100A` MVAS_TERMINATE only on an UNRESOLVED id).
+      **Runtime proof (2026-06-03)**: a raw 0x3005 with bogus id 0xDEADBEEF to
+      the live server:3806 returned `0x100A` echoing the id, proving 3806 is
+      bound and dispatches 0x3005 -> `HandleKeepCommsAlive`.
+- [x] CLI byte-pin: `MvasClientTests.BuildCommsAlive_MatchesRetailCaptureFrame`
+      pins the exact capture bytes; play-cli is covered by the CLI's own direct
+      `0x3005` (`StartCommsAlive`) since `MvasClient` dials 3806 directly.
+- [ ] CV-04 -- real-client (play-local) confirmation: undock, idle 3+ min, ship
+      must not vanish.
 
 ## 4. Tier-2 deferred transforms (documented, NOT yet implemented)
 

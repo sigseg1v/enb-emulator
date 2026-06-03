@@ -140,6 +140,12 @@ public sealed class EnterCommand : ICommandHandler
         // headless REPL has none, so it sends its own periodic REQUEST_TIME.
         _ctx.StartKeepalive();
 
+        // Mirror the retail client's MVAS keepalive: a periodic 0x3005
+        // COMMS_ALIVE on the UDP MVAS port, sent whether or not the avatar is
+        // moving, so an idle in-space avatar refreshes LastAccessTime the same
+        // way the real client does (not only via the TCP REQUEST_TIME above).
+        _ctx.StartCommsAlive();
+
         _ctx.World.Render(output, result.GameId);
         return 0;
     }
