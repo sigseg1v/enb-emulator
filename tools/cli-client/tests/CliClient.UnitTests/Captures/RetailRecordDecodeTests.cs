@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllEightySevenFrames()
+    public void Fixture_Loads_AllEightyEightFrames()
     {
-        Assert.Equal(87, Frames.Count);
+        Assert.Equal(88, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -2198,5 +2198,38 @@ public sealed class RetailRecordDecodeTests
         int reqGameLE = req[0] | req[1] << 8 | req[2] << 16 | req[3] << 24;   // LE
         Assert.Equal(8708585, reqGameLE);
         Assert.Equal(reqGameLE, invGameBE);
+    }
+
+    // ── Warp 0x9B ────────────────────────────────────────────────────────────
+    // Variable-length struct WarpPacket {int32 GameID; short Navs; int32
+    // TargetID[Navs]}, ALL little-endian -- Player::HandleWarp casts the buffer
+    // to WarpPacket* and reads with no ntohl; SetupWarpNavs copies exactly Navs
+    // entries. Payload = 6 + 4*Navs. The 2-nav fixture exercises the array.
+
+    [Fact]
+    public void Warp_VariableLengthRoute_AllLittleEndian()
+    {
+        string d = Dump("warp_two_nav_route");
+
+        Assert.Contains("[0000] GameID", d);
+        Assert.Contains("0x00000E05", d);                 // 05 0E 00 00 LE == 3589
+        Assert.Contains("Navs              = 2", d);       // 02 00 LE
+        Assert.Contains("(LE; count of TargetID route entries)", d);
+        Assert.Contains("[0006] TargetID[0]", d);
+        Assert.Contains("0x00000A38", d);                 // 38 0A 00 00 LE == 2616
+        Assert.Contains("[000A] TargetID[1]", d);
+        Assert.Contains("0x00000A39", d);                 // 39 0A 00 00 LE == 2617
+        Assert.DoesNotContain("???", d);                  // all 14 bytes decoded
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void Warp_PayloadLength_MatchesSixPlusFourPerNav()
+    {
+        var f = Frames["warp_two_nav_route"];
+        short navs = (short)(f.Payload[4] | f.Payload[5] << 8);   // LE
+        Assert.Equal(2, navs);
+        Assert.Equal(6 + 4 * navs, f.Payload.Length);            // 14 bytes
+        Assert.Equal((ushort)0x9B, PacketRecord.Resolve((ushort)f.Opcode, f.Payload).Opcode);
     }
 }

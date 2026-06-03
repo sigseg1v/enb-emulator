@@ -951,3 +951,9 @@ hex: 47 72 6f 75 70 20 65 78 70 65 72 69 65 6e 63 65
       20 62 6f 6e 75 73 20 69 73 20 6e 6f 77 20 34 30
       25 00 4d 65 73 73 61 67 65 4c 69 6e 65 00 b8 0b
       00 00 07 00 00 00
+
+[warp_two_nav_route]
+provenance: Warp 0x9B (client->server) -- GameID 3589 (0x00000E05), Navs 2, route TargetID[0]=2616 (0x00000A38), TargetID[1]=2617 (0x00000A39) (capture_3.rar packet #1481, Client->Server). Variable-length: payload = 6 + 4*Navs = 14 bytes for 2 navs. All fields little-endian: Player::HandleWarp casts the buffer to WarpPacket* and reads GameID/Navs/TargetID with no ntohl, and SetupWarpNavs copies exactly Navs entries. Picked the 2-nav frame (vs the 1-nav frames) so the test exercises the variable-length TargetID array.
+opcode: 0x9B
+payload-bytes: 14
+hex: 05 0e 00 00 02 00 38 0a 00 00 39 0a 00 00

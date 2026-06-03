@@ -1575,6 +1575,18 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       BE/LE id-equality). capture3-records.txt 86->87 frames;
       RetailRecordDecodeTests 104->108; full UnitTests suite 566 green. No server
       change (CLI decode-only).
+- [x] Warp (batch 11, 2026-06-03): 0x9B WARP, next by the fresh tally (111
+      frames). Variable-length struct WarpPacket {int32 GameID; short Navs; int32
+      TargetID[Navs]}, ALL little-endian -- Player::HandleWarp (PlayerConnection.cpp:
+      1873) casts the buffer straight to WarpPacket* and reads GameID/Navs/TargetID
+      with no ntohl, and SetupWarpNavs (PlayerClass.cpp:2174) copies exactly Navs
+      entries. So the on-wire payload is 6 + 4*Navs bytes (struct's TargetID[20] is
+      the max the server reads); the decoder reads Navs, bounds it to [0,20], and
+      walks that many waypoints. Pinned to the 2-nav capture_3 frame (#1481,
+      Client->Server, payload 14B = 05 0E 00 00 / 02 00 / two LE TargetIDs) so the
+      array path is exercised; 1-nav frames also present. Files: Records/WarpRecord.cs
+      + 1 registry line. capture3-records.txt 87->88 frames; 2 tests (field decode +
+      6+4*Navs length law); full UnitTests suite 568 green. CLI decode-only.
 - [ ] 0x0B ObjectToObjectEffect -- DEFERRED. Carries a u16 Bitmask + a
       variable-length Message field mid-packet + a conditional tail the server
       author flagged as wrong ("packet struct is wrong... TODO work out correct
@@ -1582,14 +1594,26 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       bit layout (header+Message+bits{0,1,2,5,6} computes 49B but the frame is 55B;
       another off by 6). Decoding the tail would require fabricating field
       structure -- validate interactively against the live client instead.
-- [x] Remaining high-frequency GenericRecord-fallthrough opcodes: SWEPT.
-      batch-6 cleared 0x9E/0x9D/0x5A/0x17/0x2C, batch-7 cleared 0x12/0x13/0x14,
-      batch-8 cleared 0x46, batch-9 cleared 0x21/0x22 (and 0x64 ClientDamage, 0x6A
-      ClientSound, 0x20 PriorityMessage, 0x66 OpenInterface already had decoders --
-      the old list was stale on those). Re-run the capture_3 opcode-frequency tally
-      before the next batch: the remaining GenericRecord fall-throughs are now the
-      long tail (single-digit frame counts) plus the explicitly-deferred 0x0B. Next
-      decode work should be driven by a fresh frequency re-tally, not this list.
+- [~] Remaining GenericRecord-fallthrough opcodes (driven by a fresh capture_3
+      tally, not a guess). Cleared so far: batch-6 0x9E/0x9D/0x5A/0x17/0x2C, batch-7
+      0x12/0x13/0x14, batch-8 0x46, batch-9 0x21/0x22, batch-10 0x27, batch-11 0x9B
+      (0x64/0x6A/0x20/0x66 already had decoders). The "single-digit long tail" note
+      written after batch-9 was WRONG -- a re-tally proved several mid-frequency
+      opcodes still fall through. Accurate undecoded remainder by frame count
+      (capture_3), highest first:
+        - 0x1F Trade_Action          (103)  -- NEXT
+        - 0xA3 ClientChatRequest     (71)
+        - 0x44 Request_Time          (66)
+        - 0x28 InventorySort         (31)   -- struct InvSort, PacketStructures.h:253
+        - 0x9F Starbase_Room_Change  (21)
+        - 0xA0 Starbase_Room_Update  (20)
+        - 0x55 Select_Talk_Tree      (17)
+        - 0x98 GalaxyMap (2nd op)    (14)
+        - 0x7C RefinerySetItemID     (14)
+        - 0x35 Master_Join           (14)
+        - 0x1A Debug                 (14)
+      Each must be grounded in its server emitter/parser for byte order before
+      decoding -- never guess. 0x0B stays explicitly deferred (below).
 - [ ] Long-tail records with ZERO frames in any of the 3 captures (need other
       captures): 0x6F GlobalTicket, 0xD0 GuildMessageSector. Defer until a capture
       containing them is located. AuxMobIndex/AuxHulkIndex 0x1B version-1 diff

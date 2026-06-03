@@ -77,6 +77,7 @@ public static class PacketRecordRegistry
             0x0092 => new CameraControlRecord(payload),
             0x0097 => new GalaxyMapRecord(payload),
             0x0099 => new NavigationRecord(payload),
+            0x009B => new WarpRecord(payload),
             0x009C => new WarpIndexRecord(payload),
             0x009D => new StarbaseAvatarChangeRecord(payload),
             0x009E => new StarbaseAvatarChangeS2CRecord(payload),
