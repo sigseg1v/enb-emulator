@@ -230,6 +230,33 @@ public abstract class PacketRecord : IPacketRecord
         return true;
     }
 
+    /// <summary>
+    /// Reads one server-side AddDataSN string at <paramref name="off"/>: raw
+    /// bytes up to and including a NUL terminator (see PacketMethods.h
+    /// AddDataSN). Marks the string + NUL as decoded, advances
+    /// <paramref name="off"/> past the NUL, and emits the field. Returns false
+    /// (with a Flag) if no NUL is found before the payload ends.
+    /// </summary>
+    protected bool TryReadCString(StringBuilder sb, ref int off, string name)
+    {
+        if (off >= Payload.Length)
+        {
+            Flag(sb, $"{name}: truncated -- offset {off} past end of {Payload.Length}-byte payload");
+            return false;
+        }
+        int nul = Array.IndexOf(Payload, (byte)0, off);
+        if (nul < 0)
+        {
+            Flag(sb, $"{name}: unterminated -- no NUL from offset {off} to end of payload");
+            return false;
+        }
+        int strLen = nul - off;
+        string value = Encoding.Latin1.GetString(Payload, off, strLen);
+        FStr(sb, off, strLen + 1, name, value);   // include the NUL in the marked span
+        off = nul + 1;
+        return true;
+    }
+
     protected static (int offset, string? value) FindFirstAsciiString(
         ReadOnlySpan<byte> p, int minLen)
     {

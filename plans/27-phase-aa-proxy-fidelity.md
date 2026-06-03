@@ -404,11 +404,24 @@ to `PacketRecord` and dropped the private copy in `GuildMessageSectorRecord`:
       PlayerGuild.cpp:823).
 - [x] **`0x00D3` GUILD_RANK_NAMES_SECTOR** (int32 Count BE + Count x {AddDataLS
       RankName, int32 Index BE}; PlayerGuild.cpp:690). Suite 661.
+Fifth batch (session + job opcodes, `JobAndLogoffRecordTests`). Promoted a
+shared `TryReadCString` helper (raw bytes up to+including a NUL = AddDataSN) to
+`PacketRecord`:
+- [x] **`0x0003` LOGOFF** (bare int32 GameID LE; PlayerConnection.cpp:7990).
+- [x] **`0x0065` UI_TRIGGER** (int32 ParamA + int32 ParamB LE;
+      PlayerConnection.cpp:7580).
+- [x] **`0x0094` JOB_DESCRIPTION** (int32 JobID + u8 Available + AddDataSN Title
+      + AddDataSN Description; PlayerConnection.cpp:9971 / SectorManager.cpp:1558).
+- [x] **`0x0093` JOB_LIST** (int32 CountPlaceholder [upper bound, NOT entry
+      count -- emitter writes m_JobListCount but appends only available jobs] +
+      entries until payload end, each = int32 ID/Category/Unknown/Level +
+      AddDataSN Title/Sponsor/Reward; PlayerConnection.cpp:9950 /
+      SectorManager.cpp:1521). Parser is end-of-buffer driven. Suite 665.
+
 - [ ] **`0x0081` RECUSTOMIZE_SHIP_START** -- deferred: carries a 194-byte
       embedded `ShipData` struct with no existing CLI decoder. Needs a shared
-      ShipData reader first.
-- [ ] Variable-length build-loop opcodes (`0x0093` JOB_LIST, `0x0094`
-      JOB_DESCRIPTION, `0x0065` UI_TRIGGER) -- higher effort, deferred.
+      ShipData reader first. This is the only remaining server-emitted 0x00xx
+      opcode that still falls through to `GenericRecord`.
 
 These are pure CLI parser additions for opcodes the server ALREADY emits, so
 no server/proxy change and no `KnownUnimplemented`/`TestedOpcodes` migration

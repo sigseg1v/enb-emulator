@@ -23,6 +23,7 @@ public static class PacketRecordRegistry
         return opcode switch
         {
             0x0002 => new LoginRecord(payload),
+            0x0003 => new LogoffRecord(payload),
             0x0004 => new CreateRecord(payload),
             0x0005 => new StartRecord(payload),
             0x0006 => new StartAckRecord(payload),
@@ -88,6 +89,7 @@ public static class PacketRecordRegistry
             0x005F => new AvatarEmoteResponseRecord(payload),
             0x0061 => new AvatarDescriptionRecord(payload),
             0x0064 => new ClientDamageRecord(payload),
+            0x0065 => new UiTriggerRecord(payload),
             0x0066 => new OpenInterfaceRecord(payload),
             0x006A => new ClientSoundRecord(payload),
             0x006F => new GlobalTicketRecord(payload),
@@ -101,6 +103,8 @@ public static class PacketRecordRegistry
             0x008B => new AttackerUpdatesRecord(payload),
             0x008C => new LootHulkPermissionRecord(payload),
             0x0092 => new CameraControlRecord(payload),
+            0x0093 => new JobListRecord(payload),
+            0x0094 => new JobDescriptionRecord(payload),
             0x0096 => new JobAcceptReplyRecord(payload),
             0x0097 => new GalaxyMapRecord(payload),
             0x0099 => new NavigationRecord(payload),
