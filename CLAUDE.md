@@ -293,6 +293,42 @@ or `play-cli`; use the explicit `rebuild` / `rebuild-cli` recipes.
    (CLAUDE.md "Server integrity rules" requires this for ANY change
    to server/proxy/login-server wire behaviour anyway).
 
+## Opcode / packet-structure knowledge lives in THREE places -- keep them in sync (CRITICAL)
+
+The same wire packet is touched by three independent codebases, and a
+change to how one opcode is built, parsed, framed, or fabricated almost
+always has to be mirrored in the other two or the stack silently diverges:
+
+1. **The server** (`server/src/`, `login-server/`) -- the authoritative
+   emitter and parser. It defines what the bytes mean.
+2. **The proxy** (`proxy/`) -- re-frames, consumes, drops, rewrites, and
+   *fabricates* packets between server and client (see "The proxy is NOT a
+   dumb relay"). For control opcodes the server emits in compact form (the
+   `0x20xx` fabrication band), the proxy is what expands them into the
+   client-facing game packets -- so the proxy holds packet-structure
+   knowledge the server side never serializes directly.
+3. **The C# CLI** (`tools/`/`CliClient.Core` + the Phase T integration
+   suite) -- parses and asserts the same packets to drive and verify the
+   server. It is the byte-pin: it is where a fabricated/served packet's
+   exact bytes get locked against regression.
+
+**Rule:** when you add or change opcode handling or a packet structure in
+ANY one of these, audit the other two in the SAME change and update
+whichever also encode that opcode/structure. A packet emitter changed in
+the server but not pinned in the CLI, or fabricated in the proxy but not
+parseable by the CLI, is an incomplete change. Note the cross-references
+in the commit message.
+
+**The server caveat still binds.** "Keep them in sync" is NOT licence to
+edit the server casually. Every server-side change is still governed by
+the "Server integrity rules" above: never weaken the security posture for
+a tooling consumer, never make the server accept inputs the real server
+rejected, and cite a primary source for any wire-behaviour change. If the
+CLI or proxy needs something, the default is that the *tool* adapts to the
+server, not the reverse. Sync the server only when the server is genuinely
+the thing that is wrong (measured against capture / decomp / first-hand
+docs), and cite it.
+
 ## When you implement a new server-side opcode handler
 
 The integration suite tracks opcodes the Net-7 server does NOT implement in `tests/integration/CliClient.IntegrationTests/Coverage/KnownUnimplementedOpcodes.cs`. Each entry has a matching `[Fact(Skip = ...)]` stub in `UnimplementedOpcodeStubTests.cs` whose body throws `NotImplementedException` on the first line.
