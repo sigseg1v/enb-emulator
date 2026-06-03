@@ -54,6 +54,7 @@ public static class PacketRecordRegistry
             0x003C => new ClientTypeRecord(payload),
             0x003F => new PlanetPositionalUpdateRecord(payload),
             0x0034 => new ClientSetTimeRecord(payload),
+            0x0035 => new MasterJoinRecord(payload),
             0x0036 => new ServerRedirectRecord(payload),
             0x0037 => new ClientAvatarRecord(payload),
             0x003E => new AdvancedPositionalUpdateRecord(payload),

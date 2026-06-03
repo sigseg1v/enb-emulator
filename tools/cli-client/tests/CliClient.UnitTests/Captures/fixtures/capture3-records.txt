@@ -1019,3 +1019,9 @@ provenance: Refinery_Set_Item_ID 0x7C (client->server) -- GameID 10012 (0x000027
 opcode: 0x7C
 payload-bytes: 8
 hex: 1c 27 00 00 d5 04 00 00
+
+[masterjoin_to_sector_10521]
+provenance: Master_Join 0x35 (client->server) -- the first packet the client sends the master/global server (capture_3.rar packet #224, Client->Server, 159.153.232.146:3387). 64-byte struct MasterJoin = 11 int32 + 20-byte ticket, all NETWORK BYTE ORDER (big-endian), unlike the LE sector-server raw structs. BE proven three ways: Player::HandleLogin ntohl's ToSectorID/FromSectorID (PlayerConnection.cpp:684), AccountManager builds avatar_id_lsb = ntohl(avatar_id) (AccountManager.cpp:590), and the login-server reads master-protocol fields via ntohl throughout. Decoded BE: ToSectorID 10521 (0x2919), FromSectorID 0 (fresh login), avatar_id 0x3E221201:0xF7645CC0, unknown3 0x40E5E7E8 (increments to 0x40E5ECA2/0x40E5F57B in frames #1258/#12776 -- monotonic only under BE, a capture-internal byte-order proof), unknown10 0x7FFFFFFF. The unknown*/PlayerLevel fields use the struct's own names; semantics not consumed server-side.
+opcode: 0x35
+payload-bytes: 64
+hex: 00 00 00 02 00 00 00 02 40 e5 e7 e8 3e 22 12 01 f7 64 5c c0 00 00 29 19 00 00 00 00 00 00 00 00 00 00 00 01 00 00 00 01 7f ff ff ff 89 77 24 df 40 36 32 dd 42 34 a7 59 6f df 5a 82 13 b2 70 e8

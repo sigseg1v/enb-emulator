@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllNinetyEightFrames()
+    public void Fixture_Loads_AllNinetyNineFrames()
     {
-        Assert.Equal(98, Frames.Count);
+        Assert.Equal(99, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -2464,5 +2464,43 @@ public sealed class RetailRecordDecodeTests
         // Data is the second int32 (offset 4), little-endian == 1237.
         Assert.Equal(1237, System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(f.Payload.AsSpan(4, 4)));
         Assert.Equal((ushort)0x7C, PacketRecord.Resolve((ushort)f.Opcode, f.Payload).Opcode);
+    }
+
+    // ── MasterJoin 0x35 ──────────────────────────────────────────────────────
+    // The client's first packet to the master/global server. 64-byte struct
+    // MasterJoin, NETWORK byte order (big-endian) throughout -- unlike the LE
+    // sector structs. HandleLogin ntohl's ToSectorID/FromSectorID.
+
+    [Fact]
+    public void MasterJoin_FieldsBigEndian_SectorAndAvatar()
+    {
+        string d = Dump("masterjoin_to_sector_10521");
+
+        Assert.Contains("[0014] ToSectorID", d);                 // offset 20 == 0x14
+        Assert.Contains("ToSectorID", d);
+        Assert.Contains("= 10521", d);                            // 00 00 29 19 BE == 10521
+        Assert.Contains("(BE; destination sector -- HandleLogin ntohl's this)", d);
+        Assert.Contains("FromSectorID", d);
+        Assert.Contains("(BE; origin sector, 0 = fresh login)", d);
+        Assert.Contains("avatar_id_msb", d);
+        Assert.Contains("0x3E221201", d);                         // BE high 32 bits
+        Assert.Contains("avatar_id_lsb", d);
+        Assert.Contains("0xF7645CC0", d);                         // BE low 32 bits
+        Assert.Contains("Ticket", d);
+        Assert.Contains("89 77 24 DF", d);                        // 20-byte ticket, raw
+        Assert.DoesNotContain("???", d);                          // all 64 bytes decoded
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void MasterJoin_SectorIsBigEndian_NotLittleEndian()
+    {
+        var f = Frames["masterjoin_to_sector_10521"];
+        var span = f.Payload.AsSpan(20, 4);
+        // ToSectorID at offset 20: big-endian == 10521, little-endian would be a
+        // nonsensical 0x19290000. The handler ntohl's it -> BE is the truth.
+        Assert.Equal(10521, System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(span));
+        Assert.NotEqual(10521, System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(span));
+        Assert.Equal((ushort)0x35, PacketRecord.Resolve((ushort)f.Opcode, f.Payload).Opcode);
     }
 }
