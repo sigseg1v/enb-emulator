@@ -67,19 +67,25 @@ not "port everything." Concretely:
 
 CLAUDE.md now states the rule. This section makes it checkable.
 
-- [ ] Inventory the union of opcodes that (a) the server emits to the
-      client/proxy and (b) the proxy forwards or fabrications produce on the
-      client leg. For each, assert a `PacketRecordRegistry` entry exists (not
-      `GenericRecord`). Emit the misses as a list.
-- [ ] For the fabrication band specifically, assert the CLI record's field
-      layout matches the proxy fabricator's emitted layout AND the server
-      compact emitter's layout. These three are the ones that drift silently.
-- [ ] Decide where the check lives: a `dotnet test` ratchet in the Phase-T
-      suite (preferred -- runs in CI) modelled on the existing
-      `CoverageRatchetTests` / `TestedOpcodes` pattern, NOT a shell script.
-      The ratchet asserts equality against a hand-maintained floor so adding a
-      decoder is a deliberate, reviewed bump (same discipline as
-      `KnownUnimplementedOpcodes`).
+- [x] **Fabrication-band ratchet landed** (`FabricationBandCoverageTests`,
+      commit pending): pins every opcode in the documented fabrication band --
+      the compact server->proxy sources (0x2012/0x2013/0x2014/0x2018/0x2019) and
+      the client-facing targets the proxy fabricates (0x0004/0x0007/0x000B/
+      0x000F/0x001B/0x0046) -- to its EXACT dedicated record type. Deleting or
+      remapping any registry line in the band fails the test. This is the part
+      of the invariant that drifts silently and is cheaply automatable.
+- [x] Placed in the **unit** suite, not Phase-T: it needs no live stack, so it
+      runs in every CI unit pass (faster, no docker). Deviates from the original
+      "put it in Phase-T" note -- the band check is pure-static, so the lighter
+      home is correct.
+- [~] **Whole-protocol union NOT separately re-implemented.** Enumerating "every
+      opcode the server emits" from C# would just be another hand-maintained
+      list; the existing Phase-T `CoverageRatchetTests` / `TestedOpcodes`
+      already ramps that against the LIVE server (the authoritative emitter), so
+      duplicating it statically here would rot. The fabrication band -- the only
+      part with silent-drift risk this phase introduced -- is covered above. The
+      field-layout agreement for the band is pinned by `CompactMineRecordTests`
+      (§2) against the emitter bytes + (§3) against the live fabrication.
 
 ## 2. Compact-band decoder gaps (the only real "port" work)
 
