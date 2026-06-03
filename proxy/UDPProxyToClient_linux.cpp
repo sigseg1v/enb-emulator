@@ -962,43 +962,48 @@ bool UDPClient::HandleCustomOpcode(short opcode, char *ptr, u8 *tcp_packet,
         return true;
 
     case ENB_OPCODE_2012_START_PROSPECT:
+        // FABRICATE the prospect / mining beam. The server emits only the
+        // compact 0x2012 (5 x int32: prospectorGID, asteroidGID, effectUID,
+        // startTick, drainMs -- see server/src/PlayerSkills.cpp
+        // Player::MineResource) to every range-list member and relies on each
+        // member's proxy to expand it into the client-facing 0x0b
+        // OBJECT_TO_OBJECT_EFFECT the game client renders. StartProspecting()
+        // builds that 0x0b byte-for-byte the way the server's own
+        // Player::SendObjectToObjectEffect / Player::ActivateProspectBeam
+        // serialize a timed beam. See plans/27 §3a.
+        StartProspecting(ptr, tcp_packet, tcp_index);
+        return true;
+
     case ENB_OPCODE_2013_TRACTOR_ORE:
     case ENB_OPCODE_2014_LOOT_ITEM:
     case ENB_OPCODE_2018_STATIC_OBJECT_CREATE:
     case ENB_OPCODE_2019_RESOURCE_OBJECT_CREATE:
-        // KNOWN PARITY GAP (Phase AA Wave 3 -- being implemented).
+        // KNOWN PARITY GAP (Phase AA -- 0x2012 fabricated above; these remain).
         //
         // These are NOT "consume and silently drop" opcodes. A known-good
         // reference proxy FABRICATES full client-facing game packets from
         // each of these compact server control opcodes and sends them to
-        // the client's game receiver, then (for prospect/tractor/loot)
-        // spawns a timer that emits a follow-up effect-removal packet:
-        //   0x2012 START_PROSPECT  -> 0x0b OBJECT_TO_OBJECT_EFFECT (mining
-        //        beam, EffectDescID 0xbf) + a 0x1b prospect-skill AUX and a
-        //        0x1d "Prospect ability activated." text (local prospector
-        //        only) + a drain timer that emits 0x0f REMOVE_EFFECT.
+        // the client's game receiver, then (for tractor/loot) emits a
+        // follow-up effect-removal packet once the pull completes:
         //   0x2013 TRACTOR_ORE / 0x2014 LOOT_ITEM -> 0x04 CREATE (the ore
         //        article object) + 0x0b tractor beam + 0x1b name AUX +
-        //        0x46 positional interp + a timer that emits 0x07 REMOVE.
+        //        0x46 positional interp + a later 0x07 REMOVE.
         //   0x2018/0x2019 OBJECT_CREATE -> 0x04 CREATE + orientation /
         //        nav / aux follow-ons.
         // The server emits ONLY the compact form and relies on the proxy to
-        // expand it (see server PlayerSkills.cpp StartProspecting/
-        // UseTractorBeam, whose own comment names the proxy routine
-        // "SendProspectAUX"). The entire client-facing builder family
-        // (Connection::QueueObjectLinkedEffect / QueueObjectCreate /
-        // QueueAuxPacket ...) was removed when the Win32 twins were deleted,
-        // leaving only their declarations in Connection.h -- so our proxy
-        // currently produces NOTHING for these. Net effect today: a player
-        // mining / tractoring / looting gets the server-side cargo result
-        // but NO beam, tractor, or object-spawn effect on any client.
+        // expand it (see server PlayerSkills.cpp UseTractorBeam / the loot
+        // path). The client-facing builder family was removed when the Win32
+        // twins were deleted, leaving only declarations in Connection.h -- so
+        // our proxy still produces NOTHING for these. Net effect today: a
+        // player tractoring / looting gets the server-side cargo result but
+        // NO tractor beam or ore-spawn effect on any client.
         //
-        // 0x2012/0x2013/0x2014 are an ACTIVE regression (the server emits
-        // them in normal play). 0x2018/0x2019 are LATENT only (the server's
-        // sole emitter, Player::SendObjectFull, is currently never called).
+        // 0x2013/0x2014 are an ACTIVE regression (the server emits them in
+        // normal play). 0x2018/0x2019 are LATENT only (the server's sole
+        // emitter, Player::SendObjectFull, is currently never called).
         //
         // Interim behaviour is consume-and-drop (return TRUE): it leaves the
-        // beam missing but keeps the sequence advancing. Forwarding the raw
+        // tractor missing but keeps the sequence advancing. Forwarding the raw
         // 0x20xx opcode is NOT an option -- it fails the 1..0xFE gate and
         // stalls the sequence. The fix is to fabricate, not to forward.
         // See plans/27 §3a for the full reconstructed spec.
@@ -1157,6 +1162,80 @@ void UDPClient::HandleStageConfirm(char *ch_msg, u8 *tcp_packet, short &tcp_inde
             ENB_OPCODE_2021_LOGIN_STAGE_ACK_C_S, sizeof(stage_wire),
             (char *) &stage_wire);
     }
+}
+
+// ---------------------------------------------------------------------------
+// StartProspecting -- fabricate the prospect / mining beam for opcode 0x2012.
+//
+// The sector server does NOT send the client-facing mining beam directly. It
+// sends the compact 0x2012 START_PROSPECT control packet to every player on
+// the prospector's range list (server/src/PlayerSkills.cpp
+// Player::MineResource -> SendToRangeList) and relies on each member's proxy
+// to expand it into the 0x0b OBJECT_TO_OBJECT_EFFECT the game client actually
+// renders. The compact packet is five little-endian int32 fields (AddData<long>
+// is pinned to 4 wire bytes on every platform -- server/src/PacketMethods.h):
+//
+//   [0]  prospectorGID  -- the mining ship's object GameID (beam source)
+//   [4]  asteroidGID     -- the targeted resource object    (beam target)
+//   [8]  effectUID       -- unique id for this beam instance
+//   [12] startTick       -- server GetNet7TickCount() at beam start
+//   [16] drainMs         -- how long the beam runs before the ore is tractored
+//
+// We build the 0x0b body byte-for-byte the way the server's own
+// Player::SendObjectToObjectEffect (PlayerConnection.cpp) serializes a beam,
+// matching exactly the field set Player::ActivateProspectBeam produces for a
+// *timed* beam: effect_time != 0 -> Bitmask 0x07, EffectDescID 0x00BF, with
+// EffectID, TimeStamp and a u16 Duration. The Duration field lets the client
+// self-expire the effect after drainMs, so no separate REMOVE_EFFECT and no
+// per-beam timer thread is needed (and no thread-lifetime hazard across a
+// mid-mine disconnect). Connection::SendResponse frames [len][opcode][body]
+// and RC4-encrypts exactly as the server's SendOpcode frames an inner packet,
+// so the bytes the client decodes are identical to a server-emitted 0x0b.
+//
+// This expansion is identical for the prospector and for observers: every
+// recipient renders a beam from prospectorGID to asteroidGID. The prospector-
+// only "Prospect ability activated." text + skill AUX is NOT yet fabricated
+// (needs reliable local-avatar GameID resolution -- plans/27 §3a open item).
+// ---------------------------------------------------------------------------
+void UDPClient::StartProspecting(char *ch_msg, u8 *tcp_packet, short &tcp_index)
+{
+    (void) tcp_packet;
+    (void) tcp_index;
+
+    if (!g_ServerMgr || !g_ServerMgr->m_SectorConnection) return;
+
+    unsigned char *msg = (unsigned char *) ch_msg;
+    int in = 0;
+    long     prospector_gid = ExtractLong(msg, in);
+    long     asteroid_gid   = ExtractLong(msg, in);
+    long     effect_uid     = ExtractLong(msg, in);
+    uint32_t start_tick     = (uint32_t) ExtractLong(msg, in);
+    uint32_t drain_ms       = (uint32_t) ExtractLong(msg, in);
+
+    // 0x0b OBJECT_TO_OBJECT_EFFECT body. Field order/layout mirrors
+    // Player::SendObjectToObjectEffect: Bitmask(u16), GameID(int32),
+    // TargetID(int32), EffectDescID(u16), Message(NULL -> single 0 byte),
+    // then the bit-gated fields EffectID(0x01), TimeStamp(0x02), Duration(0x04).
+    unsigned char body[64];
+    int idx = 0;
+    AddData(body, (short) 0x0007, idx);           // Bitmask: EffectID|TimeStamp|Duration
+    AddData(body, (int32_t) prospector_gid, idx); // GameID  (beam source)
+    AddData(body, (int32_t) asteroid_gid, idx);   // TargetID (beam target)
+    AddData(body, (short) 0x00BF, idx);           // EffectDescID: prospect/mining beam
+    AddData(body, (char) 0, idx);                 // Message NULL -> one 0 byte
+    AddData(body, (int32_t) effect_uid, idx);     // 0x01 EffectID
+    AddData(body, (uint32_t) start_tick, idx);    // 0x02 TimeStamp
+    // 0x04 Duration is a u16 (ms). The server truncates identically
+    // (ActivateProspectBeam: Duration = short(effect_time)); mirror it so the
+    // bytes match. Mines longer than ~65s share the server's wrap quirk.
+    AddData(body, (short) (drain_ms & 0xFFFF), idx);
+
+    g_ServerMgr->m_SectorConnection->SendResponse(
+        ENB_OPCODE_000B_OBJECT_TO_OBJECT_EFFECT, body, (short) idx);
+
+    LogVMessage("UDPClient(Linux): fabricated prospect beam 0x0b "
+                "src=%ld tgt=%ld fx=%ld dur=%ums\n",
+                prospector_gid, asteroid_gid, effect_uid, (unsigned) drain_ms);
 }
 
 // ---------------------------------------------------------------------------

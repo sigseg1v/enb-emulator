@@ -257,26 +257,36 @@ compact-form field order matches the server's emit code byte-for-byte):
   not on any live path until the server wires `SendObjectFull`.
 
 Open items before/while implementing:
-- [~] Correct the false "consume = matches reference" comments in the proxy
-      and this plan (DONE -- Wave 3).
-- [ ] Confirm how the proxy resolves the LOCAL avatar's in-space GameID (the
-      reference compares the prospector GID against a stored player GID to
-      gate the local-only AUX+text). `m_PlayerID` holds the account avatar id
-      from `SendMasterLogin`, which may not equal the in-space object GameID;
-      if it does not, capture where the proxy could learn it (the `0x05`
-      START id, or the first self-referential create). The always-path `0x0b`
-      beam does NOT need it; only the local-only AUX+text does.
-- [ ] Implement `0x2012` first (cleanest; type-0 AUX bytes already validated
-      by the server), then `0x2013/0x2014`, then `0x2018/0x2019`.
-- [ ] Byte-pin each fabricated packet. Preferred: a `tests/server` gtest (or
-      an integration `CaptureReplay`-style fixture) that feeds the compact
-      input and asserts the emitted client byte stream. The structs in
-      `PacketStructures.h` are the layout authority; a wrong layout CRASHES
-      the Win32 client (strictly worse than the current missing-effect
-      state), so this must be verified before it is considered done.
-- [ ] Timer follow-ups (`0x0f`/`0x07`) run on a detached thread that sleeps
-      then calls `Connection::SendResponse` (already mutex-guarded, see
-      Connection.cpp). Floor the sleep at 200 ms as the reference does.
+- [x] Correct the false "consume = matches reference" comments in the proxy
+      and this plan (commit 947d2296).
+- [x] Implement `0x2012` START_PROSPECT (`UDPClient::StartProspecting`,
+      proxy/UDPProxyToClient_linux.cpp). Emits a single 0x0b beam serialized
+      byte-for-byte like the server's own `Player::SendObjectToObjectEffect`
+      / `Player::ActivateProspectBeam` for a *timed* beam: Bitmask 0x07,
+      EffectDescID 0x00BF, EffectID/TimeStamp/Duration. We use the Duration
+      field (client self-expires) INSTEAD of the reference's separate 0x0f +
+      drain-timer thread -- a deliberate divergence in mechanism, not in
+      visible effect: it avoids a per-beam detached thread and its
+      use-after-free hazard if the proxy<->client connection is torn down
+      mid-mine. Grounded entirely in citable in-repo server code; needs NO
+      external reference for the layout. The prospector-only AUX+text is NOT
+      emitted yet (see next item).
+- [ ] Prospector-only `0x1b` skill AUX + `0x1d` "Prospect ability activated."
+      text. Needs the proxy to know whether the packet's prospectorGID is
+      THIS client's own avatar. `m_PlayerID` holds the account avatar id from
+      `SendMasterLogin`, which may not equal the in-space object GameID; if it
+      does not, learn it from the `0x05` START id or the first self-create.
+      The always-path beam does NOT need it; only this local branch does.
+- [ ] `0x2013`/`0x2014` TRACTOR/LOOT, then `0x2018`/`0x2019` OBJECT_CREATE.
+- [ ] **Byte-pin each fabricated packet.** No `tests/server` gtest can reach
+      the proxy fabrication (it fires only when the live server emits 0x2012
+      during a real mine). The byte-pin therefore lands in the new C# CLI
+      phase: the CLI must parse 0x0b/0x04/0x1b/0x46/0x07/0x0f and an
+      integration test mines a roid and asserts the fabricated 0x0b fields.
+      Until that test exists, 0x2012 is "implemented + compiles + grounded in
+      the server serializer" but NOT yet verified against a client. The
+      structs in `PacketStructures.h` + the server serializers are the layout
+      authority; a wrong layout CRASHES the Win32 client.
 
 ## 4. Tier-2 deferred transforms (documented, NOT yet implemented)
 
