@@ -392,9 +392,18 @@ Third batch (variable-length, server-emitted, `VariableLengthRecordTests`):
 - [x] **`0x00BE` CONFIRMED_ACTION_OFFER** (int32 BE + int32 BE + int16 len + text;
       PlayerConnection.cpp:863, pins the exact server literal). Suite 656.
 
-Remaining server-emitted variable opcodes still on GenericRecord (next):
-`0x001E` GROUP, `0x00A6` CLIENT_CHAT_ERROR, `0x00C8`/`0x00CC`/`0x00D3` guild
-(AddDataLS string builders).
+Fourth batch (AddDataLS string-builder opcodes, `GuildAndGroupRecordTests`).
+Promoted a shared `TryReadAddDataLS` helper (uint16 LE len + raw bytes, no NUL)
+to `PacketRecord` and dropped the private copy in `GuildMessageSectorRecord`:
+- [x] **`0x001E` GROUP** (int16 Len LE + u8 flag + NUL-terminated msg;
+      PlayerConnection.cpp:3700 / GroupManager.cpp:436).
+- [x] **`0x00A6` CLIENT_CHAT_ERROR** (int32 Reason + int32 Type + 3x AddDataLS
+      Player/Channel/Other; PlayerConnection.cpp:4674).
+- [x] **`0x00C8` GUILD_RECRUIT_CONFIRM_SECTOR** (2x AddDataLS; PlayerGuild.cpp:831).
+- [x] **`0x00CC` GUILD_SIMPLE_SECTOR_CLIENT** (int32 Type LE + AddDataLS;
+      PlayerGuild.cpp:823).
+- [x] **`0x00D3` GUILD_RANK_NAMES_SECTOR** (int32 Count BE + Count x {AddDataLS
+      RankName, int32 Index BE}; PlayerGuild.cpp:690). Suite 661.
 - [ ] **`0x0081` RECUSTOMIZE_SHIP_START** -- deferred: carries a 194-byte
       embedded `ShipData` struct with no existing CLI decoder. Needs a shared
       ShipData reader first.

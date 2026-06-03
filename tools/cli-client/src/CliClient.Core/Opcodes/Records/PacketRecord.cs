@@ -202,6 +202,34 @@ public abstract class PacketRecord : IPacketRecord
         return Encoding.ASCII.GetString(span[..nul]);
     }
 
+    /// <summary>
+    /// Reads one server-side AddDataLS string at <paramref name="off"/>: a
+    /// uint16 little-endian length followed by that many raw bytes (NO NUL
+    /// terminator -- see server/src/PacketMethods.h AddDataLS). Marks the
+    /// length + body as decoded, advances <paramref name="off"/>, and emits the
+    /// field. Returns false (with a Flag) if either part runs past the payload.
+    /// </summary>
+    protected bool TryReadAddDataLS(StringBuilder sb, ref int off, string name)
+    {
+        if (off + 2 > Payload.Length)
+        {
+            Flag(sb, $"{name}: truncated -- offset {off}, only {Payload.Length - off} bytes remain (need 2 for length)");
+            return false;
+        }
+        ushort len = ReadU16LE(Payload, off);
+        Mark(off, 2);
+        off += 2;
+        if (off + len > Payload.Length)
+        {
+            Flag(sb, $"{name}: truncated -- need {len} bytes of string data at offset {off}, only {Payload.Length - off} remain");
+            return false;
+        }
+        string value = Encoding.Latin1.GetString(Payload, off, len);
+        FStr(sb, off, len, name, value);
+        off += len;
+        return true;
+    }
+
     protected static (int offset, string? value) FindFirstAsciiString(
         ReadOnlySpan<byte> p, int minLen)
     {

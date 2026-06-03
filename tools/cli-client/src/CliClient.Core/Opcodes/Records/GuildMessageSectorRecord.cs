@@ -42,25 +42,4 @@ public sealed class GuildMessageSectorRecord : PacketRecord
         if (!TryReadAddDataLS(sb, ref off, "OtherName")) return;
         if (!TryReadAddDataLS(sb, ref off, "GuildName"))  return;
     }
-
-    private bool TryReadAddDataLS(StringBuilder sb, ref int off, string name)
-    {
-        if (off + 2 > Payload.Length)
-        {
-            Flag(sb, $"{name}: truncated -- offset {off}, only {Payload.Length - off} bytes remain (need 2 for length)");
-            return false;
-        }
-        ushort len = ReadU16LE(Payload, off);
-        Mark(off, 2);
-        off += 2;
-        if (off + len > Payload.Length)
-        {
-            Flag(sb, $"{name}: truncated -- need {len} bytes of string data at offset {off}, only {Payload.Length - off} remain");
-            return false;
-        }
-        string value = Encoding.UTF8.GetString(Payload, off, len);
-        FStr(sb, off, len, name, value);
-        off += len;
-        return true;
-    }
 }
