@@ -6,6 +6,12 @@
         x:Class="EffectEditorAvalonia.MainWindow"
         Title="Effect Editor" Width="740" Height="475"
         CanResize="False">
+  <DockPanel>
+  <Menu DockPanel.Dock="Top">
+    <MenuItem Header="_File">
+      <MenuItem x:Name="c_ExportChanges" Header="Export Changes to SQL..." />
+    </MenuItem>
+  </Menu>
   <Grid Margin="8" RowDefinitions="Auto,Auto,Auto,Auto,*,Auto">
 
     <!-- Row 0: Search button -->
@@ -104,4 +110,5 @@
       <TextBlock x:Name="c_Status" VerticalAlignment="Center" Foreground="Gray" Margin="12,0,0,0" />
     </StackPanel>
   </Grid>
+  </DockPanel>
 </Window>

@@ -37,8 +37,51 @@ namespace FactionEditorAvalonia
         public MainWindow()
         {
             InitializeComponent();
+            // Record mutating SQL this session so it can be exported as a
+            // standalone, re-appliable changeset.
+            CommonTools.Database.DB.Instance.ChangeTracker.Enabled = true;
             c_FactionGrid.ItemsSource = _gridRows;
+            c_ExportChanges.Click += async (_, _) => await ExportChangesToSql();
             Opened += async (_, _) => await OnLoadAsync();
+        }
+
+        // Write the recorded mutating SQL to a user-chosen .sql file. The
+        // changeset is standalone, re-appliable Postgres (params inlined).
+        async Task ExportChangesToSql()
+        {
+            var tracker = CommonTools.Database.DB.Instance.ChangeTracker;
+            if (tracker.Count == 0)
+            {
+                c_Status.Text = "No DB changes recorded this session.";
+                return;
+            }
+
+            var picker = await StorageProvider.SaveFilePickerAsync(
+                new Avalonia.Platform.Storage.FilePickerSaveOptions
+                {
+                    Title = "Export changes to SQL",
+                    SuggestedFileName = "faction-editor-changeset.sql",
+                    DefaultExtension = "sql",
+                    FileTypeChoices = new[]
+                    {
+                        new Avalonia.Platform.Storage.FilePickerFileType("SQL script")
+                        {
+                            Patterns = new[] { "*.sql" }
+                        }
+                    }
+                });
+
+            if (picker == null) return; // user cancelled
+
+            try
+            {
+                tracker.WriteSqlFile(picker.Path.LocalPath, "Faction Editor (Avalonia)");
+                c_Status.Text = "Wrote " + tracker.Count + " statement(s) to " + picker.Path.LocalPath;
+            }
+            catch (Exception ex)
+            {
+                c_Status.Text = "Export failed: " + ex.Message;
+            }
         }
 
         async Task OnLoadAsync()

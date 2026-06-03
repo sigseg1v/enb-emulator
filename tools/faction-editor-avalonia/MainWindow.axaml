@@ -14,6 +14,8 @@
         <MenuItem Header="_Save"   Click="OnSaveClick" />
         <MenuItem Header="_Delete" Click="OnDeleteClick" />
         <Separator />
+        <MenuItem Header="_Export Changes to SQL..." x:Name="c_ExportChanges" />
+        <Separator />
         <MenuItem Header="E_xit"   Click="OnExitClick" />
       </MenuItem>
       <MenuItem Header="_Edit">

@@ -44,9 +44,14 @@ namespace N7
             return DB.Instance.executeCommand(query, null, null);
         }
 
+        // Postgres equivalent of MySQL's LAST_INSERT_ID(): lastval() returns the
+        // most recent IDENTITY/sequence value generated in the current session.
+        // It is only valid immediately after an INSERT that went through an
+        // IDENTITY column on this same pooled connection. lastval() is a read,
+        // so the ChangeTracker (correctly) ignores it.
         public static long lastInsertId()
         {
-            DataTable t = DB.Instance.executeQuery("SELECT LAST_INSERT_ID()", null, null);
+            DataTable t = DB.Instance.executeQuery("SELECT lastval()", null, null);
             if (t == null || t.Rows.Count == 0) return 0;
             return Convert.ToInt64(t.Rows[0][0]);
         }

@@ -8,7 +8,7 @@ namespace N7.Sql
     // 280-LOC monster with ~70 sprintf SQL sites across sector_objects +
     // sector_nav_points + per-type subtables (mob/planets/stargates/starbases/
     // harvestable). One typed-DataRow column per parameter; every value rides
-    // a ?name placeholder so MySqlConnector escapes it.
+    // a @name placeholder so Npgsql binds it.
     //
     // Object-type discriminator (preserved from the WinForms original):
     //   0  → mob spawn          (sector_objects_mob       , mob_id)
@@ -32,7 +32,7 @@ namespace N7.Sql
         public SectorObjectsSql(String sectorName)
         {
             DataTable tmp = Database.executeQuery(Database.DatabaseName.net7,
-                "SELECT sector_id FROM sectors where name=?name",
+                "SELECT sector_id FROM sectors where name=@name",
                 new String[] { "name" },
                 new String[] { sectorName });
 
@@ -47,7 +47,7 @@ namespace N7.Sql
                     " left join sector_objects_starbases on sector_objects.sector_object_id = sector_objects_starbases.starbase_id" +
                     " left join sector_objects_stargates on sector_objects.sector_object_id = sector_objects_stargates.stargate_id" +
                     " left join sector_objects_mob on sector_objects.sector_object_id = sector_objects_mob.mob_id" +
-                    " where sector_objects.sector_id=?sid order by sector_objects.type;";
+                    " where sector_objects.sector_id=@sid order by sector_objects.type;";
                 sectorObjects = Database.executeQuery(Database.DatabaseName.net7,
                     soQuery,
                     new String[] { "sid" },
@@ -129,29 +129,29 @@ namespace N7.Sql
             {
                 case TYPE_MOB:
                     Database.executeCommand(Database.DatabaseName.net7,
-                        "DELETE FROM mob_spawn_group where spawn_group_id=?" + idParam, paramNames, paramValues);
+                        "DELETE FROM mob_spawn_group where spawn_group_id=@" + idParam, paramNames, paramValues);
                     Database.executeCommand(Database.DatabaseName.net7,
-                        "DELETE FROM sector_objects_mob where mob_id=?" + idParam, paramNames, paramValues);
+                        "DELETE FROM sector_objects_mob where mob_id=@" + idParam, paramNames, paramValues);
                     break;
                 case TYPE_PLANET:
                     Database.executeCommand(Database.DatabaseName.net7,
-                        "DELETE FROM sector_objects_planets where planet_id=?" + idParam, paramNames, paramValues);
+                        "DELETE FROM sector_objects_planets where planet_id=@" + idParam, paramNames, paramValues);
                     break;
                 case TYPE_STARGATE:
                     Database.executeCommand(Database.DatabaseName.net7,
-                        "DELETE FROM sector_objects_stargates where stargate_id=?" + idParam, paramNames, paramValues);
+                        "DELETE FROM sector_objects_stargates where stargate_id=@" + idParam, paramNames, paramValues);
                     break;
                 case TYPE_STARBASE:
                     Database.executeCommand(Database.DatabaseName.net7,
-                        "DELETE FROM sector_objects_starbases where starbase_id=?" + idParam, paramNames, paramValues);
+                        "DELETE FROM sector_objects_starbases where starbase_id=@" + idParam, paramNames, paramValues);
                     break;
                 case TYPE_HARVESTABLE:
                     Database.executeCommand(Database.DatabaseName.net7,
-                        "DELETE FROM mob_spawn_group where spawn_group_id=?" + idParam, paramNames, paramValues);
+                        "DELETE FROM mob_spawn_group where spawn_group_id=@" + idParam, paramNames, paramValues);
                     Database.executeCommand(Database.DatabaseName.net7,
-                        "DELETE FROM sector_objects_harvestable_restypes where group_id=?" + idParam, paramNames, paramValues);
+                        "DELETE FROM sector_objects_harvestable_restypes where group_id=@" + idParam, paramNames, paramValues);
                     Database.executeCommand(Database.DatabaseName.net7,
-                        "DELETE FROM sector_objects_harvestable where resource_id=?" + idParam, paramNames, paramValues);
+                        "DELETE FROM sector_objects_harvestable where resource_id=@" + idParam, paramNames, paramValues);
                     break;
                 case TYPE_NAV_ONLY:
                     break;
@@ -159,9 +159,9 @@ namespace N7.Sql
 
             // Always clean up the nav-point row and the parent sector_objects row.
             Database.executeCommand(Database.DatabaseName.net7,
-                "DELETE FROM sector_nav_points where sector_object_id=?" + idParam, paramNames, paramValues);
+                "DELETE FROM sector_nav_points where sector_object_id=@" + idParam, paramNames, paramValues);
             Database.executeCommand(Database.DatabaseName.net7,
-                "DELETE FROM sector_objects where sector_object_id=?" + idParam, paramNames, paramValues);
+                "DELETE FROM sector_objects where sector_object_id=@" + idParam, paramNames, paramValues);
         }
 
         public void newRow(DataRow r)
@@ -169,30 +169,30 @@ namespace N7.Sql
             int type = int.Parse(r["type"].ToString());
 
             // INSERT into sector_objects with the sector linkage.
+            // sector_object_id is GENERATED BY DEFAULT AS IDENTITY; the insert
+            // RETURNs the freshly-minted parent id, which every child row below
+            // (nav-point + per-type subtable) is keyed to. A nav point IS a
+            // sector object, so sector_nav_points.sector_object_id is that same
+            // id supplied explicitly.
             String[] objCols = new String[SectorObjCols.Length + 1];
             objCols[0] = "sector_id";
             Array.Copy(SectorObjCols, 0, objCols, 1, SectorObjCols.Length);
-            execInsert("sector_objects", objCols, r);
-
-            long lastInsertID = Database.lastInsertId();
+            long lastInsertID = execInsertReturning("sector_objects", objCols, r, "sector_object_id");
 
             // INSERT into sector_nav_points using the freshly-minted id.
-            String[] navColsWithLinks = new String[NavPointCols.Length + 2];
-            navColsWithLinks[0] = "sector_object_id";
-            navColsWithLinks[1] = "sector_id";
-            Array.Copy(NavPointCols, 0, navColsWithLinks, 2, NavPointCols.Length);
-
             List<String> navParamNames = new List<String> { "sector_object_id", "sector_id" };
             List<String> navParamValues = new List<String> { lastInsertID.ToString(), r["sector_id"].ToString() };
-            String navSet = "sector_object_id=?sector_object_id, sector_id=?sector_id";
+            String navCols = "\"sector_object_id\", \"sector_id\"";
+            String navVals = "@sector_object_id, @sector_id";
             foreach (String c in NavPointCols)
             {
                 navParamNames.Add(c);
                 navParamValues.Add(r[c].ToString());
-                navSet += ", " + c + "=?" + c;
+                navCols += ", \"" + c + "\"";
+                navVals += ", @" + c;
             }
             Database.executeCommand(Database.DatabaseName.net7,
-                "INSERT INTO sector_nav_points SET " + navSet,
+                "INSERT INTO sector_nav_points (" + navCols + ") VALUES (" + navVals + ")",
                 navParamNames.ToArray(), navParamValues.ToArray());
 
             // INSERT into the per-type subtable.
@@ -233,29 +233,36 @@ namespace N7.Sql
                 paramNames[i] = cols[i];
                 paramValues[i] = r[cols[i]].ToString();
                 if (setClause.Length > 0) setClause += ", ";
-                setClause += cols[i] + "=?" + cols[i];
+                setClause += "\"" + cols[i] + "\"=@" + cols[i];
             }
             paramNames[cols.Length] = whereCol;
             paramValues[cols.Length] = r[whereSource].ToString();
 
-            String query = "UPDATE " + table + " SET " + setClause + " WHERE " + whereCol + "=?" + whereCol;
+            String query = "UPDATE " + table + " SET " + setClause + " WHERE \"" + whereCol + "\"=@" + whereCol;
             Database.executeCommand(Database.DatabaseName.net7, query, paramNames, paramValues);
         }
 
-        private static void execInsert(String table, String[] cols, DataRow r)
+        // INSERT that returns a GENERATED-AS-IDENTITY pk via RETURNING (Postgres
+        // has no LAST_INSERT_ID()). Runs through executeQuery so the row comes
+        // back and the ChangeTracker still records the mutation.
+        private static long execInsertReturning(String table, String[] cols, DataRow r, String pkCol)
         {
             String[] paramNames = new String[cols.Length];
             String[] paramValues = new String[cols.Length];
-            String setClause = "";
+            String colList = "";
+            String valList = "";
             for (int i = 0; i < cols.Length; i++)
             {
                 paramNames[i] = cols[i];
                 paramValues[i] = r[cols[i]].ToString();
-                if (setClause.Length > 0) setClause += ", ";
-                setClause += cols[i] + "=?" + cols[i];
+                if (colList.Length > 0) { colList += ", "; valList += ", "; }
+                colList += "\"" + cols[i] + "\"";
+                valList += "@" + cols[i];
             }
-            String query = "INSERT INTO " + table + " SET " + setClause;
-            Database.executeCommand(Database.DatabaseName.net7, query, paramNames, paramValues);
+            String query = "INSERT INTO " + table + " (" + colList + ") VALUES (" + valList
+                         + ") RETURNING \"" + pkCol + "\" AS id";
+            DataTable res = Database.executeQuery(Database.DatabaseName.net7, query, paramNames, paramValues);
+            return Convert.ToInt64(res.Rows[0]["id"]);
         }
 
         private static void execInsertWithId(String table, String idCol, long idValue, String[] cols, DataRow r)
@@ -264,14 +271,16 @@ namespace N7.Sql
             String[] paramValues = new String[cols.Length + 1];
             paramNames[0] = idCol;
             paramValues[0] = idValue.ToString();
-            String setClause = idCol + "=?" + idCol;
+            String colList = "\"" + idCol + "\"";
+            String valList = "@" + idCol;
             for (int i = 0; i < cols.Length; i++)
             {
                 paramNames[i + 1] = cols[i];
                 paramValues[i + 1] = r[cols[i]].ToString();
-                setClause += ", " + cols[i] + "=?" + cols[i];
+                colList += ", \"" + cols[i] + "\"";
+                valList += ", @" + cols[i];
             }
-            String query = "INSERT INTO " + table + " SET " + setClause;
+            String query = "INSERT INTO " + table + " (" + colList + ") VALUES (" + valList + ")";
             Database.executeCommand(Database.DatabaseName.net7, query, paramNames, paramValues);
         }
     }

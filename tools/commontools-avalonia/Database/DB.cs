@@ -162,6 +162,11 @@ namespace CommonTools.Database
 
                 DateTime start = DateTime.Now;
                 dataAdapter.Fill(dataTable); // 156.245 milliseconds.
+                // An INSERT ... RETURNING runs through here (it yields a row),
+                // so record mutations from the query path too. IsMutating
+                // filters plain SELECTs out, so this is a no-op for reads and
+                // ensures RETURNING-style inserts still land in the changeset.
+                ChangeTracker.Record(query, parameter, value);
                 if (m_showExecutionTime)
                 {
                     TimeSpan timeSpan = DateTime.Now - start;

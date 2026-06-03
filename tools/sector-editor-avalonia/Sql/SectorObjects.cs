@@ -12,7 +12,7 @@ namespace N7.Sql
         public SectorObjects(String sectorName)
         {
             DataTable tmp = Database.executeQuery(Database.DatabaseName.net7,
-                "SELECT sector_id FROM sectors where name=?name",
+                "SELECT sector_id FROM sectors where name=@name",
                 new String[] { "name" },
                 new String[] { sectorName });
 
@@ -22,7 +22,7 @@ namespace N7.Sql
                 String soQuery =
                     "SELECT * FROM sector_objects left join sector_nav_points " +
                     "on sector_objects.sector_object_id = sector_nav_points.sector_object_id " +
-                    "where sector_objects.sector_id=?sid order by sector_objects.type;";
+                    "where sector_objects.sector_id=@sid order by sector_objects.type;";
                 sectorObjects = Database.executeQuery(Database.DatabaseName.net7,
                     soQuery,
                     new String[] { "sid" },
@@ -49,7 +49,7 @@ namespace N7.Sql
                         "SELECT stargate_id,classSpecific,faction_id FROM " +
                         "sector_objects_stargates left join sector_objects on " +
                         "sector_objects.sector_object_id = sector_objects_stargates.stargate_id " +
-                        "where sector_objects.sector_id=?sid;";
+                        "where sector_objects.sector_id=@sid;";
                     specificSecObject = Database.executeQuery(Database.DatabaseName.net7,
                         sosecQuery,
                         new String[] { "sid" },

@@ -43,7 +43,7 @@ namespace EffectEditorAvalonia
         void Reload()
         {
             var dt = DB.Instance.executeQuery(
-                "SELECT EffectID,Description,Tooltip FROM item_effect_base",
+                "SELECT \"EffectID\",\"Description\",\"Tooltip\" FROM item_effect_base",
                 null, null);
             c_Grid.ItemsSource = dt?.DefaultView;
         }
@@ -65,7 +65,7 @@ namespace EffectEditorAvalonia
             if (res != ButtonResult.Yes) return;
 
             DB.Instance.executeCommand(
-                "DELETE FROM item_effect_base WHERE EffectID = ?eid",
+                "DELETE FROM item_effect_base WHERE \"EffectID\" = @eid",
                 new[] { "eid" }, new[] { eid.ToString() });
             Reload();
         }

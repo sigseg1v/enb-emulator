@@ -418,6 +418,15 @@ services:
           echo "schema-init: applying /db/seed_phase_y_prospecting.sql -> net7"
           psql -h postgres -U net7 -d net7 -v ON_ERROR_STOP=1 -f /db/seed_phase_y_prospecting.sql
         fi
+        # Sequence sync (ALWAYS, idempotent). schema.sql and the Phase Y
+        # seeds bulk-load identity columns with explicit ids without
+        # advancing their backing sequences, so every IDENTITY sequence is
+        # left at 1 while data occupies ids up to ~200528. Until this runs,
+        # any INSERT ... RETURNING that lets the identity allocate (the
+        # editor "new row" path) collides with existing rows. See
+        # db/postgres/sync_sequences.sql.
+        echo "schema-init: syncing identity sequences -> net7"
+        psql -h postgres -U net7 -d net7 -v ON_ERROR_STOP=1 -f /db/sync_sequences.sql
         echo "schema-init: done"
     restart: "no"
 

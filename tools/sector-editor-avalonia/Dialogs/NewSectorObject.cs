@@ -334,12 +334,10 @@ namespace SectorEditorAvalonia.Dialogs
             _lastInsertId = id;
             if (_lastInsertId == 0)
             {
-                DataTable tmp = Database.executeQuery(Database.DatabaseName.net7, "SELECT LAST_INSERT_ID()");
-                foreach (DataRow z in tmp.Rows)
-                {
-                    _lastInsertId = int.Parse(z["LAST_INSERT_ID()"].ToString());
-                    EditorGlobals.SelectedObjectId = _lastInsertId;
-                }
+                // newRow() wrote the freshly-minted parent id (from the
+                // sector_objects RETURNING insert) onto the row; use it.
+                _lastInsertId = Convert.ToInt32(_newRow["sector_object_id"]);
+                EditorGlobals.SelectedObjectId = _lastInsertId;
             }
 
             string query = "SELECT * FROM mob_spawn_group where spawn_group_id='" + _lastInsertId + "';";
@@ -363,12 +361,10 @@ namespace SectorEditorAvalonia.Dialogs
             _lastInsertId = id;
             if (_lastInsertId == 0)
             {
-                DataTable tmp = Database.executeQuery(Database.DatabaseName.net7, "SELECT LAST_INSERT_ID()");
-                foreach (DataRow z in tmp.Rows)
-                {
-                    _lastInsertId = int.Parse(z["LAST_INSERT_ID()"].ToString());
-                    EditorGlobals.SelectedObjectId = _lastInsertId;
-                }
+                // newRow() wrote the freshly-minted parent id (from the
+                // sector_objects RETURNING insert) onto the row; use it.
+                _lastInsertId = Convert.ToInt32(_newRow["sector_object_id"]);
+                EditorGlobals.SelectedObjectId = _lastInsertId;
             }
 
             string q2 = "SELECT * FROM sector_objects_harvestable_restypes where group_id='" + _lastInsertId + "';";

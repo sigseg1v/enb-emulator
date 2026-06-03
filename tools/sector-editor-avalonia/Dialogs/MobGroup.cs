@@ -88,10 +88,13 @@ namespace SectorEditorAvalonia.Dialogs
 
         private static int ResolveGroupId()
         {
+            // Postgres has no information_schema.tables.Auto_increment; the next
+            // sector_objects id to be assigned is MAX(sector_object_id)+1, the
+            // same next-id convention used across the editor DAOs.
             DataTable tmp = Database.executeQuery(Database.DatabaseName.net7,
-                "SELECT Auto_increment FROM information_schema.tables WHERE table_name='sector_objects' and table_schema='net7';");
+                "SELECT COALESCE(MAX(\"sector_object_id\"), 0) + 1 AS \"next\" FROM sector_objects;");
             int autoID = 0;
-            foreach (DataRow z in tmp.Rows) autoID = int.Parse(z["Auto_increment"].ToString());
+            foreach (DataRow z in tmp.Rows) autoID = int.Parse(z["next"].ToString());
 
             DataTable tmp2 = Database.executeQuery(Database.DatabaseName.net7,
                 "SELECT sector_object_id FROM sector_objects where sector_object_id='" + EditorGlobals.SelectedObjectId + "';");
@@ -135,8 +138,8 @@ namespace SectorEditorAvalonia.Dialogs
             string name = leftRow.Row["name"].ToString();
             int groupIndex = CountInRight(mobId);
 
-            string insert = "INSERT INTO mob_spawn_group SET spawn_group_id='" + _id +
-                            "', mob_id='" + mobId + "', group_index='" + groupIndex + "';";
+            string insert = "INSERT INTO mob_spawn_group (spawn_group_id, mob_id, group_index) VALUES ('" + _id +
+                            "', '" + mobId + "', '" + groupIndex + "');";
             Database.executeQuery(Database.DatabaseName.net7, insert);
 
             var nr = _rightTable.NewRow();

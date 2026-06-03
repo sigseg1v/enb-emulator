@@ -17,7 +17,7 @@ namespace EffectEditorAvalonia
     //  - SELECT/UPDATE/INSERT against the same item_effect_base columns
     //  - Flag1 bit-packing (TFriend<<4, TEnemy<<5, TGroupM<<6) and
     //    Flag2 RequireT pair (bit0 set + bit1 cleared when checked,
-    //    inverse when unchecked — matches Form1.Save_Click verbatim).
+    //    inverse when unchecked -- matches Form1.Save_Click verbatim).
     //  - INSERT NEW row uses the exact column list + defaults the
     //    original used (NO_STAT/BUFF_NONE/zeros), then LoadEffect on
     //    LAST_INSERT_ID().
@@ -28,7 +28,7 @@ namespace EffectEditorAvalonia
     // Mechanical changes:
     //  - All SQL routed through commontools-avalonia's parameterised
     //    DB.Instance.executeQuery / executeCommand. The original built
-    //    SQL by string-concat (textbook injection) — those exact strings
+    //    SQL by string-concat (textbook injection) -- those exact strings
     //    are now parameter placeholders. Same wire semantics, no
     //    injection surface.
     //  - WinForms TFriend.Checked etc. → CheckBox.IsChecked == true
@@ -45,7 +45,13 @@ namespace EffectEditorAvalonia
         {
             InitializeComponent();
 
-            // Effect type — preserved verbatim from Form1.Designer.cs.
+            // Record the session's DB edits so they can be exported as a
+            // re-appliable .sql changeset. The capture lives in the shared
+            // DB layer; we just switch it on for this session.
+            DB.Instance.ChangeTracker.Enabled = true;
+            c_ExportChanges.Click += async (_, _) => await ExportChangesToSql();
+
+            // Effect type -- preserved verbatim from Form1.Designer.cs.
             c_EffectTypeCbo.Items.Add("Equipable (0)");
             c_EffectTypeCbo.Items.Add("Activatable (1)");
             c_EffectTypeCbo.SelectedIndex = 0;
@@ -77,7 +83,7 @@ namespace EffectEditorAvalonia
             }
             catch (Exception ex)
             {
-                // Headless smoke ctor — no DB available. Don't crash.
+                // Headless smoke ctor -- no DB available. Don't crash.
                 c_Status.Text = "Init: " + ex.Message;
             }
         }
@@ -121,12 +127,12 @@ namespace EffectEditorAvalonia
         {
             _effectId = id;
             var dt = DB.Instance.executeQuery(
-                "SELECT EffectType,Name,Description,Tooltip,flag1,flag2," +
-                "Constant1Value,Constant1Stat,Constant1Type," +
-                "Constant2Value,Constant2Stat,Constant2Type," +
-                "Var1Stat,Var1Type,Var2Stat,Var2Type,Var3Stat,Var3Type," +
-                "VisualEffect,Buff_Name " +
-                "FROM item_effect_base WHERE EffectID = ?eid",
+                "SELECT \"EffectType\",\"Name\",\"Description\",\"Tooltip\",flag1,flag2," +
+                "\"Constant1Value\",\"Constant1Stat\",\"Constant1Type\"," +
+                "\"Constant2Value\",\"Constant2Stat\",\"Constant2Type\"," +
+                "\"Var1Stat\",\"Var1Type\",\"Var2Stat\",\"Var2Type\",\"Var3Stat\",\"Var3Type\"," +
+                "\"VisualEffect\",\"Buff_Name\" " +
+                "FROM item_effect_base WHERE \"EffectID\" = @eid",
                 new[] { "eid" }, new[] { id.ToString() });
             if (dt == null || dt.Rows.Count == 0) return;
             DataRow r = dt.Rows[0];
@@ -191,7 +197,7 @@ namespace EffectEditorAvalonia
             if (c_TEnemy.IsChecked  == true) flag1 |= 1 << 5;
             if (c_TGroupM.IsChecked == true) flag1 |= 1 << 6;
 
-            // Verbatim from Form1.Save_Click — same surprising "both bits"
+            // Verbatim from Form1.Save_Click -- same surprising "both bits"
             // encoding when checked vs. unchecked.
             if (c_RequireT.IsChecked == true) flag2 |= 1;
             else                              flag2 |= 1 << 1;
@@ -200,14 +206,14 @@ namespace EffectEditorAvalonia
 
             string sql =
                 "UPDATE item_effect_base SET " +
-                "EffectType=?et,Name=?nm,Tooltip=?tt,Description=?ds," +
-                "Flag1=?f1,Flag2=?f2,Buff_Name=?bn,VisualEffect=?ve," +
-                "Var1Stat=?vs1,Var2Stat=?vs2,Var3Stat=?vs3," +
-                "Constant1Stat=?cs1,Constant2Stat=?cs2," +
-                "Var1Type=?vt1,Var2Type=?vt2,Var3Type=?vt3," +
-                "Constant1Type=?ct1,Constant2Type=?ct2," +
-                "Constant1Value=?cv1,Constant2Value=?cv2 " +
-                "WHERE EffectID=?eid";
+                "\"EffectType\"=@et,\"Name\"=@nm,\"Tooltip\"=@tt,\"Description\"=@ds," +
+                "flag1=@f1,flag2=@f2,\"Buff_Name\"=@bn,\"VisualEffect\"=@ve," +
+                "\"Var1Stat\"=@vs1,\"Var2Stat\"=@vs2,\"Var3Stat\"=@vs3," +
+                "\"Constant1Stat\"=@cs1,\"Constant2Stat\"=@cs2," +
+                "\"Var1Type\"=@vt1,\"Var2Type\"=@vt2,\"Var3Type\"=@vt3," +
+                "\"Constant1Type\"=@ct1,\"Constant2Type\"=@ct2," +
+                "\"Constant1Value\"=@cv1,\"Constant2Value\"=@cv2 " +
+                "WHERE \"EffectID\"=@eid";
 
             string[] keys = {
                 "et","nm","tt","ds","f1","f2","bn","ve",
@@ -242,19 +248,21 @@ namespace EffectEditorAvalonia
         async void OnNew(object sender, RoutedEventArgs e)
         {
             // Column list + defaults verbatim from Form1.NewEffect_Click.
+            // EffectID is GENERATED BY DEFAULT AS IDENTITY -- omit it and use
+            // INSERT ... RETURNING (executeQuery) to read back the new id.
             const string insert =
                 "INSERT INTO item_effect_base (" +
-                "EffectType,Name,Description,Tooltip,flag1,flag2," +
-                "Constant1Value,Constant1Stat,Constant1Type," +
-                "Constant2Value,Constant2Stat,Constant2Type," +
-                "Var1Stat,Var1Type,Var2Stat,Var2Type,Var3Stat,Var3Type,Buff_Name) " +
+                "\"EffectType\",\"Name\",\"Description\",\"Tooltip\",flag1,flag2," +
+                "\"Constant1Value\",\"Constant1Stat\",\"Constant1Type\"," +
+                "\"Constant2Value\",\"Constant2Stat\",\"Constant2Type\"," +
+                "\"Var1Stat\",\"Var1Type\",\"Var2Stat\",\"Var2Type\",\"Var3Stat\",\"Var3Type\",\"Buff_Name\") " +
                 "VALUES (0,'none','none','none',0,0," +
-                "0,'NO_STAT',0,0,'NO_STAT',0,'NO_STAT',0,'NO_STAT',0,'NO_STAT',0,'BUFF_NONE')";
-            DB.Instance.executeCommand(insert, null, null);
+                "0,'NO_STAT',0,0,'NO_STAT',0,'NO_STAT',0,'NO_STAT',0,'NO_STAT',0,'BUFF_NONE') " +
+                "RETURNING \"EffectID\" AS id";
 
-            var dt = DB.Instance.executeQuery("SELECT LAST_INSERT_ID()", null, null);
+            var dt = DB.Instance.executeQuery(insert, null, null);
             if (dt != null && dt.Rows.Count > 0)
-                LoadEffect(Convert.ToInt32(dt.Rows[0][0]));
+                LoadEffect(Convert.ToInt32(dt.Rows[0]["id"]));
             else
                 await Show("Insert failed", "Could not retrieve new EffectID.", MsBoxIcon.Error);
         }
@@ -263,6 +271,45 @@ namespace EffectEditorAvalonia
         {
             _itemEditor ??= new EditItemWindow();
             await _itemEditor.ShowDialog(this);
+        }
+
+        // Write the recorded mutating SQL to a user-chosen .sql file. The
+        // changeset is standalone, re-appliable Postgres (params inlined).
+        async System.Threading.Tasks.Task ExportChangesToSql()
+        {
+            var tracker = DB.Instance.ChangeTracker;
+            if (tracker.Count == 0)
+            {
+                c_Status.Text = "No DB changes recorded this session.";
+                return;
+            }
+
+            var picker = await StorageProvider.SaveFilePickerAsync(
+                new Avalonia.Platform.Storage.FilePickerSaveOptions
+                {
+                    Title = "Export changes to SQL",
+                    SuggestedFileName = "effect-editor-changeset.sql",
+                    DefaultExtension = "sql",
+                    FileTypeChoices = new[]
+                    {
+                        new Avalonia.Platform.Storage.FilePickerFileType("SQL script")
+                        {
+                            Patterns = new[] { "*.sql" }
+                        }
+                    }
+                });
+
+            if (picker == null) return; // user cancelled
+
+            try
+            {
+                tracker.WriteSqlFile(picker.Path.LocalPath, "Effect Editor (Avalonia)");
+                c_Status.Text = "Wrote " + tracker.Count + " statement(s) to " + picker.Path.LocalPath;
+            }
+            catch (Exception ex)
+            {
+                c_Status.Text = "Export failed: " + ex.Message;
+            }
         }
 
         async System.Threading.Tasks.Task Show(string title, string body, MsBoxIcon icon)

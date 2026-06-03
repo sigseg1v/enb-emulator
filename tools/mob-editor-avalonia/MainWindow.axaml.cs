@@ -57,6 +57,12 @@ namespace MobEditorAvalonia
         {
             InitializeComponent();
             c_MobGrid.ItemsSource = _gridRows;
+
+            // Record the session's DB edits so they can be exported as a
+            // re-appliable .sql changeset. The capture lives in the shared
+            // DB layer; we just switch it on for this session.
+            CommonTools.Database.DB.Instance.ChangeTracker.Enabled = true;
+
             Opened += async (_, _) => await OnLoadAsync();
         }
 
@@ -562,6 +568,45 @@ namespace MobEditorAvalonia
         }
 
         void OnExitClick(object sender, RoutedEventArgs e) => Close();
+
+        // Write the recorded mutating SQL to a user-chosen .sql file. The
+        // changeset is standalone, re-appliable Postgres (params inlined).
+        async void OnExportChangesClick(object sender, RoutedEventArgs e)
+        {
+            var tracker = CommonTools.Database.DB.Instance.ChangeTracker;
+            if (tracker.Count == 0)
+            {
+                c_Status.Text = "No DB changes recorded this session.";
+                return;
+            }
+
+            var picker = await StorageProvider.SaveFilePickerAsync(
+                new Avalonia.Platform.Storage.FilePickerSaveOptions
+                {
+                    Title = "Export changes to SQL",
+                    SuggestedFileName = "mob-editor-changeset.sql",
+                    DefaultExtension = "sql",
+                    FileTypeChoices = new[]
+                    {
+                        new Avalonia.Platform.Storage.FilePickerFileType("SQL script")
+                        {
+                            Patterns = new[] { "*.sql" }
+                        }
+                    }
+                });
+
+            if (picker == null) return; // user cancelled
+
+            try
+            {
+                tracker.WriteSqlFile(picker.Path.LocalPath, "Mob Editor (Avalonia)");
+                c_Status.Text = "Wrote " + tracker.Count + " statement(s) to " + picker.Path.LocalPath;
+            }
+            catch (Exception ex)
+            {
+                c_Status.Text = "Export failed: " + ex.Message;
+            }
+        }
 
         async void OnAboutClick(object sender, RoutedEventArgs e)
         {

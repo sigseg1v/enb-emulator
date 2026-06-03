@@ -22,8 +22,8 @@ namespace EffectEditorAvalonia
     //  - SelectedItemBaseId publicly read by EditItemWindow's Browse flow.
     //
     // Mechanical changes:
-    //  - LIKE pattern bound through parameter (was concatenated). MySQL
-    //    Connector treats placeholders inside LIKE arguments correctly.
+    //  - LIKE pattern bound through parameter (was concatenated). Npgsql
+    //    treats @placeholders inside LIKE arguments correctly.
     //  - DataGridView → Avalonia DataGrid AutoGenerateColumns from the
     //    DataTable returned by executeQuery.
     public partial class ItemBrowseWindow : Window
@@ -59,21 +59,21 @@ namespace EffectEditorAvalonia
 
             if (!string.IsNullOrEmpty(c_ItemName.Text))
             {
-                sql += "name LIKE ?nm";
+                sql += "name LIKE @nm";
                 keys.Add("nm"); vals.Add("%" + c_ItemName.Text + "%");
                 any = true;
             }
             if (c_ItemLevel.SelectedIndex > 0)
             {
                 if (any) sql += " AND ";
-                sql += "level = ?lvl";
+                sql += "level = @lvl";
                 keys.Add("lvl"); vals.Add(c_ItemLevel.SelectedIndex.ToString());
                 any = true;
             }
             if (c_ItemType.SelectedIndex > 0)
             {
                 if (any) sql += " AND ";
-                sql += "type = ?ty";
+                sql += "type = @ty";
                 keys.Add("ty"); vals.Add((c_ItemType.SelectedIndex - 1).ToString());
                 any = true;
             }

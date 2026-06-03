@@ -16,7 +16,7 @@ namespace MobEditorAvalonia.SQL
         public MobsSQL()
         {
             _mobs = DB.Instance.executeQuery(
-                "SELECT * FROM mob_base ORDER BY name, level;", null, null);
+                "SELECT * FROM \"mob_base\" ORDER BY \"name\", \"level\";", null, null);
         }
 
         public DataTable getMobTable() => _mobs;
@@ -35,15 +35,17 @@ namespace MobEditorAvalonia.SQL
 
         public int newRecord()
         {
-            DB.Instance.executeCommand(
-                "INSERT INTO mob_base SET name=?n, level=1, type=0, " +
-                "altruism=0, aggressiveness=0, bravery=0, intelligence=0, " +
-                "faction_id=0, base_asset_id=-1, h=0, s=0, v=0, scale=1, ai='';",
-                new[] { "n" }, new[] { "<New Mob>" });
+            // mob_base.mob_id has NO identity/sequence; allocate it ourselves
+            // and INSERT with an explicit mob_id (mirrors ItemsSQL).
+            int lastID = NextId();
 
-            var li = DB.Instance.executeQuery(
-                "SELECT LAST_INSERT_ID() AS id;", null, null);
-            int lastID = Convert.ToInt32(li.Rows[0]["id"]);
+            DB.Instance.executeCommand(
+                "INSERT INTO \"mob_base\" (\"mob_id\", \"name\", \"level\", \"type\", " +
+                "\"altruism\", \"aggressiveness\", \"bravery\", \"intelligence\", " +
+                "\"faction_id\", \"base_asset_id\", \"h\", \"s\", \"v\", \"scale\", \"ai\") " +
+                "VALUES (@id, @n, 1, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 1, '');",
+                new[] { "id", "n" },
+                new[] { lastID.ToString(), "<New Mob>" });
 
             var row = _mobs.NewRow();
             row["mob_id"]        = lastID;
@@ -70,7 +72,7 @@ namespace MobEditorAvalonia.SQL
         public void deleteRecord(int id, DataRow dr)
         {
             DB.Instance.executeCommand(
-                "DELETE FROM mob_base WHERE mob_id=?id;",
+                "DELETE FROM \"mob_base\" WHERE \"mob_id\"=@id;",
                 new[] { "id" }, new[] { id.ToString() });
             _mobs.Rows.Remove(dr);
         }
@@ -78,10 +80,10 @@ namespace MobEditorAvalonia.SQL
         public void updateRecord(DataRow dr)
         {
             DB.Instance.executeCommand(
-                "UPDATE mob_base SET name=?n, level=?lvl, type=?t, " +
-                "altruism=?al, aggressiveness=?ag, bravery=?br, intelligence=?intel, " +
-                "faction_id=?fid, base_asset_id=?baid, h=?h, s=?s, v=?v, scale=?sc, ai=?ai " +
-                "WHERE mob_id=?id;",
+                "UPDATE \"mob_base\" SET \"name\"=@n, \"level\"=@lvl, \"type\"=@t, " +
+                "\"altruism\"=@al, \"aggressiveness\"=@ag, \"bravery\"=@br, \"intelligence\"=@intel, " +
+                "\"faction_id\"=@fid, \"base_asset_id\"=@baid, \"h\"=@h, \"s\"=@s, \"v\"=@v, \"scale\"=@sc, \"ai\"=@ai " +
+                "WHERE \"mob_id\"=@id;",
                 new[] { "n", "lvl", "t", "al", "ag", "br", "intel",
                         "fid", "baid", "h", "s", "v", "sc", "ai", "id" },
                 new[] {
@@ -105,13 +107,19 @@ namespace MobEditorAvalonia.SQL
 
         public int newFromRecord(DataRow src)
         {
+            // mob_base.mob_id has NO identity/sequence; allocate explicitly.
+            int lastID = NextId();
+
             DB.Instance.executeCommand(
-                "INSERT INTO mob_base SET name=?n, level=?lvl, type=?t, " +
-                "altruism=?al, aggressiveness=?ag, bravery=?br, intelligence=?intel, " +
-                "faction_id=?fid, base_asset_id=?baid, h=?h, s=?s, v=?v, scale=?sc, ai=?ai;",
-                new[] { "n", "lvl", "t", "al", "ag", "br", "intel",
+                "INSERT INTO \"mob_base\" (\"mob_id\", \"name\", \"level\", \"type\", " +
+                "\"altruism\", \"aggressiveness\", \"bravery\", \"intelligence\", " +
+                "\"faction_id\", \"base_asset_id\", \"h\", \"s\", \"v\", \"scale\", \"ai\") " +
+                "VALUES (@id, @n, @lvl, @t, @al, @ag, @br, @intel, " +
+                "@fid, @baid, @h, @s, @v, @sc, @ai);",
+                new[] { "id", "n", "lvl", "t", "al", "ag", "br", "intel",
                         "fid", "baid", "h", "s", "v", "sc", "ai" },
                 new[] {
+                    lastID.ToString(),
                     src["name"].ToString(),
                     src["level"].ToString(),
                     src["type"].ToString(),
@@ -128,10 +136,6 @@ namespace MobEditorAvalonia.SQL
                     src["ai"].ToString(),
                 });
 
-            var li = DB.Instance.executeQuery(
-                "SELECT LAST_INSERT_ID() AS id;", null, null);
-            int lastID = Convert.ToInt32(li.Rows[0]["id"]);
-
             var row = _mobs.NewRow();
             foreach (DataColumn col in _mobs.Columns)
                 row[col.ColumnName] = src[col.ColumnName];
@@ -140,6 +144,16 @@ namespace MobEditorAvalonia.SQL
             row.AcceptChanges();
             _mobs.AcceptChanges();
             return lastID;
+        }
+
+        // mob_base.mob_id has no identity column, so allocate the next id as
+        // MAX(mob_id)+1 (mirrors ItemsSQL.NextId for item_base."id").
+        int NextId()
+        {
+            var dt = DB.Instance.executeQuery(
+                "SELECT COALESCE(MAX(\"mob_id\"), 0) + 1 AS \"next\" FROM \"mob_base\";",
+                null, null);
+            return Convert.ToInt32(dt.Rows[0]["next"]);
         }
     }
 }
