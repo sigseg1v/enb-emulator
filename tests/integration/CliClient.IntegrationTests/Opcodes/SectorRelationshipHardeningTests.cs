@@ -62,11 +62,17 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// dispatches the per-ship fanout chain, and after the Decal and
 /// NameDecal emits, calls
 /// <c>SendRelationship(GameID(), RELATIONSHIP_FRIENDLY, false)</c> at
-/// <c>PlayerClass.cpp:893</c>. The station handshake into Luna Station
-/// (10151) is the same 1-stage path Wave 51 exercises; Wave 79 reuses
-/// it without modification — same account pool, same firstName /
-/// shipName payload, same drain loop — and just adds the byte-exact
-/// length assertion on the captured 0x0089 frames.
+/// <c>PlayerClass.cpp:893</c>. <c>SendLoginShipData</c> runs in BOTH
+/// the space and the station login paths, so this self-relationship
+/// emit is present regardless of which sector the handshake lands in.
+/// Wave 79 therefore stays on the cheap single-stage login (a fresh
+/// char is forced to its home SPACE StartSector at 1015, where the
+/// self-relationship still fires) and just adds the byte-exact length
+/// assertion on the captured 0x0089 frames. The companion Wave 92
+/// count test needs the SECOND, station-only manu-lab relationship
+/// (SectorManager.cpp:479), so it uses the two-stage
+/// <c>SectorHandshake.EstablishAtStationAsync</c> helper to reach
+/// StationLogin.
 /// </para>
 ///
 /// <para>
@@ -150,9 +156,11 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 ///
 /// <para>
-/// Budget: 60s. Single-stage station handshake into Luna Station
-/// (10151) ~2s; assertions run synchronously against already-captured
-/// state. No additional client stimulus.
+/// Budget: Wave 79 single-stage home-space login ~2s (60s cap); Wave
+/// 92 two-stage station login (home-space login + clean logoff/relogin
+/// to the station) a few seconds (120s cap). Assertions run
+/// synchronously against already-captured state. No additional client
+/// stimulus.
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
@@ -284,17 +292,25 @@ public sealed class SectorRelationshipHardeningTests
     {
         var account = TestAccounts.New(_server);
         const int slot = 0;
-        const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
+        const int stationSectorId = 10151;   // Luna Station (station; sector_id > 9999)
+        const int homeSpaceSectorId = 1015;  // Terran Warrior home StartSector (space)
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         var login = await _client.AuthLogin.LoginAsync(
             new AuthLoginRequest(account.Username, account.Password), cts.Token);
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
-            _server, login.Ticket!, account.Username, slot, stationSectorId,
+        // Two-stage: a fresh char is forced to its home SPACE sector on the
+        // first login (StaticData.h StartSector[]). In space only the
+        // SendLoginShipData self-relationship fires (1 frame); the second,
+        // manu-lab relationship (SectorManager.cpp:479) is emitted only by
+        // StationLogin, reachable via a second login to the station id. See
+        // SectorHandshake.EstablishAtStationAsync.
+        await using var session = await SectorHandshake.EstablishAtStationAsync(
+            _server, login.Ticket!, account.Username, slot,
+            stationSectorId, homeSpaceSectorId,
             firstName: "Rel92", shipName: "Rel92Ship", cts.Token);
 
         var relationshipFrames = session.HandshakeFrames

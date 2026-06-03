@@ -125,6 +125,50 @@ public static class SectorHandshake
             // recycle then dropped) so the redo's create does not collide.
             clearSlot: c => TryDeleteCharacterAsync(server, authTicket, slot, c));
 
+    /// <summary>
+    /// Two-stage STATION login. Fresh characters are forced to their home
+    /// SPACE StartSector on first login by
+    /// <c>Player::ReInitializeSavedData</c> (the <c>StartSector[]</c> table
+    /// in <c>server/src/StaticData.h</c> is all space sector ids &lt; 10000,
+    /// a deliberate fidelity decision -- fresh chars spawn in space with the
+    /// home station visible nearby, not docked). A station handshake --
+    /// <c>SectorManager::StationLogin2</c> and the furniture opcodes it fans
+    /// out (StarbaseSet, NameDecal, Decal, ClientAvatar/ClientShip,
+    /// ConstantPositionalUpdate, Create, ManufactureSet) -- is therefore only
+    /// reachable on a SECOND login. This helper runs stage 1 (create avatar +
+    /// complete the forced home-space login via <see cref="EstablishAsync"/>),
+    /// cleanly logs off with an explicit 0x00B9 LOGOFF_REQUEST so the server
+    /// runs DropPlayerFromGalaxy synchronously (avoids G_ERROR_ACCOUNT_IN_USE
+    /// on stage 2), then runs stage 2 (<see cref="ReestablishAsync"/> to
+    /// <paramref name="stationSectorId"/>, whose ToSectorID the second login
+    /// preserves -- see <see cref="ReestablishAsync"/>). Returns the station
+    /// Session; the caller asserts on its <see cref="Session.HandshakeFrames"/>.
+    /// </summary>
+    public static async Task<Session> EstablishAtStationAsync(
+        ServerFixture server,
+        string authTicket,
+        string accountUsername,
+        int slot,
+        int stationSectorId,
+        int homeSpaceSectorId,
+        string firstName,
+        string shipName,
+        CancellationToken ct)
+    {
+        var homeSession = await EstablishAsync(
+            server, authTicket, accountUsername, slot, homeSpaceSectorId,
+            firstName, shipName, ct);
+
+        byte[] logoffPayload = new byte[8];
+        await homeSession.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload), ct);
+        await DrainUntilOpcode(
+            homeSession.Sector, OpcodeId.Known.LogoffConfirmation.Value, ct);
+        await homeSession.DisposeAsync();
+
+        return await ReestablishAsync(server, authTicket, slot, stationSectorId, ct);
+    }
+
     // One establish attempt: open a fresh global conn, create the avatar,
     // master-join, and drive the sector handshake to 0x0005 START. Throws
     // ProxyWedgeException (via MasterJoinThenSectorLoginAsync) when the proxy

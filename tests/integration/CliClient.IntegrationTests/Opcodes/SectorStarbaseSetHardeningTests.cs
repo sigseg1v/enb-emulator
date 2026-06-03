@@ -63,10 +63,12 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// the call at <c>SectorManager.cpp:514</c> emits the entering-starbase
 /// 0x004F frame (action=0, exit_mode=0); the StarbaseID is the calling
 /// player's sector number (10151 for Luna Station in this test). The
-/// station handshake into Luna Station (10151) is the same 1-stage
-/// path Wave 51 / Wave 73 exercise; Wave 80 reuses it without
-/// modification — same account pool, same firstName / shipName
-/// payload, same drain loop — and just adds the byte-exact length
+/// station handshake into Luna Station (10151) is driven by the
+/// two-stage <c>SectorHandshake.EstablishAtStationAsync</c> helper: a
+/// fresh character is forced to its home SPACE StartSector (1015) on
+/// the first login by <c>Player::ReInitializeSavedData</c>, so the
+/// StationLogin2 path that emits 0x004F is only reachable on a second
+/// login to the station id. Wave 80 adds the byte-exact length
 /// assertion on the captured 0x004F frames.
 /// </para>
 ///
@@ -145,9 +147,10 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 ///
 /// <para>
-/// Budget: 60s. Single-stage station handshake into Luna Station
-/// (10151) ~2s; assertions run synchronously against already-captured
-/// state. No additional client stimulus.
+/// Budget: 120s. Two-stage station handshake into Luna Station
+/// (10151) -- a home-space login plus a clean logoff/relogin to the
+/// station -- runs in a few seconds; assertions run synchronously
+/// against already-captured state. No additional client stimulus.
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
@@ -175,17 +178,23 @@ public sealed class SectorStarbaseSetHardeningTests
     {
         var account = TestAccounts.New(_server);
         const int slot = 0;
-        const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
+        const int stationSectorId = 10151;   // Luna Station (station; sector_id > 9999)
+        const int homeSpaceSectorId = 1015;  // Terran Warrior home StartSector (space)
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         var login = await _client.AuthLogin.LoginAsync(
             new AuthLoginRequest(account.Username, account.Password), cts.Token);
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
-            _server, login.Ticket!, account.Username, slot, stationSectorId,
+        // Two-stage: a fresh char is forced to its home SPACE sector on the
+        // first login (StaticData.h StartSector[]), so StationLogin2 -- which
+        // emits StarbaseSet -- is only reachable via a second login to the
+        // station id. See SectorHandshake.EstablishAtStationAsync.
+        await using var session = await SectorHandshake.EstablishAtStationAsync(
+            _server, login.Ticket!, account.Username, slot,
+            stationSectorId, homeSpaceSectorId,
             firstName: "SbSet80", shipName: "SbSet80Ship", cts.Token);
 
         var starbaseSetFrames = session.HandshakeFrames
@@ -267,17 +276,23 @@ public sealed class SectorStarbaseSetHardeningTests
     {
         var account = TestAccounts.New(_server);
         const int slot = 0;
-        const int stationSectorId = 10151;  // Terran Warrior start: Luna Station
+        const int stationSectorId = 10151;   // Luna Station (station; sector_id > 9999)
+        const int homeSpaceSectorId = 1015;  // Terran Warrior home StartSector (space)
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         var login = await _client.AuthLogin.LoginAsync(
             new AuthLoginRequest(account.Username, account.Password), cts.Token);
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
-            _server, login.Ticket!, account.Username, slot, stationSectorId,
+        // Two-stage: a fresh char is forced to its home SPACE sector on the
+        // first login (StaticData.h StartSector[]), so StationLogin2 -- which
+        // emits StarbaseSet -- is only reachable via a second login to the
+        // station id. See SectorHandshake.EstablishAtStationAsync.
+        await using var session = await SectorHandshake.EstablishAtStationAsync(
+            _server, login.Ticket!, account.Username, slot,
+            stationSectorId, homeSpaceSectorId,
             firstName: "SbSet97", shipName: "SbSet97Ship", cts.Token);
 
         var starbaseSetFrames = session.HandshakeFrames

@@ -221,16 +221,24 @@ public sealed class SectorHandshakeFanoutTests
     {
         var account = TestAccounts.New(_server);
         const int slot = 0;
-        const int sectorId = 10151;
+        const int stationSectorId = 10151;   // Luna Station (station; sector_id > 9999)
+        const int homeSpaceSectorId = 1015;  // Terran Warrior home StartSector (space)
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
 
         var login = await _client.AuthLogin.LoginAsync(
             new AuthLoginRequest(account.Username, account.Password), cts.Token);
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
 
-        await using var session = await SectorHandshake.EstablishAsync(
-            _server, login.Ticket!, account.Username, slot, sectorId,
+        // Two-stage: a fresh char is forced to its home SPACE sector on the
+        // first login (StaticData.h StartSector[]). The full station fanout
+        // below includes station-only emits (0x004F StarbaseSet, the manu-lab
+        // 0x0040/0x0089 emits) produced by StationLogin/StationLogin2, only
+        // reachable via a second login to the station id. See
+        // SectorHandshake.EstablishAtStationAsync.
+        await using var session = await SectorHandshake.EstablishAtStationAsync(
+            _server, login.Ticket!, account.Username, slot,
+            stationSectorId, homeSpaceSectorId,
             firstName: "Fanout", shipName: "FanoutShip2", cts.Token);
 
         try
