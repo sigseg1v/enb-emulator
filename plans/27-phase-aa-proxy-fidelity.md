@@ -354,6 +354,36 @@ every other client's view -- the "my ship disappeared after sitting idle" bug.
 - [ ] CV-04 -- real-client (play-local) confirmation: undock, idle 3+ min, ship
       must not vanish.
 
+## 3c. CLI full-parse opcode coverage (ongoing -- this session)
+
+Closing gaps where a server-emitted opcode fell through to `GenericRecord`
+(hex dump only, no field decode). Each new record is byte-pinned against the
+EXACT bytes the server emitter writes, asserting zero `???` gaps (every byte
+decoded). This is the "understand before change" half of the three-places
+rule -- CLI parse landing first.
+
+- [x] **`0x0041` FORMATION_POSITIONAL_UPDATE** (`FormationPositionalUpdateRecord`,
+      20B: TargetID@0, LeaderID@4, Pos[3]@8, all LE). Emitter
+      PlayerConnection.cpp:1222; struct PacketStructures.h:521 (fields emit in
+      declaration order -- the `this[16]`/`this[12]` comments are stale).
+- [x] **`0x0083` RECUSTOMIZE_AVATAR_START** (`RecustomizeAvatarStartRecord`,
+      60B: costs[14] LE @0..55, PlayerID BE @56). Emitter
+      PlayerConnection.cpp:10033 (`ras.playerid = htonl(...)` -> BE, same
+      convention as RELATIONSHIP ObjectID). struct PacketStructures.h:1097.
+- [x] **`0x0096` JOB_ACCEPT_REPLY** (`JobAcceptReplyRecord`, 4B JobID LE, or
+      empty for the generic-accept branch). Emitter PlayerConnection.cpp:10016
+      / :10027.
+- [x] Byte-pin tests: `SectorMiscRecordTests` (6 facts, all green; suite 634).
+- [ ] **`0x0081` RECUSTOMIZE_SHIP_START** -- deferred: carries a 194-byte
+      embedded `ShipData` struct with no existing CLI decoder. Needs a shared
+      ShipData reader first.
+- [ ] Variable-length build-loop opcodes (`0x0093` JOB_LIST, `0x0094`
+      JOB_DESCRIPTION, `0x0065` UI_TRIGGER) -- higher effort, deferred.
+
+These are pure CLI parser additions for opcodes the server ALREADY emits, so
+no server/proxy change and no `KnownUnimplemented`/`TestedOpcodes` migration
+(that path is only for newly-implemented server handlers).
+
 ## 4. Tier-2 deferred transforms (documented, NOT yet implemented)
 
 These are real reference behaviours we do not yet replicate. In every case
