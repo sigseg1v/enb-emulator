@@ -2960,8 +2960,9 @@ public sealed class RetailRecordDecodeTests
     {
         // The request/response pairing proof: both frames carry the same SourceID at
         // offset 0, and only the little-endian read makes it a sane id. The retail
-        // response's RequestType field (0x0F) is NOT the request's Action (5),
-        // documenting the server emitter divergence with primary-source bytes.
+        // response's RequestType field (0x0F in THIS frame; varies 0x0E/0x0F across
+        // frames -- see Phase Z Z-1) is NOT the request's Action (5), documenting the
+        // server emitter divergence with primary-source bytes.
         var req = Frames["cta_request_groupaction5"];
         var resp = Frames["cta_response_requesttype0f"];
 
@@ -2973,7 +2974,7 @@ public sealed class RetailRecordDecodeTests
         int reqAction = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(req.Payload.AsSpan(8, 4));
         int respField4 = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(resp.Payload.AsSpan(4, 4));
         Assert.Equal(5, reqAction);
-        Assert.Equal(0x0F, respField4);                            // retail constant, != request Action
+        Assert.Equal(0x0F, respField4);                            // retail value in THIS frame (varies 0x0E/0x0F), != request Action
         Assert.NotEqual(reqAction, respField4);
     }
 
