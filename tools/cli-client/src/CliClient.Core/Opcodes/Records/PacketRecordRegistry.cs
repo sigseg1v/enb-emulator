@@ -40,6 +40,7 @@ public static class PacketRecordRegistry
             0x0019 => new SetTargetRecord(payload),
             0x001B => new AuxDataRecord(payload),
             0x001D => new MessageStringRecord(payload),
+            0x001F => new TradeActionRecord(payload),
             0x0020 => new PriorityMessageRecord(payload),
             0x0021 => new PushMessageRecord(payload, 0x0021),
             0x0022 => new PushMessageRecord(payload, 0x0022),

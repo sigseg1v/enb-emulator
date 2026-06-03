@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllEightyEightFrames()
+    public void Fixture_Loads_AllEightyNineFrames()
     {
-        Assert.Equal(88, Frames.Count);
+        Assert.Equal(89, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -2231,5 +2231,24 @@ public sealed class RetailRecordDecodeTests
         Assert.Equal(2, navs);
         Assert.Equal(6 + 4 * navs, f.Payload.Length);            // 14 bytes
         Assert.Equal((ushort)0x9B, PacketRecord.Resolve((ushort)f.Opcode, f.Payload).Opcode);
+    }
+
+    // ── Trade_Action 0x1F ────────────────────────────────────────────────────
+    // 5-byte wire: int32 GameID (LE) + u8 Action. Player::TradeAction writes the
+    // partner GameID as a raw int32 (no htonl) and a single Action byte. The
+    // Action code is annotated from the emitter's call sites (0=open ... 6=cancel).
+
+    [Fact]
+    public void TradeAction_GameIdLittleEndian_ActionLabelled()
+    {
+        string d = Dump("trade_open_window");
+
+        Assert.Contains("[0000] GameID", d);
+        Assert.Contains("0x06ED29A2", d);                 // A2 29 ED 06 LE == 116205986
+        Assert.Contains("(116205986)", d);
+        Assert.Contains("Action            = 0", d);
+        Assert.Contains("(open trade window)", d);
+        Assert.DoesNotContain("???", d);                  // all 5 bytes decoded
+        Assert.DoesNotContain("[!]", d);
     }
 }

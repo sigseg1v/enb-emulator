@@ -1587,6 +1587,17 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       array path is exercised; 1-nav frames also present. Files: Records/WarpRecord.cs
       + 1 registry line. capture3-records.txt 87->88 frames; 2 tests (field decode +
       6+4*Navs length law); full UnitTests suite 568 green. CLI decode-only.
+- [x] TradeAction (batch 12, 2026-06-03): 0x1F TRADE_ACTION (103 frames).
+      5-byte server->client packet: int32 GameID (LE) + u8 Action.
+      Player::TradeAction (PlayerConnection.cpp:3677) writes the partner GameID as
+      a raw int32 (no htonl -> LE) and a single Action byte, then SendOpcode(...,
+      buffer, 5). The Action code is annotated from the emitter's own call sites
+      (0=open window, 1=close, 2=trade complete, 3=you confirmed, 4=money updated,
+      5=partner confirmed, 6=cancel confirmations). Pinned to an open-window frame
+      (capture_3 #14415, GameID 0x06ED29A2, Action 0) -- chosen over the GameID=0
+      confirm/money frames so the fixture exercises both fields. Files:
+      Records/TradeActionRecord.cs + 1 registry line. capture3-records.txt 88->89
+      frames; 1 test; full UnitTests suite 569 green. CLI decode-only.
 - [ ] 0x0B ObjectToObjectEffect -- DEFERRED. Carries a u16 Bitmask + a
       variable-length Message field mid-packet + a conditional tail the server
       author flagged as wrong ("packet struct is wrong... TODO work out correct
@@ -1596,13 +1607,12 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       structure -- validate interactively against the live client instead.
 - [~] Remaining GenericRecord-fallthrough opcodes (driven by a fresh capture_3
       tally, not a guess). Cleared so far: batch-6 0x9E/0x9D/0x5A/0x17/0x2C, batch-7
-      0x12/0x13/0x14, batch-8 0x46, batch-9 0x21/0x22, batch-10 0x27, batch-11 0x9B
-      (0x64/0x6A/0x20/0x66 already had decoders). The "single-digit long tail" note
-      written after batch-9 was WRONG -- a re-tally proved several mid-frequency
-      opcodes still fall through. Accurate undecoded remainder by frame count
-      (capture_3), highest first:
-        - 0x1F Trade_Action          (103)  -- NEXT
-        - 0xA3 ClientChatRequest     (71)
+      0x12/0x13/0x14, batch-8 0x46, batch-9 0x21/0x22, batch-10 0x27, batch-11 0x9B,
+      batch-12 0x1F (0x64/0x6A/0x20/0x66 already had decoders). The "single-digit
+      long tail" note written after batch-9 was WRONG -- a re-tally proved several
+      mid-frequency opcodes still fall through. Accurate undecoded remainder by
+      frame count (capture_3), highest first:
+        - 0xA3 ClientChatRequest     (71)   -- NEXT
         - 0x44 Request_Time          (66)
         - 0x28 InventorySort         (31)   -- struct InvSort, PacketStructures.h:253
         - 0x9F Starbase_Room_Change  (21)

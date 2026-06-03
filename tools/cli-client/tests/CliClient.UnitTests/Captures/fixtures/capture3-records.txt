@@ -957,3 +957,9 @@ provenance: Warp 0x9B (client->server) -- GameID 3589 (0x00000E05), Navs 2, rout
 opcode: 0x9B
 payload-bytes: 14
 hex: 05 0e 00 00 02 00 38 0a 00 00 39 0a 00 00
+
+[trade_open_window]
+provenance: Trade_Action 0x1F (server->client) -- GameID 116205986 (0x06ED29A2), Action 0 (open trade window) (capture_3.rar packet #14415, Server->Client). 5-byte wire: int32 GameID + u8 Action. All LE: Player::TradeAction writes GameID as a raw int32 (no htonl) and a single Action byte, then SendOpcode(..., buffer, 5). Action 0 = open; the GameID is the trade partner's in-sector object id. Picked an open-window frame (non-zero GameID + a meaningful action) over the GameID=0 confirm/money frames so the fixture exercises both fields.
+opcode: 0x1F
+payload-bytes: 5
+hex: a2 29 ed 06 00
