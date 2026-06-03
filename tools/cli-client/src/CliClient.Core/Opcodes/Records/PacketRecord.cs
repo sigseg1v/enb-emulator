@@ -104,11 +104,11 @@ public abstract class PacketRecord : IPacketRecord
     protected void FDec(StringBuilder sb, int off, string name, byte value, string? note = null)
         => F(sb, off, 1, name, value.ToString(System.Globalization.CultureInfo.InvariantCulture), note);
 
-    protected void FFloat(StringBuilder sb, int off, string name, float value)
+    protected void FFloat(StringBuilder sb, int off, string name, float value, string? note = null)
     {
         if (float.IsNaN(value))           Flag(sb, name + " is NaN");
         else if (float.IsInfinity(value)) Flag(sb, name + " is +-Infinity");
-        F(sb, off, 4, name, value.ToString("0.0##", System.Globalization.CultureInfo.InvariantCulture));
+        F(sb, off, 4, name, value.ToString("0.0##", System.Globalization.CultureInfo.InvariantCulture), note);
     }
 
     protected void FStr(StringBuilder sb, int off, int len, string name, string value, bool required = false)

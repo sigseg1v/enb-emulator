@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllEightyFrames()
+    public void Fixture_Loads_AllEightyThreeFrames()
     {
-        Assert.Equal(80, Frames.Count);
+        Assert.Equal(83, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -1993,6 +1993,71 @@ public sealed class RetailRecordDecodeTests
         Assert.Contains("[0018] Room", d);                 // Room appended last, offset 24 (0x18)
         Assert.DoesNotContain("RoomType", d);              // the C2S-only slot must NOT appear
         Assert.DoesNotContain("???", d);                   // all 28 bytes decoded
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    // ── Turn 0x12 / Tilt 0x13 / Move 0x14 ────────────────────────────────────
+    // The steering trio. Turn/Tilt share an 8-byte {int32 GameID; float Intensity}
+    // layout (PacketTurn, raw LE -- no ntohl). Move is a 5-byte {int32 GameID;
+    // byte type}; type == 4 is engine-off/break-formation, else engine-on. All
+    // three carry the SAME player GameID 0x0084E1E9 as the RequestTarget/Action/
+    // VerbRequest frames above -- the cross-packet identity lock extends here too.
+
+    [Fact]
+    public void Turn_DecodesGameIdAndFullLeftIntensity_LittleEndian()
+    {
+        string d = Dump("turn_full_left");
+
+        Assert.Contains("[0000] GameID", d);
+        Assert.Contains("0x0084E1E9", d);            // E9 E1 84 00 LE == 8708585, same player
+        Assert.Contains("[0004] Intensity", d);
+        Assert.Contains("= -1.0", d);                // 00 00 80 BF LE == float -1.0 (full deflection)
+        Assert.Contains("(TURN -- yaw rate)", d);    // 0x12 axis annotation
+        Assert.DoesNotContain("TILT", d);
+        Assert.DoesNotContain("???", d);             // all 8 bytes decoded
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void Tilt_DecodesFullUpIntensity_SameLayoutAsTurn_OpcodeDistinguishesAxis()
+    {
+        string d = Dump("tilt_full_up");
+
+        Assert.Contains("[0000] GameID", d);
+        Assert.Contains("0x0084E1E9", d);            // identical GameID slot to turn_full_left
+        Assert.Contains("[0004] Intensity", d);
+        Assert.Contains("= 1.0", d);                 // 00 00 80 3F LE == +1.0 (only the sign byte differs)
+        Assert.DoesNotContain("= -1.0", d);
+        Assert.Contains("(TILT -- pitch rate)", d);  // 0x13 axis annotation -- NOT the 0x12 "TURN" form
+        Assert.DoesNotContain("TURN", d);
+        Assert.DoesNotContain("???", d);             // all 8 bytes decoded
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void TurnTilt_ByteIdenticalStruct_RoutedByOpcode()
+    {
+        // The 8-byte layout is identical for 0x12 and 0x13; only the opcode the
+        // registry passes the record distinguishes them. Prove the routing is
+        // wired both ways so a copy-paste 0x13 => TurnTiltRecord(payload, 0x0012)
+        // regression is caught even though every field byte matches.
+        var turn = Frames["turn_full_left"];
+        var tilt = Frames["tilt_full_up"];
+        Assert.Equal((ushort)0x12, PacketRecord.Resolve((ushort)turn.Opcode, turn.Payload).Opcode);
+        Assert.Equal((ushort)0x13, PacketRecord.Resolve((ushort)tilt.Opcode, tilt.Payload).Opcode);
+    }
+
+    [Fact]
+    public void Move_DecodesGameIdAndTypeByte_EngineOn()
+    {
+        string d = Dump("move_type0_engine_on");
+
+        Assert.Contains("[0000] GameID", d);
+        Assert.Contains("0x0084E1E9", d);            // same player again; 4-byte int32 GameID
+        Assert.Contains("[0004] Type", d);           // single byte at offset 4
+        Assert.Contains("(engine on)", d);           // type 0 -> engine on (type == 4 would be break-formation)
+        Assert.DoesNotContain("break formation", d);
+        Assert.DoesNotContain("???", d);             // all 5 bytes decoded
         Assert.DoesNotContain("[!]", d);
     }
 }

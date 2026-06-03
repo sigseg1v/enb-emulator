@@ -901,3 +901,21 @@ opcode: 0x9E
 payload-bytes: 28
 hex: 15 47 ec 06 18 5c 69 bc 76 93 f2 c1 99 cf 33 c2
       00 19 47 be 09 00 00 00 01 00 00 00
+
+[turn_full_left]
+provenance: Turn 0x12 (client->server) -- player 0x0084E1E9 yaws at full deflection Intensity -1.0 (capture_3.rar, Packet #5597, Client->Server). GameID + float Intensity both raw LE; Player::HandleTurn reads Turning->Intensity host-order with no ntohl (PacketTurn {int32 GameID; float Intensity}).
+opcode: 0x12
+payload-bytes: 8
+hex: e9 e1 84 00 00 00 80 bf
+
+[tilt_full_up]
+provenance: Tilt 0x13 (client->server) -- same player 0x0084E1E9 pitches at full deflection Intensity +1.0 (capture_3.rar, Packet #5599, Client->Server). Identical 8-byte layout to 0x12 Turn; Player::HandleTilt reads it the same raw-LE way. The sign flip vs turn_full_left (BF -> 3F top byte) is the only payload difference.
+opcode: 0x13
+payload-bytes: 8
+hex: e9 e1 84 00 00 00 80 3f
+
+[move_type0_engine_on]
+provenance: Move 0x14 (client->server) -- same player 0x0084E1E9, Type 0 (engine on) (capture_3.rar, Packet #5557, Client->Server). 5-byte MovePacket {int32 GameID; byte type}, LE; Player::HandleMove branches Movement->type == 4 (engine off / break formation) vs else (engine on).
+opcode: 0x14
+payload-bytes: 5
+hex: e9 e1 84 00 00

@@ -1494,6 +1494,27 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       capture3-records.txt (75->80 frames) + 6 content tests incl. a cross-packet
       BE-vs-LE id-equality lock for 0x5A. RetailRecordDecodeTests 89->95; full
       UnitTests suite 555 green. No server change (CLI decode-only).
+- [x] Steering trio (batch 7, 2026-06-03): 0x12 Turn / 0x13 Tilt / 0x14 Move,
+      decoded byte-exact and cross-verified against the server parsers.
+      0x12 TURN and 0x13 TILT share a byte-identical 8B {int32 GameID; float
+      Intensity} struct (the Phase-K-Wave-11 local PacketTurn) read raw host-order
+      LE in Player::HandleTurn/HandleTilt -- no ntohl. Because the two opcodes are
+      indistinguishable by bytes, TurnTiltRecord annotates Intensity with its axis
+      ("(TURN -- yaw rate)" vs "(TILT -- pitch rate)") off the opcode, and a routing
+      test pins Resolve(0x12).Opcode==0x12 / Resolve(0x13).Opcode==0x13 so a
+      copy-paste opcode mixup is caught even though every field byte matches. 0x14
+      MOVE is a 5B MovePacket {int32 GameID; byte type}, LE; Player::HandleMove
+      branches type==4 (engine off / break formation) vs else (engine on). Files:
+      Records/{TurnTilt,Move}Record.cs + 3 registry lines (0x12/0x13 share the
+      parameterized TurnTiltRecord, mirroring ActivateRenderStateRecord 0x30/0x31).
+      Gave the base FFloat helper the optional `note` param FHex/FDec already had
+      (it was the lone F* emitter that couldn't annotate). Pinned 3 verbatim
+      capture_3 frames (#5597 Turn -1.0 / #5599 Tilt +1.0 / #5557 Move type 0), all
+      carrying the SAME player GameID 0x0084E1E9 as the batch-6 RequestTarget/
+      Action/VerbRequest frames -- the cross-packet identity lock extends here.
+      capture3-records.txt 80->83 frames; +4 tests (Turn, Tilt, routing, Move);
+      RetailRecordDecodeTests 95->99; full UnitTests suite 559 green. No server
+      change (CLI decode-only).
 - [ ] 0x0B ObjectToObjectEffect -- DEFERRED. Carries a u16 Bitmask + a
       variable-length Message field mid-packet + a conditional tail the server
       author flagged as wrong ("packet struct is wrong... TODO work out correct
@@ -1501,13 +1522,16 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       bit layout (header+Message+bits{0,1,2,5,6} computes 49B but the frame is 55B;
       another off by 6). Decoding the tail would require fabricating field
       structure -- validate interactively against the live client instead.
-- [ ] Remaining GenericRecord-fallthrough opcodes worth decoding next, after the
-      batch-6 sweep cleared 0x9E/0x9D/0x5A/0x17/0x2C (and 0x64 ClientDamage, 0x6A
-      ClientSound, 0x20 PriorityMessage, 0x66 OpenInterface already had decoders --
-      the old list was stale on those): 0x21/0x22 PushMessage variants (43/8),
-      0x46 ComponentPos (577), 0x12/0x13/0x14 Turn/Tilt/Move (149/103/456). Each
-      needs its server emitter read + real-frame byte-diff. The Turn/Tilt/Move trio
-      is the obvious next batch (high frequency, likely small fixed structs).
+- [ ] Remaining GenericRecord-fallthrough opcodes worth decoding next, after
+      batch-6 cleared 0x9E/0x9D/0x5A/0x17/0x2C and batch-7 cleared 0x12/0x13/0x14
+      (and 0x64 ClientDamage, 0x6A ClientSound, 0x20 PriorityMessage, 0x66
+      OpenInterface already had decoders -- the old list was stale on those):
+      0x21/0x22 PushMessage variants (43/8 frames), 0x46 ComponentPositionalUpdate
+      (577 frames -- embeds SimplePositionalUpdate (48B) + ImpartedDecay /
+      TractorSpeed / TractorID / TractorEffectID = 64B). Each needs its server
+      emitter read + real-frame byte-diff. 0x46 is the obvious next batch by
+      frequency, but its inner SimplePositionalUpdate quantization must be decoded
+      to match 0x3E/0x08 first.
 - [ ] Long-tail records with ZERO frames in any of the 3 captures (need other
       captures): 0x6F GlobalTicket, 0xD0 GuildMessageSector. Defer until a capture
       containing them is located. AuxMobIndex/AuxHulkIndex 0x1B version-1 diff
