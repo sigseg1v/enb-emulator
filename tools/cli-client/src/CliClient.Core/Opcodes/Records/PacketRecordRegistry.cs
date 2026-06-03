@@ -41,6 +41,8 @@ public static class PacketRecordRegistry
             0x001B => new AuxDataRecord(payload),
             0x001D => new MessageStringRecord(payload),
             0x0020 => new PriorityMessageRecord(payload),
+            0x0021 => new PushMessageRecord(payload, 0x0021),
+            0x0022 => new PushMessageRecord(payload, 0x0022),
             0x0025 => new ItemBaseRecord(payload),
             0x002C => new ActionRecord(payload),
             0x0030 => new ActivateRenderStateRecord(payload, 0x0030),

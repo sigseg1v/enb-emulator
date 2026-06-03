@@ -1536,6 +1536,29 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       player as batches 6/7. capture3-records.txt 83->84 frames; +2 tests;
       RetailRecordDecodeTests 99->101; full UnitTests suite 561 green. No server
       change (CLI decode-only).
+- [x] PushMessage family (batch 9, 2026-06-03): 0x22 PushMessageLine + 0x21
+      QueueMessageLine, decoded via one shared PushMessageRecord(payload, opcode)
+      (same idiom as TurnTiltRecord / ActivateRenderStateRecord). Shared wire
+      layout, all LE, NO length prefix: raw NUL-terminated Message, raw
+      NUL-terminated Type (chat channel -- "MessageLine"/"QuickLine"), int32 Time
+      (display ms), int32 Priority. Confirmed against AddDataS (PacketMethods.h:52
+      -- memcpys strlen() bytes; the terminator is a separate AddData(char(0)), so
+      the wire has no u16 prefix) -- this resolves the plan's open "confirm
+      length-prefix discipline" question: there is none. 0x22 is fully
+      emitter-grounded: Player::SendPushMessage(msg,type,time,priority)
+      (PlayerConnection.cpp:2254) emits ENB_OPCODE_0022_PUSH_MESSAGE, and the
+      retail frame Message "LEVEL UP!" / Type "QuickLine" / Time 0 / Priority 3
+      matches SendPushMessage("LEVEL UP!","QuickLine",0,3) (PlayerExperience.cpp:526)
+      byte-for-byte. 0x21 QueueMessageLine is the retail sibling our server NEVER
+      emits (no SendOpcode(0x0021) anywhere in server/src) -- identical wire shape,
+      so the same field model is applied; its Time 3000 corroborates the Time name
+      (== the 0x22 MessageLine duration) and its Priority 7 is a retail value our
+      server doesn't produce (disclosed in the fixture provenance, not asserted as
+      server behaviour). Files: Records/PushMessageRecord.cs + 2 registry lines.
+      Pinned 2 verbatim capture_3 frames + a routing test pinning
+      Resolve(0x21).Opcode/Resolve(0x22).Opcode. capture3-records.txt 84->86
+      frames; +3 tests; RetailRecordDecodeTests 101->104; full UnitTests suite 564
+      green. No server change (CLI decode-only).
 - [ ] 0x0B ObjectToObjectEffect -- DEFERRED. Carries a u16 Bitmask + a
       variable-length Message field mid-packet + a conditional tail the server
       author flagged as wrong ("packet struct is wrong... TODO work out correct
@@ -1543,14 +1566,14 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       bit layout (header+Message+bits{0,1,2,5,6} computes 49B but the frame is 55B;
       another off by 6). Decoding the tail would require fabricating field
       structure -- validate interactively against the live client instead.
-- [ ] Remaining GenericRecord-fallthrough opcodes worth decoding next, after
-      batch-6 cleared 0x9E/0x9D/0x5A/0x17/0x2C, batch-7 cleared 0x12/0x13/0x14, and
-      batch-8 cleared 0x46 (and 0x64 ClientDamage, 0x6A ClientSound, 0x20
-      PriorityMessage, 0x66 OpenInterface already had decoders -- the old list was
-      stale on those): 0x21/0x22 PushMessage variants (43/8 frames). Each needs its
-      server emitter read + real-frame byte-diff. These are low-frequency and the
-      PushMessage family carries variable-length strings, so confirm the on-wire
-      length-prefix discipline against a real frame before decoding the tail.
+- [x] Remaining high-frequency GenericRecord-fallthrough opcodes: SWEPT.
+      batch-6 cleared 0x9E/0x9D/0x5A/0x17/0x2C, batch-7 cleared 0x12/0x13/0x14,
+      batch-8 cleared 0x46, batch-9 cleared 0x21/0x22 (and 0x64 ClientDamage, 0x6A
+      ClientSound, 0x20 PriorityMessage, 0x66 OpenInterface already had decoders --
+      the old list was stale on those). Re-run the capture_3 opcode-frequency tally
+      before the next batch: the remaining GenericRecord fall-throughs are now the
+      long tail (single-digit frame counts) plus the explicitly-deferred 0x0B. Next
+      decode work should be driven by a fresh frequency re-tally, not this list.
 - [ ] Long-tail records with ZERO frames in any of the 3 captures (need other
       captures): 0x6F GlobalTicket, 0xD0 GuildMessageSector. Defer until a capture
       containing them is located. AuxMobIndex/AuxHulkIndex 0x1B version-1 diff

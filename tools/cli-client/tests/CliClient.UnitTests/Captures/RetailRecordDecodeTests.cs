@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllEightyFourFrames()
+    public void Fixture_Loads_AllEightySixFrames()
     {
-        Assert.Equal(84, Frames.Count);
+        Assert.Equal(86, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -2113,5 +2113,53 @@ public sealed class RetailRecordDecodeTests
         Assert.Contains("0x0084E261", viaSimple);
         Assert.Contains("(-23448.31, 57909.05, 266.981)", viaSimple);
         Assert.Contains("(0.0, 0.0, 0.0, 1.0)", viaSimple);
+    }
+
+    // ── PushMessageLine 0x22 / QueueMessageLine 0x21 ─────────────────────────
+    // Shared layout: raw NUL-terminated Message, raw NUL-terminated Type
+    // (channel), int32 Time, int32 Priority -- all LE, NO length prefix. 0x22 is
+    // emitter-grounded (Player::SendPushMessage); 0x21 is the retail-only
+    // QueueMessageLine sibling with the identical wire shape.
+
+    [Fact]
+    public void PushMessage_LevelUp_DecodesMessageChannelTimePriority()
+    {
+        string d = Dump("pushmessage_level_up_quickline");
+
+        Assert.Contains("[0000] Message", d);
+        Assert.Contains("\"LEVEL UP!\"", d);          // raw NUL-terminated, no length prefix
+        Assert.Contains("Type", d);
+        Assert.Contains("\"QuickLine\"", d);          // channel string immediately after the NUL
+        Assert.Contains("Time", d);
+        Assert.Contains("Time              = 0", d);   // SendPushMessage("LEVEL UP!","QuickLine",0,3)
+        Assert.Contains("Priority", d);
+        Assert.Contains("Priority          = 3", d);
+        Assert.DoesNotContain("???", d);              // every byte attributed to a field
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void QueueMessage_GroupBonus_SameLayoutAsPush_RetailSibling()
+    {
+        string d = Dump("queuemessage_group_bonus");
+
+        Assert.Contains("[0000] Message", d);
+        Assert.Contains("\"Group experience bonus is now 40%\"", d);
+        Assert.Contains("\"MessageLine\"", d);
+        Assert.Contains("Time              = 3000", d); // corroborates Time (== 0x22 MessageLine duration)
+        Assert.Contains("Priority          = 7", d);    // retail value -- not one our server emits
+        Assert.DoesNotContain("???", d);
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void PushQueueMessage_RoutedByOpcode()
+    {
+        // 0x21 and 0x22 share one record class; only the opcode the registry passes
+        // distinguishes them. Pin both directions so a copy-paste swap is caught.
+        var push  = Frames["pushmessage_level_up_quickline"];
+        var queue = Frames["queuemessage_group_bonus"];
+        Assert.Equal((ushort)0x22, PacketRecord.Resolve((ushort)push.Opcode, push.Payload).Opcode);
+        Assert.Equal((ushort)0x21, PacketRecord.Resolve((ushort)queue.Opcode, queue.Payload).Opcode);
     }
 }
