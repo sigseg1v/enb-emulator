@@ -67,9 +67,12 @@ CI runs the harness with a sidecar Postgres service (see `.github/workflows/buil
   encoders/decoders (uses the captures in
   `archive/kyp-snapshot/capturedPackets/`). Today only the wire-layout
   pins live here.
-- `tests/server/db/`         -- schema + DAO tests against a per-test database
-  (the Postgres smoke is the first member; real DAO tests need the
-  `mysqlplus.cpp` -> libpqxx rewrite to finish).
+- `tests/server/db/`         -- schema + DAO tests against a per-test database.
+  `postgres_smoke_test` is the raw-libpq connectivity check;
+  `sqlplus_wrapper_test` round-trips the libpqxx-backed `db/sqlplus.cpp`
+  wrapper end-to-end through the same public API the server uses
+  (incl. parameterised + hostile-literal cases). Both env-gated on
+  `NET7_TEST_DB_DSN`.
 - `tests/integration/` is the C# xUnit suite (already live, separate scope)
   that drives `CliClient.Core` against the docker-compose stack -- see
   `docs/16-integration-tests.md`.

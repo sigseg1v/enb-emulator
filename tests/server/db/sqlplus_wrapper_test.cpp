@@ -1,6 +1,6 @@
-// tests/db/mysqlplus_wrapper_test.cpp
+// tests/server/db/sqlplus_wrapper_test.cpp
 //
-// Phase N: round-trip the libpqxx-backed mysqlplus wrapper end-to-end
+// Phase N: round-trip the libpqxx-backed sqlplus wrapper end-to-end
 // through the same public API the server uses (sql_connection_c →
 // sql_query_c → sql_result_c → sql_row_c → sql_var_c).
 //
@@ -14,7 +14,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
-#include "mysql/mysqlplus.h"
+#include "db/sqlplus.h"
 
 namespace {
 
@@ -57,7 +57,7 @@ bool parse_kv_dsn(const char *dsn, Dsn &out)
 
 } // namespace
 
-TEST(MysqlplusWrapper, ConnectsAndSelectsOne) {
+TEST(SqlplusWrapper, ConnectsAndSelectsOne) {
     const char *raw = std::getenv("NET7_TEST_DB_DSN");
     if (!raw || !*raw) {
         GTEST_SKIP() << "NET7_TEST_DB_DSN not set; skipping live wrapper test";
@@ -87,7 +87,7 @@ TEST(MysqlplusWrapper, ConnectsAndSelectsOne) {
     EXPECT_EQ((int)row[0], 1);
 }
 
-TEST(MysqlplusWrapper, ParameterisedRoundTrip) {
+TEST(SqlplusWrapper, ParameterisedRoundTrip) {
     const char *raw = std::getenv("NET7_TEST_DB_DSN");
     if (!raw || !*raw) {
         GTEST_SKIP() << "NET7_TEST_DB_DSN not set; skipping live wrapper test";
@@ -123,7 +123,7 @@ TEST(MysqlplusWrapper, ParameterisedRoundTrip) {
     EXPECT_STREQ((const char *)row[1], "beta");
 }
 
-TEST(MysqlplusWrapper, ExecuteParamsHostileLiteral) {
+TEST(SqlplusWrapper, ExecuteParamsHostileLiteral) {
     // The whole point of execute_params(): a hostile string arriving as a
     // bound parameter must round-trip as literal data, never as SQL.
     // If injection ever became possible, this query would try (and fail)
@@ -161,7 +161,7 @@ TEST(MysqlplusWrapper, ExecuteParamsHostileLiteral) {
     EXPECT_STREQ((const char *)row[1], hostile);
 }
 
-TEST(MysqlplusWrapper, ExecuteParamsMixedTypesAndNull) {
+TEST(SqlplusWrapper, ExecuteParamsMixedTypesAndNull) {
     // Exercise int / unsigned long / double / NULL via the bag, and the
     // placeholder rewriter's ability to hand out $1..$N in order.
     const char *raw = std::getenv("NET7_TEST_DB_DSN");
@@ -204,7 +204,7 @@ TEST(MysqlplusWrapper, ExecuteParamsMixedTypesAndNull) {
     EXPECT_STREQ((const char *)row[3], "t");   // Postgres bool true → "t"
 }
 
-TEST(MysqlplusWrapper, EscapeHostileLiteral) {
+TEST(SqlplusWrapper, EscapeHostileLiteral) {
     // Smoke the escape shim — hostile single quotes / backslashes must
     // round-trip as literal data.
     const char *raw = std::getenv("NET7_TEST_DB_DSN");
