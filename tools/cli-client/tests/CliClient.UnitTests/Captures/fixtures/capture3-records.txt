@@ -970,3 +970,9 @@ opcode: 0xA3
 payload-bytes: 26
 hex: 1e 14 00 00 06 00 00 00 00 00 07 00 47 65 6e 65
       72 61 6c 01 00 20 00 00 00 00
+
+[requesttime_client_tick]
+provenance: Request_Time 0x44 (client->server) -- ClientTick 80574 (0x00013ABE) (capture_3.rar packet #543, Client->Server). 4-byte wire: a single int32 the client's ms tick. All LE: Player::HandleRequestTime reads *((int32_t*)data) with no ntohl and echoes it back in a 0x34 SET_CLIENT_TIME reply (the ClientSent field) for latency measurement. The value climbs monotonically across a session (client uptime tick, not a wall clock).
+opcode: 0x44
+payload-bytes: 4
+hex: be 3a 01 00

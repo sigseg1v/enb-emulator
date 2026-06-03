@@ -58,6 +58,7 @@ public static class PacketRecordRegistry
             0x003E => new AdvancedPositionalUpdateRecord(payload),
             0x0040 => new ConstantPosRecord(payload),
             0x0042 => new ServerParametersRecord(payload),
+            0x0044 => new RequestTimeRecord(payload),
             0x0046 => new ComponentPositionalUpdateRecord(payload),
             0x0047 => new ClientShipRecord(payload),
             0x004F => new StarbaseSetRecord(payload),

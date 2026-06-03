@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllNinetyFrames()
+    public void Fixture_Loads_AllNinetyOneFrames()
     {
-        Assert.Equal(90, Frames.Count);
+        Assert.Equal(91, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -2272,6 +2272,22 @@ public sealed class RetailRecordDecodeTests
         Assert.Contains("Len3              = 1", d);
         Assert.Contains("DataSize          = 0", d);
         Assert.DoesNotContain("???", d);                  // all 26 bytes decoded
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    // ── Request_Time 0x44 ────────────────────────────────────────────────────
+    // 4-byte client->server: a single int32 ms tick read LE (no ntohl), echoed
+    // back in the 0x34 SET_CLIENT_TIME reply for latency measurement.
+
+    [Fact]
+    public void RequestTime_SingleTickLittleEndian()
+    {
+        string d = Dump("requesttime_client_tick");
+
+        Assert.Contains("[0000] ClientTick", d);
+        Assert.Contains("ClientTick        = 80574", d);   // BE 3A 01 00 LE == 80574
+        Assert.Contains("(LE; client ms tick, echoed in 0x34 reply)", d);
+        Assert.DoesNotContain("???", d);                   // all 4 bytes decoded
         Assert.DoesNotContain("[!]", d);
     }
 }
