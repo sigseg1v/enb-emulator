@@ -82,11 +82,22 @@ if (args[0] is "repl" or "start")
     repl.Register(new CreateCommand(sessionCtx));
     repl.Register(new EnterCommand(sessionCtx));
     repl.Register(new MoveCommand(sessionCtx));
+    repl.Register(new WarpCommand(sessionCtx));
     repl.Register(new ChatCommand(sessionCtx));
+    repl.Register(new GroupInviteCommand(sessionCtx));
+    repl.Register(new GroupInviteAcceptCommand(sessionCtx));
+    repl.Register(new GroupLeaveCommand(sessionCtx));
     repl.Register(new DumpCommand(sessionCtx));
     repl.Register(new DumpOnCommand(sessionCtx));
     repl.Register(new DumpOffCommand(sessionCtx));
     repl.Register(new ReplayCommand());
+    // Session-aware quit: logs out (closes both planes) then exits, and adds a
+    // `stop` alias so it isn't an "unknown command". Replaces the REPL's
+    // built-in no-op quit handler and re-points the `exit`/`stop` keys at it.
+    var exitCommand = new ExitCommand(sessionCtx);
+    repl.Register(exitCommand);
+    repl.RegisterAlias("exit", exitCommand);
+    repl.RegisterAlias("stop", exitCommand);
 
     using var cts = new CancellationTokenSource();
     Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
@@ -308,9 +319,12 @@ static void PrintHelp()
                               list    (characters; in-sector: nearby objects)
                               create  <class> <firstname>   (e.g. JE Griever)
                               enter   <firstname>
-                              move    <x> <y> <z> [send]  (MVAS position; see note)
+                              move    <x> <y> <z> [send] | move <gid> [send]
+                                      (MVAS position; ESC aborts an in-flight move)
+                              warp    <gid>   (direct warp; no client-side cancel)
                               chat    [sector|gm|dev|beta|whisper] <message>
-                              help, quit (alias: exit)
+                              group-invite <player> / group-invite-accept / group-leave
+                              help, quit (aliases: exit, stop)
                             Tab/Shift-Tab complete the available commands
                             (the likely next step leads the list). Past the
                             command word Tab fills the suggested argument

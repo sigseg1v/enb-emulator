@@ -33,6 +33,10 @@ public sealed class LineEditor : ILineInput
     private readonly IKeySource? _keys;
     private readonly LivePrompt? _live;
 
+    // Submitted-line history, oldest first. Shared across lines (this editor is
+    // a single long-lived instance), so Up/Down arrow walks prior commands.
+    private readonly List<string> _history = new();
+
     public LineEditor(Func<IReadOnlyList<CommandSpec>> specs, LivePrompt? live = null, int pollMs = 15)
         : this(specs, null, live, pollMs) { }
 
@@ -73,6 +77,10 @@ public sealed class LineEditor : ILineInput
         var menu = new List<string>();
         int menuIndex = 0;
         string preMenu = string.Empty;
+        // History cursor: _history.Count == "editing a fresh line". Up/Down walk
+        // it; `stash` holds the in-progress line so Down past the end restores it.
+        int histIdx = _history.Count;
+        string stash = string.Empty;
         int promptLen = VisibleLength(prompt);   // exclude ANSI bytes from column math
 
         // Let async writers (chat echo from the sector drain) interleave above
@@ -114,7 +122,12 @@ public sealed class LineEditor : ILineInput
                     output.Write(buffer.ToString());
                     output.WriteLine();
                     output.Flush();
-                    return buffer.ToString();
+                    string committed = buffer.ToString();
+                    // Record non-blank lines, collapsing immediate duplicates.
+                    if (committed.Trim().Length > 0
+                        && (_history.Count == 0 || _history[^1] != committed))
+                        _history.Add(committed);
+                    return committed;
 
                 case ConsoleKey.Tab:
                 {
@@ -160,10 +173,33 @@ public sealed class LineEditor : ILineInput
                 case ConsoleKey.End:
                     inMenu = false; cursor = buffer.Length; break;
 
+                case ConsoleKey.UpArrow:
+                    inMenu = false;
+                    if (_history.Count > 0 && histIdx > 0)
+                    {
+                        if (histIdx == _history.Count) stash = buffer.ToString();
+                        histIdx--;
+                        buffer.Clear(); buffer.Append(_history[histIdx]);
+                        cursor = buffer.Length;
+                    }
+                    break;
+                case ConsoleKey.DownArrow:
+                    inMenu = false;
+                    if (histIdx < _history.Count)
+                    {
+                        histIdx++;
+                        buffer.Clear();
+                        buffer.Append(histIdx == _history.Count ? stash : _history[histIdx]);
+                        cursor = buffer.Length;
+                    }
+                    break;
+
                 case ConsoleKey.Escape:
                     if (inMenu) { buffer.Clear(); buffer.Append(preMenu); inMenu = false; }
                     else buffer.Clear();
                     cursor = buffer.Length;
+                    histIdx = _history.Count;   // leave history navigation
+                    stash = string.Empty;
                     break;
 
                 default:

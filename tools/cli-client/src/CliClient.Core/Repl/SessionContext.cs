@@ -236,6 +236,14 @@ public sealed class SessionContext : IAsyncDisposable
     /// </summary>
     public SectorUdpClient? SectorUdp { get; set; }
 
+    /// <summary>
+    /// Name of the most recent player who sent us a group invite (0x001E GROUP,
+    /// Flag 0x01), or null if none is pending. Set when the invite frame
+    /// arrives; the <c>group-invite-accept</c> command reads it to decide
+    /// whether there is anything to accept. Cleared once accepted/left.
+    /// </summary>
+    public string? PendingGroupInviter { get; set; }
+
     public SessionContext(OpcodeRegistry registry)
     {
         ArgumentNullException.ThrowIfNull(registry);
@@ -434,7 +442,46 @@ public sealed class SessionContext : IAsyncDisposable
     {
         World.Ingest(p);
         EchoChat(p, PacketDirection.Inbound);
+        AnnounceGroupInvite(p);
         PrintIfEnabled(p, PacketDirection.Inbound);
+    }
+
+    private const string GroupInviteSuffix = " is requesting you to join their group";
+
+    /// <summary>
+    /// Surface an inbound group invite (0x001E GROUP, Flag 0x01, message
+    /// "&lt;name&gt; is requesting you to join their group") as a one-line prompt
+    /// telling the operator how to accept, and remember the inviter so
+    /// <c>group-invite-accept</c> has something to act on. Never throws -- a
+    /// malformed frame must not kill the drain.
+    /// </summary>
+    private void AnnounceGroupInvite(Packet p)
+    {
+        try
+        {
+            if (p.Header.Opcode != 0x001E) return;
+            var span = p.Payload.Span;
+            if (span.Length < 4 || span[2] != 0x01) return;       // Flag 0x01 == group invite
+            int len = BinaryPrimitives.ReadUInt16LittleEndian(span);
+            if (len <= 1 || 3 + len > span.Length) return;
+            string msg = System.Text.Encoding.Latin1.GetString(span.Slice(3, len - 1));
+            string inviter = msg.EndsWith(GroupInviteSuffix, StringComparison.Ordinal)
+                ? msg[..^GroupInviteSuffix.Length]
+                : msg;
+            PendingGroupInviter = inviter;
+
+            string line = AnsiPalette.Colorize(
+                AnsiPalette.BrightYellow + AnsiPalette.Bold,
+                $"** You have been invited to a group by {inviter}. " +
+                "Use `group-invite-accept` to accept.");
+            lock (_chatGate)
+            {
+                if (LivePrompt is { } lp && lp.TryWriteLineAbove(line)) return;
+                ChatOutput.WriteLine(line);
+                ChatOutput.Flush();
+            }
+        }
+        catch { /* best-effort notification */ }
     }
 
     /// <summary>
@@ -570,14 +617,28 @@ public sealed class SessionContext : IAsyncDisposable
         }
     }
 
-    public async ValueTask DisposeAsync()
+    /// <summary>
+    /// Cleanly log out: stop the keepalive / comms-alive / sector-drain loops
+    /// and close both TCP planes. Closing the sockets is what the real client
+    /// does on quit -- the server reaps the player on disconnect
+    /// (PlayerConnection.cpp drop-on-disconnect -> LeaveGroup +
+    /// DropPlayerFromGalaxy), so no synthetic logoff opcode is needed (and
+    /// inventing one would be an unpinned wire change). Idempotent -- safe to
+    /// call from the <c>quit</c> command and again from <see cref="DisposeAsync"/>.
+    /// </summary>
+    public async Task LogoutAsync()
     {
         await StopKeepaliveAsync().ConfigureAwait(false);
         await StopCommsAliveAsync().ConfigureAwait(false);
         await StopSectorDrainAsync().ConfigureAwait(false);
         if (SectorUdp is not null) { await SectorUdp.StopAsync().ConfigureAwait(false); SectorUdp.Dispose(); SectorUdp = null; }
-        _mvas?.Dispose();
         if (_sector is not null) { DetachDumpHook(_sector); await _sector.DisposeAsync(); _sector = null; }
         if (_global is not null) { DetachDumpHook(_global); await _global.DisposeAsync(); _global = null; }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await LogoutAsync().ConfigureAwait(false);
+        _mvas?.Dispose();
     }
 }

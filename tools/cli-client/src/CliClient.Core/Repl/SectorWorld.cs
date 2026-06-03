@@ -311,6 +311,40 @@ public sealed class SectorWorld
             return _objects.TryGetValue(selfGameId, out var me) ? me.MaxSpeed : null;
     }
 
+    /// <summary>A tracked object's position by game id, or null if unknown/no pos.</summary>
+    public (float X, float Y, float Z)? PositionOf(int gameId)
+    {
+        lock (_gate)
+            return _objects.TryGetValue(gameId, out var t) && t.HasPos
+                ? (t.X, t.Y, t.Z) : null;
+    }
+
+    /// <summary>A tracked object's display name by game id, or null.</summary>
+    public string? NameOf(int gameId)
+    {
+        lock (_gate)
+            return _objects.TryGetValue(gameId, out var t) ? t.Name : null;
+    }
+
+    /// <summary>
+    /// Resolve a player/object name to its game id, case-insensitively. Prefers
+    /// avatars (a 0x0061 description was seen) over other named objects, so
+    /// `group-invite Yee` lands on the player and not a same-named nav. Returns
+    /// null when no tracked object carries that name.
+    /// </summary>
+    public int? FindByName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return null;
+        lock (_gate)
+        {
+            return _objects.Values
+                .Where(o => o.Name is { } n && string.Equals(n, name, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(o => o.IsAvatar)
+                .Select(o => (int?)o.GameId)
+                .FirstOrDefault();
+        }
+    }
+
     /// <summary>
     /// Print the nearby summary: own position to 4 d.p. then one row per
     /// object (kind, name, level, distance), nearest first.

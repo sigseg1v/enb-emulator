@@ -10,13 +10,14 @@ using N7.CliClient.Net;
 namespace N7.CliClient.Repl.Commands;
 
 /// <summary>
-/// <c>move &lt;x&gt; &lt;y&gt; &lt;z&gt; [send]</c> -- fly the avatar toward a
-/// sector coordinate by feeding MVAS position updates, the way a real client's
-/// proxy would (but computed, since a headless client has no engine).
+/// <c>move &lt;x&gt; &lt;y&gt; &lt;z&gt;</c> / <c>move &lt;gid|name&gt;</c> -- fly
+/// the avatar toward a sector coordinate (or a tracked object's position) by
+/// feeding MVAS position updates, the way a real client's proxy would (but
+/// computed, since a headless client has no engine).
 /// </summary>
 /// <remarks>
 /// <para>
-/// Dry-run by default (prints the datagram). With <c>send</c> the CLI becomes a
+/// Flies immediately on Enter (no send token). The CLI becomes a
 /// full UDP client for the in-flight phase: it opens a
 /// <see cref="SectorUdpClient"/>, which feeds our own position to the server
 /// AND receives the live sector stream the server reroutes to our socket. The
@@ -44,13 +45,14 @@ public sealed class MoveCommand : ICommandHandler
     }
 
     public string Name    => "move";
-    public string Summary => "fly toward sector coords (dry-run; 'send' drives MVAS for real)";
+    public string Summary => "fly toward coords or a target gid (drives MVAS)";
     public string Usage   =>
-        "move <x> <y> <z> [send]\n" +
-        "  dry-run prints the MVAS datagram; 'send' opens the sector UDP client,\n" +
-        "  orients toward the target, flies at engine speed feeding position\n" +
-        "  updates, and stops within arrival range. Watch the world with `list`.";
-    public string? Placeholder => "<x> <y> <z>";
+        "move <x> <y> <z>\n" +
+        "move <gid>                   (gid = 0x.. / decimal / a tracked name; flies to its position)\n" +
+        "  opens the sector UDP client, orients toward the target, flies at engine\n" +
+        "  speed feeding position updates, and stops within arrival range. ESC aborts\n" +
+        "  an in-flight move. Watch the world with `list`.";
+    public string? Placeholder => "<x> <y> <z> | <gid>";
 
     public bool Available => _ctx.Sector is not null && _ctx.GameId is not null;
 
@@ -64,15 +66,31 @@ public sealed class MoveCommand : ICommandHandler
             return 1;
         }
 
-        bool send = args.Count >= 4 && string.Equals(args[3], "send", StringComparison.OrdinalIgnoreCase);
-
-        if (args.Count < 3
-            || !float.TryParse(args[0], NumberStyles.Float, CultureInfo.InvariantCulture, out float tx)
-            || !float.TryParse(args[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float ty)
-            || !float.TryParse(args[2], NumberStyles.Float, CultureInfo.InvariantCulture, out float tz))
+        // Two target forms:
+        //   move <x> <y> <z>   -- explicit coordinates
+        //   move <gid|name>    -- fly to a tracked object's position
+        float tx, ty, tz;
+        if (args.Count >= 3
+            && float.TryParse(args[0], NumberStyles.Float, CultureInfo.InvariantCulture, out tx)
+            && float.TryParse(args[1], NumberStyles.Float, CultureInfo.InvariantCulture, out ty)
+            && float.TryParse(args[2], NumberStyles.Float, CultureInfo.InvariantCulture, out tz))
+        {
+            // explicit coords
+        }
+        else if (args.Count >= 1 && TargetArg.Resolve(args[0], _ctx.World) is { } targetGid)
+        {
+            if (_ctx.World.PositionOf(targetGid) is not { } tp)
+            {
+                await output.WriteLineAsync(AnsiPalette.Warn(
+                    $"target 0x{targetGid:X8} has no known position yet -- run `list` after it appears")).ConfigureAwait(false);
+                return 1;
+            }
+            (tx, ty, tz) = tp;
+        }
+        else
         {
             await output.WriteLineAsync(
-                AnsiPalette.Warn("usage: move <x> <y> <z> [send]  (numbers)")).ConfigureAwait(false);
+                AnsiPalette.Warn("usage: move <x> <y> <z>  |  move <gid|name>")).ConfigureAwait(false);
             return 1;
         }
 
@@ -81,26 +99,6 @@ public sealed class MoveCommand : ICommandHandler
             await output.WriteLineAsync(AnsiPalette.Warn(
                 "no own position yet -- wait for the sector fanout, then retry")).ConfigureAwait(false);
             return 1;
-        }
-
-        if (!send)
-        {
-            byte[] dg = MvasClient.BuildDatagram(id, sequence: 1, tx, ty, tz);
-            await output.WriteLineAsync(
-                AnsiPalette.Muted("move (dry-run): ") +
-                AnsiPalette.Value($"({start0.X:0.0}, {start0.Y:0.0}, {start0.Z:0.0})") +
-                AnsiPalette.Muted(" -> ") +
-                AnsiPalette.Value($"({tx:0.0}, {ty:0.0}, {tz:0.0})") + "  " +
-                AnsiPalette.Muted("player=") + AnsiPalette.Value($"0x{id:X8}")).ConfigureAwait(false);
-            await output.WriteLineAsync(
-                AnsiPalette.Muted($"  MVAS 0x1004 datagram ({dg.Length}B): ") +
-                AnsiPalette.Info(Convert.ToHexString(dg))).ConfigureAwait(false);
-            await output.WriteLineAsync(
-                AnsiPalette.Muted("  not sent. Append 'send' to fly there as a full UDP client")).ConfigureAwait(false);
-            await output.WriteLineAsync(
-                AnsiPalette.Muted("  (opens the sector UDP socket; the live sector stream then arrives there)."))
-                .ConfigureAwait(false);
-            return 0;
         }
 
         // --- become a full UDP client for the in-flight phase ---
@@ -159,6 +157,11 @@ public sealed class MoveCommand : ICommandHandler
 
         (float X, float Y, float Z) cur = start0;
         int ticks = 0;
+        bool aborted = false;
+        // ESC aborts the flight: stop feeding MVAS and the avatar stops where it
+        // is (the server holds the last position we fed). This is a real abort,
+        // unlike warp -- there is no position feed to stop for a warp.
+        await using var abort = CommandAbort.Begin(ct);
         try
         {
             while (ticks++ < MaxTicks)
@@ -197,18 +200,29 @@ public sealed class MoveCommand : ICommandHandler
                     lastServerPos = sp;
                 }
 
-                await Task.Delay(intervalMs, ct).ConfigureAwait(false);
+                await Task.Delay(intervalMs, abort.Token).ConfigureAwait(false);
             }
             // Settle on the target so the server registers arrival.
             client.SendPosition(id, tx, ty, tz, (0, 0, 0));
         }
-        catch (OperationCanceledException) { throw; }
+        catch (OperationCanceledException)
+        {
+            // ESC (abort token tripped, outer ct still live) -> stop here, stay
+            // where we are, and return cleanly. A genuine Ctrl-C (outer ct)
+            // propagates so the REPL exits.
+            if (!abort.AbortedByEscape(ct)) throw;
+            aborted = true;
+            await output.WriteLineAsync(
+                AnsiPalette.Warn($"  move aborted (ESC) at ({cur.X:0.0}, {cur.Y:0.0}, {cur.Z:0.0})")).ConfigureAwait(false);
+        }
         catch (Exception ex)
         {
             await output.WriteLineAsync(
                 AnsiPalette.Err($"move failed: {ex.Message}")).ConfigureAwait(false);
             return 1;
         }
+
+        if (aborted) return 0;
 
         var landed = _ctx.World.SelfSnapshot(id).Pos;
         string where = landed is { } lp ? $"({lp.X:0.0}, {lp.Y:0.0}, {lp.Z:0.0})" : "(server pos unknown)";

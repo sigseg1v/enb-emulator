@@ -67,6 +67,20 @@ public sealed class Repl
         _commands[handler.Name] = handler;
     }
 
+    /// <summary>
+    /// Point a second key at an already-registered handler (e.g. <c>stop</c> ->
+    /// the <c>quit</c> handler). Unlike <see cref="Register"/> this keys on the
+    /// alias, not the handler's Name, so <see cref="Commands"/> still lists the
+    /// command once but <see cref="Find"/> resolves the alias.
+    /// </summary>
+    public void RegisterAlias(string alias, ICommandHandler handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        if (string.IsNullOrWhiteSpace(alias))
+            throw new ArgumentException("alias is empty", nameof(alias));
+        _commands[alias] = handler;
+    }
+
     /// <summary>The set of registered commands, sorted by name (snapshot).</summary>
     /// <remarks>
     /// Deduped by <see cref="ICommandHandler.Name"/>: aliases that point the
