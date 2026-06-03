@@ -48,9 +48,9 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void Fixture_Loads_AllOneHundredNineFrames()
+    public void Fixture_Loads_AllOneHundredTwelveFrames()
     {
-        Assert.Equal(109, Frames.Count);
+        Assert.Equal(112, Frames.Count);
         Assert.Equal(0x25, Frames["itembase_sand"].Opcode);
         Assert.Equal(98, Frames["itembase_sand"].Payload.Length);
         Assert.Equal(0x25, Frames["itembase_terminal_controller_v9"].Opcode);
@@ -183,6 +183,12 @@ public sealed class RetailRecordDecodeTests
         Assert.Equal(58, Frames["linkedeffect_e1_33_e2_3_speed1"].Payload.Length);
         Assert.Equal(0x0E, Frames["linkedeffect_e1_33_e2_3_speed2"].Opcode);
         Assert.Equal(58, Frames["linkedeffect_e1_33_e2_3_speed2"].Payload.Length);
+        Assert.Equal(0xA4, Frames["chatlist_friends_11"].Opcode);
+        Assert.Equal(266, Frames["chatlist_friends_11"].Payload.Length);
+        Assert.Equal(0xA4, Frames["chatlist_friends_11_two_stations"].Opcode);
+        Assert.Equal(288, Frames["chatlist_friends_11_two_stations"].Payload.Length);
+        Assert.Equal(0xA4, Frames["chatlist_friends_12"].Opcode);
+        Assert.Equal(310, Frames["chatlist_friends_12"].Payload.Length);
     }
 
     // ── ItemBase 0x25 ────────────────────────────────────────────────────────
@@ -2789,6 +2795,119 @@ public sealed class RetailRecordDecodeTests
             Assert.InRange(le, 0, 137);
             Assert.True(be >= 138, $"{name}: big-endian index {be} should be out of range");
             Assert.Equal((ushort)0x58, PacketRecord.Resolve((ushort)f.Opcode, f.Payload).Opcode);
+        }
+    }
+
+    // ── ClientChatList 0xA4 ──────────────────────────────────────────────────
+    // Variable-length name list. ListType/counts are raw int32 LE (AddData<long>);
+    // each name/sector is a short-LE length prefix + raw bytes (AddDataLS, no NUL).
+    // The whole frame walking to exactly the declared payload under LE is the proof.
+
+    [Fact]
+    public void ChatList_Friends_DecodesNamesAndSectors()
+    {
+        string d = Dump("chatlist_friends_11");
+
+        Assert.Contains("[0000] ListType", d);
+        Assert.Contains("CHAT_LIST_FRIENDS", d);
+        Assert.Contains("[0004] Channel", d);
+        Assert.Contains("(len 0)", d);                             // empty channel: just the 2-byte prefix
+        Assert.Contains("NameCount", d);
+        Assert.Contains("= 11", d);                                // 0B 00 00 00 LE
+        Assert.Contains("Name[0]", d);
+        Assert.Contains("\"Immanuelii\"", d);
+        Assert.Contains("Name[10]", d);
+        Assert.Contains("\"Someone\"", d);
+        Assert.Contains("SectorCount", d);
+        Assert.Contains("Sector[0]", d);
+        Assert.Contains("\"offline\"", d);
+        // Last sector carries the trailing '*' verbatim inside its length prefix.
+        Assert.Contains("\"Glory's Orbit (Beta Hydri System)*\"", d);
+        Assert.DoesNotContain("???", d);                           // every byte accounted for
+        Assert.DoesNotContain("[!]", d);                           // clean walk: no truncation/trailing flag
+    }
+
+    [Fact]
+    public void ChatList_Friends_TwoNamedStations_AllAccountedFor()
+    {
+        string d = Dump("chatlist_friends_11_two_stations");
+
+        Assert.Contains("CHAT_LIST_FRIENDS", d);
+        Assert.Contains("NameCount", d);
+        Assert.Contains("= 11", d);
+        // Two friends sit in the same station this frame -- both rendered.
+        int first = d.IndexOf("\"Friendship 7 Recreation Port\"", StringComparison.Ordinal);
+        int second = d.IndexOf("\"Friendship 7 Recreation Port\"", first + 1, StringComparison.Ordinal);
+        Assert.True(first >= 0 && second > first, "both station sectors should be rendered");
+        Assert.Contains("\"Slayton Sector (Beta Hydri System)*\"", d);
+        Assert.DoesNotContain("???", d);
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void ChatList_Friends_TwelveEntries_AddsJedda()
+    {
+        string d = Dump("chatlist_friends_12");
+
+        Assert.Contains("NameCount", d);
+        Assert.Contains("= 12", d);                                // 0C 00 00 00 LE
+        Assert.Contains("Name[10]", d);
+        Assert.Contains("\"Jedda\"", d);                           // the 12th-frame extra friend
+        Assert.Contains("SectorCount", d);
+        Assert.Contains("Sector[10]", d);
+        Assert.Contains("\"Glenn Sector (Beta Hydri System)\"", d); // non-last named sector: NO trailing '*'
+        Assert.Contains("\"Carpenter Sector (Beta Hydri System)*\"", d); // last sector: trailing '*'
+        Assert.DoesNotContain("???", d);
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void ChatList_EveryFrame_WalksToExactDeclaredLength_OnlyLittleEndian()
+    {
+        // The decisive byte-order proof for a variable-length list: only when the
+        // int32 ListType/counts and the int16 string-length prefixes are read
+        // little-endian does the walk consume EXACTLY the declared payload with no
+        // leftover bytes and no overrun. A big-endian count read (e.g. 0x0B000000)
+        // would demand ~184 million list entries and run off the end immediately.
+        foreach (var (name, len) in new[]
+                 {
+                     ("chatlist_friends_11", 266),
+                     ("chatlist_friends_11_two_stations", 288),
+                     ("chatlist_friends_12", 310),
+                 })
+        {
+            var f = Frames[name];
+            Assert.Equal(len, f.Payload.Length);
+
+            var p = f.Payload.AsSpan();
+            int off = 0;
+            int listType = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(p.Slice(off, 4));
+            off += 4;
+            Assert.Equal(0, listType);                              // CHAT_LIST_FRIENDS
+
+            int chanLen = System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(p.Slice(off, 2));
+            off += 2 + chanLen;
+
+            int nameCount = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(p.Slice(off, 4));
+            off += 4;
+            Assert.InRange(nameCount, 1, 4096);
+            for (int i = 0; i < nameCount; i++)
+            {
+                int l = System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(p.Slice(off, 2));
+                off += 2 + l;
+            }
+
+            int sectorCount = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(p.Slice(off, 4));
+            off += 4;
+            Assert.Equal(nameCount, sectorCount);                  // FRIENDS list pairs names with sectors
+            for (int i = 0; i < sectorCount; i++)
+            {
+                int l = System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(p.Slice(off, 2));
+                off += 2 + l;
+            }
+
+            Assert.Equal(f.Payload.Length, off);                   // EXACT: no gap, no overrun
+            Assert.DoesNotContain("???", Dump(name));
         }
     }
 }

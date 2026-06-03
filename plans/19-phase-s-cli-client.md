@@ -1813,6 +1813,31 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       capture3-records.txt 107->109 frames (index_123 #12720 + index_44 #263886);
       3 tests (LE render+Action-unused, index 44 in range, every-frame-in-range-
       only-LE bound proof); full UnitTests suite 601 green. CLI decode-only.
+- [x] ClientChatList (batch 27, 2026-06-03): 0x00A4 CLIENT_CHAT_LIST (6 frames),
+      server->client, a chat name list (friends / ignores / channel membership).
+      First VARIABLE-LENGTH list record. Wire (Player::SendClientChatList,
+      PlayerConnection.cpp:4645): int32 ListType; {int16 len; bytes} Channel; int32
+      NameCount; NameCount x {int16 len; bytes}; int32 SectorCount; SectorCount x
+      {int16 len; bytes}. ALL LITTLE-ENDIAN. Byte order proven by the emitter helpers
+      (server/src/PacketMethods.h): AddData<long> stores a raw int32 with no flip
+      (host-order LE on x86) and AddDataLS writes short(strlen) via AddData (LE) then
+      the raw string bytes with NO NUL. ListType is one of CHAT_LIST_*
+      (PacketStructures.h:683): 0 FRIENDS, 1 IGNORES, 2 MEMBERS_CHANNEL, 3
+      ACTIVE_CHANNELS, 4 CURRENT_CHANNELS. The decisive proof is structural: only a
+      little-endian read of the int32 counts and int16 length prefixes makes all three
+      distinct frame shapes (266/288/310B) walk to EXACTLY the declared payload with
+      no leftover and no overrun -- a big-endian count (0x0B000000) would demand ~184M
+      entries and run off the end immediately. All six captured frames are FRIENDS
+      lists (ListType 0, empty channel) where names[i] pairs with sectors[i] (the
+      friend's sector or "offline"); the last sector string in every frame carries a
+      trailing '*' inside its own length prefix (a retail data artifact), rendered
+      verbatim. The decoder walks defensively (bounds-checks every length prefix,
+      caps counts at 4096) so a malformed live frame flags instead of throwing. Files:
+      Records/ClientChatListRecord.cs + 1 registry line. capture3-records.txt
+      109->112 frames (friends_11 #1235, friends_11_two_stations #13683, friends_12
+      #16165); 4 tests (names/sectors render, two-named-stations, 12-entry adds Jedda,
+      every-frame-walks-to-exact-length-only-LE proof); full UnitTests suite 605 green.
+      CLI decode-only.
 - [ ] 0x98 GALAXY_MAP_REQUEST -- DEFERRED. 64-byte request body, but
       Player::HandleGalaxyMapRequest() takes NO data argument and just replies
       SendOpcode(GALAXY_MAP_CACHE, 0, 0) -- the server discards the entire request
@@ -1835,15 +1860,15 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       0x12/0x13/0x14, batch-8 0x46, batch-9 0x21/0x22, batch-10 0x27, batch-11 0x9B,
       batch-12 0x1F, batch-13 0xA3, batch-14 0x44, batch-15 0x28, batch-16 0x9F,
       batch-17 0xA0, batch-18 0x55, batch-19 0x7C, batch-20 0x35, batch-21 0x1A,
-      batch-22 0x06, batch-23 0x02, batch-24 0x7E, batch-25 0x4E, batch-26 0x58
+      batch-22 0x06, batch-23 0x02, batch-24 0x7E, batch-25 0x4E, batch-26 0x58,
+      batch-27 0xA4
       (0x64/0x6A/0x20/0x66 already had decoders). The "single-digit long tail" note
       written after batch-9 was WRONG -- a re-tally proved several mid-frequency
-      opcodes still fall through. The registry now decodes 85 opcodes. A fresh
+      opcodes still fall through. The registry now decodes 86 opcodes. A fresh
       capture_3 tally (zero-padded, cross-referenced against the registry) gives the
       accurate undecoded remainder, highest first:
-        - 0xA4                       (6)   -- NEXT
-        - then a 1-2 frame singleton tail (0xBD/0x79/0x5F/0x5D/0xBF/0xBE/0xBC/0xB9/
-          0x87/0x5E/0x33 ...) -- genuine diminishing returns, decode opportunistically.
+        - a 1-2 frame singleton tail (0xBD/0x79/0x5F/0x5D/0xBF/0xBE/0xBC/0xB9/
+          0x87/0x5E/0x33 ...) -- NEXT; genuine diminishing returns, decode opportunistically.
       0x98 examined and DEFERRED (server discards the request body -- no parser to
       ground a decode; see below).
       Each must be grounded in its server emitter/parser for byte order before

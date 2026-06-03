@@ -96,6 +96,7 @@ public static class PacketRecordRegistry
             0x009F => new StarbaseRoomChangeRecord(payload, 0x009F),
             0x00A0 => new StarbaseRoomChangeRecord(payload, 0x00A0),
             0x00A3 => new ClientChatRequestRecord(payload),
+            0x00A4 => new ClientChatListRecord(payload),
             0x00A5 => new ClientChatEventRecord(payload),
             0x00B2 => new NameDecalRecord(payload),
             0x00B4 => new SubpartsRecord(payload),

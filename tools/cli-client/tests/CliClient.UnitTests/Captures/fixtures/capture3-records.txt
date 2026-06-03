@@ -1093,3 +1093,76 @@ provenance: SkillAbility 0x58 (client->server) -- GameID 3854004 (0x003ACEB4), A
 opcode: 0x58
 payload-bytes: 12
 hex: b4 ce 3a 00 00 00 00 00 2c 00 00 00
+
+[chatlist_friends_11]
+provenance: CLIENT_CHAT_LIST 0x00A4 (server->client) -- a CHAT_LIST_FRIENDS list (ListType 0, PacketStructures.h:683) with an empty channel. Variable length, ALL LITTLE-ENDIAN. Built by Player::SendClientChatList (PlayerConnection.cpp:4645) via AddData<long> (raw int32 LE, no flip) for ListType/NameCount/SectorCount and AddDataLS (int16 LE strlen prefix + raw bytes, no NUL, server/src/PacketMethods.h) for the channel and each name/sector. For a FRIENDS list (Player::ListFriends, PlayerMisc.cpp:1442) names[i] is a friend and sectors[i] is that friend's sector name or "offline". The last sector string carries a trailing '*' inside its own length prefix (a retail data artifact), rendered verbatim. The whole frame walks to exactly the declared payload under LE, which pins the byte order. Source: capture_3.rar packet #1235, Server->Client, 159.153.232.44:3029. 11 names, 11 sectors; last sector "Glory's Orbit (Beta Hydri System)*".
+opcode: 0x00A4
+payload-bytes: 266
+hex:
+00 00 00 00 00 00 0b 00 00 00 0a 00 49 6d 6d 61
+6e 75 65 6c 69 69 07 00 4c 69 6c 77 6f 6c 66 07
+00 54 6f 79 73 72 75 73 06 00 4c 61 79 61 6f 6e
+07 00 4d 61 63 72 6f 6c 65 0a 00 42 69 67 62 61
+64 77 6f 6c 66 0c 00 53 6f 6d 65 62 6f 64 79 65
+6c 73 65 07 00 41 6c 63 79 6f 6e 65 08 00 43 61
+70 61 63 69 74 79 02 00 51 61 07 00 53 6f 6d 65
+6f 6e 65 0b 00 00 00 07 00 6f 66 66 6c 69 6e 65
+07 00 6f 66 66 6c 69 6e 65 1c 00 46 72 69 65 6e
+64 73 68 69 70 20 37 20 52 65 63 72 65 61 74 69
+6f 6e 20 50 6f 72 74 07 00 6f 66 66 6c 69 6e 65
+07 00 6f 66 66 6c 69 6e 65 07 00 6f 66 66 6c 69
+6e 65 07 00 6f 66 66 6c 69 6e 65 07 00 6f 66 66
+6c 69 6e 65 07 00 6f 66 66 6c 69 6e 65 07 00 6f
+66 66 6c 69 6e 65 22 00 47 6c 6f 72 79 27 73 20
+4f 72 62 69 74 20 28 42 65 74 61 20 48 79 64 72
+69 20 53 79 73 74 65 6d 29 2a
+
+[chatlist_friends_11_two_stations]
+provenance: CLIENT_CHAT_LIST 0x00A4 (server->client) -- a CHAT_LIST_FRIENDS list (ListType 0, PacketStructures.h:683) with an empty channel. Variable length, ALL LITTLE-ENDIAN. Built by Player::SendClientChatList (PlayerConnection.cpp:4645) via AddData<long> (raw int32 LE, no flip) for ListType/NameCount/SectorCount and AddDataLS (int16 LE strlen prefix + raw bytes, no NUL, server/src/PacketMethods.h) for the channel and each name/sector. For a FRIENDS list (Player::ListFriends, PlayerMisc.cpp:1442) names[i] is a friend and sectors[i] is that friend's sector name or "offline". The last sector string carries a trailing '*' inside its own length prefix (a retail data artifact), rendered verbatim. The whole frame walks to exactly the declared payload under LE, which pins the byte order. Source: capture_3.rar packet #13683, Server->Client, 159.153.232.99:3367. 11 names, 11 sectors; two friends in "Friendship 7 Recreation Port", last "Slayton Sector (Beta Hydri System)*".
+opcode: 0x00A4
+payload-bytes: 288
+hex:
+00 00 00 00 00 00 0b 00 00 00 0a 00 49 6d 6d 61
+6e 75 65 6c 69 69 07 00 4c 69 6c 77 6f 6c 66 07
+00 54 6f 79 73 72 75 73 06 00 4c 61 79 61 6f 6e
+07 00 4d 61 63 72 6f 6c 65 0a 00 42 69 67 62 61
+64 77 6f 6c 66 0c 00 53 6f 6d 65 62 6f 64 79 65
+6c 73 65 07 00 41 6c 63 79 6f 6e 65 08 00 43 61
+70 61 63 69 74 79 02 00 51 61 07 00 53 6f 6d 65
+6f 6e 65 0b 00 00 00 07 00 6f 66 66 6c 69 6e 65
+07 00 6f 66 66 6c 69 6e 65 07 00 6f 66 66 6c 69
+6e 65 07 00 6f 66 66 6c 69 6e 65 07 00 6f 66 66
+6c 69 6e 65 07 00 6f 66 66 6c 69 6e 65 07 00 6f
+66 66 6c 69 6e 65 1c 00 46 72 69 65 6e 64 73 68
+69 70 20 37 20 52 65 63 72 65 61 74 69 6f 6e 20
+50 6f 72 74 1c 00 46 72 69 65 6e 64 73 68 69 70
+20 37 20 52 65 63 72 65 61 74 69 6f 6e 20 50 6f
+72 74 07 00 6f 66 66 6c 69 6e 65 23 00 53 6c 61
+79 74 6f 6e 20 53 65 63 74 6f 72 20 28 42 65 74
+61 20 48 79 64 72 69 20 53 79 73 74 65 6d 29 2a
+
+[chatlist_friends_12]
+provenance: CLIENT_CHAT_LIST 0x00A4 (server->client) -- a CHAT_LIST_FRIENDS list (ListType 0, PacketStructures.h:683) with an empty channel. Variable length, ALL LITTLE-ENDIAN. Built by Player::SendClientChatList (PlayerConnection.cpp:4645) via AddData<long> (raw int32 LE, no flip) for ListType/NameCount/SectorCount and AddDataLS (int16 LE strlen prefix + raw bytes, no NUL, server/src/PacketMethods.h) for the channel and each name/sector. For a FRIENDS list (Player::ListFriends, PlayerMisc.cpp:1442) names[i] is a friend and sectors[i] is that friend's sector name or "offline". The last sector string carries a trailing '*' inside its own length prefix (a retail data artifact), rendered verbatim. The whole frame walks to exactly the declared payload under LE, which pins the byte order. Source: capture_3.rar packet #16165, Server->Client, 159.153.232.46:3387. 12 names (adds "Jedda"), 12 sectors; last two named "Glenn Sector (Beta Hydri System)" and "Carpenter Sector (Beta Hydri System)*".
+opcode: 0x00A4
+payload-bytes: 310
+hex:
+00 00 00 00 00 00 0c 00 00 00 0a 00 49 6d 6d 61
+6e 75 65 6c 69 69 07 00 4c 69 6c 77 6f 6c 66 07
+00 54 6f 79 73 72 75 73 06 00 4c 61 79 61 6f 6e
+07 00 4d 61 63 72 6f 6c 65 0a 00 42 69 67 62 61
+64 77 6f 6c 66 0c 00 53 6f 6d 65 62 6f 64 79 65
+6c 73 65 07 00 41 6c 63 79 6f 6e 65 08 00 43 61
+70 61 63 69 74 79 02 00 51 61 05 00 4a 65 64 64
+61 07 00 53 6f 6d 65 6f 6e 65 0c 00 00 00 07 00
+6f 66 66 6c 69 6e 65 07 00 6f 66 66 6c 69 6e 65
+07 00 6f 66 66 6c 69 6e 65 07 00 6f 66 66 6c 69
+6e 65 07 00 6f 66 66 6c 69 6e 65 07 00 6f 66 66
+6c 69 6e 65 07 00 6f 66 66 6c 69 6e 65 1c 00 46
+72 69 65 6e 64 73 68 69 70 20 37 20 52 65 63 72
+65 61 74 69 6f 6e 20 50 6f 72 74 07 00 6f 66 66
+6c 69 6e 65 07 00 6f 66 66 6c 69 6e 65 20 00 47
+6c 65 6e 6e 20 53 65 63 74 6f 72 20 28 42 65 74
+61 20 48 79 64 72 69 20 53 79 73 74 65 6d 29 25
+00 43 61 72 70 65 6e 74 65 72 20 53 65 63 74 6f
+72 20 28 42 65 74 61 20 48 79 64 72 69 20 53 79
+73 74 65 6d 29 2a
