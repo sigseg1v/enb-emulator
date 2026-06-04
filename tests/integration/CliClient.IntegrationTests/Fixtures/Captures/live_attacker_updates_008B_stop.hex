@@ -1,0 +1,13 @@
+# 0x008B ATTACKER_UPDATES -- server->client, 9 bytes FIXED. Mob STOPS attacking.
+#
+# Source: live Net-7 reference server 216.219.87.147:3573 (sector), cleartext
+# proxy<->server UDP leg, Combat capture frame #26 (reassembled inner frame;
+# see plans/33 AF-7).
+#
+# Decode (AttackerUpdatesRecord + server PlayerConnection.cpp:3604-3620):
+#   @0 Update 0            (00 00 00 00, little-endian -- 0 = stop attacking)
+#   @4 Fixed  0x01
+#   @5 MobId  0x000186F5   <- BIG-ENDIAN on the wire (00 01 86 F5). The SAME mob
+#                             is the 0x000B/0x000E/0x0064 target 0x000186F5
+#                             (little-endian) -- proving MobId here is byte-swapped.
+00 00 00 00 01 00 01 86 F5

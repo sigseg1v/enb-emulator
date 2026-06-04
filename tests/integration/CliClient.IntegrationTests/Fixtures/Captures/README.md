@@ -43,3 +43,16 @@ below are committed. Pinned by `LiveReferenceFabricationTests`.
 | `live_tractor_ore_2013_californium.hex` | ProspectRun #251 | 0x2013 TRACTOR_ORE | variable-len pin, 15-byte name |
 | `live_loot_item_2014_craxelhide.hex` | KillLoot2 #91 | 0x2014 LOOT_ITEM | variable-len pin, 11-byte name |
 | `live_loot_item_2014_juuona.hex` | KillLoot2 #99 | 0x2014 LOOT_ITEM | variable-len pin, 20-byte name |
+| `live_client_damage_0064_dealt.hex` | Combat #16 | 0x0064 CLIENT_DAMAGE | 24B; player @16 source (deals) |
+| `live_client_damage_0064_received.hex` | KillLoot2 #3 | 0x0064 CLIENT_DAMAGE | 24B; player @20 target (receives) |
+| `live_object_effect_000B_weapon.hex` | Combat #4 | 0x000B OBJECT_TO_OBJECT_EFFECT | 35B string form, "~02/~WEAP_02" |
+| `live_object_linked_effect_000E.hex` | Combat #14 | 0x000E OBJECT_TO_OBJECT_LINKED_EFFECT | 58B fixed |
+| `live_attacker_updates_008B_start.hex` | SkillTraining | 0x008B ATTACKER_UPDATES | 9B; **MobId big-endian** (start) |
+| `live_attacker_updates_008B_stop.hex` | Combat #26 | 0x008B ATTACKER_UPDATES | 9B; **MobId big-endian** (stop) |
+| `live_talktree_0054_vendor.hex` | VendorInvEco #1 | 0x0054 TALK_TREE | 166B vendor dialog + branches |
+| `live_talktreeaction_0056.hex` | VendorInvEco #2 | 0x0056 TALK_TREE_ACTION | 4B |
+| `live_clientsound_006A_coin.hex` | KillLoot2 #16 | 0x006A CLIENT_SOUND | coin.wav |
+| `live_clientsettime_0034.hex` | SingleGateJump #25 | 0x0034 CLIENT_SET_TIME | 12B; +0 tick (Z-4 data point) |
+| `live_serverhandoff_003A.hex` | SingleGateJump #45 | 0x003A SERVER_HANDOFF | 112B; ticket + sector/system names |
+| `live_galaxymap_0097.hex` | SingleGateJump #49 | 0x0097 GALAXY_MAP | 31B |
+| `live_warpindex_009C.hex` | SingleGateJump #2 | 0x009C WARP_INDEX | 4B; -1 |

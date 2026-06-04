@@ -1,0 +1,19 @@
+# 0x000B OBJECT_TO_OBJECT_EFFECT -- server->client, 35 bytes (string form). The
+# weapon beam: player 0x4003992A fires WEAP_02 at mob 0x000186F5.
+#
+# Source: live Net-7 reference server 216.219.87.147:3573 (sector), cleartext
+# proxy<->server UDP leg, Combat capture frame #4 (reassembled inner frame;
+# see plans/33 AF-7).
+#
+# Decode (ObjectToObjectEffectRecord), all little-endian:
+#   @0  Bitmask      0x0007  (EffectID|TimeStamp|Duration present)
+#   @2  GameID       0x4003992A   (firing player)
+#   @6  TargetID     0x000186F5   (mob)
+#   @A  EffectDescID 0x0372
+#   @C  Message      "~02/~WEAP_02\0"  (variable, NUL-terminated)
+#   @19 EffectID     0x0025416E   (dynamic sector-counter UID)
+#   @1D TimeStamp    0x51439E61
+#   @21 Duration     4692
+07 00 2A 99 03 40 F5 86 01 00 72 03 7E 30 32 2F
+7E 57 45 41 50 5F 30 32 00 6E 41 25 00 61 9E 43
+51 54 12

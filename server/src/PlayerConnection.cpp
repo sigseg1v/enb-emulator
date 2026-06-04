@@ -3613,8 +3613,21 @@ void Player::SendAttackerUpdates(long mob_id, long update)
 	// Phase K Wave 12: attacker_data is a 9-byte buffer (4B update + 1B + 4B
 	// mob_id). The original wrote 8B at offset 5 which would have run off the
 	// end on Linux; pin both slots to 4B.
+	//
+	// Phase AF (plans/33 AF-7): mob_id goes on the wire BIG-ENDIAN. The live
+	// Net-7 reference server (216.219.87.147, Combat capture frame #26 and the
+	// Ishuan/SkillTraining/KillLoot2 captures) emits e.g. mob 0x000186F5 as the
+	// bytes 00 01 86 F5 -- the same mob the 0x000B/0x000E/0x0064 frames report
+	// little-endian. Writing mob_id host-order (LE on x86) handed the real
+	// client a byte-reversed attacker id (a Trap-1 defect; see CLAUDE.md "Wire
+	// format & byte order"). htonl matches the reference, consistent with the
+	// existing htonl'd playerid in the recustomize-avatar opcodes above. The
+	// update field stays host-order (the reference emits it little-endian).
+	// Primary source: Combat-...-20260604-072157.pcapng frame #26. CLI pin:
+	// LiveReferenceCombatTests.AttackerUpdates_0x008B_MobIdIsBigEndian.
+	// Real-client check: plans/29 CV-08.
 	*((int32_t *) &attacker_data[0]) = update;
-	*((int32_t *) &attacker_data[5]) = mob_id;
+	*((int32_t *) &attacker_data[5]) = htonl(mob_id);
 
 	SendOpcode(ENB_OPCODE_008B_ATTACKER_UPDATES, attacker_data, sizeof(attacker_data));
 }

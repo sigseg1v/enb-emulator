@@ -72,10 +72,10 @@ The records were already correct; only the scratch note was mislabeled.
 
 | Opcode | Name | Layout (observed) | Status |
 |---|---|---|---|
-| 0x000B | OBJECT_TO_OBJECT_EFFECT (string form) | u16(0x0007), src@2, effectDesc@6, u16(0x0035), cstr "~02/~WEAP_0N" (N=1/2/3 = hardpoint), target, timestamp, u16 trailing -- 35B. This is PLAYER WEAPON FIRE (rockets at the enemy in the kill step), distinct from the numeric-EffectDescID form the proxy fabricates from 0x2012. Frame order proves it: 0x000B fall AFTER all mine/tractor cycles and interleave with 0x0064 damage. | `[banked]` (Z-8 dual-emitter context) |
+| 0x000B | OBJECT_TO_OBJECT_EFFECT (string form) | 35B: Bitmask@0(0x0007), GameID@2, TargetID@6, EffectDescID@A, cstr "~02/~WEAP_0N"@C (N=hardpoint), EffectID@19, TimeStamp@1D, Duration@21. PLAYER WEAPON FIRE, distinct from the numeric-EffectDescID form the proxy fabricates from 0x2012. Frame order proves it: 0x000B fall AFTER all mine/tractor cycles and interleave with 0x0064 damage. | `[pinned]` Combat #4 |
 | 0x0064 | CLIENT_DAMAGE | 24B: Damage@0(f), Modifier@4(f), Type@8, Inflicted@12, SourceId@16, TargetId@20 -- @16/@20 are BOTH entity GameIDs (the player's own id flips @16<->@20 by damage direction). The earlier "@20 is a weapon effectDesc" suspicion was wrong: the non-player id is just in the static 0x00018xxx band. | `[pinned]` dealt (Combat #16) + received (KillLoot2 #3) |
-| 0x000E | OBJECT_TO_OBJECT_LINKED_EFFECT | 58B projectile/munition | `[banked]` |
-| 0x008B | ATTACKER_UPDATES | 9B effect/buff state; tail matches an effectDesc | `[banked]` |
+| 0x000E | OBJECT_TO_OBJECT_LINKED_EFFECT | 58B: ObjectID@0, TimeStamp@4, SourceID@8, TargetID@D, LinkedEffectDescID@11, EffectDescID@13, TargetOffset@15, Scale@26(f), HSVShift@2A, Speedup@36(f). All little-endian. | `[pinned]` Combat #14 |
+| 0x008B | ATTACKER_UPDATES | 9B: Update@0(LE; 0=stop,1=start), Fixed@4(0x01), **MobId@5 BIG-ENDIAN**. Trap-1 defect: record + server both read/wrote LE -> byte-reversed attacker id to the client. Fixed (CLI `ReadI32BE`; server `htonl(mob_id)`); plans/29 CV-08. | `[pinned]` start (SkillTraining) + stop (Combat #26) |
 | 0x008C | LOOT_HULK_PERMISSION | (KillLoot2) | `[banked]` |
 | 0x006A | sound trigger | carries a wav name (e.g. "coin.wav") | `[banked]` |
 
@@ -107,8 +107,16 @@ The records were already correct; only the scratch note was mislabeled.
       (`LiveReferenceFabricationTests`, 5 fixtures, ProspectRun/KillLoot2 frames). 5/5 green.
 - [x] AF-6 Fix the pre-existing integration build break (`SectorMvasMoveTests.cs` method-group
       `onInbound: world.Ingest` broke when 5c991f84 changed `Ingest`'s return type -> wrapped in a lambda)
-- [~] AF-7 Bank -> pin combat band. 0x0064 DONE (see AF-8). 0x000B string form / 0x000E / 0x008B
-      still banked-only (decode table above); their live-render confirmation shares the AD-66 / #66 harness
+- [x] AF-7 Pin combat band. 0x0064 DONE (see AF-8). 0x000B (35B string form) + 0x000E pinned clean
+      (`LiveReferenceCombatTests`); both decode the live Combat frames with full byte coverage, no
+      code change. **0x008B ATTACKER_UPDATES: real Trap-1 defect found + fixed.** The reference emits
+      the mob id BIG-ENDIAN (`00 01 86 F5` = 0x000186F5), but `AttackerUpdatesRecord` AND the server
+      (`SendAttackerUpdates`) both read/wrote it little-endian -- the server was handing the real client
+      a byte-reversed attacker id. Cross-corroborated: the `00 01 87 EC` mob is the SAME 0x000187EC the
+      0x0064 frames carry little-endian. Fixed CLI record (`ReadI32BE`) + pinned both start/stop frames
+      first, then fixed the server (`htonl(mob_id)`, consistent with the existing htonl'd recustomize
+      playerid). Server change cites Combat frame #26; real-client check = plans/29 CV-08. Docker server
+      build green. (This is exactly the AD-66 / #66 combat-band byte-pin -- done here, not deferred.)
 - [x] AF-8 Verify `ClientDamageRecord` 0x0064 @16/@20. **Result: NO mislabel -- record is correct.**
       The server emitter (PlayerConnection.cpp:4563-4573) passes (source_id, target_id), both entity
       GameIDs. Live frames prove it: the player's own GameID sits at @16 when dealing and @20 when
@@ -133,7 +141,8 @@ The records were already correct; only the scratch note was mislabeled.
   the format is proven. What remains for those is the real-client (client.exe)
   confirmation that the proxy's *fabricated* client-facing expansion renders
   correctly -- still a CV-gate entry in plans/29, NOT a format unknown.
-- **Combat 0x000B string form** feeds the Z-8 dual-emitter note (plans/26) and
-  AD-66 / #66 live 0x000B beam pin.
+- **Combat 0x000B string form** feeds the Z-8 dual-emitter note (plans/26); now
+  byte-pinned here (Combat #4), which satisfies the AD-66 / #66 live 0x000B beam
+  pin.
 - Sourcing stays neutral (clean-room stream observation + committed decoded
   frames); no `.pcapng` is ever committed.

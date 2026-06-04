@@ -1,0 +1,25 @@
+# 0x000E OBJECT_TO_OBJECT_LINKED_EFFECT -- server->client, 58 bytes FIXED. A
+# linked weapon effect from player 0x4003992A to mob 0x000186F5.
+#
+# Source: live Net-7 reference server 216.219.87.147:3573 (sector), cleartext
+# proxy<->server UDP leg, Combat capture frame #14 (reassembled inner frame;
+# see plans/33 AF-7).
+#
+# Decode (ObjectToObjectLinkedEffectRecord), all little-endian:
+#   @0  ObjectID           0x0025417A   (dynamic sector-counter UID)
+#   @4  TimeStamp          0x5143ADC2
+#   @8  SourceID           0x4003992A   (firing player)
+#   @C  Spacer             0
+#   @D  TargetID           0x000186F5   (mob)
+#   @11 LinkedEffectDescID 33
+#   @13 EffectDescID       3
+#   @15 TargetOffset       (0,0,0)
+#   @21 Unknown            0
+#   @25 OutsideTargetRadius 1
+#   @26 Scale              1.0
+#   @2A HSVShift           (0,0,0)
+#   @36 Speedup            2.0
+7A 41 25 00 C2 AD 43 51 2A 99 03 40 00 F5 86 01
+00 21 00 03 00 00 00 00 00 00 00 00 00 00 00 00
+00 00 00 00 00 01 00 00 80 3F 00 00 00 00 00 00
+00 00 00 00 00 00 00 00 00 40

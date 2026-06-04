@@ -257,3 +257,36 @@ format & byte order", Trap 2).
   planet is missing while navs show, which was the aliasing signature).
 - **Setup**: `just rebuild server && just play-local`, undock into Luna space,
   repeat 3+ times.
+
+### [ ] CV-08 -- 0x008B ATTACKER_UPDATES mob id is big-endian on the wire
+
+- **Change (implemented)**: `Player::SendAttackerUpdates`
+  (`server/src/PlayerConnection.cpp:3604-3620`) now writes `mob_id` with
+  `htonl` (`*((int32_t*)&attacker_data[5]) = htonl(mob_id)`) instead of
+  host-order. The `update` field stays host-order (little-endian).
+- **Root cause**: the 9-byte 0x008B payload is `update(4 LE) + 0x01 + mob_id(4)`.
+  We were writing `mob_id` host-order (LE on x86), so the real client received
+  a byte-reversed attacker id, looked it up in its object pool, got NULL, and
+  could fault on the next dispatch -- the classic Trap-1 (CLAUDE.md "Wire
+  format & byte order").
+- **Primary source**: live Net-7 reference server 216.219.87.147:3573,
+  cleartext proxy<->server UDP leg, `Combat-...-20260604-072157.pcapng`
+  frame #26 emits mob 0x000186F5 as the trailing bytes `00 01 86 F5`
+  (big-endian). The Ishuan / SkillTrainingHostileDevice2 / KillLoot2 captures
+  show the same big-endian form for many distinct mobs (00 01 8x xx), and the
+  one at `00 01 87 EC` is the SAME mob the 0x0064 CLIENT_DAMAGE frames report
+  little-endian as source 0x000187EC -- independent cross-corroboration. This
+  matches the existing `htonl(playerid)` in the 0x0083/0x0081 recustomize
+  opcodes (same file, ~line 10028).
+- **CLI proof**: `LiveReferenceCombatTests.AttackerUpdates_0x008B_MobIdIsBigEndian`
+  byte-pins both the start (update=1, mob 0x000187EC) and stop (update=0, mob
+  0x000186F5) frames from the live captures, asserting MobId decodes only when
+  read big-endian (and explicitly NOT little-endian). `AttackerUpdatesRecord`
+  was fixed to read MobId via `ReadI32BE` in the same change.
+- **What to look for (play-local / real client)**: pull aggro from a mob; the
+  attacker indicator / "being attacked by" UI must reference the correct mob
+  (and clear when it disengages). Before the fix the client saw a garbage
+  attacker id -- watch for a crash or a phantom/absent attacker marker on the
+  first hostile in a sector.
+- **Setup**: `just rebuild server && just play-local`, undock, let a mob start
+  and stop attacking.
