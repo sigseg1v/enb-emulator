@@ -83,19 +83,19 @@ The records were already correct; only the scratch note was mislabeled.
 
 | Opcode | Name | Layout (observed) | Status |
 |---|---|---|---|
-| 0x0054 | vendor dialog | NPC dialog text + buttons | `[banked]` |
-| 0x0056 | dialog state | u32 state | `[banked]` |
-| 0x006A | sound | coin.wav etc on purchase | `[banked]` |
-| 0x0027 | INVENTORY_MOVE | 36B client->server request, BE-looking 00 00 00 NN fields; drives prospect/tractor/loot | `[banked]` |
+| 0x0054 | TALK_TREE | MainText (cstr) + NumBranches + per-branch (u32 dest + cstr text) | `[pinned]` VendorInvEco #1 |
+| 0x0056 | TALK_TREE_ACTION | u32 Action (dialog state) | `[pinned]` VendorInvEco #2 |
+| 0x006A | CLIENT_SOUND | Length@0, SoundName@4 (cstr), Channel, Queue -- "coin.wav" on purchase | `[pinned]` VendorInvEco #16 |
+| 0x0027 | INVENTORY_MOVE | 36B client->server request, BE-looking 00 00 00 NN fields; drives prospect/tractor/loot | `[banked]` (client->server) |
 
 ### Gate-jump band (SingleGateJump :3573 -> :3569)
 
 | Opcode | Name | Layout (observed) | Status |
 |---|---|---|---|
-| 0x003A | SERVER_HANDOFF | 112B; dest sector id (BE), "MY_Avatar_Ticket", "Ishuan (Castor System)", system + adjacent nav names | `[banked]` |
-| 0x009C | WARP_INDEX | -1 = FF FF FF FF (arrival AND boundary-interrupt both send -1) | `[verified]` (WarpIndexRecord; AE narration) |
-| 0x0034 | gate-cache | u32 id + 2x timestamp, 12B | `[banked]` |
-| 0x0097 | GALAXY_MAP | adjacency | `[verified]` (GalaxyMapRecord) |
+| 0x003A | SERVER_HANDOFF | 112B; AvatarIdLsb, ToSectorID (BE), FromSectorID (BE), "MY_Avatar_Ticket", from/to sector+system names | `[pinned]` SingleGateJump #45 |
+| 0x009C | WARP_INDEX | -1 = FF FF FF FF (arrival AND boundary-interrupt both send -1) | `[pinned]` SingleGateJump #2 |
+| 0x0034 | CLIENT_SET_TIME | ClientSent@0, ServerReceived@4, ServerSent@8 -- time-sync ping, 12B (NOT gate-cache; my first note was wrong). ServerReceived==ServerSent (+0 tick) in live. | `[pinned]` SingleGateJump #25 |
+| 0x0097 | GALAXY_MAP | Type 4 map update: PlayerID + system/sector/station names | `[pinned]` SingleGateJump #49 |
 
 ## Checklist
 
@@ -116,8 +116,14 @@ The records were already correct; only the scratch note was mislabeled.
       0x00018xxx band, which I'd misread as an "effectDesc"). Pinned both directions:
       `live_client_damage_0064_dealt.hex` (Combat #16) + `live_client_damage_0064_received.hex`
       (KillLoot2 #3), `LiveReferenceFabricationTests` 7/7 green. No code change.
-- [ ] AF-9 Bank -> pin vendor band (0x0054 dialog / 0x0056 / 0x006A sound) + the 0x0027 request family
-- [ ] AF-10 Bank -> pin gate-jump band (0x003A handoff, 0x0034 gate-cache, 0x0097)
+- [x] AF-9 Pin vendor band: 0x0054 TALK_TREE (vendor dialog + branches), 0x0056 TALK_TREE_ACTION,
+      0x006A CLIENT_SOUND (coin.wav). All existing records decode the live frames with full byte
+      coverage. `LiveReferenceDialogGateTests`. (0x0027 request family deferred -- it's client->server.)
+- [x] AF-10 Pin gate-jump band: 0x003A SERVER_HANDOFF (112B, ticket + sector/system names),
+      0x0034 CLIENT_SET_TIME, 0x0097 GALAXY_MAP, 0x009C WARP_INDEX. All clean. `LiveReferenceDialogGateTests`.
+      **Z-4 data point:** 0x0034 ServerReceived == ServerSent (+0 tick) in every live frame -- the live
+      reference AGREES with our server's "equal" emit, contradicting the plans/26 Z-4 "retail +1 tick"
+      note. Surface to Phase Z; do not change anything (our behaviour is already reference-correct here).
 
 ## Relationship to other phases
 

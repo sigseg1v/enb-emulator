@@ -1,0 +1,4 @@
+# 0x0056 TALK_TREE_ACTION -- server->client dialog state. u32 Action.
+# Source: live Net-7 reference server 216.219.87.147:3636, VendorInvEco frame #2.
+# Decode (matches TalkTreeActionRecord): Action@0 = 6.
+06 00 00 00

@@ -1,0 +1,5 @@
+# 0x006A CLIENT_SOUND -- server->client sound trigger.
+# Source: live Net-7 reference server 216.219.87.147:3636, VendorInvEco frame #16
+# (the coin "cha-ching" on a vendor purchase). Decode (matches ClientSoundRecord):
+# Length@0=9, SoundName@4="coin.wav" (cstr), Channel@0D=0, Queue@11=0.
+09 00 00 00 63 6F 69 6E 2E 77 61 76 00 00 00 00 00 00

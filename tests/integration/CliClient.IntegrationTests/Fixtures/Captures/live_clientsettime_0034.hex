@@ -1,0 +1,7 @@
+# 0x0034 CLIENT_SET_TIME -- server->client time-sync ping. 12 bytes.
+# Source: live Net-7 reference server 216.219.87.147:3573, SingleGateJump frame #25.
+# Decode (matches ClientSetTimeRecord): ClientSent@0=0x00118304,
+# ServerReceived@4=0x51529FB0, ServerSent@8=0x51529FB0. NOTE: ServerReceived ==
+# ServerSent (+0 tick) here -- the live reference AGREES with our server's "equal"
+# emit, contradicting the Phase Z Z-4 "retail +1 tick" note (see plans/33).
+04 83 11 00 B0 9F 52 51 B0 9F 52 51

@@ -1,0 +1,16 @@
+# 0x0054 TALK_TREE -- server->client vendor/NPC dialog. Main text + branches.
+# Source: live Net-7 reference server 216.219.87.147:3636 (starbase), cleartext
+# proxy<->server UDP leg, VendorInvEco capture frame #1 (see plans/33).
+# Decode (matches TalkTreeRecord): MainText (cstr) then NumBranches@008B=2, each
+# branch = u32 Dest + cstr Text. Branch0 -> dest 2 "Trade!", Branch1 -> 3 "No Thanks!".
+2F 73 61 6C 75 74 65 20 47 72 65 65 74 69 6E 67
+73 21 20 53 74 61 72 73 74 72 75 6B 6B 2E 20 59
+6F 75 20 61 72 65 20 6D 6F 73 74 20 77 65 6C 63
+6F 6D 65 20 61 74 20 6D 79 20 62 6F 6F 74 68 2C
+20 77 68 79 20 64 6F 6E 27 74 20 79 6F 75 20 63
+6F 6D 65 20 69 6E 20 61 6E 64 20 68 61 67 67 6C
+65 20 6F 76 65 72 20 6D 79 20 74 72 61 64 65 20
+67 6F 6F 64 73 3F 20 4C 65 74 27 73 20 6D 61 6B
+65 20 61 20 64 65 61 6C 21 00 00 02 02 00 00 00
+54 72 61 64 65 21 00 03 00 00 00 4E 6F 20 54 68
+61 6E 6B 73 21 00
