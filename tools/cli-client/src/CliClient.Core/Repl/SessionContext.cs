@@ -151,6 +151,22 @@ public sealed class SessionContext : IAsyncDisposable
     /// </summary>
     public SectorWorld World { get; } = new();
 
+    /// <summary>
+    /// Turns the world-model events + select inbound opcodes into one-line
+    /// human notices (scanner contacts, damage, warp, sector load, system
+    /// messages). Reads <see cref="GameId"/> for the "is this me?" checks.
+    /// </summary>
+    private EventNarrator Narrator => _narrator ??= new EventNarrator(World, () => GameId);
+    private EventNarrator? _narrator;
+
+    /// <summary>
+    /// When true (the default), inbound frames are narrated as one-line notices
+    /// (e.g. "Mob (L17, hostile, Mbonae) appeared in scanner range, d=...").
+    /// Independent of <see cref="DumpEnabled"/>; toggled by the
+    /// <c>narrate-on</c> / <c>narrate-off</c> REPL commands.
+    /// </summary>
+    public bool NarrateEnabled { get; set; } = true;
+
     // ---------- dump-on / dump-off live tail state ----------
 
     /// <summary>
@@ -440,11 +456,36 @@ public sealed class SessionContext : IAsyncDisposable
 
     private void OnPacketReceived(Packet p)
     {
-        World.Ingest(p);
+        var events = World.Ingest(p);
         EchoChat(p, PacketDirection.Inbound);
+        Narrate(p, events);
         AnnounceGroupInvite(p);
         CaptureHandoff(p);
         PrintIfEnabled(p, PacketDirection.Inbound);
+    }
+
+    /// <summary>
+    /// Emit the human-readable notices for an inbound frame (scanner contacts,
+    /// damage, warp, sector load, system messages) above the live prompt, the
+    /// same way chat echo does. Gated by <see cref="NarrateEnabled"/>. Never
+    /// throws -- a notice is a convenience, never a failure point.
+    /// </summary>
+    private void Narrate(Packet p, IReadOnlyList<WorldEvent> events)
+    {
+        if (!NarrateEnabled) return;
+        try
+        {
+            foreach (var line in Narrator.Narrate(p, events))
+            {
+                lock (_chatGate)
+                {
+                    if (LivePrompt is { } lp && lp.TryWriteLineAbove(line)) continue;
+                    ChatOutput.WriteLine(line);
+                    ChatOutput.Flush();
+                }
+            }
+        }
+        catch { /* best-effort notification */ }
     }
 
     private TaskCompletionSource<int>? _handoffTcs;
@@ -536,8 +577,9 @@ public sealed class SessionContext : IAsyncDisposable
     /// </summary>
     public void ReplayInboundFrame(Packet p)
     {
-        World.Ingest(p);
+        var events = World.Ingest(p);
         EchoChat(p, PacketDirection.Inbound);
+        Narrate(p, events);
         PrintIfEnabled(p, PacketDirection.Inbound);
     }
 

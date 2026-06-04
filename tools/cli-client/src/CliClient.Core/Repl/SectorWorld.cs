@@ -27,10 +27,38 @@ namespace N7.CliClient.Repl;
 /// as unknown rather than guessed. Thread-safe: the background sector
 /// drain ingests while the REPL thread renders.
 /// </remarks>
+/// <summary>What happened to a tracked object as a frame was ingested.</summary>
+public enum WorldEventKind
+{
+    /// <summary>An entity first became identifiable (got a name) -- it
+    /// "appeared in scanner range".</summary>
+    Appeared,
+    /// <summary>A previously-announced entity was removed (0x0007).</summary>
+    Departed,
+}
+
+/// <summary>
+/// A semantic change to the sector model, surfaced by <see cref="SectorWorld.Ingest"/>
+/// so the REPL can narrate it. Carries only the kind + game id; the narrator
+/// reads the current model (name/level/reaction/distance) at format time, so a
+/// late-arriving aux/relationship frame is reflected. <see cref="DepartedKind"/>
+/// and <see cref="DepartedName"/> snapshot the entity at REMOVE time because the
+/// model entry is gone by the time the narrator runs.
+/// </summary>
+public readonly record struct WorldEvent(
+    WorldEventKind Kind,
+    int GameId,
+    string? DepartedKind = null,
+    string? DepartedName = null);
+
 public sealed class SectorWorld
 {
     public sealed class Tracked
     {
+        /// <summary>True once an Appeared event has been emitted for this
+        /// entity, so it is announced exactly once even as later frames
+        /// (position/aux/relationship) keep updating it.</summary>
+        public bool Announced;
         public int GameId;
         public int? CreateType;     // server create-type byte (0x0004 / 0x2018)
         public short? BaseAsset;
@@ -72,34 +100,62 @@ public sealed class SectorWorld
         return t;
     }
 
-    /// <summary>Update the model from one inbound frame. Never throws.</summary>
-    public void Ingest(Packet p)
+    private static readonly IReadOnlyList<WorldEvent> NoEvents = Array.Empty<WorldEvent>();
+
+    /// <summary>
+    /// Update the model from one inbound frame and return any semantic events
+    /// (entity appeared / departed) the frame produced, for the REPL to
+    /// narrate. Returns an empty list for frames that change nothing
+    /// announceable. Never throws -- a malformed frame must not kill the drain.
+    /// </summary>
+    public IReadOnlyList<WorldEvent> Ingest(Packet p)
     {
         try
         {
             var s = p.Payload.Span;
+            List<WorldEvent>? events = null;
             lock (_gate)
             {
                 switch (p.Header.Opcode)
                 {
                     case 0x0004: IngestCreate(s); break;
-                    case 0x2018: IngestStatic(s); break;
-                    case 0x0007: IngestRemove(s); break;
+                    case 0x2018: IngestStatic(s, ref events); break;
+                    case 0x0007: IngestRemove(s, ref events); break;
                     case 0x0008: IngestSimplePos(s); break;
                     case 0x0040: IngestConstantPos(s); break;
                     case 0x003E: IngestAdvancedPos(s); break;
                     case 0x003F: IngestPlanetPos(s); break;
-                    case 0x0061: IngestAvatar(s); break;
+                    case 0x0061: IngestAvatar(s, ref events); break;
                     case 0x0099: IngestNavigation(s); break;
-                    case 0x001B: IngestAux(s); break;
+                    case 0x001B: IngestAux(s, ref events); break;
                     case 0x0089: IngestRelationship(s); break;
                 }
             }
+            return (IReadOnlyList<WorldEvent>?)events ?? NoEvents;
         }
         catch
         {
             // Best-effort: a malformed frame must not kill the drain.
+            return NoEvents;
         }
+    }
+
+    /// <summary>
+    /// Emit an Appeared event the first time an entity (player avatar or mob)
+    /// becomes identifiable -- i.e. it has a name. Static scenery (navs,
+    /// stations, planets, deco, resources) is not a "scanner contact" and is
+    /// never announced. Latches via <see cref="Tracked.Announced"/> so a given
+    /// entity announces exactly once even as later frames keep updating it.
+    /// Caller holds <c>_gate</c>.
+    /// </summary>
+    private static void MaybeAnnounce(Tracked t, ref List<WorldEvent>? events)
+    {
+        if (t.Announced) return;
+        if (string.IsNullOrEmpty(t.Name)) return;
+        bool isEntity = t.IsAvatar || t.CreateType is 0 or 1;
+        if (!isEntity) return;
+        t.Announced = true;
+        (events ??= new()).Add(new WorldEvent(WorldEventKind.Appeared, t.GameId));
     }
 
     private void IngestCreate(ReadOnlySpan<byte> s)
@@ -111,7 +167,7 @@ public sealed class SectorWorld
         t.CreateType = (sbyte)s[10];
     }
 
-    private void IngestStatic(ReadOnlySpan<byte> s)
+    private void IngestStatic(ReadOnlySpan<byte> s, ref List<WorldEvent>? events)
     {
         // 0x2018 StaticMap::FormStaticPacket layout: GameID@0, CreateType u8@4,
         // BaseAsset i16@5, Scale@7, HSV@11/15/19, relationship@23, posType@24,
@@ -150,13 +206,22 @@ public sealed class SectorWorld
             if (60 + nameLen <= s.Length)
                 t.Name = Encoding.ASCII.GetString(s.Slice(60, nameLen));
         }
+        // 0x2018 is static content (navs/stations/scenery); MaybeAnnounce
+        // gates on entity-ness so these never produce a scanner-contact line.
+        MaybeAnnounce(t, ref events);
     }
 
-    private void IngestRemove(ReadOnlySpan<byte> s)
+    private void IngestRemove(ReadOnlySpan<byte> s, ref List<WorldEvent>? events)
     {
         if (s.Length < 4) return;
         int gameId = BinaryPrimitives.ReadInt32LittleEndian(s[..4]);
-        _objects.Remove(gameId);
+        if (_objects.TryGetValue(gameId, out var t))
+        {
+            if (t.Announced)
+                (events ??= new()).Add(new WorldEvent(
+                    WorldEventKind.Departed, gameId, TypeName(t), t.Name));
+            _objects.Remove(gameId);
+        }
     }
 
     private void IngestSimplePos(ReadOnlySpan<byte> s)
@@ -204,7 +269,7 @@ public sealed class SectorWorld
             BinaryPrimitives.ReadSingleLittleEndian(s.Slice(16, 4)));
     }
 
-    private void IngestAux(ReadOnlySpan<byte> s)
+    private void IngestAux(ReadOnlySpan<byte> s, ref List<WorldEvent>? events)
     {
         // 0x001B AUX_DATA carries an object's name (and, for ships/mobs, its
         // combat level) in a flag-driven variable-layout body. Reuse the
@@ -218,6 +283,8 @@ public sealed class SectorWorld
         if (a.CombatLevel is { } lvl) t.Level = (int)lvl;
         if (a.MaxSpeed is { } spd && spd > 0) t.MaxSpeed = spd;
         if (!string.IsNullOrEmpty(a.Faction)) t.Faction = a.Faction;
+        // Aux is usually where a mob first gets its name -- the announce point.
+        MaybeAnnounce(t, ref events);
     }
 
     private void IngestRelationship(ReadOnlySpan<byte> s)
@@ -232,7 +299,7 @@ public sealed class SectorWorld
         t.IsAttacking = s[8] != 0;
     }
 
-    private void IngestAvatar(ReadOnlySpan<byte> s)
+    private void IngestAvatar(ReadOnlySpan<byte> s, ref List<WorldEvent>? events)
     {
         if (s.Length < 24) return;
         int avatarId = BinaryPrimitives.ReadInt32LittleEndian(s[..4]);
@@ -243,6 +310,8 @@ public sealed class SectorWorld
         if (nul < 0) nul = nameSpan.Length;
         string name = Encoding.ASCII.GetString(nameSpan[..nul]);
         if (name.Length > 0) t.Name = name;
+        // A player avatar announces here (0x0061 carries the name + avatar flag).
+        MaybeAnnounce(t, ref events);
     }
 
     private void IngestNavigation(ReadOnlySpan<byte> s)
@@ -384,6 +453,28 @@ public sealed class SectorWorld
         lock (_gate)
             return _objects.TryGetValue(gameId, out var t) && t.HasPos
                 ? (t.X, t.Y, t.Z) : null;
+    }
+
+    /// <summary>
+    /// Snapshot the fields the narrator needs to describe an entity: its kind
+    /// label, name, combat level, hostility (relationship reaction), and
+    /// distance from self. Pulled at narration time so late-arriving aux /
+    /// relationship frames are reflected even though the Appeared event fired
+    /// earlier. Returns null if the game id is no longer tracked.
+    /// </summary>
+    public (string Kind, string? Name, int? Level, int? Reaction, float? Dist)? Describe(int gameId, int selfGameId)
+    {
+        lock (_gate)
+        {
+            if (!_objects.TryGetValue(gameId, out var t)) return null;
+            float? dist = null;
+            if (_objects.TryGetValue(selfGameId, out var me) && me.HasPos && t.HasPos)
+                dist = MathF.Sqrt(
+                    (t.X - me.X) * (t.X - me.X) +
+                    (t.Y - me.Y) * (t.Y - me.Y) +
+                    (t.Z - me.Z) * (t.Z - me.Z));
+            return (TypeName(t), t.Name, t.Level, t.Reaction, dist);
+        }
     }
 
     /// <summary>A tracked object's display name by game id, or null.</summary>

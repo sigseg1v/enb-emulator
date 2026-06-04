@@ -92,6 +92,8 @@ if (args[0] is "repl" or "start")
     repl.Register(new DumpCommand(sessionCtx));
     repl.Register(new DumpOnCommand(sessionCtx));
     repl.Register(new DumpOffCommand(sessionCtx));
+    repl.Register(new NarrateOnCommand(sessionCtx));
+    repl.Register(new NarrateOffCommand(sessionCtx));
     repl.Register(new ReplayCommand());
     // Session-aware quit: logs out (closes both planes) then exits, and adds a
     // `stop` alias so it isn't an "unknown command". Replaces the REPL's
