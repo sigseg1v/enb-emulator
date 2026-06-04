@@ -92,10 +92,10 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// <c>common/include/net7/PacketStructures.h</c>'s MasterJoin) with
 /// ToSectorID/FromSectorID overwritten via <c>ntohl</c> at lines
 /// 10162-10163, followed by 4 length-prefixed string blocks (from_sector,
-/// from_system, to_sector, to_system). We assert only the opcode arrival —
-/// the inner struct + strings layout is asserted by a future typed-codec
-/// wave; the opcode-level assertion here catches the regression classes
-/// listed below already.
+/// from_system, to_sector, to_system). We assert the opcode arrival AND the
+/// inner <c>ToSectorID</c> (offset 20, big-endian via the emit-side ntohl):
+/// it must equal the parent space sector 10151/10 = 1015. The remaining
+/// struct + string-block layout is left to a future typed-codec wave.
 /// </para>
 ///
 /// <para>
@@ -122,9 +122,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 ///     / 10</c> is replaced with the wrong arithmetic (e.g.
 ///     <c>m_SectorID - 9000</c> or <c>m_SectorID % 10</c>), the
 ///     ServerHandoff is still emitted but with a nonsense destination.
-///     The opcode-level assertion still passes but the future typed-codec
-///     wave for 0x003A will catch the wrong ToSectorID; this test
-///     anchors the emit-site existence.
+///     The opcode-level assertion still passes; the ToSectorID==1015
+///     assertion below (offset-20 big-endian) is what catches the wrong
+///     destination directly.
 ///   </item>
 ///   <item>
 ///     <b>SendServerHandoff opcode-id regression at
@@ -283,6 +283,17 @@ public sealed class SectorServerHandoffTests
                         $"expected ≥64B (inner MasterJoin struct alone is 64B). " +
                         $"Likely SendServerHandoff at PlayerConnection.cpp:10202 " +
                         $"is emitting an empty/truncated payload.");
+
+                    // ToSectorID at offset 20 of the inner MasterJoin.
+                    // SendServerHandoff writes it via ntohl (PlayerConnection.cpp:10167),
+                    // so it is BIG-ENDIAN on the wire while the rest of MasterJoin is
+                    // host LE. For Luna Station 10151 the launch target is the parent
+                    // SPACE sector, 10151/10 = 1015 (SectorManager.cpp:571). Pinning it
+                    // catches the divide-by-ten / wrong-arithmetic regression at the
+                    // to_sector_id computation that the loose length bound cannot.
+                    int toSectorId = BinaryPrimitives.ReadInt32BigEndian(
+                        reply.Payload.Span.Slice(20, 4));
+                    Assert.Equal(sectorId / 10, toSectorId);
                     return;
                 }
             }
