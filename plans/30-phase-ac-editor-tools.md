@@ -295,9 +295,24 @@ than trusting the build. Committed 7fd01446.
       restoring literal-equivalent contextual coercion. Verified against `net7`:
       parameterized SELECT-by-id -> 1 row, item_base UPDATE (int SET + bigint
       WHERE, all string params) -> rowsAffected 1, NULL value -> SQL NULL.
-- [ ] Live-server-reflects-the-edit (full GUI launch via `just`, real edit
-      persisted, server picks it up): SQL layer is proven; the remaining piece
-      is a manual GUI pass by the owner. Tracked, non-blocking.
+- [x] Full GUI save proven HEADLESS (no owner pass needed for the GUI half):
+      `tools/item-editor-avalonia/test` launches the real `MainWindow` under
+      Avalonia's headless platform, waits for the load, selects item 507, types
+      into the detail TextBoxes, invokes the real `OnSaveClick`, and asserts the
+      edit persisted to `net7` (then restores it). Exercises the actual
+      grid-selection -> PopulateDetails -> CommitDetailsToRow -> updateRecord
+      wiring, not just the SQL layer. DB-gated (SKIPs if net7 is unreachable, so
+      CI-safe); run via `just verify-item-editor`. Green: name+level round-trip
+      PERSISTED.
+- [ ] Live-server-reflects-the-edit: the running server loads `item_base` ONCE
+      at boot (`ItemBaseManager::Initialize` -> `ItemBaseParser::LoadItemBase`)
+      into the in-memory `m_ItemList`; there is NO runtime reload-from-DB path
+      (only boot calls `LoadItemBase`). So an editor edit lands in the DB
+      immediately but the running server keeps serving its cached copy until
+      RESTARTED (`just rebuild server` / container bounce). Confirming a restarted
+      server serves the new value over the wire (CLI vendor/inventory query) is
+      the only remaining owner/integration step; the persistence + GUI halves are
+      proven.
 
 ## Dependencies / ordering
 

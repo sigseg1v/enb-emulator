@@ -137,6 +137,14 @@ launch-faction-editor:
 launch-item-editor:
     dotnet run --project tools/item-editor-avalonia
 
+# Headless GUI end-to-end smoke for the item editor: launches MainWindow under
+# Avalonia's headless platform, selects a row, edits the detail panel, clicks
+# Save, and asserts the edit persisted to the net7 container (then restores it).
+# Regression guard for the parameter-binding write-path fix. Needs the stack up
+# (`just dev`); skips cleanly if net7 is unreachable.
+verify-item-editor:
+    dotnet run --project tools/item-editor-avalonia/test
+
 # Mission / quest authoring (DB).
 launch-mission-editor:
     dotnet run --project tools/missioneditor-avalonia

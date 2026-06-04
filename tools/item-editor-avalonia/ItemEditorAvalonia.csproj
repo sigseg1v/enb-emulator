@@ -11,6 +11,14 @@
     <AssemblyName>ItemEditorAvalonia</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
+    <!-- test/ is a sibling Exe project (headless GUI smoke); don't sweep its
+         sources or build artifacts into this app. -->
+    <Compile Remove="test/**" />
+    <None Remove="test/**" />
+    <EmbeddedResource Remove="test/**" />
+    <AvaloniaResource Remove="test/**" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\commontools-avalonia\CommonToolsAvalonia.csproj" />
   </ItemGroup>
   <ItemGroup>
