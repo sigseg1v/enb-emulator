@@ -50,6 +50,47 @@ public sealed class GateCommandTests
         Assert.Equal(19, BinaryPrimitives.ReadInt32LittleEndian(frame.AsSpan(4)));
     }
 
+    // Byte-pins against the live reference server (216.219.87.147)
+    // SingleGateJump capture, proxy<->server UDP cleartext leg (same leg the
+    // CLI/integration harness talks on). The 16-byte ActionPacket payload
+    // followed the 12-byte outer sector header; we pin only the payload here.
+    private const int CaptureGameId = 0x4003992A;
+    private const int CaptureGateTarget = 0x0001870B; // the stargate's gid
+
+    [Fact]
+    public void BuildActionFrame_MatchesCapture_SingleGateJump_dg2_GateButton()
+    {
+        // SingleGateJump dg #2 body (0x002C ACTION, Action=18 gate button):
+        //   2A 99 03 40  12 00 00 00  0B 87 01 00  00 00 00 00
+        byte[] frame = GateCommand.BuildActionFrame(CaptureGameId, 18, CaptureGateTarget, 0);
+        Assert.Equal(
+            new byte[]
+            {
+                0x2A, 0x99, 0x03, 0x40, // GameID 0x4003992A
+                0x12, 0x00, 0x00, 0x00, // Action 18 (gate button)
+                0x0B, 0x87, 0x01, 0x00, // Target 0x0001870B (stargate gid)
+                0x00, 0x00, 0x00, 0x00, // OptionalVar 0
+            },
+            frame);
+    }
+
+    [Fact]
+    public void BuildActionFrame_MatchesCapture_SingleGateJump_dg63_FinishGate()
+    {
+        // SingleGateJump dg #63 body (0x002C ACTION, Action=19 finish gate):
+        //   2A 99 03 40  13 00 00 00  0B 87 01 00  00 00 00 00
+        byte[] frame = GateCommand.BuildActionFrame(CaptureGameId, 19, CaptureGateTarget, 0);
+        Assert.Equal(
+            new byte[]
+            {
+                0x2A, 0x99, 0x03, 0x40, // GameID 0x4003992A
+                0x13, 0x00, 0x00, 0x00, // Action 19 (finish gate sequence)
+                0x0B, 0x87, 0x01, 0x00, // Target 0x0001870B (same stargate gid)
+                0x00, 0x00, 0x00, 0x00, // OptionalVar 0
+            },
+            frame);
+    }
+
     [Fact]
     public async Task Execute_NotInSector_ReturnsError()
     {

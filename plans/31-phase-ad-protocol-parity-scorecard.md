@@ -249,7 +249,21 @@ carry no server-integrity weight beyond the byte-pin itself.
   and RequestTargetCodecTests (dg#35 `2A 99 03 40 ED 87 01 00` = GameID,
   TargetID 0x000187ED). Codec-built two-step live round-trip added to the
   existing SectorSkillAbilityTests (all 3 facts pass, 24s).
-- [ ] **#74: verify gate jump (0x009B WARP / gate-cache).**
+- [x] **#74 (DONE): gate jump (0x002C ACTION two-step).** The "0x009B WARP"
+  label was imprecise: the client-driven gate sequence is not a WARP opcode, it
+  is two 0x002C ACTION frames -- Action=18 (gate button, Target = stargate gid)
+  then Action=19 (finish sequence) ~6s apart, after which the server emits
+  0x003A SERVER_HANDOFF and the CLI follows the handoff into the destination
+  sector. Already implemented: `GateCommand` (`gate <gid>`) +
+  `GateCommand.BuildActionFrame` (16B ActionPacket, int32 GameID/Action/Target/
+  OptionalVar, all LE; server HandleAction PlayerConnection.cpp:3923 case 18 ->
+  GateActivate/StargateDestination, case 19 -> SectorServerHandoff). Byte-pinned
+  the two gate frames against the SingleGateJump capture (proxy<->server UDP
+  leg): dg#2 `2A 99 03 40 12 00 00 00 0B 87 01 00 00 00 00 00` (Action 18,
+  Target 0x0001870B) and dg#63 `...13...` (Action 19, same target) in
+  GateCommandTests. End-to-end verified by the existing gate integration tests
+  (SectorGateHandoffFollow + SectorServerHandoff + SectorAction, 5 facts pass,
+  1m5s). Tooling-only: no server/proxy change, the gate path already existed.
 
 ---
 
