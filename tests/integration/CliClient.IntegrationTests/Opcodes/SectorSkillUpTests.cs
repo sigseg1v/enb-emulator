@@ -6,6 +6,7 @@ using System.Buffers.Binary;
 using N7.CliClient.Auth;
 using N7.CliClient.Net;
 using N7.CliClient.Opcodes;
+using N7.CliClient.Opcodes.Outbound;
 using Xunit;
 
 namespace N7.CliClient.IntegrationTests.Opcodes;
@@ -227,5 +228,73 @@ public sealed class SectorSkillUpTests : SectorIntegrationTest
             $"the proxy default-case forwarding dropped the opcode, " +
             $"the AuxSkills::Skill[] Init bound shrank below 30, " +
             $"or the dispatcher case at PlayerConnection.cpp:499 got mis-routed.");
+    }
+
+    [Fact]
+    public async Task SkillUp_CodecBuiltPayload_RoundTripsThroughServer()
+    {
+        // Same survival-probe contract, but the 0x0057 payload is built by the
+        // production SkillUpCodec (the byte-pin lives in the unit suite's
+        // SkillUpCodecTests against the live SkillTrainingHostileDevice2 dg #18
+        // capture). This proves the codec-produced wire shape is one the server
+        // accepts and dispatches -- the CLI-parse-first half of the parity
+        // requirement, exercised end-to-end through the proxy.
+        //
+        // NOTE the wire-shape correction: the canonical struct is 10B packed
+        // (SkillID as short), but the retail client serializes SkillID as a
+        // 4-byte int, so the real frame is 12B (`37 00 00 00` in the capture).
+        // The codec emits the faithful 12B shape; the server's `short SkillID`
+        // read of the low 2 bytes still yields the right value on LE.
+        //
+        // SkillID 55 is the capture's skill and < 64, so it is in-bounds for the
+        // AuxSkills::Skill[64] wrapper (no OOB read). Whether the fresh char has
+        // the points to train or early-returns on a guard, the connection lives.
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        var session = Track(await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Skilla", shipName: "SkillaShip", cts.Token));
+
+        byte[] payload = new SkillUpCodec().EncodeOutbound(
+            new SkillUpMessage(session.GameId, skillId: 55));
+        Assert.Equal(SkillUpCodec.Size, payload.Length);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.SkillUp.Value, payload), cts.Token);
+
+        int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+        byte[] reqTimePayload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload), cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
+        {
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
+                continue;
+
+            var span = reply.Payload.Span;
+            Assert.Equal(12, span.Length);
+            Assert.Equal(clientTick, BinaryPrimitives.ReadInt32LittleEndian(span[..4]));
+            return;
+        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after a codec-built 0x0057 SKILL_UP + 0x0044 " +
+            $"REQUEST_TIME without seeing 0x0034 CLIENT_SET_TIME -- the SkillUpCodec " +
+            $"wire shape was not accepted/dispatched by the server.");
     }
 }

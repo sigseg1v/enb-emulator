@@ -223,7 +223,18 @@ carry no server-integrity weight beyond the byte-pin itself.
   0x0003992A, top type byte cleared); command derives it as `GameId &
   0x00FFFFFF`. Codec-built talk-to-NPC live round-trip added to the existing
   SectorStarbaseRequestTests (both facts pass, 16s).
-- [ ] **#72: learn ability / skill-up (0x0057 SKILL_UP).**
+- [x] **#72 (DONE): skill-up / train skill (0x0057 SKILL_UP / SkillAction).**
+  New `SkillUpCodec` (0x0057) + `skillup <skillId>` REPL command. Wire-shape
+  correction: the canonical struct is 10B packed (`int32 GameID; int
+  SkillPoints; short SkillID`) but the retail client serializes SkillID as a
+  4-byte int, so the real frame is 12B; the codec emits the faithful 12B shape
+  and the server's `short SkillID` read of the low 2 bytes still yields the
+  right value on LE. All fields little-endian (HandleSkillAction at
+  PlayerSkills.cpp:97 casts with no ntohl); SkillPoints is server-IGNORED (it
+  recomputes from RPGInfo). Byte-pinned in SkillUpCodecTests against
+  SkillTrainingHostileDevice2 dg#18 `2A 99 03 40 01 00 00 00 37 00 00 00` =
+  GameID 0x4003992A LE, SkillPoints 1 LE, SkillID 55 LE. Codec-built live
+  round-trip added to the existing SectorSkillUpTests (both facts pass, 16s).
 - [ ] **#73: activate ability/buff + use device-on-mob (0x0058 SKILL_ABILITY,
   host-LE).**
 - [ ] **#74: verify gate jump (0x009B WARP / gate-cache).**
