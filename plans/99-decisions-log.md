@@ -7770,3 +7770,36 @@ correctness fix, not a wire-format change; the wire bytes are unchanged, the bug
 was that the LP64 build dropped a frame the retail server emits. Exposed by the
 send-every-nav path (commit 636c6175). Client verification tracked as CV-07
 (supersedes the root-cause half of CV-03).
+
+## 2026-06-04 -- Phase AF live reference corpus closed; 0x008B mob id is big-endian
+
+The owner captured 6 traces against the live Net-7 production server
+(216.219.87.147) and directed we treat it as a reference implementation to
+copy. Phase AF parsed all 6 (cleartext proxy<->server UDP leg) and byte-pinned
+the fabrication (0x2012/0x2013/0x2014), combat (0x0064/0x000B/0x000E/0x008B),
+vendor (0x0054/0x0056/0x006A), and gate-jump (0x003A/0x0034/0x0097/0x009C)
+bands against the live bytes. Most existing CLI records already matched
+byte-for-byte; AF added the missing real-capture regression pins.
+
+One real defect surfaced: **0x008B ATTACKER_UPDATES emits the mob id
+BIG-ENDIAN** (`00 01 86 F5` = 0x000186F5), but `AttackerUpdatesRecord` AND the
+server's `SendAttackerUpdates` both used host-order (LE on x86) -- a Trap-1
+byte-order bug (CLAUDE.md "Wire format") that handed the real client a
+byte-reversed attacker id. Corroborated across many distinct mobs and
+cross-checked against the same mob's little-endian id in the 0x0064 frames.
+Fixed CLI (`ReadI32BE`) then server (`htonl(mob_id)`, matching the existing
+htonl'd recustomize playerid); pinned both start/stop frames first. Server
+change cites Combat frame #26; real-client check = CV-08; docker server build
+green. (Decision: the live Net-7 server + working real client is our best
+primary source for 0x008B; matching its observed wire is "copy the reference,"
+even though it is an exception to the otherwise-little-endian convention.)
+
+Z-4 data point: live 0x0034 CLIENT_SET_TIME emits ServerReceived == ServerSent
+(+0 tick), agreeing with our server and contradicting the plans/26 Z-4 "retail
++1 tick" note. No change made (we are already reference-correct).
+
+AF unblocked the 0x2013/0x2014 fabrication INPUT (compact server form now
+citable) but NOT the proxy's client-facing OUTPUT chain (encrypted leg,
+uncaptured) -- AD-2/AD-3 narrowed to output-only CV-gate. Also closed AD-1:
+GLOBAL_ERROR 0x0075 got a structured GlobalErrorRecord (layout citable from two
+agreeing in-repo emitters).
