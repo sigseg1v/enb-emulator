@@ -279,6 +279,22 @@ than trusting the build. Committed 7fd01446.
       "unknown" type) re-applies against `net7`. Proven on item_base id=507:
       UPDATE 1, value became `ReplayTest`/lvl 5 in-txn, rolled back to
       `Dragonclaw Missile`. The editors no longer edit a dead DB.
+- [x] AC.6 follow-up: the RUNTIME parameter-bound write path was still broken
+      after the above. AC.6 proved the *changeset-replay* form (values inlined
+      as `'literal'`s, which Postgres types as `unknown` and coerces), but the
+      live GUI path is `DB.executeCommand(query, names, string[] values)` --
+      every value bound through `new NpgsqlParameter(name, stringValue)`, which
+      Npgsql sends as `text`. Postgres then refuses `WHERE "id" = @id` on a
+      bigint PK (`operator does not exist: bigint = text`); `executeCommand`
+      swallows the exception and returns 0, and `OnSaveClick` reports
+      "Saved item N" without checking the row count -- so every UPDATE/INSERT/
+      DELETE was a SILENT no-op while the GUI claimed success. The rolled-back
+      "live write-path verification" at line 273 exercised the literal form, not
+      this parameter form, so it missed it. Fix: bind every parameter as
+      `NpgsqlDbType.Unknown` in `DB.makeParameter` (one funnel, all editors),
+      restoring literal-equivalent contextual coercion. Verified against `net7`:
+      parameterized SELECT-by-id -> 1 row, item_base UPDATE (int SET + bigint
+      WHERE, all string params) -> rowsAffected 1, NULL value -> SQL NULL.
 - [ ] Live-server-reflects-the-edit (full GUI launch via `just`, real edit
       persisted, server picks it up): SQL layer is proven; the remaining piece
       is a manual GUI pass by the owner. Tracked, non-blocking.

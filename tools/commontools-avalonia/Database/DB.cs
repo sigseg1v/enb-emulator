@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using Npgsql;
+using NpgsqlTypes;
 using System.Data;
 using System.IO;
 
@@ -135,6 +136,32 @@ namespace CommonTools.Database
         /// <param name="query">The SQL query to execute.</param>
         /// <param name="parameter">The query parameter to fill in</param>
         /// <param name="value">The value of the query parameter to use</param>
+        /// <summary>
+        ///   <para>Build a query parameter bound as Postgres <c>unknown</c>.</para>
+        ///   <para>Every value the tool layer hands us is a <c>string</c>. If we
+        ///   let Npgsql infer the type it sends <c>text</c>, and Postgres will
+        ///   NOT implicitly compare/assign <c>text</c> against an integer column:
+        ///   <c>WHERE "id" = @id</c> on a bigint PK fails with
+        ///   <c>operator does not exist: bigint = text</c>, which the catch
+        ///   blocks here swallow -- so every UPDATE/INSERT/DELETE that keys on an
+        ///   integer column silently affects 0 rows. MySQL tolerated the loose
+        ///   typing; Postgres does not.</para>
+        ///   <para>Sending the value as <c>unknown</c> (an untyped literal) makes
+        ///   the server coerce it by context -- to bigint in a key comparison, to
+        ///   integer in a numeric assignment, to text for a text column -- which
+        ///   restores the loose binding the editors were written against. A null
+        ///   value maps to SQL NULL.</para>
+        /// </summary>
+        private static NpgsqlParameter makeParameter(String name, String value)
+        {
+            return new NpgsqlParameter
+            {
+                ParameterName = name,
+                NpgsqlDbType = NpgsqlDbType.Unknown,
+                Value = (Object)value ?? DBNull.Value,
+            };
+        }
+
         public DataTable executeQuery(String query, String[] parameter, String[] value)
         {
             DataTable dataTable = null;
@@ -151,7 +178,7 @@ namespace CommonTools.Database
                 {
                     for (int parameterIndex = 0; parameterIndex < parameter.Length; parameterIndex++)
                     {
-                        dataAdapter.SelectCommand.Parameters.Add(new NpgsqlParameter(parameter[parameterIndex], value[parameterIndex]));
+                        dataAdapter.SelectCommand.Parameters.Add(makeParameter(parameter[parameterIndex], value[parameterIndex]));
                     }
                 }
 
@@ -219,7 +246,7 @@ namespace CommonTools.Database
                 {
                     for (int parameterIndex = 0; parameterIndex < parameter.Length; parameterIndex++)
                     {
-                        command.Parameters.Add(new NpgsqlParameter(parameter[parameterIndex], value[parameterIndex]));
+                        command.Parameters.Add(makeParameter(parameter[parameterIndex], value[parameterIndex]));
                     }
                 }
 
