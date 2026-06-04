@@ -314,10 +314,11 @@ CLI -- the server emitter is authoritative per CLAUDE.md):
       the CLI following the handoff into space (no longer Phase-K-blocked).
 - [ ] §4 gate: the §3 LIVE harness must precede the remaining Phase-AA
       fabrication (0x2013/0x2014 tractor/loot, 0x2018/0x2019 spawn) -- those
-      have un-citable fields that crash the Win32 client if wrong, so they stay
-      blocked on the live harness, which is blocked on Phase K. The spec half
-      alone is NOT sufficient to unblock them (a C# spec cannot validate proxy
-      C++ output against the real client).
+      have un-citable fields that could break the Win32 client if guessed
+      wrong, so they stay blocked on a captured/observed field layout + the
+      live harness to confirm it -- NOT on any client crash (the undock path
+      is fixed and works). The spec half alone is NOT sufficient to unblock
+      them (a C# spec cannot validate proxy C++ output against the real client).
 - [x] §5 dual-emitter + stale-comment + uncapped-Duration drift findings
       resolved (commits dbe93970, dae171ea).
 - [x] §6 `pcap-inventory` tool + sector-object metadata parity. Built

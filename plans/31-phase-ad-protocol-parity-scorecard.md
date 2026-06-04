@@ -14,8 +14,9 @@ reference handling?"
 The honest one-line answer: **mapping = yes (100% named); CLI decode = no
 errors on anything, structured-decode on every inbound game frame we
 realistically receive; proxy fidelity = NOT 100%, and its remaining gaps
-are correctly BLOCKED behind one keystone (the Phase K dock->space
-in-space session).**
+(tractor/loot fabrication, live mining beam pin) need a captured/real-client
+verification of un-citable wire fields -- a normal CV-gate, NOT a blocker on
+any client crash.**
 
 ---
 
@@ -92,51 +93,61 @@ classified by-design / latent. These are server-side, not proxy.
 
 ## 2. THE KEYSTONE (why most of the above is blocked, and what unblocks it)
 
-The blocked rows all trace to ONE thing: **there is no live in-space client
-session to verify against.**
+The blocked rows all trace to ONE thing: **the un-citable wire fields in the
+tractor/loot fabrication band have not yet been pinned against a real capture
++ real-client confirmation.** This is a CV-gate (verify-against-client), NOT a
+client crash. The dock->space undock path itself WORKS -- it was fixed
+(owner-confirmed 2026-06-04; tasks #64/#65 "CLI follows undock handoff into
+space" and "MVAS position feed accepted after undock" are completed). Do NOT
+reintroduce any "client crashes on undock / dock->space crash-bisection"
+framing; that claim was false.
 
 - Fresh characters spawn **docked at a starbase** (Phase K reverted
   start-to-station, task #48). Reaching space requires the dock->space
-  undock transition.
-- That transition is under **Phase K crash-bisection** (task #38, plan 11):
-  the real Win32 client currently crashes somewhere on the dock->space path,
-  so we cannot drive a clean in-space session end to end.
+  undock transition -- which now succeeds.
 - The blocked proxy fabrication (0x2013 tractor / 0x2014 loot) has
-  **un-citable wire fields that crash the real client if guessed wrong**
-  (plan 27 §3a, plan 28 §4). CLAUDE.md's server-integrity rules forbid
-  shipping a fabrication we cannot verify against the real client -- the C#
-  byte-pin proves *format*, only client.exe proves *the game still works*
-  (CV-NN gate). So we CANNOT just implement them speculatively.
-- Same keystone blocks AB §3-live (live mining round-trip + 0x000B beam
-  byte-pin, task #66) and the Phase S enumerate-* items.
+  **un-citable wire fields**: we do not have a capture or first-hand doc
+  pinning their exact layout (plan 27 §3a, plan 28 §4). CLAUDE.md's
+  server-integrity rules forbid shipping a fabrication we cannot verify
+  against the real client -- the C# byte-pin proves *format*, only client.exe
+  proves *the game still works* (CV-NN gate). So we CANNOT implement them
+  speculatively; we need the captured/observed field layout first.
+- The remaining live-pin work (AB §3-live: live mining round-trip + 0x000B
+  beam byte-pin, task #66) needs a proxy-routed in-space harness that does
+  not yet exist; the undock path being fixed means this is now reachable,
+  it just has not been built/run yet.
 
-**Therefore the highest-leverage parity work is finishing the Phase K
-dock->space crash-bisection.** Everything downstream (tractor/loot
-fabrication, live mining pin, enumerate-*) unblocks the moment a clean
-in-space session exists. Chasing the fabrication band before then is
-forbidden by the integrity rules and would risk crashing the real client.
+**Therefore the highest-leverage parity work is (a) obtaining a capture or
+first-hand layout for the 0x2013/0x2014 fabrication fields, and (b) building
+the proxy-routed in-space mining harness to drive + pin 0x000B live.** Neither
+is blocked on a client crash -- the undock path works. Chasing the fabrication
+band before its fields are pinned is still forbidden by the integrity rules
+(unverified fabrication can break the real client), but the gate is "fields
+not yet captured", not "client crashes".
 
 ---
 
 ## 3. Work items (the "continue" list, in priority order)
 
-- [ ] **AD-K (keystone): Phase K dock->space crash-bisection.** Owned by
-  plan 11 / task #38. This is the gate for everything below. NOT a quick
-  add-on -- it is an active crash-bisection. Continue there.
-
-- [ ] **AD-66: live mining round-trip + 0x000B beam byte-pin.** Owned by
-  plan 28 §3-live / task #66. Blocked on AD-K (needs in-space start).
-  Groundwork already understood: create a JE (race=1/prof=2, `StartSector[5]
-  = 10521` Nishino/Io), `just grant-prospect` to seed SKILL_PROSPECT(41)+
-  explore, reach a resource sector (e.g. 1710/3606/1750 have the most
-  type-38 fields), target an asteroid, sit still, send 0x0027 INVENTORY_MOVE
-  sub-18. The server-side 0x2012 START_PROSPECT pin is drivable on the direct
-  harness; the 0x000B beam pin needs a proxy-routed harness (does not yet
-  exist) + real-client confirm (CV gate).
+- [ ] **AD-66 (keystone): live mining round-trip + 0x000B beam byte-pin.**
+  Owned by plan 28 §3-live / task #66. The undock path is fixed, so an
+  in-space start is reachable; what is missing is the **proxy-routed in-space
+  mining harness** (does not yet exist) to drive + pin the 0x000B beam, plus
+  a real-client confirm (CV gate). Groundwork already understood: create a JE
+  (race=1/prof=2, `StartSector[5] = 10521` Nishino/Io), `just grant-prospect`
+  to seed SKILL_PROSPECT(41)+explore, reach a resource sector (e.g.
+  1710/3606/1750 have the most type-38 fields), target an asteroid, sit still,
+  send 0x0027 INVENTORY_MOVE sub-18. The server-side 0x2012 START_PROSPECT pin
+  is already drivable on the direct harness; the 0x000B beam pin needs the
+  proxy-routed harness. This is the highest-leverage next build.
 
 - [ ] **AD-2/AD-3: 0x2013 tractor / 0x2014 loot fabrication.** Owned by
-  plan 27 §3a + plan 28 §4. Blocked on AD-66 (live verification path) which
-  is blocked on AD-K. Do NOT start speculatively.
+  plan 27 §3a + plan 28 §4. Blocked on **capturing/observing the un-citable
+  wire fields** (no capture or first-hand layout yet) -- NOT on any client
+  crash. The live verification path (AD-66 harness) is the vehicle to confirm
+  them once the fields are known. Do NOT start speculatively: an unverified
+  fabrication can break the real client, which is exactly what the CV-gate
+  exists to prevent.
 
 - [ ] **AD-1 (UNBLOCKED, low value): structured-decode `GLOBAL_ERROR 0x75`**
   and any small inbound status tail currently opaque-only. Pure CLI tooling,
@@ -172,7 +183,10 @@ forbidden by the integrity rules and would risk crashing the real client.
 In progress -- 2026-06-04. Scorecard created. Honest verdict recorded:
 mapping complete, CLI decode effectively complete, proxy fidelity NOT 100%
 with its real remaining work (tractor/loot fabrication + live mining pin)
-correctly blocked behind the Phase K dock->space keystone. No new code
-landed in this wave -- this is the consolidated tracking surface the owner
-asked for so "continue" resolves unambiguously to AD-K (Phase K bisection),
-with AD-1 as the only unblocked side-task.
+gated on a capture/real-client field-pin (CV-gate), NOT on any client crash --
+the dock->space undock path is fixed and works (owner-confirmed; tasks
+#64/#65 completed). The next build is AD-66 (proxy-routed in-space mining
+harness to pin 0x000B live), which then unblocks AD-2/AD-3 fabrication once
+their fields are captured. AD-1 (structured-decode GLOBAL_ERROR 0x75) is the
+only unblocked CLI side-task. No new code landed in this wave -- this is the
+consolidated tracking surface the owner asked for.
