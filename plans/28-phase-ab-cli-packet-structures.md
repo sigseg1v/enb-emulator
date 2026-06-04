@@ -134,23 +134,36 @@ remaining Phase-AA fabrication implementable without crashing the real client.
       reference the live harness will assert equality against, and it
       regression-guards the cap. It does NOT auto-catch proxy C++ drift (only
       the live harness can) -- that limit is documented in the test.
-- [!] **Live round-trip BLOCKED behind Phase K.** Establishing a sector
-      session and triggering a real mine is not possible in the integration
-      suite today: a fresh character starts DOCKED at a starbase (sector id >
-      9999; `StartSector[]` 10151..10551, `MAX_SECTOR_ID` 9999 at Net7.h:363).
-      Empirically confirmed live on the CLI 2026-06-03: `create TE Minerva` ->
-      `enter` lands in sector 10251 (Guiana Spaceport) with a 29-frame
-      handshake; `list` shows ONE object, station furniture ("Manufacturing
-      Lab"), zero avatars/navs/asteroids -- nothing of OT_RESOURCE to target,
-      so the 0x0017->0x0027(FromInv=18)->MineResource->0x2012 chain has no
-      live trigger. Mining requires being in open space near an asteroid, and
-      the dock->space
-      mining requires being in open space near an asteroid, and the dock->space
-      transition is itself under active crash-bisection (Phase K, Task #38;
-      `SectorStartAckTests` documents the gate). There is no in-space start to
-      drive, so the live mining round-trip cannot run until Phase K lands the
-      undock/dock->space path. Do NOT fake it with a synthesized "capture."
-- [ ] When Phase K unblocks: drive the prospect/mine path, drain the
+- [x] **Undock / dock->space transition PROVEN live (2026-06-03).** The
+      earlier "blocked behind Phase K crash-bisection" claim was wrong and is
+      retracted. A fresh character starts DOCKED at a starbase (sector id >
+      9999; `StartSector[]` 10151..10551, `MAX_SECTOR_ID` 9999). The real
+      undock is opcode **0x004E STARBASE_REQUEST with Action=1** ("exit
+      station"), NOT 0x009F (which only walks between rooms inside a station).
+      Primary source: live capture
+      `proxy/local-debug/net7-live-2026-06-01-login-undock-dock-logout.pcap`
+      seq=26 (the 0x009F frames at seq 15/25/61 are room-walks; only seq=26
+      triggers the launch). Server path: `Player::HandleStarbaseRequest`
+      case-1 (PlayerConnection.cpp:9879) -> `SectorManager::LaunchIntoSpace`
+      (SectorManager.cpp:558), which drops the player from the station sector
+      and hands off to the parent SPACE sector `m_SectorID / 10` (10151 ->
+      1015). Implemented in the CLI `undock` command (commit c8c944e3, byte-
+      pinned to seq=26) and verified END-TO-END live through our proxy:
+      `SectorServerHandoffTests` sends 0x004E Action=1 from Luna 10151 and
+      asserts the 0x003A SERVER_HANDOFF arrives with ToSectorID=1015 (commit
+      aef3ec3c). No server-log errors; no client crash.
+- [~] **Live mining still gated on CLI follow-the-handoff.** The launch
+      handoff frame arrives, but the CLI does not yet re-establish at the
+      space sector it points to (the real client re-runs master-join +
+      sector login against ToSectorID on a 0x003A). Once the CLI follows the
+      handoff and lands in space sector 1015/1025, `list` should show the
+      OT_RESOURCE asteroids, giving the 0x0017->0x0027(FromInv=18)->
+      MineResource->0x2012 chain a live trigger. Remaining sub-tasks: (a) add
+      handoff-follow to the CLI sector driver; (b) resolve the MVAS move
+      IP-mismatch (position UDP currently dials server:3806 direct from the
+      host IP, dropped by the server's correct anti-spoof guard at
+      UDP_Client.cpp:98 -- it must route through the proxy like login does).
+- [ ] When the CLI lands in space: drive the prospect/mine path, drain the
       client-leg frames, assert the `0x000B` arrives with the fields above, and
       assert byte-equality against `FabricateBeamBody` from the spec test (so
       the spec and the live behaviour are tied together).
@@ -221,9 +234,10 @@ CLI -- the server emitter is authoritative per CLAUDE.md):
 
 - [x] §1 fabrication-band ratchet test (commit 0e2c16cd).
 - [x] §2 `StartProspectRecord` (0x2012) + `TractorOreRecord` (0x2013) + registry + byte-pin (commit 3fcb7973).
-- [~] §3 fabrication verification: SPEC half landed (commit 9276d632); LIVE
-      mining round-trip `[!]` blocked behind Phase K (no in-space start;
-      dock->space under crash-bisection).
+- [~] §3 fabrication verification: SPEC half landed (commit 9276d632);
+      undock/dock->space PROVEN live (0x004E Action=1 -> handoff to 1015,
+      commits c8c944e3 + aef3ec3c); LIVE mining round-trip now gated only on
+      the CLI following the handoff into space (no longer Phase-K-blocked).
 - [ ] §4 gate: the §3 LIVE harness must precede the remaining Phase-AA
       fabrication (0x2013/0x2014 tractor/loot, 0x2018/0x2019 spawn) -- those
       have un-citable fields that crash the Win32 client if wrong, so they stay
