@@ -79,8 +79,8 @@ This is the genuine open gap. Status by band (detail in plan 27):
 | Fabrication 0x2018 -> object-create chain (static content) | [x] done | AA W4 |
 | Fabrication 0x2019 -> resource-create chain (asteroids) | [x] done | AA W4 |
 | MVAS 0x3005 keepalive to udp/3806 (idle-reaper fix) | [x] done | AA W4 |
-| **Fabrication 0x2013 -> tractor-ore beam** | **[!] BLOCKED** | AA §3a / AB §4 |
-| **Fabrication 0x2014 -> loot beam** | **[!] BLOCKED** | AA §3a / AB §4 |
+| **Fabrication 0x2013 -> tractor-ore beam** | **[~] compact INPUT pinned (AF-5); client-facing OUTPUT chain CV-gated** | AA §3a / AB §4 |
+| **Fabrication 0x2014 -> loot beam** | **[~] compact INPUT pinned (AF-5); client-facing OUTPUT chain CV-gated** | AA §3a / AB §4 |
 | C->S 0x4e starbase-exit handoff | [!] deferred (needs launcher handoff) | AA W1 |
 | S->C Tier-2: 0x09/0x0b conditional drop | [~] deferred (forward-unmodified is safe) | AA |
 | S->C Tier-2: 0x34 gate-cache timestamp inject + gate-cache subsystem | [~] deferred | AA |
@@ -105,13 +105,20 @@ framing; that claim was false.
 - Fresh characters spawn **docked at a starbase** (Phase K reverted
   start-to-station, task #48). Reaching space requires the dock->space
   undock transition -- which now succeeds.
-- The blocked proxy fabrication (0x2013 tractor / 0x2014 loot) has
-  **un-citable wire fields**: we do not have a capture or first-hand doc
-  pinning their exact layout (plan 27 §3a, plan 28 §4). CLAUDE.md's
-  server-integrity rules forbid shipping a fabrication we cannot verify
-  against the real client -- the C# byte-pin proves *format*, only client.exe
-  proves *the game still works* (CV-NN gate). So we CANNOT implement them
-  speculatively; we need the captured/observed field layout first.
+- The proxy fabrication (0x2013 tractor / 0x2014 loot) is now **half
+  unblocked by Phase AF.** AF-5 byte-pinned the compact server->proxy INPUT
+  form (`live_tractor_ore_2013_*.hex`, `live_loot_item_2014_*.hex`): the
+  article name, base asset, tractor_time, tractor_speed (350.0), and position
+  are now citable from a live capture -- they are no longer "un-citable." What
+  remains un-citable is the proxy's **client-facing OUTPUT chain** (0x04 CREATE
+  + 0x0b beam + 0x1b name AUX + 0x46 position): those bytes ride the encrypted
+  client<->proxy leg, which the captures do NOT cover, so the article Scale,
+  wire Type byte, tractor-beam EffectDescID, and 0x46 field order are still
+  guesses. CLAUDE.md's server-integrity rules still forbid shipping that
+  expansion unverified -- the C# byte-pin proves *input format*, only client.exe
+  proves the *fabricated output* renders without crashing (CV-NN gate). So the
+  fabrication can now be built against a known input, but its output fields
+  must still be confirmed against the real client before it ships.
 - The remaining live-pin work (AB §3-live: live mining round-trip + 0x000B
   beam byte-pin, task #66) needs a proxy-routed in-space harness that does
   not yet exist; the undock path being fixed means this is now reachable,
@@ -140,14 +147,26 @@ not yet captured", not "client crashes".
   send 0x0027 INVENTORY_MOVE sub-18. The server-side 0x2012 START_PROSPECT pin
   is already drivable on the direct harness; the 0x000B beam pin needs the
   proxy-routed harness. This is the highest-leverage next build.
+  **AF update (2026-06-04):** the 0x000B wire STRUCTURE is now byte-pinned
+  against the live reference (`live_object_effect_000B_weapon.hex`, 35B string
+  form, `LiveReferenceCombatTests`) -- so the beam target format is proven; what
+  AD-66 still needs is the proxy-routed in-space harness to drive it live + the
+  real-client confirm, not the format. (AF also fixed an unrelated combat-band
+  Trap-1: 0x008B mob id is big-endian -- server+CLI corrected, plans/29 CV-08.)
 
-- [ ] **AD-2/AD-3: 0x2013 tractor / 0x2014 loot fabrication.** Owned by
-  plan 27 §3a + plan 28 §4. Blocked on **capturing/observing the un-citable
-  wire fields** (no capture or first-hand layout yet) -- NOT on any client
-  crash. The live verification path (AD-66 harness) is the vehicle to confirm
-  them once the fields are known. Do NOT start speculatively: an unverified
-  fabrication can break the real client, which is exactly what the CV-gate
-  exists to prevent.
+- [~] **AD-2/AD-3: 0x2013 tractor / 0x2014 loot fabrication.** Owned by
+  plan 27 §3a + plan 28 §4. **AF-5 (2026-06-04) byte-pinned the compact
+  server->proxy INPUT** (name, base asset, tractor_time, tractor_speed=350.0,
+  position) against live captures -- the input fields are no longer un-citable.
+  What remains is the proxy's **client-facing OUTPUT chain** (0x04 CREATE +
+  0x0b beam + 0x1b name AUX + 0x46 position): those bytes ride the encrypted
+  client<->proxy leg the captures do not cover, so the article Scale, wire Type
+  byte, tractor-beam EffectDescID, and 0x46 field order are still guesses. The
+  fabrication can now be BUILT against a known input, but its output must be
+  confirmed against the real client (CV-gate) before it ships. Do NOT ship the
+  output expansion speculatively: a wrong 0x04 CREATE crashes the Win32 client
+  (CLAUDE.md "Wire format" Trap 1). The AD-66 harness is the vehicle to confirm
+  the output once built.
 
 - [ ] **AD-1 (UNBLOCKED, low value): structured-decode `GLOBAL_ERROR 0x75`**
   and any small inbound status tail currently opaque-only. Pure CLI tooling,
