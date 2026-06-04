@@ -138,22 +138,43 @@ not yet captured", not "client crashes".
 ## 3. Work items (the "continue" list, in priority order)
 
 - [ ] **AD-66 (keystone): live mining round-trip + 0x000B beam byte-pin.**
-  Owned by plan 28 §3-live / task #66. The undock path is fixed, so an
-  in-space start is reachable; what is missing is the **proxy-routed in-space
-  mining harness** (does not yet exist) to drive + pin the 0x000B beam, plus
-  a real-client confirm (CV gate). Groundwork already understood: create a JE
-  (race=1/prof=2, `StartSector[5] = 10521` Nishino/Io), `just grant-prospect`
-  to seed SKILL_PROSPECT(41)+explore, reach a resource sector (e.g.
-  1710/3606/1750 have the most type-38 fields), target an asteroid, sit still,
-  send 0x0027 INVENTORY_MOVE sub-18. The server-side 0x2012 START_PROSPECT pin
-  is already drivable on the direct harness; the 0x000B beam pin needs the
-  proxy-routed harness. This is the highest-leverage next build.
-  **AF update (2026-06-04):** the 0x000B wire STRUCTURE is now byte-pinned
-  against the live reference (`live_object_effect_000B_weapon.hex`, 35B string
-  form, `LiveReferenceCombatTests`) -- so the beam target format is proven; what
-  AD-66 still needs is the proxy-routed in-space harness to drive it live + the
-  real-client confirm, not the format. (AF also fixed an unrelated combat-band
-  Trap-1: 0x008B mob id is big-endian -- server+CLI corrected, plans/29 CV-08.)
+  Owned by plan 28 §3-live / task #66.
+  **AG correction (2026-06-04): the prior "the proxy-routed mining harness does
+  not yet exist" framing was WRONG and is retracted.** The whole Phase-T
+  integration suite is ALREADY proxy-routed: `ServerFixture.SectorPort = 3500`
+  is the *proxy's* SECTOR_SERVER_PORT and `SectorHandshake` connects there via
+  `EncryptedTcpConnection` (the encrypted client<->proxy leg). So the proxy
+  expands 0x2012 START_PROSPECT -> 0x000B beam BEFORE frames reach the harness;
+  a mining drive run on this transport would observe the fabricated 0x000B, not
+  the compact 0x2012. The transport was never the gap. Confirmed too that the
+  server's resource-spawn path is real (`FieldClass.cpp:174` +
+  `SectorContentSQL.cpp:321` instantiate `OT_RESOURCE` from
+  `sector_objects_harvestable`, rows present in the content DB), and the 0x000B
+  wire STRUCTURE is already byte-pinned (`live_object_effect_000B_weapon.hex`,
+  35B string form, `LiveReferenceCombatTests`).
+  **The genuine remaining blockers** (none is "no harness"):
+  (1) **Prospect range vs spawn position.** `CheckMiningConditions`
+  (`PlayerSkills.cpp:884`) requires the avatar within `ProspectRange()` of the
+  roid AND stationary (`ObjectIsMoving()==false`); a fresh in-space login
+  spawns at the sector entry point while the roid field is elsewhere, so the
+  harness must position-feed the avatar onto the field then stop cleanly -- the
+  fragile part, and the real reason this stayed open.
+  (2) Roid spawn timing/availability, JE-Explorer creation (race=1/prof=2;
+  `SectorHandshake` hardcodes Terran Warrior race=0/prof=0, needs a variant)
+  and prospect-skill DB seeding (`avatar_skill_levels` skill_id 41 in the
+  `net7_user` DB; prof MUST be 2 or it clamps to 0 at login --
+  `just grant-prospect`).
+  (3) An irreducible real-client CV-gate (only the owner confirms 0x000B
+  renders on `client.exe`) -- tracked as plans/29 CV-09.
+  Trigger chain once in range+stationary: 0x0017 REQUEST_TARGET the roid gid ->
+  0x0027 INVENTORY_MOVE sub-18 (`PlayerConnection.cpp:3210` case 18,
+  OT_RESOURCE -> `MineResource`) -> server emits 0x2012 -> proxy fabricates
+  0x000B. A green, NON-flaky test of this needs the position-feed range solve;
+  it was deliberately NOT shipped flaky under time pressure (would violate the
+  green-tests discipline). Next build = the JE-Explorer establish variant + the
+  position-feed-to-roid range solve, then pin the fabricated 0x000B.
+  (AF also fixed an unrelated combat-band Trap-1: 0x008B mob id is big-endian --
+  server+CLI corrected, plans/29 CV-08.)
 
 - [~] **AD-2/AD-3: 0x2013 tractor / 0x2014 loot fabrication.** Owned by
   plan 27 §3a + plan 28 §4. **AF-5 (2026-06-04) byte-pinned the compact

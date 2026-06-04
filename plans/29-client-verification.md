@@ -290,3 +290,33 @@ format & byte order", Trap 2).
   first hostile in a sector.
 - **Setup**: `just rebuild server && just play-local`, undock, let a mob start
   and stop attacking.
+
+### [ ] CV-09 -- Live mining prospect beam (0x000B) renders on the real client
+
+- **Change**: none yet to the server/proxy -- this entry pre-registers the
+  real-client confirm for the live mining round-trip (task #66 / AD-66). The
+  server already emits `0x2012` START_PROSPECT from `Player::MineResource`
+  (`server/src/PlayerSkills.cpp:625`) and the proxy already fabricates the
+  client-facing `0x000B` OBJECT_TO_OBJECT_EFFECT prospect beam from it
+  (`UDPClient::StartProspecting` / `SendProspectAUX`). No wire change is
+  required; what is unproven is that the *fabricated* beam renders correctly on
+  `client.exe` during a real mining cycle.
+- **Primary source (format)**: the `0x000B` wire STRUCTURE is byte-pinned
+  against the live Net-7 reference server (`live_object_effect_000B_weapon.hex`,
+  35B string form) by `LiveReferenceCombatTests`. CV-02 already covers the roid
+  field rendering + targetability; this entry is specifically the prospect
+  *beam* effect.
+- **CLI proof**: `StartProspectRecord` (0x2012) and `ObjectToObjectEffectRecord`
+  (0x000B) decode the compact source and the fabricated beam. A live end-to-end
+  Phase-T drive (JE-Explorer, prospect skill seeded, in-range + stationary on a
+  roid, 0x0017 REQUEST_TARGET -> 0x0027 INVENTORY_MOVE sub-18) to pin the
+  fabricated 0x000B on our own stack is the open build -- gated on the
+  prospect-range/position-feed solve (see AD-66 in plans/31), NOT on the format.
+- **What to look for (play-local / real client)**: as a Jenquai Explorer with
+  the Prospect skill, fly to a resource sector (e.g. 1710/3606/1750), stop on an
+  asteroid field, target a roid, and start mining. The prospect beam effect must
+  draw from the ship to the roid for the drain duration and clear when the ore
+  is pulled. Watch for a missing beam, a beam to the wrong object, or a client
+  fault when the beam starts.
+- **Setup**: `just play-local` as a JE Explorer; `just grant-prospect <user>`
+  if the skill is not trained; mine a roid in a resource sector.
