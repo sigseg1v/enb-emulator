@@ -244,7 +244,7 @@ jobs:
         run: |
           cmake -S tests/server -B build/tests -G Ninja
           cmake --build build/tests --target handshake_live_test replay_test -j"$(nproc)"
-      - name: Run live ctest (proxy-only — handshake + send path)
+      - name: Run live ctest (proxy-only -- handshake + send path)
         # NOTE: This job runs the proxy in isolation, with no MVAS / sector
         # server behind it. Replay.LivePostHandshakeReplay verifies the Net7
         # handshake completes and the encrypted post-handshake send path is
@@ -265,26 +265,56 @@ jobs:
         if: always()
         run: docker rm -f net7proxy-ci || true
 
+  # The integration suite cannot parallelise in-process: it shares one
+  # ServerCollection / one docker-compose stack, and the proxy is
+  # single-client. So we shard it across PARALLEL jobs instead -- each
+  # shard gets its own stack and runs a disjoint slice of the suite.
+  #
+  # The slice is computed at runtime from `dotnet test --list-tests`
+  # (see tools/ci/integration_shard_filter.py), NOT a hand-maintained
+  # name list: a newly added test class is discovered automatically and
+  # lands in exactly one shard. The `cli-integration-coverage` job below
+  # is the guard that proves every class is covered exactly once, so a
+  # new test can never silently fall outside CI.
+  #
+  # SHARD COUNT lives in two places that MUST agree: the matrix list
+  # `shard: [1, 2, 3]` and `SHARDS: "3"`. Bump both to rebalance.
   cli-integration-test:
-    name: cli-integration-test (xUnit / .NET 10 against full stack)
+    name: cli-integration-test (shard ${{ matrix.shard }}/3)
     runs-on: ubuntu-24.04
-    # Independent of the C++ ctest pipeline — uses docker-compose stack
-    # straight from the repo definitions, drives CliClient.Core in-
-    # process, and asserts opcode-by-opcode against the running server.
-    # No `needs:` chain so this runs in parallel with cmake-build /
-    # ctest / integration-test for fast feedback.
-    # The integration suite is fully serial (one ServerCollection,
-    # ~360 tests x ~4s) at ~24 min, plus stack bring-up (~3 min), the C++
-    # ctest step (~2 min), and the proxy-recycle self-heal that clears the
-    # single-client session-accumulation wedge (~8 recycles x ~33s). 45 min
-    # covers the whole job with margin; 20 min truncated it mid-suite.
-    timeout-minutes: 45
+    # One shard runs ~1/3 of the suite (~8 min) + stack bring-up (~3 min)
+    # + the proxy-recycle self-heal. 25 min covers a shard with margin;
+    # the un-sharded job needed 45 and still timed out.
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    env:
+      SHARDS: "3"
     steps:
       - uses: actions/checkout@v4
       - name: Install .NET 10 SDK
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - name: Build CliClient.IntegrationTests
+        run: |
+          dotnet build tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
+            --configuration Debug
+      - name: Compute this shard's test filter (runtime discovery)
+        # `--list-tests` only enumerates; it does not run the suite or
+        # touch the stack, so this is safe before the stack is up. The
+        # filter is derived from discovery, never a hardcoded name list.
+        run: |
+          dotnet test tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
+            --no-build --list-tests > /tmp/alltests.txt
+          FILTER="$(python3 tools/ci/integration_shard_filter.py \
+            --list-file /tmp/alltests.txt --shards "$SHARDS" --shard ${{ matrix.shard }})"
+          echo "Shard ${{ matrix.shard }}/${SHARDS} classes:"
+          echo "$FILTER" | tr '|' '\n'
+          # Persist for the run step (the filter can be long; use a file).
+          printf '%s' "$FILTER" > /tmp/shard_filter.txt
       - name: Generate self-signed dev TLS cert (justfile gen-certs)
         run: |
           mkdir -p deploy/certs
@@ -297,23 +327,21 @@ jobs:
         run: |
           docker compose up -d --wait postgres login proxy server
           docker compose ps
-      - name: Build CliClient.IntegrationTests
-        run: |
-          dotnet build tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
-            --configuration Debug
       - name: Build + run C++ ctest with a real MVAS behind the proxy
-        # Here the full docker-compose stack is up (postgres + login + proxy +
-        # server), so the proxy's UDPConnection::SendMasterLogin genuinely
-        # reaches a live MVAS -- this exercises the real proxy->MVAS UDP
-        # handoff path, not just the socket-level timeout the proxy-only job
-        # hits. The replayed Master_Join still carries a stale retail avatar
-        # id (no live Player), so the MVAS does not confirm it and no
-        # ServerRedirect comes back inside the timeout; the test verifies the
-        # handshake + send path complete and the proxy keeps the connection
-        # open while attempting the live handoff. The session-backed
-        # MasterJoin -> ServerRedirect round-trip is verified with a REAL
-        # logged-in avatar by the xUnit suite in the next step
-        # (Opcodes/MasterJoinTests.cs).
+        # Proxy<->MVAS handoff smoke. Runs on shard 1 only -- it is not a
+        # function of the test slice, so running it in every shard would
+        # just triplicate the same check. The full stack is up (postgres +
+        # login + proxy + server) so the proxy's UDPConnection::
+        # SendMasterLogin genuinely reaches a live MVAS, exercising the
+        # real proxy->MVAS UDP handoff, not just the socket-level timeout
+        # the proxy-only `integration-test` job hits. The replayed
+        # Master_Join carries a stale retail avatar id (no live Player), so
+        # no ServerRedirect comes back inside the timeout; the test
+        # verifies the handshake + send path complete and the proxy keeps
+        # the connection open. The session-backed MasterJoin ->
+        # ServerRedirect round-trip is verified with a REAL logged-in
+        # avatar by the xUnit suite (Opcodes/MasterJoinTests.cs).
+        if: matrix.shard == 1
         env:
           NET7_TEST_PROXY_HOST: 127.0.0.1
           NET7_TEST_PROXY_PORT: "3801"
@@ -324,10 +352,10 @@ jobs:
           cmake -S tests/server -B build/tests -G Ninja
           cmake --build build/tests --target handshake_live_test replay_test -j"$(nproc)"
           ctest --test-dir build/tests --output-on-failure -R 'Replay\.LivePostHandshakeReplay'
-      - name: Run integration suite
+      - name: Run integration suite (shard ${{ matrix.shard }}/3)
         env:
           # ServerFixture owns the lifecycle when we DON'T pass this.
-          # We brought the stack up explicitly above so we DO set it —
+          # We brought the stack up explicitly above so we DO set it --
           # fixture skips its own `compose up`/`down -v` and reuses
           # ours. This way the ServerFixture's `down -v` never wipes
           # the stack mid-job; we tear it down ourselves in a final
@@ -336,14 +364,15 @@ jobs:
         run: |
           dotnet test tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
             --no-build \
-            --logger "trx;LogFileName=cli-integration.trx" \
+            --filter "$(cat /tmp/shard_filter.txt)" \
+            --logger "trx;LogFileName=cli-integration-shard${{ matrix.shard }}.trx" \
             --logger "console;verbosity=normal" \
             --results-directory test-results/
       - name: Upload TRX artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cli-integration-trx
+          name: cli-integration-trx-${{ matrix.shard }}
           path: test-results/**/*.trx
           if-no-files-found: warn
       - name: Stack logs on failure
@@ -356,3 +385,28 @@ jobs:
       - name: Tear down docker-compose stack
         if: always()
         run: docker compose down -v || true
+
+  # Fast guard (no docker): proves the shard partition covers every
+  # discovered test class exactly once. If a new test class somehow fails
+  # to land in a shard -- or lands in two -- this job goes red, so the
+  # sharding can never silently drop a test from CI.
+  cli-integration-coverage:
+    name: cli-integration-coverage (shard partition guard)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build CliClient.IntegrationTests
+        run: |
+          dotnet build tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
+            --configuration Debug
+      - name: Verify every test class is covered exactly once
+        # The --shards value MUST match cli-integration-test's matrix.
+        run: |
+          dotnet test tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
+            --no-build --list-tests > /tmp/alltests.txt
+          python3 tools/ci/integration_shard_filter.py \
+            --list-file /tmp/alltests.txt --shards 3 --check
