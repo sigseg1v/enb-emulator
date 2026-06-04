@@ -6,6 +6,7 @@ using System.Buffers.Binary;
 using N7.CliClient.Auth;
 using N7.CliClient.Net;
 using N7.CliClient.Opcodes;
+using N7.CliClient.Opcodes.Outbound;
 using Xunit;
 
 namespace N7.CliClient.IntegrationTests.Opcodes;
@@ -282,5 +283,65 @@ public sealed class SectorEquipUseTests : SectorIntegrationTest
             $"the Equipable::ManualActivate guard at Equipable.cpp:551 was reordered " +
             $"(NULL-deref via GetItemTemplateID() before pointer check), " +
             $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted.");
+    }
+
+    [Fact]
+    public async Task EquipUse_CodecBuiltPayload_RoundTripsThroughServer()
+    {
+        // Same survival-probe contract as above, but the 0x005D payload is built
+        // by the production EquipUseCodec (the byte-pin lives in the unit suite's
+        // EquipUseCodecTests against the live KillLoot2 / SkillTraining captures).
+        // This proves the codec-produced wire shape is one the server accepts and
+        // dispatches without dropping the connection -- the CLI-parse-first half
+        // of the parity requirement, exercised end-to-end through the proxy.
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        var session = Track(await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Equsec", shipName: "EqusecShip", cts.Token));
+
+        // Fire equip slot 15 (empty device slot on a fresh Terran Warrior) using
+        // this session's real game id, encoded by the production codec.
+        byte[] payload = new EquipUseCodec().EncodeOutbound(
+            new EquipUseMessage(session.GameId, invSlot: 15));
+        Assert.Equal(EquipUseCodec.Size, payload.Length);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.EquipUse.Value, payload), cts.Token);
+
+        int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+        byte[] reqTimePayload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload), cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
+        {
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
+                continue;
+
+            var span = reply.Payload.Span;
+            Assert.Equal(12, span.Length);
+            Assert.Equal(clientTick, BinaryPrimitives.ReadInt32LittleEndian(span[..4]));
+            return;
+        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after a codec-built 0x005D EQUIP_USE + 0x0044 " +
+            $"REQUEST_TIME without seeing 0x0034 CLIENT_SET_TIME -- the EquipUseCodec " +
+            $"wire shape was not accepted/dispatched by the server.");
     }
 }

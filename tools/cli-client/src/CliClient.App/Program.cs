@@ -87,6 +87,7 @@ if (args[0] is "repl" or "start")
     repl.Register(new WarpCommand(sessionCtx));
     repl.Register(new ChatCommand(sessionCtx));
     repl.Register(new InvCommand(sessionCtx));
+    repl.Register(new UseCommand(sessionCtx));
     repl.Register(new GroupInviteCommand(sessionCtx));
     repl.Register(new GroupInviteAcceptCommand(sessionCtx));
     repl.Register(new GroupLeaveCommand(sessionCtx));

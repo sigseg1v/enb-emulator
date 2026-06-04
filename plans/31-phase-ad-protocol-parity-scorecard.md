@@ -188,6 +188,36 @@ not yet captured", not "client crashes".
 - [ ] **AD-5 (deferred): C->S 0x4e starbase-exit handoff.** Needs the
   launcher handoff path; deferred in AA W1.
 
+### CLI C->S gameplay-op codecs (tooling-only, no server/proxy change)
+
+The live-capture-driven program to make every gameplay op the owner listed
+(sell/buy/move inventory/vault/equip/ammo/stack/loot/jettison/use/learn/
+cast/gate) understood + byte-pinned + driven through the proxy by the CLI.
+These are tooling-only (the server already handles the opcodes), so they
+carry no server-integrity weight beyond the byte-pin itself.
+
+- [x] **#68 (DONE): 0x0027 INVENTORY_MOVE codec + `inv` command.** Pinned to
+  VendorInvEco dg#12/20/25 (buy/sell/rearrange). `InventoryMoveCodec`, all
+  fields big-endian (server ntohl's each).
+- [x] **#69 (DONE): 0x0027 stack split/combine + loot/jettison.** `Loot=6`
+  enum; jettison pinned to ProspectRun dg#35, loot to KillLoot2 dg#65;
+  split/combine ride the Num field (CheckStack), pinned by construction.
+- [x] **#70 (DONE): equip/unequip weapon + load/unload ammo (0x0027) +
+  activate equipped item (0x005D EQUIP_USE).** Equip moves pinned to
+  VendorInvEco dg#31 (equip cargo[30]->equip[3]), dg#34 (load ammo Num=126),
+  dg#36 (unload ammo), dg#41 (unequip). New `EquipUseCodec` (0x005D, GameID
+  LITTLE-endian -- handler casts struct without ntohl) pinned to KillLoot2
+  dg#3 (fire weapon slot 3) + SkillTrainingHostileDevice2 dg#44 (device slot
+  11); new `use <slot>` REPL command; `SectorEquipUseTests` gains a
+  codec-built live round-trip. EquipUse byte order is the trap: 0x0027 is
+  big-endian on every field, 0x005D's GameID is little-endian.
+- [ ] **#71: vendor buy/sell terminal flow (0x004E open-vendor chain).** The
+  buy/sell *move* is already 0x0027 (#68); this is the terminal-open handshake.
+- [ ] **#72: learn ability / skill-up (0x0057 SKILL_UP).**
+- [ ] **#73: activate ability/buff + use device-on-mob (0x0058 SKILL_ABILITY,
+  host-LE).**
+- [ ] **#74: verify gate jump (0x009B WARP / gate-cache).**
+
 ---
 
 ## 4. Rules that bind this phase

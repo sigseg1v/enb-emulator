@@ -195,6 +195,98 @@ public sealed class InventoryMoveCodecTests
     }
 
     [Fact]
+    public void Encode_EquipWeapon_CargoSlot30ToEquipSlot3_MatchesCapture_VendorInvEco_dg31()
+    {
+        // VendorInvEco dg #31 body: equip the weapon in cargo slot 30 into
+        // equip slot 3 (cargo -> equip, Num=1).
+        //   40 03 99 2A 00 00 00 01 00 00 00 1E 00 00 00 02 00 00 00 03 00 00 00 01
+        var msg = new InventoryMoveMessage(
+            PlayerGameId, InventoryContainer.Cargo, 0x1E,
+            InventoryContainer.Equip, 3, 1);
+
+        byte[] wire = new InventoryMoveCodec().EncodeOutbound(msg);
+
+        Assert.Equal(new byte[]
+        {
+            0x40, 0x03, 0x99, 0x2A,
+            0x00, 0x00, 0x00, 0x01,   // FromInv = 1 (cargo)
+            0x00, 0x00, 0x00, 0x1E,   // FromSlot = 30
+            0x00, 0x00, 0x00, 0x02,   // ToInv = 2 (equip)
+            0x00, 0x00, 0x00, 0x03,   // ToSlot = 3
+            0x00, 0x00, 0x00, 0x01,   // Num = 1
+        }, wire);
+    }
+
+    [Fact]
+    public void Encode_LoadAmmo_CargoSlot29ToEquipSlot3_Num126_MatchesCapture_VendorInvEco_dg34()
+    {
+        // VendorInvEco dg #34 body: load 126 rounds of ammo from cargo slot 29
+        // into the weapon equipped in equip slot 3 (cargo -> equip, Num=0x7E).
+        //   40 03 99 2A 00 00 00 01 00 00 00 1D 00 00 00 02 00 00 00 03 00 00 00 7E
+        var msg = new InventoryMoveMessage(
+            PlayerGameId, InventoryContainer.Cargo, 0x1D,
+            InventoryContainer.Equip, 3, 0x7E);
+
+        byte[] wire = new InventoryMoveCodec().EncodeOutbound(msg);
+
+        Assert.Equal(new byte[]
+        {
+            0x40, 0x03, 0x99, 0x2A,
+            0x00, 0x00, 0x00, 0x01,   // FromInv = 1 (cargo)
+            0x00, 0x00, 0x00, 0x1D,   // FromSlot = 29
+            0x00, 0x00, 0x00, 0x02,   // ToInv = 2 (equip)
+            0x00, 0x00, 0x00, 0x03,   // ToSlot = 3
+            0x00, 0x00, 0x00, 0x7E,   // Num = 126 (ammo count)
+        }, wire);
+    }
+
+    [Fact]
+    public void Encode_UnloadAmmo_EquipSlot3ToCargoSlot29_Num126_MatchesCapture_VendorInvEco_dg36()
+    {
+        // VendorInvEco dg #36 body: unload the 126 ammo back from equip slot 3
+        // into cargo slot 29 (equip -> cargo, Num=0x7E).
+        //   40 03 99 2A 00 00 00 02 00 00 00 03 00 00 00 01 00 00 00 1D 00 00 00 7E
+        var msg = new InventoryMoveMessage(
+            PlayerGameId, InventoryContainer.Equip, 3,
+            InventoryContainer.Cargo, 0x1D, 0x7E);
+
+        byte[] wire = new InventoryMoveCodec().EncodeOutbound(msg);
+
+        Assert.Equal(new byte[]
+        {
+            0x40, 0x03, 0x99, 0x2A,
+            0x00, 0x00, 0x00, 0x02,   // FromInv = 2 (equip)
+            0x00, 0x00, 0x00, 0x03,   // FromSlot = 3
+            0x00, 0x00, 0x00, 0x01,   // ToInv = 1 (cargo)
+            0x00, 0x00, 0x00, 0x1D,   // ToSlot = 29
+            0x00, 0x00, 0x00, 0x7E,   // Num = 126
+        }, wire);
+    }
+
+    [Fact]
+    public void Encode_UnequipWeapon_EquipSlot3ToCargoSlot30_MatchesCapture_VendorInvEco_dg41()
+    {
+        // VendorInvEco dg #41 body: unequip the weapon from equip slot 3 back
+        // into cargo slot 30 (equip -> cargo, Num=1).
+        //   40 03 99 2A 00 00 00 02 00 00 00 03 00 00 00 01 00 00 00 1E 00 00 00 01
+        var msg = new InventoryMoveMessage(
+            PlayerGameId, InventoryContainer.Equip, 3,
+            InventoryContainer.Cargo, 0x1E, 1);
+
+        byte[] wire = new InventoryMoveCodec().EncodeOutbound(msg);
+
+        Assert.Equal(new byte[]
+        {
+            0x40, 0x03, 0x99, 0x2A,
+            0x00, 0x00, 0x00, 0x02,   // FromInv = 2 (equip)
+            0x00, 0x00, 0x00, 0x03,   // FromSlot = 3
+            0x00, 0x00, 0x00, 0x01,   // ToInv = 1 (cargo)
+            0x00, 0x00, 0x00, 0x1E,   // ToSlot = 30
+            0x00, 0x00, 0x00, 0x01,   // Num = 1
+        }, wire);
+    }
+
+    [Fact]
     public void EncodeDecode_RoundTrips()
     {
         var codec = new InventoryMoveCodec();
