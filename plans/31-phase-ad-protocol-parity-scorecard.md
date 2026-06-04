@@ -137,7 +137,27 @@ not yet captured", not "client crashes".
 
 ## 3. Work items (the "continue" list, in priority order)
 
-- [ ] **AD-66 (keystone): live mining round-trip + 0x000B beam byte-pin.**
+- [x] **AD-66 (keystone): live mining round-trip + 0x000B beam byte-pin. DONE
+  (2026-06-04).** `SectorMiningTests.Mine_Roid_ServerEmits_StartProspect_0x2012`
+  drives the full retail trigger end-to-end and byte-pins the proxy-fabricated
+  beam. Resolution of the blockers below: a Progen Explorer (race=2/prof=2) is
+  created via the `SectorHandshake` race/prof variant, SKILL_PROSPECT=41 is
+  DB-seeded in `net7_user` between a two-stage login, the avatar undocks into
+  sector 1030 and is MVAS position-fed onto "Asteroid Field 6" (~(-8919,-9247));
+  roids arrive as 0x2019 RESOURCE_OBJECT_CREATE on the raw MVAS leg (new
+  `SectorWorld` 0x2019 ingest + 2 unit tests). On the MVAS feed path
+  `ObjectIsMoving()` is permanently false (the scalar `m_Velocity` is never
+  updated by `SetVelocityVector`), so the "not moving" gate is satisfied for
+  free -- the 35k-jump speed-clamp worry was moot. The range-list 0x2012 routes
+  through the player's PROXY connection (NOT the repointed MVAS socket), so the
+  proxy expands it to the client-facing 0x000B on the TCP leg; the test pins
+  that 23-byte beam (Bitmask 0x0007, src=playerGID, tgt=roidGID,
+  EffectDescID 0x00BF, Duration capped <=32000) and round-trips it through the
+  CLI `ObjectToObjectEffectRecord` decoder. NON-flaky: it tries every in-range
+  roid in turn (a depleted ore stack is refused via a 0x0022 PUSH_MESSAGE with
+  no server log, now surfaced in the test output). NO server change -- only the
+  existing retail trigger driven + the existing emission/fabrication pinned.
+  Real-client 0x000B render remains CV-gated -> plans/29 CV-09.
   Owned by plan 28 §3-live / task #66.
   **AG correction (2026-06-04): the prior "the proxy-routed mining harness does
   not yet exist" framing was WRONG and is retracted.** The whole Phase-T

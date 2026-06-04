@@ -120,6 +120,7 @@ public sealed class SectorWorld
                 {
                     case 0x0004: IngestCreate(s); break;
                     case 0x2018: IngestStatic(s, ref events); break;
+                    case 0x2019: IngestResource(s); break;
                     case 0x0007: IngestRemove(s, ref events); break;
                     case 0x0008: IngestSimplePos(s); break;
                     case 0x0040: IngestConstantPos(s); break;
@@ -209,6 +210,31 @@ public sealed class SectorWorld
         // 0x2018 is static content (navs/stations/scenery); MaybeAnnounce
         // gates on entity-ness so these never produce a scanner-contact line.
         MaybeAnnounce(t, ref events);
+    }
+
+    private void IngestResource(ReadOnlySpan<byte> s)
+    {
+        // 0x2019 RESOURCE_OBJECT_CREATE (Resource::FormStaticPacket,
+        // server/src/ResourceClass.cpp:694) -- the compact prospectable-resource
+        // create. The proxy normally CONSUMES this and re-emits a 0x0004 CREATE
+        // Type=38 to the client; on the raw server leg (a direct MVAS-takeover
+        // downstream, which bypasses the proxy) the CLI sees the 0x2019 itself,
+        // so it must locate roids from this. Layout pinned in
+        // ResourceObjectCreateRecord: GameID@0, BaseAsset i16@4, Position@18,
+        // NameLen i16@46, Name@48. CreateType=38 makes TypeName() report
+        // "resource" (the same kind the proxy-expanded 0x0004 Type=38 yields).
+        if (s.Length < 48) return;
+        int gameId = BinaryPrimitives.ReadInt32LittleEndian(s[..4]);
+        var t = GetOrAdd(gameId);
+        t.CreateType = 38;
+        t.BaseAsset = BinaryPrimitives.ReadInt16LittleEndian(s.Slice(4, 2));
+        t.X = BinaryPrimitives.ReadSingleLittleEndian(s.Slice(18, 4));
+        t.Y = BinaryPrimitives.ReadSingleLittleEndian(s.Slice(22, 4));
+        t.Z = BinaryPrimitives.ReadSingleLittleEndian(s.Slice(26, 4));
+        t.HasPos = true;
+        short nameLen = BinaryPrimitives.ReadInt16LittleEndian(s.Slice(46, 2));
+        if (nameLen > 0 && 48 + nameLen <= s.Length)
+            t.Name = Encoding.Latin1.GetString(s.Slice(48, nameLen));
     }
 
     private void IngestRemove(ReadOnlySpan<byte> s, ref List<WorldEvent>? events)

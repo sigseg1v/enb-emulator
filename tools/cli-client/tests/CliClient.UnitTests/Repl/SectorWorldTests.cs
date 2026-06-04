@@ -326,4 +326,52 @@ public sealed class SectorWorldTests
         Assert.Contains("Cli Pilot", outp);
         Assert.Contains("lvl 7", outp);
     }
+
+    // 0x2019 RESOURCE_OBJECT_CREATE (Resource::FormStaticPacket): the compact
+    // prospectable-roid create. On the raw MVAS leg the proxy is bypassed so the
+    // CLI sees the 0x2019 directly (the proxy would otherwise consume it and
+    // re-emit a 0x0004 Type=38). Layout per ResourceObjectCreateRecord:
+    // GameID@0, BaseAsset i16@4, Position f32@18/22/26, NameLen i16@46, Name@48.
+    private static Packet ResourceCreate(int gameId, short baseAsset, string name,
+        float x, float y, float z)
+    {
+        byte[] nameBytes = Encoding.ASCII.GetBytes(name);
+        byte[] p = new byte[48 + nameBytes.Length];
+        BinaryPrimitives.WriteInt32LittleEndian(p.AsSpan(0, 4), gameId);
+        BinaryPrimitives.WriteInt16LittleEndian(p.AsSpan(4, 2), baseAsset);
+        BinaryPrimitives.WriteSingleLittleEndian(p.AsSpan(18, 4), x);
+        BinaryPrimitives.WriteSingleLittleEndian(p.AsSpan(22, 4), y);
+        BinaryPrimitives.WriteSingleLittleEndian(p.AsSpan(26, 4), z);
+        BinaryPrimitives.WriteInt16LittleEndian(p.AsSpan(46, 2), (short)nameBytes.Length);
+        nameBytes.CopyTo(p.AsSpan(48));
+        return Packet.ForOpcode(0x2019, p);
+    }
+
+    [Fact]
+    public void Ingest_ResourceCreate_TracksRoidAsResourceWithPosition()
+    {
+        var w = new SectorWorld();
+        w.Ingest(ConstantPos(0x40000050, 0, 0, 0)); // self at origin
+        w.Ingest(ResourceCreate(0x000187EB, baseAsset: 1234, "Carbon", 300, 400, 0));
+
+        // CreateType=38 -> TypeName "resource"; locatable with a real position.
+        var row = w.NearestTo(0x40000050).First(r => r.Obj.GameId == 0x000187EB);
+        Assert.Equal("resource", SectorWorld.TypeName(row.Obj));
+        Assert.Equal("Carbon", row.Obj.Name);
+        var pos = w.PositionOf(0x000187EB);
+        Assert.NotNull(pos);
+        Assert.Equal(300f, pos!.Value.X, 3);
+        Assert.Equal(400f, pos.Value.Y, 3);
+        Assert.Equal(500f, row.Dist!.Value, 0); // sqrt(300^2+400^2) = 500
+    }
+
+    [Fact]
+    public void Ingest_ResourceCreate_Truncated_IsIgnored()
+    {
+        // A frame shorter than the 48-byte fixed header must not throw or create
+        // a phantom roid -- the drain swallows malformed frames.
+        var w = new SectorWorld();
+        w.Ingest(Packet.ForOpcode(0x2019, new byte[20]));
+        Assert.Equal(0, w.Count);
+    }
 }

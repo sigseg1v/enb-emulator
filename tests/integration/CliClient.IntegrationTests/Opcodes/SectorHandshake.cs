@@ -146,12 +146,15 @@ public static class SectorHandshake
         int sectorId,
         string firstName,
         string shipName,
-        CancellationToken ct)
+        CancellationToken ct,
+        int race = 0,
+        int profession = 0,
+        int gender = 0)
         => WithProxyRecycleOnWedgeAsync(
             server, ct,
             () => EstablishOnceAsync(
                 server, authTicket, accountUsername, slot, sectorId,
-                firstName, shipName, ct),
+                firstName, shipName, ct, race, profession, gender),
             // On retry the redo recreates the avatar on the same slot with
             // the same fixed name; clear any avatar the wedged attempt left
             // behind (its in-attempt delete ran on a connection the proxy
@@ -216,7 +219,10 @@ public static class SectorHandshake
         int sectorId,
         string firstName,
         string shipName,
-        CancellationToken ct)
+        CancellationToken ct,
+        int race = 0,
+        int profession = 0,
+        int gender = 0)
     {
         var globalConn = await EncryptedTcpConnection.ConnectAsync(
             server.GlobalHost, server.GlobalPort, ct);
@@ -228,7 +234,8 @@ public static class SectorHandshake
             await DrainUntilOpcode(globalConn, OpcodeId.Known.GlobalAvatarList.Value, ct);
 
             await CreateCharacterOnSlotAsync(
-                globalConn, accountUsername, slot, firstName, shipName, ct);
+                globalConn, accountUsername, slot, firstName, shipName, ct,
+                race, profession, gender);
             characterCreated = true;
 
             int gameId = await RequestTicketAsync(globalConn, slot, ct);
@@ -534,16 +541,24 @@ public static class SectorHandshake
         int slot,
         string firstName,
         string shipName,
-        CancellationToken ct)
+        CancellationToken ct,
+        int race = 0,
+        int profession = 0,
+        int gender = 0)
     {
+        // race/profession default to Terran Warrior (StartSector index 0 =
+        // 10151 Luna Station) so every existing caller is unchanged. Pass
+        // race=2/profession=2 (Progen Explorer, StartSector index 8 = 10301)
+        // to create a prospecting-capable Explorer -- prof MUST be 2 or the
+        // server clamps SKILL_PROSPECT to 0 at login (see SectorMiningTests).
         byte[] payload = BuildCreateCharacterPayload(
             galaxyId: 1,
             characterSlot: slot,
             accountUsername: accountUsername,
             firstName: firstName,
-            race: 0,        // Terran
-            profession: 0,  // Warrior -> StartSector[0*3+0] = 1015 (Luna space sector, near Luna Station)
-            gender: 0,
+            race: race,
+            profession: profession,
+            gender: gender,
             shipName: shipName);
 
         await conn.SendAsync(
