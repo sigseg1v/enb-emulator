@@ -137,7 +137,14 @@ remaining Phase-AA fabrication implementable without crashing the real client.
 - [!] **Live round-trip BLOCKED behind Phase K.** Establishing a sector
       session and triggering a real mine is not possible in the integration
       suite today: a fresh character starts DOCKED at a starbase (sector id >
-      9999; `StartSector[]` 10151..10551, `MAX_SECTOR_ID` 9999 at Net7.h:363),
+      9999; `StartSector[]` 10151..10551, `MAX_SECTOR_ID` 9999 at Net7.h:363).
+      Empirically confirmed live on the CLI 2026-06-03: `create TE Minerva` ->
+      `enter` lands in sector 10251 (Guiana Spaceport) with a 29-frame
+      handshake; `list` shows ONE object, station furniture ("Manufacturing
+      Lab"), zero avatars/navs/asteroids -- nothing of OT_RESOURCE to target,
+      so the 0x0017->0x0027(FromInv=18)->MineResource->0x2012 chain has no
+      live trigger. Mining requires being in open space near an asteroid, and
+      the dock->space
       mining requires being in open space near an asteroid, and the dock->space
       transition is itself under active crash-bisection (Phase K, Task #38;
       `SectorStartAckTests` documents the gate). There is no in-space start to
