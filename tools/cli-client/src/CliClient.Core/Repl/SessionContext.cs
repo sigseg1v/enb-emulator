@@ -443,7 +443,49 @@ public sealed class SessionContext : IAsyncDisposable
         World.Ingest(p);
         EchoChat(p, PacketDirection.Inbound);
         AnnounceGroupInvite(p);
+        CaptureHandoff(p);
         PrintIfEnabled(p, PacketDirection.Inbound);
+    }
+
+    private TaskCompletionSource<int>? _handoffTcs;
+
+    /// <summary>
+    /// Arm a one-shot capture of the next inbound 0x003A SERVER_HANDOFF's
+    /// ToSectorID. Returns a task that completes when that frame crosses the
+    /// active sector connection (read cleanly by the background drain -- so no
+    /// mid-frame cancellation of the RC4-stateful reader is needed). The
+    /// <c>undock</c> command awaits this to learn where the server is handing
+    /// the avatar off to, then re-joins that sector. See
+    /// <see cref="CaptureHandoff"/>.
+    /// </summary>
+    public Task<int> ArmHandoffCapture()
+    {
+        var tcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _handoffTcs = tcs;
+        return tcs.Task;
+    }
+
+    /// <summary>
+    /// Complete an armed handoff capture with the ToSectorID carried by a
+    /// 0x003A SERVER_HANDOFF. The inner MasterJoin-shaped struct puts
+    /// ToSectorID at offset 20, BIG-ENDIAN (SendServerHandoff writes it via
+    /// ntohl -- PlayerConnection.cpp:10167 -- while the rest of the struct is
+    /// host LE). Never throws -- a malformed frame must not kill the drain.
+    /// </summary>
+    private void CaptureHandoff(Packet p)
+    {
+        if (p.Header.Opcode != OpcodeId.Known.ServerHandoff.Value) return;
+        var tcs = _handoffTcs;
+        if (tcs is null) return;
+        try
+        {
+            var span = p.Payload.Span;
+            if (span.Length < 24) return;
+            int toSectorId = BinaryPrimitives.ReadInt32BigEndian(span.Slice(20, 4));
+            _handoffTcs = null;
+            tcs.TrySetResult(toSectorId);
+        }
+        catch { /* leave the capture armed; the awaiter will time out */ }
     }
 
     private const string GroupInviteSuffix = " is requesting you to join their group";

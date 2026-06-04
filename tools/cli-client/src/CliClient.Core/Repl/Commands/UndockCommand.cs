@@ -12,9 +12,22 @@ namespace N7.CliClient.Repl.Commands;
 /// <summary>
 /// <c>undock</c> -- launch the avatar out of the station it is docked in and
 /// into the surrounding sector's open space, the packet a real client sends
-/// when the player clicks "Launch".
+/// when the player clicks "Launch", then follow the server's handoff so the
+/// session actually lands in the space sector (not just fires the request).
 /// </summary>
 /// <remarks>
+/// <para>
+/// Two halves, mirroring the real client's launch:
+/// </para>
+/// <list type="number">
+///   <item>Send 0x004E STARBASE_REQUEST Action=1 on the current (station)
+///   sector connection. The server runs LaunchIntoSpace, drops us from the
+///   station sector, and replies with a 0x003A SERVER_HANDOFF naming the
+///   parent space sector (station_id / 10).</item>
+///   <item>Re-join that sector: a fresh MasterJoin + sector LOGIN with the
+///   SAME avatar id (the server kept the player node alive), swap the active
+///   sector connection to the new one, and restart the keepalive loops.</item>
+/// </list>
 /// <para>
 /// Wire: 0x004E STARBASE_REQUEST (struct StarbaseRequest, 9 bytes:
 /// <c>int32 PlayerID, int32 StarbaseID, byte Action</c>) with
@@ -58,10 +71,12 @@ public sealed class UndockCommand : ICommandHandler
     public string Summary => "launch out of the station into space (0x004E StarbaseRequest, Action=1)";
     public string Usage   =>
         "undock\n" +
-        "  Sends the retail Launch packet (0x004E STARBASE_REQUEST with Action=1).\n" +
-        "  The server drops you from the station sector and hands you off to the\n" +
-        "  parent space sector (station_id / 10). Follow with `list` to see the\n" +
-        "  space objects, then `move`/`warp`.";
+        "  Sends the retail Launch packet (0x004E STARBASE_REQUEST with Action=1),\n" +
+        "  waits for the server's 0x003A SERVER_HANDOFF, then re-joins the parent\n" +
+        "  space sector (station_id / 10) just like the real client does on a\n" +
+        "  handoff -- a fresh MasterJoin + sector LOGIN with the same avatar id.\n" +
+        "  On success you are in open space; run `list` to see the asteroids and\n" +
+        "  other ships, then `move`/`warp`.";
     public string? Placeholder => null;
     public bool Available => _ctx.Sector is not null && _ctx.GameId is not null;
 
@@ -72,20 +87,101 @@ public sealed class UndockCommand : ICommandHandler
             await output.WriteLineAsync(AnsiPalette.Warn("not in a sector -- run `enter` first")).ConfigureAwait(false);
             return 1;
         }
+        if (_ctx.Ticket is null || _ctx.ActiveSlot is not { } slot)
+        {
+            await output.WriteLineAsync(AnsiPalette.Warn("session incomplete (no ticket/slot) -- run `login` then `enter`")).ConfigureAwait(false);
+            return 1;
+        }
+
+        var oldSector = _ctx.Sector;
 
         // Match the retail convention: PlayerID is the GameID with the
         // PLAYER_TAG bit cleared. StarbaseID is ignored by the server for
         // Action 1, so 0 is correct.
         int playerId = id & ~PlayerTag;
 
-        await _ctx.Sector.SendAsync(
+        // Arm the handoff capture BEFORE sending the launch packet, so the
+        // background drain (which owns the sector socket) records the
+        // server's 0x003A SERVER_HANDOFF reply and surfaces its ToSectorID.
+        // The drain reads the frame cleanly -- we never cancel a mid-frame
+        // RC4-stateful read on this connection.
+        var handoffTask = _ctx.ArmHandoffCapture();
+
+        await oldSector.SendAsync(
             Packet.ForOpcode(OpcodeId.Known.StarbaseRequest.Value, BuildUndockFrame(playerId, 0)), ct)
             .ConfigureAwait(false);
 
         await output.WriteLineAsync(
             AnsiPalette.Ok("undock requested ") +
-            AnsiPalette.Muted("(0x004E Action=1 -> LaunchIntoSpace). Watch space fill in with `list`."))
+            AnsiPalette.Muted("(0x004E Action=1 -> LaunchIntoSpace). Awaiting server handoff..."))
             .ConfigureAwait(false);
+
+        int toSectorId;
+        try
+        {
+            using var handoffCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            handoffCts.CancelAfter(TimeSpan.FromSeconds(15));
+            toSectorId = await handoffTask.WaitAsync(handoffCts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            await output.WriteLineAsync(AnsiPalette.Err(
+                "no 0x003A SERVER_HANDOFF arrived within 15s -- still docked? " +
+                "(LaunchIntoSpace only fires from a station sector)")).ConfigureAwait(false);
+            return 1;
+        }
+
+        await output.WriteLineAsync(
+            AnsiPalette.Muted("handoff -> space sector ") + AnsiPalette.Value($"{toSectorId}") +
+            AnsiPalette.Muted("; re-joining...")).ConfigureAwait(false);
+
+        // The old (station) sector connection is finished: LaunchIntoSpace
+        // dropped us from that sector. Quiesce the background loops that own
+        // it and dispose it. RC4-stream position on the old socket no longer
+        // matters -- we re-join on a brand-new connection.
+        await _ctx.StopKeepaliveAsync().ConfigureAwait(false);
+        await _ctx.StopCommsAliveAsync().ConfigureAwait(false);
+        await _ctx.StopSectorDrainAsync().ConfigureAwait(false);
+
+        SectorEnterDriver.SectorEntryResult result;
+        try
+        {
+            result = await SectorEnterDriver.FollowHandoffAsync(_ctx, id, slot, toSectorId, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            await output.WriteLineAsync(AnsiPalette.Err($"handoff re-join failed: {ex.Message}")).ConfigureAwait(false);
+            return 1;
+        }
+
+        // Swap the active sector connection to the space sector and dispose
+        // the station one (detaches its hooks via the Sector setter first).
+        _ctx.Sector = result.Sector;
+        _ctx.ActiveSectorId = result.SectorId;
+        await oldSector.DisposeAsync().ConfigureAwait(false);
+
+        // Fresh sector -> fresh world model. Replay the re-join handshake
+        // frames (consumed before Sector was set, so the hooks missed them)
+        // to feed the world model and dump tail.
+        _ctx.World.Reset();
+        foreach (var f in result.HandshakeFrames)
+            _ctx.ReplayInboundFrame(f);
+
+        // Hand the new socket to the background drain + restart the keepalives
+        // (the in-space avatar now refreshes LastAccessTime the same way the
+        // post-`enter` session does).
+        _ctx.StartSectorDrain();
+        _ctx.StartKeepalive();
+        _ctx.StartCommsAlive();
+
+        await output.WriteLineAsync(
+            AnsiPalette.Ok("in space: ") +
+            AnsiPalette.Muted("sector=") + AnsiPalette.Value($"{result.SectorId}") + " " +
+            AnsiPalette.Muted("handshake-frames=") + AnsiPalette.Value($"{result.HandshakeFrames.Count}") +
+            AnsiPalette.Muted(" -- run `list` for the space objects.")).ConfigureAwait(false);
+
+        _ctx.World.Render(output, result.GameId);
         return 0;
     }
 

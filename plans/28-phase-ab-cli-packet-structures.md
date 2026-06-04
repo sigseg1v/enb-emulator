@@ -152,17 +152,23 @@ remaining Phase-AA fabrication implementable without crashing the real client.
       `SectorServerHandoffTests` sends 0x004E Action=1 from Luna 10151 and
       asserts the 0x003A SERVER_HANDOFF arrives with ToSectorID=1015 (commit
       aef3ec3c). No server-log errors; no client crash.
-- [~] **Live mining still gated on CLI follow-the-handoff.** The launch
-      handoff frame arrives, but the CLI does not yet re-establish at the
-      space sector it points to (the real client re-runs master-join +
-      sector login against ToSectorID on a 0x003A). Once the CLI follows the
-      handoff and lands in space sector 1015/1025, `list` should show the
-      OT_RESOURCE asteroids, giving the 0x0017->0x0027(FromInv=18)->
-      MineResource->0x2012 chain a live trigger. Remaining sub-tasks: (a) add
-      handoff-follow to the CLI sector driver; (b) resolve the MVAS move
-      IP-mismatch (position UDP currently dials server:3806 direct from the
-      host IP, dropped by the server's correct anti-spoof guard at
-      UDP_Client.cpp:98 -- it must route through the proxy like login does).
+- [~] **Live mining still gated on the MVAS move IP-mismatch.** Sub-task (a)
+      DONE and PROVEN live: the CLI now FOLLOWS the 0x003A handoff into space.
+      `SectorEnterDriver.FollowHandoffAsync` re-runs master-join + sector LOGIN
+      against ToSectorID reusing the SAME GameId (no fresh GlobalTicketRequest --
+      the server kept the player node alive via DropPlayerFromSector, not
+      DropPlayerFromGalaxy, SectorManager.cpp:574), and `UndockCommand` swaps the
+      active sector connection to the space leg. Verified live by
+      `SectorUndockHandoffFollowTests.Undock_FollowsHandoff_LandsInSpaceWithAsteroids`:
+      undock from Luna Station 10151 -> handoff -> re-join space sector 1015,
+      START 0x0B, 141 objects (7 mob spawns / 17 navs). NOTE: 1015 is a mob/nav
+      newbie field, NOT a resource sector -- it has 0 OT_RESOURCE. Landing in
+      space does NOT itself show asteroids; mining requires a subsequent
+      gate/warp to a resource sector (e.g. 1710=45 asteroids, 1070=38). Remaining
+      sub-task (b): resolve the MVAS move IP-mismatch (position UDP currently
+      dials server:3806 direct from the host IP, dropped by the server's correct
+      anti-spoof guard at UDP_Client.cpp:98 -- it must route through the proxy
+      like login does), then gate/warp to a resource sector to trigger mining.
 - [ ] When the CLI lands in space: drive the prospect/mine path, drain the
       client-leg frames, assert the `0x000B` arrives with the fields above, and
       assert byte-equality against `FabricateBeamBody` from the spec test (so

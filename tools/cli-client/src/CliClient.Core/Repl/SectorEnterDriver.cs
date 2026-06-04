@@ -92,6 +92,40 @@ public static class SectorEnterDriver
         return new SectorEntryResult(sectorConn, gameId, startId, slot, sectorId, packets);
     }
 
+    /// <summary>
+    /// Re-join a sector the server has handed the avatar off to (the
+    /// destination of a 0x003A SERVER_HANDOFF, e.g. after <c>undock</c>).
+    /// Mirrors what the real client does on a handoff: a fresh MasterJoin
+    /// + sector LOGIN against the new sector, re-using the EXISTING
+    /// <paramref name="gameId"/> and ticket -- NOT a new GlobalTicketRequest.
+    /// The server kept the player node alive (LaunchIntoSpace calls
+    /// DropPlayerFromSector, not DropPlayerFromGalaxy, and set the node's
+    /// sector_num to the target -- SectorManager.cpp:574-575), so the same
+    /// gameId re-attaches to the space sector. The proxy re-points its
+    /// UDP back-channel to the new sector inside HandleMasterJoin
+    /// (proxy/ClientToMasterServer.cpp:108).
+    /// </summary>
+    public static async Task<SectorEntryResult> FollowHandoffAsync(
+        SessionContext ctx,
+        int gameId,
+        int slot,
+        int toSectorId,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(ctx);
+
+        var redirect = await DoMasterJoinAsync(
+            ctx.Host, ctx.MasterPort, ctx.Ticket!, gameId, toSectorId, ct);
+        if (redirect.SectorId != toSectorId)
+            throw new InvalidOperationException(
+                $"ServerRedirect sector mismatch after handoff: got {redirect.SectorId}, expected {toSectorId}");
+
+        var (sectorConn, startId, packets) = await DoSectorLoginUntilStartAsync(
+            ctx.Host, ctx.SectorPort, ctx.Ticket!, gameId, toSectorId, ct);
+
+        return new SectorEntryResult(sectorConn, gameId, startId, slot, toSectorId, packets);
+    }
+
     public static async Task SendGlobalConnectAsync(
         EncryptedTcpConnection conn, string ticket, CancellationToken ct)
     {
