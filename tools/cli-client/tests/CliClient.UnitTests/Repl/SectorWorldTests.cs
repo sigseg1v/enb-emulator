@@ -74,23 +74,82 @@ public sealed class SectorWorldTests
     // ShipIndex schema layout. A field with flagNum N is present iff bit (N+4)
     // is set, and present fields serialise in flag order:
     // [u32 GameID][u16 BodyLen=payload-6][u8 ver=1][8 flag bytes][Name][MaxSpeed?][lvl].
-    private static Packet ShipAux(uint gameId, string name, uint combatLevel, float? maxSpeed = null)
+    private static Packet ShipAux(uint gameId, string name, uint combatLevel,
+        float? maxSpeed = null, string? faction = null)
     {
         byte[] nameB = Encoding.ASCII.GetBytes(name);
+        byte[] facB = faction is null ? System.Array.Empty<byte>() : Encoding.ASCII.GetBytes(faction);
         int speedBytes = maxSpeed is null ? 0 : 4;
-        byte[] p = new byte[7 + 8 + (2 + nameB.Length) + speedBytes + 4];
+        int facBytes = faction is null ? 0 : 2 + facB.Length;
+        byte[] p = new byte[7 + 8 + (2 + nameB.Length) + speedBytes + 4 + facBytes];
         BinaryPrimitives.WriteUInt32LittleEndian(p.AsSpan(0, 4), gameId);
         BinaryPrimitives.WriteUInt16LittleEndian(p.AsSpan(4, 2), (ushort)(p.Length - 6));
         p[6] = 1;                       // version
         p[7 + 0] = 0x10;                // bit 4  -> flag 0  (Name)
         if (maxSpeed is not null) p[7 + 2] = 0x02;   // bit 17 -> flag 13 (MaxSpeed)
         p[7 + 3] = 0x40;                // bit 30 -> flag 26 (CombatLevel)
+        if (faction is not null) p[7 + 7] = 0x20;    // bit 61 -> flag 57 (FactionIdentifier)
         int o = 7 + 8;
         BinaryPrimitives.WriteUInt16LittleEndian(p.AsSpan(o, 2), (ushort)nameB.Length); o += 2;
         nameB.CopyTo(p.AsSpan(o)); o += nameB.Length;
         if (maxSpeed is { } ms) { BinaryPrimitives.WriteSingleLittleEndian(p.AsSpan(o, 4), ms); o += 4; }
-        BinaryPrimitives.WriteUInt32LittleEndian(p.AsSpan(o, 4), combatLevel);
+        BinaryPrimitives.WriteUInt32LittleEndian(p.AsSpan(o, 4), combatLevel); o += 4;
+        if (faction is not null)
+        {
+            BinaryPrimitives.WriteUInt16LittleEndian(p.AsSpan(o, 2), (ushort)facB.Length); o += 2;
+            facB.CopyTo(p.AsSpan(o));
+        }
         return Packet.ForOpcode(0x001B, p);
+    }
+
+    // 0x0089 RELATIONSHIP (struct Relationship, 9 bytes): ObjectID i32 BE
+    // (server applies ntohl at emit), Reaction i32 LE, IsAttacking u8.
+    private static Packet Relationship(int gameId, int reaction, bool attacking)
+    {
+        byte[] p = new byte[9];
+        BinaryPrimitives.WriteInt32BigEndian(p.AsSpan(0, 4), gameId);
+        BinaryPrimitives.WriteInt32LittleEndian(p.AsSpan(4, 4), reaction);
+        p[8] = (byte)(attacking ? 1 : 0);
+        return Packet.ForOpcode(0x0089, p);
+    }
+
+    [Theory]
+    [InlineData(0, "hostile")]
+    [InlineData(1, "shun")]
+    [InlineData(2, "friendly")]
+    [InlineData(3, "adoration")]
+    public void Ingest_Relationship_SetsReactionAndDisposition(int reaction, string label)
+    {
+        // Reaction enum per PacketStructures.h RELATIONSHIP_* and confirmed
+        // against an upstream net7 Ishuan capture (only 0/1/2/3 ever on wire).
+        var w = new SectorWorld();
+        w.Ingest(Create(0x1872C, baseAsset: 398, type: 0));        // a mob
+        w.Ingest(Relationship(0x1872C, reaction, attacking: true));
+
+        var obj = w.NearestTo(0)[0].Obj;
+        Assert.Equal(reaction, obj.Reaction);
+        Assert.True(obj.IsAttacking);
+        Assert.Equal(label, SectorWorld.ReactionName(obj.Reaction));
+    }
+
+    [Fact]
+    public void ReactionName_UnknownReaction_IsNotMisreported()
+    {
+        Assert.Equal("unknown", SectorWorld.ReactionName(null));
+        Assert.Equal("reaction=4", SectorWorld.ReactionName(4)); // no phantom NEUTRAL/FRIENDLY
+    }
+
+    [Fact]
+    public void Ingest_Aux_DecodesFactionIdentifier()
+    {
+        // FactionIdentifier is ShipIndex flag 57 (AuxSchemas.ShipIndex); it must
+        // surface through the world model so mob/ship disposition has context.
+        var w = new SectorWorld();
+        w.Ingest(ShipAux(0x40000050, "Sharim Trader", combatLevel: 12, faction: "Sharim"));
+
+        var obj = w.NearestTo(0)[0].Obj;
+        Assert.Equal("Sharim Trader", obj.Name);
+        Assert.Equal("Sharim", obj.Faction);
     }
 
     [Fact]

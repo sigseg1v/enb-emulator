@@ -45,6 +45,12 @@ build:
 build-tools:
     dotnet build tools/Net7Tools.slnx
 
+# Decode a proxy<->server sector capture into a nav/mob/resource inventory.
+# Output lands next to the input as <input>.inventory.txt (gitignored).
+#   just pcap-inventory proxy/local-debug/<capture>.pcapng
+pcap-inventory FILE:
+    dotnet run --project tools/pcap-inventory -c Release -- "{{FILE}}"
+
 # Cross-compile Net7Proxy as a Win32 PE binary (MinGW-w64). The launcher
 # spawns this under WINE next to the EnB client — see plans/23-phase-w-proxy-win32-crossbuild.md.
 # Builds OpenSSL 3 statically into proxy/third_party/openssl-mingw64 the

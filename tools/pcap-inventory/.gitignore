@@ -1,0 +1,8 @@
+# Tool outputs and any local captures are NOT committed -- captures may carry
+# real credentials / session data (see proxy/local-debug convention).
+*.inventory.txt
+*.pcapng
+*.pcap
+out/
+bin/
+obj/

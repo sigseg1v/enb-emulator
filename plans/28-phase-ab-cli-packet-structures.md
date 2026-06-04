@@ -265,3 +265,25 @@ CLI -- the server emitter is authoritative per CLAUDE.md):
       C++ output against the real client).
 - [x] §5 dual-emitter + stale-comment + uncapped-Duration drift findings
       resolved (commits dbe93970, dae171ea).
+- [x] §6 `pcap-inventory` tool + sector-object metadata parity. Built
+      `tools/pcap-inventory/` -- a standalone decoder that turns a
+      proxy<->server sector `.pcapng` into a nav/station/gate + mob + resource
+      inventory, reusing `SectorStreamReassembler` / `SectorWorld` /
+      `AuxDataRecord` so the byte semantics stay in lock-step with the CLI. It
+      is an accumulating decode (ignores `0x0007` REMOVE) so flying out of range
+      does not drop an already-catalogued object. Captures + outputs are
+      gitignored (a capture may carry credentials). While wiring it, surfaced
+      and fixed real CLI gaps, each verified against an upstream net7 Ishuan
+      capture:
+      - **`0x0089` RELATIONSHIP reaction enum was WRONG in the CLI.**
+        `RelationshipRecord` annotated `5=FRIENDLY/4=NEUTRAL/3=HOSTILE/0=UNFRIENDLY`;
+        the authoritative server enum (PacketStructures.h `RELATIONSHIP_*` +
+        `MOB::SendRelationship`) is `0=ATTACK/1=SHUN/2=FRIENDLY/3=ADORATION`, and
+        the capture only ever carries 0/1/2/3 -- never 4/5. Corrected the labels.
+      - **`SectorWorld` now models disposition.** Added `Reaction`/`IsAttacking`
+        (from `0x0089`) and `Faction` (from `0x001B` ShipIndex flag 57
+        FactionIdentifier) to `Tracked`, plus `ReactionName()`. This is what gives
+        each mob a hostile/shun/friendly/adoration label.
+      - Read-side only (no server/proxy wire change), so no plans/29 CV entry is
+        required. Pinned by new `SectorWorldTests` (reaction theory + faction +
+        unknown-reaction guard); full CLI unit suite green (677).

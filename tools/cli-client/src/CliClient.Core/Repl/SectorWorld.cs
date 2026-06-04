@@ -44,6 +44,9 @@ public sealed class SectorWorld
         public float X, Y, Z;
         public int? Level;          // CombatLevel from a 0x001B aux, if announced
         public float? MaxSpeed;     // ship MaxSpeed from a 0x001B ship aux, if announced
+        public string? Faction;     // FactionIdentifier from a 0x001B mob aux, if announced
+        public int? Reaction;       // 0x0089 RELATIONSHIP reaction (0=attack,1=shun,2=friendly,3=adoration)
+        public bool? IsAttacking;   // 0x0089 RELATIONSHIP is-attacking flag
     }
 
     private readonly object _gate = new();
@@ -88,6 +91,7 @@ public sealed class SectorWorld
                     case 0x0061: IngestAvatar(s); break;
                     case 0x0099: IngestNavigation(s); break;
                     case 0x001B: IngestAux(s); break;
+                    case 0x0089: IngestRelationship(s); break;
                 }
             }
         }
@@ -195,6 +199,19 @@ public sealed class SectorWorld
         if (!string.IsNullOrEmpty(a.Name)) t.Name = a.Name;
         if (a.CombatLevel is { } lvl) t.Level = (int)lvl;
         if (a.MaxSpeed is { } spd && spd > 0) t.MaxSpeed = spd;
+        if (!string.IsNullOrEmpty(a.Faction)) t.Faction = a.Faction;
+    }
+
+    private void IngestRelationship(ReadOnlySpan<byte> s)
+    {
+        // 0x0089 RELATIONSHIP (struct Relationship, 9 bytes): ObjectID i32 BE
+        // (server applies ntohl at emit), Reaction i32 LE, IsAttacking u8.
+        // Reaction: 0=ATTACK, 1=SHUN, 2=FRIENDLY, 3=ADORATION.
+        if (s.Length < 9) return;
+        int gameId = BinaryPrimitives.ReadInt32BigEndian(s[..4]);
+        var t = GetOrAdd(gameId);
+        t.Reaction = BinaryPrimitives.ReadInt32LittleEndian(s.Slice(4, 4));
+        t.IsAttacking = s[8] != 0;
     }
 
     private void IngestAvatar(ReadOnlySpan<byte> s)
@@ -226,6 +243,20 @@ public sealed class SectorWorld
         var t = GetOrAdd(gameId);
         t.X = x; t.Y = y; t.Z = z; t.HasPos = true;
     }
+
+    /// <summary>
+    /// Human-readable disposition for a 0x0089 RELATIONSHIP reaction value
+    /// (server enum: 0=ATTACK, 1=SHUN, 2=FRIENDLY, 3=ADORATION).
+    /// </summary>
+    public static string ReactionName(int? reaction) => reaction switch
+    {
+        0 => "hostile",
+        1 => "shun",
+        2 => "friendly",
+        3 => "adoration",
+        null => "unknown",
+        _ => $"reaction={reaction}",
+    };
 
     /// <summary>Human-readable object kind for a tracked entry.</summary>
     public static string TypeName(Tracked t)
