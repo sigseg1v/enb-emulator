@@ -21,7 +21,7 @@ client and its tests:
 | Opcode | Field surfaced |
 |---|---|
 | `0x0004` CREATE | game id, base asset, create-type (mob / planet / ...) |
-| `0x2018` STATIC_OBJECT_CREATE | nav / station / gate name, position, signature |
+| `0x2018` STATIC_OBJECT_CREATE | nav / station / gate name, position, signature, nav class (sig_flags) |
 | `0x2019` RESOURCE_OBJECT_CREATE | resource name, position, resource template |
 | `0x001B` AUX_DATA | mob name, combat level, faction, ship max speed |
 | `0x0089` RELATIONSHIP | reaction (0 attack / 1 shun / 2 friendly / 3 adoration) + is-attacking |
@@ -31,6 +31,13 @@ client and its tests:
 
 - **It is an inventory, not a live model.** It deliberately ignores `0x0007
   REMOVE` so flying out of range never deletes an object already catalogued.
+- **Nav vs deco is read from the `0x2018` sig_flags byte, not `0x0099`.** A
+  *hidden nav* (clickable but off-minimap: `IS_NAV`/`NavType>0` with `HAS_NAV`
+  clear -- e.g. "Traders Run", "Strange Ship") emits **no** `0x0099 NAVIGATION`
+  frame, because the server gates that on `AppearsInRadar`. Labelling nav-ness
+  off `0x0099` alone mislabels every hidden nav as a deco, so the tool decodes
+  the create packet's nav class directly: `nav` / `nav (major)` /
+  `nav (hidden)` / `nav (hidden, major)` vs a true `deco` (NavType 0).
 - **Completeness is path-bound.** Navs have huge signature ranges so the nav set
   is reliable, but mobs and resources are range-gated: the listing is everything
   the capture's flight path passed, which is *not* provably the whole sector.

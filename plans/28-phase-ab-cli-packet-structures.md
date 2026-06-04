@@ -284,6 +284,19 @@ CLI -- the server emitter is authoritative per CLAUDE.md):
         (from `0x0089`) and `Faction` (from `0x001B` ShipIndex flag 57
         FactionIdentifier) to `Tracked`, plus `ReactionName()`. This is what gives
         each mob a hostile/shun/friendly/adoration label.
+      - **Hidden navs were mislabelled as decos.** `SectorWorld` keyed nav-ness
+        off seeing a `0x0099 NAVIGATION` frame, but the server gates
+        `SendNavigation` on `AppearsInRadar` (NavTypeClass.cpp:417), so a HIDDEN
+        nav (clickable but off-minimap: `IS_NAV`/`NavType>0`, `HAS_NAV` clear --
+        e.g. "Traders Run", "Strange Ship") emits no `0x0099` and fell through
+        to "deco". Fixed `IngestStatic` to read the `0x2018` sig_flags byte@57
+        directly (the server's authoritative nav class -- DB `nav_type` from the
+        `sector_nav_points` LEFT JOIN, SectorContentSQL.cpp:231/373) and label
+        `nav` / `nav (major)` / `nav (hidden)` / `nav (hidden, major)` vs a true
+        `deco`. Cross-validated against the runtime DB `appears_in_radar` for the
+        Ishuan objects (Traders Run/Little Rock radar=1 -> on-minimap nav;
+        Strange Ship/Hou'jeu Byeon radar=0 -> hidden nav; Deco/Rings -> deco).
       - Read-side only (no server/proxy wire change), so no plans/29 CV entry is
         required. Pinned by new `SectorWorldTests` (reaction theory + faction +
-        unknown-reaction guard); full CLI unit suite green (677).
+        unknown-reaction guard + nav-class sig_flags theory); full CLI unit suite
+        green (682).

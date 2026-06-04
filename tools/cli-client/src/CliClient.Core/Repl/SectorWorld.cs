@@ -36,8 +36,9 @@ public sealed class SectorWorld
         public short? BaseAsset;
         public string? Name;
         public bool IsAvatar;       // saw a 0x0061 AVATAR_DESCRIPTION
-        public bool IsNav;          // saw a 0x0099 NAVIGATION entry
+        public bool IsNav;          // 0x2018 IS_NAV/NavType>0, or a 0x0099 entry
         public int? NavType;        // 1 = minor nav, 2 = major nav
+        public bool? OnRadar;       // 0x2018 sig_flags HAS_NAV (on the minimap)
         public float? Signature;
         public bool? Visited;
         public bool HasPos;
@@ -126,6 +127,23 @@ public sealed class SectorWorld
         t.Z = BinaryPrimitives.ReadSingleLittleEndian(s.Slice(33, 4));
         t.HasPos = true;
         t.Signature = BinaryPrimitives.ReadSingleLittleEndian(s.Slice(53, 4));
+        // sig_flags@57 (server StaticMap::FormStaticPacket): 0x80 HAS_VISITED,
+        // 0x40 IS_HUGE, 0x20 IS_NAV, 0x10 HAS_NAV (on-minimap), low nibble =
+        // NavType (0/1/2). This is the ONLY reliable nav/deco signal in the
+        // create path. A HIDDEN nav (clickable but off-minimap: NavType>0,
+        // AppearsInRadar=0 -- e.g. "Traders Run") gets NO 0x0099 NAVIGATION
+        // frame, because the server gates SendNavigation on AppearsInRadar
+        // (NavTypeClass.cpp:417). So keying nav-ness off 0x0099 alone mislabels
+        // every hidden nav as a deco; reading the flag byte fixes that.
+        byte sigFlags = s[57];
+        int navTypeFromStatic = sigFlags & 0x0F;
+        if ((sigFlags & 0x20) != 0 || navTypeFromStatic > 0)
+        {
+            t.IsNav = true;
+            if (navTypeFromStatic > 0) t.NavType = navTypeFromStatic;
+            t.OnRadar = (sigFlags & 0x10) != 0;
+            t.Visited = (sigFlags & 0x80) != 0;
+        }
         if (s.Length >= 60)
         {
             ushort nameLen = BinaryPrimitives.ReadUInt16LittleEndian(s.Slice(58, 2));
@@ -271,15 +289,33 @@ public sealed class SectorWorld
             10 => "stargate",
             11 => "stargate",
             12 => "station",
-            37 => t.IsNav ? "nav" : "deco",
+            37 => t.IsNav ? NavLabel(t) : "deco",
             38 => "resource",
             40 => "radiation",
             41 => "gravity well",
             42 => "turret",
-            _  => t.IsNav ? "nav" : "object",
+            _  => t.IsNav ? NavLabel(t) : "object",
         };
-        if (t.IsNav && t.NavType == 2 && baseName is "nav") return "nav (major)";
         return baseName;
+    }
+
+    /// <summary>
+    /// Label a nav by its class. A HIDDEN nav (clickable but off-minimap:
+    /// 0x2018 IS_NAV/NavType>0 with HAS_NAV clear) emits no 0x0099 and is what
+    /// the create path would otherwise mislabel as a deco. NavType 2 is a
+    /// destination-only ("major") nav; 1 is a warp-path nav.
+    /// </summary>
+    private static string NavLabel(Tracked t)
+    {
+        bool hidden = t.OnRadar == false;
+        bool major  = t.NavType == 2;
+        return (hidden, major) switch
+        {
+            (true,  true)  => "nav (hidden, major)",
+            (true,  false) => "nav (hidden)",
+            (false, true)  => "nav (major)",
+            _              => "nav",
+        };
     }
 
     /// <summary>

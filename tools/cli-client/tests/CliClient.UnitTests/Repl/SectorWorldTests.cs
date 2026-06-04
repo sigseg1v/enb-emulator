@@ -32,7 +32,7 @@ public sealed class SectorWorldTests
     }
 
     private static Packet StaticNav(int gameId, byte createType, string name,
-        float x, float y, float z, float signature)
+        float x, float y, float z, float signature, byte sigFlags = 0)
     {
         byte[] nameBytes = Encoding.ASCII.GetBytes(name);
         byte[] p = new byte[60 + nameBytes.Length];
@@ -42,6 +42,7 @@ public sealed class SectorWorldTests
         BinaryPrimitives.WriteSingleLittleEndian(p.AsSpan(29, 4), y);
         BinaryPrimitives.WriteSingleLittleEndian(p.AsSpan(33, 4), z);
         BinaryPrimitives.WriteSingleLittleEndian(p.AsSpan(53, 4), signature);
+        p[57] = sigFlags; // sig_flags: 0x20 IS_NAV, 0x10 HAS_NAV, low nibble NavType
         BinaryPrimitives.WriteUInt16LittleEndian(p.AsSpan(58, 2), (ushort)nameBytes.Length);
         nameBytes.CopyTo(p.AsSpan(60));
         return Packet.ForOpcode(0x2018, p);
@@ -193,6 +194,26 @@ public sealed class SectorWorldTests
         Assert.Equal(2, nav.NavType);
         Assert.True(nav.Visited);
         Assert.Equal("nav (major)", SectorWorld.TypeName(nav));
+    }
+
+    // A HIDDEN nav (clickable but off-minimap: 0x2018 IS_NAV/NavType>0 with
+    // HAS_NAV clear) emits NO 0x0099 NAVIGATION frame -- the server gates
+    // SendNavigation on AppearsInRadar (NavTypeClass.cpp:417). Before reading
+    // sig_flags@57 directly, such a nav (e.g. "Traders Run", "Strange Ship")
+    // was mislabelled a deco because IsNav only flipped on a 0x0099.
+    [Theory]
+    // sigFlags, expect0099, expectedLabel
+    [InlineData(0x00, false, "deco")]                // NavType 0, no IS_NAV -> true deco
+    [InlineData(0x31, false, "nav")]                 // IS_NAV|HAS_NAV|NavType1 -> visible warp-path nav
+    [InlineData(0x32, false, "nav (major)")]         // IS_NAV|HAS_NAV|NavType2 -> visible destination nav
+    [InlineData(0x21, false, "nav (hidden)")]        // IS_NAV|NavType1, no HAS_NAV -> hidden nav
+    [InlineData(0x22, false, "nav (hidden, major)")] // IS_NAV|NavType2, no HAS_NAV -> hidden destination nav
+    public void TypeName_StaticSigFlags_ClassifyNavVsDeco(byte sigFlags, bool _, string expected)
+    {
+        var w = new SectorWorld();
+        w.Ingest(StaticNav(0x3000, createType: 37, "Traders Run 3", 100, 200, 0, 30000f, sigFlags));
+        var obj = w.NearestTo(0)[0].Obj;
+        Assert.Equal(expected, SectorWorld.TypeName(obj));
     }
 
     [Fact]
