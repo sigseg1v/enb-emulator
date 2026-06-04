@@ -224,9 +224,13 @@ remaining Phase-AA fabrication implementable without crashing the real client.
       warns if the target is not prof=2 (it would clamp to 0 at login).
       Workflow: seed-account -> play-cli `create JE <name>` -> grant-prospect ->
       relog. Verified against a synthetic JE: prospect=7, explore=150, "OK
-      (Explorer)"; non-explorer correctly warns. Still need a mining beam
-      equipped + target-set + move into range + stationary before 0x0027 sub-18.
-      BLOCKER 2: the CLI
+      (Explorer)"; non-explorer correctly warns. NOTE: `CheckMiningConditions`
+      (PlayerSkills.cpp:884-943) does NOT require a mining beam equipped -- it
+      gates only on SKILL_PROSPECT>0, target OT_RESOURCE/OT_HULK with a non-empty
+      slot, ship stationary, `m_ProspectBeam` not already active, inventory room,
+      and reactor energy >= per-ore. So after grant-prospect the only remaining
+      live steps are: reach a resource sector, target an asteroid, sit still,
+      then send 0x0027 sub-18. BLOCKER 2: the CLI
       integration harness talks DIRECTLY to the sector server, so it only sees
       the server's compact `0x2012 START_PROSPECT`, NOT the proxy-fabricated
       `0x000B` beam. Byte-pinning the fabricated beam (the actual §3 deliverable)
