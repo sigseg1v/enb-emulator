@@ -194,9 +194,16 @@ remaining Phase-AA fabrication implementable without crashing the real client.
       byte-pinned (16 bytes, 4x int32 LE, `PacketStructures.h:546`). 687 unit
       tests green. Single faithful route from a newbie space sector to a resource
       sector: Luna space 1015 -> obj 533 "Sector Gate to Earth" -> 1060 (20
-      type-38 resource nodes). **NOT yet proven live** (server up but the live
-      gate round-trip + prospect/mine chain still to run); real-client gate-send
-      verification tracked as `plans/29` CV-06.
+      type-38 resource nodes). **Gate jump PROVEN live** by
+      `SectorGateHandoffFollowTests.Gate_FromMobSector_LandsInResourceSector`
+      (commit `77b40318`): undock 10151 -> 1015, find "Sector Gate to Earth" in
+      the fanout, send 0x002C Action 18 then 19, assert 0x003A -> 1060, follow
+      the handoff into Earth space, assert resource nodes fan out. 27s, no
+      server change, no server-log errors. Route confirmed against the live DB
+      (sector_objects 1015 gate 533 gate_to 1060; 1060 type-38 = 20 nodes).
+      Real-client gate-send (does client.exe emit 18->19?) still tracked as
+      `plans/29` CV-06. REMAINING for the full live mining round-trip: run the
+      prospect/mine chain in 1060 and byte-pin the fabricated 0x000B beam.
 - [ ] When the CLI lands in space: drive the prospect/mine path, drain the
       client-leg frames, assert the `0x000B` arrives with the fields above, and
       assert byte-equality against `FabricateBeamBody` from the spec test (so
