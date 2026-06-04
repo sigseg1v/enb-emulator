@@ -182,6 +182,21 @@ remaining Phase-AA fabrication implementable without crashing the real client.
       stream re-routed to our socket). NO server change, NO guard weakened.
       Remaining toward live mining: gate/warp from a mob sector (e.g. 1015) to a
       resource sector (1710/1070), then run the prospect/mine chain below.
+- [~] **Gate command landed (commit `fbe16a5e`).** CLI `gate <gid>` sends
+      `0x002C ACTION Action=18` (select, Target=gate gid) then, ~6s later
+      (mirroring the retail B_CAMERA_CONTROL +5800ms), `Action=19` (finish),
+      then follows the `0x003A SERVER_HANDOFF` into the destination sector with
+      the same avatar id. Server path: `PlayerConnection.cpp:3923` case 18 ->
+      `SectorManager::Gate` (`:639`) stores StargateDestination; `:3965` case 19
+      -> `SectorServerHandoff` (`:579`, DropPlayerFromSector -- keeps the node
+      alive, identical to LaunchIntoSpace). Shared post-handoff re-join extracted
+      to `HandoffFollow.CompleteAsync`; `undock` refactored onto it. ActionPacket
+      byte-pinned (16 bytes, 4x int32 LE, `PacketStructures.h:546`). 687 unit
+      tests green. Single faithful route from a newbie space sector to a resource
+      sector: Luna space 1015 -> obj 533 "Sector Gate to Earth" -> 1060 (20
+      type-38 resource nodes). **NOT yet proven live** (server up but the live
+      gate round-trip + prospect/mine chain still to run); real-client gate-send
+      verification tracked as `plans/29` CV-06.
 - [ ] When the CLI lands in space: drive the prospect/mine path, drain the
       client-leg frames, assert the `0x000B` arrives with the fields above, and
       assert byte-equality against `FabricateBeamBody` from the spec test (so
@@ -299,4 +314,4 @@ CLI -- the server emitter is authoritative per CLAUDE.md):
       - Read-side only (no server/proxy wire change), so no plans/29 CV entry is
         required. Pinned by new `SectorWorldTests` (reaction theory + faction +
         unknown-reaction guard + nav-class sig_flags theory); full CLI unit suite
-        green (682).
+        green (682; 687 after the gate-command tests landed).

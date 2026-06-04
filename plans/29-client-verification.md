@@ -194,3 +194,29 @@ format & byte order", Trap 2).
   sector.
 - **Setup**: `just rebuild server && just play-local`, create a fresh
   character, observe the first-login state.
+
+### [ ] CV-06 -- Real client gate-jump sends 0x002C ACTION 18 then 19
+
+- **Change**: NONE server-side. This is a tooling-consumer verification only:
+  the new CLI `gate <gid>` command (commit `fbe16a5e`) sends `0x002C ACTION`
+  `Action=18` (gate button, Target=stargate gid) then, ~6s later, `Action=19`
+  (finish gate sequence). The CLI byte-pins the ActionPacket layout (16 bytes,
+  4x int32 LE per `PacketStructures.h:546`) and the 18/19 values are taken from
+  the SERVER handler (`PlayerConnection.cpp:3923` case 18 -> `SectorManager::Gate`
+  stores StargateDestination; `:3965` case 19 -> `SectorServerHandoff`).
+- **Gap being verified**: the 18/19 sequence is confirmed against the *server*
+  side only. I do NOT have a captured *client*->server gate jump pinning that
+  the retail `client.exe` actually emits `0x002C` with Action 18 then 19 (the
+  committed captures cover login/undock/navs/warp/logout, not a gate jump). So
+  the CLI proves our server ACCEPTS the sequence and hands off correctly, but
+  only the real client proves the sequence is what the client SENDS.
+- **What to look for (play-local / real client)**: in a sector with a working
+  stargate (e.g. Luna space 1015 -> obj 533 "Sector Gate to Earth" -> 1060),
+  fly to the gate and jump. Capture the cleartext proxy<->server leg
+  (`proxy/local-debug/`); confirm the client->server frames carry `0x002C` with
+  `Action=18` (Target=the gate gid) followed by `Action=19`, and that the
+  server replies with a `0x003A SERVER_HANDOFF` to the destination sector. If
+  the real client uses different Action codes or a different Target convention,
+  fix `GateCommand.BuildActionFrame` callers to match and re-pin.
+- **Setup**: `just play-local`, fly to a stargate, jump; diff the proxy capture
+  against `GateCommand`'s emitted bytes.
