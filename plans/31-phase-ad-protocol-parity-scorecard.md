@@ -59,9 +59,10 @@ proxy (`UDPProxyToClient_linux.cpp` / `ClientToServer_linux_stubs.cpp`).
     `0x001C, 0x0043, 0x0085, 0x0095, 0x00D5, 0x00DD`). Nothing emits them, so
     there is nothing to decode. They live or die with a future server
     feature, not with the CLI.
-  - **Residual genuine inbound opaque-only: essentially `GLOBAL_ERROR 0x75`**
-    (and a small tail of low-value status frames). This is the only real,
-    safe, unblocked CLI structured-decode work, and it is marginal.
+  - **Residual genuine inbound opaque-only: now essentially empty.**
+    `GLOBAL_ERROR 0x75` -- the one real item here -- got a structured
+    `GlobalErrorRecord` (AD-1, done). Only a small tail of low-value status
+    frames remains opaque, and the opaque decode already shows name + bytes.
 - **Conclusion:** the CLI side is effectively done. Do NOT report "38 missing
   decoders" -- that conflates outbound builders and server-unimplemented
   opcodes with a real decode gap. See AD-1 for the only actionable item.
@@ -168,11 +169,15 @@ not yet captured", not "client crashes".
   (CLAUDE.md "Wire format" Trap 1). The AD-66 harness is the vehicle to confirm
   the output once built.
 
-- [ ] **AD-1 (UNBLOCKED, low value): structured-decode `GLOBAL_ERROR 0x75`**
-  and any small inbound status tail currently opaque-only. Pure CLI tooling,
-  zero server risk. The only parity item that needs nothing from the
-  keystone. Marginal value -- the opaque decode already shows the named
-  frame + bytes -- but it is the one thing that can move now.
+- [x] **AD-1 (DONE): structured-decode `GLOBAL_ERROR 0x75`.** `GlobalErrorRecord`
+  decodes the `[u32 Length LE][u32 Code BE = ntohl(index+7)][Length msg bytes,
+  Latin1, not NUL-terminated]` layout -- citable from two agreeing in-repo
+  emitters (login-server/Net7SSL/ClientToGlobalServer.cpp:46-55 +
+  proxy/ClientToServer_linux_stubs.cpp:255-264). Registered at 0x0075;
+  `GlobalErrorRecordTests` byte-pins three error indices (full coverage, Code
+  decodes back to the index) + the truncated-header and length-overrun flags.
+  No live capture exists (error-only reply on the global leg), so the test
+  synthesises the emitter's exact bytes -- same pattern as `CompactMineRecordTests`.
 
 - [ ] **AD-4 (deferred, optional): proxy S->C Tier-2** (0x09/0x0b
   conditional drop, 0x34 gate-cache timestamp inject). Forward-unmodified is

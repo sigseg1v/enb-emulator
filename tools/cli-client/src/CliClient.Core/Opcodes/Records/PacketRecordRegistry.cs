@@ -93,6 +93,7 @@ public static class PacketRecordRegistry
             0x0066 => new OpenInterfaceRecord(payload),
             0x006A => new ClientSoundRecord(payload),
             0x006F => new GlobalTicketRecord(payload),
+            0x0075 => new GlobalErrorRecord(payload),
             0x0079 => new ManufactureItemCategoryRecord(payload),
             0x007C => new RefinerySetItemRecord(payload),
             0x007E => new ManufactureActionRecord(payload),
