@@ -7,6 +7,7 @@ using System.Text;
 using N7.CliClient.Auth;
 using N7.CliClient.Net;
 using N7.CliClient.Opcodes;
+using N7.CliClient.Opcodes.Outbound;
 using Xunit;
 
 namespace N7.CliClient.IntegrationTests.Opcodes;
@@ -416,6 +417,88 @@ public sealed class SectorInventoryMoveTests
     /// sub-second.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// Proves the production <see cref="InventoryMoveCodec"/> (the bytes the CLI
+    /// actually emits, byte-pinned against the live reference server's
+    /// VendorInvEco capture) is accepted and parsed by our server exactly as the
+    /// hand-rolled payload above is. Builds the same FromInv=99 unrecognised move
+    /// through the codec and asserts the server's "UNRECOGNISED INVENTORY MOVE"
+    /// default-arm reply -- a deterministic, state-independent round trip that
+    /// does not depend on the fresh character holding any item. This closes the
+    /// loop required by CLAUDE.md: the CLI builder and the server parser agree on
+    /// the wire format that the captures pinned.
+    /// </summary>
+    [Fact]
+    public async Task InventoryMove_CodecBuiltPayload_RoundTripsThroughServer()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Codecmover", shipName: "CodecMvrShip", cts.Token);
+
+        try
+        {
+            int gameId = session.GameId;
+
+            // Build the move through the SAME codec the CLI's `inv` command
+            // uses. FromInv=99 routes to the server's default arm regardless of
+            // character state. GameID is host-side context the handler does not
+            // switch on, so any value reaches the default arm.
+            byte[] payload = new InventoryMoveCodec().EncodeOutbound(
+                new InventoryMoveMessage(
+                    GameId: gameId, FromInv: 99, FromSlot: 0,
+                    ToInv: 0, ToSlot: 0, Num: 0));
+
+            Assert.Equal(InventoryMoveCodec.Size, payload.Length);
+
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(OpcodeId.Known.InventoryMove.Value, payload),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+                int nulIdx = span[3..].IndexOf((byte)0);
+                if (nulIdx < 0) continue;
+                string body = Encoding.ASCII.GetString(span.Slice(3, nulIdx));
+                if (!body.Contains("UNRECOGNISED INVENTORY MOVE", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Contains("UNRECOGNISED INVENTORY MOVE", body);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after sending a codec-built 0x0027 " +
+                $"INVENTORY_MOVE without the expected UNRECOGNISED reply -- the " +
+                $"InventoryMoveCodec wire format diverged from what the server parses.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
     [Fact]
     public async Task InventoryMove_UnrecognisedFromInv_PinsExactReplyWireShape()
     {
