@@ -164,11 +164,24 @@ remaining Phase-AA fabrication implementable without crashing the real client.
       START 0x0B, 141 objects (7 mob spawns / 17 navs). NOTE: 1015 is a mob/nav
       newbie field, NOT a resource sector -- it has 0 OT_RESOURCE. Landing in
       space does NOT itself show asteroids; mining requires a subsequent
-      gate/warp to a resource sector (e.g. 1710=45 asteroids, 1070=38). Remaining
-      sub-task (b): resolve the MVAS move IP-mismatch (position UDP currently
-      dials server:3806 direct from the host IP, dropped by the server's correct
-      anti-spoof guard at UDP_Client.cpp:98 -- it must route through the proxy
-      like login does), then gate/warp to a resource sector to trigger mining.
+      gate/warp to a resource sector (e.g. 1710=45 asteroids, 1070=38).
+      Sub-task (b) DISPROVEN (the earlier diagnosis was wrong): the direct MVAS
+      feed is NOT dropped. The anti-spoof guard (UDP_Client.cpp:72,
+      PlayerIPAddr()==source_addr) lives ONLY on the SECTOR connection
+      (HandleClientOpcode). The MVAS port (3806) runs a different dispatcher
+      (HandleMVASOpcode, UDPConnection.cpp:214); its 0x1004 handler
+      (HandleMVASPosReturn, UDP_MVAS.cpp:118) and its 0x3005 keepalive
+      (HandleKeepCommsAlive, UDP_MVAS.cpp:206) key purely on hdr->player_id and
+      re-point SetPlayerPortIP UNCONDITIONALLY -- no IP guard. So a headless
+      CLI's direct 0x1004 from the docker-gateway IP IS accepted even though the
+      player was established through the proxy. PROVEN live by
+      `SectorMvasMoveTests.Mvas_DirectPositionFeed_IsAccepted_AndStreamsSectorBack`:
+      after undock+handoff-follow into 1015, a direct SectorUdpClient feed to
+      :3806 gets back 0x1007 MVAS_TOGGLE_SEND_FREQ (the server's direct reply to
+      our position) and 0x2016 PACKET_SEQUENCE (the player's downstream sector
+      stream re-routed to our socket). NO server change, NO guard weakened.
+      Remaining toward live mining: gate/warp from a mob sector (e.g. 1015) to a
+      resource sector (1710/1070), then run the prospect/mine chain below.
 - [ ] When the CLI lands in space: drive the prospect/mine path, drain the
       client-leg frames, assert the `0x000B` arrives with the fields above, and
       assert byte-equality against `FabricateBeamBody` from the spec test (so
