@@ -698,6 +698,45 @@ seed-account USER='testuser' PASS='testpass':
             -v username={{ quote(USER) }} -v phc="$phc"
     @echo ">>> seeded {{USER}} / {{PASS}} (status=100)"
 
+# Grant SKILL_PROSPECT (id 41) and a high Explore level to an existing
+# character, so a Jenquai Explorer can mine without first completing the
+# retail mission that normally grants Prospect (Skills.xml marks it
+# Quest="1"). Prospect's per-class MaxLevel is 7 for the Explorer classes
+# (Sentinel/Explorer/Scout) and 0 for everyone else, so granting it to a
+# non-explorer is pointless -- the server clamps the loaded level to the
+# class MaxLevel at login (server/src/PlayerSaves.cpp:668-675). This recipe
+# warns if the target is not prof=2 (Explorer).
+#
+# Order of operations:
+#   1. just seed-account <user> <pass>
+#   2. just play-cli <unit>  ->  `create JE <name>`  (name must contain a vowel)
+#   3. just grant-prospect <user>     <-- you are here
+#   4. log out + back in (skills load from avatar_skill_levels at login)
+#
+# The skill row is loaded at login by PlayerSaves.cpp:653 and prospecting
+# is gated only on Skill[SKILL_PROSPECT].GetLevel() != 0 (PlayerSkills.cpp:912),
+# so level 1 is enough to enable mining; 7 is the JE cap.
+#
+# Args: USER (account username), SLOT (char slot, default 0),
+#       LEVEL (prospect skill level 1..7, default 7),
+#       EXPLORE (explore level, default 150 -- retail discipline cap).
+grant-prospect USER SLOT='0' LEVEL='7' EXPLORE='150':
+    @aid=$(printf '%s\n' \
+            "SELECT i.avatar_id FROM avatar_info i JOIN accounts a ON a.id = i.account_id WHERE a.username = :'username' AND i.slot = :slot;" \
+        | docker compose exec -T -e PGPASSWORD=net7 postgres psql -U net7 -d net7_user -tA \
+            -v username={{ quote(USER) }} -v slot={{ quote(SLOT) }} 2>/dev/null); \
+        if [ -z "$aid" ]; then \
+            echo "grant-prospect: no character for account '{{USER}}' slot {{SLOT}} -- create one first (play-cli: create JE <name>)" >&2; \
+            exit 1; \
+        fi; \
+        printf '%s\n' \
+            "INSERT INTO avatar_skill_levels (avatar_id, skill_id, skill_level) VALUES (:aid, 41, :level) ON CONFLICT (avatar_id, skill_id) DO UPDATE SET skill_level = EXCLUDED.skill_level;" \
+            "UPDATE avatar_info SET explore = :explore WHERE avatar_id = :aid;" \
+            "SELECT i.avatar_id, d.first_name, d.race, d.prof, i.explore, s.skill_level AS prospect_level, CASE WHEN d.prof = 2 THEN 'OK (Explorer)' ELSE 'WARNING: not Explorer -- Prospect will clamp to 0 at login' END AS status FROM avatar_info i JOIN avatar_data d USING (avatar_id) LEFT JOIN avatar_skill_levels s ON s.avatar_id = i.avatar_id AND s.skill_id = 41 WHERE i.avatar_id = :aid;" \
+        | docker compose exec -T -e PGPASSWORD=net7 postgres psql -U net7 -d net7_user -v ON_ERROR_STOP=1 \
+            -v aid="$aid" -v level={{ quote(LEVEL) }} -v explore={{ quote(EXPLORE) }}
+    @echo ">>> granted Prospect(41) + explore={{EXPLORE}} to {{USER}} slot {{SLOT}} -- log out and back in to load it"
+
 # ---- Phase C continuation (Postgres) ----
 
 # Bring up the postgres profile and apply the converted schema.

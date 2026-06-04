@@ -214,10 +214,19 @@ remaining Phase-AA fabrication implementable without crashing the real client.
       OT_RESOURCE with a non-empty slot; **`SKILL_PROSPECT` level > 0**; ship
       NOT moving; inventory room; reactor energy >= per-ore; **within
       `ProspectRange()` of the asteroid**; not incapacitated; `m_Gating` false.
-      BLOCKER 1: a fresh Terran Warrior (10151 start) has NO prospecting skill,
-      so the live harness needs a prospecting-capable character (Explorer /
-      Tradesman) or a skill grant + a mining beam, then target-set + move into
-      range + stay stationary before the 0x0027 sub-18. BLOCKER 2: the CLI
+      BLOCKER 1 (RESOLVED, commit pending): a fresh Terran Warrior (10151 start)
+      has NO prospecting skill. Added `just grant-prospect <user> [slot] [level]
+      [explore]` -- it UPSERTs `avatar_skill_levels (avatar_id, 41, level)` and
+      sets `avatar_info.explore`, which the server loads at login
+      (PlayerSaves.cpp:653-680); prospecting is gated only on
+      `Skill[SKILL_PROSPECT].GetLevel() != 0`. Prospect MaxLevel is 7 for the
+      Explorer classes and 0 elsewhere (Skills.xml, `Quest="1"`), so the recipe
+      warns if the target is not prof=2 (it would clamp to 0 at login).
+      Workflow: seed-account -> play-cli `create JE <name>` -> grant-prospect ->
+      relog. Verified against a synthetic JE: prospect=7, explore=150, "OK
+      (Explorer)"; non-explorer correctly warns. Still need a mining beam
+      equipped + target-set + move into range + stationary before 0x0027 sub-18.
+      BLOCKER 2: the CLI
       integration harness talks DIRECTLY to the sector server, so it only sees
       the server's compact `0x2012 START_PROSPECT`, NOT the proxy-fabricated
       `0x000B` beam. Byte-pinning the fabricated beam (the actual §3 deliverable)
