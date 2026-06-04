@@ -211,8 +211,18 @@ carry no server-integrity weight beyond the byte-pin itself.
   11); new `use <slot>` REPL command; `SectorEquipUseTests` gains a
   codec-built live round-trip. EquipUse byte order is the trap: 0x0027 is
   big-endian on every field, 0x005D's GameID is little-endian.
-- [ ] **#71: vendor buy/sell terminal flow (0x004E open-vendor chain).** The
-  buy/sell *move* is already 0x0027 (#68); this is the terminal-open handshake.
+- [x] **#71 (DONE): vendor terminal / NPC-talk + station-exit (0x004E
+  STARBASE_REQUEST).** The buy/sell *move* is already 0x0027 (#68); this is the
+  terminal-open handshake. New `StarbaseRequestCodec` (0x004E, 9B: int32
+  PlayerID + int32 StarbaseID + char Action, BOTH ints little-endian -- handler
+  HandleStarbaseRequest at PlayerConnection.cpp:9861 casts the struct with no
+  ntohl) + `starbase <talk|exit|job|jobdesc> [id]` REPL command. Byte-pinned in
+  StarbaseRequestCodecTests against VendorInvEco dg#4 `2A 99 03 00 C4 01 00 00
+  04` = PlayerID 0x0003992A LE, StarbaseID 452 LE, Action 4 (talk-to-NPC).
+  Note PlayerID is the MASKED avatar id (session GameID 0x4003992A -> wire
+  0x0003992A, top type byte cleared); command derives it as `GameId &
+  0x00FFFFFF`. Codec-built talk-to-NPC live round-trip added to the existing
+  SectorStarbaseRequestTests (both facts pass, 16s).
 - [ ] **#72: learn ability / skill-up (0x0057 SKILL_UP).**
 - [ ] **#73: activate ability/buff + use device-on-mob (0x0058 SKILL_ABILITY,
   host-LE).**
