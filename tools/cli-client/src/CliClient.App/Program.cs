@@ -90,6 +90,7 @@ if (args[0] is "repl" or "start")
     repl.Register(new UseCommand(sessionCtx));
     repl.Register(new StarbaseCommand(sessionCtx));
     repl.Register(new SkillUpCommand(sessionCtx));
+    repl.Register(new AbilityCommand(sessionCtx));
     repl.Register(new GroupInviteCommand(sessionCtx));
     repl.Register(new GroupInviteAcceptCommand(sessionCtx));
     repl.Register(new GroupLeaveCommand(sessionCtx));

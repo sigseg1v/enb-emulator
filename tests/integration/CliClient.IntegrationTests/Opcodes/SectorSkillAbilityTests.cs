@@ -7,6 +7,7 @@ using System.Text;
 using N7.CliClient.Auth;
 using N7.CliClient.Net;
 using N7.CliClient.Opcodes;
+using N7.CliClient.Opcodes.Outbound;
 using Xunit;
 
 namespace N7.CliClient.IntegrationTests.Opcodes;
@@ -450,5 +451,77 @@ public sealed class SectorSkillAbilityTests : SectorIntegrationTest
         throw new Xunit.Sdk.XunitException(
             $"drained {maxFrames} frames after sending 0x0058 SKILL_ABILITY (AbilityIndex=200) " +
             $"without seeing 0x0020 PRIORITY_MESSAGE containing \"not yet working\" for byte-exact pin.");
+    }
+
+    [Fact]
+    public async Task UseDeviceOnTarget_CodecBuiltTargetThenAbility_RoundTripsThroughServer()
+    {
+        // The full "use a device on a mob" two-step, both packets built by the
+        // production codecs (byte-pins live in the unit suite: RequestTargetCodec
+        // against SkillTrainingHostileDevice2 dg #35, SkillUseCodec against dg
+        // #28). Step 1: 0x0017 REQUEST_TARGET locks the target server-side. Step
+        // 2: 0x0058 SKILL_ABILITY fires -- HandleSkillAbility resolves the target
+        // from ShipIndex()->GetTargetGameID(), the lock set by step 1.
+        //
+        // We target the avatar's own game id (a guaranteed-resolvable object in
+        // the sector) so REQUEST_TARGET succeeds, then fire the capture's ability
+        // index 46. Whether ability 46 is trained (fires) or unpopulated (the
+        // "not yet working" else-branch), the connection survives; we confirm via
+        // 0x0044 REQUEST_TIME -> 0x0034 CLIENT_SET_TIME.
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        var session = Track(await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Skilla", shipName: "SkillaShip", cts.Token));
+
+        // Step 1: lock a target (self -- a resolvable object) via the codec.
+        byte[] targetPayload = new RequestTargetCodec().EncodeOutbound(
+            new RequestTargetMessage(session.GameId, session.GameId));
+        Assert.Equal(RequestTargetCodec.Size, targetPayload.Length);
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTarget.Value, targetPayload), cts.Token);
+
+        // Step 2: fire ability index 46 (the capture's ability) via the codec.
+        byte[] abilityPayload = new SkillUseCodec().EncodeOutbound(
+            new SkillUseMessage(session.GameId, abilityIndex: 46));
+        Assert.Equal(SkillUseCodec.Size, abilityPayload.Length);
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.SkillAbility.Value, abilityPayload), cts.Token);
+
+        // Survival probe.
+        int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+        byte[] reqTimePayload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload), cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
+        {
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
+                continue;
+
+            var span = reply.Payload.Span;
+            Assert.Equal(12, span.Length);
+            Assert.Equal(clientTick, BinaryPrimitives.ReadInt32LittleEndian(span[..4]));
+            return;
+        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after a codec-built 0x0017 REQUEST_TARGET + 0x0058 " +
+            $"SKILL_ABILITY + 0x0044 REQUEST_TIME without seeing 0x0034 CLIENT_SET_TIME -- " +
+            $"the RequestTargetCodec/SkillUseCodec wire shapes were not accepted by the server.");
     }
 }

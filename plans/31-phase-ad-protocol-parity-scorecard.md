@@ -235,8 +235,20 @@ carry no server-integrity weight beyond the byte-pin itself.
   SkillTrainingHostileDevice2 dg#18 `2A 99 03 40 01 00 00 00 37 00 00 00` =
   GameID 0x4003992A LE, SkillPoints 1 LE, SkillID 55 LE. Codec-built live
   round-trip added to the existing SectorSkillUpTests (both facts pass, 16s).
-- [ ] **#73: activate ability/buff + use device-on-mob (0x0058 SKILL_ABILITY,
-  host-LE).**
+- [x] **#73 (DONE): activate ability/buff + use device-on-mob (0x0058
+  SKILL_ABILITY + 0x0017 REQUEST_TARGET).** The target is NOT in the 0x0058
+  packet: HandleSkillAbility (PlayerAbilitys.cpp:23) reads
+  `ShipIndex()->GetTargetGameID()`, the lock set by a prior REQUEST_TARGET. So
+  device-on-mob is two steps. New `SkillUseCodec` (0x0058, 12B: GameID +
+  Action + AbilityIndex, all LE; Action server-IGNORED, only AbilityIndex used)
+  and new `RequestTargetCodec` (0x0017, 8B: GameID + TargetID, all LE; outbound
+  half of the existing inbound RequestTargetRecord). New `ability <index>
+  [target]` REPL command: with a target it sends REQUEST_TARGET first, then the
+  ability. Byte-pinned in SkillUseCodecTests (SkillTrainingHostileDevice2 dg#28
+  `2A 99 03 40 00 00 00 00 2E 00 00 00` = GameID, Action 0, AbilityIndex 46)
+  and RequestTargetCodecTests (dg#35 `2A 99 03 40 ED 87 01 00` = GameID,
+  TargetID 0x000187ED). Codec-built two-step live round-trip added to the
+  existing SectorSkillAbilityTests (all 3 facts pass, 24s).
 - [ ] **#74: verify gate jump (0x009B WARP / gate-cache).**
 
 ---
