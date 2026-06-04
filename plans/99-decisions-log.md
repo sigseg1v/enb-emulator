@@ -7748,3 +7748,25 @@ motion. Note the dock->space / InSpace path now works in practice (owner zoned a
 play-local AND a play-cli avatar into Luna; they see each other + chat), so the
 Phase-K sub-blocker that had gated the in-space fabrication/verification work
 (plans/27 §3a §4, plans/28 §3-live) is effectively lifted for the happy path.
+
+---
+
+## 2026-06-03 -- LP64 in-range bitset aliasing fix (Object::SetIndex/GetIndex)
+
+`Object::SetIndex/UnSetIndex/GetIndex` and the `*BitEntry` pair in
+`server/src/ObjectClass.cpp` computed the word stride from `sizeof(long)*8` but
+the in-word bit position from a hardcoded `%32`. On the retail Win32 server
+`sizeof(long)==4` so both were 32 and agreed; on our LP64 Linux build the stride
+divides by 64 while the bit wraps at 32, so object indices 32 apart alias to the
+same bit. A sector nav and the Luna planet collided in `ObjectRangeList`,
+intermittently making `SendAllNavs` treat the planet as "already in range" and
+skip its planet-exclusive 0x003F at sector entry -- the failing-CI signal in
+`SectorPlanetPositionalUpdateHardeningTests`.
+
+Fix: derive the in-word bit width from the word type (`OBJ_BITS_PER_WORD =
+sizeof(long)*8`) and use it for BOTH stride and modulus, `1L <<` shifts. Restores
+the 32-bit retail behaviour on any ILP32/LP64 target. This is a portability
+correctness fix, not a wire-format change; the wire bytes are unchanged, the bug
+was that the LP64 build dropped a frame the retail server emits. Exposed by the
+send-every-nav path (commit 636c6175). Client verification tracked as CV-07
+(supersedes the root-cause half of CV-03).

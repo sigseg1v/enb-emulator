@@ -233,28 +233,40 @@ void Object::SetMovementID(long mov_id)
 }
 
 //object index methods
+//
+// These pack one bit per object index into an array of `long`. The word
+// stride and the in-word bit position MUST use the same bits-per-word, or
+// indices that differ by 32 alias to the same bit. The original Win32 code
+// got away with a hardcoded `%32` because sizeof(long)==4 there, so
+// sizeof(long)*8 == 32 and the two agreed. On LP64 Linux sizeof(long)==8,
+// so the word stride divides by 64 while a hardcoded `%32` shifts within a
+// 32-bit sub-range -- index N and index N+32 then collide (e.g. a sector
+// nav clobbering Luna's in-range bit, suppressing its 0x003F at entry).
+// Derive the bit width from the word type so the two always agree.
+static const unsigned int OBJ_BITS_PER_WORD = sizeof(long) * 8;
+
 void Object::SetIndex(long *index_array)
 {
-	long *entry = (long*) (index_array + (m_ObjectIndex/(sizeof(long)*8)));
+	long *entry = index_array + (m_ObjectIndex / OBJ_BITS_PER_WORD);
 
 	//now set the specific bit
-	*entry |= (1 << m_ObjectIndex%32);
+	*entry |= (1L << (m_ObjectIndex % OBJ_BITS_PER_WORD));
 }
 
 void Object::UnSetIndex(long *index_array)
 {
-	long *entry = (long*) (index_array + (m_ObjectIndex/(sizeof(long)*8)));
+	long *entry = index_array + (m_ObjectIndex / OBJ_BITS_PER_WORD);
 
 	//now unset the specific bit
-	*entry &= (0xFFFFFFFF ^ (1 << m_ObjectIndex%32));
+	*entry &= ~(1L << (m_ObjectIndex % OBJ_BITS_PER_WORD));
 }
 
 bool Object::GetIndex(long *index_array)
 {
-	long *entry = (long*) (index_array + (m_ObjectIndex/(sizeof(long)*8)));
+	long *entry = index_array + (m_ObjectIndex / OBJ_BITS_PER_WORD);
 
 	//now get the specific bit
-	if (*entry & (1 << m_ObjectIndex%32))
+	if (*entry & (1L << (m_ObjectIndex % OBJ_BITS_PER_WORD)))
 	{
 		return true;
 	}
@@ -267,10 +279,10 @@ bool Object::GetIndex(long *index_array)
 //given a pointer to an array of bits and an index into them, return true if the bit is set
 bool Object::GetBitEntry(long *bit_array, long index)
 {
-	long *entry = (long*) (bit_array + (index/(sizeof(long)*8)));
+	long *entry = bit_array + (index / OBJ_BITS_PER_WORD);
 
 	//now get the specific bit
-	if (*entry & (1 << index%32))
+	if (*entry & (1L << (index % OBJ_BITS_PER_WORD)))
 	{
 		return true;
 	}
@@ -283,18 +295,18 @@ bool Object::GetBitEntry(long *bit_array, long index)
 //given a pointer to an array of bits and an index into them, return true if the bit is set
 void Object::SetBitEntry(long *bit_array, long index)
 {
-	long *entry = (long*) (bit_array + (index/(sizeof(long)*8)));
+	long *entry = bit_array + (index / OBJ_BITS_PER_WORD);
 
 	//now set the specific bit
-	*entry |= (1 << index%32);
+	*entry |= (1L << (index % OBJ_BITS_PER_WORD));
 }
 
 void Object::UnsetBitEntry(long *bit_array, long index)
 {
-	long *entry = (long*) (bit_array + (index/(sizeof(long)*8)));
+	long *entry = bit_array + (index / OBJ_BITS_PER_WORD);
 
 	//now unset the specific bit
-	*entry &= (0xFFFFFFFF ^ (1 << index%32));
+	*entry &= ~(1L << (index % OBJ_BITS_PER_WORD));
 }
 
 bool Object::IsInRange(float *position, float scan_range, bool is_active)

@@ -220,3 +220,40 @@ format & byte order", Trap 2).
   fix `GateCommand.BuildActionFrame` callers to match and re-pin.
 - **Setup**: `just play-local`, fly to a stargate, jump; diff the proxy capture
   against `GateCommand`'s emitted bytes.
+
+### [ ] CV-07 -- Luna planet 0x003F survives the LP64 in-range bitset fix
+
+- **Supersedes the root-cause half of CV-03.** CV-03 asks "is the Luna body
+  visible"; this entry pins WHY it was intermittently NOT, and what changed.
+- **Root cause (CONFIRMED)**: `Object::SetIndex/UnSetIndex/GetIndex` (and the
+  `*BitEntry` pair) in `server/src/ObjectClass.cpp` computed the word stride
+  from `sizeof(long)*8` but the in-word bit position from a hardcoded `%32`.
+  On the retail Win32 server `sizeof(long)==4`, so both were 32 and agreed. On
+  our LP64 Linux build `sizeof(long)==8`: the stride divides by 64 while the
+  bit still wraps at 32, so object indices that differ by 32 alias onto the
+  same bit. A sector nav (e.g. index 80) and the Luna planet (index 112) both
+  map to word 1 bit 16 of `ObjectRangeList`; whichever was processed first in
+  `SendAllNavs` set the bit, and the second was then seen as "already in
+  range" and skipped -- intermittently suppressing Luna's planet-exclusive
+  0x003F PLANET_POSITIONAL_UPDATE at sector entry.
+- **Change (implemented)**: derive the in-word bit width from the word type
+  (`OBJ_BITS_PER_WORD = sizeof(long)*8`) and use it for BOTH the stride and the
+  modulus, with `1L <<` shifts. The two can no longer disagree on any ILP32 or
+  LP64 target. This restores the behaviour the 32-bit retail server always had.
+- **Primary source**: the retail server is x86 (32-bit `long`); its bitset
+  packs 32 indices per word and never aliases at the 32-boundary because stride
+  and modulus are both 32. Our LP64 build is the only place the two diverged.
+  The send-every-nav path that exposed it is commit `636c6175` (cited there
+  against the live-server roster). The aliasing arithmetic is mechanical, not a
+  behaviour guess.
+- **CLI proof**: `SectorPlanetPositionalUpdateHardeningTests` Wave 107
+  (`PlanetPositionalUpdateAndNavigation_..._PinsSendAllNavsCount`) byte-pins
+  exactly one 48-byte 0x003F plus one-per-nav 14-byte 0x0099 on the space-sector
+  handshake; Wave 89 pins the 48-byte 0x003F payload length. Before the fix the
+  0x003F collection came back empty on the LP64 server (the failing CI signal).
+- **What to look for (play-local / real client)**: enter Luna space (1015) from
+  Luna Station several times; the Luna planet body must render in-space and on
+  the map EVERY time, with all clickable navs also present (no run where the
+  planet is missing while navs show, which was the aliasing signature).
+- **Setup**: `just rebuild server && just play-local`, undock into Luna space,
+  repeat 3+ times.

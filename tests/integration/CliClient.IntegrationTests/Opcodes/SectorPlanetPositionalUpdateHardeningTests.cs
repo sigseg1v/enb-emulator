@@ -299,22 +299,27 @@ public sealed class SectorPlanetPositionalUpdateHardeningTests
     }
 
     /// <summary>
-    /// Wave 107 paired frame-count hardening (+0 ratchet, 0x003F + 0x0099):
-    /// pins the per-planet emit-count invariant Wave 88's and Wave 89's
-    /// payload-length hardenings were structurally blind to. Captured
-    /// space-sector handshake stream emits one 0x003F PLANET_POSITIONAL_UPDATE
-    /// frame AND one 0x0099 NAVIGATION frame for every OT_PLANET object in
-    /// the sector — both ride the per-planet <c>Object::SendObject</c>
-    /// chain dispatched from <c>ObjectManager::SendAllNavs</c>
-    /// (<c>server/src/ObjectManager.cpp:406-424</c>).
+    /// Wave 107 paired frame-count hardening (0x003F + 0x0099):
+    /// pins the emit-count invariants Wave 88's and Wave 89's
+    /// payload-length hardenings were structurally blind to. The captured
+    /// space-sector handshake stream emits exactly one 0x003F
+    /// PLANET_POSITIONAL_UPDATE frame per OT_PLANET (planet-exclusive) and
+    /// one 0x0099 NAVIGATION frame per nav-bearing object (the planet plus
+    /// every clickable sector nav) -- both ride the per-object
+    /// <c>Object::SendObject</c> chain dispatched from
+    /// <c>ObjectManager::SendAllNavs</c>
+    /// (<c>server/src/ObjectManager.cpp:421-433</c>).
     ///
     /// <para>
     /// SendAllNavs gate (fresh-player). On a fresh login both
     /// <c>ExposedNavList</c> and <c>ObjectRangeList</c> are empty.
-    /// The loop body at ObjectManager.cpp:414-422 reduces to
-    /// "NOT OT_DECO AND Active() AND (OT_PLANET OR exposed)" — only
-    /// OT_PLANET passes (every other object type requires a prior bit
-    /// in <c>ExposedNavList</c> which a fresh player does not have).
+    /// The loop body reduces to "NOT OT_DECO AND Active() AND (OT_PLANET
+    /// OR IsNav()) AND not-already-in-range" -- so OT_PLANET and every
+    /// clickable nav pass and get sent once each (636c6175 changed the
+    /// second disjunct from a prior-exposed check to <c>IsNav()</c>, so
+    /// all navs are sent at entry). The index-aliasing bitset fix in
+    /// <c>Object::SetIndex/GetIndex</c> is what stopped a sector nav from
+    /// clobbering Luna's in-range bit and suppressing its 0x003F.
     /// </para>
     ///
     /// <para>
@@ -323,22 +328,23 @@ public sealed class SectorPlanetPositionalUpdateHardeningTests
     /// (<c>SendCreateInfo / SendObjectEffects / SendRelationship /
     /// SendPosition / SendAuxDataPacket / SendNavigation / OnCreate</c>).
     /// <c>Planet::SendPosition</c> at <c>server/src/PlanetClass.cpp:226-231</c>
-    /// emits the 48-byte 0x003F PLANET_POSITIONAL_UPDATE frame; the
-    /// per-Planet <c>SendNavigation</c> at PlanetClass.cpp:238-253 emits
-    /// the 14-byte 0x0099 NAVIGATION frame. So count(0x003F) == count(0x0099)
-    /// == count(OT_PLANET in sector) for the handshake drain.
+    /// emits the 48-byte 0x003F PLANET_POSITIONAL_UPDATE frame, which is
+    /// planet-exclusive; the per-Planet <c>SendNavigation</c> at
+    /// PlanetClass.cpp:238-253 emits the 14-byte 0x0099 NAVIGATION frame,
+    /// but 0x0099 is NOT planet-exclusive -- every clickable sector nav
+    /// emits one too. So count(0x003F) == count(OT_PLANET in sector),
+    /// while count(0x0099) == count(planet + clickable navs).
     /// </para>
     ///
     /// <para>
     /// Sector 1015 (Luna space) ground truth. The retail sector roster
     /// (verified via direct count of the loaded <c>sector_objects</c>
     /// rows with <c>sector_id=1015 AND type=3</c>) contains exactly ONE
-    /// OT_PLANET — Luna itself, the namesake planet of the sector. Other
-    /// objects in the sector roster are 2 OT_STARGATE (type=11), 1
-    /// OT_STATION (type=12, Luna Station), 183 OT_DECO (type=37), 12
-    /// OT_MOBSPAWN (type=0); none pass the SendAllNavs gate for a fresh
-    /// player. So both 0x003F and 0x0099 emit EXACTLY ONE FRAME per
-    /// space-sector handshake into 1015.
+    /// OT_PLANET -- Luna itself, the namesake planet of the sector. So
+    /// 0x003F emits EXACTLY ONE FRAME per space-sector handshake into
+    /// 1015. 0x0099 emits one frame for Luna plus one per clickable
+    /// sector nav (the SendAllNavs send-every-nav path, 636c6175), so its
+    /// count is >= 1 and every frame is 14 bytes.
     /// </para>
     ///
     /// <para>
@@ -346,10 +352,11 @@ public sealed class SectorPlanetPositionalUpdateHardeningTests
     /// (0x0037 CLIENT_AVATAR + 0x0047 CLIENT_SHIP self-emit pair). First
     /// paired-pinning that rides the per-planet <c>SendAllNavs</c> chain
     /// (Wave 101 rode the per-player <c>SendLoginShipData</c> chain).
-    /// Reuses Waves 88/89's 2-stage station→space pattern. The single
-    /// test method does two <c>Assert.Equal(1, count)</c> calls — one per
-    /// opcode — which lets a single live-stack test cycle pin both
-    /// invariants at one shared 120s budget cost (the Wave 101 pattern).
+    /// Reuses Waves 88/89's 2-stage station->space pattern. The single
+    /// test method pins both opcodes in one live-stack cycle: 0x003F via
+    /// <c>Assert.Single</c> (planet-exclusive, exactly one) and 0x0099 via
+    /// <c>Assert.NotEmpty</c> + per-frame length (planet plus clickable
+    /// navs), at one shared 120s budget cost (the Wave 101 pattern).
     /// </para>
     ///
     /// <para>
@@ -357,63 +364,59 @@ public sealed class SectorPlanetPositionalUpdateHardeningTests
     /// </para>
     /// <list type="bullet">
     ///   <item>
-    ///     <b>SendAllNavs gate relaxation at ObjectManager.cpp:414-416.</b>
-    ///     A regression that drops the <c>obj-&gt;GetEIndex(player-&gt;ExposedNavList())</c>
-    ///     guard would let stargates / stations / mob-spawns through and
-    ///     emit additional 0x003F/0x0099 frames per non-planet object.
-    ///     Waves 88/89's <c>Assert.NotEmpty</c> + <c>Assert.All(payload==length)</c>
-    ///     still passes (every frame is still 48B/14B). Wave 107
-    ///     <c>Assert.Equal(1, count)</c> catches.
+    ///     <b>SendAllNavs gate relaxation at ObjectManager.cpp:421-433.</b>
+    ///     The gate passes only OT_PLANET and <c>IsNav()</c> objects. A
+    ///     regression that widened it to let stargates / stations /
+    ///     mob-spawns through would emit additional 0x003F frames per
+    ///     non-planet object -- the <c>Assert.Single(0x003F)</c> here
+    ///     catches that, since 0x003F is planet-exclusive.
     ///   </item>
     ///   <item>
     ///     <b>SendObject chain duplication.</b> A refactor that calls
-    ///     <c>SendPosition</c> or <c>SendNavigation</c> twice within
-    ///     <c>Object::SendObject</c> — for example, a copy-paste error
-    ///     adding a "confirmation" emit after the original — would
-    ///     double the per-planet count. Wave 107 catches.
+    ///     <c>SendPosition</c> twice within <c>Object::SendObject</c> --
+    ///     for example, a copy-paste error adding a "confirmation" emit
+    ///     after the original -- would double the per-planet 0x003F count.
+    ///     <c>Assert.Single(0x003F)</c> catches it.
     ///   </item>
     ///   <item>
     ///     <b>SectorContentSQL type-3 reassignment.</b> A regression
     ///     to SectorContentSQL.cpp:299-302 that maps DB type=3 to
     ///     something other than OT_PLANET (e.g., OT_OBJECT) would drop
-    ///     count(0x003F) and count(0x0099) to zero; the existing
-    ///     <c>Assert.NotEmpty</c> in Wave 89/88 also catches that, but
-    ///     Wave 107's <c>Assert.Equal(1, count)</c> identifies the
-    ///     specific regression by its exact-zero signature.
+    ///     count(0x003F) to zero; <c>Assert.Single(0x003F)</c> catches
+    ///     that by failing on the empty collection.
     ///   </item>
     ///   <item>
     ///     <b>Spurious mid-handshake re-emit from a sector-handoff path.</b>
     ///     If a future Phase K fix for sector transitions re-runs
     ///     <c>SendAllNavs</c> mid-handshake (or appends a second
-    ///     SendObject pass for any reason), the count doubles. Wave 107
-    ///     catches.
+    ///     SendObject pass for any reason), the 0x003F count doubles.
+    ///     <c>Assert.Single(0x003F)</c> catches it.
     ///   </item>
     ///   <item>
     ///     <b>HandshakeFrames capture regression at SectorHandshake.cs.</b>
-    ///     If a future refactor drops or under-counts the frame-capture
-    ///     path, <c>Assert.Equal(1, count)</c> over-counts or
-    ///     under-counts versus reality.
+    ///     If a future refactor drops the frame-capture path, both the
+    ///     0x003F and 0x0099 collections go empty and both assertions fail.
     ///   </item>
     /// </list>
     ///
     /// <para>
     /// Per CLAUDE.md server-integrity. Pure passive-observation tightening.
-    /// No client stimulus, no server change. The 1-frame-per-planet
-    /// invariant is a retail-faithful invariant of the SendAllNavs
-    /// gate + Object::SendObject single-call-per-virtual-dispatch
-    /// pattern.
+    /// No client stimulus, no server change. The planet-exclusive 0x003F
+    /// single-frame invariant and the per-nav 0x0099 fan-out are
+    /// retail-faithful invariants of the SendAllNavs gate +
+    /// Object::SendObject single-call-per-virtual-dispatch pattern.
     /// </para>
     /// </summary>
     [Fact]
     public async Task PlanetPositionalUpdateAndNavigation_EmittedExactlyOncePerPlanetDuringSpaceSectorHandshake_PinsSendAllNavsCount()
     {
         // Sector 1015 (Luna space) has exactly ONE OT_PLANET object in
-        // its static roster — Luna itself. Verified by direct count of
+        // its static roster -- Luna itself. Verified by direct count of
         // sector_objects rows with sector_id=1015 AND type=3 in the
-        // loaded retail dump. Other object types (OT_STARGATE,
-        // OT_STATION, OT_DECO, OT_MOBSPAWN) do NOT pass the
-        // SendAllNavs gate for a fresh-login player. So both 0x003F and
-        // 0x0099 emit exactly one frame per space-sector handshake.
+        // loaded retail dump. 0x003F PLANET_POSITIONAL_UPDATE is
+        // planet-exclusive, so it emits exactly one frame. 0x0099
+        // NAVIGATION is emitted by the planet AND every clickable sector
+        // nav (SendAllNavs send-every-nav path), so its count is >= 1.
         const int ExpectedNavigationPayloadLength = 14;
 
         var account = TestAccounts.New(_server);
@@ -452,18 +455,25 @@ public sealed class SectorPlanetPositionalUpdateHardeningTests
                 .Where(f => f.Opcode == OpcodeId.Known.Navigation.Value)
                 .ToList();
 
-            // Wave 107 pins the 1-frame-per-planet invariant for both
-            // opcodes. count(0x003F) == count(0x0099) == count(OT_PLANET) == 1
-            // for sector 1015 (Luna). Assert.Single yields the single
-            // captured frame for the defence-in-depth length check
-            // below — a regression that changes both length AND count
-            // (e.g., a struct-layout refactor that also adds an extra
-            // emit) surfaces here with both diagnostics.
+            // 0x003F PLANET_POSITIONAL_UPDATE is emitted only by
+            // Planet::SendPosition, so its count tracks OT_PLANET objects
+            // exactly: sector 1015 (Luna) carries one planet, so exactly
+            // one 0x003F. Assert.Single yields it for the byte-exact length
+            // check below.
             var singlePpu = Assert.Single(planetPositionalFrames);
-            var singleNav = Assert.Single(navigationFrames);
-
             Assert.Equal(ExpectedPlanetPositionalUpdatePayloadLength, singlePpu.PayloadLength);
-            Assert.Equal(ExpectedNavigationPayloadLength, singleNav.PayloadLength);
+
+            // 0x0099 NAVIGATION is NOT planet-exclusive. Since the
+            // send-every-sector-nav fix (636c6175) plus the index-aliasing
+            // bitset fix that stopped a sector nav from clobbering the
+            // planet's in-range bit, SendAllNavs emits one 0x0099 per
+            // nav-bearing object at entry (the planet plus every clickable
+            // sector nav), not just the single planet. Pin the per-nav
+            // invariant as NotEmpty + every-frame-14-bytes rather than the
+            // old (pre-636c6175) exactly-one count.
+            Assert.NotEmpty(navigationFrames);
+            Assert.All(navigationFrames, f =>
+                Assert.Equal(ExpectedNavigationPayloadLength, f.PayloadLength));
         }
         finally
         {

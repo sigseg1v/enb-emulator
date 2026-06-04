@@ -173,13 +173,14 @@ public sealed class GlobalCreateCharacterTests
         Assert.Equal(CharacterFirstName, slot0.Data.FirstName);
         Assert.Equal(0, slot0.Data.Race);
         Assert.Equal(0, slot0.Data.Profession);
-        // sector_id is BE on the wire. StartSector[0*3+0] = 1015 (Terran
-        // Warrior, Luna space sector near Luna Station -- fresh characters
-        // spawn in space, not docked inside the home station; the space
-        // sector ids are all < 10000, see server/src/StaticData.h). Server's
+        // sector_id is BE on the wire. StartSector[0] = 10151 (Terran Warrior
+        // = Luna Station). A fresh character spawns DOCKED in its home station,
+        // not floating in space -- station ids are the space sector * 10 + 1
+        // and are > 9999 (see server/src/StaticData.h; the in-space start was
+        // reverted in the player-start-location revert). Server's
         // BuildAvatarList runs ntohl on it before packing, so the codec's BE
-        // read recovers 1015.
-        Assert.Equal(1015, slot0.Info.SectorId);
+        // read recovers 10151.
+        Assert.Equal(10151, slot0.Info.SectorId);
         // account_id_lsb encodes the seeded account ID (9_000_003). Server
         // stores via ntohl, codec reads BE.
         Assert.Equal(account.Id, slot0.Info.AccountIdLsb);
