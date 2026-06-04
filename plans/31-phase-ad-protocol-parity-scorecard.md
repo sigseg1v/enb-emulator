@@ -153,12 +153,19 @@ not yet captured", not "client crashes".
   wire STRUCTURE is already byte-pinned (`live_object_effect_000B_weapon.hex`,
   35B string form, `LiveReferenceCombatTests`).
   **The genuine remaining blockers** (none is "no harness"):
-  (1) **Prospect range vs spawn position.** `CheckMiningConditions`
-  (`PlayerSkills.cpp:884`) requires the avatar within `ProspectRange()` of the
-  roid AND stationary (`ObjectIsMoving()==false`); a fresh in-space login
-  spawns at the sector entry point while the roid field is elsewhere, so the
-  harness must position-feed the avatar onto the field then stop cleanly -- the
-  fragile part, and the real reason this stayed open.
+  (1) **Prospect range vs spawn position (quantified).**
+  `CheckMiningConditions` (`PlayerSkills.cpp:884`) requires the avatar within
+  `ProspectRange()` of the roid AND stationary (`ObjectIsMoving()==false`).
+  `ProspectRange() = 750 + skill_level*250` (`PlayerClass.cpp:3462`) = ~2500
+  units at level 7. But the roid fields are FAR from the spawn point: in sector
+  1710 the type-38 fields sit at radii ~35,000-200,000 units from origin
+  (nearest cluster ~(-33000,-4000,0) and ~(35000,12000,0)); 1710 has no
+  gate/nav (type 5/6/7) objects near a field. So the harness must position-feed
+  the avatar ~35k units onto a roid and stop cleanly within ~2500 units of it
+  -- a deliberate large teleport-hop, not an incremental nudge. Open risk: does
+  the MVAS position feed accept a 35k-unit jump without speed-clamping/rejection
+  (the #65 feed was small post-undock moves), and does `ObjectIsMoving()` settle
+  to false after it. This is the real reason AD-66 stayed open.
   (2) Roid spawn timing/availability, JE-Explorer creation (race=1/prof=2;
   `SectorHandshake` hardcodes Terran Warrior race=0/prof=0, needs a variant)
   and prospect-skill DB seeding (`avatar_skill_levels` skill_id 41 in the
