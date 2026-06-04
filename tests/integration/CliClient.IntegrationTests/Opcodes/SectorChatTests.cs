@@ -63,16 +63,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorChatTests
+public sealed class SectorChatTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorChatTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorChatTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task GroupChat_WhenUngrouped_ReceivesNotInGroupErrorString()
@@ -88,86 +81,77 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Chatter", shipName: "ChatShip", cts.Token);
+            firstName: "Chatter", shipName: "ChatShip", cts.Token));
 
-        try
+        // Build a Type=Group chat with non-slash content. The
+        // server's HandleClientChat hits the `chat->Type == 1`
+        // branch, checks GroupID() (== -1 for a freshly-logged-in
+        // player), and calls SendVaMessage with the literal
+        // "Error: You are not in a group!" string.
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "hello group");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        // Drain inbound until we see 0x001D MESSAGE_STRING. The
+        // server may interleave other post-login fan-out (state
+        // updates, NPC chatter, etc.); a frame cap keeps a stalled
+        // pipeline from masquerading as the outer-CTS timeout.
+        int framesSeen = 0;
+        const int maxFrames = 200;
+        while (framesSeen++ < maxFrames)
         {
-            // Build a Type=Group chat with non-slash content. The
-            // server's HandleClientChat hits the `chat->Type == 1`
-            // branch, checks GroupID() (== -1 for a freshly-logged-in
-            // player), and calls SendVaMessage with the literal
-            // "Error: You are not in a group!" string.
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "hello group");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            // Drain inbound until we see 0x001D MESSAGE_STRING. The
-            // server may interleave other post-login fan-out (state
-            // updates, NPC chatter, etc.); a frame cap keeps a stalled
-            // pipeline from masquerading as the outer-CTS timeout.
-            int framesSeen = 0;
-            const int maxFrames = 200;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            // 0x001D wire layout
+            //   [0..2)  short  length  = strlen(msg) + 1   (includes NUL)
+            //   [2]     byte   color   (default 5 for SendVaMessage path)
+            //   [3..N)  char[] msg + NUL terminator
+            // Mirror of Player::SendMessageString
+            // (server/src/PlayerConnection.cpp:10918).
+            var span = reply.Payload.Span;
+            Assert.True(span.Length >= 4,
+                $"MESSAGE_STRING payload too short: {span.Length}B");
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            Assert.True(msgLen >= 1,
+                $"MESSAGE_STRING length field={msgLen}, expected >= 1 (NUL).");
 
-                // 0x001D wire layout
-                //   [0..2)  short  length  = strlen(msg) + 1   (includes NUL)
-                //   [2]     byte   color   (default 5 for SendVaMessage path)
-                //   [3..N)  char[] msg + NUL terminator
-                // Mirror of Player::SendMessageString
-                // (server/src/PlayerConnection.cpp:10918).
-                var span = reply.Payload.Span;
-                Assert.True(span.Length >= 4,
-                    $"MESSAGE_STRING payload too short: {span.Length}B");
+            // Strip the trailing NUL when reading the body — be
+            // defensive in case the server short-frames us.
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            Assert.True(bodyBytes > 0,
+                $"MESSAGE_STRING body bytes={bodyBytes}, expected > 0.");
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                Assert.True(msgLen >= 1,
-                    $"MESSAGE_STRING length field={msgLen}, expected >= 1 (NUL).");
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                // Strip the trailing NUL when reading the body — be
-                // defensive in case the server short-frames us.
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                Assert.True(bodyBytes > 0,
-                    $"MESSAGE_STRING body bytes={bodyBytes}, expected > 0.");
-
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
-
-                // The exact server-side literal is "Error: You are not
-                // in a group!". Pin on the distinctive substring rather
-                // than the whole string so a colour-byte or punctuation
-                // tweak doesn't sink the test.
-                Assert.Contains("not in a group", text);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT " +
-                $"without seeing 0x001D MESSAGE_STRING. " +
-                $"Likely the server's chat dispatch didn't reach SendVaMessage, " +
-                $"or the proxy's SendClientPacketSequence dropped the inner 0x001D " +
-                $"out of the 0x2016 envelope.");
+            // The exact server-side literal is "Error: You are not
+            // in a group!". Pin on the distinctive substring rather
+            // than the whole string so a colour-byte or punctuation
+            // tweak doesn't sink the test.
+            Assert.Contains("not in a group", text);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT " +
+            $"without seeing 0x001D MESSAGE_STRING. " +
+            $"Likely the server's chat dispatch didn't reach SendVaMessage, " +
+            $"or the proxy's SendClientPacketSequence dropped the inner 0x001D " +
+            $"out of the 0x2016 envelope.");
     }
 
     /// <summary>
@@ -327,76 +311,67 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Chat110er", shipName: "Chat110Ship", cts.Token);
+            firstName: "Chat110er", shipName: "Chat110Ship", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "hello group");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "hello group");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // Filter on the distinctive substring so other
+            // MESSAGE_STRING traffic (motd, NPC chatter) doesn't
+            // race ahead of the not-in-group reply. Once we have
+            // the right reply we pin its full wire shape.
+            if (!text.Contains("not in a group", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // Filter on the distinctive substring so other
-                // MESSAGE_STRING traffic (motd, NPC chatter) doesn't
-                // race ahead of the not-in-group reply. Once we have
-                // the right reply we pin its full wire shape.
-                if (!text.Contains("not in a group", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(NotInGroupLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT (Type=Group) " +
-                $"without seeing 0x001D MESSAGE_STRING containing \"not in a group\". " +
-                $"Same drain-loop budget as Wave 8's sibling test; the failure modes are " +
-                $"identical.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(NotInGroupLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT (Type=Group) " +
+            $"without seeing 0x001D MESSAGE_STRING containing \"not in a group\". " +
+            $"Same drain-loop budget as Wave 8's sibling test; the failure modes are " +
+            $"identical.");
     }
 
     /// <summary>
@@ -616,79 +591,70 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Authleveler", shipName: "AuthLvlShip", cts.Token);
+            firstName: "Authleveler", shipName: "AuthLvlShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/authlevel");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/authlevel");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // Filter on the distinctive substring so other
+            // MESSAGE_STRING traffic (motd, NPC chatter, post-
+            // handshake server fan-out) doesn't race ahead of the
+            // /authlevel reply. Once we have the right reply we
+            // pin its full wire shape.
+            if (!text.Contains("Authentication Level", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // Filter on the distinctive substring so other
-                // MESSAGE_STRING traffic (motd, NPC chatter, post-
-                // handshake server fan-out) doesn't race ahead of the
-                // /authlevel reply. Once we have the right reply we
-                // pin its full wire shape.
-                if (!text.Contains("Authentication Level", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(AuthLevelLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/authlevel\" without seeing 0x001D MESSAGE_STRING containing " +
-                $"\"Authentication Level\". Likely the slash-prefix short-circuit at " +
-                $"server/src/PlayerConnection.cpp:4614 was bypassed, or the user-block " +
-                $"guard at line 5434 rejected the dispatch, or AdminLevel seeding from " +
-                $"the account status field at AccountManager.cpp:950 regressed.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(AuthLevelLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/authlevel\" without seeing 0x001D MESSAGE_STRING containing " +
+            $"\"Authentication Level\". Likely the slash-prefix short-circuit at " +
+            $"server/src/PlayerConnection.cpp:4614 was bypassed, or the user-block " +
+            $"guard at line 5434 rejected the dispatch, or AdminLevel seeding from " +
+            $"the account status field at AccountManager.cpp:950 regressed.");
     }
 
     /// <summary>
@@ -856,79 +822,70 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Notelle", shipName: "NotellShip", cts.Token);
+            firstName: "Notelle", shipName: "NotellShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/notells");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/notells");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // Filter on the distinctive substring so handshake-tail
+            // and chatter frames don't race ahead of the /notells
+            // reply. Once we have the right reply we pin its full
+            // wire shape.
+            if (!text.Contains("Allow tells", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // Filter on the distinctive substring so handshake-tail
-                // and chatter frames don't race ahead of the /notells
-                // reply. Once we have the right reply we pin its full
-                // wire shape.
-                if (!text.Contains("Allow tells", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(NotellsFirstInvocationLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/notells\" without seeing 0x001D MESSAGE_STRING containing " +
-                $"\"Allow tells\". Likely the user-block case-'n' arm at " +
-                $"server/src/PlayerConnection.cpp:6863 changed shape, the AdminLevel " +
-                $"guard rejected the dispatch (admin_level seeding regression), the " +
-                $"SendVaMessageC→SendMessageString colour-routing was rewired, or the " +
-                $"m_TellsFromFriendsOnly ctor-init at PlayerClass.cpp:167 changed.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(NotellsFirstInvocationLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/notells\" without seeing 0x001D MESSAGE_STRING containing " +
+            $"\"Allow tells\". Likely the user-block case-'n' arm at " +
+            $"server/src/PlayerConnection.cpp:6863 changed shape, the AdminLevel " +
+            $"guard rejected the dispatch (admin_level seeding regression), the " +
+            $"SendVaMessageC→SendMessageString colour-routing was rewired, or the " +
+            $"m_TellsFromFriendsOnly ctor-init at PlayerClass.cpp:167 changed.");
     }
 
     /// <summary>
@@ -1075,75 +1032,66 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Noattacker", shipName: "NoatkShip", cts.Token);
+            firstName: "Noattacker", shipName: "NoatkShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/noattack");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/noattack");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Contains("Combat immunity", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Contains("Combat immunity", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(NoattackFirstInvocationLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/noattack\" without seeing 0x001D MESSAGE_STRING containing " +
-                $"\"Combat immunity\". Likely the user-block case-'n' arm at " +
-                $"server/src/PlayerConnection.cpp:6856 changed shape, the AdminLevel " +
-                $"guard rejected the dispatch, the SendVaMessageC→SendMessageString " +
-                $"colour-routing was rewired, or the m_CombatImmunity ctor-init at " +
-                $"PlayerClass.cpp:119 changed.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(NoattackFirstInvocationLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/noattack\" without seeing 0x001D MESSAGE_STRING containing " +
+            $"\"Combat immunity\". Likely the user-block case-'n' arm at " +
+            $"server/src/PlayerConnection.cpp:6856 changed shape, the AdminLevel " +
+            $"guard rejected the dispatch, the SendVaMessageC→SendMessageString " +
+            $"colour-routing was rewired, or the m_CombatImmunity ctor-init at " +
+            $"PlayerClass.cpp:119 changed.");
     }
 
     /// <summary>
@@ -1322,77 +1270,68 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Positioner", shipName: "PosShip", cts.Token);
+            firstName: "Positioner", shipName: "PosShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/position");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/position");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // Filter on the distinctive prefix so handshake-tail and
+            // chatter frames don't race ahead of the /position reply.
+            // Once we have the right reply we pin its full wire shape.
+            if (!text.StartsWith("ObjectID =", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // Filter on the distinctive prefix so handshake-tail and
-                // chatter frames don't race ahead of the /position reply.
-                // Once we have the right reply we pin its full wire shape.
-                if (!text.StartsWith("ObjectID =", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(PositionNoTargetLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/position\" without seeing 0x001D MESSAGE_STRING starting with " +
-                $"\"ObjectID =\". Likely the user-block case-'p' arm at " +
-                $"server/src/PlayerConnection.cpp:6948 changed shape, the " +
-                $"SendVaMessage default-colour routing was rewired, or the " +
-                $"SendShipInfo target-seed at PlayerClass.cpp:1085 changed.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(PositionNoTargetLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/position\" without seeing 0x001D MESSAGE_STRING starting with " +
+            $"\"ObjectID =\". Likely the user-block case-'p' arm at " +
+            $"server/src/PlayerConnection.cpp:6948 changed shape, the " +
+            $"SendVaMessage default-colour routing was rewired, or the " +
+            $"SendShipInfo target-seed at PlayerClass.cpp:1085 changed.");
     }
 
     /// <summary>
@@ -1573,78 +1512,69 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Leveler", shipName: "LvlShip", cts.Token);
+            firstName: "Leveler", shipName: "LvlShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/level 99");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/level 99");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // Filter on the distinctive prefix so handshake-tail and
+            // chatter frames don't race ahead of the /level reply.
+            // Once we have the right reply we pin its full wire shape.
+            if (!text.StartsWith("0 <= Level", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // Filter on the distinctive prefix so handshake-tail and
-                // chatter frames don't race ahead of the /level reply.
-                // Once we have the right reply we pin its full wire shape.
-                if (!text.StartsWith("0 <= Level", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(LevelOutOfRangeLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/level 99\" without seeing 0x001D MESSAGE_STRING starting with " +
-                $"\"0 <= Level\". Likely the user-block case-'l' arm at " +
-                $"server/src/PlayerConnection.cpp:6777 changed shape, MatchOptWithParam " +
-                $"at PlayerConnection.cpp:4526 broke param extraction, the AdminLevel " +
-                $"body-block guard at PlayerConnection.cpp:6782 inverted, or the atoi " +
-                $"out-of-range check at PlayerConnection.cpp:6785 changed bounds.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(LevelOutOfRangeLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/level 99\" without seeing 0x001D MESSAGE_STRING starting with " +
+            $"\"0 <= Level\". Likely the user-block case-'l' arm at " +
+            $"server/src/PlayerConnection.cpp:6777 changed shape, MatchOptWithParam " +
+            $"at PlayerConnection.cpp:4526 broke param extraction, the AdminLevel " +
+            $"body-block guard at PlayerConnection.cpp:6782 inverted, or the atoi " +
+            $"out-of-range check at PlayerConnection.cpp:6785 changed bounds.");
     }
 
     /// <summary>
@@ -1806,78 +1736,69 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Missarg", shipName: "MissArgShip", cts.Token);
+            firstName: "Missarg", shipName: "MissArgShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/level");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/level");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // Filter on the distinctive prefix so handshake-tail and
+            // chatter frames don't race ahead of the /level reply.
+            // Once we have the right reply we pin its full wire shape.
+            if (!text.StartsWith("Missing arg", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // Filter on the distinctive prefix so handshake-tail and
-                // chatter frames don't race ahead of the /level reply.
-                // Once we have the right reply we pin its full wire shape.
-                if (!text.StartsWith("Missing arg", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgLevelLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/level\" without seeing 0x001D MESSAGE_STRING starting with " +
-                $"\"Missing arg\". Likely MatchOptWithParam's missing-arg branch at " +
-                $"server/src/PlayerConnection.cpp:4548 changed shape, the separator " +
-                $"check at line 4532 widened to accept no-separator, the isalpha guard " +
-                $"at line 4537 widened to include NUL, or the allowNoParams default at " +
-                $"line 4526 flipped to true.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgLevelLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/level\" without seeing 0x001D MESSAGE_STRING starting with " +
+            $"\"Missing arg\". Likely MatchOptWithParam's missing-arg branch at " +
+            $"server/src/PlayerConnection.cpp:4548 changed shape, the separator " +
+            $"check at line 4532 widened to accept no-separator, the isalpha guard " +
+            $"at line 4537 widened to include NUL, or the allowNoParams default at " +
+            $"line 4526 flipped to true.");
     }
 
     /// <summary>
@@ -2031,78 +1952,69 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Beoner", shipName: "BeonShip", cts.Token);
+            firstName: "Beoner", shipName: "BeonShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/beon");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/beon");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // Filter on the distinctive prefix so handshake-tail and
+            // chatter frames don't race ahead of the /beon reply.
+            // Once we have the right reply we pin its full wire shape.
+            if (!text.StartsWith("Beta channel on", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // Filter on the distinctive prefix so handshake-tail and
-                // chatter frames don't race ahead of the /beon reply.
-                // Once we have the right reply we pin its full wire shape.
-                if (!text.StartsWith("Beta channel on", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(BetaChannelOnLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/beon\" without seeing 0x001D MESSAGE_STRING starting with " +
-                $"\"Beta channel on\". Likely the user-block case-'b' arm at " +
-                $"server/src/PlayerConnection.cpp:5519 changed shape, the body-block " +
-                $"AdminLevel>=BETA guard at PlayerConnection.cpp:5521 inverted, the BETA " +
-                $"constant at Net7.h:373 changed, or GetChannelFromName at " +
-                $"PlayerConnection.cpp:5523 broke.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(BetaChannelOnLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/beon\" without seeing 0x001D MESSAGE_STRING starting with " +
+            $"\"Beta channel on\". Likely the user-block case-'b' arm at " +
+            $"server/src/PlayerConnection.cpp:5519 changed shape, the body-block " +
+            $"AdminLevel>=BETA guard at PlayerConnection.cpp:5521 inverted, the BETA " +
+            $"constant at Net7.h:373 changed, or GetChannelFromName at " +
+            $"PlayerConnection.cpp:5523 broke.");
     }
 
     /// <summary>
@@ -2239,83 +2151,74 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Beoffer", shipName: "BeoffShip", cts.Token);
+            firstName: "Beoffer", shipName: "BeoffShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/beoff");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/beoff");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // Filter on the distinctive prefix so handshake-tail and
+            // chatter frames don't race ahead of the /beoff reply.
+            // Note: "Beta channel" is shared with Wave 132's /beon
+            // reply, but with cli_test125 isolation and a single
+            // /beoff request on this connection there is no /beon
+            // emit to race with. We still filter on the full
+            // "channel off" suffix to make the test deterministic
+            // if someone ever wires both slash commands in series.
+            if (!text.StartsWith("Beta channel off", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // Filter on the distinctive prefix so handshake-tail and
-                // chatter frames don't race ahead of the /beoff reply.
-                // Note: "Beta channel" is shared with Wave 132's /beon
-                // reply, but with cli_test125 isolation and a single
-                // /beoff request on this connection there is no /beon
-                // emit to race with. We still filter on the full
-                // "channel off" suffix to make the test deterministic
-                // if someone ever wires both slash commands in series.
-                if (!text.StartsWith("Beta channel off", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(BetaChannelOffLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/beoff\" without seeing 0x001D MESSAGE_STRING starting with " +
-                $"\"Beta channel off\". Likely the user-block case-'b' /beoff arm at " +
-                $"server/src/PlayerConnection.cpp:5535 changed shape, the body-block " +
-                $"AdminLevel>=BETA guard at PlayerConnection.cpp:5537 inverted, the BETA " +
-                $"constant at Net7.h:373 changed, or GetChannelFromName at " +
-                $"PlayerConnection.cpp:5539 broke.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(BetaChannelOffLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/beoff\" without seeing 0x001D MESSAGE_STRING starting with " +
+            $"\"Beta channel off\". Likely the user-block case-'b' /beoff arm at " +
+            $"server/src/PlayerConnection.cpp:5535 changed shape, the body-block " +
+            $"AdminLevel>=BETA guard at PlayerConnection.cpp:5537 inverted, the BETA " +
+            $"constant at Net7.h:373 changed, or GetChannelFromName at " +
+            $"PlayerConnection.cpp:5539 broke.");
     }
 
     /// <summary>
@@ -2451,79 +2354,70 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Chjoiner", shipName: "ChjoinShip", cts.Token);
+            firstName: "Chjoiner", shipName: "ChjoinShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/chjoin");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/chjoin");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // Filter on the distinctive "for option chjoin" suffix --
+            // the "Missing arg for option" prefix is shared with
+            // Wave 131's /level reply, but with cli_test126
+            // isolation and a single /chjoin request we don't race
+            // /level. Use a more specific prefix to be defensive.
+            if (!text.StartsWith("Missing arg for option chjoin", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // Filter on the distinctive "for option chjoin" suffix --
-                // the "Missing arg for option" prefix is shared with
-                // Wave 131's /level reply, but with cli_test126
-                // isolation and a single /chjoin request we don't race
-                // /level. Use a more specific prefix to be defensive.
-                if (!text.StartsWith("Missing arg for option chjoin", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgChjoinLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/chjoin\" without seeing 0x001D MESSAGE_STRING starting with " +
-                $"\"Missing arg for option chjoin\". Likely the case-'c' arm at " +
-                $"server/src/PlayerConnection.cpp:5631 stopped dispatching to " +
-                $"MatchOptWithParam at line 5633, or the missing-arg ERROR fork at " +
-                $"PlayerConnection.cpp:4548 changed shape.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgChjoinLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/chjoin\" without seeing 0x001D MESSAGE_STRING starting with " +
+            $"\"Missing arg for option chjoin\". Likely the case-'c' arm at " +
+            $"server/src/PlayerConnection.cpp:5631 stopped dispatching to " +
+            $"MatchOptWithParam at line 5633, or the missing-arg ERROR fork at " +
+            $"PlayerConnection.cpp:4548 changed shape.");
     }
 
     /// <summary>
@@ -2642,76 +2536,67 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Chleaver", shipName: "ChleaveShip", cts.Token);
+            firstName: "Chleaver", shipName: "ChleaveShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/chleave");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/chleave");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // Filter on the distinctive "for option chleave" suffix.
+            if (!text.StartsWith("Missing arg for option chleave", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // Filter on the distinctive "for option chleave" suffix.
-                if (!text.StartsWith("Missing arg for option chleave", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgChleaveLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/chleave\" without seeing 0x001D MESSAGE_STRING starting with " +
-                $"\"Missing arg for option chleave\". Likely the case-'c' chleave " +
-                $"matcher at server/src/PlayerConnection.cpp:5667 stopped dispatching, or " +
-                $"the chjoin matcher at line 5633 incorrectly returned true (preventing " +
-                $"fall-through), or the missing-arg ERROR fork at PlayerConnection.cpp:4548 " +
-                $"changed shape.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgChleaveLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/chleave\" without seeing 0x001D MESSAGE_STRING starting with " +
+            $"\"Missing arg for option chleave\". Likely the case-'c' chleave " +
+            $"matcher at server/src/PlayerConnection.cpp:5667 stopped dispatching, or " +
+            $"the chjoin matcher at line 5633 incorrectly returned true (preventing " +
+            $"fall-through), or the missing-arg ERROR fork at PlayerConnection.cpp:4548 " +
+            $"changed shape.");
     }
 
     /// <summary>
@@ -2844,76 +2729,67 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Adduser", shipName: "AdduserShip", cts.Token);
+            firstName: "Adduser", shipName: "AdduserShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//adduser");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//adduser");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // Filter on the distinctive "for option adduser" suffix.
+            if (!text.StartsWith("Missing arg for option adduser", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // Filter on the distinctive "for option adduser" suffix.
-                if (!text.StartsWith("Missing arg for option adduser", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgAdduserLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//adduser\" without seeing 0x001D MESSAGE_STRING starting with " +
-                $"\"Missing arg for option adduser\". Likely the GM-block entry guard at " +
-                $"server/src/PlayerConnection.cpp:4716 stopped admitting status=100 accounts, " +
-                $"the 2-char strip at lines 4719-4721 mis-offset, the case-'a' GM-block " +
-                $"matcher at line 4728 stopped dispatching, or the missing-arg ERROR fork at " +
-                $"PlayerConnection.cpp:4548 changed shape.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgAdduserLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//adduser\" without seeing 0x001D MESSAGE_STRING starting with " +
+            $"\"Missing arg for option adduser\". Likely the GM-block entry guard at " +
+            $"server/src/PlayerConnection.cpp:4716 stopped admitting status=100 accounts, " +
+            $"the 2-char strip at lines 4719-4721 mis-offset, the case-'a' GM-block " +
+            $"matcher at line 4728 stopped dispatching, or the missing-arg ERROR fork at " +
+            $"PlayerConnection.cpp:4548 changed shape.");
     }
 
     /// <summary>
@@ -3043,84 +2919,75 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Banner", shipName: "BanShip", cts.Token);
+            firstName: "Banner", shipName: "BanShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//ban");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//ban");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // Filter on the distinctive "for option ban" suffix.
+            if (!text.StartsWith("Missing arg for option ban", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            // Reject longer-suffix collisions (e.g. "Missing arg for
+            // option banaccount" if such an arm ever existed).
+            if (text.Length > "Missing arg for option ban".Length &&
+                char.IsLetter(text["Missing arg for option ban".Length]))
+                continue;
 
-                // Filter on the distinctive "for option ban" suffix.
-                if (!text.StartsWith("Missing arg for option ban", StringComparison.Ordinal))
-                    continue;
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // Reject longer-suffix collisions (e.g. "Missing arg for
-                // option banaccount" if such an arm ever existed).
-                if (text.Length > "Missing arg for option ban".Length &&
-                    char.IsLetter(text["Missing arg for option ban".Length]))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgBanLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//ban\" without seeing 0x001D MESSAGE_STRING starting with " +
-                $"\"Missing arg for option ban\". Likely the GM-block entry guard at " +
-                $"server/src/PlayerConnection.cpp:4716 stopped admitting status=100 accounts, " +
-                $"the 2-char strip at lines 4719-4721 mis-offset, the case-'b' GM-block " +
-                $"matcher at line 4756 stopped dispatching, the case-'b' tier-routing " +
-                $"mis-routed //ban to the user-tier dispatcher (case-'b' user-block at " +
-                $"line 5519 /beon path), or the missing-arg ERROR fork at " +
-                $"PlayerConnection.cpp:4548 changed shape.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgBanLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//ban\" without seeing 0x001D MESSAGE_STRING starting with " +
+            $"\"Missing arg for option ban\". Likely the GM-block entry guard at " +
+            $"server/src/PlayerConnection.cpp:4716 stopped admitting status=100 accounts, " +
+            $"the 2-char strip at lines 4719-4721 mis-offset, the case-'b' GM-block " +
+            $"matcher at line 4756 stopped dispatching, the case-'b' tier-routing " +
+            $"mis-routed //ban to the user-tier dispatcher (case-'b' user-block at " +
+            $"line 5519 /beon path), or the missing-arg ERROR fork at " +
+            $"PlayerConnection.cpp:4548 changed shape.");
     }
 
     /// <summary>
@@ -3253,76 +3120,67 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Gmget", shipName: "GmgetShip", cts.Token);
+            firstName: "Gmget", shipName: "GmgetShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//gmgetaccess");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//gmgetaccess");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // Filter on the distinctive "for option gmgetaccess" suffix.
+            if (!text.StartsWith("Missing arg for option gmgetaccess", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // Filter on the distinctive "for option gmgetaccess" suffix.
-                if (!text.StartsWith("Missing arg for option gmgetaccess", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgGmgetaccessLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//gmgetaccess\" without seeing 0x001D MESSAGE_STRING starting with " +
-                $"\"Missing arg for option gmgetaccess\". Likely the GM-block entry guard at " +
-                $"server/src/PlayerConnection.cpp:4716 stopped admitting status=100 accounts, " +
-                $"the 2-char strip at lines 4719-4721 mis-offset, the case-'g' GM-block " +
-                $"FIRST matcher at line 5207 stopped dispatching (matcher chain head), " +
-                $"or the missing-arg ERROR fork at PlayerConnection.cpp:4548 changed shape.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgGmgetaccessLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//gmgetaccess\" without seeing 0x001D MESSAGE_STRING starting with " +
+            $"\"Missing arg for option gmgetaccess\". Likely the GM-block entry guard at " +
+            $"server/src/PlayerConnection.cpp:4716 stopped admitting status=100 accounts, " +
+            $"the 2-char strip at lines 4719-4721 mis-offset, the case-'g' GM-block " +
+            $"FIRST matcher at line 5207 stopped dispatching (matcher chain head), " +
+            $"or the missing-arg ERROR fork at PlayerConnection.cpp:4548 changed shape.");
     }
 
     /// <summary>
@@ -3469,77 +3327,68 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Gmset", shipName: "GmsetShip", cts.Token);
+            firstName: "Gmset", shipName: "GmsetShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//gmsetaccess");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//gmsetaccess");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // Filter on the distinctive "for option gmsetaccess" suffix.
+            if (!text.StartsWith("Missing arg for option gmsetaccess", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // Filter on the distinctive "for option gmsetaccess" suffix.
-                if (!text.StartsWith("Missing arg for option gmsetaccess", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgGmsetaccessLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//gmsetaccess\" without seeing 0x001D MESSAGE_STRING starting with " +
-                $"\"Missing arg for option gmsetaccess\". Likely the case-'g' GM-block " +
-                $"FIRST matcher (gmgetaccess at line 5207) incorrectly returned true " +
-                $"(preventing fall-through), the SECOND matcher (gmsetaccess at line 5221) " +
-                $"stopped dispatching, the AdminLevel() >= SDEV inner-guard short-circuited " +
-                $"before the matcher could emit, or the missing-arg ERROR fork at " +
-                $"PlayerConnection.cpp:4548 changed shape.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgGmsetaccessLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//gmsetaccess\" without seeing 0x001D MESSAGE_STRING starting with " +
+            $"\"Missing arg for option gmsetaccess\". Likely the case-'g' GM-block " +
+            $"FIRST matcher (gmgetaccess at line 5207) incorrectly returned true " +
+            $"(preventing fall-through), the SECOND matcher (gmsetaccess at line 5221) " +
+            $"stopped dispatching, the AdminLevel() >= SDEV inner-guard short-circuited " +
+            $"before the matcher could emit, or the missing-arg ERROR fork at " +
+            $"PlayerConnection.cpp:4548 changed shape.");
     }
 
     /// <summary>
@@ -3656,76 +3505,67 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Gmskill", shipName: "GmskillShip", cts.Token);
+            firstName: "Gmskill", shipName: "GmskillShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//gmskillpoints");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//gmskillpoints");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // Filter on the distinctive "for option gmskillpoints" suffix.
+            if (!text.StartsWith("Missing arg for option gmskillpoints", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // Filter on the distinctive "for option gmskillpoints" suffix.
-                if (!text.StartsWith("Missing arg for option gmskillpoints", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgGmskillpointsLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//gmskillpoints\" without seeing 0x001D MESSAGE_STRING starting with " +
-                $"\"Missing arg for option gmskillpoints\". Likely the case-'g' GM-block " +
-                $"FIRST matcher (gmgetaccess at line 5207) or SECOND matcher (gmsetaccess " +
-                $"at line 5221) incorrectly returned true (preventing fall-through), the " +
-                $"THIRD matcher (gmskillpoints at line 5260) stopped dispatching, or the " +
-                $"missing-arg ERROR fork at PlayerConnection.cpp:4548 changed shape.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgGmskillpointsLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//gmskillpoints\" without seeing 0x001D MESSAGE_STRING starting with " +
+            $"\"Missing arg for option gmskillpoints\". Likely the case-'g' GM-block " +
+            $"FIRST matcher (gmgetaccess at line 5207) or SECOND matcher (gmsetaccess " +
+            $"at line 5221) incorrectly returned true (preventing fall-through), the " +
+            $"THIRD matcher (gmskillpoints at line 5260) stopped dispatching, or the " +
+            $"missing-arg ERROR fork at PlayerConnection.cpp:4548 changed shape.");
     }
 
     /// <summary>
@@ -3842,77 +3682,68 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Gmenable", shipName: "GmenableShip", cts.Token);
+            firstName: "Gmenable", shipName: "GmenableShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//gmenableskills");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//gmenableskills");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // Filter on the distinctive "for option gmenableskills" suffix.
+            if (!text.StartsWith("Missing arg for option gmenableskills", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // Filter on the distinctive "for option gmenableskills" suffix.
-                if (!text.StartsWith("Missing arg for option gmenableskills", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgGmenableskillsLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//gmenableskills\" without seeing 0x001D MESSAGE_STRING starting with " +
-                $"\"Missing arg for option gmenableskills\". Likely the case-'g' GM-block " +
-                $"FIRST matcher (gmgetaccess at line 5207), SECOND matcher (gmsetaccess " +
-                $"at line 5221), or THIRD matcher (gmskillpoints at line 5260) incorrectly " +
-                $"returned true (preventing fall-through), the FOURTH matcher " +
-                $"(gmenableskills at line 5302) stopped dispatching, or the missing-arg " +
-                $"ERROR fork at PlayerConnection.cpp:4548 changed shape.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgGmenableskillsLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//gmenableskills\" without seeing 0x001D MESSAGE_STRING starting with " +
+            $"\"Missing arg for option gmenableskills\". Likely the case-'g' GM-block " +
+            $"FIRST matcher (gmgetaccess at line 5207), SECOND matcher (gmsetaccess " +
+            $"at line 5221), or THIRD matcher (gmskillpoints at line 5260) incorrectly " +
+            $"returned true (preventing fall-through), the FOURTH matcher " +
+            $"(gmenableskills at line 5302) stopped dispatching, or the missing-arg " +
+            $"ERROR fork at PlayerConnection.cpp:4548 changed shape.");
     }
 
     /// <summary>
@@ -4024,75 +3855,66 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Setpass", shipName: "SetpassShip", cts.Token);
+            firstName: "Setpass", shipName: "SetpassShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//setpassword");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//setpassword");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // Filter on the distinctive "for option setpassword" suffix.
+            if (!text.StartsWith("Missing arg for option setpassword", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // Filter on the distinctive "for option setpassword" suffix.
-                if (!text.StartsWith("Missing arg for option setpassword", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgSetpasswordLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//setpassword\" without seeing 0x001D MESSAGE_STRING starting with " +
-                $"\"Missing arg for option setpassword\". Likely the case-'s' GM-block " +
-                $"dispatch at line 5153 stopped routing, the sole setpassword matcher at " +
-                $"line 5155 stopped dispatching, or the missing-arg ERROR fork at " +
-                $"PlayerConnection.cpp:4548 changed shape.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgSetpasswordLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//setpassword\" without seeing 0x001D MESSAGE_STRING starting with " +
+            $"\"Missing arg for option setpassword\". Likely the case-'s' GM-block " +
+            $"dispatch at line 5153 stopped routing, the sole setpassword matcher at " +
+            $"line 5155 stopped dispatching, or the missing-arg ERROR fork at " +
+            $"PlayerConnection.cpp:4548 changed shape.");
     }
 
     /// <summary>
@@ -4210,79 +4032,70 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Diota", shipName: "DiotaShip", cts.Token);
+            firstName: "Diota", shipName: "DiotaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/d");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/d");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // Filter on EXACT match -- "Missing arg for option d" is a
+            // prefix of "Missing arg for option deco" etc., so use
+            // equals rather than startswith to avoid mis-matching
+            // sibling case-'d' matchers (none of which fire for pch="d"
+            // since their option names are longer, but defensive).
+            if (text != "Missing arg for option d")
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // Filter on EXACT match -- "Missing arg for option d" is a
-                // prefix of "Missing arg for option deco" etc., so use
-                // equals rather than startswith to avoid mis-matching
-                // sibling case-'d' matchers (none of which fire for pch="d"
-                // since their option names are longer, but defensive).
-                if (text != "Missing arg for option d")
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgDLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/d\" without seeing 0x001D MESSAGE_STRING with body " +
-                $"\"Missing arg for option d\". Likely the user-tier case-'d' dispatch " +
-                $"at line 5902 stopped routing, the HEAD \"d\" matcher at line 5903 " +
-                $"stopped dispatching, or the missing-arg ERROR fork at " +
-                $"PlayerConnection.cpp:4548 changed shape.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgDLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/d\" without seeing 0x001D MESSAGE_STRING with body " +
+            $"\"Missing arg for option d\". Likely the user-tier case-'d' dispatch " +
+            $"at line 5902 stopped routing, the HEAD \"d\" matcher at line 5903 " +
+            $"stopped dispatching, or the missing-arg ERROR fork at " +
+            $"PlayerConnection.cpp:4548 changed shape.");
     }
 
     /// <summary>
@@ -4417,77 +4230,68 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Removeb", shipName: "RemovebShip", cts.Token);
+            firstName: "Removeb", shipName: "RemovebShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/removebaseore");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/removebaseore");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // Filter on the distinctive "for option removebaseore" suffix.
+            if (!text.StartsWith("Missing arg for option removebaseore", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // Filter on the distinctive "for option removebaseore" suffix.
-                if (!text.StartsWith("Missing arg for option removebaseore", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgRemovebaseoreLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/removebaseore\" without seeing 0x001D MESSAGE_STRING starting with " +
-                $"\"Missing arg for option removebaseore\". Likely the user-tier case-'r' " +
-                $"dispatch at line 6992 stopped routing, the else-if chain (rsi/rsa/rsn/" +
-                $"rotatex/y/z) before line 7074 incorrectly short-circuited, the GUARD-FIRST " +
-                $"AdminLevel >= DEV check at line 7074 failed (status=100 admin should pass), " +
-                $"the removebaseore matcher at line 7074 stopped dispatching, or the " +
-                $"missing-arg ERROR fork at PlayerConnection.cpp:4548 changed shape.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgRemovebaseoreLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/removebaseore\" without seeing 0x001D MESSAGE_STRING starting with " +
+            $"\"Missing arg for option removebaseore\". Likely the user-tier case-'r' " +
+            $"dispatch at line 6992 stopped routing, the else-if chain (rsi/rsa/rsn/" +
+            $"rotatex/y/z) before line 7074 incorrectly short-circuited, the GUARD-FIRST " +
+            $"AdminLevel >= DEV check at line 7074 failed (status=100 admin should pass), " +
+            $"the removebaseore matcher at line 7074 stopped dispatching, or the " +
+            $"missing-arg ERROR fork at PlayerConnection.cpp:4548 changed shape.");
     }
 
     /// <summary>
@@ -4626,78 +4430,69 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Effecta", shipName: "EffectaShip", cts.Token);
+            firstName: "Effecta", shipName: "EffectaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/effect");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/effect");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // EXACT equals filter (not StartsWith) -- "Missing arg for option effect"
+            // is a prefix of sibling option emits ("effecto", "effects").
+            if (!text.Equals("Missing arg for option effect", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // EXACT equals filter (not StartsWith) -- "Missing arg for option effect"
-                // is a prefix of sibling option emits ("effecto", "effects").
-                if (!text.Equals("Missing arg for option effect", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgEffectLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/effect\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option effect\". Likely the user-tier case-'e' " +
-                $"dispatch at line 6045 stopped routing, the head matchers (endtalk/" +
-                $"enableskills) at lines 6047/6054 incorrectly short-circuited, the " +
-                $"OUTER AdminLevel >= GM block at line 6074 failed (status=100 admin " +
-                $"should pass), the effect matcher at line 6076 stopped dispatching, " +
-                $"or the missing-arg ERROR fork at PlayerConnection.cpp:4548 changed shape.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgEffectLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/effect\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option effect\". Likely the user-tier case-'e' " +
+            $"dispatch at line 6045 stopped routing, the head matchers (endtalk/" +
+            $"enableskills) at lines 6047/6054 incorrectly short-circuited, the " +
+            $"OUTER AdminLevel >= GM block at line 6074 failed (status=100 admin " +
+            $"should pass), the effect matcher at line 6076 stopped dispatching, " +
+            $"or the missing-arg ERROR fork at PlayerConnection.cpp:4548 changed shape.");
     }
 
     /// <summary>
@@ -4839,78 +4634,69 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Forma", shipName: "FormaShip", cts.Token);
+            firstName: "Forma", shipName: "FormaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/form");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/form");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // EXACT equals filter (not StartsWith) -- defensive against
+            // future sibling "form*" option emits in case-'f'.
+            if (!text.Equals("Missing arg for option form", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // EXACT equals filter (not StartsWith) -- defensive against
-                // future sibling "form*" option emits in case-'f'.
-                if (!text.Equals("Missing arg for option form", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgFormLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/form\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option form\". Likely the user-tier case-'f' " +
-                $"dispatch at line 6280 stopped routing, the OUTER AdminLevel >= GM " +
-                $"block at line 6281 failed (status=100 admin should pass), the form " +
-                $"matcher at line 6283 stopped dispatching, the inline AdminLevel >= 50 " +
-                $"guard at line 6283 was reordered to GUARD-FIRST and short-circuited, " +
-                $"or the missing-arg ERROR fork at PlayerConnection.cpp:4548 changed shape.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgFormLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/form\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option form\". Likely the user-tier case-'f' " +
+            $"dispatch at line 6280 stopped routing, the OUTER AdminLevel >= GM " +
+            $"block at line 6281 failed (status=100 admin should pass), the form " +
+            $"matcher at line 6283 stopped dispatching, the inline AdminLevel >= 50 " +
+            $"guard at line 6283 was reordered to GUARD-FIRST and short-circuited, " +
+            $"or the missing-arg ERROR fork at PlayerConnection.cpp:4548 changed shape.");
     }
 
     /// <summary>
@@ -5046,78 +4832,69 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Hta", shipName: "HtaShip", cts.Token);
+            firstName: "Hta", shipName: "HtaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/ht");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/ht");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // EXACT equals filter (not StartsWith) -- defensive against
+            // future sibling "ht*" option emits in case-'h'.
+            if (!text.Equals("Missing arg for option ht", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // EXACT equals filter (not StartsWith) -- defensive against
-                // future sibling "ht*" option emits in case-'h'.
-                if (!text.Equals("Missing arg for option ht", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgHtLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/ht\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option ht\". Likely the user-tier case-'h' " +
-                $"dispatch at line 6627 stopped routing, the head matchers (hijack/" +
-                $"heading) at lines 6628/6640 incorrectly emitted competing messages, " +
-                $"the ht matcher at line 6647 was wrapped in a spurious AdminLevel " +
-                $"guard at SDEV-tighter threshold, or the missing-arg ERROR fork at " +
-                $"PlayerConnection.cpp:4548 changed shape.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgHtLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/ht\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option ht\". Likely the user-tier case-'h' " +
+            $"dispatch at line 6627 stopped routing, the head matchers (hijack/" +
+            $"heading) at lines 6628/6640 incorrectly emitted competing messages, " +
+            $"the ht matcher at line 6647 was wrapped in a spurious AdminLevel " +
+            $"guard at SDEV-tighter threshold, or the missing-arg ERROR fork at " +
+            $"PlayerConnection.cpp:4548 changed shape.");
     }
 
     /// <summary>
@@ -5263,78 +5040,69 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Kicka", shipName: "KickaShip", cts.Token);
+            firstName: "Kicka", shipName: "KickaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/kick");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/kick");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // EXACT equals filter (not StartsWith) -- defensive against
+            // any future sibling "kick*" option emits in case-'k'.
+            if (!text.Equals("Missing arg for option kick", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // EXACT equals filter (not StartsWith) -- defensive against
-                // any future sibling "kick*" option emits in case-'k'.
-                if (!text.Equals("Missing arg for option kick", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgKickLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/kick\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option kick\". Likely the user-tier case-'k' " +
-                $"dispatch at line 6756 stopped routing, the OUTER AdminLevel >= GM " +
-                $"block at line 6757 failed (status=100 admin should pass), the kick " +
-                $"matcher at line 6759 stopped dispatching, the case-'k' fall-through " +
-                $"to case-'l' at line 6766 produced a competing emit, or the missing-arg " +
-                $"ERROR fork at PlayerConnection.cpp:4548 changed shape.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgKickLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/kick\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option kick\". Likely the user-tier case-'k' " +
+            $"dispatch at line 6756 stopped routing, the OUTER AdminLevel >= GM " +
+            $"block at line 6757 failed (status=100 admin should pass), the kick " +
+            $"matcher at line 6759 stopped dispatching, the case-'k' fall-through " +
+            $"to case-'l' at line 6766 produced a competing emit, or the missing-arg " +
+            $"ERROR fork at PlayerConnection.cpp:4548 changed shape.");
     }
 
     /// <summary>
@@ -5475,78 +5243,69 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Invitee", shipName: "InviteeShip", cts.Token);
+            firstName: "Invitee", shipName: "InviteeShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/invite");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/invite");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // EXACT equals filter (not StartsWith) -- defensive against
+            // any future sibling "invite*" option emits in case-'i'.
+            if (!text.Equals("Missing arg for option invite", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // EXACT equals filter (not StartsWith) -- defensive against
-                // any future sibling "invite*" option emits in case-'i'.
-                if (!text.Equals("Missing arg for option invite", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgInviteLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/invite\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option invite\". Likely the user-tier case-'i' " +
-                $"dispatch at line 6708 stopped routing, the NO-GUARD inline matcher " +
-                $"at line 6709 stopped dispatching, an AdminLevel guard was wrapped " +
-                $"around the matcher (regression), the second structural block at " +
-                $"line 6730 produced a competing emit (regression), or the missing-arg " +
-                $"ERROR fork at PlayerConnection.cpp:4548 changed shape.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgInviteLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/invite\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option invite\". Likely the user-tier case-'i' " +
+            $"dispatch at line 6708 stopped routing, the NO-GUARD inline matcher " +
+            $"at line 6709 stopped dispatching, an AdminLevel guard was wrapped " +
+            $"around the matcher (regression), the second structural block at " +
+            $"line 6730 produced a competing emit (regression), or the missing-arg " +
+            $"ERROR fork at PlayerConnection.cpp:4548 changed shape.");
     }
 
     /// <summary>
@@ -5690,78 +5449,69 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Movee", shipName: "MoveeShip", cts.Token);
+            firstName: "Movee", shipName: "MoveeShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/move");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/move");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // EXACT equals filter (not StartsWith) -- defensive against
+            // any future sibling "move*" option emits in case-'m'.
+            if (!text.Equals("Missing arg for option move", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // EXACT equals filter (not StartsWith) -- defensive against
-                // any future sibling "move*" option emits in case-'m'.
-                if (!text.Equals("Missing arg for option move", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgMoveLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/move\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option move\". Likely the user-tier case-'m' " +
-                $"dispatch at line 6824 stopped routing, the NO-GUARD HEAD matcher " +
-                $"at line 6825 stopped dispatching, an AdminLevel guard was wrapped " +
-                $"around the matcher (regression), the matcher-chain fall-through " +
-                $"to mobaggro/music produced a competing emit (regression), or the " +
-                $"missing-arg ERROR fork at PlayerConnection.cpp:4548 changed shape.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgMoveLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/move\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option move\". Likely the user-tier case-'m' " +
+            $"dispatch at line 6824 stopped routing, the NO-GUARD HEAD matcher " +
+            $"at line 6825 stopped dispatching, an AdminLevel guard was wrapped " +
+            $"around the matcher (regression), the matcher-chain fall-through " +
+            $"to mobaggro/music produced a competing emit (regression), or the " +
+            $"missing-arg ERROR fork at PlayerConnection.cpp:4548 changed shape.");
     }
 
     /// <summary>
@@ -5902,79 +5652,70 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Oriento", shipName: "OrientoShip", cts.Token);
+            firstName: "Oriento", shipName: "OrientoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/orientation");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/orientation");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // EXACT equals filter (not StartsWith) -- defensive against
+            // any future sibling "orientation*" option emits in case-'o'.
+            if (!text.Equals("Missing arg for option orientation", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // EXACT equals filter (not StartsWith) -- defensive against
-                // any future sibling "orientation*" option emits in case-'o'.
-                if (!text.Equals("Missing arg for option orientation", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgOrientationLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/orientation\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option orientation\". Likely the user-tier case-'o' " +
-                $"dispatch at line 6872 stopped routing, the bare-if \"ori\" head skip " +
-                $"at line 6873 stopped falling through, the NO-GUARD inline matcher at " +
-                $"line 6881 stopped dispatching, an AdminLevel guard was wrapped around " +
-                $"the matcher (regression), the matcher-chain fall-through to oeuler/" +
-                $"openif produced a competing emit (regression), or the missing-arg " +
-                $"ERROR fork at PlayerConnection.cpp:4548 changed shape.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgOrientationLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/orientation\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option orientation\". Likely the user-tier case-'o' " +
+            $"dispatch at line 6872 stopped routing, the bare-if \"ori\" head skip " +
+            $"at line 6873 stopped falling through, the NO-GUARD inline matcher at " +
+            $"line 6881 stopped dispatching, an AdminLevel guard was wrapped around " +
+            $"the matcher (regression), the matcher-chain fall-through to oeuler/" +
+            $"openif produced a competing emit (regression), or the missing-arg " +
+            $"ERROR fork at PlayerConnection.cpp:4548 changed shape.");
     }
 
     /// <summary>
@@ -6146,81 +5887,72 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Scripto", shipName: "ScriptoShip", cts.Token);
+            firstName: "Scripto", shipName: "ScriptoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/script");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/script");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // EXACT equals filter (not StartsWith) -- defensive against
+            // any future sibling "script*" option emits in case-'s'.
+            if (!text.Equals("Missing arg for option script", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // EXACT equals filter (not StartsWith) -- defensive against
-                // any future sibling "script*" option emits in case-'s'.
-                if (!text.Equals("Missing arg for option script", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgScriptLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/script\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option script\". Likely the user-tier case-'s' " +
-                $"dispatch at line 7136 stopped routing, the strcmp \"slaysectormobs\" " +
-                $"head at line 7137 stopped failing through, the SDEV-guard MATCHER-FIRST " +
-                $"inline matcher at line 7143 stopped emitting (guard regression: tier " +
-                $"swap SDEV -> GM/DEV/NO-GUARD changed visibility; structural swap " +
-                $"MATCHER-FIRST -> GUARD-FIRST would block matcher emit when AdminLevel " +
-                $"< SDEV), the matcher-chain fall-through across 17 sibling arms " +
-                $"produced a competing emit (regression), or the missing-arg ERROR fork " +
-                $"at PlayerConnection.cpp:4548 changed shape.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgScriptLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/script\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option script\". Likely the user-tier case-'s' " +
+            $"dispatch at line 7136 stopped routing, the strcmp \"slaysectormobs\" " +
+            $"head at line 7137 stopped failing through, the SDEV-guard MATCHER-FIRST " +
+            $"inline matcher at line 7143 stopped emitting (guard regression: tier " +
+            $"swap SDEV -> GM/DEV/NO-GUARD changed visibility; structural swap " +
+            $"MATCHER-FIRST -> GUARD-FIRST would block matcher emit when AdminLevel " +
+            $"< SDEV), the matcher-chain fall-through across 17 sibling arms " +
+            $"produced a competing emit (regression), or the missing-arg ERROR fork " +
+            $"at PlayerConnection.cpp:4548 changed shape.");
     }
 
     /// <summary>
@@ -6388,80 +6120,71 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Tilto", shipName: "TiltoShip", cts.Token);
+            firstName: "Tilto", shipName: "TiltoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/tilt");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/tilt");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // EXACT equals filter (not StartsWith) -- defensive against
+            // any future sibling "tilt*" option emits in case-'t'.
+            if (!text.Equals("Missing arg for option tilt", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // EXACT equals filter (not StartsWith) -- defensive against
-                // any future sibling "tilt*" option emits in case-'t'.
-                if (!text.Equals("Missing arg for option tilt", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgTiltLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/tilt\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option tilt\". Likely the user-tier case-'t' " +
-                $"dispatch at line 7461 stopped routing, the CONSECUTIVE-IF " +
-                $"NO-GUARD matcher at line 7495 stopped dispatching, the " +
-                $"CONSECUTIVE-IF structure was changed to ELSE-IF chain (suppressing " +
-                $"the independence semantic), an AdminLevel guard was wrapped around " +
-                $"the matcher (regression), the matcher-chain fall-through to " +
-                $"terminate/trade produced a competing emit (regression), or the " +
-                $"missing-arg ERROR fork at PlayerConnection.cpp:4548 changed shape.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgTiltLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/tilt\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option tilt\". Likely the user-tier case-'t' " +
+            $"dispatch at line 7461 stopped routing, the CONSECUTIVE-IF " +
+            $"NO-GUARD matcher at line 7495 stopped dispatching, the " +
+            $"CONSECUTIVE-IF structure was changed to ELSE-IF chain (suppressing " +
+            $"the independence semantic), an AdminLevel guard was wrapped around " +
+            $"the matcher (regression), the matcher-chain fall-through to " +
+            $"terminate/trade produced a competing emit (regression), or the " +
+            $"missing-arg ERROR fork at PlayerConnection.cpp:4548 changed shape.");
     }
 
     /// <summary>
@@ -6598,79 +6321,70 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Uitri", shipName: "UitriShip", cts.Token);
+            firstName: "Uitri", shipName: "UitriShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/uitrigger");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/uitrigger");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // EXACT equals filter (not StartsWith) -- defensive against
+            // any future sibling "uitrigger*" option emits in case-'u'.
+            if (!text.Equals("Missing arg for option uitrigger", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // EXACT equals filter (not StartsWith) -- defensive against
-                // any future sibling "uitrigger*" option emits in case-'u'.
-                if (!text.Equals("Missing arg for option uitrigger", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgUitriggerLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/uitrigger\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option uitrigger\". Likely the user-tier case-'u' " +
-                $"dispatch at line 7575 stopped routing, the NO-GUARD ELSE-IF inline " +
-                $"matcher at line 7576 stopped dispatching, an AdminLevel guard was " +
-                $"wrapped around the matcher (regression), the matcher-chain " +
-                $"fall-through to upgrade/undockp/uptime produced a competing emit " +
-                $"(regression), or the missing-arg ERROR fork at PlayerConnection.cpp:4548 " +
-                $"changed shape (esp. vsprintf_s 9-byte %s width).");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgUitriggerLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/uitrigger\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option uitrigger\". Likely the user-tier case-'u' " +
+            $"dispatch at line 7575 stopped routing, the NO-GUARD ELSE-IF inline " +
+            $"matcher at line 7576 stopped dispatching, an AdminLevel guard was " +
+            $"wrapped around the matcher (regression), the matcher-chain " +
+            $"fall-through to upgrade/undockp/uptime produced a competing emit " +
+            $"(regression), or the missing-arg ERROR fork at PlayerConnection.cpp:4548 " +
+            $"changed shape (esp. vsprintf_s 9-byte %s width).");
     }
 
     /// <summary>
@@ -6832,81 +6546,72 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Wormo", shipName: "WormoShip", cts.Token);
+            firstName: "Wormo", shipName: "WormoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/wormhole");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/wormhole");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // EXACT equals filter (not StartsWith) -- defensive against
+            // any future sibling "wormhole*" option emits or the trailing
+            // "Illegal slash command: wormhole" fallback at line 7702.
+            if (!text.Equals("Missing arg for option wormhole", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // EXACT equals filter (not StartsWith) -- defensive against
-                // any future sibling "wormhole*" option emits or the trailing
-                // "Illegal slash command: wormhole" fallback at line 7702.
-                if (!text.Equals("Missing arg for option wormhole", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgWormholeLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/wormhole\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option wormhole\". Likely the user-tier case-'w' " +
-                $"dispatch at line 7627 stopped routing, the ELSE-IF chain head /who/warp " +
-                $"stopped falling through, the CONSECUTIVE-IF /wormhole matcher at line " +
-                $"7673 stopped dispatching (CONSECUTIVE-IF -> ELSE-IF structural conversion " +
-                $"would chain off /warp), an AdminLevel guard was wrapped around the " +
-                $"matcher (regression), the trailing illegal-slash fallback at 7702 fired " +
-                $"as a second emit (msg_sent gate regression), or the missing-arg ERROR " +
-                $"fork at PlayerConnection.cpp:4548 changed shape (esp. vsprintf_s 8-byte %s width).");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgWormholeLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/wormhole\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option wormhole\". Likely the user-tier case-'w' " +
+            $"dispatch at line 7627 stopped routing, the ELSE-IF chain head /who/warp " +
+            $"stopped falling through, the CONSECUTIVE-IF /wormhole matcher at line " +
+            $"7673 stopped dispatching (CONSECUTIVE-IF -> ELSE-IF structural conversion " +
+            $"would chain off /warp), an AdminLevel guard was wrapped around the " +
+            $"matcher (regression), the trailing illegal-slash fallback at 7702 fired " +
+            $"as a second emit (msg_sent gate regression), or the missing-arg ERROR " +
+            $"fork at PlayerConnection.cpp:4548 changed shape (esp. vsprintf_s 8-byte %s width).");
     }
 
     /// <summary>
@@ -7074,83 +6779,74 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Warpo", shipName: "WarpoShip", cts.Token);
+            firstName: "Warpo", shipName: "WarpoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/warp");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/warp");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // EXACT equals filter (not StartsWith) -- defensive against
+            // any future sibling "warp*" option emits (warpreset, etc.)
+            // or the trailing "Illegal slash command: warp" fallback at
+            // line 7702.
+            if (!text.Equals("Missing arg for option warp", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // EXACT equals filter (not StartsWith) -- defensive against
-                // any future sibling "warp*" option emits (warpreset, etc.)
-                // or the trailing "Illegal slash command: warp" fallback at
-                // line 7702.
-                if (!text.Equals("Missing arg for option warp", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgWarpLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/warp\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option warp\". Likely the user-tier case-'w' " +
-                $"dispatch at line 7627 stopped routing, the ELSE-IF chain head /who " +
-                $"stopped falling through, the /warp ELSE-IF arm at line 7650 stopped " +
-                $"dispatching (NO-OUTER-GUARD INSIDE-BODY-GM-GUARD -> OUTER-GM-GUARD " +
-                $"regression would skip ERROR emit for non-GM), the INSIDE-BODY GM-guard " +
-                $"leaked into the ERROR path (regression), the trailing illegal-slash " +
-                $"fallback at 7702 fired as a second emit (msg_sent gate regression), " +
-                $"or the missing-arg ERROR fork at PlayerConnection.cpp:4548 changed " +
-                $"shape (esp. vsprintf_s 4-byte %s width).");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgWarpLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/warp\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option warp\". Likely the user-tier case-'w' " +
+            $"dispatch at line 7627 stopped routing, the ELSE-IF chain head /who " +
+            $"stopped falling through, the /warp ELSE-IF arm at line 7650 stopped " +
+            $"dispatching (NO-OUTER-GUARD INSIDE-BODY-GM-GUARD -> OUTER-GM-GUARD " +
+            $"regression would skip ERROR emit for non-GM), the INSIDE-BODY GM-guard " +
+            $"leaked into the ERROR path (regression), the trailing illegal-slash " +
+            $"fallback at 7702 fired as a second emit (msg_sent gate regression), " +
+            $"or the missing-arg ERROR fork at PlayerConnection.cpp:4548 changed " +
+            $"shape (esp. vsprintf_s 4-byte %s width).");
     }
 
     /// <summary>
@@ -7310,83 +7006,74 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Upgro", shipName: "UpgroShip", cts.Token);
+            firstName: "Upgro", shipName: "UpgroShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/upgrade");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/upgrade");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // EXACT equals filter (not StartsWith) -- defensive against
+            // any future spurious "Illegal slash command: upgrade" emit
+            // if the trailing fallback at line 7702 msg_sent gate
+            // regresses.
+            if (!text.Equals("Missing arg for option upgrade", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // EXACT equals filter (not StartsWith) -- defensive against
-                // any future spurious "Illegal slash command: upgrade" emit
-                // if the trailing fallback at line 7702 msg_sent gate
-                // regresses.
-                if (!text.Equals("Missing arg for option upgrade", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgUpgradeLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/upgrade\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option upgrade\". Likely the user-tier case-'u' " +
-                $"dispatch at line 7575 stopped routing, the HEAD matcher /uitrigger at " +
-                $"7576 stopped falling through to /upgrade at 7593 (ELSE-IF chain " +
-                $"regression), the NO-OUTER-GUARD INSIDE-BODY-GM-GUARD structural variant " +
-                $"converted to OUTER-GM-GUARD (would skip ERROR emit for non-GM), the " +
-                $"INSIDE-BODY GM-guard leaked into the ERROR path (regression), the " +
-                $"trailing illegal-slash fallback at 7702 fired as a second emit " +
-                $"(msg_sent gate regression), or the missing-arg ERROR fork at " +
-                $"PlayerConnection.cpp:4548 changed shape (esp. vsprintf_s 7-byte %s width).");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgUpgradeLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/upgrade\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option upgrade\". Likely the user-tier case-'u' " +
+            $"dispatch at line 7575 stopped routing, the HEAD matcher /uitrigger at " +
+            $"7576 stopped falling through to /upgrade at 7593 (ELSE-IF chain " +
+            $"regression), the NO-OUTER-GUARD INSIDE-BODY-GM-GUARD structural variant " +
+            $"converted to OUTER-GM-GUARD (would skip ERROR emit for non-GM), the " +
+            $"INSIDE-BODY GM-guard leaked into the ERROR path (regression), the " +
+            $"trailing illegal-slash fallback at 7702 fired as a second emit " +
+            $"(msg_sent gate regression), or the missing-arg ERROR fork at " +
+            $"PlayerConnection.cpp:4548 changed shape (esp. vsprintf_s 7-byte %s width).");
     }
 
     /// <summary>
@@ -7569,83 +7256,74 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Testo", shipName: "TestoShip", cts.Token);
+            firstName: "Testo", shipName: "TestoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/testmsg");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/testmsg");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // EXACT equals filter (not StartsWith) -- defensive against
+            // any future spurious "Illegal slash command: testmsg" emit
+            // if the trailing fallback at line 7702 msg_sent gate
+            // regresses.
+            if (!text.Equals("Missing arg for option testmsg", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // EXACT equals filter (not StartsWith) -- defensive against
-                // any future spurious "Illegal slash command: testmsg" emit
-                // if the trailing fallback at line 7702 msg_sent gate
-                // regresses.
-                if (!text.Equals("Missing arg for option testmsg", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgTestmsgLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/testmsg\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option testmsg\". Likely the user-tier case-'t' " +
-                $"dispatch at line 7461 stopped routing, the CONSECUTIVE-IF independent " +
-                $"block at 7486 stopped dispatching, the MATCHER-FIRST short-circuit " +
-                $"direction inverted to GUARD-FIRST (would block ERROR emit for non-DEV " +
-                $"users), the DEV-guard tier changed (would not affect ERROR emit due " +
-                $"to MATCHER-FIRST short-circuit), the trailing illegal-slash fallback " +
-                $"at 7702 fired as a second emit (msg_sent gate regression), or the " +
-                $"missing-arg ERROR fork at PlayerConnection.cpp:4548 changed shape " +
-                $"(esp. vsprintf_s 7-byte %s width).");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgTestmsgLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/testmsg\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option testmsg\". Likely the user-tier case-'t' " +
+            $"dispatch at line 7461 stopped routing, the CONSECUTIVE-IF independent " +
+            $"block at 7486 stopped dispatching, the MATCHER-FIRST short-circuit " +
+            $"direction inverted to GUARD-FIRST (would block ERROR emit for non-DEV " +
+            $"users), the DEV-guard tier changed (would not affect ERROR emit due " +
+            $"to MATCHER-FIRST short-circuit), the trailing illegal-slash fallback " +
+            $"at 7702 fired as a second emit (msg_sent gate regression), or the " +
+            $"missing-arg ERROR fork at PlayerConnection.cpp:4548 changed shape " +
+            $"(esp. vsprintf_s 7-byte %s width).");
     }
 
     /// <summary>
@@ -7828,83 +7506,74 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Termo", shipName: "TermoShip", cts.Token);
+            firstName: "Termo", shipName: "TermoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/terminate");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/terminate");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // EXACT equals filter (not StartsWith) -- defensive against
+            // any future spurious "Illegal slash command: terminate" emit
+            // if the trailing fallback at line 7702 msg_sent gate
+            // regresses.
+            if (!text.Equals("Missing arg for option terminate", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // EXACT equals filter (not StartsWith) -- defensive against
-                // any future spurious "Illegal slash command: terminate" emit
-                // if the trailing fallback at line 7702 msg_sent gate
-                // regresses.
-                if (!text.Equals("Missing arg for option terminate", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgTerminateLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/terminate\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option terminate\". Likely the user-tier case-'t' " +
-                $"dispatch at line 7461 stopped routing, the CONSECUTIVE-IF independent " +
-                $"block at 7501 stopped dispatching, the NO-OUTER-GUARD INSIDE-BODY-DEV-" +
-                $"GUARD structural variant converted to OUTER-DEV-GUARD (would skip ERROR " +
-                $"emit for non-DEV users), the INSIDE-BODY DEV-guard at 7511 leaked into " +
-                $"the ERROR path (regression), the trailing illegal-slash fallback at " +
-                $"7702 fired as a second emit (msg_sent gate regression), or the missing-" +
-                $"arg ERROR fork at PlayerConnection.cpp:4548 changed shape (esp. " +
-                $"vsprintf_s 9-byte %s width).");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgTerminateLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/terminate\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option terminate\". Likely the user-tier case-'t' " +
+            $"dispatch at line 7461 stopped routing, the CONSECUTIVE-IF independent " +
+            $"block at 7501 stopped dispatching, the NO-OUTER-GUARD INSIDE-BODY-DEV-" +
+            $"GUARD structural variant converted to OUTER-DEV-GUARD (would skip ERROR " +
+            $"emit for non-DEV users), the INSIDE-BODY DEV-guard at 7511 leaked into " +
+            $"the ERROR path (regression), the trailing illegal-slash fallback at " +
+            $"7702 fired as a second emit (msg_sent gate regression), or the missing-" +
+            $"arg ERROR fork at PlayerConnection.cpp:4548 changed shape (esp. " +
+            $"vsprintf_s 9-byte %s width).");
     }
 
     /// <summary>
@@ -8090,83 +7759,74 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Trado", shipName: "TradoShip", cts.Token);
+            firstName: "Trado", shipName: "TradoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/trade");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/trade");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // EXACT equals filter (not StartsWith) -- defensive against
+            // any future spurious "Illegal slash command: trade" emit if
+            // the trailing fallback at line 7702 msg_sent gate regresses.
+            if (!text.Equals("Missing arg for option trade", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // EXACT equals filter (not StartsWith) -- defensive against
-                // any future spurious "Illegal slash command: trade" emit if
-                // the trailing fallback at line 7702 msg_sent gate regresses.
-                if (!text.Equals("Missing arg for option trade", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgTradeLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/trade\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option trade\". Likely the user-tier case-'t' " +
-                $"dispatch at line 7461 stopped routing, the CONSECUTIVE-IF independent " +
-                $"block at 7521 stopped dispatching, the pure NO-GUARD structural variant " +
-                $"converted to OUTER-GUARD (would skip ERROR emit for non-privileged " +
-                $"users) or INSIDE-BODY-GUARD (would skip ERROR emit if matcher ran but " +
-                $"body block gate failed), the case-'t' break at 7573 moved before 7521 " +
-                $"(would skip /trade arm entirely), the trailing illegal-slash fallback " +
-                $"at 7702 fired as a second emit (msg_sent gate regression), or the " +
-                $"missing-arg ERROR fork at PlayerConnection.cpp:4548 changed shape " +
-                $"(esp. vsprintf_s 5-byte %s width).");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgTradeLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/trade\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option trade\". Likely the user-tier case-'t' " +
+            $"dispatch at line 7461 stopped routing, the CONSECUTIVE-IF independent " +
+            $"block at 7521 stopped dispatching, the pure NO-GUARD structural variant " +
+            $"converted to OUTER-GUARD (would skip ERROR emit for non-privileged " +
+            $"users) or INSIDE-BODY-GUARD (would skip ERROR emit if matcher ran but " +
+            $"body block gate failed), the case-'t' break at 7573 moved before 7521 " +
+            $"(would skip /trade arm entirely), the trailing illegal-slash fallback " +
+            $"at 7702 fired as a second emit (msg_sent gate regression), or the " +
+            $"missing-arg ERROR fork at PlayerConnection.cpp:4548 changed shape " +
+            $"(esp. vsprintf_s 5-byte %s width).");
     }
 
     /// <summary>
@@ -8322,79 +7982,70 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Eulro", shipName: "EulroShip", cts.Token);
+            firstName: "Eulro", shipName: "EulroShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/oeuler");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/oeuler");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option oeuler", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option oeuler", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgOeulerLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/oeuler\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option oeuler\". Likely the user-tier case-'o' " +
-                $"dispatch at line 6872 stopped routing, the ELSE-IF chain arm at " +
-                $"6886 stopped dispatching, the NO-GUARD structural variant " +
-                $"converted to OUTER-GUARD (would skip ERROR emit for non-privileged " +
-                $"users), the ELSE-IF chain converted to CONSECUTIVE-IF (would change " +
-                $"cross-arm dispatch semantics), the trailing illegal-slash fallback " +
-                $"at 7702 fired as a second emit (msg_sent gate regression), or the " +
-                $"missing-arg ERROR fork at PlayerConnection.cpp:4548 changed shape " +
-                $"(esp. vsprintf_s 6-byte %s width).");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgOeulerLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/oeuler\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option oeuler\". Likely the user-tier case-'o' " +
+            $"dispatch at line 6872 stopped routing, the ELSE-IF chain arm at " +
+            $"6886 stopped dispatching, the NO-GUARD structural variant " +
+            $"converted to OUTER-GUARD (would skip ERROR emit for non-privileged " +
+            $"users), the ELSE-IF chain converted to CONSECUTIVE-IF (would change " +
+            $"cross-arm dispatch semantics), the trailing illegal-slash fallback " +
+            $"at 7702 fired as a second emit (msg_sent gate regression), or the " +
+            $"missing-arg ERROR fork at PlayerConnection.cpp:4548 changed shape " +
+            $"(esp. vsprintf_s 6-byte %s width).");
     }
 
     /// <summary>
@@ -8533,79 +8184,70 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Openo", shipName: "OpenoShip", cts.Token);
+            firstName: "Openo", shipName: "OpenoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/openif");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/openif");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option openif", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option openif", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgOpenifLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/openif\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option openif\". Likely the user-tier case-'o' " +
-                $"dispatch at line 6872 stopped routing, the ELSE-IF chain arm pos 2 at " +
-                $"6891 stopped dispatching, the NO-GUARD structural variant converted " +
-                $"to OUTER-GUARD, the ELSE-IF chain converted to CONSECUTIVE-IF, the " +
-                $"commented-out dead matchers at 6902+ were re-enabled (would change " +
-                $"chain length), the trailing illegal-slash fallback at 7702 fired as " +
-                $"a second emit (msg_sent gate regression), or the missing-arg ERROR " +
-                $"fork at PlayerConnection.cpp:4548 changed shape (esp. vsprintf_s " +
-                $"6-byte %s width).");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgOpenifLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/openif\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option openif\". Likely the user-tier case-'o' " +
+            $"dispatch at line 6872 stopped routing, the ELSE-IF chain arm pos 2 at " +
+            $"6891 stopped dispatching, the NO-GUARD structural variant converted " +
+            $"to OUTER-GUARD, the ELSE-IF chain converted to CONSECUTIVE-IF, the " +
+            $"commented-out dead matchers at 6902+ were re-enabled (would change " +
+            $"chain length), the trailing illegal-slash fallback at 7702 fired as " +
+            $"a second emit (msg_sent gate regression), or the missing-arg ERROR " +
+            $"fork at PlayerConnection.cpp:4548 changed shape (esp. vsprintf_s " +
+            $"6-byte %s width).");
     }
 
     /// <summary>
@@ -8739,78 +8381,69 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Sounos", shipName: "SounosShip", cts.Token);
+            firstName: "Sounos", shipName: "SounosShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/sounds");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/sounds");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option sounds", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option sounds", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgSoundsLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/sounds\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option sounds\". Likely the user-tier case-'s' " +
-                $"dispatch at line 7136 stopped routing, the ELSE-IF chain arm at " +
-                $"7179 stopped dispatching, the NO-GUARD structural variant converted " +
-                $"to OUTER-GUARD or INSIDE-BODY-GUARD, the /script tail-guard short-" +
-                $"circuit at 7143 changed semantics, the trailing illegal-slash " +
-                $"fallback at 7702 fired as a second emit (msg_sent gate regression), " +
-                $"or the missing-arg ERROR fork at PlayerConnection.cpp:4548 changed " +
-                $"shape (esp. vsprintf_s 6-byte %s width).");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgSoundsLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/sounds\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option sounds\". Likely the user-tier case-'s' " +
+            $"dispatch at line 7136 stopped routing, the ELSE-IF chain arm at " +
+            $"7179 stopped dispatching, the NO-GUARD structural variant converted " +
+            $"to OUTER-GUARD or INSIDE-BODY-GUARD, the /script tail-guard short-" +
+            $"circuit at 7143 changed semantics, the trailing illegal-slash " +
+            $"fallback at 7702 fired as a second emit (msg_sent gate regression), " +
+            $"or the missing-arg ERROR fork at PlayerConnection.cpp:4548 changed " +
+            $"shape (esp. vsprintf_s 6-byte %s width).");
     }
 
     /// <summary>
@@ -8945,78 +8578,69 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Scalo", shipName: "ScaloShip", cts.Token);
+            firstName: "Scalo", shipName: "ScaloShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/scale");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/scale");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option scale", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option scale", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgScaleLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/scale\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option scale\". Likely the user-tier case-'s' " +
-                $"dispatch at line 7136 stopped routing, the ELSE-IF chain arm at " +
-                $"7201 stopped dispatching, the NO-GUARD structural variant converted " +
-                $"to OUTER-GUARD or INSIDE-BODY-GUARD, the intervening strcmp arms at " +
-                $"7189/7195 changed to matchers that intercept \"scale\", the trailing " +
-                $"illegal-slash fallback at 7702 fired as a second emit (msg_sent gate " +
-                $"regression), or the missing-arg ERROR fork at PlayerConnection.cpp:4548 " +
-                $"changed shape (esp. vsprintf_s 5-byte %s width).");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgScaleLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/scale\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option scale\". Likely the user-tier case-'s' " +
+            $"dispatch at line 7136 stopped routing, the ELSE-IF chain arm at " +
+            $"7201 stopped dispatching, the NO-GUARD structural variant converted " +
+            $"to OUTER-GUARD or INSIDE-BODY-GUARD, the intervening strcmp arms at " +
+            $"7189/7195 changed to matchers that intercept \"scale\", the trailing " +
+            $"illegal-slash fallback at 7702 fired as a second emit (msg_sent gate " +
+            $"regression), or the missing-arg ERROR fork at PlayerConnection.cpp:4548 " +
+            $"changed shape (esp. vsprintf_s 5-byte %s width).");
     }
 
     /// <summary>
@@ -9145,79 +8769,70 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Shieldo", shipName: "ShieldoShip", cts.Token);
+            firstName: "Shieldo", shipName: "ShieldoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/shieldwarnings");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/shieldwarnings");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option shieldwarnings", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option shieldwarnings", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgShieldwarningsLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/shieldwarnings\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option shieldwarnings\". Likely the user-tier case-'s' " +
-                $"dispatch at line 7136 stopped routing, the deep ELSE-IF chain arm at " +
-                $"7272 stopped dispatching (chain truncated, fall-through introduced, " +
-                $"or intermediate arm intercepted), the NO-GUARD structural variant " +
-                $"converted to OUTER-GUARD, the ERROR-fork COLOR=5 conflated with the " +
-                $"body-fork COLOR=13 at SendVaMessageC, the trailing illegal-slash " +
-                $"fallback at 7702 fired as a second emit (msg_sent gate regression), " +
-                $"or the missing-arg ERROR fork at PlayerConnection.cpp:4548 changed " +
-                $"shape (esp. vsprintf_s 14-byte %s width buffer-resize).");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgShieldwarningsLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/shieldwarnings\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option shieldwarnings\". Likely the user-tier case-'s' " +
+            $"dispatch at line 7136 stopped routing, the deep ELSE-IF chain arm at " +
+            $"7272 stopped dispatching (chain truncated, fall-through introduced, " +
+            $"or intermediate arm intercepted), the NO-GUARD structural variant " +
+            $"converted to OUTER-GUARD, the ERROR-fork COLOR=5 conflated with the " +
+            $"body-fork COLOR=13 at SendVaMessageC, the trailing illegal-slash " +
+            $"fallback at 7702 fired as a second emit (msg_sent gate regression), " +
+            $"or the missing-arg ERROR fork at PlayerConnection.cpp:4548 changed " +
+            $"shape (esp. vsprintf_s 14-byte %s width buffer-resize).");
     }
 
     /// <summary>
@@ -9346,78 +8961,69 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Skilo", shipName: "SkiloShip", cts.Token);
+            firstName: "Skilo", shipName: "SkiloShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/skillpoints");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/skillpoints");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option skillpoints", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option skillpoints", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgSkillpointsLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/skillpoints\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option skillpoints\". Likely the user-tier case-'s' " +
-                $"dispatch at line 7136 stopped routing, the ELSE-IF chain arm at " +
-                $"7206 stopped dispatching, the INSIDE-BODY-GM-guard moved BEFORE the " +
-                $"matcher (gating the ERROR-fork emit behind GM-tier), the matcher's " +
-                $"AdminLevel parameter was added to MatchOptWithParam itself, the " +
-                $"trailing illegal-slash fallback at 7702 fired as a second emit " +
-                $"(msg_sent gate regression), or the missing-arg ERROR fork at " +
-                $"PlayerConnection.cpp:4548 changed shape (esp. vsprintf_s 11-byte %s width).");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgSkillpointsLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/skillpoints\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option skillpoints\". Likely the user-tier case-'s' " +
+            $"dispatch at line 7136 stopped routing, the ELSE-IF chain arm at " +
+            $"7206 stopped dispatching, the INSIDE-BODY-GM-guard moved BEFORE the " +
+            $"matcher (gating the ERROR-fork emit behind GM-tier), the matcher's " +
+            $"AdminLevel parameter was added to MatchOptWithParam itself, the " +
+            $"trailing illegal-slash fallback at 7702 fired as a second emit " +
+            $"(msg_sent gate regression), or the missing-arg ERROR fork at " +
+            $"PlayerConnection.cpp:4548 changed shape (esp. vsprintf_s 11-byte %s width).");
     }
 
     /// <summary>
@@ -9550,77 +9156,68 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Stato", shipName: "StatoShip", cts.Token);
+            firstName: "Stato", shipName: "StatoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/stat");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/stat");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option stat", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option stat", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgStatLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/stat\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option stat\". Likely the user-tier case-'s' " +
-                $"dispatch at line 7136 stopped routing, the ELSE-IF chain arm at " +
-                $"7219 stopped dispatching, the INSIDE-BODY-DEV-guard moved BEFORE " +
-                $"the matcher (gating the ERROR-fork emit behind DEV-tier), the " +
-                $"trailing illegal-slash fallback at 7702 fired as a second emit, " +
-                $"or the missing-arg ERROR fork at PlayerConnection.cpp:4548 changed " +
-                $"shape (esp. vsprintf_s 4-byte %s width).");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgStatLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/stat\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option stat\". Likely the user-tier case-'s' " +
+            $"dispatch at line 7136 stopped routing, the ELSE-IF chain arm at " +
+            $"7219 stopped dispatching, the INSIDE-BODY-DEV-guard moved BEFORE " +
+            $"the matcher (gating the ERROR-fork emit behind DEV-tier), the " +
+            $"trailing illegal-slash fallback at 7702 fired as a second emit, " +
+            $"or the missing-arg ERROR fork at PlayerConnection.cpp:4548 changed " +
+            $"shape (esp. vsprintf_s 4-byte %s width).");
     }
 
     /// <summary>
@@ -9751,77 +9348,68 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Scano", shipName: "ScanoShip", cts.Token);
+            firstName: "Scano", shipName: "ScanoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/scan");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/scan");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option scan", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option scan", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgScanLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/scan\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option scan\". Likely the user-tier case-'s' " +
-                $"dispatch at line 7136 stopped routing, the ELSE-IF chain arm at " +
-                $"7248 stopped dispatching, the INSIDE-BODY-BETA_PLUS-guard moved " +
-                $"BEFORE the matcher (gating the ERROR-fork emit behind BETA_PLUS-tier), " +
-                $"the trailing illegal-slash fallback at 7702 fired as a second emit, " +
-                $"or the missing-arg ERROR fork at PlayerConnection.cpp:4548 changed " +
-                $"shape (esp. vsprintf_s 4-byte %s width).");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgScanLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/scan\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option scan\". Likely the user-tier case-'s' " +
+            $"dispatch at line 7136 stopped routing, the ELSE-IF chain arm at " +
+            $"7248 stopped dispatching, the INSIDE-BODY-BETA_PLUS-guard moved " +
+            $"BEFORE the matcher (gating the ERROR-fork emit behind BETA_PLUS-tier), " +
+            $"the trailing illegal-slash fallback at 7702 fired as a second emit, " +
+            $"or the missing-arg ERROR fork at PlayerConnection.cpp:4548 changed " +
+            $"shape (esp. vsprintf_s 4-byte %s width).");
     }
 
     /// <summary>
@@ -9978,77 +9566,68 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Signo", shipName: "SignoShip", cts.Token);
+            firstName: "Signo", shipName: "SignoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/signature");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/signature");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option signature", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option signature", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgSignatureLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/signature\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option signature\". Likely the user-tier case-'s' " +
-                $"dispatch at line 7136 stopped routing, the OUTER-BLOCK-DEV-guard " +
-                $"at 7286 gating tier changed (test account AdminLevel may have dropped " +
-                $"below DEV), the matcher at 7288 stopped dispatching, the trailing " +
-                $"illegal-slash fallback at 7702 fired as a second emit, or the " +
-                $"missing-arg ERROR fork at PlayerConnection.cpp:4548 changed shape " +
-                $"(esp. vsprintf_s 9-byte %s width).");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgSignatureLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/signature\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option signature\". Likely the user-tier case-'s' " +
+            $"dispatch at line 7136 stopped routing, the OUTER-BLOCK-DEV-guard " +
+            $"at 7286 gating tier changed (test account AdminLevel may have dropped " +
+            $"below DEV), the matcher at 7288 stopped dispatching, the trailing " +
+            $"illegal-slash fallback at 7702 fired as a second emit, or the " +
+            $"missing-arg ERROR fork at PlayerConnection.cpp:4548 changed shape " +
+            $"(esp. vsprintf_s 9-byte %s width).");
     }
 
     /// <summary>
@@ -10194,76 +9773,67 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Rotaxo", shipName: "RotaxoShip", cts.Token);
+            firstName: "Rotaxo", shipName: "RotaxoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/rotatex");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/rotatex");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option rotatex", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option rotatex", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgRotatexLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/rotatex\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option rotatex\". Likely the user-tier case-'r' " +
-                $"dispatch at line 6992 stopped routing, the NO-GUARD-ELSE-IF arm at " +
-                $"7059 acquired a spurious AdminLevel guard, the trailing illegal-slash " +
-                $"fallback at 7702 fired as a second emit, or the missing-arg ERROR " +
-                $"fork at PlayerConnection.cpp:4548 changed shape (esp. vsprintf_s " +
-                $"7-byte %s width).");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgRotatexLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/rotatex\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option rotatex\". Likely the user-tier case-'r' " +
+            $"dispatch at line 6992 stopped routing, the NO-GUARD-ELSE-IF arm at " +
+            $"7059 acquired a spurious AdminLevel guard, the trailing illegal-slash " +
+            $"fallback at 7702 fired as a second emit, or the missing-arg ERROR " +
+            $"fork at PlayerConnection.cpp:4548 changed shape (esp. vsprintf_s " +
+            $"7-byte %s width).");
     }
 
     /// <summary>
@@ -10404,76 +9974,67 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Rotyo", shipName: "RotyoShip", cts.Token);
+            firstName: "Rotyo", shipName: "RotyoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/rotatey");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/rotatey");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option rotatey", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option rotatey", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgRotateyLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/rotatey\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option rotatey\". Likely the user-tier case-'r' " +
-                $"dispatch at line 6992 stopped routing, the NO-GUARD-ELSE-IF arm at " +
-                $"7064 acquired a spurious AdminLevel guard, the trailing illegal-slash " +
-                $"fallback at 7702 fired as a second emit, or the missing-arg ERROR " +
-                $"fork at PlayerConnection.cpp:4548 changed shape (esp. vsprintf_s " +
-                $"7-byte %s width).");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgRotateyLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/rotatey\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option rotatey\". Likely the user-tier case-'r' " +
+            $"dispatch at line 6992 stopped routing, the NO-GUARD-ELSE-IF arm at " +
+            $"7064 acquired a spurious AdminLevel guard, the trailing illegal-slash " +
+            $"fallback at 7702 fired as a second emit, or the missing-arg ERROR " +
+            $"fork at PlayerConnection.cpp:4548 changed shape (esp. vsprintf_s " +
+            $"7-byte %s width).");
     }
 
     /// <summary>
@@ -10611,76 +10172,67 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Rotzo", shipName: "RotzoShip", cts.Token);
+            firstName: "Rotzo", shipName: "RotzoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/rotatez");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/rotatez");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option rotatez", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option rotatez", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgRotatezLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/rotatez\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option rotatez\". Likely the user-tier case-'r' " +
-                $"dispatch at line 6992 stopped routing, the NO-GUARD-ELSE-IF arm at " +
-                $"7069 acquired a spurious AdminLevel guard, the trailing illegal-slash " +
-                $"fallback at 7702 fired as a second emit, or the missing-arg ERROR " +
-                $"fork at PlayerConnection.cpp:4548 changed shape (esp. vsprintf_s " +
-                $"7-byte %s width).");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgRotatezLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/rotatez\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option rotatez\". Likely the user-tier case-'r' " +
+            $"dispatch at line 6992 stopped routing, the NO-GUARD-ELSE-IF arm at " +
+            $"7069 acquired a spurious AdminLevel guard, the trailing illegal-slash " +
+            $"fallback at 7702 fired as a second emit, or the missing-arg ERROR " +
+            $"fork at PlayerConnection.cpp:4548 changed shape (esp. vsprintf_s " +
+            $"7-byte %s width).");
     }
 
     /// <summary>
@@ -10824,77 +10376,68 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Rsio", shipName: "RsioShip", cts.Token);
+            firstName: "Rsio", shipName: "RsioShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/rsi");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/rsi");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option rsi", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option rsi", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgRsiLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/rsi\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option rsi\". Likely the user-tier case-'r' " +
-                $"dispatch at line 6992 stopped routing, the NO-GUARD-ELSE-IF arm at " +
-                $"7012 acquired a spurious AdminLevel guard, /rs at 7000 acquired a " +
-                $"prefix-match that shadowed /rsi, the trailing illegal-slash fallback " +
-                $"at 7702 fired as a second emit, or the missing-arg ERROR fork at " +
-                $"PlayerConnection.cpp:4548 changed shape (esp. vsprintf_s 3-byte %s " +
-                $"width).");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgRsiLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/rsi\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option rsi\". Likely the user-tier case-'r' " +
+            $"dispatch at line 6992 stopped routing, the NO-GUARD-ELSE-IF arm at " +
+            $"7012 acquired a spurious AdminLevel guard, /rs at 7000 acquired a " +
+            $"prefix-match that shadowed /rsi, the trailing illegal-slash fallback " +
+            $"at 7702 fired as a second emit, or the missing-arg ERROR fork at " +
+            $"PlayerConnection.cpp:4548 changed shape (esp. vsprintf_s 3-byte %s " +
+            $"width).");
     }
 
     /// <summary>
@@ -11008,76 +10551,67 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Rsao", shipName: "RsaoShip", cts.Token);
+            firstName: "Rsao", shipName: "RsaoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/rsa");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/rsa");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option rsa", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option rsa", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgRsaLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/rsa\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option rsa\". Likely the user-tier case-'r' " +
-                $"dispatch at line 6992 stopped routing, the NO-GUARD-ELSE-IF arm at " +
-                $"7016 acquired a spurious AdminLevel guard, /rsi at 7012 shadowed " +
-                $"/rsa via truncated strncmp, the trailing illegal-slash fallback at " +
-                $"7702 fired as a second emit, or the missing-arg ERROR fork at " +
-                $"PlayerConnection.cpp:4548 changed shape.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgRsaLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/rsa\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option rsa\". Likely the user-tier case-'r' " +
+            $"dispatch at line 6992 stopped routing, the NO-GUARD-ELSE-IF arm at " +
+            $"7016 acquired a spurious AdminLevel guard, /rsi at 7012 shadowed " +
+            $"/rsa via truncated strncmp, the trailing illegal-slash fallback at " +
+            $"7702 fired as a second emit, or the missing-arg ERROR fork at " +
+            $"PlayerConnection.cpp:4548 changed shape.");
     }
 
     /// <summary>
@@ -11169,71 +10703,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Rsno", shipName: "RsnoShip", cts.Token);
+            firstName: "Rsno", shipName: "RsnoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/rsn");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/rsn");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option rsn", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option rsn", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgRsnLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/rsn\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option rsn\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgRsnLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/rsn\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option rsn\".");
     }
 
     /// <summary>
@@ -11342,71 +10867,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Packo", shipName: "PackoShip", cts.Token);
+            firstName: "Packo", shipName: "PackoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/packetopt");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/packetopt");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option packetopt", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option packetopt", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgPacketoptLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/packetopt\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option packetopt\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgPacketoptLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/packetopt\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option packetopt\".");
     }
 
     /// <summary>
@@ -11462,71 +10978,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Panupo", shipName: "PanupoShip", cts.Token);
+            firstName: "Panupo", shipName: "PanupoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/panup");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/panup");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option panup", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option panup", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgPanupLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/panup\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option panup\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgPanupLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/panup\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option panup\".");
     }
 
     /// <summary>
@@ -11570,71 +11077,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Panxo", shipName: "PanxoShip", cts.Token);
+            firstName: "Panxo", shipName: "PanxoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/panx");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/panx");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option panx", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option panx", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgPanxLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/panx\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option panx\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgPanxLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/panx\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option panx\".");
     }
 
     /// <summary>
@@ -11678,71 +11176,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Panyo", shipName: "PanyoShip", cts.Token);
+            firstName: "Panyo", shipName: "PanyoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/pany");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/pany");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option pany", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option pany", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgPanyLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/pany\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option pany\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgPanyLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/pany\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option pany\".");
     }
 
     /// <summary>
@@ -11786,71 +11275,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Panzo", shipName: "PanzoShip", cts.Token);
+            firstName: "Panzo", shipName: "PanzoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/panz");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/panz");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option panz", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option panz", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgPanzLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/panz\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option panz\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgPanzLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/panz\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option panz\".");
     }
 
     /// <summary>
@@ -11894,71 +11374,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Planeto", shipName: "PlanetoShip", cts.Token);
+            firstName: "Planeto", shipName: "PlanetoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/planetspin");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/planetspin");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option planetspin", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option planetspin", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgPlanetspinLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/planetspin\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option planetspin\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgPlanetspinLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/planetspin\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option planetspin\".");
     }
 
     /// <summary>
@@ -12006,71 +11477,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Gemo", shipName: "GemoShip", cts.Token);
+            firstName: "Gemo", shipName: "GemoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/gm");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/gm");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option gm", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option gm", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgGmLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/gm\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option gm\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgGmLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/gm\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option gm\".");
     }
 
     /// <summary>
@@ -12118,71 +11580,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Gwormo", shipName: "GwormoShip", cts.Token);
+            firstName: "Gwormo", shipName: "GwormoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/gwormhole");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/gwormhole");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option gwormhole", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option gwormhole", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgGwormholeLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/gwormhole\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option gwormhole\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgGwormholeLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/gwormhole\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option gwormhole\".");
     }
 
     /// <summary>
@@ -12230,71 +11683,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Geto", shipName: "GetoShip", cts.Token);
+            firstName: "Geto", shipName: "GetoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/getstat");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/getstat");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option getstat", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option getstat", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgGetstatLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/getstat\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option getstat\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgGetstatLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/getstat\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option getstat\".");
     }
 
     /// <summary>
@@ -12341,71 +11785,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Gformo", shipName: "GformoShip", cts.Token);
+            firstName: "Gformo", shipName: "GformoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/gform");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/gform");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option gform", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option gform", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgGformLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/gform\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option gform\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgGformLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/gform\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option gform\".");
     }
 
     /// <summary>
@@ -12458,71 +11893,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Buffo", shipName: "BuffoShip", cts.Token);
+            firstName: "Buffo", shipName: "BuffoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/buff");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/buff");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option buff", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option buff", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgBuffLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/buff\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option buff\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgBuffLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/buff\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option buff\".");
     }
 
     /// <summary>
@@ -12573,71 +11999,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Basso", shipName: "BassoShip", cts.Token);
+            firstName: "Basso", shipName: "BassoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/basset");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/basset");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option basset", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option basset", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgBassetLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/basset\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option basset\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgBassetLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/basset\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option basset\".");
     }
 
     /// <summary>
@@ -12689,71 +12106,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Ccamo", shipName: "CcamoShip", cts.Token);
+            firstName: "Ccamo", shipName: "CcamoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/ccamera");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/ccamera");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option ccamera", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option ccamera", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgCcameraLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/ccamera\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option ccamera\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgCcameraLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/ccamera\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option ccamera\".");
     }
 
     /// <summary>
@@ -12806,71 +12214,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Chango", shipName: "ChangoShip", cts.Token);
+            firstName: "Chango", shipName: "ChangoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/changepassword");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/changepassword");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option changepassword", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option changepassword", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgChangepasswordLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/changepassword\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option changepassword\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgChangepasswordLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/changepassword\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option changepassword\".");
     }
 
     /// <summary>
@@ -12924,71 +12323,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Decoo", shipName: "DecooShip", cts.Token);
+            firstName: "Decoo", shipName: "DecooShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/deco");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/deco");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option deco", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option deco", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgDecoLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/deco\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option deco\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgDecoLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/deco\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option deco\".");
     }
 
     /// <summary>
@@ -13053,75 +12443,66 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Effecto", shipName: "EffectoShip", cts.Token);
+            firstName: "Effecto", shipName: "EffectoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/effecto");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/effecto");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // EXACT equals filter -- "Missing arg for option effecto"
+            // is itself a prefix-free string under the case-'e' family
+            // (/effect emits a shorter literal; /effects a different
+            // longer one).
+            if (!text.Equals("Missing arg for option effecto", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // EXACT equals filter -- "Missing arg for option effecto"
-                // is itself a prefix-free string under the case-'e' family
-                // (/effect emits a shorter literal; /effects a different
-                // longer one).
-                if (!text.Equals("Missing arg for option effecto", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgEffectoLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/effecto\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option effecto\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgEffectoLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/effecto\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option effecto\".");
     }
 
     /// <summary>
@@ -13183,71 +12564,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Findo", shipName: "FindoShip", cts.Token);
+            firstName: "Findo", shipName: "FindoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/find");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/find");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option find", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option find", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgFindLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/find\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option find\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgFindLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/find\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option find\".");
     }
 
     /// <summary>
@@ -13309,71 +12681,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Fradio", shipName: "FradioShip", cts.Token);
+            firstName: "Fradio", shipName: "FradioShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/fradius");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/fradius");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option fradius", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option fradius", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgFradiusLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/fradius\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option fradius\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgFradiusLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/fradius\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option fradius\".");
     }
 
     /// <summary>
@@ -13425,71 +12788,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Ftypo", shipName: "FtypoShip", cts.Token);
+            firstName: "Ftypo", shipName: "FtypoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/ftype");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/ftype");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option ftype", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option ftype", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgFtypeLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/ftype\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option ftype\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgFtypeLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/ftype\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option ftype\".");
     }
 
     /// <summary>
@@ -13538,71 +12892,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Flevo", shipName: "FlevoShip", cts.Token);
+            firstName: "Flevo", shipName: "FlevoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/flevel");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/flevel");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option flevel", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option flevel", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgFlevelLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/flevel\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option flevel\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgFlevelLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/flevel\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option flevel\".");
     }
 
     /// <summary>
@@ -13652,71 +12997,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Fcouno", shipName: "FcounoShip", cts.Token);
+            firstName: "Fcouno", shipName: "FcounoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/fcount");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/fcount");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option fcount", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option fcount", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgFcountLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/fcount\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option fcount\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgFcountLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/fcount\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option fcount\".");
     }
 
     /// <summary>
@@ -13773,71 +13109,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Faddo", shipName: "FaddoShip", cts.Token);
+            firstName: "Faddo", shipName: "FaddoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/faddasteroidtype");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/faddasteroidtype");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option faddasteroidtype", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option faddasteroidtype", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgFaddasteroidtypeLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/faddasteroidtype\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option faddasteroidtype\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgFaddasteroidtypeLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/faddasteroidtype\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option faddasteroidtype\".");
     }
 
     /// <summary>
@@ -13889,71 +13216,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Faddoo", shipName: "FaddooShip", cts.Token);
+            firstName: "Faddoo", shipName: "FaddooShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/faddoretofield");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/faddoretofield");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option faddoretofield", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option faddoretofield", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgFaddoretofieldLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/faddoretofield\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option faddoretofield\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgFaddoretofieldLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/faddoretofield\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option faddoretofield\".");
     }
 
     /// <summary>
@@ -14004,71 +13322,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Fdelo", shipName: "FdeloShip", cts.Token);
+            firstName: "Fdelo", shipName: "FdeloShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/fdelorefromfield");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/fdelorefromfield");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option fdelorefromfield", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option fdelorefromfield", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgFdelorefromfieldLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/fdelorefromfield\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option fdelorefromfield\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgFdelorefromfieldLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/fdelorefromfield\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option fdelorefromfield\".");
     }
 
     /// <summary>
@@ -14121,71 +13430,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Faddoreto", shipName: "FaddoretoShip", cts.Token);
+            firstName: "Faddoreto", shipName: "FaddoretoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/faddoretosector");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/faddoretosector");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option faddoretosector", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option faddoretosector", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgFaddoretosectorLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/faddoretosector\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option faddoretosector\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgFaddoretosectorLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/faddoretosector\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option faddoretosector\".");
     }
 
     /// <summary>
@@ -14239,71 +13539,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Fdeloreto", shipName: "FdeloretoShip", cts.Token);
+            firstName: "Fdeloreto", shipName: "FdeloretoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/fdelorefromsector");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/fdelorefromsector");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option fdelorefromsector", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option fdelorefromsector", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgFdelorefromsectorLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/fdelorefromsector\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option fdelorefromsector\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgFdelorefromsectorLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/fdelorefromsector\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option fdelorefromsector\".");
     }
 
     /// <summary>
@@ -14354,71 +13645,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Mobio", shipName: "MobioShip", cts.Token);
+            firstName: "Mobio", shipName: "MobioShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/mobaggro");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/mobaggro");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option mobaggro", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option mobaggro", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgMobaggroLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/mobaggro\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option mobaggro\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgMobaggroLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/mobaggro\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option mobaggro\".");
     }
 
     /// <summary>
@@ -14469,71 +13751,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Musio", shipName: "MusioShip", cts.Token);
+            firstName: "Musio", shipName: "MusioShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/music");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/music");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option music", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option music", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgMusicLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/music\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option music\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgMusicLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/music\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option music\".");
     }
 
     /// <summary>
@@ -14589,71 +13862,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Altio", shipName: "AltioShip", cts.Token);
+            firstName: "Altio", shipName: "AltioShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/altname");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/altname");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option altname", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option altname", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgAltnameLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/altname\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option altname\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgAltnameLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/altname\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option altname\".");
     }
 
     /// <summary>
@@ -14708,71 +13972,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Altwo", shipName: "AltwoShip", cts.Token);
+            firstName: "Altwo", shipName: "AltwoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/altweapon");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/altweapon");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option altweapon", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option altweapon", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgAltweaponLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/altweapon\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option altweapon\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgAltweaponLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/altweapon\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option altweapon\".");
     }
 
     /// <summary>
@@ -14828,71 +14083,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Addio", shipName: "AddioShip", cts.Token);
+            firstName: "Addio", shipName: "AddioShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/addbaseore");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/addbaseore");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option addbaseore", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option addbaseore", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgAddbaseoreLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/addbaseore\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option addbaseore\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgAddbaseoreLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/addbaseore\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option addbaseore\".");
     }
 
     /// <summary>
@@ -14948,71 +14194,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Beio", shipName: "BeioShip", cts.Token);
+            firstName: "Beio", shipName: "BeioShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/be");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/be");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option be", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option be", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgBeLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/be\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option be\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgBeLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/be\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option be\".");
     }
 
     /// <summary>
@@ -15079,71 +14316,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Halo", shipName: "HaloShip", cts.Token);
+            firstName: "Halo", shipName: "HaloShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//halloween");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//halloween");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option halloween", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option halloween", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgHalloweenLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//halloween\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option halloween\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgHalloweenLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//halloween\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option halloween\".");
     }
 
     /// <summary>
@@ -15210,71 +14438,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Restart", shipName: "RestartShip", cts.Token);
+            firstName: "Restart", shipName: "RestartShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//restartcomms");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//restartcomms");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option restartcomms", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option restartcomms", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgRestartcommsLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//restartcomms\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option restartcomms\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgRestartcommsLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//restartcomms\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option restartcomms\".");
     }
 
     /// <summary>
@@ -15337,71 +14556,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Cole", shipName: "CoreShip", cts.Token);
+            firstName: "Cole", shipName: "CoreShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//countsp");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//countsp");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals("Missing arg for option countsp", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals("Missing arg for option countsp", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgCountspLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//countsp\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"Missing arg for option countsp\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgCountspLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//countsp\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"Missing arg for option countsp\".");
     }
 
     /// <summary>
@@ -15469,71 +14679,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Dia", shipName: "DiaShip", cts.Token);
+            firstName: "Dia", shipName: "DiaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//displayplayerfaction");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//displayplayerfaction");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(MissingArgDisplayplayerfactionLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(MissingArgDisplayplayerfactionLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgDisplayplayerfactionLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//displayplayerfaction\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{MissingArgDisplayplayerfactionLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgDisplayplayerfactionLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//displayplayerfaction\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{MissingArgDisplayplayerfactionLiteral}\".");
     }
 
     /// <summary>
@@ -15619,72 +14820,63 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Destra", shipName: "DestraShip", cts.Token);
+            firstName: "Destra", shipName: "DestraShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//destroyobject");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//destroyobject");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(HijackingRequiredLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(HijackingRequiredLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(HijackingRequiredLiteral, fullBody);
-                Assert.Equal((byte)0x0A, span[literalEnd - 1]);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//destroyobject\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{HijackingRequiredLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(HijackingRequiredLiteral, fullBody);
+            Assert.Equal((byte)0x0A, span[literalEnd - 1]);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//destroyobject\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{HijackingRequiredLiteral}\".");
     }
 
     /// <summary>
@@ -15777,71 +14969,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Doffa", shipName: "DoffaShip", cts.Token);
+            firstName: "Doffa", shipName: "DoffaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/doff");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/doff");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(DevChannelOffLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(DevChannelOffLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(DevChannelOffLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/doff\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{DevChannelOffLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(DevChannelOffLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/doff\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{DevChannelOffLiteral}\".");
     }
 
     /// <summary>
@@ -15931,72 +15114,63 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Anona", shipName: "AnonaShip", cts.Token);
+            firstName: "Anona", shipName: "AnonaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/anon");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/anon");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(AnonNotYetImplementedLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(AnonNotYetImplementedLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(AnonNotYetImplementedLiteral, fullBody);
-                Assert.Equal((byte)0x0A, span[literalEnd - 1]);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/anon\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{AnonNotYetImplementedLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(AnonNotYetImplementedLiteral, fullBody);
+            Assert.Equal((byte)0x0A, span[literalEnd - 1]);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/anon\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{AnonNotYetImplementedLiteral}\".");
     }
 
     /// <summary>
@@ -16107,71 +15281,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Facea", shipName: "FaceaShip", cts.Token);
+            firstName: "Facea", shipName: "FaceaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/face");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/face");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(FaceNoTargetLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(FaceNoTargetLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(FaceNoTargetLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/face\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{FaceNoTargetLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(FaceNoTargetLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/face\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{FaceNoTargetLiteral}\".");
     }
 
     /// <summary>
@@ -16253,71 +15418,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Facemea", shipName: "FacemeaShip", cts.Token);
+            firstName: "Facemea", shipName: "FacemeaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/faceme");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/faceme");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(FaceNoTargetLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(FaceNoTargetLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(FaceNoTargetLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/faceme\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{FaceNoTargetLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(FaceNoTargetLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/faceme\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{FaceNoTargetLiteral}\".");
     }
 
     /// <summary>
@@ -16424,71 +15580,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Factia", shipName: "FactiaShip", cts.Token);
+            firstName: "Factia", shipName: "FactiaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/factionoverride");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/factionoverride");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(FactionOverrideOnLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(FactionOverrideOnLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(FactionOverrideOnLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/factionoverride\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{FactionOverrideOnLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(FactionOverrideOnLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/factionoverride\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{FactionOverrideOnLiteral}\".");
     }
 
     /// <summary>
@@ -16598,71 +15745,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Debuga", shipName: "DebugaShip", cts.Token);
+            firstName: "Debuga", shipName: "DebugaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/debugmissions on");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/debugmissions on");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(MissionDebuggingActivatedLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(MissionDebuggingActivatedLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissionDebuggingActivatedLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/debugmissions on\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{MissionDebuggingActivatedLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissionDebuggingActivatedLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/debugmissions on\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{MissionDebuggingActivatedLiteral}\".");
     }
 
     /// <summary>
@@ -16755,71 +15893,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Levela", shipName: "LevelaShip", cts.Token);
+            firstName: "Levela", shipName: "LevelaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/levelout");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/levelout");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(FaceNoTargetLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(FaceNoTargetLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(FaceNoTargetLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/levelout\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{FaceNoTargetLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(FaceNoTargetLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/levelout\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{FaceNoTargetLiteral}\".");
     }
 
     /// <summary>
@@ -16926,71 +16055,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Debugo", shipName: "DebugoShip", cts.Token);
+            firstName: "Debugo", shipName: "DebugoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/debugmissions off");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/debugmissions off");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(MissionDebuggingOffLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(MissionDebuggingOffLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissionDebuggingOffLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/debugmissions off\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{MissionDebuggingOffLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissionDebuggingOffLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/debugmissions off\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{MissionDebuggingOffLiteral}\".");
     }
 
     /// <summary>
@@ -17085,71 +16205,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Reffa", shipName: "ReffaShip", cts.Token);
+            firstName: "Reffa", shipName: "ReffaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/reffect");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/reffect");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(ReffectRemovedLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(ReffectRemovedLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(ReffectRemovedLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/reffect\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{ReffectRemovedLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(ReffectRemovedLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/reffect\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{ReffectRemovedLiteral}\".");
     }
 
     /// <summary>
@@ -17251,71 +16362,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Rsa", shipName: "RsaShip", cts.Token);
+            firstName: "Rsa", shipName: "RsaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/rs");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/rs");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(FaceNoTargetLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(FaceNoTargetLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(FaceNoTargetLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/rs\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{FaceNoTargetLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(FaceNoTargetLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/rs\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{FaceNoTargetLiteral}\".");
     }
 
     /// <summary>
@@ -17432,71 +16534,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Rsda", shipName: "RsdaShip", cts.Token);
+            firstName: "Rsda", shipName: "RsdaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/rsd");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/rsd");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(FaceNoTargetLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(FaceNoTargetLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(FaceNoTargetLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/rsd\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{FaceNoTargetLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(FaceNoTargetLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/rsd\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{FaceNoTargetLiteral}\".");
     }
 
     /// <summary>
@@ -17604,71 +16697,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Testa", shipName: "TestaShip", cts.Token);
+            firstName: "Testa", shipName: "TestaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/test");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/test");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(TestSuccessfulLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(TestSuccessfulLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(TestSuccessfulLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/test\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{TestSuccessfulLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(TestSuccessfulLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/test\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{TestSuccessfulLiteral}\".");
     }
 
     /// <summary>
@@ -17810,71 +16894,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Invia", shipName: "InviaShip", cts.Token);
+            firstName: "Invia", shipName: "InviaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/invisible");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/invisible");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(InvisibleFirstInvocationLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(InvisibleFirstInvocationLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(InvisibleFirstInvocationLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/invisible\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{InvisibleFirstInvocationLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(InvisibleFirstInvocationLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/invisible\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{InvisibleFirstInvocationLiteral}\".");
     }
 
     /// <summary>
@@ -18013,71 +17088,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Sheia", shipName: "SheiaShip", cts.Token);
+            firstName: "Sheia", shipName: "SheiaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/shieldwarnings 2");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/shieldwarnings 2");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(ShieldwarningsLevel2Literal, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(ShieldwarningsLevel2Literal, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(ShieldwarningsLevel2Literal, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/shieldwarnings 2\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{ShieldwarningsLevel2Literal}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(ShieldwarningsLevel2Literal, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/shieldwarnings 2\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{ShieldwarningsLevel2Literal}\".");
     }
 
     /// <summary>
@@ -18214,71 +17280,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Finda", shipName: "FindaShip", cts.Token);
+            firstName: "Finda", shipName: "FindaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//findsector ZZZNOMATCH");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//findsector ZZZNOMATCH");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(FindsectorNoMatchLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(FindsectorNoMatchLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(FindsectorNoMatchLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//findsector ZZZNOMATCH\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{FindsectorNoMatchLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(FindsectorNoMatchLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//findsector ZZZNOMATCH\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{FindsectorNoMatchLiteral}\".");
     }
 
     /// <summary>
@@ -18416,71 +17473,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Gmona", shipName: "GmonaShip", cts.Token);
+            firstName: "Gmona", shipName: "GmonaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/gmon");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/gmon");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(GmonLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(GmonLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(GmonLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/gmon\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{GmonLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(GmonLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/gmon\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{GmonLiteral}\".");
     }
 
     /// <summary>
@@ -18584,71 +17632,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Gmoffa", shipName: "GmoffaShip", cts.Token);
+            firstName: "Gmoffa", shipName: "GmoffaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/gmoff");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/gmoff");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(GmoffLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(GmoffLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(GmoffLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/gmoff\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{GmoffLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(GmoffLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/gmoff\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{GmoffLiteral}\".");
     }
 
     /// <summary>
@@ -18770,71 +17809,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Helpia", shipName: "HelpiaShip", cts.Token);
+            firstName: "Helpia", shipName: "HelpiaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/helpedit");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/helpedit");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(HelpeditHijackLineLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(HelpeditHijackLineLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(HelpeditHijackLineLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/helpedit\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{HelpeditHijackLineLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(HelpeditHijackLineLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/helpedit\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{HelpeditHijackLineLiteral}\".");
     }
 
     /// <summary>
@@ -18952,71 +17982,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Helfia", shipName: "HelfiaShip", cts.Token);
+            firstName: "Helfia", shipName: "HelfiaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/helpfield");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/helpfield");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(HelpfieldFradiusLineLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(HelpfieldFradiusLineLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(HelpfieldFradiusLineLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/helpfield\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{HelpfieldFradiusLineLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(HelpfieldFradiusLineLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/helpfield\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{HelpfieldFradiusLineLiteral}\".");
     }
 
     /// <summary>
@@ -19126,71 +18147,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Zara", shipName: "ZaraShip", cts.Token);
+            firstName: "Zara", shipName: "ZaraShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/zzzzzz");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/zzzzzz");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(IllegalSlashZzzzzzLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(IllegalSlashZzzzzzLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(IllegalSlashZzzzzzLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/zzzzzz\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{IllegalSlashZzzzzzLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(IllegalSlashZzzzzzLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/zzzzzz\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{IllegalSlashZzzzzzLiteral}\".");
     }
 
     /// <summary>
@@ -19317,71 +18329,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Zorba", shipName: "ZorbaShip", cts.Token);
+            firstName: "Zorba", shipName: "ZorbaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//zzzzzz");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//zzzzzz");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(IllegalSlashSlashZzzzzzLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(IllegalSlashSlashZzzzzzLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(IllegalSlashSlashZzzzzzLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//zzzzzz\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{IllegalSlashSlashZzzzzzLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(IllegalSlashSlashZzzzzzLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//zzzzzz\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{IllegalSlashSlashZzzzzzLiteral}\".");
     }
 
     /// <summary>
@@ -19499,71 +18502,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Greta", shipName: "GretaShip", cts.Token);
+            firstName: "Greta", shipName: "GretaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//gmsetaccess foo");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//gmsetaccess foo");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(SyntaxGmsetaccessLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(SyntaxGmsetaccessLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(SyntaxGmsetaccessLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//gmsetaccess foo\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{SyntaxGmsetaccessLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(SyntaxGmsetaccessLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//gmsetaccess foo\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{SyntaxGmsetaccessLiteral}\".");
     }
 
     /// <summary>
@@ -19696,71 +18690,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Galen", shipName: "GalenShip", cts.Token);
+            firstName: "Galen", shipName: "GalenShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//gmskillpoints foo");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//gmskillpoints foo");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(SyntaxGmskillpointsLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(SyntaxGmskillpointsLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(SyntaxGmskillpointsLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//gmskillpoints foo\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{SyntaxGmskillpointsLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(SyntaxGmskillpointsLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//gmskillpoints foo\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{SyntaxGmskillpointsLiteral}\".");
     }
 
     /// <summary>
@@ -19873,71 +18858,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Garin", shipName: "GarinShip", cts.Token);
+            firstName: "Garin", shipName: "GarinShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//gmplayerlevel foo 99");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//gmplayerlevel foo 99");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(SyntaxGmplayerlevelLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(SyntaxGmplayerlevelLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(SyntaxGmplayerlevelLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//gmplayerlevel foo 99\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{SyntaxGmplayerlevelLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(SyntaxGmplayerlevelLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//gmplayerlevel foo 99\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{SyntaxGmplayerlevelLiteral}\".");
     }
 
     /// <summary>
@@ -20052,71 +19028,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Gerda", shipName: "GerdaShip", cts.Token);
+            firstName: "Gerda", shipName: "GerdaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//gmupgrade foo");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//gmupgrade foo");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(PlayerFooNotOnlineLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(PlayerFooNotOnlineLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(PlayerFooNotOnlineLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//gmupgrade foo\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{PlayerFooNotOnlineLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(PlayerFooNotOnlineLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//gmupgrade foo\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{PlayerFooNotOnlineLiteral}\".");
     }
 
     /// <summary>
@@ -20229,71 +19196,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Olena", shipName: "OlenaShip", cts.Token);
+            firstName: "Olena", shipName: "OlenaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/openif 1,2");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/openif 1,2");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(OpenInterface12Literal, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(OpenInterface12Literal, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(OpenInterface12Literal, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/openif 1,2\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{OpenInterface12Literal}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(OpenInterface12Literal, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/openif 1,2\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{OpenInterface12Literal}\".");
     }
 
     /// <summary>
@@ -20410,71 +19368,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Petra", shipName: "PetraShip", cts.Token);
+            firstName: "Petra", shipName: "PetraShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/panup 5.5");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/panup 5.5");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(UnableToMovePanup55Literal, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(UnableToMovePanup55Literal, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(UnableToMovePanup55Literal, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/panup 5.5\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{UnableToMovePanup55Literal}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(UnableToMovePanup55Literal, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/panup 5.5\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{UnableToMovePanup55Literal}\".");
     }
 
     /// <summary>
@@ -20587,71 +19536,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Tania", shipName: "TaniaShip", cts.Token);
+            firstName: "Tania", shipName: "TaniaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/trade foo");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/trade foo");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(CouldNotFindPlayerFooLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(CouldNotFindPlayerFooLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(CouldNotFindPlayerFooLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/trade foo\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{CouldNotFindPlayerFooLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(CouldNotFindPlayerFooLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/trade foo\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{CouldNotFindPlayerFooLiteral}\".");
     }
 
     /// <summary>
@@ -20752,71 +19692,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Inga", shipName: "IngaShip", cts.Token);
+            firstName: "Inga", shipName: "IngaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/invite foo");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/invite foo");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(CouldNotFindPlayerFooLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(CouldNotFindPlayerFooLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(CouldNotFindPlayerFooLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/invite foo\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{CouldNotFindPlayerFooLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(CouldNotFindPlayerFooLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/invite foo\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{CouldNotFindPlayerFooLiteral}\".");
     }
 
     /// <summary>
@@ -20934,74 +19865,65 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Brina", shipName: "BrinaShip", cts.Token);
+            firstName: "Brina", shipName: "BrinaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//bumpaccess foo bar");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//bumpaccess foo bar");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(PlayerBacktickFooNotFoundLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(PlayerBacktickFooNotFoundLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(PlayerBacktickFooNotFoundLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                // Confirm the two backtick bytes (0x60) at positions 7 and 11 of the body.
-                Assert.Equal((byte)0x60, span[3 + 7]);
-                Assert.Equal((byte)0x60, span[3 + 11]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//bumpaccess foo bar\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{PlayerBacktickFooNotFoundLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(PlayerBacktickFooNotFoundLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            // Confirm the two backtick bytes (0x60) at positions 7 and 11 of the body.
+            Assert.Equal((byte)0x60, span[3 + 7]);
+            Assert.Equal((byte)0x60, span[3 + 11]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//bumpaccess foo bar\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{PlayerBacktickFooNotFoundLiteral}\".");
     }
 
     /// <summary>
@@ -21117,71 +20039,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Rena", shipName: "RenaShip", cts.Token);
+            firstName: "Rena", shipName: "RenaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/rotatex 7.5");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/rotatex 7.5");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(UnableToMoveRotatex75Literal, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(UnableToMoveRotatex75Literal, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(UnableToMoveRotatex75Literal, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/rotatex 7.5\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{UnableToMoveRotatex75Literal}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(UnableToMoveRotatex75Literal, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/rotatex 7.5\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{UnableToMoveRotatex75Literal}\".");
     }
 
     /// <summary>
@@ -21295,71 +20208,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Fina", shipName: "FinaShip", cts.Token);
+            firstName: "Fina", shipName: "FinaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/factionoverride");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/factionoverride");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(NowUseAllRestrictedGatesLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(NowUseAllRestrictedGatesLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(NowUseAllRestrictedGatesLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/factionoverride\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{NowUseAllRestrictedGatesLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(NowUseAllRestrictedGatesLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/factionoverride\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{NowUseAllRestrictedGatesLiteral}\".");
     }
 
     /// <summary>
@@ -21484,71 +20388,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Flusha", shipName: "FlushaShip", cts.Token);
+            firstName: "Flusha", shipName: "FlushaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/flushinv");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/flushinv");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(YourInventoryFlushedLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(YourInventoryFlushedLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(YourInventoryFlushedLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/flushinv\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{YourInventoryFlushedLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(YourInventoryFlushedLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/flushinv\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{YourInventoryFlushedLiteral}\".");
     }
 
     /// <summary>
@@ -21673,90 +20568,81 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Movera", shipName: "MoveraShip", cts.Token);
+            firstName: "Movera", shipName: "MoveraShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/move ,,,");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        bool sawFrameA = false;
+        bool sawFrameB = false;
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames && !(sawFrameA && sawFrameB))
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/move ,,,");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            bool sawFrameA = false;
-            bool sawFrameB = false;
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames && !(sawFrameA && sawFrameB))
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
+
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
+
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
+
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+
+            if (!sawFrameA && text.Equals(MoveSyntaxLiteral, StringComparison.Ordinal))
             {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
-
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
-
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
-
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
-
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
-
-                if (!sawFrameA && text.Equals(MoveSyntaxLiteral, StringComparison.Ordinal))
-                {
-                    Assert.Equal(ExpectedFrameAPayloadLength, span.Length);
-                    Assert.Equal(ExpectedFrameALengthField, msgLen);
-                    Assert.Equal(ExpectedReplyColor, span[2]);
-                    int literalEnd = 3 + ExpectedFrameALiteralByteCount;
-                    string fullBody = Encoding.ASCII.GetString(
-                        span.Slice(3, ExpectedFrameALiteralByteCount));
-                    Assert.Equal(MoveSyntaxLiteral, fullBody);
-                    Assert.Equal((byte)0x00, span[literalEnd]);
-                    sawFrameA = true;
-                    continue;
-                }
-
-                if (!sawFrameB && text.Equals(MoveAllParametersFloatLiteral, StringComparison.Ordinal))
-                {
-                    Assert.Equal(ExpectedFrameBPayloadLength, span.Length);
-                    Assert.Equal(ExpectedFrameBLengthField, msgLen);
-                    Assert.Equal(ExpectedReplyColor, span[2]);
-                    int literalEnd = 3 + ExpectedFrameBLiteralByteCount;
-                    string fullBody = Encoding.ASCII.GetString(
-                        span.Slice(3, ExpectedFrameBLiteralByteCount));
-                    Assert.Equal(MoveAllParametersFloatLiteral, fullBody);
-                    Assert.Equal((byte)0x00, span[literalEnd]);
-                    sawFrameB = true;
-                    continue;
-                }
+                Assert.Equal(ExpectedFrameAPayloadLength, span.Length);
+                Assert.Equal(ExpectedFrameALengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+                int literalEnd = 3 + ExpectedFrameALiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedFrameALiteralByteCount));
+                Assert.Equal(MoveSyntaxLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                sawFrameA = true;
+                continue;
             }
 
-            if (!sawFrameA || !sawFrameB)
+            if (!sawFrameB && text.Equals(MoveAllParametersFloatLiteral, StringComparison.Ordinal))
             {
-                throw new Xunit.Sdk.XunitException(
-                    $"drained {framesSeen} frames after sending 0x0033 CLIENT_CHAT with body " +
-                    $"\"/move ,,,\" without seeing BOTH 0x001D MESSAGE_STRING frames " +
-                    $"\"{MoveSyntaxLiteral}\" (sawFrameA={sawFrameA}) and " +
-                    $"\"{MoveAllParametersFloatLiteral}\" (sawFrameB={sawFrameB}).");
+                Assert.Equal(ExpectedFrameBPayloadLength, span.Length);
+                Assert.Equal(ExpectedFrameBLengthField, msgLen);
+                Assert.Equal(ExpectedReplyColor, span[2]);
+                int literalEnd = 3 + ExpectedFrameBLiteralByteCount;
+                string fullBody = Encoding.ASCII.GetString(
+                    span.Slice(3, ExpectedFrameBLiteralByteCount));
+                Assert.Equal(MoveAllParametersFloatLiteral, fullBody);
+                Assert.Equal((byte)0x00, span[literalEnd]);
+                sawFrameB = true;
+                continue;
             }
         }
-        finally
+
+        if (!sawFrameA || !sawFrameB)
         {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
+            throw new Xunit.Sdk.XunitException(
+                $"drained {framesSeen} frames after sending 0x0033 CLIENT_CHAT with body " +
+                $"\"/move ,,,\" without seeing BOTH 0x001D MESSAGE_STRING frames " +
+                $"\"{MoveSyntaxLiteral}\" (sawFrameA={sawFrameA}) and " +
+                $"\"{MoveAllParametersFloatLiteral}\" (sawFrameB={sawFrameB}).");
         }
     }
 
@@ -21881,71 +20767,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Facera", shipName: "FaceraShip", cts.Token);
+            firstName: "Facera", shipName: "FaceraShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/face");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/face");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(UnableToAccessSelectedObjectLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(UnableToAccessSelectedObjectLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(UnableToAccessSelectedObjectLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/face\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{UnableToAccessSelectedObjectLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(UnableToAccessSelectedObjectLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/face\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{UnableToAccessSelectedObjectLiteral}\".");
     }
 
     /// <summary>
@@ -22051,71 +20928,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Dia", shipName: "DiaShip", cts.Token);
+            firstName: "Dia", shipName: "DiaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//displayplayerfaction ");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//displayplayerfaction ");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(DisplayPlayerFactionUsageLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(DisplayPlayerFactionUsageLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(DisplayPlayerFactionUsageLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//displayplayerfaction \" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{DisplayPlayerFactionUsageLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(DisplayPlayerFactionUsageLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//displayplayerfaction \" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{DisplayPlayerFactionUsageLiteral}\".");
     }
 
     /// <summary>
@@ -22231,71 +21099,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Hala", shipName: "HalaShip", cts.Token);
+            firstName: "Hala", shipName: "HalaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//halloween ");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//halloween ");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(HalloweenUsageLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(HalloweenUsageLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(HalloweenUsageLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//halloween \" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{HalloweenUsageLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(HalloweenUsageLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//halloween \" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{HalloweenUsageLiteral}\".");
     }
 
     private const string SetpasswordSyntaxLiteral = "Syntax: //setpassword <username> <password>";
@@ -22445,71 +21304,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Sapa", shipName: "SapaShip", cts.Token);
+            firstName: "Sapa", shipName: "SapaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//setpassword foo");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//setpassword foo");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(SetpasswordSyntaxLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(SetpasswordSyntaxLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(SetpasswordSyntaxLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//setpassword foo\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{SetpasswordSyntaxLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(SetpasswordSyntaxLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//setpassword foo\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{SetpasswordSyntaxLiteral}\".");
     }
 
     /// <summary>
@@ -22617,71 +21467,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Adda", shipName: "AddaShip", cts.Token);
+            firstName: "Adda", shipName: "AddaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//adduser foo bar");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//adduser foo bar");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(AdduserSyntaxLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(AdduserSyntaxLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(AdduserSyntaxLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//adduser foo bar\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{AdduserSyntaxLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(AdduserSyntaxLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//adduser foo bar\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{AdduserSyntaxLiteral}\".");
     }
 
     /// <summary>
@@ -22782,71 +21623,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Eda", shipName: "EdaShip", cts.Token);
+            firstName: "Eda", shipName: "EdaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//editfaction 99 0");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//editfaction 99 0");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(FactionIdBoundsLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(FactionIdBoundsLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(FactionIdBoundsLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//editfaction 99 0\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{FactionIdBoundsLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(FactionIdBoundsLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//editfaction 99 0\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{FactionIdBoundsLiteral}\".");
     }
 
     /// <summary>
@@ -22938,71 +21770,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Edna", shipName: "EdnaShip", cts.Token);
+            firstName: "Edna", shipName: "EdnaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//editfaction 1 99999");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//editfaction 1 99999");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(FactionStandingBoundsLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(FactionStandingBoundsLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(FactionStandingBoundsLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//editfaction 1 99999\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{FactionStandingBoundsLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(FactionStandingBoundsLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//editfaction 1 99999\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{FactionStandingBoundsLiteral}\".");
     }
 
     /// <summary>
@@ -23103,71 +21926,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Eka", shipName: "EkaShip", cts.Token);
+            firstName: "Eka", shipName: "EkaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//editplayerfaction noplayerfoo 1 0");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//editplayerfaction noplayerfoo 1 0");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(EditPlayerFactionPlayerNotFoundLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(EditPlayerFactionPlayerNotFoundLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(EditPlayerFactionPlayerNotFoundLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//editplayerfaction noplayerfoo 1 0\" without seeing 0x001D MESSAGE_STRING " +
-                $"equal to \"{EditPlayerFactionPlayerNotFoundLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(EditPlayerFactionPlayerNotFoundLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//editplayerfaction noplayerfoo 1 0\" without seeing 0x001D MESSAGE_STRING " +
+            $"equal to \"{EditPlayerFactionPlayerNotFoundLiteral}\".");
     }
 
     /// <summary>
@@ -23265,71 +22079,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Capa", shipName: "CapaShip", cts.Token);
+            firstName: "Capa", shipName: "CapaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//countsp ");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//countsp ");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(CountspUsageLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(CountspUsageLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(CountspUsageLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//countsp \" without seeing 0x001D MESSAGE_STRING " +
-                $"equal to \"{CountspUsageLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(CountspUsageLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//countsp \" without seeing 0x001D MESSAGE_STRING " +
+            $"equal to \"{CountspUsageLiteral}\".");
     }
 
     /// <summary>
@@ -23434,72 +22239,63 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Dapa", shipName: "DapaShip", cts.Token);
+            firstName: "Dapa", shipName: "DapaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//destroyobject");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//destroyobject");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(DestroyobjectHijackeeLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(DestroyobjectHijackeeLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(DestroyobjectHijackeeLiteral, fullBody);
-                Assert.Equal((byte)0x0A, span[literalEnd - 1]);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//destroyobject\" without seeing 0x001D MESSAGE_STRING " +
-                $"equal to \"{DestroyobjectHijackeeLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(DestroyobjectHijackeeLiteral, fullBody);
+            Assert.Equal((byte)0x0A, span[literalEnd - 1]);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//destroyobject\" without seeing 0x001D MESSAGE_STRING " +
+            $"equal to \"{DestroyobjectHijackeeLiteral}\".");
     }
 
     /// <summary>
@@ -23601,71 +22397,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Gora", shipName: "GoraShip", cts.Token);
+            firstName: "Gora", shipName: "GoraShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//gmenableskills ghostfoo");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//gmenableskills ghostfoo");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(GmenableskillsNotOnlineLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(GmenableskillsNotOnlineLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(GmenableskillsNotOnlineLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//gmenableskills ghostfoo\" without seeing 0x001D MESSAGE_STRING " +
-                $"equal to \"{GmenableskillsNotOnlineLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(GmenableskillsNotOnlineLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//gmenableskills ghostfoo\" without seeing 0x001D MESSAGE_STRING " +
+            $"equal to \"{GmenableskillsNotOnlineLiteral}\".");
     }
 
     /// <summary>
@@ -23766,72 +22553,63 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Rapa", shipName: "RapaShip", cts.Token);
+            firstName: "Rapa", shipName: "RapaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//respec ghostfoo bar");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//respec ghostfoo bar");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(RespecNotOnlinePeriodLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(RespecNotOnlinePeriodLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(RespecNotOnlinePeriodLiteral, fullBody);
-                Assert.Equal((byte)'.', span[literalEnd - 1]);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//respec ghostfoo bar\" without seeing 0x001D MESSAGE_STRING " +
-                $"equal to \"{RespecNotOnlinePeriodLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(RespecNotOnlinePeriodLiteral, fullBody);
+            Assert.Equal((byte)'.', span[literalEnd - 1]);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//respec ghostfoo bar\" without seeing 0x001D MESSAGE_STRING " +
+            $"equal to \"{RespecNotOnlinePeriodLiteral}\".");
     }
 
     /// <summary>
@@ -23924,71 +22702,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Reka", shipName: "RekaShip", cts.Token);
+            firstName: "Reka", shipName: "RekaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//respec ghostfoo");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//respec ghostfoo");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(RespecSyntaxLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(RespecSyntaxLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(RespecSyntaxLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//respec ghostfoo\" without seeing 0x001D MESSAGE_STRING " +
-                $"equal to \"{RespecSyntaxLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(RespecSyntaxLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//respec ghostfoo\" without seeing 0x001D MESSAGE_STRING " +
+            $"equal to \"{RespecSyntaxLiteral}\".");
     }
 
     /// <summary>
@@ -24078,71 +22847,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Bapa", shipName: "BapaShip", cts.Token);
+            firstName: "Bapa", shipName: "BapaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//ban ");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//ban ");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(BanSyntaxLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(BanSyntaxLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(BanSyntaxLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//ban \" without seeing 0x001D MESSAGE_STRING " +
-                $"equal to \"{BanSyntaxLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(BanSyntaxLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//ban \" without seeing 0x001D MESSAGE_STRING " +
+            $"equal to \"{BanSyntaxLiteral}\".");
     }
 
     /// <summary>
@@ -24211,71 +22971,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Bepa", shipName: "BepaShip", cts.Token);
+            firstName: "Bepa", shipName: "BepaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//ban ghostfoo");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//ban ghostfoo");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(BanPlayerBacktickGhostfooNotFoundLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(BanPlayerBacktickGhostfooNotFoundLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(BanPlayerBacktickGhostfooNotFoundLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//ban ghostfoo\" without seeing 0x001D MESSAGE_STRING " +
-                $"equal to \"{BanPlayerBacktickGhostfooNotFoundLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(BanPlayerBacktickGhostfooNotFoundLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//ban ghostfoo\" without seeing 0x001D MESSAGE_STRING " +
+            $"equal to \"{BanPlayerBacktickGhostfooNotFoundLiteral}\".");
     }
 
     /// <summary>
@@ -24346,71 +23097,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Gepa", shipName: "GepaShip", cts.Token);
+            firstName: "Gepa", shipName: "GepaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//gmgetaccess ghostfoo");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//gmgetaccess ghostfoo");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(GmgetaccessPlayerBacktickGhostfooNotFoundLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(GmgetaccessPlayerBacktickGhostfooNotFoundLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(GmgetaccessPlayerBacktickGhostfooNotFoundLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//gmgetaccess ghostfoo\" without seeing 0x001D MESSAGE_STRING " +
-                $"equal to \"{GmgetaccessPlayerBacktickGhostfooNotFoundLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(GmgetaccessPlayerBacktickGhostfooNotFoundLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//gmgetaccess ghostfoo\" without seeing 0x001D MESSAGE_STRING " +
+            $"equal to \"{GmgetaccessPlayerBacktickGhostfooNotFoundLiteral}\".");
     }
 
     /// <summary>
@@ -24496,71 +23238,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Sela", shipName: "SelaShip", cts.Token);
+            firstName: "Sela", shipName: "SelaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//gmsetaccess ghostfoo bar");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//gmsetaccess ghostfoo bar");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(GmsetaccessPlayerBacktickGhostfooNotFoundLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(GmsetaccessPlayerBacktickGhostfooNotFoundLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(GmsetaccessPlayerBacktickGhostfooNotFoundLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//gmsetaccess ghostfoo bar\" without seeing 0x001D MESSAGE_STRING " +
-                $"equal to \"{GmsetaccessPlayerBacktickGhostfooNotFoundLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(GmsetaccessPlayerBacktickGhostfooNotFoundLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//gmsetaccess ghostfoo bar\" without seeing 0x001D MESSAGE_STRING " +
+            $"equal to \"{GmsetaccessPlayerBacktickGhostfooNotFoundLiteral}\".");
     }
 
     /// <summary>
@@ -24643,71 +23376,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Repa", shipName: "RepaShip", cts.Token);
+            firstName: "Repa", shipName: "RepaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//replaceship ");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//replaceship ");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(ReplaceshipUsageLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(ReplaceshipUsageLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(ReplaceshipUsageLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//replaceship \" without seeing 0x001D MESSAGE_STRING " +
-                $"equal to \"{ReplaceshipUsageLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(ReplaceshipUsageLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//replaceship \" without seeing 0x001D MESSAGE_STRING " +
+            $"equal to \"{ReplaceshipUsageLiteral}\".");
     }
 
     /// <summary>
@@ -24789,71 +23513,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Pela", shipName: "PelaShip", cts.Token);
+            firstName: "Pela", shipName: "PelaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//gmplayerlevel ghostfoo 30");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//gmplayerlevel ghostfoo 30");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(GmplayerlevelNotOnlineLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(GmplayerlevelNotOnlineLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(GmplayerlevelNotOnlineLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//gmplayerlevel ghostfoo 30\" without seeing 0x001D MESSAGE_STRING " +
-                $"equal to \"{GmplayerlevelNotOnlineLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(GmplayerlevelNotOnlineLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//gmplayerlevel ghostfoo 30\" without seeing 0x001D MESSAGE_STRING " +
+            $"equal to \"{GmplayerlevelNotOnlineLiteral}\".");
     }
 
     /// <summary>
@@ -24935,71 +23650,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Gola", shipName: "GolaShip", cts.Token);
+            firstName: "Gola", shipName: "GolaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//gmskillpoints ghostfoo 5");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//gmskillpoints ghostfoo 5");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(GmskillpointsNotOnlineLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(GmskillpointsNotOnlineLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(GmskillpointsNotOnlineLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//gmskillpoints ghostfoo 5\" without seeing 0x001D MESSAGE_STRING " +
-                $"equal to \"{GmskillpointsNotOnlineLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(GmskillpointsNotOnlineLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//gmskillpoints ghostfoo 5\" without seeing 0x001D MESSAGE_STRING " +
+            $"equal to \"{GmskillpointsNotOnlineLiteral}\".");
     }
 
     /// <summary>
@@ -25088,71 +23794,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Vola", shipName: "VolaShip", cts.Token);
+            firstName: "Vola", shipName: "VolaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//gmupgrade ");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//gmupgrade ");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(GmupgradeUsageSyntaxLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(GmupgradeUsageSyntaxLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(GmupgradeUsageSyntaxLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//gmupgrade \" without seeing 0x001D MESSAGE_STRING " +
-                $"equal to \"{GmupgradeUsageSyntaxLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(GmupgradeUsageSyntaxLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//gmupgrade \" without seeing 0x001D MESSAGE_STRING " +
+            $"equal to \"{GmupgradeUsageSyntaxLiteral}\".");
     }
 
     /// <summary>
@@ -25255,71 +23952,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Doly", shipName: "DolyShip", cts.Token);
+            firstName: "Doly", shipName: "DolyShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//displayplayerfaction ghostfoo");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//displayplayerfaction ghostfoo");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(DisplayPlayerFactionCouldntLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(DisplayPlayerFactionCouldntLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(DisplayPlayerFactionCouldntLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//displayplayerfaction ghostfoo\" without seeing 0x001D MESSAGE_STRING " +
-                $"equal to \"{DisplayPlayerFactionCouldntLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(DisplayPlayerFactionCouldntLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//displayplayerfaction ghostfoo\" without seeing 0x001D MESSAGE_STRING " +
+            $"equal to \"{DisplayPlayerFactionCouldntLiteral}\".");
     }
 
     /// <summary>
@@ -25407,71 +24095,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Folo", shipName: "FoloShip", cts.Token);
+            firstName: "Folo", shipName: "FoloShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//findsector ZZZNOMATCH");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//findsector ZZZNOMATCH");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(FindsectorHeaderZzzNoMatchLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(FindsectorHeaderZzzNoMatchLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(FindsectorHeaderZzzNoMatchLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//findsector ZZZNOMATCH\" without seeing 0x001D MESSAGE_STRING " +
-                $"equal to \"{FindsectorHeaderZzzNoMatchLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(FindsectorHeaderZzzNoMatchLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//findsector ZZZNOMATCH\" without seeing 0x001D MESSAGE_STRING " +
+            $"equal to \"{FindsectorHeaderZzzNoMatchLiteral}\".");
     }
 
     /// <summary>
@@ -25551,71 +24230,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Hola", shipName: "HolaShip", cts.Token);
+            firstName: "Hola", shipName: "HolaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/find ghostfoo");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/find ghostfoo");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(FindUserTierBacktickNotFoundLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(FindUserTierBacktickNotFoundLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(FindUserTierBacktickNotFoundLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/find ghostfoo\" without seeing 0x001D MESSAGE_STRING " +
-                $"equal to \"{FindUserTierBacktickNotFoundLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(FindUserTierBacktickNotFoundLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/find ghostfoo\" without seeing 0x001D MESSAGE_STRING " +
+            $"equal to \"{FindUserTierBacktickNotFoundLiteral}\".");
     }
 
     /// <summary>
@@ -25725,71 +24395,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Mola", shipName: "MolaShip", cts.Token);
+            firstName: "Mola", shipName: "MolaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//adduser ");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//adduser ");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(AdduserSyntaxLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(AdduserSyntaxLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(AdduserSyntaxLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//adduser \" (trailing space) without seeing 0x001D MESSAGE_STRING " +
-                $"equal to \"{AdduserSyntaxLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(AdduserSyntaxLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//adduser \" (trailing space) without seeing 0x001D MESSAGE_STRING " +
+            $"equal to \"{AdduserSyntaxLiteral}\".");
     }
 
     /// <summary>
@@ -25882,71 +24543,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Pola", shipName: "PolaShip", cts.Token);
+            firstName: "Pola", shipName: "PolaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//adduser foo");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//adduser foo");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(AdduserSyntaxLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(AdduserSyntaxLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(AdduserSyntaxLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//adduser foo\" (one arg) without seeing 0x001D MESSAGE_STRING " +
-                $"equal to \"{AdduserSyntaxLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(AdduserSyntaxLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//adduser foo\" (one arg) without seeing 0x001D MESSAGE_STRING " +
+            $"equal to \"{AdduserSyntaxLiteral}\".");
     }
 
     /// <summary>
@@ -26045,71 +24697,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Sopo", shipName: "SopoShip", cts.Token);
+            firstName: "Sopo", shipName: "SopoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//setpassword ");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//setpassword ");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(SetpasswordSyntaxLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(SetpasswordSyntaxLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(SetpasswordSyntaxLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//setpassword \" (trailing space) without seeing 0x001D MESSAGE_STRING " +
-                $"equal to \"{SetpasswordSyntaxLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(SetpasswordSyntaxLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//setpassword \" (trailing space) without seeing 0x001D MESSAGE_STRING " +
+            $"equal to \"{SetpasswordSyntaxLiteral}\".");
     }
 
     /// <summary>
@@ -26215,71 +24858,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Bola", shipName: "BolaShip", cts.Token);
+            firstName: "Bola", shipName: "BolaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//bumpaccess ");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//bumpaccess ");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(SyntaxGmsetaccessLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(SyntaxGmsetaccessLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(SyntaxGmsetaccessLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//bumpaccess \" (trailing space) without seeing 0x001D MESSAGE_STRING " +
-                $"equal to \"{SyntaxGmsetaccessLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(SyntaxGmsetaccessLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//bumpaccess \" (trailing space) without seeing 0x001D MESSAGE_STRING " +
+            $"equal to \"{SyntaxGmsetaccessLiteral}\".");
     }
 
     /// <summary>
@@ -26390,71 +25024,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Gimu", shipName: "GimuShip", cts.Token);
+            firstName: "Gimu", shipName: "GimuShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//gmsetaccess ");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//gmsetaccess ");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(SyntaxGmsetaccessLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(SyntaxGmsetaccessLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(SyntaxGmsetaccessLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//gmsetaccess \" (trailing space) without seeing 0x001D MESSAGE_STRING " +
-                $"equal to \"{SyntaxGmsetaccessLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(SyntaxGmsetaccessLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//gmsetaccess \" (trailing space) without seeing 0x001D MESSAGE_STRING " +
+            $"equal to \"{SyntaxGmsetaccessLiteral}\".");
     }
 
     /// <summary>
@@ -26570,71 +25195,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Buma", shipName: "BumaShip", cts.Token);
+            firstName: "Buma", shipName: "BumaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//bumpaccess foo");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//bumpaccess foo");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(SyntaxGmsetaccessLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(SyntaxGmsetaccessLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(SyntaxGmsetaccessLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//bumpaccess foo\" (one arg) without seeing 0x001D MESSAGE_STRING " +
-                $"equal to \"{SyntaxGmsetaccessLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(SyntaxGmsetaccessLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//bumpaccess foo\" (one arg) without seeing 0x001D MESSAGE_STRING " +
+            $"equal to \"{SyntaxGmsetaccessLiteral}\".");
     }
 
     /// <summary>
@@ -26703,71 +25319,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Edita", shipName: "EditaShip", cts.Token);
+            firstName: "Edita", shipName: "EditaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//editfaction");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//editfaction");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(MissingArgEditfactionLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(MissingArgEditfactionLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgEditfactionLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//editfaction\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{MissingArgEditfactionLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgEditfactionLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//editfaction\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{MissingArgEditfactionLiteral}\".");
     }
 
     /// <summary>
@@ -26836,71 +25443,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Find", shipName: "FindShip", cts.Token);
+            firstName: "Find", shipName: "FindShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//findsector");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//findsector");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(MissingArgFindsectorLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(MissingArgFindsectorLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgFindsectorLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//findsector\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{MissingArgFindsectorLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgFindsectorLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//findsector\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{MissingArgFindsectorLiteral}\".");
     }
 
     /// <summary>
@@ -26965,71 +25563,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Epfa", shipName: "EpfaShip", cts.Token);
+            firstName: "Epfa", shipName: "EpfaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//editplayerfaction");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//editplayerfaction");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(MissingArgEditplayerfactionLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(MissingArgEditplayerfactionLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgEditplayerfactionLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//editplayerfaction\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{MissingArgEditplayerfactionLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgEditplayerfactionLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//editplayerfaction\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{MissingArgEditplayerfactionLiteral}\".");
     }
 
     /// <summary>
@@ -27108,71 +25697,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Bumpa", shipName: "BumpaShip", cts.Token);
+            firstName: "Bumpa", shipName: "BumpaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//bumpaccess");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//bumpaccess");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(MissingArgBumpaccessLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(MissingArgBumpaccessLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgBumpaccessLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//bumpaccess\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{MissingArgBumpaccessLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgBumpaccessLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//bumpaccess\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{MissingArgBumpaccessLiteral}\".");
     }
 
     /// <summary>
@@ -27247,71 +25827,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Gmpla", shipName: "GmplaShip", cts.Token);
+            firstName: "Gmpla", shipName: "GmplaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//gmplayerlevel");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//gmplayerlevel");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(MissingArgGmplayerlevelLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(MissingArgGmplayerlevelLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgGmplayerlevelLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//gmplayerlevel\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{MissingArgGmplayerlevelLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgGmplayerlevelLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//gmplayerlevel\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{MissingArgGmplayerlevelLiteral}\".");
     }
 
     /// <summary>
@@ -27386,71 +25957,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Gmuga", shipName: "GmugaShip", cts.Token);
+            firstName: "Gmuga", shipName: "GmugaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//gmupgrade");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//gmupgrade");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(MissingArgGmupgradeLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(MissingArgGmupgradeLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgGmupgradeLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//gmupgrade\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{MissingArgGmupgradeLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgGmupgradeLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//gmupgrade\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{MissingArgGmupgradeLiteral}\".");
     }
 
     /// <summary>
@@ -27527,71 +26089,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Repla", shipName: "ReplaShip", cts.Token);
+            firstName: "Repla", shipName: "ReplaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//replaceship");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//replaceship");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(MissingArgReplaceshipLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(MissingArgReplaceshipLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgReplaceshipLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//replaceship\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{MissingArgReplaceshipLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgReplaceshipLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//replaceship\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{MissingArgReplaceshipLiteral}\".");
     }
 
     /// <summary>
@@ -27665,71 +26218,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Respa", shipName: "RespaShip", cts.Token);
+            firstName: "Respa", shipName: "RespaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "//respec");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "//respec");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(MissingArgRespecLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(MissingArgRespecLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgRespecLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"//respec\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{MissingArgRespecLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgRespecLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"//respec\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{MissingArgRespecLiteral}\".");
     }
 
     /// <summary>
@@ -27816,71 +26360,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Createi", shipName: "CreateiShip", cts.Token);
+            firstName: "Createi", shipName: "CreateiShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/createitem");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/createitem");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(MissingArgCreateitemLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(MissingArgCreateitemLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgCreateitemLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/createitem\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{MissingArgCreateitemLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgCreateitemLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/createitem\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{MissingArgCreateitemLiteral}\".");
     }
 
     /// <summary>
@@ -27955,71 +26490,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Credta", shipName: "CredtaShip", cts.Token);
+            firstName: "Credta", shipName: "CredtaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/createcredits");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/createcredits");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(MissingArgCreatecreditsLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(MissingArgCreatecreditsLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgCreatecreditsLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/createcredits\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{MissingArgCreatecreditsLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgCreatecreditsLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/createcredits\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{MissingArgCreatecreditsLiteral}\".");
     }
 
     /// <summary>
@@ -28063,71 +26589,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Cremia", shipName: "CremiaShip", cts.Token);
+            firstName: "Cremia", shipName: "CremiaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/createmission");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/createmission");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(MissingArgCreatemissionLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(MissingArgCreatemissionLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgCreatemissionLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/createmission\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{MissingArgCreatemissionLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgCreatemissionLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/createmission\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{MissingArgCreatemissionLiteral}\".");
     }
 
     /// <summary>
@@ -28165,71 +26682,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Cremob", shipName: "CremobShip", cts.Token);
+            firstName: "Cremob", shipName: "CremobShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/createmob");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/createmob");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(MissingArgCreatemobLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(MissingArgCreatemobLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgCreatemobLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/createmob\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{MissingArgCreatemobLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgCreatemobLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/createmob\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{MissingArgCreatemobLiteral}\".");
     }
 
     /// <summary>
@@ -28274,71 +26782,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Creabe", shipName: "CreabeShip", cts.Token);
+            firstName: "Creabe", shipName: "CreabeShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/create");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/create");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(MissingArgCreateLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(MissingArgCreateLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgCreateLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/create\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{MissingArgCreateLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgCreateLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/create\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{MissingArgCreateLiteral}\".");
     }
 
     /// <summary>
@@ -28383,71 +26882,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Custom", shipName: "CustomShip", cts.Token);
+            firstName: "Custom", shipName: "CustomShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/customizeship");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/customizeship");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(MissingArgCustomizeshipLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(MissingArgCustomizeshipLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgCustomizeshipLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/customizeship\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{MissingArgCustomizeshipLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgCustomizeshipLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/customizeship\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{MissingArgCustomizeshipLiteral}\".");
     }
 
     /// <summary>
@@ -28491,71 +26981,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Dialoa", shipName: "DialoaShip", cts.Token);
+            firstName: "Dialoa", shipName: "DialoaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/dialog");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/dialog");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(MissingArgDialogLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(MissingArgDialogLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgDialogLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/dialog\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{MissingArgDialogLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgDialogLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/dialog\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{MissingArgDialogLiteral}\".");
     }
 
     /// <summary>
@@ -28598,71 +27079,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Debmis", shipName: "DebmisShip", cts.Token);
+            firstName: "Debmis", shipName: "DebmisShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/debugmissions");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/debugmissions");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(MissingArgDebugmissionsLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(MissingArgDebugmissionsLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgDebugmissionsLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/debugmissions\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{MissingArgDebugmissionsLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgDebugmissionsLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/debugmissions\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{MissingArgDebugmissionsLiteral}\".");
     }
 
     /// <summary>
@@ -28709,71 +27181,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Effesa", shipName: "EffesaShip", cts.Token);
+            firstName: "Effesa", shipName: "EffesaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/effects");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/effects");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(MissingArgEffectsLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(MissingArgEffectsLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgEffectsLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/effects\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{MissingArgEffectsLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgEffectsLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/effects\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{MissingArgEffectsLiteral}\".");
     }
 
     /// <summary>
@@ -28817,71 +27280,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Expoda", shipName: "ExpodaShip", cts.Token);
+            firstName: "Expoda", shipName: "ExpodaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/exposedecos");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/exposedecos");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(MissingArgExposedecosLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(MissingArgExposedecosLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgExposedecosLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/exposedecos\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{MissingArgExposedecosLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgExposedecosLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/exposedecos\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{MissingArgExposedecosLiteral}\".");
     }
 
     /// <summary>
@@ -28939,71 +27393,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Shibua", shipName: "ShibuaShip", cts.Token);
+            firstName: "Shibua", shipName: "ShibuaShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/shieldbuff");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/shieldbuff");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(MissingArgShieldbuffLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(MissingArgShieldbuffLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(MissingArgShieldbuffLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/shieldbuff\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{MissingArgShieldbuffLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(MissingArgShieldbuffLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/shieldbuff\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{MissingArgShieldbuffLiteral}\".");
     }
 
     /// <summary>
@@ -29140,76 +27585,67 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Upmu", shipName: "UpmuShip", cts.Token);
+            firstName: "Upmu", shipName: "UpmuShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/uptime");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/uptime");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.StartsWith(UptimePrefix, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            // Structural invariants: COLOR, format markers, length
+            // consistency, NUL terminator. Dynamic %d substitutions
+            // (Hours/Min/Sec) are NOT byte-pinned.
+            Assert.Equal(ExpectedReplyColor, span[2]);
+            Assert.EndsWith(UptimeSuffix, text);
+            Assert.Contains(UptimeHourMarker, text);
+            Assert.Contains(UptimeMinMarker, text);
 
-                if (!text.StartsWith(UptimePrefix, StringComparison.Ordinal))
-                    continue;
-
-                // Structural invariants: COLOR, format markers, length
-                // consistency, NUL terminator. Dynamic %d substitutions
-                // (Hours/Min/Sec) are NOT byte-pinned.
-                Assert.Equal(ExpectedReplyColor, span[2]);
-                Assert.EndsWith(UptimeSuffix, text);
-                Assert.Contains(UptimeHourMarker, text);
-                Assert.Contains(UptimeMinMarker, text);
-
-                // length-prefix u16 covers body+NUL.
-                Assert.Equal(text.Length + 1, msgLen);
-                // Payload = u16(2) + color(1) + body + NUL.
-                Assert.Equal(3 + text.Length + 1, span.Length);
-                // NUL terminator after body.
-                Assert.Equal((byte)0x00, span[3 + text.Length]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/uptime\" without seeing 0x001D MESSAGE_STRING starting with " +
-                $"\"{UptimePrefix}\".");
+            // length-prefix u16 covers body+NUL.
+            Assert.Equal(text.Length + 1, msgLen);
+            // Payload = u16(2) + color(1) + body + NUL.
+            Assert.Equal(3 + text.Length + 1, span.Length);
+            // NUL terminator after body.
+            Assert.Equal((byte)0x00, span[3 + text.Length]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/uptime\" without seeing 0x001D MESSAGE_STRING starting with " +
+            $"\"{UptimePrefix}\".");
     }
 
     /// <summary>
@@ -29350,71 +27786,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Wapo", shipName: "WapoShip", cts.Token);
+            firstName: "Wapo", shipName: "WapoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/warp 500");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/warp 500");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(WarpLimitsLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(WarpLimitsLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(WarpLimitsLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/warp 500\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{WarpLimitsLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(WarpLimitsLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/warp 500\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{WarpLimitsLiteral}\".");
     }
 
     /// <summary>
@@ -29574,71 +28001,62 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Wahi", shipName: "WahiShip", cts.Token);
+            firstName: "Wahi", shipName: "WahiShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/warp 99999");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/warp 99999");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(WarpLimitsLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(WarpLimitsLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(WarpLimitsLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/warp 99999\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{WarpLimitsLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(WarpLimitsLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/warp 99999\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{WarpLimitsLiteral}\".");
     }
 
     /// <summary>
@@ -29782,70 +28200,61 @@ public sealed class SectorChatTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Wamo", shipName: "WamoShip", cts.Token);
+            firstName: "Wamo", shipName: "WamoShip", cts.Token));
 
-        try
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/warp 5000");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/warp 5000");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Equals(SuccessLiteral, StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Equals(SuccessLiteral, StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(SuccessLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
-                $"\"/warp 5000\" without seeing 0x001D MESSAGE_STRING equal to " +
-                $"\"{SuccessLiteral}\".");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(SuccessLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0033 CLIENT_CHAT with body " +
+            $"\"/warp 5000\" without seeing 0x001D MESSAGE_STRING equal to " +
+            $"\"{SuccessLiteral}\".");
     }
 }

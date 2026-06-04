@@ -186,16 +186,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorSkillAbilityTests
+public sealed class SectorSkillAbilityTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorSkillAbilityTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorSkillAbilityTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task SkillAbility_OnUnknownAbilityIndex_ReceivesPriorityMessageNotYetWorking()
@@ -211,87 +204,78 @@ public sealed class SectorSkillAbilityTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Skillet", shipName: "SkillShip", cts.Token);
+            firstName: "Skillet", shipName: "SkillShip", cts.Token));
 
-        try
+        // 0x0058 SKILL_ABILITY — 12B canonical payload with
+        // AbilityIndex=200 (>= MAX_ABILITY_IDS=138 → else-branch).
+        //   [0..4)   int32 GameID       = 0
+        //   [4..8)   int32 Action       = 0
+        //   [8..12)  int32 AbilityIndex = 200
+        byte[] payload = new byte[12];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(8, 4), 200);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.SkillAbility.Value, payload),
+            cts.Token);
+
+        // Drain inbound until we see a 0x0020 PRIORITY_MESSAGE
+        // whose first AddDataSN string contains "not yet working".
+        // Post-handshake the server may interleave other in-sector
+        // fan-out (NPC chatter, state updates, etc.); a frame cap
+        // keeps a stalled pipeline from masquerading as the outer-
+        // CTS timeout.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // 0x0058 SKILL_ABILITY — 12B canonical payload with
-            // AbilityIndex=200 (>= MAX_ABILITY_IDS=138 → else-branch).
-            //   [0..4)   int32 GameID       = 0
-            //   [4..8)   int32 Action       = 0
-            //   [8..12)  int32 AbilityIndex = 200
-            byte[] payload = new byte[12];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(8, 4), 200);
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.SkillAbility.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.PriorityMessage.Value)
+                continue;
 
-            // Drain inbound until we see a 0x0020 PRIORITY_MESSAGE
-            // whose first AddDataSN string contains "not yet working".
-            // Post-handshake the server may interleave other in-sector
-            // fan-out (NPC chatter, state updates, etc.); a frame cap
-            // keeps a stalled pipeline from masquerading as the outer-
-            // CTS timeout.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            // 0x0020 wire layout (mirror of Player::SendPriorityMessageString
+            // at server/src/PlayerConnection.cpp:10986):
+            //   AddDataSN(msg1)          // string + '\0'
+            //   AddDataSN(msg2)          // string + '\0'
+            //   AddData<long>(time)      // 4B LE
+            //   AddData<long>(priority)  // 4B LE
+            var span = reply.Payload.Span;
+            Assert.True(span.Length >= 10,
+                $"PRIORITY_MESSAGE payload too short: {span.Length}B " +
+                $"(needs at least 2× '\\0' + 8B time/priority).");
 
-                if (reply!.Header.Opcode != OpcodeId.Known.PriorityMessage.Value)
-                    continue;
+            // Find the first NUL terminator — that bounds msg1.
+            int nulIdx = span.IndexOf((byte)0);
+            if (nulIdx < 0) continue;
 
-                // 0x0020 wire layout (mirror of Player::SendPriorityMessageString
-                // at server/src/PlayerConnection.cpp:10986):
-                //   AddDataSN(msg1)          // string + '\0'
-                //   AddDataSN(msg2)          // string + '\0'
-                //   AddData<long>(time)      // 4B LE
-                //   AddData<long>(priority)  // 4B LE
-                var span = reply.Payload.Span;
-                Assert.True(span.Length >= 10,
-                    $"PRIORITY_MESSAGE payload too short: {span.Length}B " +
-                    $"(needs at least 2× '\\0' + 8B time/priority).");
+            string msg1 = Encoding.ASCII.GetString(span[..nulIdx]);
 
-                // Find the first NUL terminator — that bounds msg1.
-                int nulIdx = span.IndexOf((byte)0);
-                if (nulIdx < 0) continue;
+            // Filter — other PRIORITY_MESSAGE frames may arrive
+            // first. Keep draining until we see the one keyed by
+            // our SKILL_ABILITY.
+            if (!msg1.Contains("not yet working", StringComparison.Ordinal))
+                continue;
 
-                string msg1 = Encoding.ASCII.GetString(span[..nulIdx]);
-
-                // Filter — other PRIORITY_MESSAGE frames may arrive
-                // first. Keep draining until we see the one keyed by
-                // our SKILL_ABILITY.
-                if (!msg1.Contains("not yet working", StringComparison.Ordinal))
-                    continue;
-
-                // Pin on the distinctive substring rather than the
-                // whole string so punctuation tweaks don't sink the
-                // test. Full literal at PlayerAbilitys.cpp:72:
-                // "Error: This ability is not yet working. Try later!"
-                Assert.Contains("not yet working", msg1);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0058 SKILL_ABILITY (AbilityIndex=200) " +
-                $"without seeing 0x0020 PRIORITY_MESSAGE containing \"not yet working\". " +
-                $"Likely the server's HandleSkillAbility else-branch SendPriorityMessageString path broke, " +
-                $"the proxy default-case forwarding dropped the opcode, " +
-                $"the dispatcher case at PlayerConnection.cpp:503 got mis-routed, " +
-                $"or SkillUse struct was widened past 12B and AbilityIndex landed in receive-buffer slack.");
+            // Pin on the distinctive substring rather than the
+            // whole string so punctuation tweaks don't sink the
+            // test. Full literal at PlayerAbilitys.cpp:72:
+            // "Error: This ability is not yet working. Try later!"
+            Assert.Contains("not yet working", msg1);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0058 SKILL_ABILITY (AbilityIndex=200) " +
+            $"without seeing 0x0020 PRIORITY_MESSAGE containing \"not yet working\". " +
+            $"Likely the server's HandleSkillAbility else-branch SendPriorityMessageString path broke, " +
+            $"the proxy default-case forwarding dropped the opcode, " +
+            $"the dispatcher case at PlayerConnection.cpp:503 got mis-routed, " +
+            $"or SkillUse struct was widened past 12B and AbilityIndex landed in receive-buffer slack.");
     }
 
     /// <summary>
@@ -405,75 +389,66 @@ public sealed class SectorSkillAbilityTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Skilex12", shipName: "SkillShip12", cts.Token);
+            firstName: "Skilex12", shipName: "SkillShip12", cts.Token));
 
-        try
+        byte[] payload = new byte[12];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(8, 4), 200);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.SkillAbility.Value, payload),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            byte[] payload = new byte[12];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(8, 4), 200);
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.SkillAbility.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.PriorityMessage.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < ExpectedMsg1ByteCount + 1)
+                continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.PriorityMessage.Value)
-                    continue;
+            int firstNul = span.IndexOf((byte)0);
+            if (firstNul < 0) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < ExpectedMsg1ByteCount + 1)
-                    continue;
+            string msg1Preview = Encoding.ASCII.GetString(span[..firstNul]);
+            if (!msg1Preview.Contains("not yet working", StringComparison.Ordinal))
+                continue;
 
-                int firstNul = span.IndexOf((byte)0);
-                if (firstNul < 0) continue;
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
 
-                string msg1Preview = Encoding.ASCII.GetString(span[..firstNul]);
-                if (!msg1Preview.Contains("not yet working", StringComparison.Ordinal))
-                    continue;
+            Assert.Equal(ExpectedMsg1ByteCount, firstNul);
+            Assert.Equal(ExpectedMsg1, Encoding.ASCII.GetString(span[..ExpectedMsg1ByteCount]));
+            Assert.Equal((byte)0, span[ExpectedMsg1ByteCount]);
 
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            int msg2Start = ExpectedMsg1ByteCount + 1;
+            int msg2End = msg2Start + ExpectedMsg2ByteCount;
+            Assert.Equal(
+                ExpectedMsg2,
+                Encoding.ASCII.GetString(span.Slice(msg2Start, ExpectedMsg2ByteCount)));
+            Assert.Equal((byte)0, span[msg2End]);
 
-                Assert.Equal(ExpectedMsg1ByteCount, firstNul);
-                Assert.Equal(ExpectedMsg1, Encoding.ASCII.GetString(span[..ExpectedMsg1ByteCount]));
-                Assert.Equal((byte)0, span[ExpectedMsg1ByteCount]);
-
-                int msg2Start = ExpectedMsg1ByteCount + 1;
-                int msg2End = msg2Start + ExpectedMsg2ByteCount;
-                Assert.Equal(
-                    ExpectedMsg2,
-                    Encoding.ASCII.GetString(span.Slice(msg2Start, ExpectedMsg2ByteCount)));
-                Assert.Equal((byte)0, span[msg2End]);
-
-                int timeStart = msg2End + 1;
-                int priorityStart = timeStart + 4;
-                Assert.Equal(
-                    ExpectedTime,
-                    BinaryPrimitives.ReadInt32LittleEndian(span.Slice(timeStart, 4)));
-                Assert.Equal(
-                    ExpectedPriority,
-                    BinaryPrimitives.ReadInt32LittleEndian(span.Slice(priorityStart, 4)));
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0058 SKILL_ABILITY (AbilityIndex=200) " +
-                $"without seeing 0x0020 PRIORITY_MESSAGE containing \"not yet working\" for byte-exact pin.");
+            int timeStart = msg2End + 1;
+            int priorityStart = timeStart + 4;
+            Assert.Equal(
+                ExpectedTime,
+                BinaryPrimitives.ReadInt32LittleEndian(span.Slice(timeStart, 4)));
+            Assert.Equal(
+                ExpectedPriority,
+                BinaryPrimitives.ReadInt32LittleEndian(span.Slice(priorityStart, 4)));
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0058 SKILL_ABILITY (AbilityIndex=200) " +
+            $"without seeing 0x0020 PRIORITY_MESSAGE containing \"not yet working\" for byte-exact pin.");
     }
 }

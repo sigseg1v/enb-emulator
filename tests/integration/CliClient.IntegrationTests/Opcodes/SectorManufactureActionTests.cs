@@ -214,16 +214,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorManufactureActionTests
+public sealed class SectorManufactureActionTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorManufactureActionTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorManufactureActionTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task ManufactureAction_ModeNoneOuterSwitchDefault_DoesNotBreakConnection_RequestTimeStillRoundTrips()
@@ -242,83 +235,74 @@ public sealed class SectorManufactureActionTests
         // firstName "Ulani" starts with lowercase 'u' for the
         // AccountManager.cpp:1147 vowel-check footgun (case-sensitive
         // a/e/i/o/u/y BEFORE toupper at line 1153).
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Ulani", shipName: "UlaniShip", cts.Token);
+            firstName: "Ulani", shipName: "UlaniShip", cts.Token));
 
-        try
+        // 0x007E MANUFACTURE_ACTION (HandleManufactureAction) —
+        // 8B packed payload:
+        //   int32_t GameID   (handler ignores; identity from connection)
+        //   int32_t Data     (network byte order — Action=0
+        //                     (ACTION_LEAVE_TERMINAL) is irrelevant
+        //                     because the outer switch on
+        //                     ManuIndex()->GetMode() = MODE_NONE = 0
+        //                     has no case-MODE_NONE arm so we fall
+        //                     into the default LogMessage; no
+        //                     state mutation, no reply)
+        byte[] payload = new byte[8];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);  // GameID
+        BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(4, 4), 0);     // Data=0 (network order, irrelevant on default path)
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.ManufactureAction.Value, payload),
+            cts.Token);
+
+        // Survival probe: did the connection survive the
+        // MANUFACTURE_ACTION handler? Send REQUEST_TIME and
+        // assert CLIENT_SET_TIME echoes our sentinel tick.
+        int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+
+        byte[] reqTimePayload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
+            cts.Token);
+
+        // Drain until 0x0034 CLIENT_SET_TIME. Tolerate interleaved
+        // in-sector frames (positional updates from observers).
+        // NOTE: unlike Wave 44/45 there's no 0x001B AUX_DATA reply
+        // expected — the MODE_NONE default arm doesn't call
+        // SendAuxManu — so the only frames between our send and
+        // the CLIENT_SET_TIME echo should be positional updates
+        // from any in-sector observers.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // 0x007E MANUFACTURE_ACTION (HandleManufactureAction) —
-            // 8B packed payload:
-            //   int32_t GameID   (handler ignores; identity from connection)
-            //   int32_t Data     (network byte order — Action=0
-            //                     (ACTION_LEAVE_TERMINAL) is irrelevant
-            //                     because the outer switch on
-            //                     ManuIndex()->GetMode() = MODE_NONE = 0
-            //                     has no case-MODE_NONE arm so we fall
-            //                     into the default LogMessage; no
-            //                     state mutation, no reply)
-            byte[] payload = new byte[8];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);  // GameID
-            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(4, 4), 0);     // Data=0 (network order, irrelevant on default path)
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.ManufactureAction.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
+                continue;
 
-            // Survival probe: did the connection survive the
-            // MANUFACTURE_ACTION handler? Send REQUEST_TIME and
-            // assert CLIENT_SET_TIME echoes our sentinel tick.
-            int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+            var span = reply.Payload.Span;
+            Assert.Equal(12, span.Length);
 
-            byte[] reqTimePayload = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+            int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+            Assert.Equal(clientTick, echoedClientSent);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
-                cts.Token);
-
-            // Drain until 0x0034 CLIENT_SET_TIME. Tolerate interleaved
-            // in-sector frames (positional updates from observers).
-            // NOTE: unlike Wave 44/45 there's no 0x001B AUX_DATA reply
-            // expected — the MODE_NONE default arm doesn't call
-            // SendAuxManu — so the only frames between our send and
-            // the CLIENT_SET_TIME echo should be positional updates
-            // from any in-sector observers.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-
-                if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
-                    continue;
-
-                var span = reply.Payload.Span;
-                Assert.Equal(12, span.Length);
-
-                int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                Assert.Equal(clientTick, echoedClientSent);
-
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x007E MANUFACTURE_ACTION + 0x0044 REQUEST_TIME " +
-                $"without seeing 0x0034 CLIENT_SET_TIME. " +
-                $"Likely the dispatcher arm at PlayerConnection.cpp:535 got mis-routed " +
-                $"(swap with HandleRefineSetItem over-reads our 8B payload), " +
-                $"ATTRIB_PACKED on the ManufactureData struct at PacketStructures.h:1062 was dropped, " +
-                $"a case-MODE_NONE arm was added at PlayerManufacturing.cpp:508 with state-mutating body, " +
-                $"the outer-switch default at PlayerManufacturing.cpp:683 was changed to call a crashing method, " +
-                $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted.");
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x007E MANUFACTURE_ACTION + 0x0044 REQUEST_TIME " +
+            $"without seeing 0x0034 CLIENT_SET_TIME. " +
+            $"Likely the dispatcher arm at PlayerConnection.cpp:535 got mis-routed " +
+            $"(swap with HandleRefineSetItem over-reads our 8B payload), " +
+            $"ATTRIB_PACKED on the ManufactureData struct at PacketStructures.h:1062 was dropped, " +
+            $"a case-MODE_NONE arm was added at PlayerManufacturing.cpp:508 with state-mutating body, " +
+            $"the outer-switch default at PlayerManufacturing.cpp:683 was changed to call a crashing method, " +
+            $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted.");
     }
 }

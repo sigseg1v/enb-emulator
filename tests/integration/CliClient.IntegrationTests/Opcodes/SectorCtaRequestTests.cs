@@ -214,7 +214,7 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorCtaRequestTests
+public sealed class SectorCtaRequestTests : SectorIntegrationTest
 {
     private const int ExpectedCtaResponseSize = 9;
     private const int CtaSourceId = 0x12345678;
@@ -222,14 +222,7 @@ public sealed class SectorCtaRequestTests
     private const int CtaActionDefaultArm = 0;
     private const byte ExpectedSuccessByte = 0x01;
 
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorCtaRequestTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorCtaRequestTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task CtaRequest_OnDefaultArmAction_ReceivesCtaResponseWithSuccessByte()
@@ -245,78 +238,57 @@ public sealed class SectorCtaRequestTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Cta59", shipName: "Cta59Ship", cts.Token);
+            firstName: "Cta59", shipName: "Cta59Ship", cts.Token));
 
-        try
+        // Canonical 12B packed CTARequest payload. Action=0 forces
+        // the default arm in PlayerManager::GroupAction (the
+        // (Action-4) switch has cases 0..8 covering Action=4..12; any
+        // other value lands on the logging-no-op default). SourceID
+        // is a sentinel we assert is echoed unchanged through the
+        // server's int32_t* write — the post-tightening byte path.
+        byte[] payload = new byte[12];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), CtaSourceId);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), CtaTargetId);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(8, 4), CtaActionDefaultArm);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.CtaRequest.Value, payload),
+            cts.Token);
+
+        // Drain up to 400 frames waiting for the 0x00BD reply.
+        const int maxFrames = 400;
+        int seen = 0;
+        Packet? reply = null;
+        while (seen++ < maxFrames)
         {
-            // Canonical 12B packed CTARequest payload. Action=0 forces
-            // the default arm in PlayerManager::GroupAction (the
-            // (Action-4) switch has cases 0..8 covering Action=4..12; any
-            // other value lands on the logging-no-op default). SourceID
-            // is a sentinel we assert is echoed unchanged through the
-            // server's int32_t* write — the post-tightening byte path.
-            byte[] payload = new byte[12];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), CtaSourceId);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), CtaTargetId);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(8, 4), CtaActionDefaultArm);
-
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.CtaRequest.Value, payload),
-                cts.Token);
-
-            // Drain up to 400 frames waiting for the 0x00BD reply.
-            const int maxFrames = 400;
-            int seen = 0;
-            Packet? reply = null;
-            while (seen++ < maxFrames)
+            var frame = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(frame);
+            if (frame!.Header.Opcode == OpcodeId.Known.CtaResponse.Value)
             {
-                var frame = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(frame);
-                if (frame!.Header.Opcode == OpcodeId.Known.CtaResponse.Value)
-                {
-                    reply = frame;
-                    break;
-                }
+                reply = frame;
+                break;
             }
-
-            Assert.NotNull(reply);
-            Assert.Equal(ExpectedCtaResponseSize, reply!.Payload.Length);
-
-            var span = reply.Payload.Span;
-
-            // [0..4) GameID — echoed from SourceID via the int32_t* write.
-            int replySourceId = BinaryPrimitives.ReadInt32LittleEndian(span.Slice(0, 4));
-            Assert.Equal(CtaSourceId, replySourceId);
-
-            // [4..8) RequestType — echoed from Action via the int32_t* write.
-            int replyAction = BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4));
-            Assert.Equal(CtaActionDefaultArm, replyAction);
-
-            // [8..9) Success — pre-fix this was clobbered to 0x00 by the
-            // long* write at offset 4 overflowing into byte 8. Post-fix
-            // the int32_t* write stays within [4..8] and the literal 0x01
-            // at byte 8 is preserved.
-            Assert.Equal(ExpectedSuccessByte, span[8]);
         }
-        finally
-        {
-            try
-            {
-                using var logoffCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                byte[] logoffPayload = new byte[8];
-                await session.Sector.SendAsync(
-                    Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
-                    logoffCts.Token);
-                await SectorHandshake.DrainUntilOpcode(
-                    session.Sector, OpcodeId.Known.LogoffConfirmation.Value, logoffCts.Token);
-            }
-            catch { /* best-effort logoff */ }
 
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+        Assert.NotNull(reply);
+        Assert.Equal(ExpectedCtaResponseSize, reply!.Payload.Length);
+
+        var span = reply.Payload.Span;
+
+        // [0..4) GameID — echoed from SourceID via the int32_t* write.
+        int replySourceId = BinaryPrimitives.ReadInt32LittleEndian(span.Slice(0, 4));
+        Assert.Equal(CtaSourceId, replySourceId);
+
+        // [4..8) RequestType — echoed from Action via the int32_t* write.
+        int replyAction = BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4));
+        Assert.Equal(CtaActionDefaultArm, replyAction);
+
+        // [8..9) Success — pre-fix this was clobbered to 0x00 by the
+        // long* write at offset 4 overflowing into byte 8. Post-fix
+        // the int32_t* write stays within [4..8] and the literal 0x01
+        // at byte 8 is preserved.
+        Assert.Equal(ExpectedSuccessByte, span[8]);
     }
 }

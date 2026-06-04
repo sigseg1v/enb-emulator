@@ -164,16 +164,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorPlayerShipSentTests
+public sealed class SectorPlayerShipSentTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorPlayerShipSentTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorPlayerShipSentTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task PlayerShipSent_OnFreshChar_DoesNotBreakConnection_RequestTimeStillRoundTrips()
@@ -191,75 +184,66 @@ public sealed class SectorPlayerShipSentTests
 
         // firstName "Eshipia" contains 'e', 'i' for the AccountManager
         // vowel-check footgun (case-sensitive a/e/i/o/u/y BEFORE toupper).
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Eshipia", shipName: "EshipiaShip", cts.Token);
+            firstName: "Eshipia", shipName: "EshipiaShip", cts.Token));
 
-        try
+        // 0x3004 PLAYER_SHIP_SENT -- server handler at
+        // server/src/PlayerConnection.cpp:625-629 calls
+        // SetNavCommence() (write-only bool) then FinishLogin(true)
+        // (state finalisation, no SendOpcode emit). The handler
+        // doesn't read `data` at all. Matching the proxy's wire
+        // emit pattern (sizeof(long player_id) = 8 on Linux LP64;
+        // the proxy fills it but the handler ignores) we send an
+        // 8-byte all-zero payload.
+        byte[] payload = new byte[8];
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.PlayerShipSent.Value, payload),
+            cts.Token);
+
+        // Survival probe: did the connection survive the
+        // PLAYER_SHIP_SENT handler? Send REQUEST_TIME and assert
+        // CLIENT_SET_TIME echoes our sentinel tick.
+        int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+
+        byte[] reqTimePayload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
+            cts.Token);
+
+        // Drain until 0x0034 CLIENT_SET_TIME. Tolerate interleaved
+        // in-sector frames (positional updates from observers, plus
+        // any frames FinishLogin's downstream state transition may
+        // trigger -- the handler itself emits nothing but the state
+        // flip may surface later via the broadcast pipeline).
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // 0x3004 PLAYER_SHIP_SENT -- server handler at
-            // server/src/PlayerConnection.cpp:625-629 calls
-            // SetNavCommence() (write-only bool) then FinishLogin(true)
-            // (state finalisation, no SendOpcode emit). The handler
-            // doesn't read `data` at all. Matching the proxy's wire
-            // emit pattern (sizeof(long player_id) = 8 on Linux LP64;
-            // the proxy fills it but the handler ignores) we send an
-            // 8-byte all-zero payload.
-            byte[] payload = new byte[8];
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.PlayerShipSent.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
+                continue;
 
-            // Survival probe: did the connection survive the
-            // PLAYER_SHIP_SENT handler? Send REQUEST_TIME and assert
-            // CLIENT_SET_TIME echoes our sentinel tick.
-            int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+            var span = reply.Payload.Span;
+            Assert.Equal(12, span.Length);
 
-            byte[] reqTimePayload = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+            int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+            Assert.Equal(clientTick, echoedClientSent);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
-                cts.Token);
-
-            // Drain until 0x0034 CLIENT_SET_TIME. Tolerate interleaved
-            // in-sector frames (positional updates from observers, plus
-            // any frames FinishLogin's downstream state transition may
-            // trigger -- the handler itself emits nothing but the state
-            // flip may surface later via the broadcast pipeline).
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-
-                if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
-                    continue;
-
-                var span = reply.Payload.Span;
-                Assert.Equal(12, span.Length);
-
-                int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                Assert.Equal(clientTick, echoedClientSent);
-
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x3004 PLAYER_SHIP_SENT + 0x0044 REQUEST_TIME " +
-                $"without seeing 0x0034 CLIENT_SET_TIME. " +
-                $"Likely the dispatcher arm at PlayerConnection.cpp:625 was removed (server would default-LogMessage 'Bad opcode'), " +
-                $"FinishLogin at PlayerClass.cpp:3878 SEGV'd inside FindStation / CheckNavs / SetInSpace, " +
-                $"the proxy's bottom-of-switch ForwardClientOpcode default at proxy/ClientToServer_linux_stubs.cpp dropped 0x3004, " +
-                $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted.");
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x3004 PLAYER_SHIP_SENT + 0x0044 REQUEST_TIME " +
+            $"without seeing 0x0034 CLIENT_SET_TIME. " +
+            $"Likely the dispatcher arm at PlayerConnection.cpp:625 was removed (server would default-LogMessage 'Bad opcode'), " +
+            $"FinishLogin at PlayerClass.cpp:3878 SEGV'd inside FindStation / CheckNavs / SetInSpace, " +
+            $"the proxy's bottom-of-switch ForwardClientOpcode default at proxy/ClientToServer_linux_stubs.cpp dropped 0x3004, " +
+            $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted.");
     }
 }

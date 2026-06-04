@@ -198,16 +198,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorMissionDismissalTests
+public sealed class SectorMissionDismissalTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorMissionDismissalTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorMissionDismissalTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task MissionDismissal_OutOfRangeMissionId_DoesNotBreakConnection_RequestTimeStillRoundTrips()
@@ -226,72 +219,63 @@ public sealed class SectorMissionDismissalTests
         // firstName "Misdis" — lowercase 'i' for the
         // AccountManager.cpp:1147 vowel-check footgun (case-sensitive
         // a/e/i/o/u/y BEFORE toupper at line 1153).
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Misdis", shipName: "MisdisShip", cts.Token);
+            firstName: "Misdis", shipName: "MisdisShip", cts.Token));
 
-        try
+        // 0x0087 MISSION_DISMISSAL — 8B payload:
+        //   int32_t PlayerID    (network byte order, ignored by handler)
+        //   int32_t MissionID   (network byte order, sent as 999 to fail
+        //                        the `< 12` guard in MissionDismiss)
+        byte[] payload = new byte[8];
+        BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(0, 4), 0);   // PlayerID
+        BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(4, 4), 999); // MissionID — OOR
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.MissionDismissal.Value, payload),
+            cts.Token);
+
+        // Survival probe: did the connection survive the
+        // mission-dismissal handler? Send REQUEST_TIME and
+        // assert CLIENT_SET_TIME echoes our sentinel tick.
+        int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+
+        byte[] reqTimePayload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
+            cts.Token);
+
+        // Drain until 0x0034 CLIENT_SET_TIME. Tolerate
+        // interleaved in-sector frames (positional updates from
+        // observers, etc.).
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // 0x0087 MISSION_DISMISSAL — 8B payload:
-            //   int32_t PlayerID    (network byte order, ignored by handler)
-            //   int32_t MissionID   (network byte order, sent as 999 to fail
-            //                        the `< 12` guard in MissionDismiss)
-            byte[] payload = new byte[8];
-            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(0, 4), 0);   // PlayerID
-            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(4, 4), 999); // MissionID — OOR
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.MissionDismissal.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
+                continue;
 
-            // Survival probe: did the connection survive the
-            // mission-dismissal handler? Send REQUEST_TIME and
-            // assert CLIENT_SET_TIME echoes our sentinel tick.
-            int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+            var span = reply.Payload.Span;
+            Assert.Equal(12, span.Length);
 
-            byte[] reqTimePayload = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+            int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+            Assert.Equal(clientTick, echoedClientSent);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
-                cts.Token);
-
-            // Drain until 0x0034 CLIENT_SET_TIME. Tolerate
-            // interleaved in-sector frames (positional updates from
-            // observers, etc.).
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-
-                if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
-                    continue;
-
-                var span = reply.Payload.Span;
-                Assert.Equal(12, span.Length);
-
-                int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                Assert.Equal(clientTick, echoedClientSent);
-
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0087 MISSION_DISMISSAL + 0x0044 REQUEST_TIME " +
-                $"without seeing 0x0034 CLIENT_SET_TIME. " +
-                $"Likely the dispatcher arm at PlayerConnection.cpp:555 got mis-routed " +
-                $"(swap with HandlePetitionStuck → SavePetition over-reads our 8B payload), " +
-                $"the `< 12` guard at PlayerMissions.cpp:1618 was removed " +
-                $"(OOB read into adjacent Player instance memory), " +
-                $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted.");
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0087 MISSION_DISMISSAL + 0x0044 REQUEST_TIME " +
+            $"without seeing 0x0034 CLIENT_SET_TIME. " +
+            $"Likely the dispatcher arm at PlayerConnection.cpp:555 got mis-routed " +
+            $"(swap with HandlePetitionStuck → SavePetition over-reads our 8B payload), " +
+            $"the `< 12` guard at PlayerMissions.cpp:1618 was removed " +
+            $"(OOB read into adjacent Player instance memory), " +
+            $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted.");
     }
 }

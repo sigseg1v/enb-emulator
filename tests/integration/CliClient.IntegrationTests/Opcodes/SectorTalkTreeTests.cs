@@ -200,19 +200,12 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorTalkTreeTests
+public sealed class SectorTalkTreeTests : SectorIntegrationTest
 {
     private const int ExpectedTalkTreeFallbackSize = 139;
     private const uint UnknownNpcId = 0xDEADBEEF;
 
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorTalkTreeTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorTalkTreeTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task StarbaseTalkAction4_OnUnknownNpc_ReceivesFallbackTalkTree()
@@ -228,61 +221,40 @@ public sealed class SectorTalkTreeTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Talk4", shipName: "Talk4Ship", cts.Token);
+            firstName: "Talk4", shipName: "Talk4Ship", cts.Token));
 
-        try
+        // Canonical 9B packed StarbaseRequest payload. PlayerID is
+        // ignored on the case=4 arm; StarbaseID = 0xDEADBEEF is the
+        // intentional unknown-NPC sentinel that drives the
+        // std::map[] default-construct return → else-branch
+        // fallback emit.
+        byte[] payload = new byte[9];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(4, 4), UnknownNpcId);
+        payload[8] = 4;
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.StarbaseRequest.Value, payload),
+            cts.Token);
+
+        // Drain up to 400 frames waiting for the 0x0054 reply.
+        const int maxFrames = 400;
+        int seen = 0;
+        Packet? reply = null;
+        while (seen++ < maxFrames)
         {
-            // Canonical 9B packed StarbaseRequest payload. PlayerID is
-            // ignored on the case=4 arm; StarbaseID = 0xDEADBEEF is the
-            // intentional unknown-NPC sentinel that drives the
-            // std::map[] default-construct return → else-branch
-            // fallback emit.
-            byte[] payload = new byte[9];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(4, 4), UnknownNpcId);
-            payload[8] = 4;
-
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.StarbaseRequest.Value, payload),
-                cts.Token);
-
-            // Drain up to 400 frames waiting for the 0x0054 reply.
-            const int maxFrames = 400;
-            int seen = 0;
-            Packet? reply = null;
-            while (seen++ < maxFrames)
+            var frame = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(frame);
+            if (frame!.Header.Opcode == OpcodeId.Known.TalkTree.Value)
             {
-                var frame = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(frame);
-                if (frame!.Header.Opcode == OpcodeId.Known.TalkTree.Value)
-                {
-                    reply = frame;
-                    break;
-                }
+                reply = frame;
+                break;
             }
-
-            Assert.NotNull(reply);
-            Assert.Equal(ExpectedTalkTreeFallbackSize, reply!.Payload.Length);
         }
-        finally
-        {
-            try
-            {
-                using var logoffCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                byte[] logoffPayload = new byte[8];
-                await session.Sector.SendAsync(
-                    Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
-                    logoffCts.Token);
-                await SectorHandshake.DrainUntilOpcode(
-                    session.Sector, OpcodeId.Known.LogoffConfirmation.Value, logoffCts.Token);
-            }
-            catch { /* best-effort logoff */ }
 
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+        Assert.NotNull(reply);
+        Assert.Equal(ExpectedTalkTreeFallbackSize, reply!.Payload.Length);
     }
 }

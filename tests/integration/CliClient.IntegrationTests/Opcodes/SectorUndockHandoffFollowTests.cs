@@ -61,16 +61,12 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorUndockHandoffFollowTests
+public sealed class SectorUndockHandoffFollowTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
     private readonly ITestOutputHelper _out;
 
-    public SectorUndockHandoffFollowTests(ServerFixture server, ITestOutputHelper output)
+    public SectorUndockHandoffFollowTests(ServerFixture server, ITestOutputHelper output) : base(server)
     {
-        _server = server;
-        _client = new ClientFixture(server);
         _out = output;
     }
 

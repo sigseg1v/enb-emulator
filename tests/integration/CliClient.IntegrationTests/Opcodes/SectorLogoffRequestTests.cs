@@ -211,16 +211,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorLogoffRequestTests
+public sealed class SectorLogoffRequestTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorLogoffRequestTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorLogoffRequestTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task LogoffRequest_AllZeroPayload_ReceivesLogoffConfirmationWithEmptyBody()
@@ -236,73 +229,60 @@ public sealed class SectorLogoffRequestTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Quitter", shipName: "QuitterShip", cts.Token);
+            firstName: "Quitter", shipName: "QuitterShip", cts.Token));
 
-        try
+        // 0x00B9 LOGOFF_REQUEST — 8B canonical payload. The
+        // handler casts to LogoffRequest* but the cast is
+        // commented out (PlayerConnection.cpp:7711) so neither
+        // field is read. All-zero bytes are the safest payload.
+        //   [0..4) int32 PlayerID    = 0 (handler ignores)
+        //   [4..8) int32 LogOutType  = 0 (handler ignores)
+        byte[] payload = new byte[8];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 0);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, payload),
+            cts.Token);
+
+        // Drain inbound until we see a 0x00BA LOGOFF_CONFIRMATION
+        // with a zero-byte body. The handler may also emit a
+        // 0x0061 AUX_PLAYER frame from the pre-emit
+        // SendEmptyGroupAux path if HasDiff() is true; we
+        // tolerate that and keep draining.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // 0x00B9 LOGOFF_REQUEST — 8B canonical payload. The
-            // handler casts to LogoffRequest* but the cast is
-            // commented out (PlayerConnection.cpp:7711) so neither
-            // field is read. All-zero bytes are the safest payload.
-            //   [0..4) int32 PlayerID    = 0 (handler ignores)
-            //   [4..8) int32 LogOutType  = 0 (handler ignores)
-            byte[] payload = new byte[8];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 0);
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.LogoffConfirmation.Value)
+                continue;
 
-            // Drain inbound until we see a 0x00BA LOGOFF_CONFIRMATION
-            // with a zero-byte body. The handler may also emit a
-            // 0x0061 AUX_PLAYER frame from the pre-emit
-            // SendEmptyGroupAux path if HasDiff() is true; we
-            // tolerate that and keep draining.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-
-                if (reply!.Header.Opcode != OpcodeId.Known.LogoffConfirmation.Value)
-                    continue;
-
-                // 0x00BA wire layout: zero-byte body (per
-                // SendLogoffConfirmation's SendOpcode(opcode, 0, 0)
-                // at PlayerConnection.cpp:7749). Pin the exact
-                // length so any payload corruption is caught.
-                Assert.Equal(0, reply.Payload.Length);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x00B9 LOGOFF_REQUEST " +
-                $"without seeing 0x00BA LOGOFF_CONFIRMATION. " +
-                $"Likely the server's HandleLogoffRequest path broke " +
-                $"(SendLogoffConfirmation length-arg flip, SendOpcode header-width revert, " +
-                $"pre-emit LeaveGroup/GetGroupFromID(-1) early-return guard removed, " +
-                $"or DropPlayerFromGalaxy ran synchronously and tore down the connection " +
-                $"before the UDP queue flushed), the proxy's 0x00B9 case at " +
-                $"ClientToServer_linux_stubs.cpp:498 stopped falling through to " +
-                $"ForwardClientOpcode, the dispatcher case at PlayerConnection.cpp:591 " +
-                $"got mis-routed (swap with HandleCTARequest would trigger that handler's " +
-                $"sizeof(long) stack-clobber bug in the CTAResponse buffer), or the proxy's " +
-                $"SendClientPacketSequence guard at UDPProxyToClient_linux.cpp:568 " +
-                $"(opcode < 0x0FFF) was tightened.");
+            // 0x00BA wire layout: zero-byte body (per
+            // SendLogoffConfirmation's SendOpcode(opcode, 0, 0)
+            // at PlayerConnection.cpp:7749). Pin the exact
+            // length so any payload corruption is caught.
+            Assert.Equal(0, reply.Payload.Length);
+            return;
         }
-        finally
-        {
-            // Cleanup via the GLOBAL plane (separate UDP channel on
-            // UDP 3810, independent of the now-dropped sector
-            // player). SaveLogout queues a SAVE_CODE_LOGOUT message
-            // but the DB row persists so the global delete works.
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x00B9 LOGOFF_REQUEST " +
+            $"without seeing 0x00BA LOGOFF_CONFIRMATION. " +
+            $"Likely the server's HandleLogoffRequest path broke " +
+            $"(SendLogoffConfirmation length-arg flip, SendOpcode header-width revert, " +
+            $"pre-emit LeaveGroup/GetGroupFromID(-1) early-return guard removed, " +
+            $"or DropPlayerFromGalaxy ran synchronously and tore down the connection " +
+            $"before the UDP queue flushed), the proxy's 0x00B9 case at " +
+            $"ClientToServer_linux_stubs.cpp:498 stopped falling through to " +
+            $"ForwardClientOpcode, the dispatcher case at PlayerConnection.cpp:591 " +
+            $"got mis-routed (swap with HandleCTARequest would trigger that handler's " +
+            $"sizeof(long) stack-clobber bug in the CTAResponse buffer), or the proxy's " +
+            $"SendClientPacketSequence guard at UDPProxyToClient_linux.cpp:568 " +
+            $"(opcode < 0x0FFF) was tightened.");
     }
 }

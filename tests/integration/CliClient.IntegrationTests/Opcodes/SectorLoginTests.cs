@@ -47,16 +47,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorLoginTests
+public sealed class SectorLoginTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorLoginTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorLoginTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task FullSectorLogin_ReceivesStart()
@@ -75,9 +68,9 @@ public sealed class SectorLoginTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Loginus", shipName: "LoginShip", cts.Token);
+            firstName: "Loginus", shipName: "LoginShip", cts.Token));
 
         // start_id wire-format sanity check — the pre-fix Linux server
         // emitted 8 bytes for sizeof(long), which the proxy then read as
@@ -85,12 +78,5 @@ public sealed class SectorLoginTests
         // opcode in the UDP sequence. A non-zero int32_t start_id means
         // we received exactly 4 bytes in the START payload.
         Assert.NotEqual(0, session.StartId);
-
-        // Cleanup: delete the created character so a re-run starts from
-        // the empty-slot baseline. Best-effort — primary failure (if any)
-        // has already been reported.
-        using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-        try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-        catch { /* best-effort cleanup */ }
     }
 }

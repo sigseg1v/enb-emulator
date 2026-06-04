@@ -192,16 +192,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorInventoryMoveTests
+public sealed class SectorInventoryMoveTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorInventoryMoveTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorInventoryMoveTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task InventoryMove_UnrecognisedFromInv_ReceivesUnrecognisedErrorString()
@@ -217,92 +210,83 @@ public sealed class SectorInventoryMoveTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Mover", shipName: "MoverShip", cts.Token);
+            firstName: "Mover", shipName: "MoverShip", cts.Token));
 
-        try
+        // 0x0027 INVENTORY_MOVE — 24B canonical payload with
+        // FromInv=99 (well outside the switch's 1/2/3/4/6/12/14/
+        // 16/18 cases → default arm). Wire is BIG-ENDIAN (the
+        // handler ntohl-decodes every field at PlayerConnection
+        // .cpp:2493-2498).
+        //   [0..4)   int32 GameID   = 0
+        //   [4..8)   int32 FromInv  = 99
+        //   [8..12)  int32 FromSlot = 0
+        //   [12..16) int32 ToInv    = 0
+        //   [16..20) int32 ToSlot   = 0
+        //   [20..24) int32 Num      = 0
+        byte[] payload = new byte[24];
+        BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(4, 4), 99);
+        BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(8, 4), 0);
+        BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(12, 4), 0);
+        BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(16, 4), 0);
+        BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(20, 4), 0);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.InventoryMove.Value, payload),
+            cts.Token);
+
+        // Drain inbound until we see a 0x001D MESSAGE_STRING whose
+        // body contains "UNRECOGNISED INVENTORY MOVE". Post-handshake
+        // the server may interleave other in-sector fan-out (NPC
+        // chatter, state updates, etc.); a frame cap keeps a stalled
+        // pipeline from masquerading as the outer-CTS timeout.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // 0x0027 INVENTORY_MOVE — 24B canonical payload with
-            // FromInv=99 (well outside the switch's 1/2/3/4/6/12/14/
-            // 16/18 cases → default arm). Wire is BIG-ENDIAN (the
-            // handler ntohl-decodes every field at PlayerConnection
-            // .cpp:2493-2498).
-            //   [0..4)   int32 GameID   = 0
-            //   [4..8)   int32 FromInv  = 99
-            //   [8..12)  int32 FromSlot = 0
-            //   [12..16) int32 ToInv    = 0
-            //   [16..20) int32 ToSlot   = 0
-            //   [20..24) int32 Num      = 0
-            byte[] payload = new byte[24];
-            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(4, 4), 99);
-            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(8, 4), 0);
-            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(12, 4), 0);
-            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(16, 4), 0);
-            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(20, 4), 0);
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.InventoryMove.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            // Drain inbound until we see a 0x001D MESSAGE_STRING whose
-            // body contains "UNRECOGNISED INVENTORY MOVE". Post-handshake
-            // the server may interleave other in-sector fan-out (NPC
-            // chatter, state updates, etc.); a frame cap keeps a stalled
-            // pipeline from masquerading as the outer-CTS timeout.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            // 0x001D wire layout (mirror of Player::SendMessageString
+            // at server/src/PlayerConnection.cpp:10974):
+            //   [0..2) short length    (LE; strlen(msg)+1)
+            //   [2]    char  color
+            //   [3..]  msg + '\0'
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            // Skip the 3-byte header and read the NUL-terminated string.
+            int nulIdx = span[3..].IndexOf((byte)0);
+            if (nulIdx < 0) continue;
 
-                // 0x001D wire layout (mirror of Player::SendMessageString
-                // at server/src/PlayerConnection.cpp:10974):
-                //   [0..2) short length    (LE; strlen(msg)+1)
-                //   [2]    char  color
-                //   [3..]  msg + '\0'
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            string body = Encoding.ASCII.GetString(span.Slice(3, nulIdx));
 
-                // Skip the 3-byte header and read the NUL-terminated string.
-                int nulIdx = span[3..].IndexOf((byte)0);
-                if (nulIdx < 0) continue;
+            // Filter — other MESSAGE_STRING frames (e.g. login
+            // chatter) may arrive first. Keep draining until we see
+            // the one keyed by our INVENTORY_MOVE.
+            if (!body.Contains("UNRECOGNISED INVENTORY MOVE", StringComparison.Ordinal))
+                continue;
 
-                string body = Encoding.ASCII.GetString(span.Slice(3, nulIdx));
-
-                // Filter — other MESSAGE_STRING frames (e.g. login
-                // chatter) may arrive first. Keep draining until we see
-                // the one keyed by our INVENTORY_MOVE.
-                if (!body.Contains("UNRECOGNISED INVENTORY MOVE", StringComparison.Ordinal))
-                    continue;
-
-                // Pin on the distinctive substring rather than the
-                // whole string so punctuation/newline tweaks don't sink
-                // the test. Full literal at PlayerConnection.cpp:3242:
-                // "UNRECOGNISED INVENTORY MOVE!\nPlease submit a bug report\n"
-                Assert.Contains("UNRECOGNISED INVENTORY MOVE", body);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0027 INVENTORY_MOVE (FromInv=99) " +
-                $"without seeing 0x001D MESSAGE_STRING containing \"UNRECOGNISED INVENTORY MOVE\". " +
-                $"Likely the server's HandleInventoryMove default-arm SendVaMessage path broke, " +
-                $"the proxy default-case forwarding dropped the opcode, " +
-                $"the dispatcher case at PlayerConnection.cpp:455 got mis-routed, " +
-                $"or InvMove struct was reshuffled and FromInv read from the wrong offset.");
+            // Pin on the distinctive substring rather than the
+            // whole string so punctuation/newline tweaks don't sink
+            // the test. Full literal at PlayerConnection.cpp:3242:
+            // "UNRECOGNISED INVENTORY MOVE!\nPlease submit a bug report\n"
+            Assert.Contains("UNRECOGNISED INVENTORY MOVE", body);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0027 INVENTORY_MOVE (FromInv=99) " +
+            $"without seeing 0x001D MESSAGE_STRING containing \"UNRECOGNISED INVENTORY MOVE\". " +
+            $"Likely the server's HandleInventoryMove default-arm SendVaMessage path broke, " +
+            $"the proxy default-case forwarding dropped the opcode, " +
+            $"the dispatcher case at PlayerConnection.cpp:455 got mis-routed, " +
+            $"or InvMove struct was reshuffled and FromInv read from the wrong offset.");
     }
 
     /// <summary>
@@ -442,61 +426,52 @@ public sealed class SectorInventoryMoveTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Codecmover", shipName: "CodecMvrShip", cts.Token);
+            firstName: "Codecmover", shipName: "CodecMvrShip", cts.Token));
 
-        try
+        int gameId = session.GameId;
+
+        // Build the move through the SAME codec the CLI's `inv` command
+        // uses. FromInv=99 routes to the server's default arm regardless of
+        // character state. GameID is host-side context the handler does not
+        // switch on, so any value reaches the default arm.
+        byte[] payload = new InventoryMoveCodec().EncodeOutbound(
+            new InventoryMoveMessage(
+                GameId: gameId, FromInv: 99, FromSlot: 0,
+                ToInv: 0, ToSlot: 0, Num: 0));
+
+        Assert.Equal(InventoryMoveCodec.Size, payload.Length);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.InventoryMove.Value, payload),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            int gameId = session.GameId;
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            // Build the move through the SAME codec the CLI's `inv` command
-            // uses. FromInv=99 routes to the server's default arm regardless of
-            // character state. GameID is host-side context the handler does not
-            // switch on, so any value reaches the default arm.
-            byte[] payload = new InventoryMoveCodec().EncodeOutbound(
-                new InventoryMoveMessage(
-                    GameId: gameId, FromInv: 99, FromSlot: 0,
-                    ToInv: 0, ToSlot: 0, Num: 0));
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
+            int nulIdx = span[3..].IndexOf((byte)0);
+            if (nulIdx < 0) continue;
+            string body = Encoding.ASCII.GetString(span.Slice(3, nulIdx));
+            if (!body.Contains("UNRECOGNISED INVENTORY MOVE", StringComparison.Ordinal))
+                continue;
 
-            Assert.Equal(InventoryMoveCodec.Size, payload.Length);
-
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.InventoryMove.Value, payload),
-                cts.Token);
-
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
-
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
-                int nulIdx = span[3..].IndexOf((byte)0);
-                if (nulIdx < 0) continue;
-                string body = Encoding.ASCII.GetString(span.Slice(3, nulIdx));
-                if (!body.Contains("UNRECOGNISED INVENTORY MOVE", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Contains("UNRECOGNISED INVENTORY MOVE", body);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending a codec-built 0x0027 " +
-                $"INVENTORY_MOVE without the expected UNRECOGNISED reply -- the " +
-                $"InventoryMoveCodec wire format diverged from what the server parses.");
+            Assert.Contains("UNRECOGNISED INVENTORY MOVE", body);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending a codec-built 0x0027 " +
+            $"INVENTORY_MOVE without the expected UNRECOGNISED reply -- the " +
+            $"InventoryMoveCodec wire format diverged from what the server parses.");
     }
 
     /// <summary>
@@ -528,66 +503,57 @@ public sealed class SectorInventoryMoveTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Splitter", shipName: "SplitShip", cts.Token);
+            firstName: "Splitter", shipName: "SplitShip", cts.Token));
 
-        try
+        int gameId = session.GameId;
+
+        // Codec-built split: cargo slot 0 -> cargo slot 1, Num=3. On an empty
+        // cargo this is a no-op inside CheckStack (both slots empty: same -1
+        // ItemTemplateID, harmless), but it MUST drive the case-1 cargo path
+        // with Num>1 and not fault.
+        byte[] splitPayload = new InventoryMoveCodec().EncodeOutbound(
+            new InventoryMoveMessage(
+                gameId, InventoryContainer.Cargo, 0,
+                InventoryContainer.Cargo, 1, 3));
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.InventoryMove.Value, splitPayload),
+            cts.Token);
+
+        // Follow-up unrecognised move -- its deterministic reply proves the
+        // session survived the split move.
+        byte[] probePayload = new InventoryMoveCodec().EncodeOutbound(
+            new InventoryMoveMessage(gameId, 99, 0, 0, 0, 0));
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.InventoryMove.Value, probePayload),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            int gameId = session.GameId;
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            // Codec-built split: cargo slot 0 -> cargo slot 1, Num=3. On an empty
-            // cargo this is a no-op inside CheckStack (both slots empty: same -1
-            // ItemTemplateID, harmless), but it MUST drive the case-1 cargo path
-            // with Num>1 and not fault.
-            byte[] splitPayload = new InventoryMoveCodec().EncodeOutbound(
-                new InventoryMoveMessage(
-                    gameId, InventoryContainer.Cargo, 0,
-                    InventoryContainer.Cargo, 1, 3));
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.InventoryMove.Value, splitPayload),
-                cts.Token);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
+            int nulIdx = span[3..].IndexOf((byte)0);
+            if (nulIdx < 0) continue;
+            string body = Encoding.ASCII.GetString(span.Slice(3, nulIdx));
+            if (!body.Contains("UNRECOGNISED INVENTORY MOVE", StringComparison.Ordinal))
+                continue;
 
-            // Follow-up unrecognised move -- its deterministic reply proves the
-            // session survived the split move.
-            byte[] probePayload = new InventoryMoveCodec().EncodeOutbound(
-                new InventoryMoveMessage(gameId, 99, 0, 0, 0, 0));
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.InventoryMove.Value, probePayload),
-                cts.Token);
-
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
-
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
-                int nulIdx = span[3..].IndexOf((byte)0);
-                if (nulIdx < 0) continue;
-                string body = Encoding.ASCII.GetString(span.Slice(3, nulIdx));
-                if (!body.Contains("UNRECOGNISED INVENTORY MOVE", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Contains("UNRECOGNISED INVENTORY MOVE", body);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after a Num=3 cargo split move + a " +
-                $"FromInv=99 probe without the probe's UNRECOGNISED reply -- the " +
-                $"split move likely dropped the session or wedged the case-1 path.");
+            Assert.Contains("UNRECOGNISED INVENTORY MOVE", body);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after a Num=3 cargo split move + a " +
+            $"FromInv=99 probe without the probe's UNRECOGNISED reply -- the " +
+            $"split move likely dropped the session or wedged the case-1 path.");
     }
 
     [Fact]
@@ -613,71 +579,62 @@ public sealed class SectorInventoryMoveTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Mover109", shipName: "Mvr109Ship", cts.Token);
+            firstName: "Mover109", shipName: "Mvr109Ship", cts.Token));
 
-        try
+        byte[] payload = new byte[24];
+        BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(4, 4), 99);
+        BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(8, 4), 0);
+        BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(12, 4), 0);
+        BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(16, 4), 0);
+        BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(20, 4), 0);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.InventoryMove.Value, payload),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            byte[] payload = new byte[24];
-            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(4, 4), 99);
-            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(8, 4), 0);
-            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(12, 4), 0);
-            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(16, 4), 0);
-            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(20, 4), 0);
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.InventoryMove.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            if (!text.Contains("UNRECOGNISED INVENTORY MOVE", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                if (!text.Contains("UNRECOGNISED INVENTORY MOVE", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(UnrecognisedInventoryMoveLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0027 INVENTORY_MOVE (FromInv=99) " +
-                $"without seeing 0x001D MESSAGE_STRING containing \"UNRECOGNISED INVENTORY MOVE\". " +
-                $"Same drain-loop budget as Wave 27's sibling test; the failure modes are " +
-                $"identical.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(UnrecognisedInventoryMoveLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0027 INVENTORY_MOVE (FromInv=99) " +
+            $"without seeing 0x001D MESSAGE_STRING containing \"UNRECOGNISED INVENTORY MOVE\". " +
+            $"Same drain-loop budget as Wave 27's sibling test; the failure modes are " +
+            $"identical.");
     }
 }

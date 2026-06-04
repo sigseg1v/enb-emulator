@@ -188,20 +188,13 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorUiTriggerTests
+public sealed class SectorUiTriggerTests : SectorIntegrationTest
 {
     private const int ExpectedUiTriggerPayloadSize = 8;
     private const int UiTriggerA = 0;
     private const int UiTriggerB = 0;
 
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorUiTriggerTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorUiTriggerTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task UiTriggerSlashCommand_OnSlashUitrigger_ReceivesUiTriggerEmit()
@@ -217,109 +210,88 @@ public sealed class SectorUiTriggerTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "UiTrig61", shipName: "UiTrig61Ship", cts.Token);
+            firstName: "UiTrig61", shipName: "UiTrig61Ship", cts.Token));
 
+        // Build a CLIENT_CHAT with "/uitrigger 0,0" — the single-slash
+        // prefix routes through HandleSlashCommands' single-slash block
+        // (PlayerConnection.cpp:5447); the uitrigger arm at
+        // PlayerConnection.cpp:7575-7592 (case 'u') parses "0,0" and
+        // emits 0x0065 UI_TRIGGER with an 8-byte payload {int32 a=0;
+        // int32 b=0}. Type=Group is irrelevant for the slash branch
+        // (the slash check at PlayerConnection.cpp:4614 fires before
+        // the type-dependent branches).
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/uitrigger 0,0");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        // Drain up to 400 frames waiting for the 0x0065 emit. Unlike
+        // the /openif arm, the /uitrigger arm does NOT emit a 0x001D
+        // MESSAGE_STRING acknowledgement — only the bare 0x0065 emit
+        // and the standard msg_sent=true sentinel that suppresses the
+        // "Illegal slash command" fallback.
+        const int maxFrames = 400;
+        int seen = 0;
+        Packet? reply = null;
+        var observed = new List<string>();
+        using var drainCts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cts.Token, drainCts.Token);
         try
         {
-            // Build a CLIENT_CHAT with "/uitrigger 0,0" — the single-slash
-            // prefix routes through HandleSlashCommands' single-slash block
-            // (PlayerConnection.cpp:5447); the uitrigger arm at
-            // PlayerConnection.cpp:7575-7592 (case 'u') parses "0,0" and
-            // emits 0x0065 UI_TRIGGER with an 8-byte payload {int32 a=0;
-            // int32 b=0}. Type=Group is irrelevant for the slash branch
-            // (the slash check at PlayerConnection.cpp:4614 fires before
-            // the type-dependent branches).
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/uitrigger 0,0");
-
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
-
-            // Drain up to 400 frames waiting for the 0x0065 emit. Unlike
-            // the /openif arm, the /uitrigger arm does NOT emit a 0x001D
-            // MESSAGE_STRING acknowledgement — only the bare 0x0065 emit
-            // and the standard msg_sent=true sentinel that suppresses the
-            // "Illegal slash command" fallback.
-            const int maxFrames = 400;
-            int seen = 0;
-            Packet? reply = null;
-            var observed = new List<string>();
-            using var drainCts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cts.Token, drainCts.Token);
-            try
+            while (seen++ < maxFrames)
             {
-                while (seen++ < maxFrames)
+                var frame = await session.Sector.ReceiveAsync(linked.Token);
+                Assert.NotNull(frame);
+                observed.Add($"0x{frame!.Header.Opcode:X4}/{frame.Payload.Length}");
+                if (frame.Header.Opcode == OpcodeId.Known.MessageString.Value
+                    && frame.Payload.Length > 0)
                 {
-                    var frame = await session.Sector.ReceiveAsync(linked.Token);
-                    Assert.NotNull(frame);
-                    observed.Add($"0x{frame!.Header.Opcode:X4}/{frame.Payload.Length}");
-                    if (frame.Header.Opcode == OpcodeId.Known.MessageString.Value
-                        && frame.Payload.Length > 0)
+                    try
                     {
-                        try
-                        {
-                            var s = System.Text.Encoding.ASCII.GetString(frame.Payload.Span);
-                            observed[^1] += $"[{s.Replace('\0', '.')}]";
-                        }
-                        catch { }
+                        var s = System.Text.Encoding.ASCII.GetString(frame.Payload.Span);
+                        observed[^1] += $"[{s.Replace('\0', '.')}]";
                     }
-                    if (frame.Header.Opcode == OpcodeId.Known.UiTrigger.Value)
-                    {
-                        reply = frame;
-                        break;
-                    }
+                    catch { }
+                }
+                if (frame.Header.Opcode == OpcodeId.Known.UiTrigger.Value)
+                {
+                    reply = frame;
+                    break;
                 }
             }
-            catch (OperationCanceledException) when (drainCts.IsCancellationRequested)
-            {
-                // drain timed out — emit observed list as failure diagnostic
-            }
-
-            if (reply == null)
-            {
-                throw new Xunit.Sdk.XunitException(
-                    $"No 0x0065 UI_TRIGGER received after {seen} frames. " +
-                    $"Observed [{observed.Count}]: {string.Join(" | ", observed)}");
-            }
-
-            Assert.NotNull(reply);
-            Assert.Equal(ExpectedUiTriggerPayloadSize, reply!.Payload.Length);
-
-            var span = reply.Payload.Span;
-
-            // [0..4) a — atoi("0") → 0.
-            int replyA = BinaryPrimitives.ReadInt32LittleEndian(span.Slice(0, 4));
-            Assert.Equal(UiTriggerA, replyA);
-
-            // [4..8) b — atoi("0") → 0.
-            int replyB = BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4));
-            Assert.Equal(UiTriggerB, replyB);
         }
-        finally
+        catch (OperationCanceledException) when (drainCts.IsCancellationRequested)
         {
-            try
-            {
-                using var logoffCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                byte[] logoffPayload = new byte[8];
-                await session.Sector.SendAsync(
-                    Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
-                    logoffCts.Token);
-                await SectorHandshake.DrainUntilOpcode(
-                    session.Sector, OpcodeId.Known.LogoffConfirmation.Value, logoffCts.Token);
-            }
-            catch { /* best-effort logoff */ }
-
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
+            // drain timed out — emit observed list as failure diagnostic
         }
+
+        if (reply == null)
+        {
+            throw new Xunit.Sdk.XunitException(
+                $"No 0x0065 UI_TRIGGER received after {seen} frames. " +
+                $"Observed [{observed.Count}]: {string.Join(" | ", observed)}");
+        }
+
+        Assert.NotNull(reply);
+        Assert.Equal(ExpectedUiTriggerPayloadSize, reply!.Payload.Length);
+
+        var span = reply.Payload.Span;
+
+        // [0..4) a — atoi("0") → 0.
+        int replyA = BinaryPrimitives.ReadInt32LittleEndian(span.Slice(0, 4));
+        Assert.Equal(UiTriggerA, replyA);
+
+        // [4..8) b — atoi("0") → 0.
+        int replyB = BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4));
+        Assert.Equal(UiTriggerB, replyB);
     }
 }

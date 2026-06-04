@@ -104,16 +104,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorMoveTests
+public sealed class SectorMoveTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorMoveTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorMoveTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task Move_EngineOn_DoesNotBreakConnection_RequestTimeStillRoundTrips()
@@ -129,84 +122,75 @@ public sealed class SectorMoveTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Mover", shipName: "MoveShip", cts.Token);
+            firstName: "Mover", shipName: "MoveShip", cts.Token));
 
-        try
+        // MovePacket wire layout — 5 bytes total:
+        //   [0..4)   int32 LE  GameID  — retail client sets the
+        //                                 actor's game id; server
+        //                                 resolves the actor via the
+        //                                 connection binding so this
+        //                                 field is effectively unused.
+        //   [4..5)   byte      type    — engine mode. 4 = engine off,
+        //                                 anything else = engine on
+        //                                 (per HandleMove switch at
+        //                                 server/src/PlayerConnection.cpp:1861).
+        //                                 We send 1 for "engine on".
+        // common/include/net7/PacketStructures.h:981
+        byte[] movePayload = new byte[5];
+        BinaryPrimitives.WriteInt32LittleEndian(movePayload.AsSpan(0, 4), 0);
+        movePayload[4] = 1;
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.Move.Value, movePayload),
+            cts.Token);
+
+        // Survival probe.
+        int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+
+        byte[] reqTimePayload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
+            cts.Token);
+
+        // Drain until 0x0034 CLIENT_SET_TIME. Post-handshake the
+        // server may begin streaming in-sector frames (ship updates,
+        // contrail state, etc.) so this loop tolerates interleaved
+        // traffic. Cap on frame count so a stalled pipeline can't
+        // masquerade as the outer-CTS timeout.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // MovePacket wire layout — 5 bytes total:
-            //   [0..4)   int32 LE  GameID  — retail client sets the
-            //                                 actor's game id; server
-            //                                 resolves the actor via the
-            //                                 connection binding so this
-            //                                 field is effectively unused.
-            //   [4..5)   byte      type    — engine mode. 4 = engine off,
-            //                                 anything else = engine on
-            //                                 (per HandleMove switch at
-            //                                 server/src/PlayerConnection.cpp:1861).
-            //                                 We send 1 for "engine on".
-            // common/include/net7/PacketStructures.h:981
-            byte[] movePayload = new byte[5];
-            BinaryPrimitives.WriteInt32LittleEndian(movePayload.AsSpan(0, 4), 0);
-            movePayload[4] = 1;
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.Move.Value, movePayload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
+                continue;
 
-            // Survival probe.
-            int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+            // 0x0034 wire layout (ClientSetTime struct):
+            //   [0..4)  int32  ClientSent
+            //   [4..8)  int32  ServerReceived
+            //   [8..12) int32  ServerSent
+            // common/include/net7/PacketStructures.h:563
+            var span = reply.Payload.Span;
+            Assert.Equal(12, span.Length);
 
-            byte[] reqTimePayload = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+            int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+            Assert.Equal(clientTick, echoedClientSent);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
-                cts.Token);
-
-            // Drain until 0x0034 CLIENT_SET_TIME. Post-handshake the
-            // server may begin streaming in-sector frames (ship updates,
-            // contrail state, etc.) so this loop tolerates interleaved
-            // traffic. Cap on frame count so a stalled pipeline can't
-            // masquerade as the outer-CTS timeout.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-
-                if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
-                    continue;
-
-                // 0x0034 wire layout (ClientSetTime struct):
-                //   [0..4)  int32  ClientSent
-                //   [4..8)  int32  ServerReceived
-                //   [8..12) int32  ServerSent
-                // common/include/net7/PacketStructures.h:563
-                var span = reply.Payload.Span;
-                Assert.Equal(12, span.Length);
-
-                int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                Assert.Equal(clientTick, echoedClientSent);
-
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0014 MOVE (type=1, engine-on) + 0x0044 REQUEST_TIME " +
-                $"without seeing 0x0034 CLIENT_SET_TIME. " +
-                $"Likely the server's HandleMove read past the 5-byte payload (sizeof(long) regression on MovePacket), " +
-                $"the proxy's ProcessSectorServerOpcode dispatch dropped the frame " +
-                $"(proxy/ClientToServer_linux_stubs.cpp:487-489), " +
-                $"or AbortProspecting()/FormationEngineOperation() crashed mid-call.");
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0014 MOVE (type=1, engine-on) + 0x0044 REQUEST_TIME " +
+            $"without seeing 0x0034 CLIENT_SET_TIME. " +
+            $"Likely the server's HandleMove read past the 5-byte payload (sizeof(long) regression on MovePacket), " +
+            $"the proxy's ProcessSectorServerOpcode dispatch dropped the frame " +
+            $"(proxy/ClientToServer_linux_stubs.cpp:487-489), " +
+            $"or AbortProspecting()/FormationEngineOperation() crashed mid-call.");
     }
 }

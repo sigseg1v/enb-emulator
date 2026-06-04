@@ -52,16 +52,13 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorGateHandoffFollowTests
+public sealed class SectorGateHandoffFollowTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
     private readonly ITestOutputHelper _out;
 
     public SectorGateHandoffFollowTests(ServerFixture server, ITestOutputHelper output)
+        : base(server)
     {
-        _server = server;
-        _client = new ClientFixture(server);
         _out = output;
     }
 
@@ -81,9 +78,9 @@ public sealed class SectorGateHandoffFollowTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, stationSectorId,
-            firstName: "Galeo", shipName: "GaleoShip", cts.Token);
+            firstName: "Galeo", shipName: "GaleoShip", cts.Token));
 
         var ctx = new SessionContext(new OpcodeRegistry())
         {
@@ -185,11 +182,6 @@ public sealed class SectorGateHandoffFollowTests
         {
             if (earthConn is not null) { try { await earthConn.DisposeAsync(); } catch { } }
             if (lunaConn is not null) { try { await lunaConn.DisposeAsync(); } catch { } }
-
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-            try { await session.Global.DisposeAsync(); } catch { }
         }
     }
 

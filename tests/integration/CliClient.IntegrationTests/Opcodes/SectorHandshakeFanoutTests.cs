@@ -135,16 +135,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorHandshakeFanoutTests
+public sealed class SectorHandshakeFanoutTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorHandshakeFanoutTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorHandshakeFanoutTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task HandshakeEmitsClientShipAndAvatarDescription()
@@ -160,28 +153,19 @@ public sealed class SectorHandshakeFanoutTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Fanout", shipName: "FanoutShip", cts.Token);
+            firstName: "Fanout", shipName: "FanoutShip", cts.Token));
 
-        try
-        {
-            // SectorHandshake.DoSectorLoginUntilStartAsync now captures
-            // every opcode received between the LOGIN frame and the
-            // terminating 0x0005 START into Session.HandshakeOpcodes.
-            // Per Player::SendLoginShipData (server/src/PlayerClass.cpp:857-901),
-            // the server emits 0x0047 CLIENT_SHIP (line 880) and
-            // 0x0061 AVATAR_DESCRIPTION (line 889) before SendStart
-            // closes the handshake.
-            Assert.Contains(OpcodeId.Known.ClientShip.Value, session.HandshakeOpcodes);
-            Assert.Contains(OpcodeId.Known.AvatarDescription.Value, session.HandshakeOpcodes);
-        }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+        // SectorHandshake.DoSectorLoginUntilStartAsync now captures
+        // every opcode received between the LOGIN frame and the
+        // terminating 0x0005 START into Session.HandshakeOpcodes.
+        // Per Player::SendLoginShipData (server/src/PlayerClass.cpp:857-901),
+        // the server emits 0x0047 CLIENT_SHIP (line 880) and
+        // 0x0061 AVATAR_DESCRIPTION (line 889) before SendStart
+        // closes the handshake.
+        Assert.Contains(OpcodeId.Known.ClientShip.Value, session.HandshakeOpcodes);
+        Assert.Contains(OpcodeId.Known.AvatarDescription.Value, session.HandshakeOpcodes);
     }
 
     /// <summary>
@@ -236,37 +220,28 @@ public sealed class SectorHandshakeFanoutTests
         // 0x0040/0x0089 emits) produced by StationLogin/StationLogin2, only
         // reachable via a second login to the station id. See
         // SectorHandshake.EstablishAtStationAsync.
-        await using var session = await SectorHandshake.EstablishAtStationAsync(
+        var session = Track(await SectorHandshake.EstablishAtStationAsync(
             _server, login.Ticket!, account.Username, slot,
             stationSectorId, homeSpaceSectorId,
-            firstName: "Fanout", shipName: "FanoutShip2", cts.Token);
+            firstName: "Fanout", shipName: "FanoutShip2", cts.Token));
 
-        try
-        {
-            // 14 opcodes from the captured handshake stream, sorted by
-            // opcode value. Each assertion produces a clean per-opcode
-            // failure message identifying which emit went missing.
-            Assert.Contains(OpcodeId.Known.Create.Value, session.HandshakeOpcodes);
-            Assert.Contains(OpcodeId.Known.Decal.Value, session.HandshakeOpcodes);
-            Assert.Contains(OpcodeId.Known.Colorization.Value, session.HandshakeOpcodes);
-            Assert.Contains(OpcodeId.Known.AuxData.Value, session.HandshakeOpcodes);
-            Assert.Contains(OpcodeId.Known.ItemBase.Value, session.HandshakeOpcodes);
-            Assert.Contains(OpcodeId.Known.ClientAvatar.Value, session.HandshakeOpcodes);
-            Assert.Contains(OpcodeId.Known.AdvancedPositionalUpdate.Value, session.HandshakeOpcodes);
-            Assert.Contains(OpcodeId.Known.ConstantPositionalUpdate.Value, session.HandshakeOpcodes);
-            Assert.Contains(OpcodeId.Known.StarbaseSet.Value, session.HandshakeOpcodes);
-            Assert.Contains(OpcodeId.Known.LoungeNpc.Value, session.HandshakeOpcodes);
-            Assert.Contains(OpcodeId.Known.ManufactureSetManufactureId.Value, session.HandshakeOpcodes);
-            Assert.Contains(OpcodeId.Known.Relationship.Value, session.HandshakeOpcodes);
-            Assert.Contains(OpcodeId.Known.NameDecal.Value, session.HandshakeOpcodes);
-            Assert.Contains(OpcodeId.Known.Subparts.Value, session.HandshakeOpcodes);
-        }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+        // 14 opcodes from the captured handshake stream, sorted by
+        // opcode value. Each assertion produces a clean per-opcode
+        // failure message identifying which emit went missing.
+        Assert.Contains(OpcodeId.Known.Create.Value, session.HandshakeOpcodes);
+        Assert.Contains(OpcodeId.Known.Decal.Value, session.HandshakeOpcodes);
+        Assert.Contains(OpcodeId.Known.Colorization.Value, session.HandshakeOpcodes);
+        Assert.Contains(OpcodeId.Known.AuxData.Value, session.HandshakeOpcodes);
+        Assert.Contains(OpcodeId.Known.ItemBase.Value, session.HandshakeOpcodes);
+        Assert.Contains(OpcodeId.Known.ClientAvatar.Value, session.HandshakeOpcodes);
+        Assert.Contains(OpcodeId.Known.AdvancedPositionalUpdate.Value, session.HandshakeOpcodes);
+        Assert.Contains(OpcodeId.Known.ConstantPositionalUpdate.Value, session.HandshakeOpcodes);
+        Assert.Contains(OpcodeId.Known.StarbaseSet.Value, session.HandshakeOpcodes);
+        Assert.Contains(OpcodeId.Known.LoungeNpc.Value, session.HandshakeOpcodes);
+        Assert.Contains(OpcodeId.Known.ManufactureSetManufactureId.Value, session.HandshakeOpcodes);
+        Assert.Contains(OpcodeId.Known.Relationship.Value, session.HandshakeOpcodes);
+        Assert.Contains(OpcodeId.Known.NameDecal.Value, session.HandshakeOpcodes);
+        Assert.Contains(OpcodeId.Known.Subparts.Value, session.HandshakeOpcodes);
     }
 
     /// <summary>
@@ -438,52 +413,33 @@ public sealed class SectorHandshakeFanoutTests
             _server, login.Ticket!, account.Username, slot, stationSectorId,
             firstName: "SpaceHs", shipName: "SpaceHsShip", cts.Token);
 
-        try
-        {
-            // Cleanly tear down stage 1 with an explicit 0x00B9
-            // LOGOFF_REQUEST so the server runs DropPlayerFromGalaxy
-            // synchronously. A bare TCP disconnect leaves the in-memory
-            // Player around long enough that the stage-2 GlobalConnect
-            // hits G_ERROR_ACCOUNT_IN_USE (UDP_Global.cpp:166-170).
-            byte[] logoffPayload = new byte[8];
-            await stationSession.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
-                cts.Token);
-            await SectorHandshake.DrainUntilOpcode(
-                stationSession.Sector, OpcodeId.Known.LogoffConfirmation.Value, cts.Token);
-            await stationSession.DisposeAsync();
+        // Cleanly tear down stage 1 with an explicit 0x00B9
+        // LOGOFF_REQUEST so the server runs DropPlayerFromGalaxy
+        // synchronously. A bare TCP disconnect leaves the in-memory
+        // Player around long enough that the stage-2 GlobalConnect
+        // hits G_ERROR_ACCOUNT_IN_USE (UDP_Global.cpp:166-170).
+        byte[] logoffPayload = new byte[8];
+        await stationSession.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
+            cts.Token);
+        await SectorHandshake.DrainUntilOpcode(
+            stationSession.Sector, OpcodeId.Known.LogoffConfirmation.Value, cts.Token);
+        await stationSession.DisposeAsync();
 
-            // Stage 2: reconnect (no char create) and LOGIN to space
-            // sector 1015. ReadSavedData now takes the ReloadSavedData
-            // path (avatar_level_info exists from stage 1), which
-            // preserves the sector_num set by HandleLogin
-            // (PlayerSaves.cpp:289-291). GetSectorManager(1015)
-            // resolves m_SectorID=1015 ≤ 9999 →
-            // SectorManager::HandleSectorLogin dispatches to SectorLogin
-            // (SectorManager.cpp:332), which emits 0x0097 GALAXY_MAP
-            // (line 344) and 0x003C CLIENT_TYPE (line 347).
-            await using var spaceSession = await SectorHandshake.ReestablishAsync(
-                _server, login.Ticket!, slot, spaceSectorId, cts.Token);
+        // Stage 2: reconnect (no char create) and LOGIN to space
+        // sector 1015. ReadSavedData now takes the ReloadSavedData
+        // path (avatar_level_info exists from stage 1), which
+        // preserves the sector_num set by HandleLogin
+        // (PlayerSaves.cpp:289-291). GetSectorManager(1015)
+        // resolves m_SectorID=1015 ≤ 9999 →
+        // SectorManager::HandleSectorLogin dispatches to SectorLogin
+        // (SectorManager.cpp:332), which emits 0x0097 GALAXY_MAP
+        // (line 344) and 0x003C CLIENT_TYPE (line 347).
+        var spaceSession = Track(await SectorHandshake.ReestablishAsync(
+            _server, login.Ticket!, slot, spaceSectorId, cts.Token));
 
-            Assert.Contains(OpcodeId.Known.ClientType.Value, spaceSession.HandshakeOpcodes);
-            Assert.Contains(OpcodeId.Known.GalaxyMap.Value, spaceSession.HandshakeOpcodes);
-        }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            try
-            {
-                await using var cleanupGlobal = await N7.CliClient.Net.EncryptedTcpConnection.ConnectAsync(
-                    _server.GlobalHost, _server.GlobalPort, cleanupCts.Token);
-                await SectorHandshake.SendGlobalConnectAsync(
-                    cleanupGlobal, login.Ticket!, cleanupCts.Token);
-                await SectorHandshake.DrainUntilOpcode(
-                    cleanupGlobal, OpcodeId.Known.GlobalAvatarList.Value, cleanupCts.Token);
-                await SectorHandshake.DeleteCreatedCharacterAsync(
-                    cleanupGlobal, slot, cleanupCts.Token);
-            }
-            catch { /* best-effort cleanup */ }
-        }
+        Assert.Contains(OpcodeId.Known.ClientType.Value, spaceSession.HandshakeOpcodes);
+        Assert.Contains(OpcodeId.Known.GalaxyMap.Value, spaceSession.HandshakeOpcodes);
     }
 
     /// <summary>
@@ -624,37 +580,18 @@ public sealed class SectorHandshakeFanoutTests
             _server, login.Ticket!, account.Username, slot, stationSectorId,
             firstName: "SrvParam", shipName: "SrvParamShip", cts.Token);
 
-        try
-        {
-            byte[] logoffPayload = new byte[8];
-            await stationSession.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
-                cts.Token);
-            await SectorHandshake.DrainUntilOpcode(
-                stationSession.Sector, OpcodeId.Known.LogoffConfirmation.Value, cts.Token);
-            await stationSession.DisposeAsync();
+        byte[] logoffPayload = new byte[8];
+        await stationSession.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
+            cts.Token);
+        await SectorHandshake.DrainUntilOpcode(
+            stationSession.Sector, OpcodeId.Known.LogoffConfirmation.Value, cts.Token);
+        await stationSession.DisposeAsync();
 
-            await using var spaceSession = await SectorHandshake.ReestablishAsync(
-                _server, login.Ticket!, slot, spaceSectorId, cts.Token);
+        var spaceSession = Track(await SectorHandshake.ReestablishAsync(
+            _server, login.Ticket!, slot, spaceSectorId, cts.Token));
 
-            Assert.Contains(OpcodeId.Known.ServerParameters.Value, spaceSession.HandshakeOpcodes);
-        }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            try
-            {
-                await using var cleanupGlobal = await N7.CliClient.Net.EncryptedTcpConnection.ConnectAsync(
-                    _server.GlobalHost, _server.GlobalPort, cleanupCts.Token);
-                await SectorHandshake.SendGlobalConnectAsync(
-                    cleanupGlobal, login.Ticket!, cleanupCts.Token);
-                await SectorHandshake.DrainUntilOpcode(
-                    cleanupGlobal, OpcodeId.Known.GlobalAvatarList.Value, cleanupCts.Token);
-                await SectorHandshake.DeleteCreatedCharacterAsync(
-                    cleanupGlobal, slot, cleanupCts.Token);
-            }
-            catch { /* best-effort cleanup */ }
-        }
+        Assert.Contains(OpcodeId.Known.ServerParameters.Value, spaceSession.HandshakeOpcodes);
     }
 
     /// <summary>
@@ -824,38 +761,19 @@ public sealed class SectorHandshakeFanoutTests
             _server, login.Ticket!, account.Username, slot, stationSectorId,
             firstName: "NavFan", shipName: "NavFanShip", cts.Token);
 
-        try
-        {
-            byte[] logoffPayload = new byte[8];
-            await stationSession.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
-                cts.Token);
-            await SectorHandshake.DrainUntilOpcode(
-                stationSession.Sector, OpcodeId.Known.LogoffConfirmation.Value, cts.Token);
-            await stationSession.DisposeAsync();
+        byte[] logoffPayload = new byte[8];
+        await stationSession.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
+            cts.Token);
+        await SectorHandshake.DrainUntilOpcode(
+            stationSession.Sector, OpcodeId.Known.LogoffConfirmation.Value, cts.Token);
+        await stationSession.DisposeAsync();
 
-            await using var spaceSession = await SectorHandshake.ReestablishAsync(
-                _server, login.Ticket!, slot, spaceSectorId, cts.Token);
+        var spaceSession = Track(await SectorHandshake.ReestablishAsync(
+            _server, login.Ticket!, slot, spaceSectorId, cts.Token));
 
-            Assert.Contains(OpcodeId.Known.PlanetPositionalUpdate.Value, spaceSession.HandshakeOpcodes);
-            Assert.Contains(OpcodeId.Known.Navigation.Value, spaceSession.HandshakeOpcodes);
-        }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            try
-            {
-                await using var cleanupGlobal = await N7.CliClient.Net.EncryptedTcpConnection.ConnectAsync(
-                    _server.GlobalHost, _server.GlobalPort, cleanupCts.Token);
-                await SectorHandshake.SendGlobalConnectAsync(
-                    cleanupGlobal, login.Ticket!, cleanupCts.Token);
-                await SectorHandshake.DrainUntilOpcode(
-                    cleanupGlobal, OpcodeId.Known.GlobalAvatarList.Value, cleanupCts.Token);
-                await SectorHandshake.DeleteCreatedCharacterAsync(
-                    cleanupGlobal, slot, cleanupCts.Token);
-            }
-            catch { /* best-effort cleanup */ }
-        }
+        Assert.Contains(OpcodeId.Known.PlanetPositionalUpdate.Value, spaceSession.HandshakeOpcodes);
+        Assert.Contains(OpcodeId.Known.Navigation.Value, spaceSession.HandshakeOpcodes);
     }
 
     /// <summary>
@@ -1008,43 +926,24 @@ public sealed class SectorHandshakeFanoutTests
             _server, login.Ticket!, account.Username, slot, stationSectorId,
             firstName: "NoSbsLeak", shipName: "NoSbsLeakShip", cts.Token);
 
-        try
-        {
-            byte[] logoffPayload = new byte[8];
-            await stationSession.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
-                cts.Token);
-            await SectorHandshake.DrainUntilOpcode(
-                stationSession.Sector, OpcodeId.Known.LogoffConfirmation.Value, cts.Token);
-            await stationSession.DisposeAsync();
+        byte[] logoffPayload = new byte[8];
+        await stationSession.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
+            cts.Token);
+        await SectorHandshake.DrainUntilOpcode(
+            stationSession.Sector, OpcodeId.Known.LogoffConfirmation.Value, cts.Token);
+        await stationSession.DisposeAsync();
 
-            await using var spaceSession = await SectorHandshake.ReestablishAsync(
-                _server, login.Ticket!, slot, spaceSectorId, cts.Token);
+        var spaceSession = Track(await SectorHandshake.ReestablishAsync(
+            _server, login.Ticket!, slot, spaceSectorId, cts.Token));
 
-            // Negative assertion: 0x004F STARBASE_SET must NOT appear in
-            // the space-sector handshake. It's a STATION-only emit
-            // (SectorManager.cpp:514 in StationLogin2) plus an explicit
-            // LaunchIntoSpace emit (SectorManager.cpp:537) which only
-            // fires on the docked→space transition, never on a direct
-            // space-sector login.
-            Assert.DoesNotContain(OpcodeId.Known.StarbaseSet.Value, spaceSession.HandshakeOpcodes);
-        }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            try
-            {
-                await using var cleanupGlobal = await N7.CliClient.Net.EncryptedTcpConnection.ConnectAsync(
-                    _server.GlobalHost, _server.GlobalPort, cleanupCts.Token);
-                await SectorHandshake.SendGlobalConnectAsync(
-                    cleanupGlobal, login.Ticket!, cleanupCts.Token);
-                await SectorHandshake.DrainUntilOpcode(
-                    cleanupGlobal, OpcodeId.Known.GlobalAvatarList.Value, cleanupCts.Token);
-                await SectorHandshake.DeleteCreatedCharacterAsync(
-                    cleanupGlobal, slot, cleanupCts.Token);
-            }
-            catch { /* best-effort cleanup */ }
-        }
+        // Negative assertion: 0x004F STARBASE_SET must NOT appear in
+        // the space-sector handshake. It's a STATION-only emit
+        // (SectorManager.cpp:514 in StationLogin2) plus an explicit
+        // LaunchIntoSpace emit (SectorManager.cpp:537) which only
+        // fires on the docked→space transition, never on a direct
+        // space-sector login.
+        Assert.DoesNotContain(OpcodeId.Known.StarbaseSet.Value, spaceSession.HandshakeOpcodes);
     }
 
     /// <summary>
@@ -1166,41 +1065,21 @@ public sealed class SectorHandshakeFanoutTests
             _server, login.Ticket!, account.Username, slot, stationSectorId,
             firstName: "NoLngLk", shipName: "NoLngLkShip", cts.Token);
 
-        try
-        {
-            byte[] logoffPayload = new byte[8];
-            await stationSession.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
-                cts.Token);
-            await SectorHandshake.DrainUntilOpcode(
-                stationSession.Sector, OpcodeId.Known.LogoffConfirmation.Value, cts.Token);
-            await stationSession.DisposeAsync();
+        byte[] logoffPayload = new byte[8];
+        await stationSession.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
+            cts.Token);
+        await SectorHandshake.DrainUntilOpcode(
+            stationSession.Sector, OpcodeId.Known.LogoffConfirmation.Value, cts.Token);
+        await stationSession.DisposeAsync();
 
-            await using var spaceSession = await SectorHandshake.ReestablishAsync(
-                _server, login.Ticket!, slot, spaceSectorId, cts.Token);
+        var spaceSession = Track(await SectorHandshake.ReestablishAsync(
+            _server, login.Ticket!, slot, spaceSectorId, cts.Token));
 
-            // 0x0052 LOUNGE_NPC is STATION-only — SectorManager.cpp:520
-            // SendLoungeNPC is called only from StationLogin2's
-            // lounge-block (lines 516-524). SectorLogin2 (the space-arm)
-            // never invokes the lounge path.
-            Assert.DoesNotContain(OpcodeId.Known.LoungeNpc.Value, spaceSession.HandshakeOpcodes);
-        }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            try
-            {
-                await using var cleanupGlobal = await N7.CliClient.Net.EncryptedTcpConnection.ConnectAsync(
-                    _server.GlobalHost, _server.GlobalPort, cleanupCts.Token);
-                await SectorHandshake.SendGlobalConnectAsync(
-                    cleanupGlobal, login.Ticket!, cleanupCts.Token);
-                await SectorHandshake.DrainUntilOpcode(
-                    cleanupGlobal, OpcodeId.Known.GlobalAvatarList.Value, cleanupCts.Token);
-                await SectorHandshake.DeleteCreatedCharacterAsync(
-                    cleanupGlobal, slot, cleanupCts.Token);
-            }
-            catch { /* best-effort cleanup */ }
-        }
+        // 0x0052 LOUNGE_NPC is STATION-only — SectorManager.cpp:520
+        // SendLoungeNPC is called only from StationLogin2's
+        // lounge-block (lines 516-524). SectorLogin2 (the space-arm)
+        // never invokes the lounge path.
+        Assert.DoesNotContain(OpcodeId.Known.LoungeNpc.Value, spaceSession.HandshakeOpcodes);
     }
-
 }

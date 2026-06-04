@@ -207,16 +207,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorServerHandoffTests
+public sealed class SectorServerHandoffTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorServerHandoffTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorServerHandoffTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task StarbaseExitAction_ReceivesServerHandoffFrame()
@@ -232,110 +225,80 @@ public sealed class SectorServerHandoffTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Hando", shipName: "HandoShip", cts.Token);
+            firstName: "Hando", shipName: "HandoShip", cts.Token));
 
-        try
+        // 0x004E STARBASE_REQUEST — 9B canonical packed payload.
+        // Server code at PlayerConnection.cpp:9879-9892 only
+        // reads Action in the case=1 branch; PlayerID and
+        // StarbaseID are logged but not consulted on this path.
+        //   [0..4) int32 PlayerID   = 0 (case-1 ignores)
+        //   [4..8) int32 StarbaseID = 0 (case-1 ignores)
+        //   [8..9)   char Action    = 1 (drives LaunchIntoSpace)
+        byte[] payload = new byte[9];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 0);
+        payload[8] = 1;
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.StarbaseRequest.Value, payload),
+            cts.Token);
+
+        // Drain inbound until we see a 0x003A SERVER_HANDOFF.
+        // The LaunchIntoSpace fan-out also emits 0x004F
+        // STARBASE_SET and (when the station has a StationMgr
+        // entry) 0x0086 MESSAGE_STRING ahead of it — both are
+        // already covered by other waves, so we tolerate and
+        // skip past them rather than asserting their order.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // 0x004E STARBASE_REQUEST — 9B canonical packed payload.
-            // Server code at PlayerConnection.cpp:9879-9892 only
-            // reads Action in the case=1 branch; PlayerID and
-            // StarbaseID are logged but not consulted on this path.
-            //   [0..4) int32 PlayerID   = 0 (case-1 ignores)
-            //   [4..8) int32 StarbaseID = 0 (case-1 ignores)
-            //   [8..9)   char Action    = 1 (drives LaunchIntoSpace)
-            byte[] payload = new byte[9];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 0);
-            payload[8] = 1;
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.StarbaseRequest.Value, payload),
-                cts.Token);
-
-            // Drain inbound until we see a 0x003A SERVER_HANDOFF.
-            // The LaunchIntoSpace fan-out also emits 0x004F
-            // STARBASE_SET and (when the station has a StationMgr
-            // entry) 0x0086 MESSAGE_STRING ahead of it — both are
-            // already covered by other waves, so we tolerate and
-            // skip past them rather than asserting their order.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
+            if (reply!.Header.Opcode == OpcodeId.Known.ServerHandoff.Value)
             {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+                // ServerHandoff payload starts with the inner
+                // MasterJoin-shaped `join` struct (64B canonical
+                // per PacketStructures.h's MasterJoin) plus
+                // four length-prefixed strings. Minimum sane
+                // length: 64B inner + 4×2B length fields + the
+                // non-empty sector/system names = >70B. Pin a
+                // very loose lower bound here to catch a
+                // zero-body emit regression without coupling
+                // to the exact retail layout.
+                Assert.True(reply.Payload.Length >= 64,
+                    $"0x003A SERVER_HANDOFF payload was {reply.Payload.Length}B; " +
+                    $"expected ≥64B (inner MasterJoin struct alone is 64B). " +
+                    $"Likely SendServerHandoff at PlayerConnection.cpp:10202 " +
+                    $"is emitting an empty/truncated payload.");
 
-                if (reply!.Header.Opcode == OpcodeId.Known.ServerHandoff.Value)
-                {
-                    // ServerHandoff payload starts with the inner
-                    // MasterJoin-shaped `join` struct (64B canonical
-                    // per PacketStructures.h's MasterJoin) plus
-                    // four length-prefixed strings. Minimum sane
-                    // length: 64B inner + 4×2B length fields + the
-                    // non-empty sector/system names = >70B. Pin a
-                    // very loose lower bound here to catch a
-                    // zero-body emit regression without coupling
-                    // to the exact retail layout.
-                    Assert.True(reply.Payload.Length >= 64,
-                        $"0x003A SERVER_HANDOFF payload was {reply.Payload.Length}B; " +
-                        $"expected ≥64B (inner MasterJoin struct alone is 64B). " +
-                        $"Likely SendServerHandoff at PlayerConnection.cpp:10202 " +
-                        $"is emitting an empty/truncated payload.");
-
-                    // ToSectorID at offset 20 of the inner MasterJoin.
-                    // SendServerHandoff writes it via ntohl (PlayerConnection.cpp:10167),
-                    // so it is BIG-ENDIAN on the wire while the rest of MasterJoin is
-                    // host LE. For Luna Station 10151 the launch target is the parent
-                    // SPACE sector, 10151/10 = 1015 (SectorManager.cpp:571). Pinning it
-                    // catches the divide-by-ten / wrong-arithmetic regression at the
-                    // to_sector_id computation that the loose length bound cannot.
-                    int toSectorId = BinaryPrimitives.ReadInt32BigEndian(
-                        reply.Payload.Span.Slice(20, 4));
-                    Assert.Equal(sectorId / 10, toSectorId);
-                    return;
-                }
+                // ToSectorID at offset 20 of the inner MasterJoin.
+                // SendServerHandoff writes it via ntohl (PlayerConnection.cpp:10167),
+                // so it is BIG-ENDIAN on the wire while the rest of MasterJoin is
+                // host LE. For Luna Station 10151 the launch target is the parent
+                // SPACE sector, 10151/10 = 1015 (SectorManager.cpp:571). Pinning it
+                // catches the divide-by-ten / wrong-arithmetic regression at the
+                // to_sector_id computation that the loose length bound cannot.
+                int toSectorId = BinaryPrimitives.ReadInt32BigEndian(
+                    reply.Payload.Span.Slice(20, 4));
+                Assert.Equal(sectorId / 10, toSectorId);
+                return;
             }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x004E STARBASE_REQUEST " +
-                $"Action=1 without seeing 0x003A SERVER_HANDOFF. " +
-                $"Likely the case-1 branch in HandleStarbaseRequest " +
-                $"(PlayerConnection.cpp:9879-9892) was deleted/short-circuited, " +
-                $"SectorManager::LaunchIntoSpace's SendServerHandoff call at " +
-                $"SectorManager.cpp:551 was removed, SendServerHandoff's opcode " +
-                $"constant at PlayerConnection.cpp:10202 was flipped, the proxy's " +
-                $"SendClientPacketSequence guard at UDPProxyToClient_linux.cpp:568 " +
-                $"was tightened past 0x003A, or the STARBASE_REQUEST case at " +
-                $"PlayerConnection.cpp:487 was removed/renamed in the dispatch table.");
         }
-        finally
-        {
-            // Drive a clean LOGOFF round-trip so DropPlayerFromGalaxy
-            // runs (PlayerConnection.cpp:7719) and releases the
-            // player node before the global plane deletes the
-            // avatar slot. DropPlayerFromSector already ran inside
-            // LaunchIntoSpace so this is the second drop call —
-            // DropPlayerFromSector is idempotent (range-list
-            // removal + SetActive(false) are no-ops the second
-            // time; SaveData no-ops if PlayerIndex's sector_num
-            // wasn't reset).
-            try
-            {
-                using var logoffCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                byte[] logoffPayload = new byte[8];
-                await session.Sector.SendAsync(
-                    Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
-                    logoffCts.Token);
-                await SectorHandshake.DrainUntilOpcode(
-                    session.Sector, OpcodeId.Known.LogoffConfirmation.Value, logoffCts.Token);
-            }
-            catch { /* best-effort logoff */ }
 
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x004E STARBASE_REQUEST " +
+            $"Action=1 without seeing 0x003A SERVER_HANDOFF. " +
+            $"Likely the case-1 branch in HandleStarbaseRequest " +
+            $"(PlayerConnection.cpp:9879-9892) was deleted/short-circuited, " +
+            $"SectorManager::LaunchIntoSpace's SendServerHandoff call at " +
+            $"SectorManager.cpp:551 was removed, SendServerHandoff's opcode " +
+            $"constant at PlayerConnection.cpp:10202 was flipped, the proxy's " +
+            $"SendClientPacketSequence guard at UDPProxyToClient_linux.cpp:568 " +
+            $"was tightened past 0x003A, or the STARBASE_REQUEST case at " +
+            $"PlayerConnection.cpp:487 was removed/renamed in the dispatch table.");
     }
 }

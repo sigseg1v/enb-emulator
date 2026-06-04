@@ -116,16 +116,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorStarbaseRequestTests
+public sealed class SectorStarbaseRequestTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorStarbaseRequestTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorStarbaseRequestTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task JobTerminal_DoesNotBreakConnection_RequestTimeStillRoundTrips()
@@ -141,88 +134,79 @@ public sealed class SectorStarbaseRequestTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Jobber", shipName: "JobShip", cts.Token);
+            firstName: "Jobber", shipName: "JobShip", cts.Token));
 
-        try
+        // StarbaseRequest wire layout — 9 bytes:
+        //   [0..4)   int32 LE  PlayerID    — retail client sets the
+        //                                     actor's avatar id;
+        //                                     server resolves the
+        //                                     actor via connection
+        //                                     binding (this field is
+        //                                     effectively unused
+        //                                     server-side), but its
+        //                                     width matters for
+        //                                     struct offsets.
+        //   [4..8)   int32 LE  StarbaseID  — for action=6 this is
+        //                                     0 (the Job Terminal is
+        //                                     identified by action,
+        //                                     not by NPC id; action=7
+        //                                     puts a job description
+        //                                     id here instead).
+        //   [8..9)   byte      Action      — 6 = Job Terminal open
+        //                                     (per HandleStarbaseRequest
+        //                                     case 6 at
+        //                                     server/src/PlayerConnection.cpp:9928).
+        // common/include/net7/PacketStructures.h:812
+        byte[] payload = new byte[9];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 0);
+        payload[8] = 6;
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.StarbaseRequest.Value, payload),
+            cts.Token);
+
+        // Survival probe.
+        int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+
+        byte[] reqTimePayload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
+            cts.Token);
+
+        // Drain until 0x0034 CLIENT_SET_TIME. Tolerate interleaved
+        // in-sector frames (and a possible JOB_LIST if the seed
+        // ever grows job rows) — cap on frame count so a stalled
+        // pipeline can't masquerade as the outer-CTS timeout.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // StarbaseRequest wire layout — 9 bytes:
-            //   [0..4)   int32 LE  PlayerID    — retail client sets the
-            //                                     actor's avatar id;
-            //                                     server resolves the
-            //                                     actor via connection
-            //                                     binding (this field is
-            //                                     effectively unused
-            //                                     server-side), but its
-            //                                     width matters for
-            //                                     struct offsets.
-            //   [4..8)   int32 LE  StarbaseID  — for action=6 this is
-            //                                     0 (the Job Terminal is
-            //                                     identified by action,
-            //                                     not by NPC id; action=7
-            //                                     puts a job description
-            //                                     id here instead).
-            //   [8..9)   byte      Action      — 6 = Job Terminal open
-            //                                     (per HandleStarbaseRequest
-            //                                     case 6 at
-            //                                     server/src/PlayerConnection.cpp:9928).
-            // common/include/net7/PacketStructures.h:812
-            byte[] payload = new byte[9];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 0);
-            payload[8] = 6;
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.StarbaseRequest.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
+                continue;
 
-            // Survival probe.
-            int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+            var span = reply.Payload.Span;
+            Assert.Equal(12, span.Length);
 
-            byte[] reqTimePayload = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+            int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+            Assert.Equal(clientTick, echoedClientSent);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
-                cts.Token);
-
-            // Drain until 0x0034 CLIENT_SET_TIME. Tolerate interleaved
-            // in-sector frames (and a possible JOB_LIST if the seed
-            // ever grows job rows) — cap on frame count so a stalled
-            // pipeline can't masquerade as the outer-CTS timeout.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-
-                if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
-                    continue;
-
-                var span = reply.Payload.Span;
-                Assert.Equal(12, span.Length);
-
-                int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                Assert.Equal(clientTick, echoedClientSent);
-
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x004E STARBASE_REQUEST (action=6 Job Terminal) " +
-                $"+ 0x0044 REQUEST_TIME without seeing 0x0034 CLIENT_SET_TIME. " +
-                $"Likely the server's HandleStarbaseRequest read past the 9B payload " +
-                $"(sizeof(long) regression on StarbaseRequest struct), " +
-                $"the proxy default-case forwarding dropped the opcode, " +
-                $"or SectorManager::GetJobList faulted on the empty-jobs path.");
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x004E STARBASE_REQUEST (action=6 Job Terminal) " +
+            $"+ 0x0044 REQUEST_TIME without seeing 0x0034 CLIENT_SET_TIME. " +
+            $"Likely the server's HandleStarbaseRequest read past the 9B payload " +
+            $"(sizeof(long) regression on StarbaseRequest struct), " +
+            $"the proxy default-case forwarding dropped the opcode, " +
+            $"or SectorManager::GetJobList faulted on the empty-jobs path.");
     }
 }

@@ -147,16 +147,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorRecustomizeAvatarDoneTests
+public sealed class SectorRecustomizeAvatarDoneTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorRecustomizeAvatarDoneTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorRecustomizeAvatarDoneTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task RecustomizeAvatarDone_OnFreshStarbaseSession_DoesNotBreakConnection_RequestTimeStillRoundTrips()
@@ -173,65 +166,56 @@ public sealed class SectorRecustomizeAvatarDoneTests
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
         // firstName "Avara" -- contains 'a' for the vowel-check.
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Avara", shipName: "AvaraShip", cts.Token);
+            firstName: "Avara", shipName: "AvaraShip", cts.Token));
 
-        try
+        // RecustomizeAvatarDone canonical 257-byte all-zero shape:
+        //   [0..241)   AvatarData (20 first_name + 20 last_name + ...)
+        //   [241..245) int32 playerid
+        //   [245]      bool unknown
+        //   [246..257) char _unknown[11]
+        byte[] payload = new byte[257];
+        // all zero already; payload[0..257] = 0.
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RecustomizeAvatarDone.Value, payload),
+            cts.Token);
+
+        // Survival probe: send REQUEST_TIME, assert CLIENT_SET_TIME
+        // echoes our sentinel tick.
+        int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+        byte[] reqTimePayload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // RecustomizeAvatarDone canonical 257-byte all-zero shape:
-            //   [0..241)   AvatarData (20 first_name + 20 last_name + ...)
-            //   [241..245) int32 playerid
-            //   [245]      bool unknown
-            //   [246..257) char _unknown[11]
-            byte[] payload = new byte[257];
-            // all zero already; payload[0..257] = 0.
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RecustomizeAvatarDone.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
+                continue;
 
-            // Survival probe: send REQUEST_TIME, assert CLIENT_SET_TIME
-            // echoes our sentinel tick.
-            int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
-            byte[] reqTimePayload = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
-
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
-                cts.Token);
-
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-
-                if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
-                    continue;
-
-                var span = reply.Payload.Span;
-                Assert.Equal(12, span.Length);
-                int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                Assert.Equal(clientTick, echoedClientSent);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0084 RECUSTOMIZE_AVATAR_DONE + 0x0044 REQUEST_TIME " +
-                $"without seeing 0x0034 CLIENT_SET_TIME. " +
-                $"Likely HandleRecustomizeAvatarDone SEGV'd inside SendStarbaseAvatarList on the all-zero avatar, " +
-                $"SendAuxPlayer NULL-deref'd after the avatar wipe, " +
-                $"AvatarData struct layout drifted (int32_t -> long widening on the 9 int32 fields shifts the OOB boundary by 36 bytes), " +
-                $"the dispatcher case at PlayerConnection.cpp:547 got mis-routed, " +
-                $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted.");
+            var span = reply.Payload.Span;
+            Assert.Equal(12, span.Length);
+            int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+            Assert.Equal(clientTick, echoedClientSent);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0084 RECUSTOMIZE_AVATAR_DONE + 0x0044 REQUEST_TIME " +
+            $"without seeing 0x0034 CLIENT_SET_TIME. " +
+            $"Likely HandleRecustomizeAvatarDone SEGV'd inside SendStarbaseAvatarList on the all-zero avatar, " +
+            $"SendAuxPlayer NULL-deref'd after the avatar wipe, " +
+            $"AvatarData struct layout drifted (int32_t -> long widening on the 9 int32 fields shifts the OOB boundary by 36 bytes), " +
+            $"the dispatcher case at PlayerConnection.cpp:547 got mis-routed, " +
+            $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted.");
     }
 }

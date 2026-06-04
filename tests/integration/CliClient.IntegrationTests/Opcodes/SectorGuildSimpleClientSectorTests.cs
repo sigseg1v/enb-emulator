@@ -178,16 +178,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorGuildSimpleClientSectorTests
+public sealed class SectorGuildSimpleClientSectorTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorGuildSimpleClientSectorTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorGuildSimpleClientSectorTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task GuildSimpleClientSector_OnZeroTypePayload_DoesNotBreakConnection_RequestTimeStillRoundTrips()
@@ -205,70 +198,61 @@ public sealed class SectorGuildSimpleClientSectorTests
 
         // firstName "Gusimple" — lowercase 'u', 'i', 'e' for the
         // AccountManager.cpp:1147 vowel-check footgun.
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Gusimple", shipName: "GusimpleShip", cts.Token);
+            firstName: "Gusimple", shipName: "GusimpleShip", cts.Token));
 
-        try
+        // 0x00CD GUILD_SIMPLE_CLIENT_SECTOR — 26B payload
+        // (wire-effective: 4B int32 type + 4B int32 gameid + 2B
+        // short length + 16B optionalparam). The local struct
+        // at PlayerGuild.cpp:703-709 declares type/gameid as
+        // `long` (sizeof(long) bug class) but for all-zero
+        // payload the 8B over-read still resolves type=0.
+        byte[] payload = new byte[26];
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.GuildSimpleClientSector.Value, payload),
+            cts.Token);
+
+        // Survival probe: did the connection survive the
+        // guild-simple-client-sector handler? Send REQUEST_TIME
+        // and assert CLIENT_SET_TIME echoes our sentinel tick.
+        int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+
+        byte[] reqTimePayload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
+            cts.Token);
+
+        // Drain until 0x0034 CLIENT_SET_TIME. Tolerate
+        // interleaved in-sector frames.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // 0x00CD GUILD_SIMPLE_CLIENT_SECTOR — 26B payload
-            // (wire-effective: 4B int32 type + 4B int32 gameid + 2B
-            // short length + 16B optionalparam). The local struct
-            // at PlayerGuild.cpp:703-709 declares type/gameid as
-            // `long` (sizeof(long) bug class) but for all-zero
-            // payload the 8B over-read still resolves type=0.
-            byte[] payload = new byte[26];
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.GuildSimpleClientSector.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
+                continue;
 
-            // Survival probe: did the connection survive the
-            // guild-simple-client-sector handler? Send REQUEST_TIME
-            // and assert CLIENT_SET_TIME echoes our sentinel tick.
-            int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+            var span = reply.Payload.Span;
+            Assert.Equal(12, span.Length);
 
-            byte[] reqTimePayload = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+            int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+            Assert.Equal(clientTick, echoedClientSent);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
-                cts.Token);
-
-            // Drain until 0x0034 CLIENT_SET_TIME. Tolerate
-            // interleaved in-sector frames.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-
-                if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
-                    continue;
-
-                var span = reply.Payload.Span;
-                Assert.Equal(12, span.Length);
-
-                int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                Assert.Equal(clientTick, echoedClientSent);
-
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x00CD GUILD_SIMPLE_CLIENT_SECTOR + 0x0044 REQUEST_TIME " +
-                $"without seeing 0x0034 CLIENT_SET_TIME. " +
-                $"Likely the dispatcher arm at PlayerConnection.cpp:613 got mis-routed " +
-                $"(swap with HandleRecruitAcceptClient → SEGV on null m_Recruiter), " +
-                $"a GUILD_*_CONFIRM constant in Guilds.h wrapped to 0 (would route type=0 into a real mutator), " +
-                $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted.");
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x00CD GUILD_SIMPLE_CLIENT_SECTOR + 0x0044 REQUEST_TIME " +
+            $"without seeing 0x0034 CLIENT_SET_TIME. " +
+            $"Likely the dispatcher arm at PlayerConnection.cpp:613 got mis-routed " +
+            $"(swap with HandleRecruitAcceptClient → SEGV on null m_Recruiter), " +
+            $"a GUILD_*_CONFIRM constant in Guilds.h wrapped to 0 (would route type=0 into a real mutator), " +
+            $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted.");
     }
 }

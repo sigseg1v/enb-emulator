@@ -152,16 +152,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorStarbaseAcceptJob9Tests
+public sealed class SectorStarbaseAcceptJob9Tests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorStarbaseAcceptJob9Tests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorStarbaseAcceptJob9Tests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task StarbaseAcceptJobAction9_ReceivesBareJobAcceptReply()
@@ -177,58 +170,37 @@ public sealed class SectorStarbaseAcceptJob9Tests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Job9", shipName: "Job9Ship", cts.Token);
+            firstName: "Job9", shipName: "Job9Ship", cts.Token));
 
-        try
+        // Canonical 9B packed StarbaseRequest payload. PlayerID
+        // and StarbaseID are ignored on the case=9 arm.
+        byte[] payload = new byte[9];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 0);
+        payload[8] = 9;
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.StarbaseRequest.Value, payload),
+            cts.Token);
+
+        // Drain up to 400 frames waiting for the 0x0096 reply.
+        const int maxFrames = 400;
+        int seen = 0;
+        Packet? reply = null;
+        while (seen++ < maxFrames)
         {
-            // Canonical 9B packed StarbaseRequest payload. PlayerID
-            // and StarbaseID are ignored on the case=9 arm.
-            byte[] payload = new byte[9];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 0);
-            payload[8] = 9;
-
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.StarbaseRequest.Value, payload),
-                cts.Token);
-
-            // Drain up to 400 frames waiting for the 0x0096 reply.
-            const int maxFrames = 400;
-            int seen = 0;
-            Packet? reply = null;
-            while (seen++ < maxFrames)
+            var frame = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(frame);
+            if (frame!.Header.Opcode == OpcodeId.Known.JobAcceptReply.Value)
             {
-                var frame = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(frame);
-                if (frame!.Header.Opcode == OpcodeId.Known.JobAcceptReply.Value)
-                {
-                    reply = frame;
-                    break;
-                }
+                reply = frame;
+                break;
             }
-
-            Assert.NotNull(reply);
-            Assert.Equal(0, reply!.Payload.Length);
         }
-        finally
-        {
-            try
-            {
-                using var logoffCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                byte[] logoffPayload = new byte[8];
-                await session.Sector.SendAsync(
-                    Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
-                    logoffCts.Token);
-                await SectorHandshake.DrainUntilOpcode(
-                    session.Sector, OpcodeId.Known.LogoffConfirmation.Value, logoffCts.Token);
-            }
-            catch { /* best-effort logoff */ }
 
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+        Assert.NotNull(reply);
+        Assert.Equal(0, reply!.Payload.Length);
     }
 }

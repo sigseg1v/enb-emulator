@@ -128,16 +128,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorDebugTests
+public sealed class SectorDebugTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorDebugTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorDebugTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task Debug_EmptyPayload_DoesNotBreakConnection_RequestTimeStillRoundTrips()
@@ -153,72 +146,63 @@ public sealed class SectorDebugTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Debby", shipName: "DebShip", cts.Token);
+            firstName: "Debby", shipName: "DebShip", cts.Token));
 
-        try
+        // 0x001A DEBUG — zero-byte payload. HandleDebug ignores
+        // data entirely (no struct cast, no field reads). The
+        // handler body is literally one line of LogDebug, and
+        // LogDebug itself early-returns before doing anything.
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.Debug.Value, Array.Empty<byte>()),
+            cts.Token);
+
+        // Survival probe.
+        int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+
+        byte[] reqTimePayload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
+            cts.Token);
+
+        // Drain until 0x0034 CLIENT_SET_TIME. Post-handshake the
+        // server may begin streaming in-sector frames so this loop
+        // tolerates interleaved traffic. Cap on frame count so a
+        // stalled pipeline can't masquerade as the outer-CTS
+        // timeout.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // 0x001A DEBUG — zero-byte payload. HandleDebug ignores
-            // data entirely (no struct cast, no field reads). The
-            // handler body is literally one line of LogDebug, and
-            // LogDebug itself early-returns before doing anything.
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.Debug.Value, Array.Empty<byte>()),
-                cts.Token);
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            // Survival probe.
-            int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
+                continue;
 
-            byte[] reqTimePayload = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+            // 0x0034 wire layout (ClientSetTime struct):
+            //   [0..4)  int32  ClientSent
+            //   [4..8)  int32  ServerReceived
+            //   [8..12) int32  ServerSent
+            // common/include/net7/PacketStructures.h:563
+            var span = reply.Payload.Span;
+            Assert.Equal(12, span.Length);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
-                cts.Token);
+            int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+            Assert.Equal(clientTick, echoedClientSent);
 
-            // Drain until 0x0034 CLIENT_SET_TIME. Post-handshake the
-            // server may begin streaming in-sector frames so this loop
-            // tolerates interleaved traffic. Cap on frame count so a
-            // stalled pipeline can't masquerade as the outer-CTS
-            // timeout.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-
-                if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
-                    continue;
-
-                // 0x0034 wire layout (ClientSetTime struct):
-                //   [0..4)  int32  ClientSent
-                //   [4..8)  int32  ServerReceived
-                //   [8..12) int32  ServerSent
-                // common/include/net7/PacketStructures.h:563
-                var span = reply.Payload.Span;
-                Assert.Equal(12, span.Length);
-
-                int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                Assert.Equal(clientTick, echoedClientSent);
-
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x001A DEBUG (empty payload) + 0x0044 REQUEST_TIME " +
-                $"without seeing 0x0034 CLIENT_SET_TIME. " +
-                $"Likely the server's HandleDebug grew payload parsing without a length guard and crashed on the zero-byte payload, " +
-                $"the LogDebug early-return at ServerManager.cpp:749 was removed and the vsprintf_s path corrupted state, " +
-                $"the proxy default-case forwarding dropped the opcode, " +
-                $"or the dispatcher case at PlayerConnection.cpp:451 got mis-routed to a nearby struct-reading handler.");
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x001A DEBUG (empty payload) + 0x0044 REQUEST_TIME " +
+            $"without seeing 0x0034 CLIENT_SET_TIME. " +
+            $"Likely the server's HandleDebug grew payload parsing without a length guard and crashed on the zero-byte payload, " +
+            $"the LogDebug early-return at ServerManager.cpp:749 was removed and the vsprintf_s path corrupted state, " +
+            $"the proxy default-case forwarding dropped the opcode, " +
+            $"or the dispatcher case at PlayerConnection.cpp:451 got mis-routed to a nearby struct-reading handler.");
     }
 }

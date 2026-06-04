@@ -210,19 +210,12 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorRecustomizeStartTests
+public sealed class SectorRecustomizeStartTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
     private const int ExpectedAvatarStartSize = 60;   // 14*int32 + int32
     private const int ExpectedShipStartSize   = 262;  // 194 ShipData + 12*int32 + int32 + 4*int32
 
-    public SectorRecustomizeStartTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorRecustomizeStartTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task StarbaseRecustomizeActions_ReceivesShipAndAvatarStartFrames()
@@ -238,46 +231,25 @@ public sealed class SectorRecustomizeStartTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Recust", shipName: "RecustShip", cts.Token);
+            firstName: "Recust", shipName: "RecustShip", cts.Token));
 
-        try
-        {
-            // --- Action=10 → 0x0083 RECUSTOMIZE_AVATAR_START ---
-            await SendStarbaseRequestAsync(session, action: 10, cts.Token);
-            var avatarStartReply = await DrainUntilOpcodeAsync(
-                session, OpcodeId.Known.RecustomizeAvatarStart.Value,
-                stimulusName: "STARBASE_REQUEST Action=10",
-                expectedReplyOpcode: 0x0083, cts.Token);
-            Assert.Equal(ExpectedAvatarStartSize, avatarStartReply.Payload.Length);
+        // --- Action=10 → 0x0083 RECUSTOMIZE_AVATAR_START ---
+        await SendStarbaseRequestAsync(session, action: 10, cts.Token);
+        var avatarStartReply = await DrainUntilOpcodeAsync(
+            session, OpcodeId.Known.RecustomizeAvatarStart.Value,
+            stimulusName: "STARBASE_REQUEST Action=10",
+            expectedReplyOpcode: 0x0083, cts.Token);
+        Assert.Equal(ExpectedAvatarStartSize, avatarStartReply.Payload.Length);
 
-            // --- Action=11 → 0x0081 RECUSTOMIZE_SHIP_START ---
-            await SendStarbaseRequestAsync(session, action: 11, cts.Token);
-            var shipStartReply = await DrainUntilOpcodeAsync(
-                session, OpcodeId.Known.RecustomizeShipStart.Value,
-                stimulusName: "STARBASE_REQUEST Action=11",
-                expectedReplyOpcode: 0x0081, cts.Token);
-            Assert.Equal(ExpectedShipStartSize, shipStartReply.Payload.Length);
-        }
-        finally
-        {
-            try
-            {
-                using var logoffCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                byte[] logoffPayload = new byte[8];
-                await session.Sector.SendAsync(
-                    Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
-                    logoffCts.Token);
-                await SectorHandshake.DrainUntilOpcode(
-                    session.Sector, OpcodeId.Known.LogoffConfirmation.Value, logoffCts.Token);
-            }
-            catch { /* best-effort logoff */ }
-
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+        // --- Action=11 → 0x0081 RECUSTOMIZE_SHIP_START ---
+        await SendStarbaseRequestAsync(session, action: 11, cts.Token);
+        var shipStartReply = await DrainUntilOpcodeAsync(
+            session, OpcodeId.Known.RecustomizeShipStart.Value,
+            stimulusName: "STARBASE_REQUEST Action=11",
+            expectedReplyOpcode: 0x0081, cts.Token);
+        Assert.Equal(ExpectedShipStartSize, shipStartReply.Payload.Length);
     }
 
     private static async Task SendStarbaseRequestAsync(

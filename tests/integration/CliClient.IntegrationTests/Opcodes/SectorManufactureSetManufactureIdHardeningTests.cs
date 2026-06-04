@@ -141,18 +141,11 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorManufactureSetManufactureIdHardeningTests
+public sealed class SectorManufactureSetManufactureIdHardeningTests : SectorIntegrationTest
 {
     private const int ExpectedMfgIdPayloadLength = 4;
 
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorManufactureSetManufactureIdHardeningTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorManufactureSetManufactureIdHardeningTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task ManufactureSetManufactureId_EmittedDuringHandshake_HasExactly4BytePayload()
@@ -168,30 +161,21 @@ public sealed class SectorManufactureSetManufactureIdHardeningTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "MfgPin68", shipName: "MfgPin68Ship", cts.Token);
+            firstName: "MfgPin68", shipName: "MfgPin68Ship", cts.Token));
 
-        try
-        {
-            // Pull every 0x007F frame captured during the handshake drain.
-            // StationLogin (sector_id > 9999, our 10151 path) calls
-            // SetManufactureID(ntohl(ManuID)) exactly once per login, so
-            // we expect at least one frame; assert all are 4-byte.
-            var mfgFrames = session.HandshakeFrames
-                .Where(f => f.Opcode == OpcodeId.Known.ManufactureSetManufactureId.Value)
-                .ToList();
+        // Pull every 0x007F frame captured during the handshake drain.
+        // StationLogin (sector_id > 9999, our 10151 path) calls
+        // SetManufactureID(ntohl(ManuID)) exactly once per login, so
+        // we expect at least one frame; assert all are 4-byte.
+        var mfgFrames = session.HandshakeFrames
+            .Where(f => f.Opcode == OpcodeId.Known.ManufactureSetManufactureId.Value)
+            .ToList();
 
-            Assert.NotEmpty(mfgFrames);
-            Assert.All(mfgFrames, f =>
-                Assert.Equal(ExpectedMfgIdPayloadLength, f.PayloadLength));
-        }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+        Assert.NotEmpty(mfgFrames);
+        Assert.All(mfgFrames, f =>
+            Assert.Equal(ExpectedMfgIdPayloadLength, f.PayloadLength));
     }
 
     /// <summary>
@@ -294,28 +278,19 @@ public sealed class SectorManufactureSetManufactureIdHardeningTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, stationSectorId,
-            firstName: "MfgPin105", shipName: "MfgPin105Ship", cts.Token);
+            firstName: "MfgPin105", shipName: "MfgPin105Ship", cts.Token));
 
-        try
-        {
-            var mfgFrames = session.HandshakeFrames
-                .Where(f => f.Opcode == OpcodeId.Known.ManufactureSetManufactureId.Value)
-                .ToList();
+        var mfgFrames = session.HandshakeFrames
+            .Where(f => f.Opcode == OpcodeId.Known.ManufactureSetManufactureId.Value)
+            .ToList();
 
-            // Wave 105 pins the 1-frame invariant: StationLogin manu-lab
-            // anchor (SectorManager.cpp:475). Only emit-site reached on the
-            // single-player station-sector handshake dispatch path.
-            var single = Assert.Single(mfgFrames);
-            Assert.Equal(ExpectedMfgIdPayloadLength, single.PayloadLength);
-        }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+        // Wave 105 pins the 1-frame invariant: StationLogin manu-lab
+        // anchor (SectorManager.cpp:475). Only emit-site reached on the
+        // single-player station-sector handshake dispatch path.
+        var single = Assert.Single(mfgFrames);
+        Assert.Equal(ExpectedMfgIdPayloadLength, single.PayloadLength);
     }
 
     /// <summary>
@@ -442,8 +417,8 @@ public sealed class SectorManufactureSetManufactureIdHardeningTests
             // MANUFACTURE_SET_MANUFACTURE_ID(0) at line 345. Filter
             // HandshakeFrames for 0x007F and pin the count to exactly
             // one + the payload length to 4 bytes.
-            await using var spaceSession = await SectorHandshake.ReestablishAsync(
-                _server, login.Ticket!, slot, spaceSectorId, cts.Token);
+            var spaceSession = Track(await SectorHandshake.ReestablishAsync(
+                _server, login.Ticket!, slot, spaceSectorId, cts.Token));
 
             var mfgFrames = spaceSession.HandshakeFrames
                 .Where(f => f.Opcode == OpcodeId.Known.ManufactureSetManufactureId.Value)
@@ -457,19 +432,7 @@ public sealed class SectorManufactureSetManufactureIdHardeningTests
         }
         finally
         {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            try
-            {
-                await using var cleanupGlobal = await EncryptedTcpConnection.ConnectAsync(
-                    _server.GlobalHost, _server.GlobalPort, cleanupCts.Token);
-                await SectorHandshake.SendGlobalConnectAsync(
-                    cleanupGlobal, login.Ticket!, cleanupCts.Token);
-                await SectorHandshake.DrainUntilOpcode(
-                    cleanupGlobal, OpcodeId.Known.GlobalAvatarList.Value, cleanupCts.Token);
-                await SectorHandshake.DeleteCreatedCharacterAsync(
-                    cleanupGlobal, slot, cleanupCts.Token);
-            }
-            catch { /* best-effort cleanup */ }
+            await stationSession.DisposeAsync();
         }
     }
 }

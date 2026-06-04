@@ -177,16 +177,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorStarbaseLoginCompleteTests
+public sealed class SectorStarbaseLoginCompleteTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorStarbaseLoginCompleteTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorStarbaseLoginCompleteTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task StarbaseLoginComplete_OnFreshChar_DoesNotBreakConnection_RequestTimeStillRoundTrips()
@@ -205,78 +198,69 @@ public sealed class SectorStarbaseLoginCompleteTests
         // firstName "Umbriel" starts with lowercase 'u' for the
         // AccountManager.cpp:1147 vowel-check footgun (case-sensitive
         // a/e/i/o/u/y BEFORE toupper at line 1153).
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Umbriel", shipName: "UmbrielShip", cts.Token);
+            firstName: "Umbriel", shipName: "UmbrielShip", cts.Token));
 
-        try
+        // 0x3008 STARBASE_LOGIN_COMPLETE — server handler at
+        // server/src/PlayerConnection.cpp:631-634 is literally
+        // `SetNavCommence(); break;` — sets a write-only bool.
+        // No payload decode at all. We send an 8-byte all-zero
+        // payload matching the Linux proxy's wire emit
+        // (sizeof(long) = 8 on Linux x86_64; the proxy fills it
+        // with player_id but the handler ignores). A zero-byte
+        // payload would also work since the handler doesn't
+        // touch `data`.
+        byte[] payload = new byte[8];
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.StarbaseLoginComplete.Value, payload),
+            cts.Token);
+
+        // Survival probe: did the connection survive the
+        // STARBASE_LOGIN_COMPLETE handler? Send REQUEST_TIME and
+        // assert CLIENT_SET_TIME echoes our sentinel tick.
+        int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+
+        byte[] reqTimePayload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
+            cts.Token);
+
+        // Drain until 0x0034 CLIENT_SET_TIME. Tolerate interleaved
+        // in-sector frames (positional updates from observers).
+        // Unlike Wave 44/45 there's no AUX_DATA expected — the
+        // 0x3008 handler is a true no-op — so the only frames
+        // between our send and the CLIENT_SET_TIME echo should be
+        // positional updates from any in-sector observers.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // 0x3008 STARBASE_LOGIN_COMPLETE — server handler at
-            // server/src/PlayerConnection.cpp:631-634 is literally
-            // `SetNavCommence(); break;` — sets a write-only bool.
-            // No payload decode at all. We send an 8-byte all-zero
-            // payload matching the Linux proxy's wire emit
-            // (sizeof(long) = 8 on Linux x86_64; the proxy fills it
-            // with player_id but the handler ignores). A zero-byte
-            // payload would also work since the handler doesn't
-            // touch `data`.
-            byte[] payload = new byte[8];
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.StarbaseLoginComplete.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
+                continue;
 
-            // Survival probe: did the connection survive the
-            // STARBASE_LOGIN_COMPLETE handler? Send REQUEST_TIME and
-            // assert CLIENT_SET_TIME echoes our sentinel tick.
-            int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+            var span = reply.Payload.Span;
+            Assert.Equal(12, span.Length);
 
-            byte[] reqTimePayload = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+            int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+            Assert.Equal(clientTick, echoedClientSent);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
-                cts.Token);
-
-            // Drain until 0x0034 CLIENT_SET_TIME. Tolerate interleaved
-            // in-sector frames (positional updates from observers).
-            // Unlike Wave 44/45 there's no AUX_DATA expected — the
-            // 0x3008 handler is a true no-op — so the only frames
-            // between our send and the CLIENT_SET_TIME echo should be
-            // positional updates from any in-sector observers.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-
-                if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
-                    continue;
-
-                var span = reply.Payload.Span;
-                Assert.Equal(12, span.Length);
-
-                int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                Assert.Equal(clientTick, echoedClientSent);
-
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x3008 STARBASE_LOGIN_COMPLETE + 0x0044 REQUEST_TIME " +
-                $"without seeing 0x0034 CLIENT_SET_TIME. " +
-                $"Likely the dispatcher arm at PlayerConnection.cpp:631 was removed (server would default-LogMessage 'Bad opcode'), " +
-                $"a swap with the 0x3004 PLAYER_SHIP_SENT handler at line 625 triggered FinishLogin a second time, " +
-                $"SetNavCommence at PlayerClass.h:1055 was changed to a crashing method call, " +
-                $"the proxy's bottom-of-switch ForwardClientOpcode default at proxy/ClientToServer_linux_stubs.cpp dropped 0x3008, " +
-                $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted.");
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x3008 STARBASE_LOGIN_COMPLETE + 0x0044 REQUEST_TIME " +
+            $"without seeing 0x0034 CLIENT_SET_TIME. " +
+            $"Likely the dispatcher arm at PlayerConnection.cpp:631 was removed (server would default-LogMessage 'Bad opcode'), " +
+            $"a swap with the 0x3004 PLAYER_SHIP_SENT handler at line 625 triggered FinishLogin a second time, " +
+            $"SetNavCommence at PlayerClass.h:1055 was changed to a crashing method call, " +
+            $"the proxy's bottom-of-switch ForwardClientOpcode default at proxy/ClientToServer_linux_stubs.cpp dropped 0x3008, " +
+            $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted.");
     }
 }

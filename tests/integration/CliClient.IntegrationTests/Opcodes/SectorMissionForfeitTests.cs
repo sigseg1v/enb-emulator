@@ -213,16 +213,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorMissionForfeitTests
+public sealed class SectorMissionForfeitTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorMissionForfeitTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorMissionForfeitTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task MissionForfeit_EmptySlotZero_ReceivesNonForfeitableErrorString()
@@ -238,83 +231,74 @@ public sealed class SectorMissionForfeitTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Forfeitor", shipName: "ForfeitorShip", cts.Token);
+            firstName: "Forfeitor", shipName: "ForfeitorShip", cts.Token));
 
-        try
+        // 0x0086 MISSION_FORFEIT — 8B canonical payload. Wire is
+        // BIG-ENDIAN (HandleMissionForfeit at PlayerConnection
+        // .cpp:11012-11013 ntohl-decodes both fields).
+        //   [0..4) int32 PlayerID  = 0 (handler ignores; only
+        //                            MissionID is used for the
+        //                            range check + slot index)
+        //   [4..8) int32 MissionID = 0 (empty slot 0)
+        byte[] payload = new byte[8];
+        BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(4, 4), 0);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.MissionForfeit.Value, payload),
+            cts.Token);
+
+        // Drain inbound until we see a 0x001D MESSAGE_STRING whose
+        // body contains "non forfeitable". Post-handshake the server
+        // may interleave other in-sector fan-out (NPC chatter, state
+        // updates, etc.); a frame cap keeps a stalled pipeline from
+        // masquerading as the outer-CTS timeout.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // 0x0086 MISSION_FORFEIT — 8B canonical payload. Wire is
-            // BIG-ENDIAN (HandleMissionForfeit at PlayerConnection
-            // .cpp:11012-11013 ntohl-decodes both fields).
-            //   [0..4) int32 PlayerID  = 0 (handler ignores; only
-            //                            MissionID is used for the
-            //                            range check + slot index)
-            //   [4..8) int32 MissionID = 0 (empty slot 0)
-            byte[] payload = new byte[8];
-            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(4, 4), 0);
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.MissionForfeit.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            // Drain inbound until we see a 0x001D MESSAGE_STRING whose
-            // body contains "non forfeitable". Post-handshake the server
-            // may interleave other in-sector fan-out (NPC chatter, state
-            // updates, etc.); a frame cap keeps a stalled pipeline from
-            // masquerading as the outer-CTS timeout.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            // 0x001D wire layout (mirror of Player::SendMessageString
+            // at server/src/PlayerConnection.cpp:10974):
+            //   [0..2) short length    (LE; strlen(msg)+1)
+            //   [2]    char  color     (17 for this reply)
+            //   [3..]  msg + '\0'
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            int nulIdx = span[3..].IndexOf((byte)0);
+            if (nulIdx < 0) continue;
 
-                // 0x001D wire layout (mirror of Player::SendMessageString
-                // at server/src/PlayerConnection.cpp:10974):
-                //   [0..2) short length    (LE; strlen(msg)+1)
-                //   [2]    char  color     (17 for this reply)
-                //   [3..]  msg + '\0'
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            string body = Encoding.ASCII.GetString(span.Slice(3, nulIdx));
 
-                int nulIdx = span[3..].IndexOf((byte)0);
-                if (nulIdx < 0) continue;
+            // Filter — other MESSAGE_STRING frames (e.g. login
+            // chatter) may arrive first. Keep draining until we see
+            // the one keyed by our MISSION_FORFEIT.
+            if (!body.Contains("non forfeitable", StringComparison.Ordinal))
+                continue;
 
-                string body = Encoding.ASCII.GetString(span.Slice(3, nulIdx));
-
-                // Filter — other MESSAGE_STRING frames (e.g. login
-                // chatter) may arrive first. Keep draining until we see
-                // the one keyed by our MISSION_FORFEIT.
-                if (!body.Contains("non forfeitable", StringComparison.Ordinal))
-                    continue;
-
-                // Pin on the distinctive substring rather than the
-                // whole string so punctuation/casing tweaks don't sink
-                // the test. Full literal at PlayerMissions.cpp:1630:
-                // "This mission is non forfeitable."
-                Assert.Contains("non forfeitable", body);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0086 MISSION_FORFEIT (MissionID=0) " +
-                $"without seeing 0x001D MESSAGE_STRING containing \"non forfeitable\". " +
-                $"Likely the server's HandleMissionForfeit / MissionDismiss else-branch " +
-                $"SendVaMessageC path broke, the proxy default-case forwarding dropped the opcode, " +
-                $"the dispatcher case at PlayerConnection.cpp:551 got mis-routed, " +
-                $"or AuxMission's default IsForfeitable flipped to true.");
+            // Pin on the distinctive substring rather than the
+            // whole string so punctuation/casing tweaks don't sink
+            // the test. Full literal at PlayerMissions.cpp:1630:
+            // "This mission is non forfeitable."
+            Assert.Contains("non forfeitable", body);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0086 MISSION_FORFEIT (MissionID=0) " +
+            $"without seeing 0x001D MESSAGE_STRING containing \"non forfeitable\". " +
+            $"Likely the server's HandleMissionForfeit / MissionDismiss else-branch " +
+            $"SendVaMessageC path broke, the proxy default-case forwarding dropped the opcode, " +
+            $"the dispatcher case at PlayerConnection.cpp:551 got mis-routed, " +
+            $"or AuxMission's default IsForfeitable flipped to true.");
     }
 
     /// <summary>
@@ -467,70 +451,61 @@ public sealed class SectorMissionForfeitTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Frftor11", shipName: "Frftor11Ship", cts.Token);
+            firstName: "Frftor11", shipName: "Frftor11Ship", cts.Token));
 
-        try
+        byte[] payload = new byte[8];
+        BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(4, 4), 0);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.MissionForfeit.Value, payload),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            byte[] payload = new byte[8];
-            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(4, 4), 0);
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.MissionForfeit.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // Filter on the distinctive substring so other
+            // MESSAGE_STRING traffic (motd, NPC chatter) doesn't
+            // race ahead of the non-forfeitable reply.
+            if (!text.Contains("non forfeitable", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // Filter on the distinctive substring so other
-                // MESSAGE_STRING traffic (motd, NPC chatter) doesn't
-                // race ahead of the non-forfeitable reply.
-                if (!text.Contains("non forfeitable", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(NonForfeitableLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0086 MISSION_FORFEIT (MissionID=0) " +
-                $"without seeing 0x001D MESSAGE_STRING containing \"non forfeitable\". " +
-                $"Same drain-loop budget as Wave 27's sibling test; the failure modes are " +
-                $"identical.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(NonForfeitableLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0086 MISSION_FORFEIT (MissionID=0) " +
+            $"without seeing 0x001D MESSAGE_STRING containing \"non forfeitable\". " +
+            $"Same drain-loop budget as Wave 27's sibling test; the failure modes are " +
+            $"identical.");
     }
 }

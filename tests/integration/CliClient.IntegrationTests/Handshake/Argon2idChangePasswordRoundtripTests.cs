@@ -57,16 +57,9 @@ namespace N7.CliClient.IntegrationTests.Handshake;
 /// switch).</para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class Argon2idChangePasswordRoundtripTests
+public sealed class Argon2idChangePasswordRoundtripTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public Argon2idChangePasswordRoundtripTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public Argon2idChangePasswordRoundtripTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task SlashChangepassword_RewritesPhc_OldPasswordRejected_NewPasswordAccepted()
@@ -85,78 +78,68 @@ public sealed class Argon2idChangePasswordRoundtripTests
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
         // 2. Drive the sector handshake and fire the slash command.
-        await using (var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Cypria", shipName: "CypriaShip", cts.Token))
+            firstName: "Cypria", shipName: "CypriaShip", cts.Token));
+
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: $"/changepassword {newPassword}");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        // Reply body: "Your password has been changed to: `<newpw>`"
+        string expectedLiteral =
+            $"Your password has been changed to: `{newPassword}`";
+        int expectedLiteralBytes =
+            Encoding.ASCII.GetByteCount(expectedLiteral);
+        int expectedReplyPayloadLength =
+            2 + 1 + expectedLiteralBytes + 1; // u16 length + u8 color + literal + NUL
+        short expectedReplyLengthField = (short)(expectedLiteralBytes + 1);
+        const byte expectedReplyColor = 5;
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        bool seenReply = false;
+        while (framesSeen++ < maxFrames)
         {
-            try
-            {
-                var codec = new ClientChatCodec();
-                var chat = new ClientChatMessage(
-                    GameId: session.GameId,
-                    Type: ChatChannel.Group,
-                    Message: $"/changepassword {newPassword}");
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-                await session.Sector.SendAsync(
-                    Packet.ForOpcode(
-                        OpcodeId.Known.ClientChat.Value,
-                        codec.EncodeOutbound(chat)),
-                    cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-                // Reply body: "Your password has been changed to: `<newpw>`"
-                string expectedLiteral =
-                    $"Your password has been changed to: `{newPassword}`";
-                int expectedLiteralBytes =
-                    Encoding.ASCII.GetByteCount(expectedLiteral);
-                int expectedReplyPayloadLength =
-                    2 + 1 + expectedLiteralBytes + 1; // u16 length + u8 color + literal + NUL
-                short expectedReplyLengthField = (short)(expectedLiteralBytes + 1);
-                const byte expectedReplyColor = 5;
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                int framesSeen = 0;
-                const int maxFrames = 400;
-                bool seenReply = false;
-                while (framesSeen++ < maxFrames)
-                {
-                    var reply = await session.Sector.ReceiveAsync(cts.Token);
-                    Assert.NotNull(reply);
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                    if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                        continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                    var span = reply.Payload.Span;
-                    if (span.Length < 4) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            if (!text.Equals(expectedLiteral, StringComparison.Ordinal))
+                continue;
 
-                    short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                    if (msgLen < 1) continue;
+            Assert.Equal(expectedReplyPayloadLength, span.Length);
+            Assert.Equal(expectedReplyLengthField, msgLen);
+            Assert.Equal(expectedReplyColor, span[2]);
+            Assert.Equal((byte)0x00, span[3 + expectedLiteralBytes]);
+            seenReply = true;
+            break;
+        }
 
-                    int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                    if (bodyBytes <= 0) continue;
-
-                    string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
-                    if (!text.Equals(expectedLiteral, StringComparison.Ordinal))
-                        continue;
-
-                    Assert.Equal(expectedReplyPayloadLength, span.Length);
-                    Assert.Equal(expectedReplyLengthField, msgLen);
-                    Assert.Equal(expectedReplyColor, span[2]);
-                    Assert.Equal((byte)0x00, span[3 + expectedLiteralBytes]);
-                    seenReply = true;
-                    break;
-                }
-
-                if (!seenReply)
-                {
-                    throw new Xunit.Sdk.XunitException(
-                        $"drained {maxFrames} frames after 0x0033 \"/changepassword {newPassword}\" without seeing the success 0x001D reply.");
-                }
-            }
-            finally
-            {
-                using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-                catch { /* best-effort cleanup */ }
-            }
+        if (!seenReply)
+        {
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after 0x0033 \"/changepassword {newPassword}\" without seeing the success 0x001D reply.");
         }
 
         // 3. AuthLogin with the ORIGINAL password must now fail.

@@ -208,7 +208,7 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorClientChatErrorTests
+public sealed class SectorClientChatErrorTests : SectorIntegrationTest
 {
     private const string NonexistentNick = "Bzqxqxz64";
     private const string Message = "hi";
@@ -249,14 +249,7 @@ public sealed class SectorClientChatErrorTests
     private const string IgnoreSelfNick = "Selfor";
     private const int AddIgnoreSelfExpectedPayloadSize = 4 + 4 + 2 + 6 + 2 + 2;  // 20
 
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorClientChatErrorTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorClientChatErrorTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task ClientChatRequest_SpeakLocallyNonexistentRecipient_ReceivesClientChatError()
@@ -272,87 +265,66 @@ public sealed class SectorClientChatErrorTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Erroria", shipName: "ErroriaShip", cts.Token);
+            firstName: "Erroria", shipName: "ErroriaShip", cts.Token));
 
-        try
+        // 0x00A3 CLIENT_CHAT_REQUEST — variable-length 29B layout.
+        byte[] nickBytes = Encoding.ASCII.GetBytes(NonexistentNick);
+        byte[] msgBytes = Encoding.ASCII.GetBytes(Message);
+        int payloadSize = 4 + 4 + 2 + nickBytes.Length + 2 + 2 + msgBytes.Length + 4;
+        byte[] payload = new byte[payloadSize];
+        int o = 0;
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 0); o += 4;             // PlayerID
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 1); o += 4;             // type = CCE_SPEAK_LOCALLY
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), (short)nickBytes.Length); o += 2;
+        nickBytes.CopyTo(payload, o); o += nickBytes.Length;
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), 0); o += 2;             // string_length2 = 0
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), (short)msgBytes.Length); o += 2;
+        msgBytes.CopyTo(payload, o); o += msgBytes.Length;
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 0);                     // data_size
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.ClientChatRequest.Value, payload),
+            cts.Token);
+
+        // Drain inbound until we see 0x00A6 CLIENT_CHAT_ERROR.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        var observed = new List<string>();
+        while (framesSeen++ < maxFrames)
         {
-            // 0x00A3 CLIENT_CHAT_REQUEST — variable-length 29B layout.
-            byte[] nickBytes = Encoding.ASCII.GetBytes(NonexistentNick);
-            byte[] msgBytes = Encoding.ASCII.GetBytes(Message);
-            int payloadSize = 4 + 4 + 2 + nickBytes.Length + 2 + 2 + msgBytes.Length + 4;
-            byte[] payload = new byte[payloadSize];
-            int o = 0;
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 0); o += 4;             // PlayerID
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 1); o += 4;             // type = CCE_SPEAK_LOCALLY
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), (short)nickBytes.Length); o += 2;
-            nickBytes.CopyTo(payload, o); o += nickBytes.Length;
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), 0); o += 2;             // string_length2 = 0
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), (short)msgBytes.Length); o += 2;
-            msgBytes.CopyTo(payload, o); o += msgBytes.Length;
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 0);                     // data_size
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
+            observed.Add($"0x{reply!.Header.Opcode:X4}/{reply.Payload.Length}");
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.ClientChatRequest.Value, payload),
-                cts.Token);
+            if (reply.Header.Opcode != OpcodeId.Known.ClientChatError.Value)
+                continue;
 
-            // Drain inbound until we see 0x00A6 CLIENT_CHAT_ERROR.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            var observed = new List<string>();
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-                observed.Add($"0x{reply!.Header.Opcode:X4}/{reply.Payload.Length}");
+            // Wire layout (23 bytes):
+            //   bytes [0..4]   int32 LE reason  = 4 (CHAT_ERROR_INVALID_PERSON)
+            //   bytes [4..8]   int32 LE type    = 1 (CCE_SPEAK_LOCALLY)
+            //   bytes [8..10]  int16 LE player_len = 9
+            //   bytes [10..19] 9B ASCII player  = "Bzqxqxz64"
+            //   bytes [19..21] int16 LE channel_len = 0
+            //   bytes [21..23] int16 LE other_len   = 0
+            Assert.Equal(ExpectedPayloadSize, reply.Payload.Length);
+            var span = reply.Payload.Span;
 
-                if (reply.Header.Opcode != OpcodeId.Known.ClientChatError.Value)
-                    continue;
-
-                // Wire layout (23 bytes):
-                //   bytes [0..4]   int32 LE reason  = 4 (CHAT_ERROR_INVALID_PERSON)
-                //   bytes [4..8]   int32 LE type    = 1 (CCE_SPEAK_LOCALLY)
-                //   bytes [8..10]  int16 LE player_len = 9
-                //   bytes [10..19] 9B ASCII player  = "Bzqxqxz64"
-                //   bytes [19..21] int16 LE channel_len = 0
-                //   bytes [21..23] int16 LE other_len   = 0
-                Assert.Equal(ExpectedPayloadSize, reply.Payload.Length);
-                var span = reply.Payload.Span;
-
-                Assert.Equal(4, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(0, 4)));
-                Assert.Equal(1, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4)));
-                Assert.Equal((short)9, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(8, 2)));
-                Assert.Equal(NonexistentNick, Encoding.ASCII.GetString(span.Slice(10, 9)));
-                Assert.Equal((short)0, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(19, 2)));
-                Assert.Equal((short)0, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(21, 2)));
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x00A3 CLIENT_CHAT_REQUEST " +
-                $"(type=CCE_SPEAK_LOCALLY=1, nick=\"{NonexistentNick}\", msg=\"{Message}\") " +
-                $"without seeing 0x00A6 CLIENT_CHAT_ERROR. Observed [{observed.Count}]: " +
-                $"{string.Join(" | ", observed)}");
+            Assert.Equal(4, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(0, 4)));
+            Assert.Equal(1, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4)));
+            Assert.Equal((short)9, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(8, 2)));
+            Assert.Equal(NonexistentNick, Encoding.ASCII.GetString(span.Slice(10, 9)));
+            Assert.Equal((short)0, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(19, 2)));
+            Assert.Equal((short)0, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(21, 2)));
+            return;
         }
-        finally
-        {
-            try
-            {
-                using var logoffCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                byte[] logoffPayload = new byte[8];
-                await session.Sector.SendAsync(
-                    Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
-                    logoffCts.Token);
-                await SectorHandshake.DrainUntilOpcode(
-                    session.Sector, OpcodeId.Known.LogoffConfirmation.Value, logoffCts.Token);
-            }
-            catch { /* best-effort logoff */ }
 
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x00A3 CLIENT_CHAT_REQUEST " +
+            $"(type=CCE_SPEAK_LOCALLY=1, nick=\"{NonexistentNick}\", msg=\"{Message}\") " +
+            $"without seeing 0x00A6 CLIENT_CHAT_ERROR. Observed [{observed.Count}]: " +
+            $"{string.Join(" | ", observed)}");
     }
 
     /// <summary>
@@ -479,87 +451,66 @@ public sealed class SectorClientChatErrorTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Friender", shipName: "FrienderShip", cts.Token);
+            firstName: "Friender", shipName: "FrienderShip", cts.Token));
 
-        try
+        // 0x00A3 CLIENT_CHAT_REQUEST — 26B variable-length layout,
+        // type=CCE_REMOVE_FRIEND=9, string1="Ghost119" (the friend
+        // name we're asking the server to remove from our empty list).
+        byte[] nickBytes = Encoding.ASCII.GetBytes(AbsentFriendNick);
+        int payloadSize = 4 + 4 + 2 + nickBytes.Length + 2 + 2 + 4;
+        byte[] payload = new byte[payloadSize];
+        int o = 0;
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 0); o += 4;             // PlayerID
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 9); o += 4;             // type = CCE_REMOVE_FRIEND
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), (short)nickBytes.Length); o += 2;
+        nickBytes.CopyTo(payload, o); o += nickBytes.Length;
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), 0); o += 2;             // string_length2 = 0
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), 0); o += 2;             // string_length3 = 0
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 0);                     // data_size
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.ClientChatRequest.Value, payload),
+            cts.Token);
+
+        // Drain inbound until we see 0x00A6 CLIENT_CHAT_ERROR.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        var observed = new List<string>();
+        while (framesSeen++ < maxFrames)
         {
-            // 0x00A3 CLIENT_CHAT_REQUEST — 26B variable-length layout,
-            // type=CCE_REMOVE_FRIEND=9, string1="Ghost119" (the friend
-            // name we're asking the server to remove from our empty list).
-            byte[] nickBytes = Encoding.ASCII.GetBytes(AbsentFriendNick);
-            int payloadSize = 4 + 4 + 2 + nickBytes.Length + 2 + 2 + 4;
-            byte[] payload = new byte[payloadSize];
-            int o = 0;
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 0); o += 4;             // PlayerID
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 9); o += 4;             // type = CCE_REMOVE_FRIEND
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), (short)nickBytes.Length); o += 2;
-            nickBytes.CopyTo(payload, o); o += nickBytes.Length;
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), 0); o += 2;             // string_length2 = 0
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), 0); o += 2;             // string_length3 = 0
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 0);                     // data_size
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
+            observed.Add($"0x{reply!.Header.Opcode:X4}/{reply.Payload.Length}");
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.ClientChatRequest.Value, payload),
-                cts.Token);
+            if (reply.Header.Opcode != OpcodeId.Known.ClientChatError.Value)
+                continue;
 
-            // Drain inbound until we see 0x00A6 CLIENT_CHAT_ERROR.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            var observed = new List<string>();
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-                observed.Add($"0x{reply!.Header.Opcode:X4}/{reply.Payload.Length}");
+            // Wire layout (22 bytes):
+            //   bytes [0..4]   int32 LE reason  = 6 (CHAT_ERROR_NOT_A_MEMBER)
+            //   bytes [4..8]   int32 LE type    = 9 (CCE_REMOVE_FRIEND)
+            //   bytes [8..10]  int16 LE player_len = 8
+            //   bytes [10..18] 8B ASCII player  = "Ghost119"
+            //   bytes [18..20] int16 LE channel_len = 0
+            //   bytes [20..22] int16 LE other_len   = 0
+            Assert.Equal(RemoveFriendExpectedPayloadSize, reply.Payload.Length);
+            var span = reply.Payload.Span;
 
-                if (reply.Header.Opcode != OpcodeId.Known.ClientChatError.Value)
-                    continue;
-
-                // Wire layout (22 bytes):
-                //   bytes [0..4]   int32 LE reason  = 6 (CHAT_ERROR_NOT_A_MEMBER)
-                //   bytes [4..8]   int32 LE type    = 9 (CCE_REMOVE_FRIEND)
-                //   bytes [8..10]  int16 LE player_len = 8
-                //   bytes [10..18] 8B ASCII player  = "Ghost119"
-                //   bytes [18..20] int16 LE channel_len = 0
-                //   bytes [20..22] int16 LE other_len   = 0
-                Assert.Equal(RemoveFriendExpectedPayloadSize, reply.Payload.Length);
-                var span = reply.Payload.Span;
-
-                Assert.Equal(6, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(0, 4)));
-                Assert.Equal(9, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4)));
-                Assert.Equal((short)8, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(8, 2)));
-                Assert.Equal(AbsentFriendNick, Encoding.ASCII.GetString(span.Slice(10, 8)));
-                Assert.Equal((short)0, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(18, 2)));
-                Assert.Equal((short)0, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(20, 2)));
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x00A3 CLIENT_CHAT_REQUEST " +
-                $"(type=CCE_REMOVE_FRIEND=9, nick=\"{AbsentFriendNick}\") without seeing " +
-                $"0x00A6 CLIENT_CHAT_ERROR. Observed [{observed.Count}]: " +
-                $"{string.Join(" | ", observed)}");
+            Assert.Equal(6, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(0, 4)));
+            Assert.Equal(9, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4)));
+            Assert.Equal((short)8, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(8, 2)));
+            Assert.Equal(AbsentFriendNick, Encoding.ASCII.GetString(span.Slice(10, 8)));
+            Assert.Equal((short)0, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(18, 2)));
+            Assert.Equal((short)0, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(20, 2)));
+            return;
         }
-        finally
-        {
-            try
-            {
-                using var logoffCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                byte[] logoffPayload = new byte[8];
-                await session.Sector.SendAsync(
-                    Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
-                    logoffCts.Token);
-                await SectorHandshake.DrainUntilOpcode(
-                    session.Sector, OpcodeId.Known.LogoffConfirmation.Value, logoffCts.Token);
-            }
-            catch { /* best-effort logoff */ }
 
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x00A3 CLIENT_CHAT_REQUEST " +
+            $"(type=CCE_REMOVE_FRIEND=9, nick=\"{AbsentFriendNick}\") without seeing " +
+            $"0x00A6 CLIENT_CHAT_ERROR. Observed [{observed.Count}]: " +
+            $"{string.Join(" | ", observed)}");
     }
 
     /// <summary>
@@ -709,88 +660,67 @@ public sealed class SectorClientChatErrorTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: SelfNick, shipName: "YorselfShip", cts.Token);
+            firstName: SelfNick, shipName: "YorselfShip", cts.Token));
 
-        try
+        // 0x00A3 CLIENT_CHAT_REQUEST — 25B variable-length layout,
+        // type=CCE_ADD_FRIEND=8, string1="Yorself" (the player's own
+        // first name — triggers the self-reject branch at
+        // PlayerMisc.cpp:1363-1366 via strcasecmp(name, Name()) == 0).
+        byte[] nickBytes = Encoding.ASCII.GetBytes(SelfNick);
+        int payloadSize = 4 + 4 + 2 + nickBytes.Length + 2 + 2 + 4;
+        byte[] payload = new byte[payloadSize];
+        int o = 0;
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 0); o += 4;             // PlayerID
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 8); o += 4;             // type = CCE_ADD_FRIEND
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), (short)nickBytes.Length); o += 2;
+        nickBytes.CopyTo(payload, o); o += nickBytes.Length;
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), 0); o += 2;             // string_length2 = 0
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), 0); o += 2;             // string_length3 = 0
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 0);                     // data_size
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.ClientChatRequest.Value, payload),
+            cts.Token);
+
+        // Drain inbound until we see 0x00A6 CLIENT_CHAT_ERROR.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        var observed = new List<string>();
+        while (framesSeen++ < maxFrames)
         {
-            // 0x00A3 CLIENT_CHAT_REQUEST — 25B variable-length layout,
-            // type=CCE_ADD_FRIEND=8, string1="Yorself" (the player's own
-            // first name — triggers the self-reject branch at
-            // PlayerMisc.cpp:1363-1366 via strcasecmp(name, Name()) == 0).
-            byte[] nickBytes = Encoding.ASCII.GetBytes(SelfNick);
-            int payloadSize = 4 + 4 + 2 + nickBytes.Length + 2 + 2 + 4;
-            byte[] payload = new byte[payloadSize];
-            int o = 0;
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 0); o += 4;             // PlayerID
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 8); o += 4;             // type = CCE_ADD_FRIEND
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), (short)nickBytes.Length); o += 2;
-            nickBytes.CopyTo(payload, o); o += nickBytes.Length;
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), 0); o += 2;             // string_length2 = 0
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), 0); o += 2;             // string_length3 = 0
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 0);                     // data_size
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
+            observed.Add($"0x{reply!.Header.Opcode:X4}/{reply.Payload.Length}");
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.ClientChatRequest.Value, payload),
-                cts.Token);
+            if (reply.Header.Opcode != OpcodeId.Known.ClientChatError.Value)
+                continue;
 
-            // Drain inbound until we see 0x00A6 CLIENT_CHAT_ERROR.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            var observed = new List<string>();
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-                observed.Add($"0x{reply!.Header.Opcode:X4}/{reply.Payload.Length}");
+            // Wire layout (21 bytes):
+            //   bytes [0..4]   int32 LE reason  = 17 (CHAT_ERROR_YOURSELF)
+            //   bytes [4..8]   int32 LE type    = 8 (CCE_ADD_FRIEND)
+            //   bytes [8..10]  int16 LE player_len = 7
+            //   bytes [10..17] 7B ASCII player  = "Yorself"
+            //   bytes [17..19] int16 LE channel_len = 0
+            //   bytes [19..21] int16 LE other_len   = 0
+            Assert.Equal(AddFriendSelfExpectedPayloadSize, reply.Payload.Length);
+            var span = reply.Payload.Span;
 
-                if (reply.Header.Opcode != OpcodeId.Known.ClientChatError.Value)
-                    continue;
-
-                // Wire layout (21 bytes):
-                //   bytes [0..4]   int32 LE reason  = 17 (CHAT_ERROR_YOURSELF)
-                //   bytes [4..8]   int32 LE type    = 8 (CCE_ADD_FRIEND)
-                //   bytes [8..10]  int16 LE player_len = 7
-                //   bytes [10..17] 7B ASCII player  = "Yorself"
-                //   bytes [17..19] int16 LE channel_len = 0
-                //   bytes [19..21] int16 LE other_len   = 0
-                Assert.Equal(AddFriendSelfExpectedPayloadSize, reply.Payload.Length);
-                var span = reply.Payload.Span;
-
-                Assert.Equal(17, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(0, 4)));
-                Assert.Equal(8, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4)));
-                Assert.Equal((short)7, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(8, 2)));
-                Assert.Equal(SelfNick, Encoding.ASCII.GetString(span.Slice(10, 7)));
-                Assert.Equal((short)0, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(17, 2)));
-                Assert.Equal((short)0, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(19, 2)));
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x00A3 CLIENT_CHAT_REQUEST " +
-                $"(type=CCE_ADD_FRIEND=8, nick=\"{SelfNick}\" matching self Name()) " +
-                $"without seeing 0x00A6 CLIENT_CHAT_ERROR. Observed [{observed.Count}]: " +
-                $"{string.Join(" | ", observed)}");
+            Assert.Equal(17, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(0, 4)));
+            Assert.Equal(8, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4)));
+            Assert.Equal((short)7, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(8, 2)));
+            Assert.Equal(SelfNick, Encoding.ASCII.GetString(span.Slice(10, 7)));
+            Assert.Equal((short)0, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(17, 2)));
+            Assert.Equal((short)0, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(19, 2)));
+            return;
         }
-        finally
-        {
-            try
-            {
-                using var logoffCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                byte[] logoffPayload = new byte[8];
-                await session.Sector.SendAsync(
-                    Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
-                    logoffCts.Token);
-                await SectorHandshake.DrainUntilOpcode(
-                    session.Sector, OpcodeId.Known.LogoffConfirmation.Value, logoffCts.Token);
-            }
-            catch { /* best-effort logoff */ }
 
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x00A3 CLIENT_CHAT_REQUEST " +
+            $"(type=CCE_ADD_FRIEND=8, nick=\"{SelfNick}\" matching self Name()) " +
+            $"without seeing 0x00A6 CLIENT_CHAT_ERROR. Observed [{observed.Count}]: " +
+            $"{string.Join(" | ", observed)}");
     }
 
     /// <summary>
@@ -926,88 +856,67 @@ public sealed class SectorClientChatErrorTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Ignorer", shipName: "IgnorerShip", cts.Token);
+            firstName: "Ignorer", shipName: "IgnorerShip", cts.Token));
 
-        try
+        // 0x00A3 CLIENT_CHAT_REQUEST — 28B variable-length layout,
+        // type=CCE_UNIGNORE=11, string1="Phantom121" (the nick the
+        // server walks m_IgnoreNames against — content irrelevant for
+        // the empty-list fall-through).
+        byte[] nickBytes = Encoding.ASCII.GetBytes(AbsentIgnoredNick);
+        int payloadSize = 4 + 4 + 2 + nickBytes.Length + 2 + 2 + 4;
+        byte[] payload = new byte[payloadSize];
+        int o = 0;
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 0); o += 4;             // PlayerID
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 11); o += 4;            // type = CCE_UNIGNORE
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), (short)nickBytes.Length); o += 2;
+        nickBytes.CopyTo(payload, o); o += nickBytes.Length;
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), 0); o += 2;             // string_length2 = 0
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), 0); o += 2;             // string_length3 = 0
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 0);                     // data_size
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.ClientChatRequest.Value, payload),
+            cts.Token);
+
+        // Drain inbound until we see 0x00A6 CLIENT_CHAT_ERROR.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        var observed = new List<string>();
+        while (framesSeen++ < maxFrames)
         {
-            // 0x00A3 CLIENT_CHAT_REQUEST — 28B variable-length layout,
-            // type=CCE_UNIGNORE=11, string1="Phantom121" (the nick the
-            // server walks m_IgnoreNames against — content irrelevant for
-            // the empty-list fall-through).
-            byte[] nickBytes = Encoding.ASCII.GetBytes(AbsentIgnoredNick);
-            int payloadSize = 4 + 4 + 2 + nickBytes.Length + 2 + 2 + 4;
-            byte[] payload = new byte[payloadSize];
-            int o = 0;
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 0); o += 4;             // PlayerID
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 11); o += 4;            // type = CCE_UNIGNORE
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), (short)nickBytes.Length); o += 2;
-            nickBytes.CopyTo(payload, o); o += nickBytes.Length;
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), 0); o += 2;             // string_length2 = 0
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), 0); o += 2;             // string_length3 = 0
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 0);                     // data_size
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
+            observed.Add($"0x{reply!.Header.Opcode:X4}/{reply.Payload.Length}");
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.ClientChatRequest.Value, payload),
-                cts.Token);
+            if (reply.Header.Opcode != OpcodeId.Known.ClientChatError.Value)
+                continue;
 
-            // Drain inbound until we see 0x00A6 CLIENT_CHAT_ERROR.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            var observed = new List<string>();
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-                observed.Add($"0x{reply!.Header.Opcode:X4}/{reply.Payload.Length}");
+            // Wire layout (24 bytes):
+            //   bytes [0..4]   int32 LE reason  = 6 (CHAT_ERROR_NOT_A_MEMBER)
+            //   bytes [4..8]   int32 LE type    = 11 (CCE_UNIGNORE)
+            //   bytes [8..10]  int16 LE player_len = 10
+            //   bytes [10..20] 10B ASCII player = "Phantom121"
+            //   bytes [20..22] int16 LE channel_len = 0
+            //   bytes [22..24] int16 LE other_len   = 0
+            Assert.Equal(RemoveIgnoreExpectedPayloadSize, reply.Payload.Length);
+            var span = reply.Payload.Span;
 
-                if (reply.Header.Opcode != OpcodeId.Known.ClientChatError.Value)
-                    continue;
-
-                // Wire layout (24 bytes):
-                //   bytes [0..4]   int32 LE reason  = 6 (CHAT_ERROR_NOT_A_MEMBER)
-                //   bytes [4..8]   int32 LE type    = 11 (CCE_UNIGNORE)
-                //   bytes [8..10]  int16 LE player_len = 10
-                //   bytes [10..20] 10B ASCII player = "Phantom121"
-                //   bytes [20..22] int16 LE channel_len = 0
-                //   bytes [22..24] int16 LE other_len   = 0
-                Assert.Equal(RemoveIgnoreExpectedPayloadSize, reply.Payload.Length);
-                var span = reply.Payload.Span;
-
-                Assert.Equal(6, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(0, 4)));
-                Assert.Equal(11, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4)));
-                Assert.Equal((short)10, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(8, 2)));
-                Assert.Equal(AbsentIgnoredNick, Encoding.ASCII.GetString(span.Slice(10, 10)));
-                Assert.Equal((short)0, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(20, 2)));
-                Assert.Equal((short)0, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(22, 2)));
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x00A3 CLIENT_CHAT_REQUEST " +
-                $"(type=CCE_UNIGNORE=11, nick=\"{AbsentIgnoredNick}\") without seeing " +
-                $"0x00A6 CLIENT_CHAT_ERROR. Observed [{observed.Count}]: " +
-                $"{string.Join(" | ", observed)}");
+            Assert.Equal(6, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(0, 4)));
+            Assert.Equal(11, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4)));
+            Assert.Equal((short)10, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(8, 2)));
+            Assert.Equal(AbsentIgnoredNick, Encoding.ASCII.GetString(span.Slice(10, 10)));
+            Assert.Equal((short)0, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(20, 2)));
+            Assert.Equal((short)0, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(22, 2)));
+            return;
         }
-        finally
-        {
-            try
-            {
-                using var logoffCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                byte[] logoffPayload = new byte[8];
-                await session.Sector.SendAsync(
-                    Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
-                    logoffCts.Token);
-                await SectorHandshake.DrainUntilOpcode(
-                    session.Sector, OpcodeId.Known.LogoffConfirmation.Value, logoffCts.Token);
-            }
-            catch { /* best-effort logoff */ }
 
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x00A3 CLIENT_CHAT_REQUEST " +
+            $"(type=CCE_UNIGNORE=11, nick=\"{AbsentIgnoredNick}\") without seeing " +
+            $"0x00A6 CLIENT_CHAT_ERROR. Observed [{observed.Count}]: " +
+            $"{string.Join(" | ", observed)}");
     }
 
     /// <summary>
@@ -1134,87 +1043,66 @@ public sealed class SectorClientChatErrorTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: IgnoreSelfNick, shipName: "SelforShip", cts.Token);
+            firstName: IgnoreSelfNick, shipName: "SelforShip", cts.Token));
 
-        try
+        // 0x00A3 CLIENT_CHAT_REQUEST — 24B variable-length layout,
+        // type=CCE_IGNORE=10, string1="Selfor" (the player's own
+        // first name — triggers the self-reject branch at
+        // PlayerMisc.cpp:1469-1472 via strcasecmp(name, Name()) == 0).
+        byte[] nickBytes = Encoding.ASCII.GetBytes(IgnoreSelfNick);
+        int payloadSize = 4 + 4 + 2 + nickBytes.Length + 2 + 2 + 4;
+        byte[] payload = new byte[payloadSize];
+        int o = 0;
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 0); o += 4;             // PlayerID
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 10); o += 4;            // type = CCE_IGNORE
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), (short)nickBytes.Length); o += 2;
+        nickBytes.CopyTo(payload, o); o += nickBytes.Length;
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), 0); o += 2;             // string_length2 = 0
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), 0); o += 2;             // string_length3 = 0
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 0);                     // data_size
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.ClientChatRequest.Value, payload),
+            cts.Token);
+
+        // Drain inbound until we see 0x00A6 CLIENT_CHAT_ERROR.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        var observed = new List<string>();
+        while (framesSeen++ < maxFrames)
         {
-            // 0x00A3 CLIENT_CHAT_REQUEST — 24B variable-length layout,
-            // type=CCE_IGNORE=10, string1="Selfor" (the player's own
-            // first name — triggers the self-reject branch at
-            // PlayerMisc.cpp:1469-1472 via strcasecmp(name, Name()) == 0).
-            byte[] nickBytes = Encoding.ASCII.GetBytes(IgnoreSelfNick);
-            int payloadSize = 4 + 4 + 2 + nickBytes.Length + 2 + 2 + 4;
-            byte[] payload = new byte[payloadSize];
-            int o = 0;
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 0); o += 4;             // PlayerID
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 10); o += 4;            // type = CCE_IGNORE
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), (short)nickBytes.Length); o += 2;
-            nickBytes.CopyTo(payload, o); o += nickBytes.Length;
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), 0); o += 2;             // string_length2 = 0
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(o, 2), 0); o += 2;             // string_length3 = 0
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(o, 4), 0);                     // data_size
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
+            observed.Add($"0x{reply!.Header.Opcode:X4}/{reply.Payload.Length}");
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.ClientChatRequest.Value, payload),
-                cts.Token);
+            if (reply.Header.Opcode != OpcodeId.Known.ClientChatError.Value)
+                continue;
 
-            // Drain inbound until we see 0x00A6 CLIENT_CHAT_ERROR.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            var observed = new List<string>();
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-                observed.Add($"0x{reply!.Header.Opcode:X4}/{reply.Payload.Length}");
+            // Wire layout (20 bytes):
+            //   bytes [0..4]   int32 LE reason  = 17 (CHAT_ERROR_YOURSELF)
+            //   bytes [4..8]   int32 LE type    = 10 (CCE_IGNORE)
+            //   bytes [8..10]  int16 LE player_len = 6
+            //   bytes [10..16] 6B ASCII player  = "Selfor"
+            //   bytes [16..18] int16 LE channel_len = 0
+            //   bytes [18..20] int16 LE other_len   = 0
+            Assert.Equal(AddIgnoreSelfExpectedPayloadSize, reply.Payload.Length);
+            var span = reply.Payload.Span;
 
-                if (reply.Header.Opcode != OpcodeId.Known.ClientChatError.Value)
-                    continue;
-
-                // Wire layout (20 bytes):
-                //   bytes [0..4]   int32 LE reason  = 17 (CHAT_ERROR_YOURSELF)
-                //   bytes [4..8]   int32 LE type    = 10 (CCE_IGNORE)
-                //   bytes [8..10]  int16 LE player_len = 6
-                //   bytes [10..16] 6B ASCII player  = "Selfor"
-                //   bytes [16..18] int16 LE channel_len = 0
-                //   bytes [18..20] int16 LE other_len   = 0
-                Assert.Equal(AddIgnoreSelfExpectedPayloadSize, reply.Payload.Length);
-                var span = reply.Payload.Span;
-
-                Assert.Equal(17, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(0, 4)));
-                Assert.Equal(10, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4)));
-                Assert.Equal((short)6, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(8, 2)));
-                Assert.Equal(IgnoreSelfNick, Encoding.ASCII.GetString(span.Slice(10, 6)));
-                Assert.Equal((short)0, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(16, 2)));
-                Assert.Equal((short)0, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(18, 2)));
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x00A3 CLIENT_CHAT_REQUEST " +
-                $"(type=CCE_IGNORE=10, nick=\"{IgnoreSelfNick}\" matching self Name()) " +
-                $"without seeing 0x00A6 CLIENT_CHAT_ERROR. Observed [{observed.Count}]: " +
-                $"{string.Join(" | ", observed)}");
+            Assert.Equal(17, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(0, 4)));
+            Assert.Equal(10, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4)));
+            Assert.Equal((short)6, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(8, 2)));
+            Assert.Equal(IgnoreSelfNick, Encoding.ASCII.GetString(span.Slice(10, 6)));
+            Assert.Equal((short)0, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(16, 2)));
+            Assert.Equal((short)0, BinaryPrimitives.ReadInt16LittleEndian(span.Slice(18, 2)));
+            return;
         }
-        finally
-        {
-            try
-            {
-                using var logoffCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                byte[] logoffPayload = new byte[8];
-                await session.Sector.SendAsync(
-                    Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
-                    logoffCts.Token);
-                await SectorHandshake.DrainUntilOpcode(
-                    session.Sector, OpcodeId.Known.LogoffConfirmation.Value, logoffCts.Token);
-            }
-            catch { /* best-effort logoff */ }
 
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x00A3 CLIENT_CHAT_REQUEST " +
+            $"(type=CCE_IGNORE=10, nick=\"{IgnoreSelfNick}\" matching self Name()) " +
+            $"without seeing 0x00A6 CLIENT_CHAT_ERROR. Observed [{observed.Count}]: " +
+            $"{string.Join(" | ", observed)}");
     }
 }

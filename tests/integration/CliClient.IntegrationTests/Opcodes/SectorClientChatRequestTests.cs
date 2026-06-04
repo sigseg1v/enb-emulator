@@ -241,16 +241,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorClientChatRequestTests
+public sealed class SectorClientChatRequestTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorClientChatRequestTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorClientChatRequestTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task ClientChatRequest_FriendStatusOnlyBranch_ReceivesClientChatEvent()
@@ -266,97 +259,88 @@ public sealed class SectorClientChatRequestTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Chatter", shipName: "ChatterShip", cts.Token);
+            firstName: "Chatter", shipName: "ChatterShip", cts.Token));
 
-        try
+        // 0x00A3 CLIENT_CHAT_REQUEST — 18B canonical layout.
+        //   [0..4)   int32 PlayerID       = 0  (handler ignores)
+        //   [4..8)   int32 type           = 28 (CCR_FRIEND_STATUS_ONLY)
+        //   [8..10)  short string_length1 = 0
+        //   [10..12) short string_length2 = 0
+        //   [12..14) short string_length3 = 0
+        //   [14..18) int32 data_size      = 0
+        byte[] payload = new byte[18];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 28);
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(8, 2), 0);
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(10, 2), 0);
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(12, 2), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(14, 4), 0);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.ClientChatRequest.Value, payload),
+            cts.Token);
+
+        // Drain inbound until we see 0x00A5 CLIENT_CHAT_EVENT with
+        // Type=CHEV_FRIEND_STATUS_ONLY (=25) in the first int32 LE
+        // of the body. The handler emits exactly one 0x00A5 frame
+        // per CCR_FRIEND_STATUS_ONLY request — no interleaving
+        // emits are expected for the type=28 path (the SendAuxShip/
+        // SendNotifyEmote/SendPositionalUpdate sites are all
+        // unrelated to chat-policy toggles).
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // 0x00A3 CLIENT_CHAT_REQUEST — 18B canonical layout.
-            //   [0..4)   int32 PlayerID       = 0  (handler ignores)
-            //   [4..8)   int32 type           = 28 (CCR_FRIEND_STATUS_ONLY)
-            //   [8..10)  short string_length1 = 0
-            //   [10..12) short string_length2 = 0
-            //   [12..14) short string_length3 = 0
-            //   [14..18) int32 data_size      = 0
-            byte[] payload = new byte[18];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 28);
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(8, 2), 0);
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(10, 2), 0);
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(12, 2), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(14, 4), 0);
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.ClientChatRequest.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientChatEvent.Value)
+                continue;
 
-            // Drain inbound until we see 0x00A5 CLIENT_CHAT_EVENT with
-            // Type=CHEV_FRIEND_STATUS_ONLY (=25) in the first int32 LE
-            // of the body. The handler emits exactly one 0x00A5 frame
-            // per CCR_FRIEND_STATUS_ONLY request — no interleaving
-            // emits are expected for the type=28 path (the SendAuxShip/
-            // SendNotifyEmote/SendPositionalUpdate sites are all
-            // unrelated to chat-policy toggles).
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-
-                if (reply!.Header.Opcode != OpcodeId.Known.ClientChatEvent.Value)
-                    continue;
-
-                // 0x00A5 wire layout: first int32 LE is Type. Pin
-                // CHEV_FRIEND_STATUS_ONLY=25 → 0x19,0x00,0x00,0x00.
-                // Robust to LastName length (avatar firstName +
-                // optional admin postfix), survives admin-level
-                // changes (no postfix path lights up for USER), and
-                // differentiates this branch from any other Type the
-                // server could mis-emit if the switch were scrambled.
-                Assert.True(reply.Payload.Length >= 4,
-                    $"0x00A5 body too short: {reply.Payload.Length} bytes (expected >= 4 for Type int32)");
-                Assert.Equal((byte)0x19, reply.Payload.Span[0]);
-                Assert.Equal((byte)0x00, reply.Payload.Span[1]);
-                Assert.Equal((byte)0x00, reply.Payload.Span[2]);
-                Assert.Equal((byte)0x00, reply.Payload.Span[3]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x00A3 " +
-                $"CLIENT_CHAT_REQUEST (type=CCR_FRIEND_STATUS_ONLY=28) " +
-                $"without seeing 0x00A5 CLIENT_CHAT_EVENT. Likely causes: " +
-                $"(a) dispatcher mis-route at PlayerConnection.cpp:587 " +
-                $"(swap with HandleTriggerEmote sends 0x00A2 NOTIFY_EMOTE " +
-                $"to range-list peers only, swap with HandleLogoffRequest " +
-                $"tears down sector before 0x00A5 emits); (b) " +
-                $"ClientChatRequest layout regression at " +
-                $"PacketStructures.h:669-681 (long-revert shifts type to " +
-                $"offset 8 where our short(0) sits — switch reads type==0 " +
-                $"→ default branch, no reply); (c) variable-length string " +
-                $"walker regression at PlayerConnection.cpp:1659-1692 " +
-                $"(short→int32 revert on string_length fields desyncs the " +
-                $"walker); (d) CCR_FRIEND_STATUS_ONLY case-label revert " +
-                $"at PlayerConnection.cpp:1709 (drift of the constant in " +
-                $"PacketStructures.h:663 from 28); (e) SendClientChatEvent " +
-                $"early-return: IsIgnored(self) returning true, or the " +
-                $"m_TellsFromFriendsOnly+PRIVATE_MESSAGE guard widening " +
-                $"to match CHEV_FRIEND_STATUS_ONLY → emits 0x00A4 " +
-                $"CLIENT_CHAT_ERROR instead; (f) proxy 0x00A3 forward " +
-                $"regression in ClientToServer_linux_stubs.cpp (0x00A3 " +
-                $"falls through to bottom-of-switch default-case forward); " +
-                $"(g) proxy SendClientPacketSequence guard tightening at " +
-                $"UDPProxyToClient_linux.cpp:568 (opcode < 0x0FFF " +
-                $"currently passes 0x00A5).");
+            // 0x00A5 wire layout: first int32 LE is Type. Pin
+            // CHEV_FRIEND_STATUS_ONLY=25 → 0x19,0x00,0x00,0x00.
+            // Robust to LastName length (avatar firstName +
+            // optional admin postfix), survives admin-level
+            // changes (no postfix path lights up for USER), and
+            // differentiates this branch from any other Type the
+            // server could mis-emit if the switch were scrambled.
+            Assert.True(reply.Payload.Length >= 4,
+                $"0x00A5 body too short: {reply.Payload.Length} bytes (expected >= 4 for Type int32)");
+            Assert.Equal((byte)0x19, reply.Payload.Span[0]);
+            Assert.Equal((byte)0x00, reply.Payload.Span[1]);
+            Assert.Equal((byte)0x00, reply.Payload.Span[2]);
+            Assert.Equal((byte)0x00, reply.Payload.Span[3]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x00A3 " +
+            $"CLIENT_CHAT_REQUEST (type=CCR_FRIEND_STATUS_ONLY=28) " +
+            $"without seeing 0x00A5 CLIENT_CHAT_EVENT. Likely causes: " +
+            $"(a) dispatcher mis-route at PlayerConnection.cpp:587 " +
+            $"(swap with HandleTriggerEmote sends 0x00A2 NOTIFY_EMOTE " +
+            $"to range-list peers only, swap with HandleLogoffRequest " +
+            $"tears down sector before 0x00A5 emits); (b) " +
+            $"ClientChatRequest layout regression at " +
+            $"PacketStructures.h:669-681 (long-revert shifts type to " +
+            $"offset 8 where our short(0) sits — switch reads type==0 " +
+            $"→ default branch, no reply); (c) variable-length string " +
+            $"walker regression at PlayerConnection.cpp:1659-1692 " +
+            $"(short→int32 revert on string_length fields desyncs the " +
+            $"walker); (d) CCR_FRIEND_STATUS_ONLY case-label revert " +
+            $"at PlayerConnection.cpp:1709 (drift of the constant in " +
+            $"PacketStructures.h:663 from 28); (e) SendClientChatEvent " +
+            $"early-return: IsIgnored(self) returning true, or the " +
+            $"m_TellsFromFriendsOnly+PRIVATE_MESSAGE guard widening " +
+            $"to match CHEV_FRIEND_STATUS_ONLY → emits 0x00A4 " +
+            $"CLIENT_CHAT_ERROR instead; (f) proxy 0x00A3 forward " +
+            $"regression in ClientToServer_linux_stubs.cpp (0x00A3 " +
+            $"falls through to bottom-of-switch default-case forward); " +
+            $"(g) proxy SendClientPacketSequence guard tightening at " +
+            $"UDPProxyToClient_linux.cpp:568 (opcode < 0x0FFF " +
+            $"currently passes 0x00A5).");
     }
 
     /// <summary>
@@ -562,84 +546,75 @@ public sealed class SectorClientChatRequestTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: FirstName, shipName: "Cher113Ship", cts.Token);
+            firstName: FirstName, shipName: "Cher113Ship", cts.Token));
 
-        try
+        byte[] payload = new byte[18];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 28);
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(8, 2), 0);
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(10, 2), 0);
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(12, 2), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(14, 4), 0);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.ClientChatRequest.Value, payload),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            byte[] payload = new byte[18];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 28);
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(8, 2), 0);
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(10, 2), 0);
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(12, 2), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(14, 4), 0);
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.ClientChatRequest.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientChatEvent.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
+            int type = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+            if (type != 25) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.ClientChatEvent.Value)
-                    continue;
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(25, type);
+            Assert.Equal(0, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4)));
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
-                int type = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                if (type != 25) continue;
+            // First LastName emit: short(15) + "Cher113 [ADMIN]"
+            Assert.Equal((short)ExpectedLastNameByteCount,
+                BinaryPrimitives.ReadInt16LittleEndian(span.Slice(8, 2)));
+            Assert.Equal(ExpectedLastName,
+                Encoding.ASCII.GetString(span.Slice(10, ExpectedLastNameByteCount)));
 
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(25, type);
-                Assert.Equal(0, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4)));
+            // Duplicated LastName emit: short(15) + "Cher113 [ADMIN]"
+            int second = 10 + ExpectedLastNameByteCount;
+            Assert.Equal((short)ExpectedLastNameByteCount,
+                BinaryPrimitives.ReadInt16LittleEndian(span.Slice(second, 2)));
+            Assert.Equal(ExpectedLastName,
+                Encoding.ASCII.GetString(span.Slice(second + 2, ExpectedLastNameByteCount)));
 
-                // First LastName emit: short(15) + "Cher113 [ADMIN]"
-                Assert.Equal((short)ExpectedLastNameByteCount,
-                    BinaryPrimitives.ReadInt16LittleEndian(span.Slice(8, 2)));
-                Assert.Equal(ExpectedLastName,
-                    Encoding.ASCII.GetString(span.Slice(10, ExpectedLastNameByteCount)));
+            // Three AddDataLS("") empty-string emits — short(0) each.
+            int afterDupName = second + 2 + ExpectedLastNameByteCount;
+            Assert.Equal((short)0,
+                BinaryPrimitives.ReadInt16LittleEndian(span.Slice(afterDupName, 2)));      // OtherPlayer.len
+            Assert.Equal((short)0,
+                BinaryPrimitives.ReadInt16LittleEndian(span.Slice(afterDupName + 2, 2)));  // Channel.len
+            Assert.Equal((short)0,
+                BinaryPrimitives.ReadInt16LittleEndian(span.Slice(afterDupName + 4, 2)));  // Message.len
 
-                // Duplicated LastName emit: short(15) + "Cher113 [ADMIN]"
-                int second = 10 + ExpectedLastNameByteCount;
-                Assert.Equal((short)ExpectedLastNameByteCount,
-                    BinaryPrimitives.ReadInt16LittleEndian(span.Slice(second, 2)));
-                Assert.Equal(ExpectedLastName,
-                    Encoding.ASCII.GetString(span.Slice(second + 2, ExpectedLastNameByteCount)));
-
-                // Three AddDataLS("") empty-string emits — short(0) each.
-                int afterDupName = second + 2 + ExpectedLastNameByteCount;
-                Assert.Equal((short)0,
-                    BinaryPrimitives.ReadInt16LittleEndian(span.Slice(afterDupName, 2)));      // OtherPlayer.len
-                Assert.Equal((short)0,
-                    BinaryPrimitives.ReadInt16LittleEndian(span.Slice(afterDupName + 2, 2)));  // Channel.len
-                Assert.Equal((short)0,
-                    BinaryPrimitives.ReadInt16LittleEndian(span.Slice(afterDupName + 4, 2)));  // Message.len
-
-                // Trailing AddData((short)0) blank + AddData(0L→int32) block-length.
-                Assert.Equal((short)0,
-                    BinaryPrimitives.ReadInt16LittleEndian(span.Slice(afterDupName + 6, 2)));
-                Assert.Equal(0,
-                    BinaryPrimitives.ReadInt32LittleEndian(span.Slice(afterDupName + 8, 4)));
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x00A3 CLIENT_CHAT_REQUEST " +
-                $"(type=CCR_FRIEND_STATUS_ONLY=28) without seeing 0x00A5 CLIENT_CHAT_EVENT " +
-                $"with Type=25 for byte-exact pin.");
+            // Trailing AddData((short)0) blank + AddData(0L→int32) block-length.
+            Assert.Equal((short)0,
+                BinaryPrimitives.ReadInt16LittleEndian(span.Slice(afterDupName + 6, 2)));
+            Assert.Equal(0,
+                BinaryPrimitives.ReadInt32LittleEndian(span.Slice(afterDupName + 8, 4)));
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x00A3 CLIENT_CHAT_REQUEST " +
+            $"(type=CCR_FRIEND_STATUS_ONLY=28) without seeing 0x00A5 CLIENT_CHAT_EVENT " +
+            $"with Type=25 for byte-exact pin.");
     }
 
     /// <summary>
@@ -812,91 +787,82 @@ public sealed class SectorClientChatRequestTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: FirstName, shipName: "Cher116Ship", cts.Token);
+            firstName: FirstName, shipName: "Cher116Ship", cts.Token));
 
-        try
+        // 0x00A3 CLIENT_CHAT_REQUEST — 18B canonical layout.
+        //   [0..4)   int32 PlayerID       = 0  (handler ignores)
+        //   [4..8)   int32 type           = 29 (CCR_ANYONE_STATUS)
+        //   [8..10)  short string_length1 = 0
+        //   [10..12) short string_length2 = 0
+        //   [12..14) short string_length3 = 0
+        //   [14..18) int32 data_size      = 0
+        byte[] payload = new byte[18];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 29);
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(8, 2), 0);
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(10, 2), 0);
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(12, 2), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(14, 4), 0);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.ClientChatRequest.Value, payload),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // 0x00A3 CLIENT_CHAT_REQUEST — 18B canonical layout.
-            //   [0..4)   int32 PlayerID       = 0  (handler ignores)
-            //   [4..8)   int32 type           = 29 (CCR_ANYONE_STATUS)
-            //   [8..10)  short string_length1 = 0
-            //   [10..12) short string_length2 = 0
-            //   [12..14) short string_length3 = 0
-            //   [14..18) int32 data_size      = 0
-            byte[] payload = new byte[18];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 29);
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(8, 2), 0);
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(10, 2), 0);
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(12, 2), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(14, 4), 0);
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.ClientChatRequest.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientChatEvent.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
+            int type = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+            if (type != 26) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.ClientChatEvent.Value)
-                    continue;
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(26, type);
+            Assert.Equal(0, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4)));
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
-                int type = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                if (type != 26) continue;
+            // First LastName emit: short(15) + "Cher116 [ADMIN]"
+            Assert.Equal((short)ExpectedLastNameByteCount,
+                BinaryPrimitives.ReadInt16LittleEndian(span.Slice(8, 2)));
+            Assert.Equal(ExpectedLastName,
+                Encoding.ASCII.GetString(span.Slice(10, ExpectedLastNameByteCount)));
 
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(26, type);
-                Assert.Equal(0, BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4)));
+            // Duplicated LastName emit: short(15) + "Cher116 [ADMIN]"
+            int second = 10 + ExpectedLastNameByteCount;
+            Assert.Equal((short)ExpectedLastNameByteCount,
+                BinaryPrimitives.ReadInt16LittleEndian(span.Slice(second, 2)));
+            Assert.Equal(ExpectedLastName,
+                Encoding.ASCII.GetString(span.Slice(second + 2, ExpectedLastNameByteCount)));
 
-                // First LastName emit: short(15) + "Cher116 [ADMIN]"
-                Assert.Equal((short)ExpectedLastNameByteCount,
-                    BinaryPrimitives.ReadInt16LittleEndian(span.Slice(8, 2)));
-                Assert.Equal(ExpectedLastName,
-                    Encoding.ASCII.GetString(span.Slice(10, ExpectedLastNameByteCount)));
+            // Three AddDataLS("") empty-string emits — short(0) each.
+            int afterDupName = second + 2 + ExpectedLastNameByteCount;
+            Assert.Equal((short)0,
+                BinaryPrimitives.ReadInt16LittleEndian(span.Slice(afterDupName, 2)));
+            Assert.Equal((short)0,
+                BinaryPrimitives.ReadInt16LittleEndian(span.Slice(afterDupName + 2, 2)));
+            Assert.Equal((short)0,
+                BinaryPrimitives.ReadInt16LittleEndian(span.Slice(afterDupName + 4, 2)));
 
-                // Duplicated LastName emit: short(15) + "Cher116 [ADMIN]"
-                int second = 10 + ExpectedLastNameByteCount;
-                Assert.Equal((short)ExpectedLastNameByteCount,
-                    BinaryPrimitives.ReadInt16LittleEndian(span.Slice(second, 2)));
-                Assert.Equal(ExpectedLastName,
-                    Encoding.ASCII.GetString(span.Slice(second + 2, ExpectedLastNameByteCount)));
-
-                // Three AddDataLS("") empty-string emits — short(0) each.
-                int afterDupName = second + 2 + ExpectedLastNameByteCount;
-                Assert.Equal((short)0,
-                    BinaryPrimitives.ReadInt16LittleEndian(span.Slice(afterDupName, 2)));
-                Assert.Equal((short)0,
-                    BinaryPrimitives.ReadInt16LittleEndian(span.Slice(afterDupName + 2, 2)));
-                Assert.Equal((short)0,
-                    BinaryPrimitives.ReadInt16LittleEndian(span.Slice(afterDupName + 4, 2)));
-
-                // Trailing AddData((short)0) blank + AddData(0L→int32) block-length.
-                Assert.Equal((short)0,
-                    BinaryPrimitives.ReadInt16LittleEndian(span.Slice(afterDupName + 6, 2)));
-                Assert.Equal(0,
-                    BinaryPrimitives.ReadInt32LittleEndian(span.Slice(afterDupName + 8, 4)));
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x00A3 CLIENT_CHAT_REQUEST " +
-                $"(type=CCR_ANYONE_STATUS=29) without seeing 0x00A5 CLIENT_CHAT_EVENT " +
-                $"with Type=26 (CHEV_ALL_STATUS) for byte-exact pin.");
+            // Trailing AddData((short)0) blank + AddData(0L→int32) block-length.
+            Assert.Equal((short)0,
+                BinaryPrimitives.ReadInt16LittleEndian(span.Slice(afterDupName + 6, 2)));
+            Assert.Equal(0,
+                BinaryPrimitives.ReadInt32LittleEndian(span.Slice(afterDupName + 8, 4)));
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x00A3 CLIENT_CHAT_REQUEST " +
+            $"(type=CCR_ANYONE_STATUS=29) without seeing 0x00A5 CLIENT_CHAT_EVENT " +
+            $"with Type=26 (CHEV_ALL_STATUS) for byte-exact pin.");
     }
 
     /// <summary>
@@ -1036,59 +1002,50 @@ public sealed class SectorClientChatRequestTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: FirstName, shipName: "Chnel117Ship", cts.Token);
+            firstName: FirstName, shipName: "Chnel117Ship", cts.Token));
 
-        try
+        byte[] payload = new byte[18];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 25);  // CCR_LIST_CHANNELS
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(8, 2), 0);
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(10, 2), 0);
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(12, 2), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(14, 4), 0);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.ClientChatRequest.Value, payload),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            byte[] payload = new byte[18];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 25);  // CCR_LIST_CHANNELS
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(8, 2), 0);
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(10, 2), 0);
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(12, 2), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(14, 4), 0);
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.ClientChatRequest.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 3) continue;
+            short lengthField = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (lengthField != ExpectedLengthField) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
-
-                var span = reply.Payload.Span;
-                if (span.Length < 3) continue;
-                short lengthField = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (lengthField != ExpectedLengthField) continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal((short)ExpectedLengthField, lengthField);
-                Assert.Equal(ExpectedColour, span[2]);
-                Assert.Equal(ExpectedLiteral,
-                    Encoding.ASCII.GetString(span.Slice(3, ExpectedLiteral.Length)));
-                Assert.Equal((byte)0x00, span[3 + ExpectedLiteral.Length]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x00A3 CLIENT_CHAT_REQUEST " +
-                $"(type=CCR_LIST_CHANNELS=25) without seeing 0x001D MESSAGE_STRING " +
-                $"with length-field=21 for byte-exact pin.");
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal((short)ExpectedLengthField, lengthField);
+            Assert.Equal(ExpectedColour, span[2]);
+            Assert.Equal(ExpectedLiteral,
+                Encoding.ASCII.GetString(span.Slice(3, ExpectedLiteral.Length)));
+            Assert.Equal((byte)0x00, span[3 + ExpectedLiteral.Length]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x00A3 CLIENT_CHAT_REQUEST " +
+            $"(type=CCR_LIST_CHANNELS=25) without seeing 0x001D MESSAGE_STRING " +
+            $"with length-field=21 for byte-exact pin.");
     }
 
     /// <summary>
@@ -1212,58 +1169,49 @@ public sealed class SectorClientChatRequestTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: FirstName, shipName: "Chnel118Ship", cts.Token);
+            firstName: FirstName, shipName: "Chnel118Ship", cts.Token));
 
-        try
+        byte[] payload = new byte[18];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 26);  // CCR_LIST_ALL_CHANNELS
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(8, 2), 0);
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(10, 2), 0);
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(12, 2), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(14, 4), 0);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.ClientChatRequest.Value, payload),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            byte[] payload = new byte[18];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 26);  // CCR_LIST_ALL_CHANNELS
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(8, 2), 0);
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(10, 2), 0);
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(12, 2), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(14, 4), 0);
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.ClientChatRequest.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 3) continue;
+            short lengthField = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (lengthField != ExpectedLengthField) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
-
-                var span = reply.Payload.Span;
-                if (span.Length < 3) continue;
-                short lengthField = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (lengthField != ExpectedLengthField) continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal((short)ExpectedLengthField, lengthField);
-                Assert.Equal(ExpectedColour, span[2]);
-                Assert.Equal(ExpectedLiteral,
-                    Encoding.ASCII.GetString(span.Slice(3, ExpectedLiteral.Length)));
-                Assert.Equal((byte)0x00, span[3 + ExpectedLiteral.Length]);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x00A3 CLIENT_CHAT_REQUEST " +
-                $"(type=CCR_LIST_ALL_CHANNELS=26) without seeing 0x001D MESSAGE_STRING " +
-                $"with length-field=26 for byte-exact pin.");
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal((short)ExpectedLengthField, lengthField);
+            Assert.Equal(ExpectedColour, span[2]);
+            Assert.Equal(ExpectedLiteral,
+                Encoding.ASCII.GetString(span.Slice(3, ExpectedLiteral.Length)));
+            Assert.Equal((byte)0x00, span[3 + ExpectedLiteral.Length]);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x00A3 CLIENT_CHAT_REQUEST " +
+            $"(type=CCR_LIST_ALL_CHANNELS=26) without seeing 0x001D MESSAGE_STRING " +
+            $"with length-field=26 for byte-exact pin.");
     }
 }

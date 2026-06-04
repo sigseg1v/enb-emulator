@@ -246,16 +246,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorAction2Tests
+public sealed class SectorAction2Tests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorAction2Tests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorAction2Tests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task Action2_NoOpSubActionAndEmptyName_DoesNotBreakConnection_RequestTimeStillRoundTrips()
@@ -271,111 +264,102 @@ public sealed class SectorAction2Tests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Crosser", shipName: "CrossShip", cts.Token);
+            firstName: "Crosser", shipName: "CrossShip", cts.Token));
 
-        try
+        // ActionPacket2 wire layout — 14 bytes with string_len=0:
+        //   [0..4)   big-endian int32   GameID       = 0
+        //                                 (ntohl-swapped on host;
+        //                                  not consumed by case 23)
+        //   [4..8)   big-endian int32   Action       = 23
+        //                                 wire bytes: 00 00 00 17
+        //                                 ntohl-swapped to host 23 LE
+        //                                 ("keep trading???" no-op)
+        //   [8..10)  little-endian int16 string_len = 0
+        //                                 (host-endian; handler does
+        //                                  not ntohl this field)
+        //   [10..14) big-endian int32   OptionalVar  = 0
+        //                                 read by handler at
+        //                                 *(uint32_t*)(string+string_len)
+        //                                 = *(uint32_t*)(byte10) = wire
+        //                                 bytes 10..13.
+        //                                 (Was u_long* pre-Wave-21
+        //                                  → 8B read past payload end
+        //                                  on Linux x86_64.)
+        //
+        // No string bytes between offset 10 and OptionalVar because
+        // string_len=0. The handler passes myAction2->string
+        // (= pointer to byte 10) into GetGameIDFromName; byte 10 is
+        // OptionalVar's first byte = 0x00, so the C string starts
+        // and ends with a null terminator — strcasecmp("", any-name)
+        // returns nonzero for every connected player, GetGameIDFromName
+        // returns -1, HandleAction's pre-switch GetObjectFromID(-1)
+        // returns null (object_id<0 fails all three branches in
+        // ObjectManager::GetObjectFromID at line 563), and case 23
+        // never touches obj.
+        //
+        // common/include/net7/PacketStructures.h:554
+        byte[] payload = new byte[14];
+        // GameID big-endian = 0 → all zero bytes (no-op write).
+        BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(0, 4), 0);
+        // Action big-endian = 23 → wire bytes 00 00 00 17.
+        BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(4, 4), 23);
+        // string_len host-endian (little-endian on x86) = 0.
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(8, 2), 0);
+        // OptionalVar big-endian = 0.
+        BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(10, 4), 0);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.Action2.Value, payload),
+            cts.Token);
+
+        // Survival probe.
+        int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+
+        byte[] reqTimePayload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
+            cts.Token);
+
+        // Drain until 0x0034 CLIENT_SET_TIME. Post-handshake the
+        // server may begin streaming in-sector frames so this loop
+        // tolerates interleaved traffic. Cap on frame count so a
+        // stalled pipeline can't masquerade as the outer-CTS
+        // timeout.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // ActionPacket2 wire layout — 14 bytes with string_len=0:
-            //   [0..4)   big-endian int32   GameID       = 0
-            //                                 (ntohl-swapped on host;
-            //                                  not consumed by case 23)
-            //   [4..8)   big-endian int32   Action       = 23
-            //                                 wire bytes: 00 00 00 17
-            //                                 ntohl-swapped to host 23 LE
-            //                                 ("keep trading???" no-op)
-            //   [8..10)  little-endian int16 string_len = 0
-            //                                 (host-endian; handler does
-            //                                  not ntohl this field)
-            //   [10..14) big-endian int32   OptionalVar  = 0
-            //                                 read by handler at
-            //                                 *(uint32_t*)(string+string_len)
-            //                                 = *(uint32_t*)(byte10) = wire
-            //                                 bytes 10..13.
-            //                                 (Was u_long* pre-Wave-21
-            //                                  → 8B read past payload end
-            //                                  on Linux x86_64.)
-            //
-            // No string bytes between offset 10 and OptionalVar because
-            // string_len=0. The handler passes myAction2->string
-            // (= pointer to byte 10) into GetGameIDFromName; byte 10 is
-            // OptionalVar's first byte = 0x00, so the C string starts
-            // and ends with a null terminator — strcasecmp("", any-name)
-            // returns nonzero for every connected player, GetGameIDFromName
-            // returns -1, HandleAction's pre-switch GetObjectFromID(-1)
-            // returns null (object_id<0 fails all three branches in
-            // ObjectManager::GetObjectFromID at line 563), and case 23
-            // never touches obj.
-            //
-            // common/include/net7/PacketStructures.h:554
-            byte[] payload = new byte[14];
-            // GameID big-endian = 0 → all zero bytes (no-op write).
-            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(0, 4), 0);
-            // Action big-endian = 23 → wire bytes 00 00 00 17.
-            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(4, 4), 23);
-            // string_len host-endian (little-endian on x86) = 0.
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(8, 2), 0);
-            // OptionalVar big-endian = 0.
-            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(10, 4), 0);
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.Action2.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
+                continue;
 
-            // Survival probe.
-            int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+            // 0x0034 wire layout (ClientSetTime struct):
+            //   [0..4)  int32  ClientSent
+            //   [4..8)  int32  ServerReceived
+            //   [8..12) int32  ServerSent
+            // common/include/net7/PacketStructures.h:563
+            var span = reply.Payload.Span;
+            Assert.Equal(12, span.Length);
 
-            byte[] reqTimePayload = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+            int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+            Assert.Equal(clientTick, echoedClientSent);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
-                cts.Token);
-
-            // Drain until 0x0034 CLIENT_SET_TIME. Post-handshake the
-            // server may begin streaming in-sector frames so this loop
-            // tolerates interleaved traffic. Cap on frame count so a
-            // stalled pipeline can't masquerade as the outer-CTS
-            // timeout.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-
-                if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
-                    continue;
-
-                // 0x0034 wire layout (ClientSetTime struct):
-                //   [0..4)  int32  ClientSent
-                //   [4..8)  int32  ServerReceived
-                //   [8..12) int32  ServerSent
-                // common/include/net7/PacketStructures.h:563
-                var span = reply.Payload.Span;
-                Assert.Equal(12, span.Length);
-
-                int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                Assert.Equal(clientTick, echoedClientSent);
-
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x002D ACTION2 (sub=23, empty-name) + 0x0044 REQUEST_TIME " +
-                $"without seeing 0x0034 CLIENT_SET_TIME. " +
-                $"Likely the server's HandleAction2 crashed (u_long* cast regression reading 4 bytes past 14B payload end), " +
-                $"GetGameIDFromName segfaulted on the empty-string lookup, " +
-                $"the proxy default-case forwarding dropped the opcode, " +
-                $"the dispatcher case at PlayerConnection.cpp:471 got mis-routed, " +
-                $"or HandleAction's pre-switch GetObjectFromID(Target=-1) null-derefed.");
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x002D ACTION2 (sub=23, empty-name) + 0x0044 REQUEST_TIME " +
+            $"without seeing 0x0034 CLIENT_SET_TIME. " +
+            $"Likely the server's HandleAction2 crashed (u_long* cast regression reading 4 bytes past 14B payload end), " +
+            $"GetGameIDFromName segfaulted on the empty-string lookup, " +
+            $"the proxy default-case forwarding dropped the opcode, " +
+            $"the dispatcher case at PlayerConnection.cpp:471 got mis-routed, " +
+            $"or HandleAction's pre-switch GetObjectFromID(Target=-1) null-derefed.");
     }
 }

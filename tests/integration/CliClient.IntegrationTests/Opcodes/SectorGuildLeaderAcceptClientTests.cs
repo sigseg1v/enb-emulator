@@ -141,16 +141,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorGuildLeaderAcceptClientTests
+public sealed class SectorGuildLeaderAcceptClientTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorGuildLeaderAcceptClientTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorGuildLeaderAcceptClientTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task GuildLeaderAcceptClient_DeclineNonExistentGuild_DoesNotBreakConnection_RequestTimeStillRoundTrips()
@@ -167,71 +160,62 @@ public sealed class SectorGuildLeaderAcceptClientTests
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
         // firstName "Guildor" -- contains 'u', 'i', 'o' for the vowel-check.
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Guildor", shipName: "GuildShip", cts.Token);
+            firstName: "Guildor", shipName: "GuildShip", cts.Token));
 
-        try
+        // GuildLeaderAcceptClient canonical 11-byte decline shape:
+        //   [0..4)  long  gameid  = 0
+        //   [4..6)  short length  = 4 (LE)
+        //   [6..10) char  name[4] = "TEST"
+        //   [10]    char  accept  = 0 (decline)
+        byte[] payload = new byte[11];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(4, 2), 4);
+        payload[6] = (byte)'T';
+        payload[7] = (byte)'E';
+        payload[8] = (byte)'S';
+        payload[9] = (byte)'T';
+        payload[10] = 0; // accept = 0 (decline)
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.GuildLeaderAcceptClient.Value, payload),
+            cts.Token);
+
+        // Survival probe: send REQUEST_TIME, assert CLIENT_SET_TIME
+        // echoes our sentinel tick.
+        int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+        byte[] reqTimePayload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // GuildLeaderAcceptClient canonical 11-byte decline shape:
-            //   [0..4)  long  gameid  = 0
-            //   [4..6)  short length  = 4 (LE)
-            //   [6..10) char  name[4] = "TEST"
-            //   [10]    char  accept  = 0 (decline)
-            byte[] payload = new byte[11];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(4, 2), 4);
-            payload[6] = (byte)'T';
-            payload[7] = (byte)'E';
-            payload[8] = (byte)'S';
-            payload[9] = (byte)'T';
-            payload[10] = 0; // accept = 0 (decline)
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.GuildLeaderAcceptClient.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
+                continue;
 
-            // Survival probe: send REQUEST_TIME, assert CLIENT_SET_TIME
-            // echoes our sentinel tick.
-            int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
-            byte[] reqTimePayload = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
-
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
-                cts.Token);
-
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-
-                if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
-                    continue;
-
-                var span = reply.Payload.Span;
-                Assert.Equal(12, span.Length);
-                int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                Assert.Equal(clientTick, echoedClientSent);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x00C5 GUILD_LEADER_ACCEPT_CLIENT (decline) " +
-                $"+ 0x0044 REQUEST_TIME without seeing 0x0034 CLIENT_SET_TIME. " +
-                $"Likely HandleGuildLeaderAcceptClient SEGV'd inside strncpy on an OOB regression, " +
-                $"GuildFromName returned a wild pointer the if-guard didn't catch, " +
-                $"the dispatcher case at PlayerConnection.cpp:604 got mis-routed to HandleRecruitAcceptClient " +
-                $"(which deterministically NULL-derefs m_Recruiter on a fresh char), " +
-                $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted.");
+            var span = reply.Payload.Span;
+            Assert.Equal(12, span.Length);
+            int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+            Assert.Equal(clientTick, echoedClientSent);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x00C5 GUILD_LEADER_ACCEPT_CLIENT (decline) " +
+            $"+ 0x0044 REQUEST_TIME without seeing 0x0034 CLIENT_SET_TIME. " +
+            $"Likely HandleGuildLeaderAcceptClient SEGV'd inside strncpy on an OOB regression, " +
+            $"GuildFromName returned a wild pointer the if-guard didn't catch, " +
+            $"the dispatcher case at PlayerConnection.cpp:604 got mis-routed to HandleRecruitAcceptClient " +
+            $"(which deterministically NULL-derefs m_Recruiter on a fresh char), " +
+            $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted.");
     }
 }

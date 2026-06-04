@@ -158,16 +158,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorFindMemberTests
+public sealed class SectorFindMemberTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorFindMemberTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorFindMemberTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task FindMember_SoloRequester_ReceivesEmptyCountReply()
@@ -184,72 +177,63 @@ public sealed class SectorFindMemberTests
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
         // firstName "Finder" -- contains 'i', 'e' for the vowel-check.
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Finder", shipName: "FindShip", cts.Token);
+            firstName: "Finder", shipName: "FindShip", cts.Token));
 
-        try
+        // ActionPacket wire layout -- 16 bytes total, all int32_t LE.
+        // common/include/net7/PacketStructures.h:546
+        //   [0..4)   GameID       -- actor's game id (server resolves
+        //                            actor via the connection binding).
+        //   [4..8)   Action       -- 16 = request list of players LFG.
+        //   [8..12)  Target       -- unused by case 16.
+        //   [12..16) OptionalVar  -- unused by case 16.
+        byte[] actionPayload = new byte[16];
+        BinaryPrimitives.WriteInt32LittleEndian(actionPayload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(actionPayload.AsSpan(4, 4), 16);
+        BinaryPrimitives.WriteInt32LittleEndian(actionPayload.AsSpan(8, 4), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(actionPayload.AsSpan(12, 4), 0);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.Action.Value, actionPayload),
+            cts.Token);
+
+        // Drain until 0x0053 FIND_MEMBER. Post-handshake the server
+        // may interleave other in-sector frames so this loop tolerates
+        // unrelated traffic. Cap on frame count so a stalled pipeline
+        // can't masquerade as the outer-CTS timeout.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // ActionPacket wire layout -- 16 bytes total, all int32_t LE.
-            // common/include/net7/PacketStructures.h:546
-            //   [0..4)   GameID       -- actor's game id (server resolves
-            //                            actor via the connection binding).
-            //   [4..8)   Action       -- 16 = request list of players LFG.
-            //   [8..12)  Target       -- unused by case 16.
-            //   [12..16) OptionalVar  -- unused by case 16.
-            byte[] actionPayload = new byte[16];
-            BinaryPrimitives.WriteInt32LittleEndian(actionPayload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(actionPayload.AsSpan(4, 4), 16);
-            BinaryPrimitives.WriteInt32LittleEndian(actionPayload.AsSpan(8, 4), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(actionPayload.AsSpan(12, 4), 0);
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.Action.Value, actionPayload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.FindMember.Value)
+                continue;
 
-            // Drain until 0x0053 FIND_MEMBER. Post-handshake the server
-            // may interleave other in-sector frames so this loop tolerates
-            // unrelated traffic. Cap on frame count so a stalled pipeline
-            // can't masquerade as the outer-CTS timeout.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            // 0x0053 wire layout for the empty-list case:
+            //   [0..4)  int32 LE count = 0
+            // No list items follow when count==0 (the C++ side emits
+            // exactly count*16+4 bytes via SendFindMember).
+            var span = reply.Payload.Span;
+            Assert.Equal(4, span.Length);
 
-                if (reply!.Header.Opcode != OpcodeId.Known.FindMember.Value)
-                    continue;
+            int count = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+            Assert.Equal(0, count);
 
-                // 0x0053 wire layout for the empty-list case:
-                //   [0..4)  int32 LE count = 0
-                // No list items follow when count==0 (the C++ side emits
-                // exactly count*16+4 bytes via SendFindMember).
-                var span = reply.Payload.Span;
-                Assert.Equal(4, span.Length);
-
-                int count = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                Assert.Equal(0, count);
-
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x002C ACTION (Action=16 LFG) " +
-                $"without seeing 0x0053 FIND_MEMBER. " +
-                $"Likely HandleAction case 16 at PlayerConnection.cpp:3895 was deleted, " +
-                $"RequestAllPlayersLFG's post-loop p->SendFindMember NULL-derefed because a " +
-                $"GetNextPlayerOnList refactor reset p on the false return, " +
-                $"SendFindMember's size formula at PlayerConnection.cpp:11230 was broken, " +
-                $"ActionPacket struct layout drifted (long-revert shifts Action field offset), " +
-                $"the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted, " +
-                $"or the proxy dropped 0x002C dispatch.");
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x002C ACTION (Action=16 LFG) " +
+            $"without seeing 0x0053 FIND_MEMBER. " +
+            $"Likely HandleAction case 16 at PlayerConnection.cpp:3895 was deleted, " +
+            $"RequestAllPlayersLFG's post-loop p->SendFindMember NULL-derefed because a " +
+            $"GetNextPlayerOnList refactor reset p on the false return, " +
+            $"SendFindMember's size formula at PlayerConnection.cpp:11230 was broken, " +
+            $"ActionPacket struct layout drifted (long-revert shifts Action field offset), " +
+            $"the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted, " +
+            $"or the proxy dropped 0x002C dispatch.");
     }
 }

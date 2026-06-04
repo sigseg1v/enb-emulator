@@ -94,16 +94,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorActionTests
+public sealed class SectorActionTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorActionTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorActionTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task Action_NoOpSubAction_DoesNotBreakConnection_RequestTimeStillRoundTrips()
@@ -119,92 +112,83 @@ public sealed class SectorActionTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Actor", shipName: "ActShip", cts.Token);
+            firstName: "Actor", shipName: "ActShip", cts.Token));
 
-        try
+        // ActionPacket wire layout — 16 bytes total, all int32_t LE:
+        //   [0..4)   GameID       — retail client sets the actor's
+        //                            game id; server resolves the
+        //                            actor via the connection
+        //                            binding so this field is
+        //                            effectively unused, but its
+        //                            width matters for the struct
+        //                            offset of Action.
+        //   [4..8)   Action       — sub-action selector. 23 =
+        //                            "keep trading???" (a commented-
+        //                            out no-op in HandleAction).
+        //   [8..12)  Target       — target game id. 0 (none) is
+        //                            safe for sub-action 23 because
+        //                            the case body never touches it.
+        //   [12..16) OptionalVar  — sub-action-specific scalar;
+        //                            unused by sub-action 23.
+        // common/include/net7/PacketStructures.h:546
+        byte[] actionPayload = new byte[16];
+        BinaryPrimitives.WriteInt32LittleEndian(actionPayload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(actionPayload.AsSpan(4, 4), 23);
+        BinaryPrimitives.WriteInt32LittleEndian(actionPayload.AsSpan(8, 4), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(actionPayload.AsSpan(12, 4), 0);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.Action.Value, actionPayload),
+            cts.Token);
+
+        // Survival probe.
+        int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+
+        byte[] reqTimePayload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
+            cts.Token);
+
+        // Drain until 0x0034 CLIENT_SET_TIME. Post-handshake the
+        // server may begin streaming in-sector frames so this loop
+        // tolerates interleaved traffic. Cap on frame count so a
+        // stalled pipeline can't masquerade as the outer-CTS
+        // timeout.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // ActionPacket wire layout — 16 bytes total, all int32_t LE:
-            //   [0..4)   GameID       — retail client sets the actor's
-            //                            game id; server resolves the
-            //                            actor via the connection
-            //                            binding so this field is
-            //                            effectively unused, but its
-            //                            width matters for the struct
-            //                            offset of Action.
-            //   [4..8)   Action       — sub-action selector. 23 =
-            //                            "keep trading???" (a commented-
-            //                            out no-op in HandleAction).
-            //   [8..12)  Target       — target game id. 0 (none) is
-            //                            safe for sub-action 23 because
-            //                            the case body never touches it.
-            //   [12..16) OptionalVar  — sub-action-specific scalar;
-            //                            unused by sub-action 23.
-            // common/include/net7/PacketStructures.h:546
-            byte[] actionPayload = new byte[16];
-            BinaryPrimitives.WriteInt32LittleEndian(actionPayload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(actionPayload.AsSpan(4, 4), 23);
-            BinaryPrimitives.WriteInt32LittleEndian(actionPayload.AsSpan(8, 4), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(actionPayload.AsSpan(12, 4), 0);
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.Action.Value, actionPayload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
+                continue;
 
-            // Survival probe.
-            int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+            // 0x0034 wire layout (ClientSetTime struct):
+            //   [0..4)  int32  ClientSent
+            //   [4..8)  int32  ServerReceived
+            //   [8..12) int32  ServerSent
+            // common/include/net7/PacketStructures.h:563
+            var span = reply.Payload.Span;
+            Assert.Equal(12, span.Length);
 
-            byte[] reqTimePayload = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+            int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+            Assert.Equal(clientTick, echoedClientSent);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
-                cts.Token);
-
-            // Drain until 0x0034 CLIENT_SET_TIME. Post-handshake the
-            // server may begin streaming in-sector frames so this loop
-            // tolerates interleaved traffic. Cap on frame count so a
-            // stalled pipeline can't masquerade as the outer-CTS
-            // timeout.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-
-                if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
-                    continue;
-
-                // 0x0034 wire layout (ClientSetTime struct):
-                //   [0..4)  int32  ClientSent
-                //   [4..8)  int32  ServerReceived
-                //   [8..12) int32  ServerSent
-                // common/include/net7/PacketStructures.h:563
-                var span = reply.Payload.Span;
-                Assert.Equal(12, span.Length);
-
-                int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                Assert.Equal(clientTick, echoedClientSent);
-
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x002C ACTION (sub=23) + 0x0044 REQUEST_TIME " +
-                $"without seeing 0x0034 CLIENT_SET_TIME. " +
-                $"Likely the server's HandleAction switch fell to default (UNRECOGNIZED ACTION) " +
-                $"and the connection state was corrupted, the proxy's ProcessSectorServerOpcode dispatch " +
-                $"(proxy/ClientToServer_linux_stubs.cpp:471-477) dropped the frame, " +
-                $"or HandleAction's pre-switch GetObjectFromID(Target=0) crashed.");
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x002C ACTION (sub=23) + 0x0044 REQUEST_TIME " +
+            $"without seeing 0x0034 CLIENT_SET_TIME. " +
+            $"Likely the server's HandleAction switch fell to default (UNRECOGNIZED ACTION) " +
+            $"and the connection state was corrupted, the proxy's ProcessSectorServerOpcode dispatch " +
+            $"(proxy/ClientToServer_linux_stubs.cpp:471-477) dropped the frame, " +
+            $"or HandleAction's pre-switch GetObjectFromID(Target=0) crashed.");
     }
 
     /// <summary>
@@ -345,97 +329,88 @@ public sealed class SectorActionTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "JSTest", shipName: "JSShip", cts.Token);
+            firstName: "JSTest", shipName: "JSShip", cts.Token));
 
-        try
+        // ActionPacket wire layout — 16 bytes total, all int32_t LE.
+        // common/include/net7/PacketStructures.h:546
+        //   [0..4)   GameID       — actor's game id (server resolves
+        //                            actor via the connection binding
+        //                            so this field is effectively
+        //                            unused for routing).
+        //   [4..8)   Action       — 26 = Jump Start.
+        //   [8..12)  Target       — 0 = no target selected. The
+        //                            handler's pre-switch
+        //                            GetObjectFromID(0) returns
+        //                            nullptr (ObjectManager.cpp:567
+        //                            first arm), case 26 sees
+        //                            !obj true and emits the fixed
+        //                            error string.
+        //   [12..16) OptionalVar  — unused by case 26.
+        byte[] actionPayload = new byte[16];
+        BinaryPrimitives.WriteInt32LittleEndian(actionPayload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(actionPayload.AsSpan(4, 4), 26);
+        BinaryPrimitives.WriteInt32LittleEndian(actionPayload.AsSpan(8, 4), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(actionPayload.AsSpan(12, 4), 0);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.Action.Value, actionPayload),
+            cts.Token);
+
+        // Drain until we see the specific 0x001D MESSAGE_STRING
+        // carrying "Invalid JS target!". Post-handshake the server
+        // may interleave other MESSAGE_STRING frames (e.g. tutorial
+        // banners), so substring-filter rather than first-match.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // ActionPacket wire layout — 16 bytes total, all int32_t LE.
-            // common/include/net7/PacketStructures.h:546
-            //   [0..4)   GameID       — actor's game id (server resolves
-            //                            actor via the connection binding
-            //                            so this field is effectively
-            //                            unused for routing).
-            //   [4..8)   Action       — 26 = Jump Start.
-            //   [8..12)  Target       — 0 = no target selected. The
-            //                            handler's pre-switch
-            //                            GetObjectFromID(0) returns
-            //                            nullptr (ObjectManager.cpp:567
-            //                            first arm), case 26 sees
-            //                            !obj true and emits the fixed
-            //                            error string.
-            //   [12..16) OptionalVar  — unused by case 26.
-            byte[] actionPayload = new byte[16];
-            BinaryPrimitives.WriteInt32LittleEndian(actionPayload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(actionPayload.AsSpan(4, 4), 26);
-            BinaryPrimitives.WriteInt32LittleEndian(actionPayload.AsSpan(8, 4), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(actionPayload.AsSpan(12, 4), 0);
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.Action.Value, actionPayload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            // Drain until we see the specific 0x001D MESSAGE_STRING
-            // carrying "Invalid JS target!". Post-handshake the server
-            // may interleave other MESSAGE_STRING frames (e.g. tutorial
-            // banners), so substring-filter rather than first-match.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            // Cheap substring probe before the strict pin so we
+            // don't hard-fail on unrelated handshake-tail frames.
+            if (span.Length < 3 + InvalidJsTargetLiteral.Length)
+                continue;
+            var bodyText = System.Text.Encoding.ASCII.GetString(
+                span.Slice(3, Math.Min(span.Length - 3, 64)).ToArray());
+            if (!bodyText.StartsWith("Invalid JS target!", StringComparison.Ordinal))
+                continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            // 0x001D wire layout — mirror of SendMessageString:
+            //   [0..2)  u16 LE length = strlen(msg) + 1
+            //   [2]     u8  color (default 5)
+            //   [3..3+strlen)  ASCII body
+            //   [3+strlen]     '\0'
+            Assert.Equal(41, span.Length);
 
-                var span = reply.Payload.Span;
-                // Cheap substring probe before the strict pin so we
-                // don't hard-fail on unrelated handshake-tail frames.
-                if (span.Length < 3 + InvalidJsTargetLiteral.Length)
-                    continue;
-                var bodyText = System.Text.Encoding.ASCII.GetString(
-                    span.Slice(3, Math.Min(span.Length - 3, 64)).ToArray());
-                if (!bodyText.StartsWith("Invalid JS target!", StringComparison.Ordinal))
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            Assert.Equal((short)38, msgLen);
 
-                // 0x001D wire layout — mirror of SendMessageString:
-                //   [0..2)  u16 LE length = strlen(msg) + 1
-                //   [2]     u8  color (default 5)
-                //   [3..3+strlen)  ASCII body
-                //   [3+strlen]     '\0'
-                Assert.Equal(41, span.Length);
+            Assert.Equal((byte)5, span[2]);
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                Assert.Equal((short)38, msgLen);
+            byte[] expectedBody = System.Text.Encoding.ASCII.GetBytes(
+                InvalidJsTargetLiteral);
+            Assert.Equal(37, expectedBody.Length);
+            Assert.True(span.Slice(3, 37).SequenceEqual(expectedBody));
 
-                Assert.Equal((byte)5, span[2]);
+            Assert.Equal((byte)0x00, span[40]);
 
-                byte[] expectedBody = System.Text.Encoding.ASCII.GetBytes(
-                    InvalidJsTargetLiteral);
-                Assert.Equal(37, expectedBody.Length);
-                Assert.True(span.Slice(3, 37).SequenceEqual(expectedBody));
-
-                Assert.Equal((byte)0x00, span[40]);
-
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x002C ACTION " +
-                $"(Action=26 Jump Start, Target=0) without seeing the 0x001D " +
-                $"MESSAGE_STRING reply containing \"Invalid JS target!\". " +
-                $"Likely HandleAction case 26 at PlayerConnection.cpp:4147 " +
-                $"changed shape, GetObjectFromID(0) stopped returning nullptr, " +
-                $"the SendVaMessage→SendMessageString fan-out was rewired, " +
-                $"or the proxy dropped the 0x001D inside the encrypted client tunnel.");
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x002C ACTION " +
+            $"(Action=26 Jump Start, Target=0) without seeing the 0x001D " +
+            $"MESSAGE_STRING reply containing \"Invalid JS target!\". " +
+            $"Likely HandleAction case 26 at PlayerConnection.cpp:4147 " +
+            $"changed shape, GetObjectFromID(0) stopped returning nullptr, " +
+            $"the SendVaMessage→SendMessageString fan-out was rewired, " +
+            $"or the proxy dropped the 0x001D inside the encrypted client tunnel.");
     }
 }

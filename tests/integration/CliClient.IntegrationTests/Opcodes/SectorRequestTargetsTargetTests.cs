@@ -180,16 +180,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorRequestTargetsTargetTests
+public sealed class SectorRequestTargetsTargetTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorRequestTargetsTargetTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorRequestTargetsTargetTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task RequestTargetsTarget_OnUnknownPlayer_ReceivesSetTargetWithLiteralZeroGameId()
@@ -205,96 +198,87 @@ public sealed class SectorRequestTargetsTargetTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Inquirer", shipName: "InquireShip", cts.Token);
+            firstName: "Inquirer", shipName: "InquireShip", cts.Token));
 
-        try
+        // RequestTarget wire layout — 8 bytes (shared with 0x0017):
+        //   [0..4)   int32 LE  GameID    — actor's own avatar id;
+        //                                   retail client sets this
+        //                                   to the player's own
+        //                                   GameID. We send 0 — the
+        //                                   field is not consumed
+        //                                   by HandleRequestTargetsTarget.
+        //   [4..8)   int32 LE  TargetID  — the GameID of the player
+        //                                   whose target we're
+        //                                   inquiring about. We send
+        //                                   0x12345678 (305419896) —
+        //                                   a fixed nonzero sentinel
+        //                                   that doesn't correspond
+        //                                   to any connected player.
+        //                                   GetPlayer(0x12345678)
+        //                                   returns null → handler
+        //                                   takes the else branch →
+        //                                   SendSetTarget(0, -1).
+        //
+        // Why 0x12345678 specifically — it's safely outside any
+        // possible CharacterID assigned by SaveManager
+        // (account_id*5 + slot + 1) for any seeded account
+        // (id <= 9_000_017 → max CharacterID 45_000_086). It's also
+        // a recognizable byte pattern in a hex dump if the test
+        // ever fails noisily.
+        //
+        // common/include/net7/PacketStructures.h:528
+        const int unknownPlayerTargetId = 0x12345678;
+
+        byte[] payload = new byte[8];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), unknownPlayerTargetId);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTargetsTarget.Value, payload),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // RequestTarget wire layout — 8 bytes (shared with 0x0017):
-            //   [0..4)   int32 LE  GameID    — actor's own avatar id;
-            //                                   retail client sets this
-            //                                   to the player's own
-            //                                   GameID. We send 0 — the
-            //                                   field is not consumed
-            //                                   by HandleRequestTargetsTarget.
-            //   [4..8)   int32 LE  TargetID  — the GameID of the player
-            //                                   whose target we're
-            //                                   inquiring about. We send
-            //                                   0x12345678 (305419896) —
-            //                                   a fixed nonzero sentinel
-            //                                   that doesn't correspond
-            //                                   to any connected player.
-            //                                   GetPlayer(0x12345678)
-            //                                   returns null → handler
-            //                                   takes the else branch →
-            //                                   SendSetTarget(0, -1).
-            //
-            // Why 0x12345678 specifically — it's safely outside any
-            // possible CharacterID assigned by SaveManager
-            // (account_id*5 + slot + 1) for any seeded account
-            // (id <= 9_000_017 → max CharacterID 45_000_086). It's also
-            // a recognizable byte pattern in a hex dump if the test
-            // ever fails noisily.
-            //
-            // common/include/net7/PacketStructures.h:528
-            const int unknownPlayerTargetId = 0x12345678;
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            byte[] payload = new byte[8];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), unknownPlayerTargetId);
+            if (reply!.Header.Opcode != OpcodeId.Known.SetTarget.Value)
+                continue;
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RequestTargetsTarget.Value, payload),
-                cts.Token);
+            var span = reply.Payload.Span;
+            Assert.Equal(8, span.Length);
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            int replyGameID = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+            int replyTargetID = BinaryPrimitives.ReadInt32LittleEndian(span[4..8]);
 
-                if (reply!.Header.Opcode != OpcodeId.Known.SetTarget.Value)
-                    continue;
+            // Critical assertion — differentiates HandleRequestTargetsTarget
+            // (else branch, SendSetTarget(0, -1) → GameID=0) from
+            // HandleRequestTarget (SendSetTarget(request->TargetID, -1)
+            // → GameID=0x12345678 in this scenario). A 0x0018→0x0017
+            // dispatcher mis-route would fail HERE.
+            Assert.Equal(0, replyGameID);
 
-                var span = reply.Payload.Span;
-                Assert.Equal(8, span.Length);
+            // TargetID=-1 sentinel — same as Wave 19's reply; means
+            // "no rank/threat info available". Confirms the
+            // SendSetTarget hardcoded -1 is intact.
+            Assert.Equal(-1, replyTargetID);
 
-                int replyGameID = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                int replyTargetID = BinaryPrimitives.ReadInt32LittleEndian(span[4..8]);
-
-                // Critical assertion — differentiates HandleRequestTargetsTarget
-                // (else branch, SendSetTarget(0, -1) → GameID=0) from
-                // HandleRequestTarget (SendSetTarget(request->TargetID, -1)
-                // → GameID=0x12345678 in this scenario). A 0x0018→0x0017
-                // dispatcher mis-route would fail HERE.
-                Assert.Equal(0, replyGameID);
-
-                // TargetID=-1 sentinel — same as Wave 19's reply; means
-                // "no rank/threat info available". Confirms the
-                // SendSetTarget hardcoded -1 is intact.
-                Assert.Equal(-1, replyTargetID);
-
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0018 REQUEST_TARGETS_TARGET (GameID=0, TargetID=0x12345678) " +
-                $"without seeing 0x0019 SET_TARGET. " +
-                $"Likely the server's HandleRequestTargetsTarget crashed on the 8B payload " +
-                $"(RequestTarget long-revert regression), " +
-                $"PlayerManager::GetPlayer returned non-null for the unknown TargetID " +
-                $"(would route to the if-branch HandleRequestTarget instead — would still emit SET_TARGET, but with a different GameID), " +
-                $"the proxy default-case forwarding dropped the opcode, " +
-                $"the dispatcher case at PlayerConnection.cpp:447 got mis-routed elsewhere, " +
-                $"or ShipIndex/SendAuxShip in the else branch crashed.");
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0018 REQUEST_TARGETS_TARGET (GameID=0, TargetID=0x12345678) " +
+            $"without seeing 0x0019 SET_TARGET. " +
+            $"Likely the server's HandleRequestTargetsTarget crashed on the 8B payload " +
+            $"(RequestTarget long-revert regression), " +
+            $"PlayerManager::GetPlayer returned non-null for the unknown TargetID " +
+            $"(would route to the if-branch HandleRequestTarget instead — would still emit SET_TARGET, but with a different GameID), " +
+            $"the proxy default-case forwarding dropped the opcode, " +
+            $"the dispatcher case at PlayerConnection.cpp:447 got mis-routed elsewhere, " +
+            $"or ShipIndex/SendAuxShip in the else branch crashed.");
     }
 }

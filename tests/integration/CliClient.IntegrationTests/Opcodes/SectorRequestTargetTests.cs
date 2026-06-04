@@ -130,16 +130,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorRequestTargetTests
+public sealed class SectorRequestTargetTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorRequestTargetTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorRequestTargetTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task RequestTarget_OnNullTarget_ReceivesSetTargetWithSentinelTargetIdMinusOne()
@@ -155,91 +148,82 @@ public sealed class SectorRequestTargetTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Targeter", shipName: "TargetShip", cts.Token);
+            firstName: "Targeter", shipName: "TargetShip", cts.Token));
 
-        try
+        // RequestTarget wire layout — 8 bytes:
+        //   [0..4)   int32 LE  GameID    — actor's own avatar id;
+        //                                   retail client sets this
+        //                                   to the player's own
+        //                                   GameID. We send 0 — the
+        //                                   field is read but not
+        //                                   used on the SetTarget
+        //                                   reply path (the reply's
+        //                                   GameID is mirrored from
+        //                                   request->TargetID, not
+        //                                   request->GameID).
+        //   [4..8)   int32 LE  TargetID  — the requested target
+        //                                   object's GameID. We send
+        //                                   0 — the retail client
+        //                                   sends this when the user
+        //                                   clicks on empty space to
+        //                                   clear the active target.
+        //                                   GetObjectFromID(0)
+        //                                   returns null → newtarget
+        //                                   stays null → threat-rank
+        //                                   logic is skipped →
+        //                                   SendSetTarget(0, -1) is
+        //                                   the only emit.
+        // common/include/net7/PacketStructures.h:528
+        byte[] payload = new byte[8];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 0);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTarget.Value, payload),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // RequestTarget wire layout — 8 bytes:
-            //   [0..4)   int32 LE  GameID    — actor's own avatar id;
-            //                                   retail client sets this
-            //                                   to the player's own
-            //                                   GameID. We send 0 — the
-            //                                   field is read but not
-            //                                   used on the SetTarget
-            //                                   reply path (the reply's
-            //                                   GameID is mirrored from
-            //                                   request->TargetID, not
-            //                                   request->GameID).
-            //   [4..8)   int32 LE  TargetID  — the requested target
-            //                                   object's GameID. We send
-            //                                   0 — the retail client
-            //                                   sends this when the user
-            //                                   clicks on empty space to
-            //                                   clear the active target.
-            //                                   GetObjectFromID(0)
-            //                                   returns null → newtarget
-            //                                   stays null → threat-rank
-            //                                   logic is skipped →
-            //                                   SendSetTarget(0, -1) is
-            //                                   the only emit.
-            // common/include/net7/PacketStructures.h:528
-            byte[] payload = new byte[8];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 0);
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RequestTarget.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.SetTarget.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            Assert.Equal(8, span.Length);
 
-                if (reply!.Header.Opcode != OpcodeId.Known.SetTarget.Value)
-                    continue;
+            int replyGameID = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+            int replyTargetID = BinaryPrimitives.ReadInt32LittleEndian(span[4..8]);
 
-                var span = reply.Payload.Span;
-                Assert.Equal(8, span.Length);
+            // GameID field of SetTarget is mirrored from
+            // request->TargetID (server/src/PlayerConnection.cpp:3410
+            // calls SendSetTarget(request->TargetID, -1)). We sent
+            // TargetID=0 so we expect GameID=0 in the reply.
+            Assert.Equal(0, replyGameID);
 
-                int replyGameID = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                int replyTargetID = BinaryPrimitives.ReadInt32LittleEndian(span[4..8]);
+            // TargetID=-1 is the hard-coded sentinel from
+            // SendSetTarget itself, not echoed from the wire — this
+            // is the positive-correlation signal that the dispatch
+            // reached the right handler and the right code path.
+            Assert.Equal(-1, replyTargetID);
 
-                // GameID field of SetTarget is mirrored from
-                // request->TargetID (server/src/PlayerConnection.cpp:3410
-                // calls SendSetTarget(request->TargetID, -1)). We sent
-                // TargetID=0 so we expect GameID=0 in the reply.
-                Assert.Equal(0, replyGameID);
-
-                // TargetID=-1 is the hard-coded sentinel from
-                // SendSetTarget itself, not echoed from the wire — this
-                // is the positive-correlation signal that the dispatch
-                // reached the right handler and the right code path.
-                Assert.Equal(-1, replyTargetID);
-
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0017 REQUEST_TARGET (GameID=0, TargetID=0) " +
-                $"without seeing 0x0019 SET_TARGET. " +
-                $"Likely the server's HandleRequestTarget crashed on the 8B payload " +
-                $"(RequestTarget long-revert regression), " +
-                $"the proxy default-case forwarding dropped the opcode, " +
-                $"the dispatcher case at PlayerConnection.cpp:443 got mis-routed, " +
-                $"the server→client UDP fan-out (SendOpcode → 0x2016 PACKET_SEQUENCE " +
-                $"→ proxy SendClientPacketSequence → TCP) regressed for this opcode, " +
-                $"or BlankVerbs/SetTargetGameID introduced a crash hazard.");
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0017 REQUEST_TARGET (GameID=0, TargetID=0) " +
+            $"without seeing 0x0019 SET_TARGET. " +
+            $"Likely the server's HandleRequestTarget crashed on the 8B payload " +
+            $"(RequestTarget long-revert regression), " +
+            $"the proxy default-case forwarding dropped the opcode, " +
+            $"the dispatcher case at PlayerConnection.cpp:443 got mis-routed, " +
+            $"the server→client UDP fan-out (SendOpcode → 0x2016 PACKET_SEQUENCE " +
+            $"→ proxy SendClientPacketSequence → TCP) regressed for this opcode, " +
+            $"or BlankVerbs/SetTargetGameID introduced a crash hazard.");
     }
 }

@@ -149,16 +149,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorPetitionStuckTests
+public sealed class SectorPetitionStuckTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorPetitionStuckTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorPetitionStuckTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task PetitionStuck_DoesNotBreakConnection_RequestTimeStillRoundTrips()
@@ -174,79 +167,70 @@ public sealed class SectorPetitionStuckTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Stuck", shipName: "StuckShip", cts.Token);
+            firstName: "Stuck", shipName: "StuckShip", cts.Token));
 
-        try
+        // PetitionStuck canonical 11B wire payload:
+        //   [0..4)   long GameID       = 0          (int32_t LE)
+        //   [4..8)   long ProblemType  = 0          (int32_t LE)
+        //   [8]      char Subject[1]   = 0x00       (empty NUL-term string)
+        //   [9]      char Complaint[1] = 0x00       (empty NUL-term string)
+        //   [10]     char PlayerList[1]= 0x00       (empty NUL-term string)
+        // Per the doc comment at server/src/PlayerConnection.cpp:11019-11037.
+        byte[] payload = new byte[11];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 0);
+        // Trailing 3 NUL bytes already zero from new byte[11].
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.PetitionStuck.Value, payload),
+            cts.Token);
+
+        // Survival probe: did the connection survive the petition
+        // handler? Send REQUEST_TIME and assert CLIENT_SET_TIME
+        // echoes our sentinel tick.
+        int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+
+        byte[] reqTimePayload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
+            cts.Token);
+
+        // Drain until 0x0034 CLIENT_SET_TIME. Tolerate interleaved
+        // in-sector frames; cap on frame count so a stalled
+        // pipeline doesn't masquerade as the outer-CTS timeout.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // PetitionStuck canonical 11B wire payload:
-            //   [0..4)   long GameID       = 0          (int32_t LE)
-            //   [4..8)   long ProblemType  = 0          (int32_t LE)
-            //   [8]      char Subject[1]   = 0x00       (empty NUL-term string)
-            //   [9]      char Complaint[1] = 0x00       (empty NUL-term string)
-            //   [10]     char PlayerList[1]= 0x00       (empty NUL-term string)
-            // Per the doc comment at server/src/PlayerConnection.cpp:11019-11037.
-            byte[] payload = new byte[11];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 0);
-            // Trailing 3 NUL bytes already zero from new byte[11].
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.PetitionStuck.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
+                continue;
 
-            // Survival probe: did the connection survive the petition
-            // handler? Send REQUEST_TIME and assert CLIENT_SET_TIME
-            // echoes our sentinel tick.
-            int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+            var span = reply.Payload.Span;
+            Assert.Equal(12, span.Length);
 
-            byte[] reqTimePayload = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+            int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+            Assert.Equal(clientTick, echoedClientSent);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
-                cts.Token);
-
-            // Drain until 0x0034 CLIENT_SET_TIME. Tolerate interleaved
-            // in-sector frames; cap on frame count so a stalled
-            // pipeline doesn't masquerade as the outer-CTS timeout.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-
-                if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
-                    continue;
-
-                var span = reply.Payload.Span;
-                Assert.Equal(12, span.Length);
-
-                int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                Assert.Equal(clientTick, echoedClientSent);
-
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0088 PETITION_STUCK + 0x0044 REQUEST_TIME " +
-                $"without seeing 0x0034 CLIENT_SET_TIME. " +
-                $"Likely the server's HandlePetitionStuck SEGV'd inside SavePetition " +
-                $"(g_SaveMgr->AddSaveMessage memory corruption or m_CharacterID null-deref), " +
-                $"the proxy default-case ForwardClientOpcode dropped 0x0088, " +
-                $"the dispatcher case at PlayerConnection.cpp:559 got mis-routed " +
-                $"(swap with HandleIncapacitanceRequest at line 563 would trigger that handler's " +
-                $"known-crashing first-time AvatarDescription emit), " +
-                $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted " +
-                $"(would corrupt the 0x2016 inner-tuple parser and break the entire reply path).");
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0088 PETITION_STUCK + 0x0044 REQUEST_TIME " +
+            $"without seeing 0x0034 CLIENT_SET_TIME. " +
+            $"Likely the server's HandlePetitionStuck SEGV'd inside SavePetition " +
+            $"(g_SaveMgr->AddSaveMessage memory corruption or m_CharacterID null-deref), " +
+            $"the proxy default-case ForwardClientOpcode dropped 0x0088, " +
+            $"the dispatcher case at PlayerConnection.cpp:559 got mis-routed " +
+            $"(swap with HandleIncapacitanceRequest at line 563 would trigger that handler's " +
+            $"known-crashing first-time AvatarDescription emit), " +
+            $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted " +
+            $"(would corrupt the 0x2016 inner-tuple parser and break the entire reply path).");
     }
 }

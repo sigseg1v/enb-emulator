@@ -216,18 +216,11 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorPlanetPositionalUpdateHardeningTests
+public sealed class SectorPlanetPositionalUpdateHardeningTests : SectorIntegrationTest
 {
     private const int ExpectedPlanetPositionalUpdatePayloadLength = 48;
 
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorPlanetPositionalUpdateHardeningTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorPlanetPositionalUpdateHardeningTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task PlanetPositionalUpdate_EmittedDuringSpaceSectorHandshake_HasExactly48BytePayload()
@@ -249,53 +242,34 @@ public sealed class SectorPlanetPositionalUpdateHardeningTests
             _server, login.Ticket!, account.Username, slot, stationSectorId,
             firstName: "PPU89Pin", shipName: "PPU89PinShip", cts.Token);
 
-        try
-        {
-            // Cleanly tear down stage 1 with an explicit 0x00B9
-            // LOGOFF_REQUEST so the server runs DropPlayerFromGalaxy
-            // synchronously (avoids G_ERROR_ACCOUNT_IN_USE in stage 2).
-            byte[] logoffPayload = new byte[8];
-            await stationSession.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
-                cts.Token);
-            await SectorHandshake.DrainUntilOpcode(
-                stationSession.Sector, OpcodeId.Known.LogoffConfirmation.Value, cts.Token);
-            await stationSession.DisposeAsync();
+        // Cleanly tear down stage 1 with an explicit 0x00B9
+        // LOGOFF_REQUEST so the server runs DropPlayerFromGalaxy
+        // synchronously (avoids G_ERROR_ACCOUNT_IN_USE in stage 2).
+        byte[] logoffPayload = new byte[8];
+        await stationSession.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
+            cts.Token);
+        await SectorHandshake.DrainUntilOpcode(
+            stationSession.Sector, OpcodeId.Known.LogoffConfirmation.Value, cts.Token);
+        await stationSession.DisposeAsync();
 
-            // Stage 2: reconnect (no char create) and LOGIN to space
-            // sector 1015. HandleSectorLogin2 dispatches to SectorLogin2
-            // (SectorManager.cpp:303), which calls SendAllNavs at
-            // SectorManager.cpp:369; the per-planet Object::SendObject
-            // chain dispatches Planet::SendPosition (PlanetClass.cpp:226)
-            // which emits a 48-byte 0x003F frame for each planet in the
-            // sector.
-            await using var spaceSession = await SectorHandshake.ReestablishAsync(
-                _server, login.Ticket!, slot, spaceSectorId, cts.Token);
+        // Stage 2: reconnect (no char create) and LOGIN to space
+        // sector 1015. HandleSectorLogin2 dispatches to SectorLogin2
+        // (SectorManager.cpp:303), which calls SendAllNavs at
+        // SectorManager.cpp:369; the per-planet Object::SendObject
+        // chain dispatches Planet::SendPosition (PlanetClass.cpp:226)
+        // which emits a 48-byte 0x003F frame for each planet in the
+        // sector.
+        var spaceSession = Track(await SectorHandshake.ReestablishAsync(
+            _server, login.Ticket!, slot, spaceSectorId, cts.Token));
 
-            var planetPositionalFrames = spaceSession.HandshakeFrames
-                .Where(f => f.Opcode == OpcodeId.Known.PlanetPositionalUpdate.Value)
-                .ToList();
+        var planetPositionalFrames = spaceSession.HandshakeFrames
+            .Where(f => f.Opcode == OpcodeId.Known.PlanetPositionalUpdate.Value)
+            .ToList();
 
-            Assert.NotEmpty(planetPositionalFrames);
-            Assert.All(planetPositionalFrames, f =>
-                Assert.Equal(ExpectedPlanetPositionalUpdatePayloadLength, f.PayloadLength));
-        }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            try
-            {
-                await using var cleanupGlobal = await EncryptedTcpConnection.ConnectAsync(
-                    _server.GlobalHost, _server.GlobalPort, cleanupCts.Token);
-                await SectorHandshake.SendGlobalConnectAsync(
-                    cleanupGlobal, login.Ticket!, cleanupCts.Token);
-                await SectorHandshake.DrainUntilOpcode(
-                    cleanupGlobal, OpcodeId.Known.GlobalAvatarList.Value, cleanupCts.Token);
-                await SectorHandshake.DeleteCreatedCharacterAsync(
-                    cleanupGlobal, slot, cleanupCts.Token);
-            }
-            catch { /* best-effort cleanup */ }
-        }
+        Assert.NotEmpty(planetPositionalFrames);
+        Assert.All(planetPositionalFrames, f =>
+            Assert.Equal(ExpectedPlanetPositionalUpdatePayloadLength, f.PayloadLength));
     }
 
     /// <summary>
@@ -435,61 +409,42 @@ public sealed class SectorPlanetPositionalUpdateHardeningTests
             _server, login.Ticket!, account.Username, slot, stationSectorId,
             firstName: "PpuNav107", shipName: "PpuNav107Ship", cts.Token);
 
-        try
-        {
-            byte[] logoffPayload = new byte[8];
-            await stationSession.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
-                cts.Token);
-            await SectorHandshake.DrainUntilOpcode(
-                stationSession.Sector, OpcodeId.Known.LogoffConfirmation.Value, cts.Token);
-            await stationSession.DisposeAsync();
+        byte[] logoffPayload = new byte[8];
+        await stationSession.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
+            cts.Token);
+        await SectorHandshake.DrainUntilOpcode(
+            stationSession.Sector, OpcodeId.Known.LogoffConfirmation.Value, cts.Token);
+        await stationSession.DisposeAsync();
 
-            await using var spaceSession = await SectorHandshake.ReestablishAsync(
-                _server, login.Ticket!, slot, spaceSectorId, cts.Token);
+        var spaceSession = Track(await SectorHandshake.ReestablishAsync(
+            _server, login.Ticket!, slot, spaceSectorId, cts.Token));
 
-            var planetPositionalFrames = spaceSession.HandshakeFrames
-                .Where(f => f.Opcode == OpcodeId.Known.PlanetPositionalUpdate.Value)
-                .ToList();
-            var navigationFrames = spaceSession.HandshakeFrames
-                .Where(f => f.Opcode == OpcodeId.Known.Navigation.Value)
-                .ToList();
+        var planetPositionalFrames = spaceSession.HandshakeFrames
+            .Where(f => f.Opcode == OpcodeId.Known.PlanetPositionalUpdate.Value)
+            .ToList();
+        var navigationFrames = spaceSession.HandshakeFrames
+            .Where(f => f.Opcode == OpcodeId.Known.Navigation.Value)
+            .ToList();
 
-            // 0x003F PLANET_POSITIONAL_UPDATE is emitted only by
-            // Planet::SendPosition, so its count tracks OT_PLANET objects
-            // exactly: sector 1015 (Luna) carries one planet, so exactly
-            // one 0x003F. Assert.Single yields it for the byte-exact length
-            // check below.
-            var singlePpu = Assert.Single(planetPositionalFrames);
-            Assert.Equal(ExpectedPlanetPositionalUpdatePayloadLength, singlePpu.PayloadLength);
+        // 0x003F PLANET_POSITIONAL_UPDATE is emitted only by
+        // Planet::SendPosition, so its count tracks OT_PLANET objects
+        // exactly: sector 1015 (Luna) carries one planet, so exactly
+        // one 0x003F. Assert.Single yields it for the byte-exact length
+        // check below.
+        var singlePpu = Assert.Single(planetPositionalFrames);
+        Assert.Equal(ExpectedPlanetPositionalUpdatePayloadLength, singlePpu.PayloadLength);
 
-            // 0x0099 NAVIGATION is NOT planet-exclusive. Since the
-            // send-every-sector-nav fix (636c6175) plus the index-aliasing
-            // bitset fix that stopped a sector nav from clobbering the
-            // planet's in-range bit, SendAllNavs emits one 0x0099 per
-            // nav-bearing object at entry (the planet plus every clickable
-            // sector nav), not just the single planet. Pin the per-nav
-            // invariant as NotEmpty + every-frame-14-bytes rather than the
-            // old (pre-636c6175) exactly-one count.
-            Assert.NotEmpty(navigationFrames);
-            Assert.All(navigationFrames, f =>
-                Assert.Equal(ExpectedNavigationPayloadLength, f.PayloadLength));
-        }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            try
-            {
-                await using var cleanupGlobal = await EncryptedTcpConnection.ConnectAsync(
-                    _server.GlobalHost, _server.GlobalPort, cleanupCts.Token);
-                await SectorHandshake.SendGlobalConnectAsync(
-                    cleanupGlobal, login.Ticket!, cleanupCts.Token);
-                await SectorHandshake.DrainUntilOpcode(
-                    cleanupGlobal, OpcodeId.Known.GlobalAvatarList.Value, cleanupCts.Token);
-                await SectorHandshake.DeleteCreatedCharacterAsync(
-                    cleanupGlobal, slot, cleanupCts.Token);
-            }
-            catch { /* best-effort cleanup */ }
-        }
+        // 0x0099 NAVIGATION is NOT planet-exclusive. Since the
+        // send-every-sector-nav fix (636c6175) plus the index-aliasing
+        // bitset fix that stopped a sector nav from clobbering the
+        // planet's in-range bit, SendAllNavs emits one 0x0099 per
+        // nav-bearing object at entry (the planet plus every clickable
+        // sector nav), not just the single planet. Pin the per-nav
+        // invariant as NotEmpty + every-frame-14-bytes rather than the
+        // old (pre-636c6175) exactly-one count.
+        Assert.NotEmpty(navigationFrames);
+        Assert.All(navigationFrames, f =>
+            Assert.Equal(ExpectedNavigationPayloadLength, f.PayloadLength));
     }
 }

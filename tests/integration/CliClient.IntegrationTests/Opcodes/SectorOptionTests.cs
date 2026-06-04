@@ -187,16 +187,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorOptionTests
+public sealed class SectorOptionTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorOptionTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorOptionTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task Option_UnhandledOptionType_DoesNotBreakConnection_RequestTimeStillRoundTrips()
@@ -212,88 +205,79 @@ public sealed class SectorOptionTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Optic", shipName: "OptiShip", cts.Token);
+            firstName: "Optic", shipName: "OptiShip", cts.Token));
 
-        try
+        // OptionPacket wire layout — 9 bytes:
+        //   [0..4)  host-endian (LE on x86) int32  GameID     = 0
+        //                              (ignored by handler;
+        //                               player derived from
+        //                               connection context)
+        //   [4..8)  host-endian (LE on x86) int32  OptionType = 2
+        //                              (published gap between LFG/
+        //                               AllowInvite and group-leader
+        //                               options 3/4/5 — fall-through
+        //                               no-op branch)
+        //   [8]                             byte   OptionVar  = 0
+        //                              (not consumed on the fall-
+        //                               through branch)
+        //
+        // common/include/net7/PacketStructures.h:601
+        byte[] payload = new byte[9];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 2);
+        payload[8] = 0;
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.Option.Value, payload),
+            cts.Token);
+
+        // Survival probe.
+        int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+
+        byte[] reqTimePayload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
+            cts.Token);
+
+        // Drain until 0x0034 CLIENT_SET_TIME. Post-handshake the
+        // server may begin streaming in-sector frames so this loop
+        // tolerates interleaved traffic. Cap on frame count so a
+        // stalled pipeline can't masquerade as the outer-CTS
+        // timeout.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // OptionPacket wire layout — 9 bytes:
-            //   [0..4)  host-endian (LE on x86) int32  GameID     = 0
-            //                              (ignored by handler;
-            //                               player derived from
-            //                               connection context)
-            //   [4..8)  host-endian (LE on x86) int32  OptionType = 2
-            //                              (published gap between LFG/
-            //                               AllowInvite and group-leader
-            //                               options 3/4/5 — fall-through
-            //                               no-op branch)
-            //   [8]                             byte   OptionVar  = 0
-            //                              (not consumed on the fall-
-            //                               through branch)
-            //
-            // common/include/net7/PacketStructures.h:601
-            byte[] payload = new byte[9];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 2);
-            payload[8] = 0;
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.Option.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
+                continue;
 
-            // Survival probe.
-            int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+            // 0x0034 wire layout (ClientSetTime struct):
+            //   [0..4)  int32  ClientSent
+            //   [4..8)  int32  ServerReceived
+            //   [8..12) int32  ServerSent
+            // common/include/net7/PacketStructures.h:563
+            var span = reply.Payload.Span;
+            Assert.Equal(12, span.Length);
 
-            byte[] reqTimePayload = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+            int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+            Assert.Equal(clientTick, echoedClientSent);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
-                cts.Token);
-
-            // Drain until 0x0034 CLIENT_SET_TIME. Post-handshake the
-            // server may begin streaming in-sector frames so this loop
-            // tolerates interleaved traffic. Cap on frame count so a
-            // stalled pipeline can't masquerade as the outer-CTS
-            // timeout.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-
-                if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
-                    continue;
-
-                // 0x0034 wire layout (ClientSetTime struct):
-                //   [0..4)  int32  ClientSent
-                //   [4..8)  int32  ServerReceived
-                //   [8..12) int32  ServerSent
-                // common/include/net7/PacketStructures.h:563
-                var span = reply.Payload.Span;
-                Assert.Equal(12, span.Length);
-
-                int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                Assert.Equal(clientTick, echoedClientSent);
-
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x002E OPTION (OptionType=2 fall-through) + 0x0044 REQUEST_TIME " +
-                $"without seeing 0x0034 CLIENT_SET_TIME. " +
-                $"Likely the server's HandleOption crashed (struct layout regression past 9B payload end), " +
-                $"GetGroupFromID(-1) null-safety guard was removed and the empty m_GroupList walk segfaulted, " +
-                $"the proxy default-case forwarding dropped the opcode, " +
-                $"or the dispatcher case at PlayerConnection.cpp:475 got mis-routed to HandleAction2 which reads 5 bytes past the OptionPacket end.");
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x002E OPTION (OptionType=2 fall-through) + 0x0044 REQUEST_TIME " +
+            $"without seeing 0x0034 CLIENT_SET_TIME. " +
+            $"Likely the server's HandleOption crashed (struct layout regression past 9B payload end), " +
+            $"GetGroupFromID(-1) null-safety guard was removed and the empty m_GroupList walk segfaulted, " +
+            $"the proxy default-case forwarding dropped the opcode, " +
+            $"or the dispatcher case at PlayerConnection.cpp:475 got mis-routed to HandleAction2 which reads 5 bytes past the OptionPacket end.");
     }
 }

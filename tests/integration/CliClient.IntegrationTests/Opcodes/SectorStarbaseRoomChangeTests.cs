@@ -101,16 +101,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorStarbaseRoomChangeTests
+public sealed class SectorStarbaseRoomChangeTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorStarbaseRoomChangeTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorStarbaseRoomChangeTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task RoomChange_DoesNotBreakConnection_RequestTimeStillRoundTrips()
@@ -126,84 +119,75 @@ public sealed class SectorStarbaseRoomChangeTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Roomer", shipName: "RoomShip", cts.Token);
+            firstName: "Roomer", shipName: "RoomShip", cts.Token));
 
-        try
+        // StarbaseRoomChange wire layout — 12 bytes, 3× int32_t LE:
+        //   [0..4)   AvatarID — retail client sets the actor's game
+        //                       id; server uses connection binding,
+        //                       this field is unused server-side but
+        //                       its width matters for struct offsets.
+        //   [4..8)   NewRoom  — destination room id within the
+        //                       starbase. 1 = first room after lobby
+        //                       (matches typical retail-client first
+        //                       transition).
+        //   [8..12)  OldRoom  — source room id. 0 = lobby (the
+        //                       value m_Room is initialised to on
+        //                       starbase entry, per
+        //                       server/src/PlayerClass.cpp:638
+        //                       which special-cases OldRoom=-1 /
+        //                       NewRoom=0 — we use 0/1 to drive the
+        //                       normal "first move" path).
+        // common/include/net7/PacketStructures.h:805
+        byte[] payload = new byte[12];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 1);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(8, 4), 0);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.StarbaseRoomChange.Value, payload),
+            cts.Token);
+
+        // Survival probe.
+        int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+
+        byte[] reqTimePayload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
+            cts.Token);
+
+        // Drain until 0x0034 CLIENT_SET_TIME. Tolerate interleaved
+        // in-sector frames; cap on frame count so a stalled
+        // pipeline doesn't masquerade as the outer-CTS timeout.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // StarbaseRoomChange wire layout — 12 bytes, 3× int32_t LE:
-            //   [0..4)   AvatarID — retail client sets the actor's game
-            //                       id; server uses connection binding,
-            //                       this field is unused server-side but
-            //                       its width matters for struct offsets.
-            //   [4..8)   NewRoom  — destination room id within the
-            //                       starbase. 1 = first room after lobby
-            //                       (matches typical retail-client first
-            //                       transition).
-            //   [8..12)  OldRoom  — source room id. 0 = lobby (the
-            //                       value m_Room is initialised to on
-            //                       starbase entry, per
-            //                       server/src/PlayerClass.cpp:638
-            //                       which special-cases OldRoom=-1 /
-            //                       NewRoom=0 — we use 0/1 to drive the
-            //                       normal "first move" path).
-            // common/include/net7/PacketStructures.h:805
-            byte[] payload = new byte[12];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 1);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(8, 4), 0);
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.StarbaseRoomChange.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
+                continue;
 
-            // Survival probe.
-            int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+            var span = reply.Payload.Span;
+            Assert.Equal(12, span.Length);
 
-            byte[] reqTimePayload = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+            int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+            Assert.Equal(clientTick, echoedClientSent);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
-                cts.Token);
-
-            // Drain until 0x0034 CLIENT_SET_TIME. Tolerate interleaved
-            // in-sector frames; cap on frame count so a stalled
-            // pipeline doesn't masquerade as the outer-CTS timeout.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-
-                if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
-                    continue;
-
-                var span = reply.Payload.Span;
-                Assert.Equal(12, span.Length);
-
-                int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                Assert.Equal(clientTick, echoedClientSent);
-
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x009F STARBASE_ROOM_CHANGE + 0x0044 REQUEST_TIME " +
-                $"without seeing 0x0034 CLIENT_SET_TIME. " +
-                $"Likely the server's HandleStarbaseRoomChange read past the 12B payload " +
-                $"(sizeof(long) regression on StarbaseRoomChange struct), " +
-                $"the proxy's ProcessSectorServerOpcode dispatch dropped the bottom-of-switch forward " +
-                $"(proxy/ClientToServer_linux_stubs.cpp:491-496), " +
-                $"or the m_Mutex room-update path deadlocked / GetSectorPlayerList iteration crashed.");
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x009F STARBASE_ROOM_CHANGE + 0x0044 REQUEST_TIME " +
+            $"without seeing 0x0034 CLIENT_SET_TIME. " +
+            $"Likely the server's HandleStarbaseRoomChange read past the 12B payload " +
+            $"(sizeof(long) regression on StarbaseRoomChange struct), " +
+            $"the proxy's ProcessSectorServerOpcode dispatch dropped the bottom-of-switch forward " +
+            $"(proxy/ClientToServer_linux_stubs.cpp:491-496), " +
+            $"or the m_Mutex room-update path deadlocked / GetSectorPlayerList iteration crashed.");
     }
 }

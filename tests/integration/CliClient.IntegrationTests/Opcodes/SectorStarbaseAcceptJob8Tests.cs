@@ -156,19 +156,12 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorStarbaseAcceptJob8Tests
+public sealed class SectorStarbaseAcceptJob8Tests : SectorIntegrationTest
 {
     private const int ExpectedPayloadSize = 4;
     private const int SentinelJobId = 0x12345678;
 
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorStarbaseAcceptJob8Tests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorStarbaseAcceptJob8Tests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task StarbaseAcceptJobAction8_OnSentinelJobId_ReceivesByteExact4ByteJobAcceptReply()
@@ -197,66 +190,45 @@ public sealed class SectorStarbaseAcceptJob8Tests
                 firstSession.Sector, OpcodeId.Known.LogoffConfirmation.Value, cts.Token);
         }
 
-        await using var session = await SectorHandshake.ReestablishAsync(
-            _server, login.Ticket!, slot, jtSector, cts.Token);
+        var session = Track(await SectorHandshake.ReestablishAsync(
+            _server, login.Ticket!, slot, jtSector, cts.Token));
 
-        try
+        // StarbaseRequest wire layout (9 bytes):
+        //   [0..4)   int32 LE  PlayerID    = 0
+        //   [4..8)   int32 LE  StarbaseID  = 0x12345678  (job_id echo)
+        //   [8..9)   byte      Action      = 8
+        byte[] payload = new byte[9];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), SentinelJobId);
+        payload[8] = 8;
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.StarbaseRequest.Value, payload),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        var observed = new List<string>();
+        while (framesSeen++ < maxFrames)
         {
-            // StarbaseRequest wire layout (9 bytes):
-            //   [0..4)   int32 LE  PlayerID    = 0
-            //   [4..8)   int32 LE  StarbaseID  = 0x12345678  (job_id echo)
-            //   [8..9)   byte      Action      = 8
-            byte[] payload = new byte[9];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), SentinelJobId);
-            payload[8] = 8;
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
+            observed.Add($"0x{reply!.Header.Opcode:X4}/{reply.Payload.Length}");
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.StarbaseRequest.Value, payload),
-                cts.Token);
+            if (reply.Header.Opcode != OpcodeId.Known.JobAcceptReply.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            var observed = new List<string>();
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-                observed.Add($"0x{reply!.Header.Opcode:X4}/{reply.Payload.Length}");
-
-                if (reply.Header.Opcode != OpcodeId.Known.JobAcceptReply.Value)
-                    continue;
-
-                // Byte-exact 4-byte payload — the case-8 tightening.
-                Assert.Equal(ExpectedPayloadSize, reply.Payload.Length);
-                int echoedJobId = BinaryPrimitives.ReadInt32LittleEndian(reply.Payload.Span[..4]);
-                Assert.Equal(SentinelJobId, echoedJobId);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x004E STARBASE_REQUEST " +
-                $"(Action=8 Accept-Job, job_id=0x{SentinelJobId:X8}) in sector 10711 " +
-                $"(Net-7 SOL) without seeing 0x0096 JOB_ACCEPT_REPLY. Observed " +
-                $"[{observed.Count}]: {string.Join(" | ", observed)}");
+            // Byte-exact 4-byte payload — the case-8 tightening.
+            Assert.Equal(ExpectedPayloadSize, reply.Payload.Length);
+            int echoedJobId = BinaryPrimitives.ReadInt32LittleEndian(reply.Payload.Span[..4]);
+            Assert.Equal(SentinelJobId, echoedJobId);
+            return;
         }
-        finally
-        {
-            try
-            {
-                using var logoffCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                byte[] logoffPayload = new byte[8];
-                await session.Sector.SendAsync(
-                    Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
-                    logoffCts.Token);
-                await SectorHandshake.DrainUntilOpcode(
-                    session.Sector, OpcodeId.Known.LogoffConfirmation.Value, logoffCts.Token);
-            }
-            catch { /* best-effort logoff */ }
 
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x004E STARBASE_REQUEST " +
+            $"(Action=8 Accept-Job, job_id=0x{SentinelJobId:X8}) in sector 10711 " +
+            $"(Net-7 SOL) without seeing 0x0096 JOB_ACCEPT_REPLY. Observed " +
+            $"[{observed.Count}]: {string.Join(" | ", observed)}");
     }
 }

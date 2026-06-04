@@ -155,16 +155,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorRefinerySetItemTests
+public sealed class SectorRefinerySetItemTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorRefinerySetItemTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorRefinerySetItemTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task RefinerySetItem_InvalidItemZero_DoesNotBreakConnection_RequestTimeStillRoundTrips()
@@ -183,80 +176,71 @@ public sealed class SectorRefinerySetItemTests
         // firstName "Orin" starts with lowercase 'o' for the
         // AccountManager.cpp:1147 vowel-check footgun (case-sensitive
         // a/e/i/o/u/y BEFORE toupper at line 1153).
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Orin", shipName: "OrinShip", cts.Token);
+            firstName: "Orin", shipName: "OrinShip", cts.Token));
 
-        try
+        // 0x007C REFINERY_ITEM_ID (HandleRefineSetItem) —
+        // 8B packed payload:
+        //   int32_t GameID   (handler ignores; identity from connection)
+        //   int32_t Data     (network byte order — Item=0
+        //                     (sentinel invalid item) triggers the
+        //                     if (!m_CurManuItem) early-bail at
+        //                     PlayerManufacturing.cpp:462-466;
+        //                     SendVaMessage emits one 0x001D
+        //                     MESSAGE_STRING "Invalid Item!" then
+        //                     return)
+        byte[] payload = new byte[8];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);  // GameID
+        BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(4, 4), 0);     // Data=0 (network order)
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RefinerySetItem.Value, payload),
+            cts.Token);
+
+        // Survival probe: did the connection survive the
+        // REFINERY_ITEM_ID handler? Send REQUEST_TIME and
+        // assert CLIENT_SET_TIME echoes our sentinel tick.
+        int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+
+        byte[] reqTimePayload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
+            cts.Token);
+
+        // Drain until 0x0034 CLIENT_SET_TIME. Tolerate the
+        // 0x001D MESSAGE_STRING "Invalid Item!" reply plus any
+        // interleaved positional-update frames from in-sector
+        // observers.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // 0x007C REFINERY_ITEM_ID (HandleRefineSetItem) —
-            // 8B packed payload:
-            //   int32_t GameID   (handler ignores; identity from connection)
-            //   int32_t Data     (network byte order — Item=0
-            //                     (sentinel invalid item) triggers the
-            //                     if (!m_CurManuItem) early-bail at
-            //                     PlayerManufacturing.cpp:462-466;
-            //                     SendVaMessage emits one 0x001D
-            //                     MESSAGE_STRING "Invalid Item!" then
-            //                     return)
-            byte[] payload = new byte[8];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);  // GameID
-            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(4, 4), 0);     // Data=0 (network order)
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RefinerySetItem.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
+                continue;
 
-            // Survival probe: did the connection survive the
-            // REFINERY_ITEM_ID handler? Send REQUEST_TIME and
-            // assert CLIENT_SET_TIME echoes our sentinel tick.
-            int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+            var span = reply.Payload.Span;
+            Assert.Equal(12, span.Length);
 
-            byte[] reqTimePayload = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+            int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+            Assert.Equal(clientTick, echoedClientSent);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
-                cts.Token);
-
-            // Drain until 0x0034 CLIENT_SET_TIME. Tolerate the
-            // 0x001D MESSAGE_STRING "Invalid Item!" reply plus any
-            // interleaved positional-update frames from in-sector
-            // observers.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-
-                if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
-                    continue;
-
-                var span = reply.Payload.Span;
-                Assert.Equal(12, span.Length);
-
-                int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                Assert.Equal(clientTick, echoedClientSent);
-
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x007C REFINERY_ITEM_ID + 0x0044 REQUEST_TIME " +
-                $"without seeing 0x0034 CLIENT_SET_TIME. " +
-                $"Likely the dispatcher arm at PlayerConnection.cpp:531 got mis-routed, " +
-                $"GetItem(0) now returns a non-null pointer (db migration added item id 0) and the " +
-                $"unconditional refine path crashed (no AllowManufacture gate to bounce off), " +
-                $"SendVaMessage format-spec regression at PlayerClass.cpp crashed on the literal, " +
-                $"the proxy's bottom-of-switch ForwardClientOpcode default at proxy/ClientToServer_linux_stubs.cpp dropped 0x007C, " +
-                $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted.");
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x007C REFINERY_ITEM_ID + 0x0044 REQUEST_TIME " +
+            $"without seeing 0x0034 CLIENT_SET_TIME. " +
+            $"Likely the dispatcher arm at PlayerConnection.cpp:531 got mis-routed, " +
+            $"GetItem(0) now returns a non-null pointer (db migration added item id 0) and the " +
+            $"unconditional refine path crashed (no AllowManufacture gate to bounce off), " +
+            $"SendVaMessage format-spec regression at PlayerClass.cpp crashed on the literal, " +
+            $"the proxy's bottom-of-switch ForwardClientOpcode default at proxy/ClientToServer_linux_stubs.cpp dropped 0x007C, " +
+            $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted.");
     }
 }

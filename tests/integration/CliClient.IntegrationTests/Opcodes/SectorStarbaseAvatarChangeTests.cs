@@ -148,16 +148,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorStarbaseAvatarChangeTests
+public sealed class SectorStarbaseAvatarChangeTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorStarbaseAvatarChangeTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorStarbaseAvatarChangeTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task StarbaseAvatarChange_OnUnknownAvatarId_DoesNotBreakConnection_RequestTimeStillRoundTrips()
@@ -173,76 +166,67 @@ public sealed class SectorStarbaseAvatarChangeTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Avchnge", shipName: "AvchngeShip", cts.Token);
+            firstName: "Avchnge", shipName: "AvchngeShip", cts.Token));
 
-        try
+        // 0x009D STARBASE_AVATAR_CHANGE — 28B canonical payload.
+        //   [0..4)   int32 AvatarID    = 0x12345678 (unknown — null-check trips)
+        //   [4..8)   int32 RoomType    = 0
+        //   [8..12)  float Orient      = 0.0f
+        //   [12..24) float Position[3] = 0.0f x 3
+        //   [24..28) int32 ActionFlag  = 0
+        byte[] payload = new byte[28];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0x12345678);
+        // Remaining 24 bytes already zero from new byte[28].
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.StarbaseAvatarChange.Value, payload),
+            cts.Token);
+
+        // Survival probe: did the connection survive the
+        // avatar-change handler? Send REQUEST_TIME and assert
+        // CLIENT_SET_TIME echoes our sentinel tick.
+        int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+
+        byte[] reqTimePayload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
+            cts.Token);
+
+        // Drain until 0x0034 CLIENT_SET_TIME. Tolerate interleaved
+        // in-sector frames; cap on frame count so a stalled
+        // pipeline doesn't masquerade as the outer-CTS timeout.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // 0x009D STARBASE_AVATAR_CHANGE — 28B canonical payload.
-            //   [0..4)   int32 AvatarID    = 0x12345678 (unknown — null-check trips)
-            //   [4..8)   int32 RoomType    = 0
-            //   [8..12)  float Orient      = 0.0f
-            //   [12..24) float Position[3] = 0.0f x 3
-            //   [24..28) int32 ActionFlag  = 0
-            byte[] payload = new byte[28];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0x12345678);
-            // Remaining 24 bytes already zero from new byte[28].
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.StarbaseAvatarChange.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
+                continue;
 
-            // Survival probe: did the connection survive the
-            // avatar-change handler? Send REQUEST_TIME and assert
-            // CLIENT_SET_TIME echoes our sentinel tick.
-            int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+            var span = reply.Payload.Span;
+            Assert.Equal(12, span.Length);
 
-            byte[] reqTimePayload = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+            int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+            Assert.Equal(clientTick, echoedClientSent);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
-                cts.Token);
-
-            // Drain until 0x0034 CLIENT_SET_TIME. Tolerate interleaved
-            // in-sector frames; cap on frame count so a stalled
-            // pipeline doesn't masquerade as the outer-CTS timeout.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-
-                if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
-                    continue;
-
-                var span = reply.Payload.Span;
-                Assert.Equal(12, span.Length);
-
-                int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                Assert.Equal(clientTick, echoedClientSent);
-
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x009D STARBASE_AVATAR_CHANGE + 0x0044 REQUEST_TIME " +
-                $"without seeing 0x0034 CLIENT_SET_TIME. " +
-                $"Likely the server's HandleStarbaseAvatarChange null-check at PlayerClass.cpp:596 was removed " +
-                $"(would SEGV on p->m_PlayerIndex.SetSectorNum), " +
-                $"the dispatcher case at PlayerConnection.cpp:575 got mis-routed to HandleWarp at line 571 " +
-                $"(formation-walk on a fresh char with no group), " +
-                $"the StarbaseAvatarChange struct in PacketStructures.h:787-794 was widened to long " +
-                $"(AvatarID offset shifted past the 28B payload), " +
-                $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted.");
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x009D STARBASE_AVATAR_CHANGE + 0x0044 REQUEST_TIME " +
+            $"without seeing 0x0034 CLIENT_SET_TIME. " +
+            $"Likely the server's HandleStarbaseAvatarChange null-check at PlayerClass.cpp:596 was removed " +
+            $"(would SEGV on p->m_PlayerIndex.SetSectorNum), " +
+            $"the dispatcher case at PlayerConnection.cpp:575 got mis-routed to HandleWarp at line 571 " +
+            $"(formation-walk on a fresh char with no group), " +
+            $"the StarbaseAvatarChange struct in PacketStructures.h:787-794 was widened to long " +
+            $"(AvatarID offset shifted past the 28B payload), " +
+            $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted.");
     }
 }

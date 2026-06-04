@@ -224,16 +224,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorForceLogoutTests
+public sealed class SectorForceLogoutTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorForceLogoutTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorForceLogoutTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task ForceLogout_TriggeredByDuplicateGlobalConnect_EmitsLogoffWithExactly4BytePayload()

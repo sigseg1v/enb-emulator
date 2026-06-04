@@ -78,16 +78,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorRequestTimeTests
+public sealed class SectorRequestTimeTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorRequestTimeTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorRequestTimeTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task RequestTime_RoundTripsClientSentTickAndReturnsServerTimes()
@@ -103,81 +96,72 @@ public sealed class SectorRequestTimeTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Tempora", shipName: "TimeShip", cts.Token);
+            firstName: "Tempora", shipName: "TimeShip", cts.Token));
 
-        try
+        // Pick a sentinel that is (a) easy to spot in a hex dump,
+        // (b) unique per run so a leaked-recv-buffer regression
+        // can't accidentally echo a matching value, and (c) fits in
+        // an int32_t. Low 31 bits of UTC ticks works.
+        int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+
+        byte[] payload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(payload, clientTick);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, payload),
+            cts.Token);
+
+        // Drain until 0x0034. The server may interleave other
+        // post-login fan-out frames; cap on frame count so a
+        // stalled pipeline can't masquerade as the outer-CTS
+        // timeout.
+        int framesSeen = 0;
+        const int maxFrames = 200;
+        while (framesSeen++ < maxFrames)
         {
-            // Pick a sentinel that is (a) easy to spot in a hex dump,
-            // (b) unique per run so a leaked-recv-buffer regression
-            // can't accidentally echo a matching value, and (c) fits in
-            // an int32_t. Low 31 bits of UTC ticks works.
-            int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            byte[] payload = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(payload, clientTick);
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
+                continue;
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, payload),
-                cts.Token);
+            // 0x0034 wire layout (ClientSetTime struct):
+            //   [0..4)  int32  ClientSent      (echoed client tick)
+            //   [4..8)  int32  ServerReceived  (server tick at recv)
+            //   [8..12) int32  ServerSent      (server tick at send)
+            // common/include/net7/PacketStructures.h:563
+            var span = reply.Payload.Span;
+            Assert.Equal(12, span.Length);
 
-            // Drain until 0x0034. The server may interleave other
-            // post-login fan-out frames; cap on frame count so a
-            // stalled pipeline can't masquerade as the outer-CTS
-            // timeout.
-            int framesSeen = 0;
-            const int maxFrames = 200;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+            int serverReceived   = BinaryPrimitives.ReadInt32LittleEndian(span[4..8]);
+            int serverSent       = BinaryPrimitives.ReadInt32LittleEndian(span[8..12]);
 
-                if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
-                    continue;
+            // The single strongest assertion: the server echoed
+            // back our exact tick. A sizeof(long) over-read at the
+            // server (4B payload + 4B garbage) would put garbage
+            // here. A wire-byte-order bug would also fail.
+            Assert.Equal(clientTick, echoedClientSent);
 
-                // 0x0034 wire layout (ClientSetTime struct):
-                //   [0..4)  int32  ClientSent      (echoed client tick)
-                //   [4..8)  int32  ServerReceived  (server tick at recv)
-                //   [8..12) int32  ServerSent      (server tick at send)
-                // common/include/net7/PacketStructures.h:563
-                var span = reply.Payload.Span;
-                Assert.Equal(12, span.Length);
+            // Server tick is GetNet7TickCount(); both fields are
+            // taken at the same moment, so they should be equal
+            // OR ServerSent strictly later than ServerReceived.
+            // Non-zero proves the server actually wrote them
+            // (zeros would mean the struct went out uninitialised).
+            Assert.NotEqual(0, serverReceived);
+            Assert.NotEqual(0, serverSent);
+            Assert.True(serverSent >= serverReceived,
+                $"server_sent={serverSent} < server_received={serverReceived}; clock travelled backwards or fields are swapped.");
 
-                int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                int serverReceived   = BinaryPrimitives.ReadInt32LittleEndian(span[4..8]);
-                int serverSent       = BinaryPrimitives.ReadInt32LittleEndian(span[8..12]);
-
-                // The single strongest assertion: the server echoed
-                // back our exact tick. A sizeof(long) over-read at the
-                // server (4B payload + 4B garbage) would put garbage
-                // here. A wire-byte-order bug would also fail.
-                Assert.Equal(clientTick, echoedClientSent);
-
-                // Server tick is GetNet7TickCount(); both fields are
-                // taken at the same moment, so they should be equal
-                // OR ServerSent strictly later than ServerReceived.
-                // Non-zero proves the server actually wrote them
-                // (zeros would mean the struct went out uninitialised).
-                Assert.NotEqual(0, serverReceived);
-                Assert.NotEqual(0, serverSent);
-                Assert.True(serverSent >= serverReceived,
-                    $"server_sent={serverSent} < server_received={serverReceived}; clock travelled backwards or fields are swapped.");
-
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0044 REQUEST_TIME " +
-                $"without seeing 0x0034 CLIENT_SET_TIME. " +
-                $"Likely the server's HandleRequestTime didn't fire, or the proxy's " +
-                $"SendClientPacketSequence dropped the inner 0x0034 out of the 0x2016 envelope.");
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0044 REQUEST_TIME " +
+            $"without seeing 0x0034 CLIENT_SET_TIME. " +
+            $"Likely the server's HandleRequestTime didn't fire, or the proxy's " +
+            $"SendClientPacketSequence dropped the inner 0x0034 out of the 0x2016 envelope.");
     }
 }

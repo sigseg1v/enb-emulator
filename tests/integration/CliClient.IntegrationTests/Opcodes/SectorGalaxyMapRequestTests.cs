@@ -131,16 +131,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorGalaxyMapRequestTests
+public sealed class SectorGalaxyMapRequestTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorGalaxyMapRequestTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorGalaxyMapRequestTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task GalaxyMapRequest_OnFreshSession_DoesNotBreakConnection_RequestTimeStillRoundTrips()
@@ -156,75 +149,66 @@ public sealed class SectorGalaxyMapRequestTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Gmap70", shipName: "Gmap70Ship", cts.Token);
+            firstName: "Gmap70", shipName: "Gmap70Ship", cts.Token));
 
-        try
+        // 0x0098 GALAXY_MAP_REQUEST — empty payload. The retail
+        // client-side handler is parameterless and the server
+        // dispatcher invokes HandleGalaxyMapRequest() with no args
+        // (server/src/PlayerConnection.cpp:567-569). The server
+        // handler at PlayerConnection.cpp:10715-10720 emits a
+        // single 0x2011 GALAXY_MAP_CACHE with empty body —
+        // dropped by the proxy guard at
+        // UDPProxyToClient_linux.cpp:568 (0x2011 >= 0x0FFF). We
+        // can't observe the reply directly so we observe pipe
+        // survival via the REQUEST_TIME echo below.
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.GalaxyMapRequest.Value, ReadOnlyMemory<byte>.Empty),
+            cts.Token);
+
+        // Survival probe: did the connection survive the
+        // GALAXY_MAP_REQUEST handler? Send REQUEST_TIME and assert
+        // CLIENT_SET_TIME echoes our sentinel tick.
+        int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+
+        byte[] reqTimePayload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
+            cts.Token);
+
+        // Drain until 0x0034 CLIENT_SET_TIME. Tolerate interleaved
+        // in-sector frames (positional updates from observers).
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // 0x0098 GALAXY_MAP_REQUEST — empty payload. The retail
-            // client-side handler is parameterless and the server
-            // dispatcher invokes HandleGalaxyMapRequest() with no args
-            // (server/src/PlayerConnection.cpp:567-569). The server
-            // handler at PlayerConnection.cpp:10715-10720 emits a
-            // single 0x2011 GALAXY_MAP_CACHE with empty body —
-            // dropped by the proxy guard at
-            // UDPProxyToClient_linux.cpp:568 (0x2011 >= 0x0FFF). We
-            // can't observe the reply directly so we observe pipe
-            // survival via the REQUEST_TIME echo below.
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.GalaxyMapRequest.Value, ReadOnlyMemory<byte>.Empty),
-                cts.Token);
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            // Survival probe: did the connection survive the
-            // GALAXY_MAP_REQUEST handler? Send REQUEST_TIME and assert
-            // CLIENT_SET_TIME echoes our sentinel tick.
-            int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
+                continue;
 
-            byte[] reqTimePayload = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+            var span = reply.Payload.Span;
+            Assert.Equal(12, span.Length);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
-                cts.Token);
+            int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+            Assert.Equal(clientTick, echoedClientSent);
 
-            // Drain until 0x0034 CLIENT_SET_TIME. Tolerate interleaved
-            // in-sector frames (positional updates from observers).
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-
-                if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
-                    continue;
-
-                var span = reply.Payload.Span;
-                Assert.Equal(12, span.Length);
-
-                int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                Assert.Equal(clientTick, echoedClientSent);
-
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0098 GALAXY_MAP_REQUEST + 0x0044 REQUEST_TIME " +
-                $"without seeing 0x0034 CLIENT_SET_TIME. " +
-                $"Likely the dispatcher arm at PlayerConnection.cpp:567-569 got mis-routed " +
-                $"(swap with HandleIncapacitanceRequest's *data dereference on our 0-byte payload, " +
-                $"or swap with HandleWarp's struct cast over-reading our empty body), " +
-                $"HandleGalaxyMapRequest got a SendDataFileToClient refactor that NULL-derefs on " +
-                $"missing GalaxyMap.dat in the test env, " +
-                $"the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted, " +
-                $"or the proxy default-case ForwardClientOpcode arm was dropped.");
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0098 GALAXY_MAP_REQUEST + 0x0044 REQUEST_TIME " +
+            $"without seeing 0x0034 CLIENT_SET_TIME. " +
+            $"Likely the dispatcher arm at PlayerConnection.cpp:567-569 got mis-routed " +
+            $"(swap with HandleIncapacitanceRequest's *data dereference on our 0-byte payload, " +
+            $"or swap with HandleWarp's struct cast over-reading our empty body), " +
+            $"HandleGalaxyMapRequest got a SendDataFileToClient refactor that NULL-derefs on " +
+            $"missing GalaxyMap.dat in the test env, " +
+            $"the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted, " +
+            $"or the proxy default-case ForwardClientOpcode arm was dropped.");
     }
 }

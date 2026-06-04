@@ -97,16 +97,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorTurnTiltTests
+public sealed class SectorTurnTiltTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorTurnTiltTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorTurnTiltTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task TurnAndTilt_DoNotBreakConnection_RequestTimeStillRoundTrips()
@@ -122,86 +115,77 @@ public sealed class SectorTurnTiltTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Tilter", shipName: "PivotShip", cts.Token);
+            firstName: "Tilter", shipName: "PivotShip", cts.Token));
 
-        try
+        // TURN payload: 4B GameID + 4B float intensity.
+        // GameID=0 is the convention for "this connection's player";
+        // the server resolves the actor via the connection binding,
+        // not the wire GameID, so the value is effectively unused on
+        // the server side — but it must be the right WIDTH for the
+        // server's struct read to find the Intensity float at the
+        // right offset (which is the Wave 11 regression bait).
+        byte[] turnPayload = new byte[8];
+        BinaryPrimitives.WriteInt32LittleEndian(turnPayload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteSingleLittleEndian(turnPayload.AsSpan(4, 4), 0.5f);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.Turn.Value, turnPayload),
+            cts.Token);
+
+        byte[] tiltPayload = new byte[8];
+        BinaryPrimitives.WriteInt32LittleEndian(tiltPayload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteSingleLittleEndian(tiltPayload.AsSpan(4, 4), -0.25f);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.Tilt.Value, tiltPayload),
+            cts.Token);
+
+        // Survival probe.
+        int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+
+        byte[] reqTimePayload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
+            cts.Token);
+
+        // Drain until 0x0034 CLIENT_SET_TIME. Post-handshake the
+        // server may begin streaming in-sector frames (ship
+        // updates, etc.) so this loop tolerates interleaved
+        // traffic. Cap on frame count so a stalled pipeline can't
+        // masquerade as the outer-CTS timeout.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // TURN payload: 4B GameID + 4B float intensity.
-            // GameID=0 is the convention for "this connection's player";
-            // the server resolves the actor via the connection binding,
-            // not the wire GameID, so the value is effectively unused on
-            // the server side — but it must be the right WIDTH for the
-            // server's struct read to find the Intensity float at the
-            // right offset (which is the Wave 11 regression bait).
-            byte[] turnPayload = new byte[8];
-            BinaryPrimitives.WriteInt32LittleEndian(turnPayload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteSingleLittleEndian(turnPayload.AsSpan(4, 4), 0.5f);
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.Turn.Value, turnPayload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
+                continue;
 
-            byte[] tiltPayload = new byte[8];
-            BinaryPrimitives.WriteInt32LittleEndian(tiltPayload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteSingleLittleEndian(tiltPayload.AsSpan(4, 4), -0.25f);
+            // 0x0034 wire layout (ClientSetTime struct):
+            //   [0..4)  int32  ClientSent
+            //   [4..8)  int32  ServerReceived
+            //   [8..12) int32  ServerSent
+            // common/include/net7/PacketStructures.h:563
+            var span = reply.Payload.Span;
+            Assert.Equal(12, span.Length);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.Tilt.Value, tiltPayload),
-                cts.Token);
+            int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+            Assert.Equal(clientTick, echoedClientSent);
 
-            // Survival probe.
-            int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
-
-            byte[] reqTimePayload = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
-
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
-                cts.Token);
-
-            // Drain until 0x0034 CLIENT_SET_TIME. Post-handshake the
-            // server may begin streaming in-sector frames (ship
-            // updates, etc.) so this loop tolerates interleaved
-            // traffic. Cap on frame count so a stalled pipeline can't
-            // masquerade as the outer-CTS timeout.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-
-                if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
-                    continue;
-
-                // 0x0034 wire layout (ClientSetTime struct):
-                //   [0..4)  int32  ClientSent
-                //   [4..8)  int32  ServerReceived
-                //   [8..12) int32  ServerSent
-                // common/include/net7/PacketStructures.h:563
-                var span = reply.Payload.Span;
-                Assert.Equal(12, span.Length);
-
-                int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                Assert.Equal(clientTick, echoedClientSent);
-
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0012 TURN + 0x0013 TILT + 0x0044 REQUEST_TIME " +
-                $"without seeing 0x0034 CLIENT_SET_TIME. " +
-                $"Likely the server's HandleTurn/HandleTilt struct over-read corrupted state, " +
-                $"the proxy's TURN/TILT throttle dropped both inputs (proxy/ClientToSectorServer.cpp:58-76), " +
-                $"or AbortProspecting()/WarpDrive() guards crashed mid-call.");
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0012 TURN + 0x0013 TILT + 0x0044 REQUEST_TIME " +
+            $"without seeing 0x0034 CLIENT_SET_TIME. " +
+            $"Likely the server's HandleTurn/HandleTilt struct over-read corrupted state, " +
+            $"the proxy's TURN/TILT throttle dropped both inputs (proxy/ClientToSectorServer.cpp:58-76), " +
+            $"or AbortProspecting()/WarpDrive() guards crashed mid-call.");
     }
 }

@@ -136,16 +136,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class TwoPlayerStarbaseRoomChangeFanoutTests
+public sealed class TwoPlayerStarbaseRoomChangeFanoutTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public TwoPlayerStarbaseRoomChangeFanoutTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public TwoPlayerStarbaseRoomChangeFanoutTests(ServerFixture server) : base(server) { }
 
     private const string ProxySingleTenancySkip =
         "BLOCKED by Net7Proxy single-tenancy: the proxy global state " +
@@ -177,152 +170,141 @@ public sealed class TwoPlayerStarbaseRoomChangeFanoutTests
             new AuthLoginRequest(accountB.Username, accountB.Password), cts.Token);
         Assert.True(loginB.Valid, $"loginB: {loginB.RawBody.TrimEnd()}");
 
-        await using var sessionA = await SectorHandshake.EstablishAsync(
+        var sessionA = Track(await SectorHandshake.EstablishAsync(
             _server, loginA.Ticket!, accountA.Username, slot, sectorId,
-            firstName: "Cypria", shipName: "CypriaShip", cts.Token);
+            firstName: "Cypria", shipName: "CypriaShip", cts.Token));
 
-        await using var sessionB = await SectorHandshake.EstablishAsync(
+        var sessionB = Track(await SectorHandshake.EstablishAsync(
             _server, loginB.Ticket!, accountB.Username, slot, sectorId,
-            firstName: "Eboria", shipName: "EboriaShip", cts.Token);
+            firstName: "Eboria", shipName: "EboriaShip", cts.Token));
 
-        try
+        Assert.NotEqual(sessionA.GameId, sessionB.GameId);
+
+        // Inbound 0x009F payload (StarbaseRoomChange, 12B, 3x int32_t LE).
+        // common/include/net7/PacketStructures.h:805
+        byte[] payload = new byte[12];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), sessionA.GameId);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), newRoom);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(8, 4), 0);
+
+        var roomChangePacket = Packet.ForOpcode(
+            OpcodeId.Known.StarbaseRoomChange.Value, payload);
+
+        // Login-stage 10 race: EstablishAsync returns at 0x0005 START
+        // (login stage 7, PlayerManager.cpp:540-604 state machine).
+        // Player A's HandleStarbaseRoomChange (PlayerClass.cpp:631-672)
+        // walks GetSectorPlayerList -- which is all-zeros for Player B
+        // until stage 10's HandleSectorLogin3 -> AddPlayerToSectorList
+        // (SectorManager.cpp:307-322) fires. During the race window the
+        // self-skip-and-fanout loop iterates an empty bitmap and no
+        // 0x00A0 reaches Player B. Retry-send is idempotent: each
+        // 0x009F updates A's m_Room/m_Oldroom under m_Mutex
+        // (PlayerClass.cpp:643-647) and triggers ANOTHER fan-out
+        // attempt; once stage 10 lands on BOTH players the next send
+        // hits the populated bitmap and Player B sees the frame. We
+        // do NOT modify the server to expose a "fully logged in"
+        // signal (CLAUDE.md server-integrity rule). Same pattern as
+        // SectorAvatarEmoteTests.
+        TimeSpan attemptTimeout = TimeSpan.FromSeconds(2);
+        const int maxAttempts = 60;
+        int attempt;
+        bool seenFanout = false;
+
+        for (attempt = 0; attempt < maxAttempts && !seenFanout; attempt++)
         {
-            Assert.NotEqual(sessionA.GameId, sessionB.GameId);
+            await sessionA.Sector.SendAsync(roomChangePacket, cts.Token);
 
-            // Inbound 0x009F payload (StarbaseRoomChange, 12B, 3x int32_t LE).
-            // common/include/net7/PacketStructures.h:805
-            byte[] payload = new byte[12];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), sessionA.GameId);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), newRoom);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(8, 4), 0);
+            using var attemptCts =
+                CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+            attemptCts.CancelAfter(attemptTimeout);
 
-            var roomChangePacket = Packet.ForOpcode(
-                OpcodeId.Known.StarbaseRoomChange.Value, payload);
-
-            // Login-stage 10 race: EstablishAsync returns at 0x0005 START
-            // (login stage 7, PlayerManager.cpp:540-604 state machine).
-            // Player A's HandleStarbaseRoomChange (PlayerClass.cpp:631-672)
-            // walks GetSectorPlayerList -- which is all-zeros for Player B
-            // until stage 10's HandleSectorLogin3 -> AddPlayerToSectorList
-            // (SectorManager.cpp:307-322) fires. During the race window the
-            // self-skip-and-fanout loop iterates an empty bitmap and no
-            // 0x00A0 reaches Player B. Retry-send is idempotent: each
-            // 0x009F updates A's m_Room/m_Oldroom under m_Mutex
-            // (PlayerClass.cpp:643-647) and triggers ANOTHER fan-out
-            // attempt; once stage 10 lands on BOTH players the next send
-            // hits the populated bitmap and Player B sees the frame. We
-            // do NOT modify the server to expose a "fully logged in"
-            // signal (CLAUDE.md server-integrity rule). Same pattern as
-            // SectorAvatarEmoteTests.
-            TimeSpan attemptTimeout = TimeSpan.FromSeconds(2);
-            const int maxAttempts = 60;
-            int attempt;
-            bool seenFanout = false;
-
-            for (attempt = 0; attempt < maxAttempts && !seenFanout; attempt++)
+            try
             {
-                await sessionA.Sector.SendAsync(roomChangePacket, cts.Token);
-
-                using var attemptCts =
-                    CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
-                attemptCts.CancelAfter(attemptTimeout);
-
-                try
+                while (true)
                 {
-                    while (true)
-                    {
-                        var reply = await sessionB.Sector.ReceiveAsync(attemptCts.Token);
-                        Assert.NotNull(reply);
+                    var reply = await sessionB.Sector.ReceiveAsync(attemptCts.Token);
+                    Assert.NotNull(reply);
 
-                        if (reply!.Header.Opcode != OpcodeId.Known.StarbaseRoomChangeServerToClient.Value)
-                            continue;
+                    if (reply!.Header.Opcode != OpcodeId.Known.StarbaseRoomChangeServerToClient.Value)
+                        continue;
 
-                        var span = reply.Payload.Span;
-                        Assert.Equal(12, span.Length);
+                    var span = reply.Payload.Span;
+                    Assert.Equal(12, span.Length);
 
-                        int wireAvatarId = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                        int wireNewRoom  = BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4));
-                        // OldRoom (bytes [8..12)) intentionally not pinned -
-                        // reflects Player A's spawn-time m_Room which is
-                        // StationData-driven.
+                    int wireAvatarId = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+                    int wireNewRoom  = BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4));
+                    // OldRoom (bytes [8..12)) intentionally not pinned -
+                    // reflects Player A's spawn-time m_Room which is
+                    // StationData-driven.
 
-                        Assert.Equal(sessionA.GameId, wireAvatarId);
-                        Assert.Equal(newRoom, wireNewRoom);
-                        seenFanout = true;
-                        break;
-                    }
-                }
-                catch (OperationCanceledException) when (!cts.IsCancellationRequested)
-                {
-                    // Attempt timed out -- either both players aren't on
-                    // the sector list yet (stage 10 race) or this fan-out
-                    // raced ahead of the next pulse and got dropped. Retry.
+                    Assert.Equal(sessionA.GameId, wireAvatarId);
+                    Assert.Equal(newRoom, wireNewRoom);
+                    seenFanout = true;
+                    break;
                 }
             }
-
-            if (!seenFanout)
+            catch (OperationCanceledException) when (!cts.IsCancellationRequested)
             {
-                throw new Xunit.Sdk.XunitException(
-                    $"sent 0x009F STARBASE_ROOM_CHANGE {attempt} times " +
-                    $"(2s attempt window) without Player B seeing the 0x00A0 fan-out. " +
-                    $"PlayerA.GameID=0x{sessionA.GameId:X8}, PlayerB.GameID=0x{sessionB.GameId:X8}. " +
-                    $"Likely the sector-list iteration in HandleStarbaseRoomChange " +
-                    $"(PlayerClass.cpp:631-672) skipped Player B, the self-skip guard " +
-                    $"inverted, the proxy dropped the inbound 0x009F, or the login-stage " +
-                    $"state machine never reached stage 10 (AddPlayerToSectorList) for one " +
-                    $"or both players within the outer budget.");
+                // Attempt timed out -- either both players aren't on
+                // the sector list yet (stage 10 race) or this fan-out
+                // raced ahead of the next pulse and got dropped. Retry.
             }
+        }
 
-            // Self-skip check: Player A must NOT receive the 0x00A0 fanout
-            // from their OWN room change. We can't drain Player A forever,
-            // so use a 0x0044 REQUEST_TIME sentinel: the server's
-            // HandleRequestTime echoes 0x0034 CLIENT_SET_TIME unconditionally
-            // (no sector-list dependency), so seeing 0x0034 proves the pipe
-            // is alive past the fan-out window. If 0x00A0 appears on A's
-            // pipe before 0x0034 the self-skip guard has inverted.
-            int sentinelTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
-            byte[] reqTimePayload = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, sentinelTick);
-            await sessionA.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
-                cts.Token);
-
-            int aFramesSeen = 0;
-            const int maxAFrames = 400;
-            bool sawSelfEcho00A0 = false;
-            while (aFramesSeen++ < maxAFrames)
-            {
-                var reply = await sessionA.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-
-                if (reply!.Header.Opcode == OpcodeId.Known.StarbaseRoomChangeServerToClient.Value)
-                {
-                    sawSelfEcho00A0 = true;
-                    continue;
-                }
-
-                if (reply.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
-                    continue;
-
-                int echoedTick = BinaryPrimitives.ReadInt32LittleEndian(reply.Payload.Span[..4]);
-                Assert.Equal(sentinelTick, echoedTick);
-                Assert.False(sawSelfEcho00A0,
-                    "Player A received 0x00A0 STARBASE_ROOM_CHANGE for their own room change -- " +
-                    "the self-skip guard at PlayerClass.cpp:660 has inverted.");
-                return;
-            }
-
+        if (!seenFanout)
+        {
             throw new Xunit.Sdk.XunitException(
-                $"drained {maxAFrames} frames on Player A's pipe without seeing the 0x0034 " +
-                $"CLIENT_SET_TIME sentinel; cannot verify the self-skip guard.");
+                $"sent 0x009F STARBASE_ROOM_CHANGE {attempt} times " +
+                $"(2s attempt window) without Player B seeing the 0x00A0 fan-out. " +
+                $"PlayerA.GameID=0x{sessionA.GameId:X8}, PlayerB.GameID=0x{sessionB.GameId:X8}. " +
+                $"Likely the sector-list iteration in HandleStarbaseRoomChange " +
+                $"(PlayerClass.cpp:631-672) skipped Player B, the self-skip guard " +
+                $"inverted, the proxy dropped the inbound 0x009F, or the login-stage " +
+                $"state machine never reached stage 10 (AddPlayerToSectorList) for one " +
+                $"or both players within the outer budget.");
         }
-        finally
+
+        // Self-skip check: Player A must NOT receive the 0x00A0 fanout
+        // from their OWN room change. We can't drain Player A forever,
+        // so use a 0x0044 REQUEST_TIME sentinel: the server's
+        // HandleRequestTime echoes 0x0034 CLIENT_SET_TIME unconditionally
+        // (no sector-list dependency), so seeing 0x0034 proves the pipe
+        // is alive past the fan-out window. If 0x00A0 appears on A's
+        // pipe before 0x0034 the self-skip guard has inverted.
+        int sentinelTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+        byte[] reqTimePayload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, sentinelTick);
+        await sessionA.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
+            cts.Token);
+
+        int aFramesSeen = 0;
+        const int maxAFrames = 400;
+        bool sawSelfEcho00A0 = false;
+        while (aFramesSeen++ < maxAFrames)
         {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(sessionA.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(sessionB.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
+            var reply = await sessionA.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
+
+            if (reply!.Header.Opcode == OpcodeId.Known.StarbaseRoomChangeServerToClient.Value)
+            {
+                sawSelfEcho00A0 = true;
+                continue;
+            }
+
+            if (reply.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
+                continue;
+
+            int echoedTick = BinaryPrimitives.ReadInt32LittleEndian(reply.Payload.Span[..4]);
+            Assert.Equal(sentinelTick, echoedTick);
+            Assert.False(sawSelfEcho00A0,
+                "Player A received 0x00A0 STARBASE_ROOM_CHANGE for their own room change -- " +
+                "the self-skip guard at PlayerClass.cpp:660 has inverted.");
+            return;
         }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxAFrames} frames on Player A's pipe without seeing the 0x0034 " +
+            $"CLIENT_SET_TIME sentinel; cannot verify the self-skip guard.");
     }
 }

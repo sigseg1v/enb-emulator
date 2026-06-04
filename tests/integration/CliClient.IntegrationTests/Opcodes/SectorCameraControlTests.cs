@@ -183,18 +183,11 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorCameraControlTests
+public sealed class SectorCameraControlTests : SectorIntegrationTest
 {
     private const int ExpectedCameraControlPayloadLength = 8;
 
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorCameraControlTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorCameraControlTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task StartAck_AfterSpaceArmHandshake_EmitsCameraControlWithEightBytePayload()
@@ -216,76 +209,57 @@ public sealed class SectorCameraControlTests
             _server, login.Ticket!, account.Username, slot, stationSectorId,
             firstName: "CamPin103", shipName: "CamPin103Ship", cts.Token);
 
-        try
+        // Cleanly tear down stage 1 with an explicit 0x00B9
+        // LOGOFF_REQUEST so the server runs DropPlayerFromGalaxy
+        // synchronously (avoids G_ERROR_ACCOUNT_IN_USE in stage 2).
+        byte[] logoffPayload = new byte[8];
+        await stationSession.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
+            cts.Token);
+        await SectorHandshake.DrainUntilOpcode(
+            stationSession.Sector, OpcodeId.Known.LogoffConfirmation.Value, cts.Token);
+        await stationSession.DisposeAsync();
+
+        // Stage 2: reconnect (no char create) and LOGIN to space
+        // sector 1015. HandleSectorLogin dispatches to SectorLogin
+        // (SectorManager.cpp:332), the handshake drains to 0x0005
+        // START with sector_num=1015.
+        var spaceSession = Track(await SectorHandshake.ReestablishAsync(
+            _server, login.Ticket!, slot, spaceSectorId, cts.Token));
+
+        // START_ACK payload is empty in the retail client — the
+        // server's HandleStartAck(unsigned char *data) signature
+        // takes data but never dereferences it
+        // (PlayerConnection.cpp:1613-1627).
+        await spaceSession.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.StartAck.Value, ReadOnlyMemory<byte>.Empty),
+            cts.Token);
+
+        // Drain until 0x0092 CAMERA_CONTROL. Cap frames so a stalled
+        // pipeline can't masquerade as the outer-CTS timeout.
+        // SendLoginCamera fires after the SetActive(true) flip; the
+        // post-START_ACK in-sector frame fan-out is bounded but can
+        // be busy, so allow a generous frame budget.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // Cleanly tear down stage 1 with an explicit 0x00B9
-            // LOGOFF_REQUEST so the server runs DropPlayerFromGalaxy
-            // synchronously (avoids G_ERROR_ACCOUNT_IN_USE in stage 2).
-            byte[] logoffPayload = new byte[8];
-            await stationSession.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
-                cts.Token);
-            await SectorHandshake.DrainUntilOpcode(
-                stationSession.Sector, OpcodeId.Known.LogoffConfirmation.Value, cts.Token);
-            await stationSession.DisposeAsync();
+            var reply = await spaceSession.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            // Stage 2: reconnect (no char create) and LOGIN to space
-            // sector 1015. HandleSectorLogin dispatches to SectorLogin
-            // (SectorManager.cpp:332), the handshake drains to 0x0005
-            // START with sector_num=1015.
-            await using var spaceSession = await SectorHandshake.ReestablishAsync(
-                _server, login.Ticket!, slot, spaceSectorId, cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.CameraControl.Value)
+                continue;
 
-            // START_ACK payload is empty in the retail client — the
-            // server's HandleStartAck(unsigned char *data) signature
-            // takes data but never dereferences it
-            // (PlayerConnection.cpp:1613-1627).
-            await spaceSession.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.StartAck.Value, ReadOnlyMemory<byte>.Empty),
-                cts.Token);
-
-            // Drain until 0x0092 CAMERA_CONTROL. Cap frames so a stalled
-            // pipeline can't masquerade as the outer-CTS timeout.
-            // SendLoginCamera fires after the SetActive(true) flip; the
-            // post-START_ACK in-sector frame fan-out is bounded but can
-            // be busy, so allow a generous frame budget.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await spaceSession.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-
-                if (reply!.Header.Opcode != OpcodeId.Known.CameraControl.Value)
-                    continue;
-
-                Assert.Equal(ExpectedCameraControlPayloadLength, reply.Payload.Length);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0006 START_ACK against the SPACE-arm " +
-                $"handshake without seeing 0x0092 CAMERA_CONTROL. Likely the HandleStartAck " +
-                $"MAX_SECTOR_ID guard inverted, SendLoginCamera's Active() guard tripped (SetActive " +
-                $"didn't fire), SendCameraControl was removed, the proxy dropped the frame, or " +
-                $"ReestablishAsync's sector_num preservation regressed and the dispatch took the " +
-                $"station path again.");
+            Assert.Equal(ExpectedCameraControlPayloadLength, reply.Payload.Length);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            try
-            {
-                await using var cleanupGlobal = await EncryptedTcpConnection.ConnectAsync(
-                    _server.GlobalHost, _server.GlobalPort, cleanupCts.Token);
-                await SectorHandshake.SendGlobalConnectAsync(
-                    cleanupGlobal, login.Ticket!, cleanupCts.Token);
-                await SectorHandshake.DrainUntilOpcode(
-                    cleanupGlobal, OpcodeId.Known.GlobalAvatarList.Value, cleanupCts.Token);
-                await SectorHandshake.DeleteCreatedCharacterAsync(
-                    cleanupGlobal, slot, cleanupCts.Token);
-            }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0006 START_ACK against the SPACE-arm " +
+            $"handshake without seeing 0x0092 CAMERA_CONTROL. Likely the HandleStartAck " +
+            $"MAX_SECTOR_ID guard inverted, SendLoginCamera's Active() guard tripped (SetActive " +
+            $"didn't fire), SendCameraControl was removed, the proxy dropped the frame, or " +
+            $"ReestablishAsync's sector_num preservation regressed and the dispatch took the " +
+            $"station path again.");
     }
 }

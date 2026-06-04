@@ -214,16 +214,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorAvatarEmoteTests
+public sealed class SectorAvatarEmoteTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorAvatarEmoteTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorAvatarEmoteTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task AvatarEmote_EmoteTrigger_ReceivesAvatarEmoteResponseWithEchoedSentinel()
@@ -239,112 +232,103 @@ public sealed class SectorAvatarEmoteTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Emoty", shipName: "EmoteShip", cts.Token);
+            firstName: "Emoty", shipName: "EmoteShip", cts.Token));
 
-        try
+        // 0x005E AVATAR_EMOTE — 11B canonical payload:
+        //   [0..4)  int32 GameID    = 0x12345678 (sentinel — echoed verbatim)
+        //   [4]     byte  Unknown1  = 0x01       (struct comment says always 0x01)
+        //   [5..7)  short ChatSize  = 4          (length of message[])
+        //   [7..11) byte[4] message = {0x02, 0xAB, 0xCD, 0xEF}
+        //                              ^^^^  emote-trigger
+        //                                    ^^^^^^^^^^^^^^  sentinel bytes
+        const int chatSize = 4;
+        const int gameIdSentinel = 0x12345678;
+        byte[] sentinelMessage = [0x02, 0xAB, 0xCD, 0xEF];
+
+        byte[] payload = new byte[7 + chatSize];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), gameIdSentinel);
+        payload[4] = 0x01;
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(5, 2), chatSize);
+        sentinelMessage.CopyTo(payload.AsSpan(7));
+
+        var emotePacket = Packet.ForOpcode(OpcodeId.Known.AvatarEmote.Value, payload);
+
+        // Send + drain in a retry loop. Each attempt sends one
+        // emote, then waits up to `attemptTimeout` for a 0x005F
+        // reply (draining other inbound traffic while it waits).
+        // See the class doc-comment "Login-stage race" section for
+        // why this is necessary. Total outer wall-clock is bounded
+        // by the 90s CTS.
+        TimeSpan attemptTimeout = TimeSpan.FromSeconds(2);
+        const int maxAttempts = 30;
+        int attempt;
+
+        for (attempt = 0; attempt < maxAttempts; attempt++)
         {
-            // 0x005E AVATAR_EMOTE — 11B canonical payload:
-            //   [0..4)  int32 GameID    = 0x12345678 (sentinel — echoed verbatim)
-            //   [4]     byte  Unknown1  = 0x01       (struct comment says always 0x01)
-            //   [5..7)  short ChatSize  = 4          (length of message[])
-            //   [7..11) byte[4] message = {0x02, 0xAB, 0xCD, 0xEF}
-            //                              ^^^^  emote-trigger
-            //                                    ^^^^^^^^^^^^^^  sentinel bytes
-            const int chatSize = 4;
-            const int gameIdSentinel = 0x12345678;
-            byte[] sentinelMessage = [0x02, 0xAB, 0xCD, 0xEF];
+            await session.Sector.SendAsync(emotePacket, cts.Token);
 
-            byte[] payload = new byte[7 + chatSize];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), gameIdSentinel);
-            payload[4] = 0x01;
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(5, 2), chatSize);
-            sentinelMessage.CopyTo(payload.AsSpan(7));
+            using var attemptCts =
+                CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+            attemptCts.CancelAfter(attemptTimeout);
 
-            var emotePacket = Packet.ForOpcode(OpcodeId.Known.AvatarEmote.Value, payload);
-
-            // Send + drain in a retry loop. Each attempt sends one
-            // emote, then waits up to `attemptTimeout` for a 0x005F
-            // reply (draining other inbound traffic while it waits).
-            // See the class doc-comment "Login-stage race" section for
-            // why this is necessary. Total outer wall-clock is bounded
-            // by the 90s CTS.
-            TimeSpan attemptTimeout = TimeSpan.FromSeconds(2);
-            const int maxAttempts = 30;
-            int attempt;
-
-            for (attempt = 0; attempt < maxAttempts; attempt++)
+            try
             {
-                await session.Sector.SendAsync(emotePacket, cts.Token);
-
-                using var attemptCts =
-                    CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
-                attemptCts.CancelAfter(attemptTimeout);
-
-                try
+                while (true)
                 {
-                    while (true)
-                    {
-                        var reply = await session.Sector.ReceiveAsync(attemptCts.Token);
-                        Assert.NotNull(reply);
+                    var reply = await session.Sector.ReceiveAsync(attemptCts.Token);
+                    Assert.NotNull(reply);
 
-                        if (reply!.Header.Opcode != OpcodeId.Known.AvatarEmoteResponse.Value)
-                            continue;
+                    if (reply!.Header.Opcode != OpcodeId.Known.AvatarEmoteResponse.Value)
+                        continue;
 
-                        // 0x005F wire layout (mirror of HandleChatStream's emote branch
-                        // at server/src/PlayerConnection.cpp:10227-10241):
-                        //   [0..2)  short ChatSize  (echoed from request)
-                        //   [2]     byte  0x01      (literal)
-                        //   [3..7)  int32 GameID    (echoed from request)
-                        //   [7..N)  byte[] message  (memcpy'd from request message[])
-                        var span = reply.Payload.Span;
-                        Assert.Equal(7 + chatSize, span.Length);
+                    // 0x005F wire layout (mirror of HandleChatStream's emote branch
+                    // at server/src/PlayerConnection.cpp:10227-10241):
+                    //   [0..2)  short ChatSize  (echoed from request)
+                    //   [2]     byte  0x01      (literal)
+                    //   [3..7)  int32 GameID    (echoed from request)
+                    //   [7..N)  byte[] message  (memcpy'd from request message[])
+                    var span = reply.Payload.Span;
+                    Assert.Equal(7 + chatSize, span.Length);
 
-                        short replyChatSize = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                        Assert.Equal(chatSize, replyChatSize);
+                    short replyChatSize = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+                    Assert.Equal(chatSize, replyChatSize);
 
-                        Assert.Equal((byte)0x01, span[2]);
+                    Assert.Equal((byte)0x01, span[2]);
 
-                        int replyGameId = BinaryPrimitives.ReadInt32LittleEndian(span.Slice(3, 4));
-                        Assert.Equal(gameIdSentinel, replyGameId);
+                    int replyGameId = BinaryPrimitives.ReadInt32LittleEndian(span.Slice(3, 4));
+                    Assert.Equal(gameIdSentinel, replyGameId);
 
-                        // Sentinel bytes from message[] must round-trip verbatim
-                        // through the handler's memcpy.
-                        byte[] replyMessage = span.Slice(7, chatSize).ToArray();
-                        Assert.Equal(sentinelMessage, replyMessage);
+                    // Sentinel bytes from message[] must round-trip verbatim
+                    // through the handler's memcpy.
+                    byte[] replyMessage = span.Slice(7, chatSize).ToArray();
+                    Assert.Equal(sentinelMessage, replyMessage);
 
-                        return;
-                    }
-                }
-                catch (OperationCanceledException) when (!cts.IsCancellationRequested)
-                {
-                    // This attempt's window expired with no 0x005F.
-                    // Either the player isn't on the sector list yet
-                    // (login-stage race — most common cause early on)
-                    // or this emote raced ahead of the next pulse and
-                    // got dropped by an empty SendToSector. Retry.
+                    return;
                 }
             }
+            catch (OperationCanceledException) when (!cts.IsCancellationRequested)
+            {
+                // This attempt's window expired with no 0x005F.
+                // Either the player isn't on the sector list yet
+                // (login-stage race — most common cause early on)
+                // or this emote raced ahead of the next pulse and
+                // got dropped by an empty SendToSector. Retry.
+            }
+        }
 
-            throw new Xunit.Sdk.XunitException(
-                $"sent 0x005E AVATAR_EMOTE {attempt} times " +
-                $"(message[0]=0x02, sentinel GameID=0x{gameIdSentinel:X8}) over " +
-                $"{attempt * attemptTimeout.TotalSeconds:F0}s without seeing " +
-                $"0x005F AVATAR_EMOTE_RESPONSE. Likely the server's " +
-                $"HandleChatStream emote branch SendToSector path broke, " +
-                $"SendToSector grew an originator-exclusion guard, the proxy " +
-                $"default-case forwarding dropped the opcode, the dispatcher " +
-                $"case at PlayerConnection.cpp:515 got mis-routed, ChatStream " +
-                $"struct was widened past 8B and the ChatSize/message offsets " +
-                $"shifted past the wire payload, or the login-stage state " +
-                $"machine never reached stage 10 (AddPlayerToSectorList).");
-        }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+        throw new Xunit.Sdk.XunitException(
+            $"sent 0x005E AVATAR_EMOTE {attempt} times " +
+            $"(message[0]=0x02, sentinel GameID=0x{gameIdSentinel:X8}) over " +
+            $"{attempt * attemptTimeout.TotalSeconds:F0}s without seeing " +
+            $"0x005F AVATAR_EMOTE_RESPONSE. Likely the server's " +
+            $"HandleChatStream emote branch SendToSector path broke, " +
+            $"SendToSector grew an originator-exclusion guard, the proxy " +
+            $"default-case forwarding dropped the opcode, the dispatcher " +
+            $"case at PlayerConnection.cpp:515 got mis-routed, ChatStream " +
+            $"struct was widened past 8B and the ChatSize/message offsets " +
+            $"shifted past the wire payload, or the login-stage state " +
+            $"machine never reached stage 10 (AddPlayerToSectorList).");
     }
 }

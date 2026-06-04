@@ -166,16 +166,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorWarpTests
+public sealed class SectorWarpTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorWarpTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorWarpTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task Warp_OnFreshStarbaseSession_DoesNotBreakConnection_RequestTimeStillRoundTrips()
@@ -193,67 +186,58 @@ public sealed class SectorWarpTests
 
         // firstName "Warpio" -- contains 'a', 'i', 'o' for the vowel-check
         // (per CLAUDE.md feedback_character-name-vowel memory).
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Warpio", shipName: "WarpShip", cts.Token);
+            firstName: "Warpio", shipName: "WarpShip", cts.Token));
 
-        try
+        // WarpPacket canonical 86-byte all-zero shape:
+        //   [0..4)   int32 GameID = 0
+        //   [4..6)   short Navs   = 0
+        //   [6..86)  int32 TargetID[20] = {0}
+        byte[] payload = new byte[86];
+        // all zero already from new byte[86]; explicit writes documented
+        // for clarity but not strictly needed.
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(4, 2), 0);
+        // payload[6..86] = 0 from new byte[].
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.Warp.Value, payload),
+            cts.Token);
+
+        // Survival probe: send REQUEST_TIME, assert CLIENT_SET_TIME
+        // echoes our sentinel tick.
+        int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+        byte[] reqTimePayload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // WarpPacket canonical 86-byte all-zero shape:
-            //   [0..4)   int32 GameID = 0
-            //   [4..6)   short Navs   = 0
-            //   [6..86)  int32 TargetID[20] = {0}
-            byte[] payload = new byte[86];
-            // all zero already from new byte[86]; explicit writes documented
-            // for clarity but not strictly needed.
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(4, 2), 0);
-            // payload[6..86] = 0 from new byte[].
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.Warp.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
+                continue;
 
-            // Survival probe: send REQUEST_TIME, assert CLIENT_SET_TIME
-            // echoes our sentinel tick.
-            int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
-            byte[] reqTimePayload = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
-
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
-                cts.Token);
-
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-
-                if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
-                    continue;
-
-                var span = reply.Payload.Span;
-                Assert.Equal(12, span.Length);
-                int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                Assert.Equal(clientTick, echoedClientSent);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x009B WARP + 0x0044 REQUEST_TIME " +
-                $"without seeing 0x0034 CLIENT_SET_TIME. " +
-                $"Likely HandleWarp SEGV'd inside PrepareForWarp (NULL m_Equip / ShipIndex deref), " +
-                $"SetupWarpNavs OOB'd past m_WarpNavs[], " +
-                $"the dispatcher case at PlayerConnection.cpp:571 got mis-routed, " +
-                $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted.");
+            var span = reply.Payload.Span;
+            Assert.Equal(12, span.Length);
+            int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+            Assert.Equal(clientTick, echoedClientSent);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x009B WARP + 0x0044 REQUEST_TIME " +
+            $"without seeing 0x0034 CLIENT_SET_TIME. " +
+            $"Likely HandleWarp SEGV'd inside PrepareForWarp (NULL m_Equip / ShipIndex deref), " +
+            $"SetupWarpNavs OOB'd past m_WarpNavs[], " +
+            $"the dispatcher case at PlayerConnection.cpp:571 got mis-routed, " +
+            $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted.");
     }
 }

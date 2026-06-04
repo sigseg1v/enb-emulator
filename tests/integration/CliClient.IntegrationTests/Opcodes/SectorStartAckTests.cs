@@ -136,16 +136,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorStartAckTests
+public sealed class SectorStartAckTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorStartAckTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorStartAckTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task StartAck_DoesNotBreakConnection_RequestTimeStillRoundTrips()
@@ -161,82 +154,73 @@ public sealed class SectorStartAckTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Acker", shipName: "AckShip", cts.Token);
+            firstName: "Acker", shipName: "AckShip", cts.Token));
 
-        try
+        // START_ACK payload is empty in the retail client — the
+        // server's HandleStartAck signature takes `unsigned char *data`
+        // but never dereferences it (PlayerConnection.cpp:1603).
+        // The server side already knows which player is acking via
+        // the connection's bound player id.
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.StartAck.Value, ReadOnlyMemory<byte>.Empty),
+            cts.Token);
+
+        // Survival probe. Send a REQUEST_TIME with a per-run
+        // sentinel tick; the server echoes it back as
+        // ClientSetTime.ClientSent. If START_ACK or the proxy's
+        // 0x3008 follow-up tore the connection down, this either
+        // fails to send or times out on the receive.
+        int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+
+        byte[] payload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(payload, clientTick);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, payload),
+            cts.Token);
+
+        // Drain until 0x0034 CLIENT_SET_TIME. Cap on frame count so
+        // a stalled pipeline can't masquerade as the outer-CTS
+        // timeout. Post-START_ACK the server may begin streaming
+        // in-sector frames (ship updates, etc.) so this loop must
+        // tolerate interleaved traffic.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // START_ACK payload is empty in the retail client — the
-            // server's HandleStartAck signature takes `unsigned char *data`
-            // but never dereferences it (PlayerConnection.cpp:1603).
-            // The server side already knows which player is acking via
-            // the connection's bound player id.
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.StartAck.Value, ReadOnlyMemory<byte>.Empty),
-                cts.Token);
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            // Survival probe. Send a REQUEST_TIME with a per-run
-            // sentinel tick; the server echoes it back as
-            // ClientSetTime.ClientSent. If START_ACK or the proxy's
-            // 0x3008 follow-up tore the connection down, this either
-            // fails to send or times out on the receive.
-            int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
+                continue;
 
-            byte[] payload = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(payload, clientTick);
+            // 0x0034 wire layout (ClientSetTime struct):
+            //   [0..4)  int32  ClientSent
+            //   [4..8)  int32  ServerReceived
+            //   [8..12) int32  ServerSent
+            // common/include/net7/PacketStructures.h:563
+            var span = reply.Payload.Span;
+            Assert.Equal(12, span.Length);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, payload),
-                cts.Token);
+            int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
 
-            // Drain until 0x0034 CLIENT_SET_TIME. Cap on frame count so
-            // a stalled pipeline can't masquerade as the outer-CTS
-            // timeout. Post-START_ACK the server may begin streaming
-            // in-sector frames (ship updates, etc.) so this loop must
-            // tolerate interleaved traffic.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            // The exact-echo assertion catches a leak in the server
+            // recv-buffer reader (the Wave 9 sizeof(long) class of
+            // bug) AND proves the connection genuinely round-tripped
+            // through to HandleRequestTime — meaning START_ACK and
+            // the proxy's 0x3008 follow-up didn't tear anything down.
+            Assert.Equal(clientTick, echoedClientSent);
 
-                if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
-                    continue;
-
-                // 0x0034 wire layout (ClientSetTime struct):
-                //   [0..4)  int32  ClientSent
-                //   [4..8)  int32  ServerReceived
-                //   [8..12) int32  ServerSent
-                // common/include/net7/PacketStructures.h:563
-                var span = reply.Payload.Span;
-                Assert.Equal(12, span.Length);
-
-                int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-
-                // The exact-echo assertion catches a leak in the server
-                // recv-buffer reader (the Wave 9 sizeof(long) class of
-                // bug) AND proves the connection genuinely round-tripped
-                // through to HandleRequestTime — meaning START_ACK and
-                // the proxy's 0x3008 follow-up didn't tear anything down.
-                Assert.Equal(clientTick, echoedClientSent);
-
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0006 START_ACK + 0x0044 REQUEST_TIME " +
-                $"without seeing 0x0034 CLIENT_SET_TIME. " +
-                $"Likely the server crashed on HandleStartAck, the proxy crashed on the synthesised " +
-                $"0x3008 STARBASE_LOGIN_COMPLETE follow-up, or the proxy dropped the UDP plane on the " +
-                $"SetLoginComplete(true) transition (ClientToServer_linux_stubs.cpp:440-443).");
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0006 START_ACK + 0x0044 REQUEST_TIME " +
+            $"without seeing 0x0034 CLIENT_SET_TIME. " +
+            $"Likely the server crashed on HandleStartAck, the proxy crashed on the synthesised " +
+            $"0x3008 STARBASE_LOGIN_COMPLETE follow-up, or the proxy dropped the UDP plane on the " +
+            $"SetLoginComplete(true) transition (ClientToServer_linux_stubs.cpp:440-443).");
     }
 }

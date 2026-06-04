@@ -245,7 +245,7 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorJobListTests
+public sealed class SectorJobListTests : SectorIntegrationTest
 {
     // m_JobListCount = rand()%5 + 5 → upper bound 9; assert sanity on the
     // count read from the count-header at wire offset 0.
@@ -255,14 +255,7 @@ public sealed class SectorJobListTests
     // int32 level (each AddData<long> → 4B on the wire).
     private const int JobFixedPrefixSize = 16;
 
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorJobListTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorJobListTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task StarbaseJobTerminalAction6_InNet7SolJtSector_ReceivesWellFormedJobList()
@@ -297,107 +290,86 @@ public sealed class SectorJobListTests
         // Stage 2: re-login targeting sector 10711 (Net-7 SOL). The
         // ReloadSavedData branch preserves the sector_num set by
         // HandleLogin from the LOGIN packet's ToSectorID.
-        await using var session = await SectorHandshake.ReestablishAsync(
-            _server, login.Ticket!, slot, jtSector, cts.Token);
+        var session = Track(await SectorHandshake.ReestablishAsync(
+            _server, login.Ticket!, slot, jtSector, cts.Token));
 
-        try
+        // StarbaseRequest wire layout — 9 bytes:
+        //   [0..4)   int32 LE  PlayerID    = 0
+        //   [4..8)   int32 LE  StarbaseID  = 0   (Action=6 ignores)
+        //   [8..9)   byte      Action      = 6   (Job Terminal open)
+        byte[] payload = new byte[9];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 0);
+        payload[8] = 6;
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.StarbaseRequest.Value, payload),
+            cts.Token);
+
+        // Drain inbound until we see 0x0093 JOB_LIST.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        var observed = new List<string>();
+        while (framesSeen++ < maxFrames)
         {
-            // StarbaseRequest wire layout — 9 bytes:
-            //   [0..4)   int32 LE  PlayerID    = 0
-            //   [4..8)   int32 LE  StarbaseID  = 0   (Action=6 ignores)
-            //   [8..9)   byte      Action      = 6   (Job Terminal open)
-            byte[] payload = new byte[9];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 0);
-            payload[8] = 6;
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
+            observed.Add($"0x{reply!.Header.Opcode:X4}/{reply.Payload.Length}");
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.StarbaseRequest.Value, payload),
-                cts.Token);
+            if (reply.Header.Opcode != OpcodeId.Known.JobList.Value)
+                continue;
 
-            // Drain inbound until we see 0x0093 JOB_LIST.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            var observed = new List<string>();
-            while (framesSeen++ < maxFrames)
+            // Wire layout (variable length):
+            //   [0..4)   int32 LE  jobs_count (overwrites the
+            //                                 placeholder header
+            //                                 written at GetJobList's
+            //                                 top)
+            //   For each of jobs_count entries:
+            //     [+0..+4)   int32 LE  job_id
+            //     [+4..+8)   int32 LE  category (Combat=0,Explore=1,Trade=2)
+            //     [+8..+12)  int32 LE  zero
+            //     [+12..+16) int32 LE  level
+            //     NUL-terminated  title
+            //     NUL-terminated  sponsor
+            //     NUL-terminated  reward (e.g. "%d XP")
+            Assert.True(reply.Payload.Length >= 4,
+                $"0x0093 payload must contain at least the count header; got {reply.Payload.Length}B");
+
+            int jobsCount = BinaryPrimitives.ReadInt32LittleEndian(reply.Payload.Span[..4]);
+            Assert.InRange(jobsCount, 0, MaxJobListCount);
+
+            int cursor = 4;
+            for (int j = 0; j < jobsCount; j++)
             {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-                observed.Add($"0x{reply!.Header.Opcode:X4}/{reply.Payload.Length}");
+                Assert.True(cursor + JobFixedPrefixSize <= reply.Payload.Length,
+                    $"job[{j}]: 16B fixed prefix overruns payload at offset {cursor}");
 
-                if (reply.Header.Opcode != OpcodeId.Known.JobList.Value)
-                    continue;
+                int level = BinaryPrimitives.ReadInt32LittleEndian(
+                    reply.Payload.Span.Slice(cursor + 12, 4));
+                // Level is m_JobTerminalLevel on this sector (Net-7 SOL: 50).
+                // Allow [1, 200] as a sanity range (real levels are 1..150).
+                Assert.InRange(level, 1, 200);
 
-                // Wire layout (variable length):
-                //   [0..4)   int32 LE  jobs_count (overwrites the
-                //                                 placeholder header
-                //                                 written at GetJobList's
-                //                                 top)
-                //   For each of jobs_count entries:
-                //     [+0..+4)   int32 LE  job_id
-                //     [+4..+8)   int32 LE  category (Combat=0,Explore=1,Trade=2)
-                //     [+8..+12)  int32 LE  zero
-                //     [+12..+16) int32 LE  level
-                //     NUL-terminated  title
-                //     NUL-terminated  sponsor
-                //     NUL-terminated  reward (e.g. "%d XP")
-                Assert.True(reply.Payload.Length >= 4,
-                    $"0x0093 payload must contain at least the count header; got {reply.Payload.Length}B");
+                cursor += JobFixedPrefixSize;
 
-                int jobsCount = BinaryPrimitives.ReadInt32LittleEndian(reply.Payload.Span[..4]);
-                Assert.InRange(jobsCount, 0, MaxJobListCount);
-
-                int cursor = 4;
-                for (int j = 0; j < jobsCount; j++)
+                // Three NUL-terminated strings.
+                for (int s = 0; s < 3; s++)
                 {
-                    Assert.True(cursor + JobFixedPrefixSize <= reply.Payload.Length,
-                        $"job[{j}]: 16B fixed prefix overruns payload at offset {cursor}");
-
-                    int level = BinaryPrimitives.ReadInt32LittleEndian(
-                        reply.Payload.Span.Slice(cursor + 12, 4));
-                    // Level is m_JobTerminalLevel on this sector (Net-7 SOL: 50).
-                    // Allow [1, 200] as a sanity range (real levels are 1..150).
-                    Assert.InRange(level, 1, 200);
-
-                    cursor += JobFixedPrefixSize;
-
-                    // Three NUL-terminated strings.
-                    for (int s = 0; s < 3; s++)
-                    {
-                        int nulOffset = reply.Payload.Span.Slice(cursor).IndexOf((byte)0);
-                        Assert.True(nulOffset >= 0,
-                            $"job[{j}].string[{s}]: missing NUL terminator at offset {cursor}");
-                        cursor += nulOffset + 1;
-                    }
+                    int nulOffset = reply.Payload.Span.Slice(cursor).IndexOf((byte)0);
+                    Assert.True(nulOffset >= 0,
+                        $"job[{j}].string[{s}]: missing NUL terminator at offset {cursor}");
+                    cursor += nulOffset + 1;
                 }
-
-                Assert.Equal(reply.Payload.Length, cursor);
-                return;
             }
 
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x004E STARBASE_REQUEST " +
-                $"(Action=6 Job-Terminal-open) in sector 10711 (Net-7 SOL) " +
-                $"without seeing 0x0093 JOB_LIST. Observed [{observed.Count}]: " +
-                $"{string.Join(" | ", observed)}");
+            Assert.Equal(reply.Payload.Length, cursor);
+            return;
         }
-        finally
-        {
-            try
-            {
-                using var logoffCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                byte[] logoffPayload = new byte[8];
-                await session.Sector.SendAsync(
-                    Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
-                    logoffCts.Token);
-                await SectorHandshake.DrainUntilOpcode(
-                    session.Sector, OpcodeId.Known.LogoffConfirmation.Value, logoffCts.Token);
-            }
-            catch { /* best-effort logoff */ }
 
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x004E STARBASE_REQUEST " +
+            $"(Action=6 Job-Terminal-open) in sector 10711 (Net-7 SOL) " +
+            $"without seeing 0x0093 JOB_LIST. Observed [{observed.Count}]: " +
+            $"{string.Join(" | ", observed)}");
     }
 }

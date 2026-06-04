@@ -220,7 +220,7 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorFgpsTests
+public sealed class SectorFgpsTests : SectorIntegrationTest
 {
     private const int ExpectedConfirmedActionOfferPayloadSize = 17;
     private const int ExpectedClientSoundPayloadSize = 34;
@@ -228,14 +228,7 @@ public sealed class SectorFgpsTests
     private const byte ClientSoundQueue = 0;
     private const string ClientSoundName = "push_mission_alert_sound";
 
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorFgpsTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorFgpsTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task FgpsSlashCommand_OnSlashFgps_ReceivesConfirmedActionOfferAndClientSound()
@@ -251,138 +244,117 @@ public sealed class SectorFgpsTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Fugpsi62", shipName: "Fugpsi62Ship", cts.Token);
+            firstName: "Fugpsi62", shipName: "Fugpsi62Ship", cts.Token));
 
+        // Build a CLIENT_CHAT with "/fgps" — the single-slash prefix
+        // routes through HandleSlashCommands' single-slash block
+        // (PlayerConnection.cpp:5447); the case 'f' /fgps arm at
+        // PlayerConnection.cpp:6377-6382 calls SendConfirmedActionOffer
+        // which emits 0x00BE CONFIRMED_ACTION_OFFER (17B literal
+        // payload) followed by 0x006A CLIENT_SOUND (34B payload for
+        // "push_mission_alert_sound", channel=2, queue=0). The /fgps
+        // arm sits OUTSIDE both AdminLevel >= GM sub-blocks in case 'f',
+        // so any logged-in player triggers it.
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/fgps");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        // Drain up to 400 frames waiting for BOTH 0x00BE and 0x006A.
+        // Don't assume ordering — assert both are seen and capture each
+        // for separate byte-for-byte assertions below.
+        const int maxFrames = 400;
+        int seen = 0;
+        Packet? confirmedActionOffer = null;
+        Packet? clientSound = null;
+        var observed = new List<string>();
+        using var drainCts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cts.Token, drainCts.Token);
         try
         {
-            // Build a CLIENT_CHAT with "/fgps" — the single-slash prefix
-            // routes through HandleSlashCommands' single-slash block
-            // (PlayerConnection.cpp:5447); the case 'f' /fgps arm at
-            // PlayerConnection.cpp:6377-6382 calls SendConfirmedActionOffer
-            // which emits 0x00BE CONFIRMED_ACTION_OFFER (17B literal
-            // payload) followed by 0x006A CLIENT_SOUND (34B payload for
-            // "push_mission_alert_sound", channel=2, queue=0). The /fgps
-            // arm sits OUTSIDE both AdminLevel >= GM sub-blocks in case 'f',
-            // so any logged-in player triggers it.
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/fgps");
-
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
-
-            // Drain up to 400 frames waiting for BOTH 0x00BE and 0x006A.
-            // Don't assume ordering — assert both are seen and capture each
-            // for separate byte-for-byte assertions below.
-            const int maxFrames = 400;
-            int seen = 0;
-            Packet? confirmedActionOffer = null;
-            Packet? clientSound = null;
-            var observed = new List<string>();
-            using var drainCts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cts.Token, drainCts.Token);
-            try
+            while (seen++ < maxFrames)
             {
-                while (seen++ < maxFrames)
+                var frame = await session.Sector.ReceiveAsync(linked.Token);
+                Assert.NotNull(frame);
+                observed.Add($"0x{frame!.Header.Opcode:X4}/{frame.Payload.Length}");
+
+                if (frame.Header.Opcode == OpcodeId.Known.ConfirmedActionOffer.Value
+                    && confirmedActionOffer == null)
                 {
-                    var frame = await session.Sector.ReceiveAsync(linked.Token);
-                    Assert.NotNull(frame);
-                    observed.Add($"0x{frame!.Header.Opcode:X4}/{frame.Payload.Length}");
+                    confirmedActionOffer = frame;
+                }
+                else if (frame.Header.Opcode == OpcodeId.Known.ClientSound.Value
+                    && clientSound == null)
+                {
+                    clientSound = frame;
+                }
 
-                    if (frame.Header.Opcode == OpcodeId.Known.ConfirmedActionOffer.Value
-                        && confirmedActionOffer == null)
-                    {
-                        confirmedActionOffer = frame;
-                    }
-                    else if (frame.Header.Opcode == OpcodeId.Known.ClientSound.Value
-                        && clientSound == null)
-                    {
-                        clientSound = frame;
-                    }
-
-                    if (confirmedActionOffer != null && clientSound != null)
-                    {
-                        break;
-                    }
+                if (confirmedActionOffer != null && clientSound != null)
+                {
+                    break;
                 }
             }
-            catch (OperationCanceledException) when (drainCts.IsCancellationRequested)
-            {
-                // drain timed out — emit observed list as failure diagnostic
-            }
-
-            if (confirmedActionOffer == null || clientSound == null)
-            {
-                throw new Xunit.Sdk.XunitException(
-                    $"Missing 0x00BE={confirmedActionOffer != null} 0x006A={clientSound != null} " +
-                    $"after {seen} frames. Observed [{observed.Count}]: {string.Join(" | ", observed)}");
-            }
-
-            // === 0x00BE CONFIRMED_ACTION_OFFER byte-for-byte assertion ===
-            // Wire literal (17 bytes) from PlayerConnection.cpp:863-869:
-            //   00 00 00 01    int32 BE — offer id = 1 (note BE, not LE)
-            //   00 00 00 65    int32 BE — talk-tree node id = 0x65 = 101
-            //   07 00          int16 LE — string length-prefix = 7
-            //   4d 65 73 73 61 67 65  ASCII "Message" (no NUL)
-            Assert.Equal(ExpectedConfirmedActionOfferPayloadSize, confirmedActionOffer.Payload.Length);
-            var offerSpan = confirmedActionOffer.Payload.Span;
-            byte[] expectedOffer = new byte[]
-            {
-                0x00, 0x00, 0x00, 0x01,
-                0x00, 0x00, 0x00, 0x65,
-                0x07, 0x00,
-                0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65,
-            };
-            Assert.Equal(expectedOffer, offerSpan.ToArray());
-
-            // === 0x006A CLIENT_SOUND byte-for-byte assertion ===
-            // Wire layout (34 bytes) from PlayerConnection.cpp:949-968:
-            //   bytes [0..4]   int32 LE length = strlen("push_mission_alert_sound") + 1 = 25
-            //   bytes [4..28]  ASCII "push_mission_alert_sound" (24 chars, no inline NUL)
-            //   bytes [28]     1 byte NUL terminator
-            //   bytes [29..33] int32 LE channel = 2
-            //   bytes [33]     1 byte queue = 0
-            Assert.Equal(ExpectedClientSoundPayloadSize, clientSound.Payload.Length);
-            var soundSpan = clientSound.Payload.Span;
-
-            int soundLength = BinaryPrimitives.ReadInt32LittleEndian(soundSpan.Slice(0, 4));
-            Assert.Equal(ClientSoundName.Length + 1, soundLength);  // 25
-
-            string soundName = System.Text.Encoding.ASCII.GetString(soundSpan.Slice(4, ClientSoundName.Length));
-            Assert.Equal(ClientSoundName, soundName);
-
-            Assert.Equal(0x00, soundSpan[4 + ClientSoundName.Length]);  // NUL terminator at offset 28
-
-            int channel = BinaryPrimitives.ReadInt32LittleEndian(soundSpan.Slice(4 + ClientSoundName.Length + 1, 4));
-            Assert.Equal(ClientSoundChannel, channel);
-
-            byte queue = soundSpan[4 + ClientSoundName.Length + 1 + 4];  // offset 33
-            Assert.Equal(ClientSoundQueue, queue);
         }
-        finally
+        catch (OperationCanceledException) when (drainCts.IsCancellationRequested)
         {
-            try
-            {
-                using var logoffCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                byte[] logoffPayload = new byte[8];
-                await session.Sector.SendAsync(
-                    Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
-                    logoffCts.Token);
-                await SectorHandshake.DrainUntilOpcode(
-                    session.Sector, OpcodeId.Known.LogoffConfirmation.Value, logoffCts.Token);
-            }
-            catch { /* best-effort logoff */ }
-
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
+            // drain timed out — emit observed list as failure diagnostic
         }
+
+        if (confirmedActionOffer == null || clientSound == null)
+        {
+            throw new Xunit.Sdk.XunitException(
+                $"Missing 0x00BE={confirmedActionOffer != null} 0x006A={clientSound != null} " +
+                $"after {seen} frames. Observed [{observed.Count}]: {string.Join(" | ", observed)}");
+        }
+
+        // === 0x00BE CONFIRMED_ACTION_OFFER byte-for-byte assertion ===
+        // Wire literal (17 bytes) from PlayerConnection.cpp:863-869:
+        //   00 00 00 01    int32 BE — offer id = 1 (note BE, not LE)
+        //   00 00 00 65    int32 BE — talk-tree node id = 0x65 = 101
+        //   07 00          int16 LE — string length-prefix = 7
+        //   4d 65 73 73 61 67 65  ASCII "Message" (no NUL)
+        Assert.Equal(ExpectedConfirmedActionOfferPayloadSize, confirmedActionOffer.Payload.Length);
+        var offerSpan = confirmedActionOffer.Payload.Span;
+        byte[] expectedOffer = new byte[]
+        {
+            0x00, 0x00, 0x00, 0x01,
+            0x00, 0x00, 0x00, 0x65,
+            0x07, 0x00,
+            0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65,
+        };
+        Assert.Equal(expectedOffer, offerSpan.ToArray());
+
+        // === 0x006A CLIENT_SOUND byte-for-byte assertion ===
+        // Wire layout (34 bytes) from PlayerConnection.cpp:949-968:
+        //   bytes [0..4]   int32 LE length = strlen("push_mission_alert_sound") + 1 = 25
+        //   bytes [4..28]  ASCII "push_mission_alert_sound" (24 chars, no inline NUL)
+        //   bytes [28]     1 byte NUL terminator
+        //   bytes [29..33] int32 LE channel = 2
+        //   bytes [33]     1 byte queue = 0
+        Assert.Equal(ExpectedClientSoundPayloadSize, clientSound.Payload.Length);
+        var soundSpan = clientSound.Payload.Span;
+
+        int soundLength = BinaryPrimitives.ReadInt32LittleEndian(soundSpan.Slice(0, 4));
+        Assert.Equal(ClientSoundName.Length + 1, soundLength);  // 25
+
+        string soundName = System.Text.Encoding.ASCII.GetString(soundSpan.Slice(4, ClientSoundName.Length));
+        Assert.Equal(ClientSoundName, soundName);
+
+        Assert.Equal(0x00, soundSpan[4 + ClientSoundName.Length]);  // NUL terminator at offset 28
+
+        int channel = BinaryPrimitives.ReadInt32LittleEndian(soundSpan.Slice(4 + ClientSoundName.Length + 1, 4));
+        Assert.Equal(ClientSoundChannel, channel);
+
+        byte queue = soundSpan[4 + ClientSoundName.Length + 1 + 4];  // offset 33
+        Assert.Equal(ClientSoundQueue, queue);
     }
 }

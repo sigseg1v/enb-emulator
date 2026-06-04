@@ -194,16 +194,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorGuildRankNamesRequestClientTests
+public sealed class SectorGuildRankNamesRequestClientTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorGuildRankNamesRequestClientTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorGuildRankNamesRequestClientTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task GuildRankNamesRequestClient_OnFreshCharNoGuild_DoesNotBreakConnection_RequestTimeStillRoundTrips()
@@ -224,74 +217,65 @@ public sealed class SectorGuildRankNamesRequestClientTests
         // a/e/i/o/u/y scan before toupper at line 1153). Wave 39+
         // infra-hygiene item: factor a name-validation helper into
         // SectorHandshake.cs.
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Guildrn", shipName: "GuildrnShip", cts.Token);
+            firstName: "Guildrn", shipName: "GuildrnShip", cts.Token));
 
-        try
+        // 0x00D4 GUILD_RANK_NAMES_REQUEST_CLIENT — 6B payload.
+        //   [0..4)   int32 gameid    (handler never reads)
+        //   [4..6)   short unknown   (handler never reads)
+        //
+        // The handler casts to the local struct but reads only
+        // m_GuildID — the cast fields are not field-accessed.
+        // 6B all-zero is the minimum safe wire shape.
+        byte[] payload = new byte[6];
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.GuildRankNamesRequestClient.Value, payload),
+            cts.Token);
+
+        // Survival probe: did the connection survive the
+        // guild-rank-names-request handler? Send REQUEST_TIME
+        // and assert CLIENT_SET_TIME echoes our sentinel tick.
+        int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+
+        byte[] reqTimePayload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
+            cts.Token);
+
+        // Drain until 0x0034 CLIENT_SET_TIME. Tolerate
+        // interleaved in-sector frames; cap on frame count so a
+        // stalled pipeline doesn't masquerade as the outer-CTS
+        // timeout.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // 0x00D4 GUILD_RANK_NAMES_REQUEST_CLIENT — 6B payload.
-            //   [0..4)   int32 gameid    (handler never reads)
-            //   [4..6)   short unknown   (handler never reads)
-            //
-            // The handler casts to the local struct but reads only
-            // m_GuildID — the cast fields are not field-accessed.
-            // 6B all-zero is the minimum safe wire shape.
-            byte[] payload = new byte[6];
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.GuildRankNamesRequestClient.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
+                continue;
 
-            // Survival probe: did the connection survive the
-            // guild-rank-names-request handler? Send REQUEST_TIME
-            // and assert CLIENT_SET_TIME echoes our sentinel tick.
-            int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+            var span = reply.Payload.Span;
+            Assert.Equal(12, span.Length);
 
-            byte[] reqTimePayload = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+            int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+            Assert.Equal(clientTick, echoedClientSent);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
-                cts.Token);
-
-            // Drain until 0x0034 CLIENT_SET_TIME. Tolerate
-            // interleaved in-sector frames; cap on frame count so a
-            // stalled pipeline doesn't masquerade as the outer-CTS
-            // timeout.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-
-                if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
-                    continue;
-
-                var span = reply.Payload.Span;
-                Assert.Equal(12, span.Length);
-
-                int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                Assert.Equal(clientTick, echoedClientSent);
-
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x00D4 GUILD_RANK_NAMES_REQUEST_CLIENT + 0x0044 REQUEST_TIME " +
-                $"without seeing 0x0034 CLIENT_SET_TIME. " +
-                $"Likely the dispatcher arm at PlayerConnection.cpp:617 got mis-routed, " +
-                $"the `if (g)` guard at PlayerGuild.cpp:685 was removed " +
-                $"(would SEGV inside GetRankName on null Guild*), " +
-                $"the m_GuildID initialisation regressed to a non-zero placeholder, " +
-                $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted.");
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x00D4 GUILD_RANK_NAMES_REQUEST_CLIENT + 0x0044 REQUEST_TIME " +
+            $"without seeing 0x0034 CLIENT_SET_TIME. " +
+            $"Likely the dispatcher arm at PlayerConnection.cpp:617 got mis-routed, " +
+            $"the `if (g)` guard at PlayerGuild.cpp:685 was removed " +
+            $"(would SEGV inside GetRankName on null Guild*), " +
+            $"the m_GuildID initialisation regressed to a non-zero placeholder, " +
+            $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted.");
     }
 }

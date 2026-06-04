@@ -208,16 +208,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorManufactureTechLevelFilterTests
+public sealed class SectorManufactureTechLevelFilterTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorManufactureTechLevelFilterTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorManufactureTechLevelFilterTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task ManufactureTechLevelFilter_DisableZeroBitField_DoesNotBreakConnection_RequestTimeStillRoundTrips()
@@ -236,77 +229,68 @@ public sealed class SectorManufactureTechLevelFilterTests
         // firstName "Anufa" — starts with lowercase 'a' for the
         // AccountManager.cpp:1147 vowel-check footgun (case-sensitive
         // a/e/i/o/u/y BEFORE toupper at line 1153).
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Anufa", shipName: "AnufaShip", cts.Token);
+            firstName: "Anufa", shipName: "AnufaShip", cts.Token));
 
-        try
+        // 0x0080 MANUFACTURE_TECH_LEVEL_FILTER — 9B packed payload:
+        //   int32_t GameID   (handler ignores; identity from connection)
+        //   char    Enable   (0 → AND-NOT arm at line 701)
+        //   int32_t BitField (0 → AND-NOT-zero is a no-op against
+        //                     the existing TechFilterBitField)
+        byte[] payload = new byte[9];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);  // GameID
+        payload[4] = 0;                                                    // Enable
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(5, 4), 0);  // BitField
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.ManufactureTechLevelFilter.Value, payload),
+            cts.Token);
+
+        // Survival probe: did the connection survive the
+        // MANUFACTURE_TECH_LEVEL_FILTER handler? Send REQUEST_TIME
+        // and assert CLIENT_SET_TIME echoes our sentinel tick.
+        int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+
+        byte[] reqTimePayload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
+            cts.Token);
+
+        // Drain until 0x0034 CLIENT_SET_TIME. Tolerate interleaved
+        // in-sector frames (positional updates from observers, plus
+        // the 0x001B AUX_DATA frame SendAuxManu emits as a response
+        // to our 0x0080).
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // 0x0080 MANUFACTURE_TECH_LEVEL_FILTER — 9B packed payload:
-            //   int32_t GameID   (handler ignores; identity from connection)
-            //   char    Enable   (0 → AND-NOT arm at line 701)
-            //   int32_t BitField (0 → AND-NOT-zero is a no-op against
-            //                     the existing TechFilterBitField)
-            byte[] payload = new byte[9];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);  // GameID
-            payload[4] = 0;                                                    // Enable
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(5, 4), 0);  // BitField
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.ManufactureTechLevelFilter.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
+                continue;
 
-            // Survival probe: did the connection survive the
-            // MANUFACTURE_TECH_LEVEL_FILTER handler? Send REQUEST_TIME
-            // and assert CLIENT_SET_TIME echoes our sentinel tick.
-            int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+            var span = reply.Payload.Span;
+            Assert.Equal(12, span.Length);
 
-            byte[] reqTimePayload = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+            int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+            Assert.Equal(clientTick, echoedClientSent);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
-                cts.Token);
-
-            // Drain until 0x0034 CLIENT_SET_TIME. Tolerate interleaved
-            // in-sector frames (positional updates from observers, plus
-            // the 0x001B AUX_DATA frame SendAuxManu emits as a response
-            // to our 0x0080).
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-
-                if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
-                    continue;
-
-                var span = reply.Payload.Span;
-                Assert.Equal(12, span.Length);
-
-                int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                Assert.Equal(clientTick, echoedClientSent);
-
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0080 MANUFACTURE_TECH_LEVEL_FILTER + 0x0044 REQUEST_TIME " +
-                $"without seeing 0x0034 CLIENT_SET_TIME. " +
-                $"Likely the dispatcher arm at PlayerConnection.cpp:539 got mis-routed " +
-                $"(swap with HandleManufactureAction → ManufactureAction over-reads our 9B payload), " +
-                $"ATTRIB_PACKED on the ManufactureTechLevelFilter struct at PacketStructures.h:1068 was dropped " +
-                $"(BitField reads past buffer end), " +
-                $"the BuildManufactureList loop at PlayerManufacturing.cpp:716 had its iterator-end guard " +
-                $"replaced with an off-by-one index, " +
-                $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted.");
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0080 MANUFACTURE_TECH_LEVEL_FILTER + 0x0044 REQUEST_TIME " +
+            $"without seeing 0x0034 CLIENT_SET_TIME. " +
+            $"Likely the dispatcher arm at PlayerConnection.cpp:539 got mis-routed " +
+            $"(swap with HandleManufactureAction → ManufactureAction over-reads our 9B payload), " +
+            $"ATTRIB_PACKED on the ManufactureTechLevelFilter struct at PacketStructures.h:1068 was dropped " +
+            $"(BitField reads past buffer end), " +
+            $"the BuildManufactureList loop at PlayerManufacturing.cpp:716 had its iterator-end guard " +
+            $"replaced with an off-by-one index, " +
+            $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted.");
     }
 }

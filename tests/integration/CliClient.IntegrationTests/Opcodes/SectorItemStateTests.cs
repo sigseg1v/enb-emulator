@@ -150,16 +150,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorItemStateTests
+public sealed class SectorItemStateTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorItemStateTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorItemStateTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task ItemState_UnrecognisedInventoryByte_ReceivesUnrecognisedErrorString()
@@ -175,92 +168,83 @@ public sealed class SectorItemStateTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Itemy", shipName: "ItemShip", cts.Token);
+            firstName: "Itemy", shipName: "ItemShip", cts.Token));
 
-        try
+        // 0x0029 ITEM_STATE — 11B canonical payload with
+        // Inventory=0 (anything != 2 trips the else-branch).
+        //   [0..4)  int32 GameID    = 0
+        //   [4..8)  int32 BitMask   = 0
+        //   [8]     byte  Enable    = 0
+        //   [9]     byte  Inventory = 0   (NOT 2 → else-branch)
+        //   [10]    byte  ItemNum   = 0
+        byte[] payload = new byte[11];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 0);
+        payload[8] = 0;
+        payload[9] = 0;
+        payload[10] = 0;
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.ItemState.Value, payload),
+            cts.Token);
+
+        // Drain inbound until we see a 0x001D MESSAGE_STRING whose
+        // body contains the literal "UNRECOGNISED ITEM STATE".
+        // Post-handshake the server may interleave other in-sector
+        // fan-out (NPC chatter, state updates, etc.); a frame cap
+        // keeps a stalled pipeline from masquerading as the outer-
+        // CTS timeout.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // 0x0029 ITEM_STATE — 11B canonical payload with
-            // Inventory=0 (anything != 2 trips the else-branch).
-            //   [0..4)  int32 GameID    = 0
-            //   [4..8)  int32 BitMask   = 0
-            //   [8]     byte  Enable    = 0
-            //   [9]     byte  Inventory = 0   (NOT 2 → else-branch)
-            //   [10]    byte  ItemNum   = 0
-            byte[] payload = new byte[11];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 0);
-            payload[8] = 0;
-            payload[9] = 0;
-            payload[10] = 0;
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.ItemState.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            // Drain inbound until we see a 0x001D MESSAGE_STRING whose
-            // body contains the literal "UNRECOGNISED ITEM STATE".
-            // Post-handshake the server may interleave other in-sector
-            // fan-out (NPC chatter, state updates, etc.); a frame cap
-            // keeps a stalled pipeline from masquerading as the outer-
-            // CTS timeout.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            // 0x001D wire layout (mirror of Player::SendMessageString
+            // at server/src/PlayerConnection.cpp:10918):
+            //   [0..2)  short  length  = strlen(msg) + 1   (includes NUL)
+            //   [2]     byte   color   (default 5 for SendVaMessage)
+            //   [3..N)  char[] msg + NUL terminator
+            var span = reply.Payload.Span;
+            Assert.True(span.Length >= 4,
+                $"MESSAGE_STRING payload too short: {span.Length}B");
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            Assert.True(msgLen >= 1,
+                $"MESSAGE_STRING length field={msgLen}, expected >= 1 (NUL).");
 
-                // 0x001D wire layout (mirror of Player::SendMessageString
-                // at server/src/PlayerConnection.cpp:10918):
-                //   [0..2)  short  length  = strlen(msg) + 1   (includes NUL)
-                //   [2]     byte   color   (default 5 for SendVaMessage)
-                //   [3..N)  char[] msg + NUL terminator
-                var span = reply.Payload.Span;
-                Assert.True(span.Length >= 4,
-                    $"MESSAGE_STRING payload too short: {span.Length}B");
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                Assert.True(msgLen >= 1,
-                    $"MESSAGE_STRING length field={msgLen}, expected >= 1 (NUL).");
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // Filter — other MESSAGE_STRING frames may arrive
+            // first (NPC chatter, motd, etc.). Keep draining until
+            // we see the one keyed by our ITEM_STATE.
+            if (!text.Contains("UNRECOGNISED ITEM STATE", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
-
-                // Filter — other MESSAGE_STRING frames may arrive
-                // first (NPC chatter, motd, etc.). Keep draining until
-                // we see the one keyed by our ITEM_STATE.
-                if (!text.Contains("UNRECOGNISED ITEM STATE", StringComparison.Ordinal))
-                    continue;
-
-                // Pin on the distinctive substring rather than the
-                // whole string so punctuation / newline tweaks don't
-                // sink the test. The full literal at PlayerConnection.cpp:3386
-                // is "UNRECOGNISED ITEM STATE!\nPlease submit a bug report\n".
-                Assert.Contains("UNRECOGNISED ITEM STATE", text);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0029 ITEM_STATE (Inventory=0) " +
-                $"without seeing 0x001D MESSAGE_STRING containing \"UNRECOGNISED ITEM STATE\". " +
-                $"Likely the server's HandleItemState else-branch SendVaMessage path broke, " +
-                $"the proxy default-case forwarding dropped the opcode, " +
-                $"the dispatcher case at PlayerConnection.cpp:463 got mis-routed, " +
-                $"or ItemState struct was widened past 11B and Inventory==0 landed elsewhere.");
+            // Pin on the distinctive substring rather than the
+            // whole string so punctuation / newline tweaks don't
+            // sink the test. The full literal at PlayerConnection.cpp:3386
+            // is "UNRECOGNISED ITEM STATE!\nPlease submit a bug report\n".
+            Assert.Contains("UNRECOGNISED ITEM STATE", text);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0029 ITEM_STATE (Inventory=0) " +
+            $"without seeing 0x001D MESSAGE_STRING containing \"UNRECOGNISED ITEM STATE\". " +
+            $"Likely the server's HandleItemState else-branch SendVaMessage path broke, " +
+            $"the proxy default-case forwarding dropped the opcode, " +
+            $"the dispatcher case at PlayerConnection.cpp:463 got mis-routed, " +
+            $"or ItemState struct was widened past 11B and Inventory==0 landed elsewhere.");
     }
 
     /// <summary>
@@ -419,74 +403,65 @@ public sealed class SectorItemStateTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Itm108e", shipName: "Itm108Ship", cts.Token);
+            firstName: "Itm108e", shipName: "Itm108Ship", cts.Token));
 
-        try
+        byte[] payload = new byte[11];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 0);
+        payload[8] = 0;
+        payload[9] = 0;
+        payload[10] = 0;
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.ItemState.Value, payload),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            byte[] payload = new byte[11];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 0);
-            payload[8] = 0;
-            payload[9] = 0;
-            payload[10] = 0;
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.ItemState.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
 
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
-                    continue;
+            short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
+            if (msgLen < 1) continue;
 
-                var span = reply.Payload.Span;
-                if (span.Length < 4) continue;
+            int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
+            if (bodyBytes <= 0) continue;
 
-                short msgLen = BinaryPrimitives.ReadInt16LittleEndian(span[..2]);
-                if (msgLen < 1) continue;
+            string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
 
-                int bodyBytes = Math.Min(msgLen - 1, span.Length - 3);
-                if (bodyBytes <= 0) continue;
+            // Filter on the distinctive substring so other
+            // MESSAGE_STRING traffic (motd, NPC chatter) doesn't
+            // race ahead of the UNRECOGNISED reply. Once we have
+            // the right reply we pin its full wire shape.
+            if (!text.Contains("UNRECOGNISED ITEM STATE", StringComparison.Ordinal))
+                continue;
 
-                string text = Encoding.ASCII.GetString(span.Slice(3, bodyBytes));
+            Assert.Equal(ExpectedReplyPayloadLength, span.Length);
+            Assert.Equal(ExpectedReplyLengthField, msgLen);
+            Assert.Equal(ExpectedReplyColor, span[2]);
 
-                // Filter on the distinctive substring so other
-                // MESSAGE_STRING traffic (motd, NPC chatter) doesn't
-                // race ahead of the UNRECOGNISED reply. Once we have
-                // the right reply we pin its full wire shape.
-                if (!text.Contains("UNRECOGNISED ITEM STATE", StringComparison.Ordinal))
-                    continue;
-
-                Assert.Equal(ExpectedReplyPayloadLength, span.Length);
-                Assert.Equal(ExpectedReplyLengthField, msgLen);
-                Assert.Equal(ExpectedReplyColor, span[2]);
-
-                int literalEnd = 3 + ExpectedLiteralByteCount;
-                string fullBody = Encoding.ASCII.GetString(
-                    span.Slice(3, ExpectedLiteralByteCount));
-                Assert.Equal(UnrecognisedItemStateLiteral, fullBody);
-                Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0029 ITEM_STATE (Inventory=0) " +
-                $"without seeing 0x001D MESSAGE_STRING containing \"UNRECOGNISED ITEM STATE\". " +
-                $"Same drain-loop budget as Wave 24's sibling test; the failure modes are " +
-                $"identical.");
+            int literalEnd = 3 + ExpectedLiteralByteCount;
+            string fullBody = Encoding.ASCII.GetString(
+                span.Slice(3, ExpectedLiteralByteCount));
+            Assert.Equal(UnrecognisedItemStateLiteral, fullBody);
+            Assert.Equal((byte)0x00, span[literalEnd]);  // NUL terminator
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0029 ITEM_STATE (Inventory=0) " +
+            $"without seeing 0x001D MESSAGE_STRING containing \"UNRECOGNISED ITEM STATE\". " +
+            $"Same drain-loop budget as Wave 24's sibling test; the failure modes are " +
+            $"identical.");
     }
 }

@@ -45,18 +45,15 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorMvasMoveTests
+public sealed class SectorMvasMoveTests : SectorIntegrationTest
 {
     private const int MvasPort = 3806; // MVAS_LOGIN_PORT (common/include/net7/Ports.h)
 
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
     private readonly ITestOutputHelper _out;
 
     public SectorMvasMoveTests(ServerFixture server, ITestOutputHelper output)
+        : base(server)
     {
-        _server = server;
-        _client = new ClientFixture(server);
         _out = output;
     }
 
@@ -74,9 +71,9 @@ public sealed class SectorMvasMoveTests
             new AuthLoginRequest(account.Username, account.Password), cts.Token);
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
 
-        var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, stationSectorId,
-            firstName: "Mwillo", shipName: "MwilloShip", cts.Token);
+            firstName: "Mwillo", shipName: "MwilloShip", cts.Token));
 
         SectorUdpClient? udp = null;
         EncryptedTcpConnection? spaceConn = null;
@@ -206,11 +203,6 @@ public sealed class SectorMvasMoveTests
             if (udp is not null) { try { await udp.StopAsync(); } catch { } udp.Dispose(); }
             if (spaceConn is not null) { try { await spaceConn.DisposeAsync(); } catch { } }
             else { try { await session.Sector.DisposeAsync(); } catch { } }
-
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { }
-            try { await session.Global.DisposeAsync(); } catch { }
         }
     }
 }

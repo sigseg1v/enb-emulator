@@ -125,16 +125,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorRemoveTests
+public sealed class SectorRemoveTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorRemoveTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorRemoveTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task Remove_EmittedAfterRecustomizeShipDone_HasExactly4BytePayload()
@@ -151,74 +144,65 @@ public sealed class SectorRemoveTests
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
         // firstName "Remover" -- contains 'e', 'o' for the vowel-check.
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Remover", shipName: "RemoverShip", cts.Token);
+            firstName: "Remover", shipName: "RemoverShip", cts.Token));
 
-        try
+        // RecustomizeShipDone canonical 210-byte all-zero shape:
+        //   [0..194)  ShipData (5 int32 + 26 name + 12 color + 8*17 ColorInfo)
+        //   [194..198) int32 playerid
+        //   [198]      bool unknown
+        //   [199..210) char _unknown[11]
+        byte[] payload = new byte[210];
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RecustomizeShipDone.Value, payload),
+            cts.Token);
+
+        // Drain looking for 0x0007 REMOVE. The handler unconditionally
+        // calls RemoveObject(GameID()) at PlayerConnection.cpp:10091
+        // which emits 0x0007 with a 4-byte int32 payload. The
+        // post-stimulus fan-out also includes SendShipData,
+        // SendAuxShipExtended, and SendAuxPlayer -- those are already
+        // covered by other waves and this loop tolerates interleaving.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // RecustomizeShipDone canonical 210-byte all-zero shape:
-            //   [0..194)  ShipData (5 int32 + 26 name + 12 color + 8*17 ColorInfo)
-            //   [194..198) int32 playerid
-            //   [198]      bool unknown
-            //   [199..210) char _unknown[11]
-            byte[] payload = new byte[210];
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RecustomizeShipDone.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.Remove.Value)
+                continue;
 
-            // Drain looking for 0x0007 REMOVE. The handler unconditionally
-            // calls RemoveObject(GameID()) at PlayerConnection.cpp:10091
-            // which emits 0x0007 with a 4-byte int32 payload. The
-            // post-stimulus fan-out also includes SendShipData,
-            // SendAuxShipExtended, and SendAuxPlayer -- those are already
-            // covered by other waves and this loop tolerates interleaving.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            // 0x0007 wire layout:
+            //   [0..4)  int32 LE object_id  (the removed object's GameID)
+            // The Wave-11/12 int32_t pinning at
+            // PlayerConnection.cpp:2335-2345 makes this exactly 4 bytes.
+            var span = reply.Payload.Span;
+            Assert.Equal(4, span.Length);
 
-                if (reply!.Header.Opcode != OpcodeId.Known.Remove.Value)
-                    continue;
+            // Sanity probe: the 4-byte payload decodes to a non-zero
+            // int32 (we know our own GameID is positive). This is a
+            // weak check -- the exact GameID is sector-assigned at
+            // handshake and not directly accessible from the session
+            // wrapper -- but a payload of all-zero would indicate a
+            // serious regression (RemoveObject called with GameID()==0
+            // which never happens for an active Player).
+            int removedId = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+            Assert.NotEqual(0, removedId);
 
-                // 0x0007 wire layout:
-                //   [0..4)  int32 LE object_id  (the removed object's GameID)
-                // The Wave-11/12 int32_t pinning at
-                // PlayerConnection.cpp:2335-2345 makes this exactly 4 bytes.
-                var span = reply.Payload.Span;
-                Assert.Equal(4, span.Length);
-
-                // Sanity probe: the 4-byte payload decodes to a non-zero
-                // int32 (we know our own GameID is positive). This is a
-                // weak check -- the exact GameID is sector-assigned at
-                // handshake and not directly accessible from the session
-                // wrapper -- but a payload of all-zero would indicate a
-                // serious regression (RemoveObject called with GameID()==0
-                // which never happens for an active Player).
-                int removedId = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                Assert.NotEqual(0, removedId);
-
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0082 RECUSTOMIZE_SHIP_DONE " +
-                $"without seeing 0x0007 REMOVE. " +
-                $"Likely RemoveObject was dropped from HandleRecustomizeShipDone's fan-out at " +
-                $"PlayerConnection.cpp:10091, RemoveObject's SendOpcode call at " +
-                $"PlayerConnection.cpp:2341 was removed or rewired, the SendOpcode header-width " +
-                $"fix at PlayerConnection.cpp:127 was reverted (mislabeling 0x0007 in the inbound " +
-                $"stream), or the proxy SendClientPacketSequence inner-opcode guard tightened " +
-                $"to drop 0x0007.");
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0082 RECUSTOMIZE_SHIP_DONE " +
+            $"without seeing 0x0007 REMOVE. " +
+            $"Likely RemoveObject was dropped from HandleRecustomizeShipDone's fan-out at " +
+            $"PlayerConnection.cpp:10091, RemoveObject's SendOpcode call at " +
+            $"PlayerConnection.cpp:2341 was removed or rewired, the SendOpcode header-width " +
+            $"fix at PlayerConnection.cpp:127 was reverted (mislabeling 0x0007 in the inbound " +
+            $"stream), or the proxy SendClientPacketSequence inner-opcode guard tightened " +
+            $"to drop 0x0007.");
     }
 }

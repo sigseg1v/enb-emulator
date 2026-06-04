@@ -220,16 +220,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorTriggerEmoteTests
+public sealed class SectorTriggerEmoteTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorTriggerEmoteTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorTriggerEmoteTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task TriggerEmote_DefaultPayload_ReceivesNotifyEmoteEchoed()
@@ -246,80 +239,71 @@ public sealed class SectorTriggerEmoteTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Emoter", shipName: "EmoterShip", cts.Token);
+            firstName: "Emoter", shipName: "EmoterShip", cts.Token));
 
-        try
+        // 0x00A1 TRIGGER_EMOTE — 8B canonical layout.
+        //   [0..4)   int32 GameID = 0           (handler reads but only echoes; the server's
+        //                                        own resolved GameID is irrelevant to the
+        //                                        reply's Emote-field round-trip).
+        //   [4..8)   int32 Emote  = 0x4D454D45  (sentinel — proves SendNotifyEmote's
+        //                                        field-copy didn't lose or transform the
+        //                                        value).
+        byte[] payload = new byte[8];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), emoteSentinel);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.TriggerEmote.Value, payload),
+            cts.Token);
+
+        // Drain inbound until we see 0x00A2 NOTIFY_EMOTE with our
+        // Emote sentinel echoed in body[4..7]. SectorLogin's
+        // self-add to m_RangeList (PlayerClass.cpp:467) guarantees
+        // the originator receives the SendToRangeList fan-out
+        // even for a single-player test.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // 0x00A1 TRIGGER_EMOTE — 8B canonical layout.
-            //   [0..4)   int32 GameID = 0           (handler reads but only echoes; the server's
-            //                                        own resolved GameID is irrelevant to the
-            //                                        reply's Emote-field round-trip).
-            //   [4..8)   int32 Emote  = 0x4D454D45  (sentinel — proves SendNotifyEmote's
-            //                                        field-copy didn't lose or transform the
-            //                                        value).
-            byte[] payload = new byte[8];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), emoteSentinel);
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.TriggerEmote.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.NotifyEmote.Value)
+                continue;
 
-            // Drain inbound until we see 0x00A2 NOTIFY_EMOTE with our
-            // Emote sentinel echoed in body[4..7]. SectorLogin's
-            // self-add to m_RangeList (PlayerClass.cpp:467) guarantees
-            // the originator receives the SendToRangeList fan-out
-            // even for a single-player test.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-
-                if (reply!.Header.Opcode != OpcodeId.Known.NotifyEmote.Value)
-                    continue;
-
-                // 0x00A2 wire layout: 8 bytes total {int32 GameID;
-                // int32 Emote}. Emote at offset 4 is what we pin
-                // against the request's sentinel.
-                Assert.Equal(8, reply.Payload.Length);
-                var echoedEmote = BinaryPrimitives.ReadInt32LittleEndian(reply.Payload.Span.Slice(4, 4));
-                Assert.Equal(emoteSentinel, echoedEmote);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x00A1 " +
-                $"TRIGGER_EMOTE without seeing 0x00A2 NOTIFY_EMOTE. " +
-                $"Likely causes: (a) dispatcher mis-route at " +
-                $"PlayerConnection.cpp:583 (swap with " +
-                $"HandleClientChatRequest reads 8B as the start of an " +
-                $"18B variable-length payload, walks past end into " +
-                $"garbage); (b) PacketStructures.h TriggerEmote/" +
-                $"NotifyEmote long-revert (struct grows to 16B on " +
-                $"Linux x86_64, Emote reads past end of 8B payload " +
-                $"into stack garbage); (c) SectorLogin self-add " +
-                $"removal at PlayerClass.cpp:467 (m_RangeList empty " +
-                $"for solo player, SendToRangeList loop never " +
-                $"executes); (d) proxy default-case ForwardClientOpcode " +
-                $"dropping 0x00A1 (not explicitly cased in " +
-                $"ClientToServer_linux_stubs.cpp so falls through to " +
-                $"bottom-of-switch default-case forward); (e) proxy " +
-                $"SendClientPacketSequence guard tightening at " +
-                $"UDPProxyToClient_linux.cpp:568 (opcode < 0x0FFF " +
-                $"currently passes 0x00A2); (f) SendToRangeList " +
-                $"originator-exclusion regression (a future `p != " +
-                $"this` guard mirroring SendToVisibilityList's " +
-                $"pattern at line 3134 would skip the originator).");
+            // 0x00A2 wire layout: 8 bytes total {int32 GameID;
+            // int32 Emote}. Emote at offset 4 is what we pin
+            // against the request's sentinel.
+            Assert.Equal(8, reply.Payload.Length);
+            var echoedEmote = BinaryPrimitives.ReadInt32LittleEndian(reply.Payload.Span.Slice(4, 4));
+            Assert.Equal(emoteSentinel, echoedEmote);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x00A1 " +
+            $"TRIGGER_EMOTE without seeing 0x00A2 NOTIFY_EMOTE. " +
+            $"Likely causes: (a) dispatcher mis-route at " +
+            $"PlayerConnection.cpp:583 (swap with " +
+            $"HandleClientChatRequest reads 8B as the start of an " +
+            $"18B variable-length payload, walks past end into " +
+            $"garbage); (b) PacketStructures.h TriggerEmote/" +
+            $"NotifyEmote long-revert (struct grows to 16B on " +
+            $"Linux x86_64, Emote reads past end of 8B payload " +
+            $"into stack garbage); (c) SectorLogin self-add " +
+            $"removal at PlayerClass.cpp:467 (m_RangeList empty " +
+            $"for solo player, SendToRangeList loop never " +
+            $"executes); (d) proxy default-case ForwardClientOpcode " +
+            $"dropping 0x00A1 (not explicitly cased in " +
+            $"ClientToServer_linux_stubs.cpp so falls through to " +
+            $"bottom-of-switch default-case forward); (e) proxy " +
+            $"SendClientPacketSequence guard tightening at " +
+            $"UDPProxyToClient_linux.cpp:568 (opcode < 0x0FFF " +
+            $"currently passes 0x00A2); (f) SendToRangeList " +
+            $"originator-exclusion regression (a future `p != " +
+            $"this` guard mirroring SendToVisibilityList's " +
+            $"pattern at line 3134 would skip the originator).");
     }
 }

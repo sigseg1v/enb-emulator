@@ -65,16 +65,12 @@ namespace N7.CliClient.IntegrationTests.Verification;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class DockHandshakeFriendship7Tests
+public sealed class DockHandshakeFriendship7Tests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
     private readonly ITestOutputHelper _out;
 
-    public DockHandshakeFriendship7Tests(ServerFixture server, ITestOutputHelper output)
+    public DockHandshakeFriendship7Tests(ServerFixture server, ITestOutputHelper output) : base(server)
     {
-        _server = server;
-        _client = new ClientFixture(server);
         _out = output;
     }
 
@@ -217,40 +213,31 @@ public sealed class DockHandshakeFriendship7Tests
         // the LOGIN packet's ToSectorId. GetSectorManager(45151) returns
         // the Friendship 7 SectorManager and StationLogin emits Friendship
         // 7's GalaxyMap / Greeting / etc.
-        await using var f7Session = await SectorHandshake.ReestablishAsync(
-            _server, login.Ticket!, slot, friendship7SectorId, cts.Token);
+        var f7Session = Track(await SectorHandshake.ReestablishAsync(
+            _server, login.Ticket!, slot, friendship7SectorId, cts.Token));
 
-        try
+        var actualHistogram = string.Join("\n", f7Session.HandshakeOpcodes
+            .GroupBy(o => o)
+            .OrderByDescending(g => g.Count())
+            .ThenBy(g => g.Key)
+            .Select(g => $"{g.Count(),2}x 0x{g.Key:X4}"));
+
+        // Always dump the actual sequence to xUnit output so a failure
+        // surfaces both the histogram diff and the ordered frame list
+        // for direct inspection against the retail capture's hex-dump.
+        _out.WriteLine("Our sector-handshake opcode histogram (Friendship 7, 45151):");
+        _out.WriteLine(actualHistogram);
+        _out.WriteLine("");
+        _out.WriteLine("Expected retail histogram:");
+        _out.WriteLine(ExpectedRetailHistogram);
+        _out.WriteLine("");
+        _out.WriteLine($"Ordered sequence ({f7Session.HandshakeOpcodes.Count} frames):");
+        for (int i = 0; i < f7Session.HandshakeOpcodes.Count; i++)
         {
-            var actualHistogram = string.Join("\n", f7Session.HandshakeOpcodes
-                .GroupBy(o => o)
-                .OrderByDescending(g => g.Count())
-                .ThenBy(g => g.Key)
-                .Select(g => $"{g.Count(),2}x 0x{g.Key:X4}"));
-
-            // Always dump the actual sequence to xUnit output so a failure
-            // surfaces both the histogram diff and the ordered frame list
-            // for direct inspection against the retail capture's hex-dump.
-            _out.WriteLine("Our sector-handshake opcode histogram (Friendship 7, 45151):");
-            _out.WriteLine(actualHistogram);
-            _out.WriteLine("");
-            _out.WriteLine("Expected retail histogram:");
-            _out.WriteLine(ExpectedRetailHistogram);
-            _out.WriteLine("");
-            _out.WriteLine($"Ordered sequence ({f7Session.HandshakeOpcodes.Count} frames):");
-            for (int i = 0; i < f7Session.HandshakeOpcodes.Count; i++)
-            {
-                var frame = f7Session.HandshakeFrames[i];
-                _out.WriteLine($"  [{i,3}] 0x{frame.Opcode:X4}  payload={frame.PayloadLength,5}B");
-            }
-
-            Assert.Equal(ExpectedRetailHistogram, actualHistogram);
+            var frame = f7Session.HandshakeFrames[i];
+            _out.WriteLine($"  [{i,3}] 0x{frame.Opcode:X4}  payload={frame.PayloadLength,5}B");
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(f7Session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        Assert.Equal(ExpectedRetailHistogram, actualHistogram);
     }
 }

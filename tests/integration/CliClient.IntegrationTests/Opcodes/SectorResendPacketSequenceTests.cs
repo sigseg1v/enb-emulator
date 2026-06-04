@@ -206,16 +206,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorResendPacketSequenceTests
+public sealed class SectorResendPacketSequenceTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorResendPacketSequenceTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorResendPacketSequenceTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task ResendPacketSequence_MissPacketNum_DoesNotBreakConnection_RequestTimeStillRoundTrips()
@@ -234,85 +227,76 @@ public sealed class SectorResendPacketSequenceTests
         // firstName "iris" starts with lowercase 'i' for the
         // AccountManager.cpp:1147 vowel-check footgun (case-sensitive
         // a/e/i/o/u/y BEFORE toupper at line 1153).
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "iris", shipName: "IrisShip", cts.Token);
+            firstName: "iris", shipName: "IrisShip", cts.Token));
 
-        try
+        // 0x2017 RESEND_PACKET_SEQUENCE (ReSendOpcodes) —
+        // 6B payload, all fields host-LE:
+        //   [0..2)  short packet_num   = 0xFFFF (sign-extends to -1
+        //                                 long on both Win32 and
+        //                                 Linux x86_64 — guaranteed
+        //                                 miss against m_ResendQueue
+        //                                 whose slots ctor-init to
+        //                                 packet_num=0)
+        //   [2..4)  short pad          = 0     (handler skips —
+        //                                 reads next short at
+        //                                 offset 4, not 2)
+        //   [4..6)  short opcode_count = 0     (read into local
+        //                                 `long opcode_count` but
+        //                                 never field-accessed in
+        //                                 the miss path)
+        byte[] payload = new byte[6];
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(0, 2), unchecked((short)0xFFFF));
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(2, 2), 0);
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(4, 2), 0);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.ResendPacketSequence.Value, payload),
+            cts.Token);
+
+        // Survival probe: did the connection survive the
+        // RESEND_PACKET_SEQUENCE miss-path handler? Send
+        // REQUEST_TIME and assert CLIENT_SET_TIME echoes our
+        // sentinel tick.
+        int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+
+        byte[] reqTimePayload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
+            cts.Token);
+
+        // Drain until 0x0034 CLIENT_SET_TIME. Tolerate any
+        // interleaved positional-update frames from in-sector
+        // observers. Miss-path RESEND_PACKET_SEQUENCE emits NO
+        // reply frame itself (only a server stdout LogMessage).
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // 0x2017 RESEND_PACKET_SEQUENCE (ReSendOpcodes) —
-            // 6B payload, all fields host-LE:
-            //   [0..2)  short packet_num   = 0xFFFF (sign-extends to -1
-            //                                 long on both Win32 and
-            //                                 Linux x86_64 — guaranteed
-            //                                 miss against m_ResendQueue
-            //                                 whose slots ctor-init to
-            //                                 packet_num=0)
-            //   [2..4)  short pad          = 0     (handler skips —
-            //                                 reads next short at
-            //                                 offset 4, not 2)
-            //   [4..6)  short opcode_count = 0     (read into local
-            //                                 `long opcode_count` but
-            //                                 never field-accessed in
-            //                                 the miss path)
-            byte[] payload = new byte[6];
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(0, 2), unchecked((short)0xFFFF));
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(2, 2), 0);
-            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(4, 2), 0);
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.ResendPacketSequence.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
+                continue;
 
-            // Survival probe: did the connection survive the
-            // RESEND_PACKET_SEQUENCE miss-path handler? Send
-            // REQUEST_TIME and assert CLIENT_SET_TIME echoes our
-            // sentinel tick.
-            int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+            var span = reply.Payload.Span;
+            Assert.Equal(12, span.Length);
 
-            byte[] reqTimePayload = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+            int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+            Assert.Equal(clientTick, echoedClientSent);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
-                cts.Token);
-
-            // Drain until 0x0034 CLIENT_SET_TIME. Tolerate any
-            // interleaved positional-update frames from in-sector
-            // observers. Miss-path RESEND_PACKET_SEQUENCE emits NO
-            // reply frame itself (only a server stdout LogMessage).
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-
-                if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
-                    continue;
-
-                var span = reply.Payload.Span;
-                Assert.Equal(12, span.Length);
-
-                int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                Assert.Equal(clientTick, echoedClientSent);
-
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x2017 RESEND_PACKET_SEQUENCE + 0x0044 REQUEST_TIME " +
-                $"without seeing 0x0034 CLIENT_SET_TIME. " +
-                $"Likely the dispatcher arm at PlayerConnection.cpp:621 got mis-routed, " +
-                $"the ReSendOpcodes for-loop's `break` semantics changed (a regression that took the break on every slot would still survive via REQUEST_TIME), " +
-                $"the proxy's bottom-of-switch ForwardClientOpcode default at proxy/ClientToServer_linux_stubs.cpp dropped 0x2017, " +
-                $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted.");
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x2017 RESEND_PACKET_SEQUENCE + 0x0044 REQUEST_TIME " +
+            $"without seeing 0x0034 CLIENT_SET_TIME. " +
+            $"Likely the dispatcher arm at PlayerConnection.cpp:621 got mis-routed, " +
+            $"the ReSendOpcodes for-loop's `break` semantics changed (a regression that took the break on every slot would still survive via REQUEST_TIME), " +
+            $"the proxy's bottom-of-switch ForwardClientOpcode default at proxy/ClientToServer_linux_stubs.cpp dropped 0x2017, " +
+            $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted.");
     }
 }

@@ -179,16 +179,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorConfirmedActionResponseTests
+public sealed class SectorConfirmedActionResponseTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorConfirmedActionResponseTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorConfirmedActionResponseTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task ConfirmedActionResponse_NonMatchingPlayerId_DoesNotBreakConnection_RequestTimeStillRoundTrips()
@@ -209,73 +202,64 @@ public sealed class SectorConfirmedActionResponseTests
         // (case-sensitive a/e/i/o/u/y scan BEFORE toupper at line
         // 1153). Hit twice in Waves 36 & 37; see the Wave 39+
         // infra-hygiene item to factor a name-validation helper.
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Confact", shipName: "ConfactShip", cts.Token);
+            firstName: "Confact", shipName: "ConfactShip", cts.Token));
 
-        try
+        // 0x00C0 CONFIRMED_ACTION_RESPONSE — 4B payload.
+        //   [0..4)   int32 player_id  (network byte order;
+        //                              handler does ntohl)
+        // player_id=0 will never match GameID() for any real
+        // account; the handler short-circuits silently.
+        byte[] payload = new byte[4];
+        BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(0, 4), 0);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.ConfirmedActionResponse.Value, payload),
+            cts.Token);
+
+        // Survival probe: did the connection survive the
+        // confirmed-action-response handler? Send REQUEST_TIME
+        // and assert CLIENT_SET_TIME echoes our sentinel tick.
+        int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+
+        byte[] reqTimePayload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
+            cts.Token);
+
+        // Drain until 0x0034 CLIENT_SET_TIME. Tolerate
+        // interleaved in-sector frames; cap on frame count so a
+        // stalled pipeline doesn't masquerade as the outer-CTS
+        // timeout.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // 0x00C0 CONFIRMED_ACTION_RESPONSE — 4B payload.
-            //   [0..4)   int32 player_id  (network byte order;
-            //                              handler does ntohl)
-            // player_id=0 will never match GameID() for any real
-            // account; the handler short-circuits silently.
-            byte[] payload = new byte[4];
-            BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(0, 4), 0);
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.ConfirmedActionResponse.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
+                continue;
 
-            // Survival probe: did the connection survive the
-            // confirmed-action-response handler? Send REQUEST_TIME
-            // and assert CLIENT_SET_TIME echoes our sentinel tick.
-            int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+            var span = reply.Payload.Span;
+            Assert.Equal(12, span.Length);
 
-            byte[] reqTimePayload = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+            int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
+            Assert.Equal(clientTick, echoedClientSent);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload),
-                cts.Token);
-
-            // Drain until 0x0034 CLIENT_SET_TIME. Tolerate
-            // interleaved in-sector frames; cap on frame count so a
-            // stalled pipeline doesn't masquerade as the outer-CTS
-            // timeout.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
-
-                if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
-                    continue;
-
-                var span = reply.Payload.Span;
-                Assert.Equal(12, span.Length);
-
-                int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                Assert.Equal(clientTick, echoedClientSent);
-
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x00C0 CONFIRMED_ACTION_RESPONSE + 0x0044 REQUEST_TIME " +
-                $"without seeing 0x0034 CLIENT_SET_TIME. " +
-                $"Likely the dispatcher arm at PlayerConnection.cpp:599 got mis-routed to HandleCTARequest " +
-                $"(would SEGV on the long-cast spill writes), " +
-                $"the Phase K Wave 11 ntohl read-width fix at PlayerConnection.cpp:880 was reverted, " +
-                $"the player_id == GameID() guard at line 881 was removed, " +
-                $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted.");
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x00C0 CONFIRMED_ACTION_RESPONSE + 0x0044 REQUEST_TIME " +
+            $"without seeing 0x0034 CLIENT_SET_TIME. " +
+            $"Likely the dispatcher arm at PlayerConnection.cpp:599 got mis-routed to HandleCTARequest " +
+            $"(would SEGV on the long-cast spill writes), " +
+            $"the Phase K Wave 11 ntohl read-width fix at PlayerConnection.cpp:880 was reverted, " +
+            $"the player_id == GameID() guard at line 881 was removed, " +
+            $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted.");
     }
 }

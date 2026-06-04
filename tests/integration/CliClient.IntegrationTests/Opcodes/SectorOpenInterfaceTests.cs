@@ -203,20 +203,13 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorOpenInterfaceTests
+public sealed class SectorOpenInterfaceTests : SectorIntegrationTest
 {
     private const int ExpectedOpenInterfacePayloadSize = 8;
     private const int OpenIfUIChange = 0;
     private const int OpenIfUIType = 0;
 
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorOpenInterfaceTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorOpenInterfaceTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task OpenInterfaceSlashCommand_OnSlashOpenif_ReceivesOpenInterfaceEmit()
@@ -232,112 +225,91 @@ public sealed class SectorOpenInterfaceTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "OpenIf60", shipName: "OpenIf60Ship", cts.Token);
+            firstName: "OpenIf60", shipName: "OpenIf60Ship", cts.Token));
 
+        // Build a CLIENT_CHAT with "/openif 0,0" — the single-slash
+        // prefix routes through HandleSlashCommands' single-slash
+        // block (PlayerConnection.cpp:5447); the "openif" arm at
+        // PlayerConnection.cpp:6885-6905 (case 'o' of the second
+        // switch) parses "0,0", calls OpenInterface(0, 0), which
+        // emits 0x0066 OPEN_INTERFACE with an 8-byte
+        // SetInterface{UIChange=0, UIType=0} payload. Type=Group is
+        // irrelevant for the slash branch (the slash check at
+        // PlayerConnection.cpp:4614 fires before the type-dependent
+        // branches).
+        var codec = new ClientChatCodec();
+        var chat = new ClientChatMessage(
+            GameId: session.GameId,
+            Type: ChatChannel.Group,
+            Message: "/openif 0,0");
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(
+                OpcodeId.Known.ClientChat.Value,
+                codec.EncodeOutbound(chat)),
+            cts.Token);
+
+        // Drain up to 400 frames waiting for the 0x0066 emit. The
+        // server also fires 0x001D MESSAGE_STRING (SendVaMessage at
+        // PlayerConnection.cpp:6892) but we don't depend on it —
+        // 0x0066 is sufficient for the +1 ratchet and the slash arm
+        // emits 0x0066 before SendVaMessage so we'd see it first in
+        // any case.
+        const int maxFrames = 400;
+        int seen = 0;
+        Packet? reply = null;
+        var observed = new List<string>();
+        using var drainCts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cts.Token, drainCts.Token);
         try
         {
-            // Build a CLIENT_CHAT with "/openif 0,0" — the single-slash
-            // prefix routes through HandleSlashCommands' single-slash
-            // block (PlayerConnection.cpp:5447); the "openif" arm at
-            // PlayerConnection.cpp:6885-6905 (case 'o' of the second
-            // switch) parses "0,0", calls OpenInterface(0, 0), which
-            // emits 0x0066 OPEN_INTERFACE with an 8-byte
-            // SetInterface{UIChange=0, UIType=0} payload. Type=Group is
-            // irrelevant for the slash branch (the slash check at
-            // PlayerConnection.cpp:4614 fires before the type-dependent
-            // branches).
-            var codec = new ClientChatCodec();
-            var chat = new ClientChatMessage(
-                GameId: session.GameId,
-                Type: ChatChannel.Group,
-                Message: "/openif 0,0");
-
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(
-                    OpcodeId.Known.ClientChat.Value,
-                    codec.EncodeOutbound(chat)),
-                cts.Token);
-
-            // Drain up to 400 frames waiting for the 0x0066 emit. The
-            // server also fires 0x001D MESSAGE_STRING (SendVaMessage at
-            // PlayerConnection.cpp:6892) but we don't depend on it —
-            // 0x0066 is sufficient for the +1 ratchet and the slash arm
-            // emits 0x0066 before SendVaMessage so we'd see it first in
-            // any case.
-            const int maxFrames = 400;
-            int seen = 0;
-            Packet? reply = null;
-            var observed = new List<string>();
-            using var drainCts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cts.Token, drainCts.Token);
-            try
+            while (seen++ < maxFrames)
             {
-                while (seen++ < maxFrames)
+                var frame = await session.Sector.ReceiveAsync(linked.Token);
+                Assert.NotNull(frame);
+                observed.Add($"0x{frame!.Header.Opcode:X4}/{frame.Payload.Length}");
+                if (frame.Header.Opcode == OpcodeId.Known.MessageString.Value
+                    && frame.Payload.Length > 0)
                 {
-                    var frame = await session.Sector.ReceiveAsync(linked.Token);
-                    Assert.NotNull(frame);
-                    observed.Add($"0x{frame!.Header.Opcode:X4}/{frame.Payload.Length}");
-                    if (frame.Header.Opcode == OpcodeId.Known.MessageString.Value
-                        && frame.Payload.Length > 0)
+                    try
                     {
-                        try
-                        {
-                            var s = System.Text.Encoding.ASCII.GetString(frame.Payload.Span);
-                            observed[^1] += $"[{s.Replace('\0', '.')}]";
-                        }
-                        catch { }
+                        var s = System.Text.Encoding.ASCII.GetString(frame.Payload.Span);
+                        observed[^1] += $"[{s.Replace('\0', '.')}]";
                     }
-                    if (frame.Header.Opcode == OpcodeId.Known.OpenInterface.Value)
-                    {
-                        reply = frame;
-                        break;
-                    }
+                    catch { }
+                }
+                if (frame.Header.Opcode == OpcodeId.Known.OpenInterface.Value)
+                {
+                    reply = frame;
+                    break;
                 }
             }
-            catch (OperationCanceledException) when (drainCts.IsCancellationRequested)
-            {
-                // drain timed out — emit observed list as failure diagnostic
-            }
-
-            if (reply == null)
-            {
-                throw new Xunit.Sdk.XunitException(
-                    $"No 0x0066 OPEN_INTERFACE received after {seen} frames. " +
-                    $"Observed [{observed.Count}]: {string.Join(" | ", observed)}");
-            }
-
-            Assert.NotNull(reply);
-            Assert.Equal(ExpectedOpenInterfacePayloadSize, reply!.Payload.Length);
-
-            var span = reply.Payload.Span;
-
-            // [0..4) UIChange — atoi("0") → 0.
-            int replyUIChange = BinaryPrimitives.ReadInt32LittleEndian(span.Slice(0, 4));
-            Assert.Equal(OpenIfUIChange, replyUIChange);
-
-            // [4..8) UIType — atoi("0") → 0.
-            int replyUIType = BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4));
-            Assert.Equal(OpenIfUIType, replyUIType);
         }
-        finally
+        catch (OperationCanceledException) when (drainCts.IsCancellationRequested)
         {
-            try
-            {
-                using var logoffCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                byte[] logoffPayload = new byte[8];
-                await session.Sector.SendAsync(
-                    Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload),
-                    logoffCts.Token);
-                await SectorHandshake.DrainUntilOpcode(
-                    session.Sector, OpcodeId.Known.LogoffConfirmation.Value, logoffCts.Token);
-            }
-            catch { /* best-effort logoff */ }
-
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
+            // drain timed out — emit observed list as failure diagnostic
         }
+
+        if (reply == null)
+        {
+            throw new Xunit.Sdk.XunitException(
+                $"No 0x0066 OPEN_INTERFACE received after {seen} frames. " +
+                $"Observed [{observed.Count}]: {string.Join(" | ", observed)}");
+        }
+
+        Assert.NotNull(reply);
+        Assert.Equal(ExpectedOpenInterfacePayloadSize, reply!.Payload.Length);
+
+        var span = reply.Payload.Span;
+
+        // [0..4) UIChange — atoi("0") → 0.
+        int replyUIChange = BinaryPrimitives.ReadInt32LittleEndian(span.Slice(0, 4));
+        Assert.Equal(OpenIfUIChange, replyUIChange);
+
+        // [4..8) UIType — atoi("0") → 0.
+        int replyUIType = BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4));
+        Assert.Equal(OpenIfUIType, replyUIType);
     }
 }

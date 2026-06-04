@@ -224,16 +224,9 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
-public sealed class SectorSelectTalkTreeTests
+public sealed class SectorSelectTalkTreeTests : SectorIntegrationTest
 {
-    private readonly ServerFixture _server;
-    private readonly ClientFixture _client;
-
-    public SectorSelectTalkTreeTests(ServerFixture server)
-    {
-        _server = server;
-        _client = new ClientFixture(server);
-    }
+    public SectorSelectTalkTreeTests(ServerFixture server) : base(server) { }
 
     [Fact]
     public async Task SelectTalkTree_NoCurrentNpc_ReceivesTalkTreeActionCloseSentinel()
@@ -249,78 +242,69 @@ public sealed class SectorSelectTalkTreeTests
         Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(login.Ticket));
 
-        await using var session = await SectorHandshake.EstablishAsync(
+        var session = Track(await SectorHandshake.EstablishAsync(
             _server, login.Ticket!, account.Username, slot, sectorId,
-            firstName: "Talker", shipName: "TalkerShip", cts.Token);
+            firstName: "Talker", shipName: "TalkerShip", cts.Token));
 
-        try
+        // 0x0055 SELECT_TALK_TREE — 5B canonical payload, host-LE
+        // (handler does NOT ntohl-decode):
+        //   [0..4) int32 PlayerID  = 0
+        //   [4]    char  Selection = 0
+        // Selection=0 + no open NPC dialogue (m_CurrentNPC null on
+        // fresh character) → handler walks every guard, lands in
+        // the bottom else-branch at PlayerConnection.cpp:10560 →
+        // single SendTalkTreeAction(-32) emission.
+        byte[] payload = new byte[5];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
+        payload[4] = 0;
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.SelectTalkTree.Value, payload),
+            cts.Token);
+
+        // Drain inbound until we see a 0x0056 TALK_TREE_ACTION
+        // with the expected 4-byte payload = -32. Post-handshake
+        // the server may interleave other in-sector fan-out (NPC
+        // chatter, state updates, login-stage probes etc.); a frame
+        // cap keeps a stalled pipeline from masquerading as the
+        // outer-CTS timeout.
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
         {
-            // 0x0055 SELECT_TALK_TREE — 5B canonical payload, host-LE
-            // (handler does NOT ntohl-decode):
-            //   [0..4) int32 PlayerID  = 0
-            //   [4]    char  Selection = 0
-            // Selection=0 + no open NPC dialogue (m_CurrentNPC null on
-            // fresh character) → handler walks every guard, lands in
-            // the bottom else-branch at PlayerConnection.cpp:10560 →
-            // single SendTalkTreeAction(-32) emission.
-            byte[] payload = new byte[5];
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), 0);
-            payload[4] = 0;
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
 
-            await session.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.SelectTalkTree.Value, payload),
-                cts.Token);
+            if (reply!.Header.Opcode != OpcodeId.Known.TalkTreeAction.Value)
+                continue;
 
-            // Drain inbound until we see a 0x0056 TALK_TREE_ACTION
-            // with the expected 4-byte payload = -32. Post-handshake
-            // the server may interleave other in-sector fan-out (NPC
-            // chatter, state updates, login-stage probes etc.); a frame
-            // cap keeps a stalled pipeline from masquerading as the
-            // outer-CTS timeout.
-            int framesSeen = 0;
-            const int maxFrames = 400;
-            while (framesSeen++ < maxFrames)
-            {
-                var reply = await session.Sector.ReceiveAsync(cts.Token);
-                Assert.NotNull(reply);
+            // 0x0056 wire layout (mirror of Player::SendTalkTreeAction
+            // at server/src/PlayerConnection.cpp:7762):
+            //   [0..4) int32 action  (host-LE)
+            var span = reply.Payload.Span;
 
-                if (reply!.Header.Opcode != OpcodeId.Known.TalkTreeAction.Value)
-                    continue;
+            // Payload-length assertion catches Wave 11 sizeof(long)
+            // regression that would balloon this to 8 bytes.
+            Assert.Equal(4, span.Length);
 
-                // 0x0056 wire layout (mirror of Player::SendTalkTreeAction
-                // at server/src/PlayerConnection.cpp:7762):
-                //   [0..4) int32 action  (host-LE)
-                var span = reply.Payload.Span;
+            int action = BinaryPrimitives.ReadInt32LittleEndian(span);
 
-                // Payload-length assertion catches Wave 11 sizeof(long)
-                // regression that would balloon this to 8 bytes.
-                Assert.Equal(4, span.Length);
-
-                int action = BinaryPrimitives.ReadInt32LittleEndian(span);
-
-                // -32 is the literal "close display" sentinel — see the
-                // comment at PlayerConnection.cpp:10533 ("close display").
-                // Pinning the exact value catches a regression that
-                // swapped the sentinel (e.g. 0, -1, 230) which would
-                // silently break client-side dialog dismissal.
-                Assert.Equal(-32, action);
-                return;
-            }
-
-            throw new Xunit.Sdk.XunitException(
-                $"drained {maxFrames} frames after sending 0x0055 SELECT_TALK_TREE (Selection=0) " +
-                $"without seeing 0x0056 TALK_TREE_ACTION with payload=-32. " +
-                $"Likely the server's HandleSelectTalkTree else-branch broke (line 10560-10565), " +
-                $"CheckTalkTree's m_CurrentNPC null-guard was removed, " +
-                $"the proxy default-case forwarding dropped 0x0055, " +
-                $"the dispatcher case at PlayerConnection.cpp:495 got mis-routed, " +
-                $"or SendTalkTreeAction's int32_t width-fix at line 7767 was reverted.");
+            // -32 is the literal "close display" sentinel — see the
+            // comment at PlayerConnection.cpp:10533 ("close display").
+            // Pinning the exact value catches a regression that
+            // swapped the sentinel (e.g. 0, -1, 230) which would
+            // silently break client-side dialog dismissal.
+            Assert.Equal(-32, action);
+            return;
         }
-        finally
-        {
-            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
-            catch { /* best-effort cleanup */ }
-        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"drained {maxFrames} frames after sending 0x0055 SELECT_TALK_TREE (Selection=0) " +
+            $"without seeing 0x0056 TALK_TREE_ACTION with payload=-32. " +
+            $"Likely the server's HandleSelectTalkTree else-branch broke (line 10560-10565), " +
+            $"CheckTalkTree's m_CurrentNPC null-guard was removed, " +
+            $"the proxy default-case forwarding dropped 0x0055, " +
+            $"the dispatcher case at PlayerConnection.cpp:495 got mis-routed, " +
+            $"or SendTalkTreeAction's int32_t width-fix at line 7767 was reverted.");
     }
 }
