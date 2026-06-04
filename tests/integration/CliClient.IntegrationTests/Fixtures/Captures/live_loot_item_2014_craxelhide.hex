@@ -1,0 +1,23 @@
+# 0x2014 LOOT_ITEM -- server->client, variable length, name-bearing.
+# Byte-identical structure to 0x2013 TRACTOR_ORE (the proxy/server reuse the
+# same article-create layout for mined ore and looted drops).
+#
+# Source: live Net-7 reference server 216.219.87.147:3573 (sector), cleartext
+# proxy<->server UDP leg, KillLoot2 capture frame #91 (reassembled inner
+# frame; see plans/33). Player 0x4003992A loots "Craxel Hide" from a killed
+# enemy hulk.
+#
+# Decode (matches LootItemRecord):
+#   @0  PlayerGID          0x4003992A
+#   @4  article_UID        0x00254360
+#   @8  article_effect_UID 0x0025435F
+#   @12 resource_basset    1326         (0x052E)
+#   @14 loot_tick          0x51515790
+#   @18 nameLen            11
+#   @20 name               "Craxel Hide"
+#   @31 tractor_time       4500         (0x1194)
+#   @35 tractor_speed      350.0
+#   @39 position           x,y,z floats
+2A 99 03 40 60 43 25 00 5F 43 25 00 2E 05 90 57 51 51 0B 00
+43 72 61 78 65 6C 20 48 69 64 65 94 11 00 00 00 00 AF 43 0D
+03 39 47 AA C6 7D C7 15 78 78 C5

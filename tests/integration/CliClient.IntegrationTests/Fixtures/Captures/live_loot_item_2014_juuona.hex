@@ -1,0 +1,22 @@
+# 0x2014 LOOT_ITEM -- server->client, variable length (LONGER name sample).
+#
+# Source: live Net-7 reference server 216.219.87.147:3573 (sector), cleartext
+# proxy<->server UDP leg, KillLoot2 capture frame #99 (reassembled inner
+# frame; see plans/33). Player 0x4003992A loots "Juuona Adrenal Gland".
+# Paired with the Craxel Hide fixture to pin the variable-length layout:
+# name 20 bytes instead of 11.
+#
+# Decode (matches LootItemRecord):
+#   @0  PlayerGID          0x4003992A
+#   @4  article_UID        0x00254362
+#   @8  article_effect_UID 0x00254361
+#   @12 resource_basset    1329         (0x0531)
+#   @14 loot_tick          0x51516839
+#   @18 nameLen            20
+#   @20 name               "Juuona Adrenal Gland"
+#   @40 tractor_time       4500         (0x1194)
+#   @44 tractor_speed      350.0
+#   @48 position           x,y,z floats
+2A 99 03 40 62 43 25 00 61 43 25 00 31 05 39 68 51 51 14 00
+4A 75 75 6F 6E 61 20 41 64 72 65 6E 61 6C 20 47 6C 61 6E 64
+94 11 00 00 00 00 AF 43 0D 03 39 47 AA C6 7D C7 15 78 78 C5

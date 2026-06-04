@@ -1,0 +1,22 @@
+# 0x2013 TRACTOR_ORE -- server->client, variable length (LONGER name sample).
+#
+# Source: live Net-7 reference server 216.219.87.147:3573 (sector), cleartext
+# proxy<->server UDP leg, ProspectRun capture frame #251 (reassembled inner
+# frame; see plans/33). Player 0x4000C95F tractors in "Californium Ore" mined
+# from an asteroid. Paired with the Helium fixture to pin the variable-length
+# (name-dependent) layout: same record, name 15 bytes instead of 6.
+#
+# Decode (matches TractorOreRecord):
+#   @0  PlayerGID          0x4000C95F
+#   @4  article_UID        0x002540AA
+#   @8  article_effect_UID 0x002540A9
+#   @12 resource_basset    118
+#   @14 prospect_tick      0x512F1DD8
+#   @18 nameLen            15
+#   @20 name               "Californium Ore"
+#   @35 tractor_time       5348         (0x14E4)
+#   @39 tractor_speed      350.0
+#   @43 position           x,y,z floats
+5F C9 00 40 AA 40 25 00 A9 40 25 00 76 00 D8 1D 2F 51 0F 00
+43 61 6C 69 66 6F 72 6E 69 75 6D 20 4F 72 65 E4 14 00 00 00
+00 AF 43 8B CB 3D 47 9B 29 8F C7 00 40 04 C4

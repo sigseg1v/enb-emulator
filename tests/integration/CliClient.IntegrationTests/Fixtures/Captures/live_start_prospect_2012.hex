@@ -1,0 +1,14 @@
+# 0x2012 START_PROSPECT -- server->client, 20 bytes FIXED.
+#
+# Source: live Net-7 reference server 216.219.87.147:3573 (sector), captured
+# on the cleartext proxy<->server UDP leg, ProspectRun capture frame #190
+# (reassembled inner frame; see plans/33). Player avatar GameID 0x4000C95F
+# begins prospecting a gas-cloud resource node.
+#
+# Decode (matches StartProspectRecord + server PlayerSkills.cpp:691-695):
+#   @0  PlayerGID     0x4000C95F   GameID()        -- beam source
+#   @4  AsteroidGID   0x00018802   obj->GameID()   -- STATIC node id (low band)
+#   @8  EffectUID     0x0025409D   effect_UID      -- DYNAMIC sector counter
+#   @12 ProspectTick  0x512E794B   GetNet7TickCount
+#   @16 DrainMs       1000         drain_effect_time
+5F C9 00 40 02 88 01 00 9D 40 25 00 4B 79 2E 51 E8 03 00 00

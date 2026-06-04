@@ -158,7 +158,7 @@ public sealed class SectorMvasMoveTests
             //        position toward the target. ---
             udp = new SectorUdpClient(
                 _server.SectorHost, MvasPort,
-                onInbound: world.Ingest,
+                onInbound: p => world.Ingest(p),   // Ingest now returns events (5c991f84); discard here
                 log: m => _out.WriteLine(m));
             udp.Start(cts.Token);
             _out.WriteLine($"MVAS udp up: local :{udp.LocalPort} -> {_server.SectorHost}:{MvasPort}; " +

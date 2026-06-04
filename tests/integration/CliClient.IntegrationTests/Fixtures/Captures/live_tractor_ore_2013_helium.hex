@@ -1,0 +1,21 @@
+# 0x2013 TRACTOR_ORE -- server->client, variable length, name-bearing.
+#
+# Source: live Net-7 reference server 216.219.87.147:3573 (sector), cleartext
+# proxy<->server UDP leg, ProspectRun capture frame #197 (reassembled inner
+# frame; see plans/33). Player 0x4000C95F tractors in "Helium" mined from the
+# gas cloud (the 0x2012 in live_start_prospect_2012.hex precedes it).
+#
+# Decode (matches TractorOreRecord + server PlayerSkills.cpp:766-799):
+#   @0  PlayerGID          0x4000C95F
+#   @4  article_UID        0x0025409F   GetSectorNextObjID
+#   @8  article_effect_UID 0x0025409E   GetSectorNextObjID
+#   @12 resource_basset    192          (i16)
+#   @14 prospect_tick      0x512E7D90
+#   @18 nameLen            6            (i16)
+#   @20 name               "Helium"
+#   @26 tractor_time       6418         (0x1912)
+#   @30 tractor_speed      350.0        (00 00 AF 43)
+#   @34 position           x,y,z floats
+5F C9 00 40 9F 40 25 00 9E 40 25 00 C0 00 90 7D 2E 51 06 00
+48 65 6C 69 75 6D 12 19 00 00 00 00 AF 43 25 AD 47 47 B5 0B
+89 C7 00 40 08 44
