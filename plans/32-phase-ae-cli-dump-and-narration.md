@@ -71,12 +71,27 @@ what the wire says.
   (0x001D, covers leave-group), warp progressed/ended (0x009C), loading
   sector (0x003A). Unit tests.
 - [x] **AE-W3: narrate-on/off REPL commands** + help text.
-- [ ] **AE-W4: full-field dump audit.** Sweep the structured records for
-  residual `???` gap ranges and the realistically-received opcodes still on
-  `GenericRecord`; close them. This is the open-ended half -- driven per
-  opcode as live dumps surface gaps. (Outbound-only request opcodes and the
-  6 server-never-emitted `KnownUnimplemented` opcodes are intentionally NOT
-  given inbound records -- they'd be dead code; see plan 31/AD Q2.)
+- [x] **AE-W4: full-field dump audit.** Done -- the audit shows the
+  dump already parses all fields of every frame the server actually sends:
+  - **Emit-diff is empty.** Cross-referencing every `SendOpcode(ENB_OPCODE_00xx..)`
+    literal call site in `server/` + `login-server/` (79 distinct client-wire
+    opcodes) against the 109 opcodes registered in `PacketRecordRegistry`
+    leaves ZERO server-emitted client-wire opcodes without a structured record.
+    So nothing the server emits inbound falls to the hex-only `GenericRecord`.
+  - **No record leaves fields unmarked.** Only `PacketRecord` (the base) and
+    `GenericRecord` reference the legacy non-offset `Field*`/`FieldHex*`
+    emitters; every concrete record uses the byte-marking `F*` family, so
+    `WriteGaps` reports `???` only for genuinely-variable trailing data, never
+    for a field the record simply forgot to decode.
+  - The opcodes still on `GenericRecord` are exactly the outbound-only request
+    builders the CLI emits (never receives) and the 6 server-never-emitted
+    `KnownUnimplemented` opcodes. Giving them inbound records would be dead
+    code (no emitter to exercise it) -- forbidden by the no-dead-code rule and
+    pointless per plan 31/AD Q2. They are intentionally left record-less.
+  - Conclusion: "parse all fields" holds for the realistic inbound stream
+    today. If a future live capture surfaces a variable-tail `???` in a
+    specific record, close it then against that capture -- but there is no
+    standing gap to chase speculatively.
 
 ## Rules that bind this phase
 
@@ -90,4 +105,10 @@ what the wire says.
 
 ## Status
 
-In progress -- 2026-06-04.
+Complete -- 2026-06-04. All four waves landed. Narration (W1-W3) shipped:
+scanner-contact appeared/departed + damage/warp/sector-load/system-message
+notices behind `narrate-on`/`narrate-off`, 16 new tests, 701-test suite green.
+Dump-all-fields (W4) audited to complete: the emit-diff is empty and no record
+leaves fields unmarked, so every frame the server actually sends already parses
+all its fields; the only `GenericRecord` fallbacks are outbound-only/never-
+emitted opcodes that must stay record-less to avoid dead code.
