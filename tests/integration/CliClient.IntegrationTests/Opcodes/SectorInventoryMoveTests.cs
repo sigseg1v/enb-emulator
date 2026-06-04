@@ -499,6 +499,97 @@ public sealed class SectorInventoryMoveTests
         }
     }
 
+    /// <summary>
+    /// Stack-split path survival probe. A split is a 0x0027 INVENTORY_MOVE with
+    /// <c>Num</c> &gt; 1 from one cargo slot to another; the server's CheckStack
+    /// (<c>server/src/PlayerInventory.cpp:435</c>) splits when the destination is
+    /// empty and <c>Num &lt; Source.StackCount</c>. A fresh character holds no
+    /// stack, so we cannot assert the split <em>outcome</em> here -- that needs
+    /// seeded inventory. What this DOES prove, and what no other test covers, is
+    /// that a codec-built cargo-to-cargo move with a non-trivial <c>Num</c> is
+    /// forwarded by the proxy and processed by the server's case-1 branch without
+    /// dropping the session: after sending the split move we send a FromInv=99
+    /// move and require the deterministic UNRECOGNISED reply, proving the pipe is
+    /// still live. This guards the proxy-forward + case-1 dispatch path against a
+    /// regression that only triggers on Num&gt;1 (e.g. a CheckStack that faulted
+    /// on a non-empty MoveNum against an empty source).
+    /// </summary>
+    [Fact]
+    public async Task InventoryMove_StackSplitMove_DoesNotDropSession()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        await using var session = await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Splitter", shipName: "SplitShip", cts.Token);
+
+        try
+        {
+            int gameId = session.GameId;
+
+            // Codec-built split: cargo slot 0 -> cargo slot 1, Num=3. On an empty
+            // cargo this is a no-op inside CheckStack (both slots empty: same -1
+            // ItemTemplateID, harmless), but it MUST drive the case-1 cargo path
+            // with Num>1 and not fault.
+            byte[] splitPayload = new InventoryMoveCodec().EncodeOutbound(
+                new InventoryMoveMessage(
+                    gameId, InventoryContainer.Cargo, 0,
+                    InventoryContainer.Cargo, 1, 3));
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(OpcodeId.Known.InventoryMove.Value, splitPayload),
+                cts.Token);
+
+            // Follow-up unrecognised move -- its deterministic reply proves the
+            // session survived the split move.
+            byte[] probePayload = new InventoryMoveCodec().EncodeOutbound(
+                new InventoryMoveMessage(gameId, 99, 0, 0, 0, 0));
+            await session.Sector.SendAsync(
+                Packet.ForOpcode(OpcodeId.Known.InventoryMove.Value, probePayload),
+                cts.Token);
+
+            int framesSeen = 0;
+            const int maxFrames = 400;
+            while (framesSeen++ < maxFrames)
+            {
+                var reply = await session.Sector.ReceiveAsync(cts.Token);
+                Assert.NotNull(reply);
+                if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                    continue;
+
+                var span = reply.Payload.Span;
+                if (span.Length < 4) continue;
+                int nulIdx = span[3..].IndexOf((byte)0);
+                if (nulIdx < 0) continue;
+                string body = Encoding.ASCII.GetString(span.Slice(3, nulIdx));
+                if (!body.Contains("UNRECOGNISED INVENTORY MOVE", StringComparison.Ordinal))
+                    continue;
+
+                Assert.Contains("UNRECOGNISED INVENTORY MOVE", body);
+                return;
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"drained {maxFrames} frames after a Num=3 cargo split move + a " +
+                $"FromInv=99 probe without the probe's UNRECOGNISED reply -- the " +
+                $"split move likely dropped the session or wedged the case-1 path.");
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
     [Fact]
     public async Task InventoryMove_UnrecognisedFromInv_PinsExactReplyWireShape()
     {

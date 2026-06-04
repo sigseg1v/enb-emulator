@@ -24,6 +24,11 @@ public enum InventoryContainer
     /// <summary>Vendor. As ToInv this SELLS the source item; as FromInv it BUYS
     /// the vendor-stock item into the target container.</summary>
     Vendor = 4,
+    /// <summary>Loot source: the targeted husk's loot bin. Used only as FromInv;
+    /// the server loots <c>FromSlot</c> of the currently-targeted husk
+    /// (server/src/PlayerConnection.cpp:3076, <c>LootItem</c>). The real client
+    /// sends ToInv=0, ToSlot=-1, Num=-1 with it.</summary>
+    Loot = 6,
     /// <summary>Jettison into space ("spacing" an item).</summary>
     Space = 11,
     /// <summary>Manufacture / refinery input (only valid in manufacture mode).</summary>

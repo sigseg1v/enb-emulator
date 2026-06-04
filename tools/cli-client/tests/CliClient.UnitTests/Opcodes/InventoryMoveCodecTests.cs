@@ -97,6 +97,104 @@ public sealed class InventoryMoveCodecTests
     }
 
     [Fact]
+    public void Encode_JettisonCargoSlot32_MatchesCapture_ProspectRun_dg35()
+    {
+        // ProspectRun dg #35 body: cargo slot 32 -> space (jettison), Num=1.
+        // GameID for this capture is 0x4000C95F.
+        //   40 00 C9 5F 00 00 00 01 00 00 00 20 00 00 00 0B FF FF FF FF 00 00 00 01
+        var msg = new InventoryMoveMessage(
+            0x4000C95F, InventoryContainer.Cargo, 0x20,
+            InventoryContainer.Space, -1, 1);
+
+        byte[] wire = new InventoryMoveCodec().EncodeOutbound(msg);
+
+        Assert.Equal(new byte[]
+        {
+            0x40, 0x00, 0xC9, 0x5F,   // GameID (BE)
+            0x00, 0x00, 0x00, 0x01,   // FromInv = 1 (cargo)
+            0x00, 0x00, 0x00, 0x20,   // FromSlot = 32
+            0x00, 0x00, 0x00, 0x0B,   // ToInv = 11 (space / jettison)
+            0xFF, 0xFF, 0xFF, 0xFF,   // ToSlot = -1 (first free)
+            0x00, 0x00, 0x00, 0x01,   // Num = 1
+        }, wire);
+    }
+
+    [Fact]
+    public void Encode_LootHuskSlot0_MatchesCapture_KillLoot2_dg65()
+    {
+        // KillLoot2 dg #65 body: loot the targeted husk's slot 0.
+        // The real client sends FromInv=6 (loot), ToInv=0, ToSlot=-1, Num=-1.
+        //   40 03 99 2A 00 00 00 06 00 00 00 00 00 00 00 00 FF FF FF FF FF FF FF FF
+        var msg = new InventoryMoveMessage(
+            PlayerGameId, (int)InventoryContainer.Loot, 0,
+            0, -1, -1);
+
+        byte[] wire = new InventoryMoveCodec().EncodeOutbound(msg);
+
+        Assert.Equal(new byte[]
+        {
+            0x40, 0x03, 0x99, 0x2A,   // GameID (BE)
+            0x00, 0x00, 0x00, 0x06,   // FromInv = 6 (loot)
+            0x00, 0x00, 0x00, 0x00,   // FromSlot = 0 (husk loot slot)
+            0x00, 0x00, 0x00, 0x00,   // ToInv = 0
+            0xFF, 0xFF, 0xFF, 0xFF,   // ToSlot = -1
+            0xFF, 0xFF, 0xFF, 0xFF,   // Num = -1 (loot all)
+        }, wire);
+    }
+
+    [Fact]
+    public void Encode_StackSplit_CargoToEmptyCargoSlot_PartialNum()
+    {
+        // Stack split: move Num (< full stack) from cargo slot 5 to empty cargo
+        // slot 9. Server CheckStack (server/src/PlayerInventory.cpp:435) splits
+        // when the destination is empty and MoveNum < Source.StackCount. No
+        // capture frame in the local set carries Num>1 (the captured operator
+        // never split a stack), so this pins the encoding by construction --
+        // the struct is identical to the captured frames, only the Num and
+        // slot fields vary.
+        var msg = new InventoryMoveMessage(
+            PlayerGameId, InventoryContainer.Cargo, 5,
+            InventoryContainer.Cargo, 9, 3);
+
+        byte[] wire = new InventoryMoveCodec().EncodeOutbound(msg);
+
+        Assert.Equal(new byte[]
+        {
+            0x40, 0x03, 0x99, 0x2A,
+            0x00, 0x00, 0x00, 0x01,   // FromInv = 1 (cargo)
+            0x00, 0x00, 0x00, 0x05,   // FromSlot = 5
+            0x00, 0x00, 0x00, 0x01,   // ToInv = 1 (cargo)
+            0x00, 0x00, 0x00, 0x09,   // ToSlot = 9
+            0x00, 0x00, 0x00, 0x03,   // Num = 3 (partial -> split)
+        }, wire);
+    }
+
+    [Fact]
+    public void Encode_StackCombine_CargoOntoMatchingStack_FullNum()
+    {
+        // Stack combine: move the whole stack from cargo slot 5 onto a matching
+        // stack in cargo slot 9. Server CheckStack merges (capped at MaxStack)
+        // when source and destination share ItemTemplateID/Quality/BuilderName.
+        // Same struct, distinguished only by the destination already holding the
+        // same item -- a server-state condition, not a wire-format one.
+        var msg = new InventoryMoveMessage(
+            PlayerGameId, InventoryContainer.Cargo, 5,
+            InventoryContainer.Cargo, 9, 10);
+
+        byte[] wire = new InventoryMoveCodec().EncodeOutbound(msg);
+
+        Assert.Equal(new byte[]
+        {
+            0x40, 0x03, 0x99, 0x2A,
+            0x00, 0x00, 0x00, 0x01,
+            0x00, 0x00, 0x00, 0x05,
+            0x00, 0x00, 0x00, 0x01,
+            0x00, 0x00, 0x00, 0x09,
+            0x00, 0x00, 0x00, 0x0A,   // Num = 10 (full stack -> combine)
+        }, wire);
+    }
+
+    [Fact]
     public void EncodeDecode_RoundTrips()
     {
         var codec = new InventoryMoveCodec();
