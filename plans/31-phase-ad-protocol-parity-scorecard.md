@@ -214,8 +214,19 @@ not yet captured", not "client crashes".
   fabrication can now be BUILT against a known input, but its output must be
   confirmed against the real client (CV-gate) before it ships. Do NOT ship the
   output expansion speculatively: a wrong 0x04 CREATE crashes the Win32 client
-  (CLAUDE.md "Wire format" Trap 1). The AD-66 harness is the vehicle to confirm
-  the output once built.
+  (CLAUDE.md "Wire format" Trap 1).
+  **AG correction (2026-06-04): the AD-66 harness CANNOT confirm this output.**
+  AD-66 is now DONE, but the harness observes only what OUR proxy emits, and our
+  proxy is the very thing being fixed -- it currently drop-consumes 0x2013/0x2014
+  and emits NOTHING, so there is no reference output on our stack to observe. The
+  prospect beam (AD-66) was confirmable because it is a pure 0x0b (structurally
+  safe, CV-gate only); the tractor/loot output requires a 0x04 CREATE whose
+  article wire Type is UNKNOWN for a looted weapon (0x2014) and a 0x46
+  positional-interp whose field order is a guess -- both crash-risky. The output
+  bytes ride the ENCRYPTED client<->proxy leg that no cleartext AF-5 capture
+  covers. Genuine unblock: a DECRYPTED client<->proxy capture during a real
+  tractor/loot, OR owner real-client iteration. Until then #49 stays blocked --
+  this is the safely-implementable ceiling of the parity program.
 
 - [x] **AD-1 (DONE): structured-decode `GLOBAL_ERROR 0x75`.** `GlobalErrorRecord`
   decodes the `[u32 Length LE][u32 Code BE = ntohl(index+7)][Length msg bytes,
