@@ -51,6 +51,24 @@ build-tools:
 pcap-inventory FILE:
     dotnet run --project tools/pcap-inventory -c Release -- "{{FILE}}"
 
+# Publish pcap-inventory as a self-contained, single-file Windows .exe with no
+# .NET install required, so a non-technical user can just drag a .pcapng file
+# onto it to get a <name>.inventory.txt next to it. Output:
+#   bin/pcap-inventory.exe
+# (Trimming is left OFF: the tool reflects over CliClient.Core record decoders,
+# and an over-eager trimmer would strip types it can't see are used.)
+package-pcap-inventory:
+    @echo ">>> publishing self-contained win-x64 single-file pcap-inventory.exe"
+    dotnet publish tools/pcap-inventory -c Release -r win-x64 \
+        --self-contained true \
+        -p:PublishSingleFile=true \
+        -p:IncludeNativeLibrariesForSelfExtract=true \
+        -p:EnableCompressionInSingleFile=true \
+        -o tools/pcap-inventory/bin/win-x64-publish
+    @mkdir -p bin
+    @cp tools/pcap-inventory/bin/win-x64-publish/pcap-inventory.exe bin/pcap-inventory.exe
+    @echo ">>> done. bin/pcap-inventory.exe -- drag a .pcapng onto it on Windows."
+
 # Cross-compile Net7Proxy as a Win32 PE binary (MinGW-w64). The launcher
 # spawns this under WINE next to the EnB client — see plans/23-phase-w-proxy-win32-crossbuild.md.
 # Builds OpenSSL 3 statically into proxy/third_party/openssl-mingw64 the

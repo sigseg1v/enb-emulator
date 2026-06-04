@@ -11,6 +11,21 @@ dotnet run --project tools/pcap-inventory -- <input.pcapng> [output.txt]
 
 Default output is `<input>.inventory.txt` next to the input.
 
+## Drag-and-drop on Windows (no .NET install needed)
+
+For a non-technical user, build a self-contained single-file `.exe`:
+
+```
+just package-pcap-inventory      # -> bin/pcap-inventory.exe
+```
+
+Then **drag a `.pcapng` (or `.pcap`) file onto `pcap-inventory.exe`**. It writes
+`<name>.inventory.txt` in the same folder and holds the console window open so
+you can read the summary (or any error) before it closes. The build is
+self-contained `win-x64`, so it runs on a machine with no .NET runtime
+installed. (Run from a terminal -- e.g. `pcap-inventory.exe foo.pcapng` -- and
+it does NOT pause, so it scripts cleanly too.)
+
 ## What it reads
 
 It reassembles the downstream sector UDP stream (`0x2016 PACKET_SEQUENCE` /

@@ -34,14 +34,15 @@ if (args.Length < 1 || args[0] is "-h" or "--help")
     Console.Error.WriteLine("usage: pcap-inventory <input.pcapng> [output.txt]");
     Console.Error.WriteLine("  Decodes a proxy<->server sector UDP capture into a nav/mob/resource inventory.");
     Console.Error.WriteLine("  Default output: <input>.inventory.txt (next to the input).");
-    return args.Length < 1 ? 2 : 0;
+    Console.Error.WriteLine("  Tip: on Windows you can drag a .pcapng file onto pcap-inventory.exe.");
+    return PauseOnOwnConsole(args.Length < 1 ? 2 : 0);
 }
 
 string inputPath = args[0];
 if (!File.Exists(inputPath))
 {
     Console.Error.WriteLine($"error: input not found: {inputPath}");
-    return 2;
+    return PauseOnOwnConsole(2);
 }
 string outputPath = args.Length >= 2
     ? args[1]
@@ -96,7 +97,39 @@ File.WriteAllText(outputPath, report);
 
 Console.WriteLine($"decoded {frames} frames from {datagrams} UDP datagrams across {reassemblers.Count} flow(s)");
 Console.WriteLine($"wrote {outputPath}");
-return 0;
+return PauseOnOwnConsole(0);
+
+// When this process OWNS its console (it was double-clicked or had a file
+// dragged onto it from Explorer, so the window closes the instant we return),
+// hold the window open so the user can read the result or the error. When we
+// share a console with a parent shell (run from a terminal / `just`), return
+// immediately -- a pause prompt there would be a nuisance. The discriminator is
+// GetConsoleProcessList: a fresh own-console has exactly one attached process.
+static int PauseOnOwnConsole(int exitCode)
+{
+    if (OwnsConsole())
+    {
+        Console.Error.WriteLine();
+        Console.Error.Write("Press Enter to close...");
+        Console.In.ReadLine();
+    }
+    return exitCode;
+}
+
+static bool OwnsConsole()
+{
+    if (!OperatingSystem.IsWindows() || Console.IsOutputRedirected)
+        return false;
+    try
+    {
+        var buf = new uint[2];
+        return NativeConsole.GetConsoleProcessList(buf, (uint)buf.Length) <= 1;
+    }
+    catch
+    {
+        return false; // no console attached (e.g. headless) -- never block
+    }
+}
 
 // ----------------------------------------------------------------------------
 
