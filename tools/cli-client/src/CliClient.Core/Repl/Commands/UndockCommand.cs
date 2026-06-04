@@ -135,54 +135,12 @@ public sealed class UndockCommand : ICommandHandler
             AnsiPalette.Muted("handoff -> space sector ") + AnsiPalette.Value($"{toSectorId}") +
             AnsiPalette.Muted("; re-joining...")).ConfigureAwait(false);
 
-        // The old (station) sector connection is finished: LaunchIntoSpace
-        // dropped us from that sector. Quiesce the background loops that own
-        // it and dispose it. RC4-stream position on the old socket no longer
-        // matters -- we re-join on a brand-new connection.
-        await _ctx.StopKeepaliveAsync().ConfigureAwait(false);
-        await _ctx.StopCommsAliveAsync().ConfigureAwait(false);
-        await _ctx.StopSectorDrainAsync().ConfigureAwait(false);
-
-        SectorEnterDriver.SectorEntryResult result;
-        try
-        {
-            result = await SectorEnterDriver.FollowHandoffAsync(_ctx, id, slot, toSectorId, ct)
-                .ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            await output.WriteLineAsync(AnsiPalette.Err($"handoff re-join failed: {ex.Message}")).ConfigureAwait(false);
-            return 1;
-        }
-
-        // Swap the active sector connection to the space sector and dispose
-        // the station one (detaches its hooks via the Sector setter first).
-        _ctx.Sector = result.Sector;
-        _ctx.ActiveSectorId = result.SectorId;
-        await oldSector.DisposeAsync().ConfigureAwait(false);
-
-        // Fresh sector -> fresh world model. Replay the re-join handshake
-        // frames (consumed before Sector was set, so the hooks missed them)
-        // to feed the world model and dump tail.
-        _ctx.World.Reset();
-        foreach (var f in result.HandshakeFrames)
-            _ctx.ReplayInboundFrame(f);
-
-        // Hand the new socket to the background drain + restart the keepalives
-        // (the in-space avatar now refreshes LastAccessTime the same way the
-        // post-`enter` session does).
-        _ctx.StartSectorDrain();
-        _ctx.StartKeepalive();
-        _ctx.StartCommsAlive();
-
-        await output.WriteLineAsync(
-            AnsiPalette.Ok("in space: ") +
-            AnsiPalette.Muted("sector=") + AnsiPalette.Value($"{result.SectorId}") + " " +
-            AnsiPalette.Muted("handshake-frames=") + AnsiPalette.Value($"{result.HandshakeFrames.Count}") +
-            AnsiPalette.Muted(" -- run `list` for the space objects.")).ConfigureAwait(false);
-
-        _ctx.World.Render(output, result.GameId);
-        return 0;
+        // LaunchIntoSpace dropped us from the station sector (DropPlayerFromSector,
+        // not DropPlayerFromGalaxy) and kept the player node alive, so the re-join
+        // reuses the same avatar id. Identical to `gate` (0x002C ACTION 18->19),
+        // so the follow-the-handoff sequence is shared.
+        return await HandoffFollow.CompleteAsync(
+            _ctx, output, id, slot, toSectorId, oldSector, "in space", ct).ConfigureAwait(false);
     }
 
     /// <summary>
