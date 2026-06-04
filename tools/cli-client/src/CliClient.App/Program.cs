@@ -81,6 +81,7 @@ if (args[0] is "repl" or "start")
     repl.Register(new ListCommand(sessionCtx));
     repl.Register(new CreateCommand(sessionCtx));
     repl.Register(new EnterCommand(sessionCtx));
+    repl.Register(new UndockCommand(sessionCtx));
     repl.Register(new MoveCommand(sessionCtx));
     repl.Register(new WarpCommand(sessionCtx));
     repl.Register(new ChatCommand(sessionCtx));
