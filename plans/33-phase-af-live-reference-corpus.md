@@ -73,7 +73,7 @@ The records were already correct; only the scratch note was mislabeled.
 | Opcode | Name | Layout (observed) | Status |
 |---|---|---|---|
 | 0x000B | OBJECT_TO_OBJECT_EFFECT (string form) | u16(0x0007), src@2, effectDesc@6, u16(0x0035), cstr "~02/~WEAP_0N" (N=1/2/3 = hardpoint), target, timestamp, u16 trailing -- 35B. This is PLAYER WEAPON FIRE (rockets at the enemy in the kill step), distinct from the numeric-EffectDescID form the proxy fabricates from 0x2012. Frame order proves it: 0x000B fall AFTER all mine/tractor cycles and interleave with 0x0064 damage. | `[banked]` (Z-8 dual-emitter context) |
-| 0x0064 | CLIENT_DAMAGE | 24B: float@0, float@4, u32@8, u32@12, u32@16, u32@20. In combat @16=a gameID, @20=a weapon effectDesc. SUSPECTED CLI mislabel: ClientDamageRecord calls @20 "TargetId" but it looks like a weapon effectDesc. NEEDS CLI parse + test before any change. | `[banked]` -- verify |
+| 0x0064 | CLIENT_DAMAGE | 24B: Damage@0(f), Modifier@4(f), Type@8, Inflicted@12, SourceId@16, TargetId@20 -- @16/@20 are BOTH entity GameIDs (the player's own id flips @16<->@20 by damage direction). The earlier "@20 is a weapon effectDesc" suspicion was wrong: the non-player id is just in the static 0x00018xxx band. | `[pinned]` dealt (Combat #16) + received (KillLoot2 #3) |
 | 0x000E | OBJECT_TO_OBJECT_LINKED_EFFECT | 58B projectile/munition | `[banked]` |
 | 0x008B | ATTACKER_UPDATES | 9B effect/buff state; tail matches an effectDesc | `[banked]` |
 | 0x008C | LOOT_HULK_PERMISSION | (KillLoot2) | `[banked]` |
@@ -107,9 +107,15 @@ The records were already correct; only the scratch note was mislabeled.
       (`LiveReferenceFabricationTests`, 5 fixtures, ProspectRun/KillLoot2 frames). 5/5 green.
 - [x] AF-6 Fix the pre-existing integration build break (`SectorMvasMoveTests.cs` method-group
       `onInbound: world.Ingest` broke when 5c991f84 changed `Ingest`'s return type -> wrapped in a lambda)
-- [ ] AF-7 Bank -> pin combat band (0x000B string form, 0x0064 damage, 0x000E, 0x008B) -- needs the
-      live-mining/combat harness (shares the AD-66 / #66 in-space harness)
-- [ ] AF-8 Verify/correct `ClientDamageRecord` 0x0064 @20 (weapon effectDesc vs "TargetId") -- CLI parse + test first
+- [~] AF-7 Bank -> pin combat band. 0x0064 DONE (see AF-8). 0x000B string form / 0x000E / 0x008B
+      still banked-only (decode table above); their live-render confirmation shares the AD-66 / #66 harness
+- [x] AF-8 Verify `ClientDamageRecord` 0x0064 @16/@20. **Result: NO mislabel -- record is correct.**
+      The server emitter (PlayerConnection.cpp:4563-4573) passes (source_id, target_id), both entity
+      GameIDs. Live frames prove it: the player's own GameID sits at @16 when dealing and @20 when
+      receiving, so both fields are entities flipping by direction (the non-player id is in the static
+      0x00018xxx band, which I'd misread as an "effectDesc"). Pinned both directions:
+      `live_client_damage_0064_dealt.hex` (Combat #16) + `live_client_damage_0064_received.hex`
+      (KillLoot2 #3), `LiveReferenceFabricationTests` 7/7 green. No code change.
 - [ ] AF-9 Bank -> pin vendor band (0x0054 dialog / 0x0056 / 0x006A sound) + the 0x0027 request family
 - [ ] AF-10 Bank -> pin gate-jump band (0x003A handoff, 0x0034 gate-cache, 0x0097)
 

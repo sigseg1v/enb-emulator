@@ -118,4 +118,40 @@ public sealed class LiveReferenceFabricationTests
         Assert.Contains(name, dump);
         Assert.Contains("350.0", dump);
     }
+
+    // 0x0064 CLIENT_DAMAGE. AF-8: the record's @16 SourceId / @20 TargetId
+    // labels were suspected to be mislabeled (was @20 a weapon effectDesc?).
+    // The live frames settle it: the PLAYER's own GameID (0x4003992A) sits at
+    // @16 when dealing and at @20 when receiving, so both fields are entity
+    // GameIDs flipping by direction -- exactly the server emit order
+    // (PlayerConnection.cpp:4563-4573). No effectDesc. Record is correct.
+    private const int PlayerGid = 0x4003992A;
+
+    [Theory]
+    [InlineData("live_client_damage_0064_dealt.hex",    415.0f, -16.496f,  2, 3, PlayerGid,  0x000186F5)]
+    [InlineData("live_client_damage_0064_received.hex",   4.9f,   -2.1f,   3, 1, 0x000187EC, PlayerGid)]
+    public void ClientDamage_0x0064_LiveCapture_SourceTargetAreEntities(
+        string fixture, float damage, float modifier, int type, int inflicted, int sourceId, int targetId)
+    {
+        byte[] b = HexFixture.Load(fixture);
+        Assert.Equal(24, b.Length);
+
+        Assert.Equal(damage,    BinaryPrimitives.ReadSingleLittleEndian(b.AsSpan(0)),  3);
+        Assert.Equal(modifier,  BinaryPrimitives.ReadSingleLittleEndian(b.AsSpan(4)),  3);
+        Assert.Equal(type,      BinaryPrimitives.ReadInt32LittleEndian(b.AsSpan(8)));
+        Assert.Equal(inflicted, BinaryPrimitives.ReadInt32LittleEndian(b.AsSpan(12)));
+        Assert.Equal(sourceId,  BinaryPrimitives.ReadInt32LittleEndian(b.AsSpan(16)));
+        Assert.Equal(targetId,  BinaryPrimitives.ReadInt32LittleEndian(b.AsSpan(20)));
+
+        // Exactly one of source/target is the player (the other combatant is
+        // the non-player entity) -- the invariant that proves both are entities.
+        Assert.True((sourceId == PlayerGid) ^ (targetId == PlayerGid),
+            "exactly one of SourceId/TargetId must be the player GameID");
+
+        var rec = PacketRecord.Resolve(0x0064, b);
+        Assert.IsType<ClientDamageRecord>(rec);
+        string dump = rec.DumpToString();
+        Assert.DoesNotContain("???", dump);
+        Assert.DoesNotContain("[!]", dump);
+    }
 }

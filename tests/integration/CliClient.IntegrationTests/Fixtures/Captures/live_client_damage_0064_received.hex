@@ -1,0 +1,16 @@
+# 0x0064 CLIENT_DAMAGE -- server->client, 24 bytes FIXED. Player RECEIVING damage.
+#
+# Source: live Net-7 reference server 216.219.87.147:3573 (sector), cleartext
+# proxy<->server UDP leg, KillLoot2 capture frame #3 (reassembled inner frame;
+# see plans/33). Source 0x000187EC deals 4.9 damage to player 0x4003992A.
+# Paired with the "dealt" fixture: the player GameID moves from @16 to @20,
+# proving both fields are entity GameIDs (source/target), NOT a weapon effectDesc.
+#
+# Decode (matches ClientDamageRecord):
+#   @0  Damage     4.9      (CD CC 9C 40)
+#   @4  Modifier   -2.1     (66 66 06 C0)
+#   @8  Type       3
+#   @12 Inflicted  1
+#   @16 SourceId   0x000187EC   <- the other combatant
+#   @20 TargetId   0x4003992A   <- the PLAYER
+CD CC 9C 40 66 66 06 C0 03 00 00 00 01 00 00 00 EC 87 01 00 2A 99 03 40

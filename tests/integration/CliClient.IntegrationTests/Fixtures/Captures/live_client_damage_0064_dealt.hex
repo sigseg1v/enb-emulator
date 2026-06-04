@@ -1,0 +1,15 @@
+# 0x0064 CLIENT_DAMAGE -- server->client, 24 bytes FIXED. Player DEALING damage.
+#
+# Source: live Net-7 reference server 216.219.87.147:3573 (sector), cleartext
+# proxy<->server UDP leg, Combat capture frame #16 (reassembled inner frame;
+# see plans/33). Player 0x4003992A deals 415 damage to target 0x000186F5.
+#
+# Decode (matches ClientDamageRecord + server PlayerConnection.cpp:4563-4573,
+# emit order damage,modifier,type,inflicted,source_id,target_id):
+#   @0  Damage     415.0    (00 80 CF 43)
+#   @4  Modifier   -16.496  (D0 F7 83 C1)
+#   @8  Type       2
+#   @12 Inflicted  3
+#   @16 SourceId   0x4003992A   <- the PLAYER (proves @16 is an entity, not an effect)
+#   @20 TargetId   0x000186F5   <- the other combatant (static 0x00018xxx band)
+00 80 CF 43 D0 F7 83 C1 02 00 00 00 03 00 00 00 2A 99 03 40 F5 86 01 00
