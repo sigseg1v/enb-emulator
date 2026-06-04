@@ -202,8 +202,28 @@ remaining Phase-AA fabrication implementable without crashing the real client.
       server change, no server-log errors. Route confirmed against the live DB
       (sector_objects 1015 gate 533 gate_to 1060; 1060 type-38 = 20 nodes).
       Real-client gate-send (does client.exe emit 18->19?) still tracked as
-      `plans/29` CV-06. REMAINING for the full live mining round-trip: run the
-      prospect/mine chain in 1060 and byte-pin the fabricated 0x000B beam.
+      `plans/29` CV-06.
+- [ ] **Live mining chain -- remaining, with two real blockers found (not yet
+      done).** Tracing the server: mining is triggered by **0x0027
+      INVENTORY_MOVE** with `FromInv==18` ("From Mining Window") and
+      `FromSlot`=the asteroid's resource slot, target = an OT_RESOURCE
+      (PlayerConnection.cpp:3210-3224 -> `MineResource`). `MineResource`
+      (PlayerSkills.cpp:625) then `SendToRangeList(ENB_OPCODE_2012_START_PROSPECT,
+      ...)` (the 20-byte compact our CLI already decodes as `StartProspectRecord`).
+      `CheckMiningConditions` (PlayerSkills.cpp:884) gates it on: target is
+      OT_RESOURCE with a non-empty slot; **`SKILL_PROSPECT` level > 0**; ship
+      NOT moving; inventory room; reactor energy >= per-ore; **within
+      `ProspectRange()` of the asteroid**; not incapacitated; `m_Gating` false.
+      BLOCKER 1: a fresh Terran Warrior (10151 start) has NO prospecting skill,
+      so the live harness needs a prospecting-capable character (Explorer /
+      Tradesman) or a skill grant + a mining beam, then target-set + move into
+      range + stay stationary before the 0x0027 sub-18. BLOCKER 2: the CLI
+      integration harness talks DIRECTLY to the sector server, so it only sees
+      the server's compact `0x2012 START_PROSPECT`, NOT the proxy-fabricated
+      `0x000B` beam. Byte-pinning the fabricated beam (the actual §3 deliverable)
+      requires a PROXY-ROUTED harness; the direct-to-server suite can pin
+      0x2012 but cannot observe the 0x000B fabrication. So the live mining
+      round-trip is two distinct pieces of remaining work, not a quick add-on.
 - [ ] When the CLI lands in space: drive the prospect/mine path, drain the
       client-leg frames, assert the `0x000B` arrives with the fields above, and
       assert byte-equality against `FabricateBeamBody` from the spec test (so
