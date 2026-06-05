@@ -188,7 +188,7 @@ bool UDPClient::OpenFixedPort(short port, long ip_addr)
     short peer_port = (port == 0) ? (short) UDP_MASTER_SERVER_PORT : port;
 
     m_Listen_Socket = ::socket(AF_INET, SOCK_DGRAM, 0);
-    if (m_Listen_Socket < 0)
+    if (m_Listen_Socket == INVALID_SOCKET)
     {
         LogMessage("UDPClient: socket() failed: %s\n", strerror(errno));
         return false;
@@ -207,7 +207,7 @@ bool UDPClient::OpenFixedPort(short port, long ip_addr)
     {
         LogMessage("UDPClient: bind() failed: %s\n", strerror(errno));
         ::close(m_Listen_Socket);
-        m_Listen_Socket = -1;
+        m_Listen_Socket = INVALID_SOCKET;
         return false;
     }
 
@@ -290,7 +290,7 @@ UDPClient::UDPClient(short port, short connection_type, long ip_addr,
     m_PacketResendTimer    = 0;
     m_KeepaliveStarted     = false;
     m_KeepaliveSeq         = 0;
-    m_Listen_Socket        = -1;
+    m_Listen_Socket        = INVALID_SOCKET;
     m_recv_thread_running  = false;
 
     memset(&m_Server_handoff, 0, sizeof(m_Server_handoff));
@@ -325,10 +325,10 @@ UDPClient::UDPClient(short port, short connection_type, long ip_addr,
 UDPClient::~UDPClient()
 {
     m_recv_thread_running = false;
-    if (m_Listen_Socket >= 0)
+    if (m_Listen_Socket != INVALID_SOCKET)
     {
         ::close(m_Listen_Socket);
-        m_Listen_Socket = -1;
+        m_Listen_Socket = INVALID_SOCKET;
     }
 }
 
@@ -350,7 +350,7 @@ void UDPClient::RecvThread()
             // recv() returned -1 (with errno set by SIGINT / EINTR /
             // close()) or 0 (shouldn't happen on UDP). Bail if the
             // socket has been closed under us.
-            if (m_Listen_Socket < 0) break;
+            if (m_Listen_Socket == INVALID_SOCKET) break;
             continue;
         }
 
@@ -443,10 +443,10 @@ void UDPClient::RecvThread()
         }
     }
 
-    if (m_Listen_Socket >= 0)
+    if (m_Listen_Socket != INVALID_SOCKET)
     {
         ::close(m_Listen_Socket);
-        m_Listen_Socket = -1;
+        m_Listen_Socket = INVALID_SOCKET;
     }
 }
 
@@ -542,7 +542,7 @@ void UDPClient::ForwardClientOpcode(short opcode, short bytes, char *packet)
 
 void UDPClient::UDP_Send(short port, const char *buffer, int bufferLen)
 {
-    if (m_Listen_Socket < 0) return;
+    if (m_Listen_Socket == INVALID_SOCKET) return;
 
     ssize_t sent;
     if (port == 0)
