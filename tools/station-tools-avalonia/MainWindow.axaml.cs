@@ -724,12 +724,28 @@ namespace StationToolsAvalonia
         {
             try
             {
-                var psi = new ProcessStartInfo("dotnet", "run --project ../talktreeeditor-avalonia/")
+                // The editor reads args[0] as the initial conversation XML
+                // (talktreeeditor-avalonia/Program.cs). Hand it the selected
+                // NPC's talk_tree_handle so it opens populated instead of
+                // blank. Use ArgumentList (not a single string) so the XML's
+                // quotes/angle-brackets are passed verbatim; the `--`
+                // separates `dotnet run` flags from the program's own args.
+                var psi = new ProcessStartInfo("dotnet")
                 {
                     UseShellExecute = false
                 };
+                psi.ArgumentList.Add("run");
+                psi.ArgumentList.Add("--project");
+                psi.ArgumentList.Add("../talktreeeditor-avalonia/");
+                if (!string.IsNullOrEmpty(m_TalkTreeData))
+                {
+                    psi.ArgumentList.Add("--");
+                    psi.ArgumentList.Add(m_TalkTreeData);
+                }
                 Process.Start(psi);
-                c_Status.Text = "launched talktreeeditor-avalonia";
+                c_Status.Text = string.IsNullOrEmpty(m_TalkTreeData)
+                    ? "launched talktreeeditor-avalonia (no talk tree on this NPC)"
+                    : "launched talktreeeditor-avalonia with this NPC's talk tree";
             }
             catch (Exception ex) { Error("Launch failed: " + ex.Message); }
         }
