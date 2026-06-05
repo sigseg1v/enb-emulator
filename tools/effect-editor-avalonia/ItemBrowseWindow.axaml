@@ -21,7 +21,7 @@
 
     <!-- Grid -->
     <DataGrid Grid.Column="2" Grid.Row="0" x:Name="c_Grid"
-              AutoGenerateColumns="True" IsReadOnly="True"
+ IsReadOnly="True"
               SelectionMode="Single" GridLinesVisibility="All" />
 
     <!-- Description below grid -->

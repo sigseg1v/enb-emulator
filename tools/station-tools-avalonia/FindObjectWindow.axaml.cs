@@ -35,7 +35,7 @@ namespace StationToolsAvalonia
                 "INNER JOIN \"sectors\" ON \"sector_objects\".\"sector_id\" = \"sectors\".\"sector_id\"";
 
             var dt = DB.Instance.executeQuery(sql, new string[0], new string[0]);
-            c_StationList.ItemsSource = dt?.DefaultView;
+            CommonTools.Gui.DataGridBinder.Bind(c_StationList, dt);
         }
 
         public int GetSectorID() => m_SectorID;

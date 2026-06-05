@@ -43,7 +43,7 @@ namespace EffectEditorAvalonia
                 var dt = await Task.Run(() => DB.Instance.executeQuery(
                     "SELECT \"EffectID\",\"Description\",\"Tooltip\" FROM item_effect_base",
                     null, null));
-                c_Grid.ItemsSource = dt?.DefaultView;
+                CommonTools.Gui.DataGridBinder.Bind(c_Grid, dt);
             }
             catch (Exception ex)
             {

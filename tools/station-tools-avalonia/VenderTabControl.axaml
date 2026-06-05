@@ -59,7 +59,7 @@
     <!-- RIGHT COLUMN: items grid + actions -->
     <Grid Grid.Column="1" RowDefinitions="*,Auto" Margin="6,0,0,0">
       <DataGrid Grid.Row="0" Name="c_ItemLists"
-                AutoGenerateColumns="True" IsReadOnly="True"
+ IsReadOnly="True"
                 SelectionMode="Extended"/>
       <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,6,0,0">
         <Button Name="c_EditItem" Content="Edit Item"     Click="OnEditItem"   Margin="2"/>

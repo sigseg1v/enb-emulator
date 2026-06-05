@@ -13,7 +13,7 @@
       <Button x:Name="c_OkBtn"     Width="100" Content="OK"        Click="OnOk" />
       <Button x:Name="c_CancelBtn" Width="100" Content="Cancel"    Click="OnCancel" />
     </StackPanel>
-    <DataGrid x:Name="c_Grid" AutoGenerateColumns="True"
+    <DataGrid x:Name="c_Grid"
               IsReadOnly="True" GridLinesVisibility="All"
               SelectionMode="Single" />
   </DockPanel>

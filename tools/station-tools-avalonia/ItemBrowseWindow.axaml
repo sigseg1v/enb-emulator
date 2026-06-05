@@ -15,7 +15,7 @@
     </Grid>
 
     <DataGrid Grid.Row="1" Name="c_ItemList" Margin="10,0"
-              AutoGenerateColumns="True" CanUserResizeColumns="True"
+ CanUserResizeColumns="True"
               IsReadOnly="True" SelectionMode="Extended"
               SelectionChanged="OnSelectionChanged"/>
 

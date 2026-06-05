@@ -5,7 +5,7 @@
         Title="Find Object">
   <Grid RowDefinitions="*,Auto">
     <DataGrid Grid.Row="0" Name="c_StationList" Margin="10"
-              AutoGenerateColumns="True" CanUserResizeColumns="True"
+ CanUserResizeColumns="True"
               IsReadOnly="True" SelectionMode="Single"/>
     <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="10">
       <Button Name="c_Ok"     Content="OK"     Click="OnOk"     Margin="0,0,8,0"/>

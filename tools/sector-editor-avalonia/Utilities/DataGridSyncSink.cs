@@ -22,7 +22,7 @@ namespace SectorEditorAvalonia.Utilities
         {
             _grid = grid;
             _table = table;
-            _grid.ItemsSource = _table.DefaultView;
+            CommonTools.Gui.DataGridBinder.Bind(_grid, _table);
         }
 
         public void OnCellChanged(string columnName, object newValue)

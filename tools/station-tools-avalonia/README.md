@@ -33,7 +33,7 @@ The Venders tab is an embedded `VenderTabControl` UserControl rather than a sepa
 | MySql.Data 6.x reference | replaced by `MySqlConnector` (via `commontools-avalonia`) |
 | `WinForms.MessageBox.Show` | `MsBox.Avalonia.MessageBoxManager.GetMessageBoxStandard` |
 | `TreeView` (System.Windows.Forms) with icon images per node | `Avalonia.Controls.TreeView` with text labels (icon GIFs/ICOs dropped — see below) |
-| `DataGridView` (vender inventory) | Avalonia `DataGrid` with `AutoGenerateColumns=True` bound to `DataTable.DefaultView` |
+| `DataGridView` (vender inventory) | Avalonia `DataGrid` populated via `CommonTools.Gui.DataGridBinder.Bind` (explicit `[col]`-bound columns; Avalonia's DataGrid has no native DataTable/DataView support) |
 | `DisplayStation` preview composite (rendered station thumbnail in main editor) | dropped — visual-only, no functional impact |
 | Drag-drop of `.bin` avatar files onto the NPC tab | dropped — replaced by an "Add Avatar..." button that opens `StorageProvider.OpenFilePickerAsync` |
 | Runtime icon loading from `/ico/*.gif|.ico` | dropped — TreeView nodes use plain text labels |

@@ -29,7 +29,7 @@ A 5-window editor:
 | `SQLDataBase.cs` (private MySQL wrapper, sprintf-style SQL) | dropped — uses `commontools-avalonia`'s parameterised `DB.Instance.executeQuery/executeCommand` |
 | MySql.Data 6.x reference | replaced by `MySqlConnector` (via `commontools-avalonia`) |
 | `WinForms.MessageBox.Show` | `MsBox.Avalonia.MessageBoxManager.GetMessageBoxStandard` |
-| `DataGridView` (effect/item search) | Avalonia `DataGrid` with `AutoGenerateColumns=True` |
+| `DataGridView` (effect/item search) | Avalonia `DataGrid` populated via `CommonTools.Gui.DataGridBinder.Bind` (explicit `[col]`-bound columns; Avalonia's DataGrid has no native DataTable/DataView support) |
 | `Form1`'s custom version check against `versions` table | dropped — the editor was a Windows-only desktop binary with a `versions` table that no current deployment uses |
 
 ## What this port adds

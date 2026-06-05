@@ -131,7 +131,7 @@ namespace StationToolsAvalonia
             }
             dt.Columns.Remove("Description");
 
-            c_ItemList.ItemsSource = dt.DefaultView;
+            CommonTools.Gui.DataGridBinder.Bind(c_ItemList, dt);
             c_RowCount.Text = "Number of Results: " + dt.Rows.Count;
         }
 

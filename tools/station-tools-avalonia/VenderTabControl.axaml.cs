@@ -266,7 +266,7 @@ namespace StationToolsAvalonia
                 "WHERE  \"groupid\" = @g",
                 new[] { "@g" }, new[] { VenderGroupID.ToString() });
 
-            c_ItemLists.ItemsSource = _itemsTable?.DefaultView;
+            CommonTools.Gui.DataGridBinder.Bind(c_ItemLists, _itemsTable);
         }
 
         void OnReloadGroup(object sender, RoutedEventArgs e)

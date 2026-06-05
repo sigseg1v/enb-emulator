@@ -43,22 +43,20 @@ namespace SectorEditorAvalonia.Dialogs
             // slow or unreachable (AC.4).
             _leftGrid = new DataGrid
             {
-                ItemsSource = _mobs.getMobTable().DefaultView,
                 SelectionMode = DataGridSelectionMode.Single,
                 IsReadOnly = true,
-                AutoGenerateColumns = true,
             };
+            CommonTools.Gui.DataGridBinder.Bind(_leftGrid, _mobs.getMobTable());
 
             _rightTable = new DataTable();
             _rightTable.Columns.Add("id", typeof(string));
             _rightTable.Columns.Add("name", typeof(string));
             _rightGrid = new DataGrid
             {
-                ItemsSource = _rightTable.DefaultView,
                 SelectionMode = DataGridSelectionMode.Single,
                 IsReadOnly = true,
-                AutoGenerateColumns = true,
             };
+            CommonTools.Gui.DataGridBinder.Bind(_rightGrid, _rightTable);
 
             Opened += async (_, _) => await LoadAsync();
 

@@ -172,7 +172,19 @@ namespace CommonTools.Database
                 openConnection();
 
                 dataAdapter = new NpgsqlDataAdapter(query, m_connection);
-                dataAdapter.MissingSchemaAction = MissingSchemaAction.AddWithKey;
+                // Add columns only -- do NOT pull primary-key / NOT-NULL info
+                // from the schema. AddWithKey would copy each source column's
+                // NOT-NULL + PK constraints onto the DataTable, then enforce
+                // them on EnableConstraints(). That breaks every multi-table
+                // LEFT JOIN here (e.g. the sector_objects + 6-subtable read):
+                // an unmatched right side yields NULLs in columns the subtable
+                // declares NOT NULL, so EnableConstraints throws "one or more
+                // rows contain values violating non-null... constraints" even
+                // though the query is correct. Nothing in these editors drives
+                // DataAdapter.Update() or reads .PrimaryKey/.Constraints (all
+                // writes go through executeCommand with hand-built SQL), so the
+                // keys AddWithKey fetched were pure liability.
+                dataAdapter.MissingSchemaAction = MissingSchemaAction.Add;
 
                 if (parameter != null && parameter.Length != 0)
                 {

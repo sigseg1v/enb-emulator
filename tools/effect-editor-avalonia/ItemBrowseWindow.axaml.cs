@@ -99,7 +99,7 @@ namespace EffectEditorAvalonia
                 return;
             }
 
-            c_Grid.ItemsSource = dt?.DefaultView;
+            CommonTools.Gui.DataGridBinder.Bind(c_Grid, dt);
             c_RowCount.Text = "Results: " + (dt?.Rows.Count ?? 0);
         }
 

@@ -1,4 +1,7 @@
 using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
 using System.Reflection;
 using System.Threading;
 using Avalonia;
@@ -61,6 +64,12 @@ namespace CommonToolsAvaloniaSmoke
 
                 int loginErrors = LiveLoginChecks();
                 if (loginErrors != 0) return 3;
+
+                int gridErrors = DataGridBinderChecks();
+                if (gridErrors != 0) return 4;
+
+                int queryErrors = LiveQueryChecks();
+                if (queryErrors != 0) return 5;
 
                 Console.WriteLine("smoke OK: all 4 commontools-avalonia windows instantiated");
                 return 0;
@@ -165,6 +174,130 @@ namespace CommonToolsAvaloniaSmoke
                 login.Close();
                 Pump(null, 500);
             }
+
+            return errors;
+        }
+
+        // Deterministic (no DB) check of DataGridBinder. Regression guard for the
+        // "every cell says System.Data.DataView" bug: binding a DataGrid to a
+        // DataTable.DefaultView with AutoGenerateColumns=true makes Avalonia
+        // reflect the CLR properties of DataRowView (DataView, Item, Item,
+        // RowVersion) instead of the data columns. DataGridBinder.Bind must
+        // produce one column per DATA column, bound to the "[name]" indexer, and
+        // never a DataRowView property column.
+        static int DataGridBinderChecks()
+        {
+            int errors = 0;
+            void Check(bool cond, string what)
+            {
+                if (cond) Console.WriteLine("grid     OK: " + what);
+                else { Console.Error.WriteLine("grid   FAIL: " + what); errors++; }
+            }
+
+            var table = new DataTable();
+            table.Columns.Add("id", typeof(int));
+            table.Columns.Add("name", typeof(string));
+            var r = table.NewRow(); r["id"] = 7; r["name"] = "Skeletor"; table.Rows.Add(r);
+
+            var grid = new DataGrid();
+            DataGridBinder.Bind(grid, table);
+
+            Check(grid.AutoGenerateColumns == false, "AutoGenerateColumns forced off");
+            Check(grid.Columns.Count == 2, $"one column per data column (got {grid.Columns.Count})");
+
+            var headers = grid.Columns.Select(c => c.Header?.ToString()).ToList();
+            Check(headers.SequenceEqual(new[] { "id", "name" }),
+                  "headers are the data columns [" + string.Join(",", headers) + "]");
+            // The bug's fingerprint: a DataRowView property leaking in as a column.
+            Check(!headers.Contains("DataView") && !headers.Contains("RowVersion"),
+                  "no DataRowView property columns leaked in");
+
+            var b0 = (grid.Columns[0] as DataGridTextColumn)?.Binding as Avalonia.Data.Binding;
+            Check(b0 != null && b0.Path == "[id]", "column 0 bound to the [id] indexer (path=" + b0?.Path + ")");
+
+            // Bind(null) clears columns + source without throwing.
+            DataGridBinder.Bind(grid, null);
+            Check(grid.Columns.Count == 0 && grid.ItemsSource == null, "Bind(null) clears the grid");
+
+            return errors;
+        }
+
+        // Live, DB-gated check of the multi-table LEFT JOIN read path. The exact
+        // query SectorObjectsSql issues when a sector is clicked (sector_objects +
+        // 6 subtables) used to fail with "Failed to enable constraints..." because
+        // executeQuery filled with MissingSchemaAction.AddWithKey -- which copies
+        // the source NOT-NULL/PK constraints onto the DataTable, then enforces
+        // them, and the LEFT JOINs produce NULLs in unmatched subtable key
+        // columns. The fix drops back to MissingSchemaAction.Add: a DataTable with
+        // no constraints cannot raise EnableConstraints at all, so that exception
+        // class is eliminated by construction. This sweeps EVERY populated sector
+        // and asserts each fills -- the editor's real read path, end to end.
+        //
+        // Skips cleanly (returns 0) when the container is unreachable.
+        static int LiveQueryChecks()
+        {
+            string host = Environment.GetEnvironmentVariable("ENB_PG_HOST") ?? "localhost";
+            int port = int.TryParse(Environment.GetEnvironmentVariable("ENB_PG_PORT"), out var p) ? p : 5434;
+            string user = Environment.GetEnvironmentVariable("ENB_PG_USER") ?? "net7";
+            string pass = Environment.GetEnvironmentVariable("ENB_PG_PASS") ?? "net7";
+
+            LoginData.Host = host; LoginData.Port = port;
+            LoginData.User = user; LoginData.Pass = pass;
+
+            try { DB.Instance.openConnection(); DB.Instance.closeConnection(); }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"query  SKIP: net7 not reachable on {host}:{port} ({ex.Message})");
+                return 0;
+            }
+
+            int errors = 0;
+            void Check(bool cond, string what)
+            {
+                if (cond) Console.WriteLine("query    OK: " + what);
+                else { Console.Error.WriteLine("query  FAIL: " + what); errors++; }
+            }
+
+            var sids = new List<string>();
+            try
+            {
+                var pick = DB.Instance.executeQuery(
+                    "SELECT DISTINCT sector_id FROM sector_objects ORDER BY sector_id", null, null);
+                foreach (DataRow row in pick.Rows) sids.Add(row["sector_id"].ToString());
+            }
+            catch (Exception ex)
+            {
+                Check(false, "enumerate populated sectors (" + ex.Message + ")");
+                return errors;
+            }
+
+            if (sids.Count == 0)
+            {
+                Console.WriteLine("query  SKIP: no rows in sector_objects to join against");
+                return 0;
+            }
+
+            string soQuery =
+                "SELECT * FROM sector_objects" +
+                " left join sector_nav_points on sector_objects.sector_object_id = sector_nav_points.sector_object_id" +
+                " left join sector_objects_harvestable on sector_objects.sector_object_id = sector_objects_harvestable.resource_id" +
+                " left join sector_objects_planets on sector_objects.sector_object_id = sector_objects_planets.planet_id" +
+                " left join sector_objects_starbases on sector_objects.sector_object_id = sector_objects_starbases.starbase_id" +
+                " left join sector_objects_stargates on sector_objects.sector_object_id = sector_objects_stargates.stargate_id" +
+                " left join sector_objects_mob on sector_objects.sector_object_id = sector_objects_mob.mob_id" +
+                " where sector_objects.sector_id=@sid order by sector_objects.type;";
+
+            int ok = 0;
+            string firstFail = null;
+            foreach (string sid in sids)
+            {
+                try { DB.Instance.executeQuery(soQuery, new[] { "sid" }, new[] { sid }); ok++; }
+                catch (Exception ex) { if (firstFail == null) firstFail = $"sector {sid}: {ex.Message}"; }
+            }
+            Check(firstFail == null,
+                  firstFail == null
+                      ? $"sector_objects 6-way LEFT JOIN fills for ALL {sids.Count} populated sectors"
+                      : $"sector_objects 6-way LEFT JOIN threw ({ok}/{sids.Count} ok); first -- {firstFail}");
 
             return errors;
         }

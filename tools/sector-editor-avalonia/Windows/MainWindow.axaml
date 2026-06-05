@@ -45,7 +45,7 @@
           <Border x:Name="c_UniverseHost" Background="Black" />
         </TabItem>
         <TabItem Header="Objects">
-          <DataGrid x:Name="c_ObjectsGrid" AutoGenerateColumns="True" IsReadOnly="False" />
+          <DataGrid x:Name="c_ObjectsGrid" IsReadOnly="False" />
         </TabItem>
       </TabControl>
       <GridSplitter Grid.Column="3" Background="DarkGray" />

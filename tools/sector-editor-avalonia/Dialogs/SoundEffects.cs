@@ -34,11 +34,10 @@ namespace SectorEditorAvalonia.Dialogs
 
             _grid = new DataGrid
             {
-                ItemsSource = effects.DefaultView,
                 SelectionMode = DataGridSelectionMode.Single,
                 IsReadOnly = true,
-                AutoGenerateColumns = true,
             };
+            CommonTools.Gui.DataGridBinder.Bind(_grid, effects);
 
             var ok = new Button { Content = "OK", Width = 80 };
             ok.Click += (_, _) =>

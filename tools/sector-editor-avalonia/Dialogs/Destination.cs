@@ -42,7 +42,6 @@ namespace SectorEditorAvalonia.Dialogs
             {
                 SelectionMode = DataGridSelectionMode.Single,
                 IsReadOnly = true,
-                AutoGenerateColumns = true,
             };
 
             var ok = new Button { Content = "OK", Width = 80 };
@@ -89,7 +88,7 @@ namespace SectorEditorAvalonia.Dialogs
             };
             if (string.IsNullOrEmpty(query)) return;
             DataTable t = Database.executeQuery(Database.DatabaseName.net7, query);
-            _grid.ItemsSource = t.DefaultView;
+            CommonTools.Gui.DataGridBinder.Bind(_grid, t);
         }
     }
 }
