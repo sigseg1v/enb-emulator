@@ -706,12 +706,15 @@ void Player::MineResource(long slot)
 void Player::PullOreFromResource(Object *obj, long stack_val, long slot, long effect_UID, long incomplete)
 {
     ItemBase * resource = obj->GetItem(slot);
-    
+
     if (!resource)
     {
         LogMessage("*** mining an empty roid - how did this happen?\n");
         return;
     }
+
+    LogMessage("[MINEDIAG] PullOreFromResource: obj='%s' objType=%d slot=%d resource='%s' templateID=%d stack=%d\n",
+               obj->Name(), obj->ObjectType(), slot, resource->Name(), resource->ItemTemplateID(), stack_val);
     
     //see if an ore is currently being pulled, if so, force the issue
     if (m_ProspectTractorNode.player_id != 0)
@@ -801,20 +804,26 @@ void Player::UseTractorBeam(Object *obj, short stack_val, ItemBase * contents, l
 }
 
 void Player::TakeOreOnboard(Object *obj, long article_UID, bool mined)
-{	
+{
     //Finished prospecting, take the ore on board
     ItemBase * resource = m_FloatingOre_contents;
     short stack = m_FloatingOre_stack;
-    
+
     if (stack < 1 || stack > 800)
     {
+        LogMessage("[MINEDIAG] TakeOreOnboard bail: bad stack=%d (obj=%s type=%d)\n",
+                   stack, obj ? obj->Name() : "<null>", obj ? obj->ObjectType() : -1);
         return;
     }
-    
+
     if (resource == 0 || obj == 0)
     {
+        LogMessage("[MINEDIAG] TakeOreOnboard bail: resource=%p obj=%p\n", (void*)resource, (void*)obj);
         return; // something's not right.
     }
+
+    LogMessage("[MINEDIAG] TakeOreOnboard: obj='%s' objType=%d resource='%s' templateID=%d stack=%d\n",
+               obj->Name(), obj->ObjectType(), resource->Name(), resource->ItemTemplateID(), stack);
     
     if (obj->ResourceRemains() == 0.0f)
     {
@@ -839,7 +848,11 @@ void Player::TakeOreOnboard(Object *obj, long article_UID, bool mined)
     myItem.StackCount = stack;
     myItem.TradeStack = stack;
     
-    CargoAddItem(&myItem);
+    int cargoRc = CargoAddItem(&myItem);
+    if (cargoRc != 0)
+        LogMessage("[MINEDIAG] CargoAddItem FAILED rc=%d for templateID=%d ('%s') stack=%d "
+                   "(rc -1=templateID<0, -2=no ItemBase, -3=hold full)\n",
+                   cargoRc, myItem.ItemTemplateID, resource->Name(), stack);
     SendAuxShip();
 
     //Check for mission stage
