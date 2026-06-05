@@ -115,7 +115,10 @@ namespace LaunchNet7Avalonia
             }
             catch (Exception ex)
             {
-                AppendLog("Config load failed: " + ex.Message);
+                // A malformed cfg used to fail silently here, leaving an empty
+                // server list with no on-screen explanation. Surface it.
+                AppendLog($"Config load FAILED ({cfgPath}): " + ex.Message);
+                c_Status.Text = $"Config load failed: {ex.Message}";
                 _config = new LauncherConfig();
             }
 

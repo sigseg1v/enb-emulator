@@ -153,7 +153,8 @@ namespace LaunchNet7Avalonia
             // process CWD. Double-clicking in Explorer happens to set CWD to
             // the exe folder, but launching from a shell elsewhere or via a
             // shortcut with a different "Start in" would otherwise break the
-            // spawn. AppContext.BaseDirectory is always the exe's folder.
+            // spawn. AppContext.BaseDirectory is the exe's folder (verified to
+            // hold even for the single-file self-extracting package build).
             var dir = Path.Combine(AppContext.BaseDirectory, "bin");
             var exe = Path.Combine(dir, "Net7Proxy.exe");
             var info = WinExe(dir, exe, $"/ADDRESS:{addrs[0]}");
