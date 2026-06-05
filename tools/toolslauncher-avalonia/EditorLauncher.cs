@@ -51,15 +51,24 @@ namespace ToolsLauncherAvalonia
             }
         }
 
-        // Launches LaunchNet7Avalonia from settings.LaunchNet7Path, or
-        // falls back to the sibling launchnet7-avalonia project. On
-        // non-Windows the in-tree `dotnet run` works directly; on Windows
-        // a published binary in LaunchNet7Path is preferred if set.
+        // Launches the game client the SAME way `just play-local` does:
+        // through that recipe, in a terminal. This is deliberate -- a bare
+        // `dotnet run` of launchnet7-avalonia only spawns client.exe under
+        // WINE; it skips bringing up the docker stack (postgres + server +
+        // login + proxy) AND skips play-local's build-if-stale guard. The
+        // client then connects to a stale or absent proxy/server and crashes
+        // (task #75). Routing through `just play-local` gives the exact same
+        // build-if-stale + stack bring-up that the user confirmed works.
+        //
+        // An explicitly-configured published-binary directory
+        // (settings.LaunchNet7Path) still wins: that is a standalone deploy
+        // pointing at a real external server, where there is no dev docker
+        // stack to build and the recipe does not apply.
         public static (bool Ok, string Detail) LaunchNet7(Settings settings)
         {
             if (!string.IsNullOrWhiteSpace(settings.LaunchNet7Path))
             {
-                // User pointed at an explicit binary directory.
+                // User pointed at an explicit binary directory (standalone deploy).
                 string exe = Path.Combine(settings.LaunchNet7Path, "LaunchNet7Avalonia");
                 if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) exe += ".exe";
                 if (File.Exists(exe))
@@ -67,10 +76,23 @@ namespace ToolsLauncherAvalonia
                     try { Process.Start(new ProcessStartInfo { FileName = exe, WorkingDirectory = settings.LaunchNet7Path, UseShellExecute = false }); return (true, exe); }
                     catch (Exception ex) { return (false, ex.Message); }
                 }
-                // Fall through to in-tree fallback if the configured path
-                // is stale.
+                // Fall through to the dev-stack path if the configured path is stale.
             }
-            return Launch("launchnet7-avalonia", settings);
+
+            string repoRoot = ResolveRepoRoot(settings);
+            if (repoRoot == null)
+            {
+                // No repo / justfile -- can't bring up the dev stack. Fall
+                // back to the in-tree launcher, but make clear the stack must
+                // already be current or the client will hit a stale proxy.
+                var (ok, detail) = Launch("launchnet7-avalonia", settings);
+                return ok
+                    ? (true, $"{detail} (no justfile found -- stack NOT rebuilt; run `just play-local` if the client crashes)")
+                    : (ok, detail);
+            }
+            // `just play-local` brings the docker stack up build-if-stale,
+            // writes the launcher settings, then launches the client.
+            return RunInTerminal(repoRoot, "just play-local", "client");
         }
 
         // Launches the interactive CLI client via `just play-cli`. Unlike the
@@ -83,8 +105,16 @@ namespace ToolsLauncherAvalonia
             string repoRoot = ResolveRepoRoot(settings);
             if (repoRoot == null)
                 return (false, "justfile not found walking up from launcher / tools root");
+            return RunInTerminal(repoRoot, "just play-cli", "CLI");
+        }
 
-            const string runCmd = "just play-cli";
+        // Spawn `runCmd` in a platform-appropriate terminal rooted at
+        // repoRoot, leaving the shell open after it exits so the build/stack
+        // logs and any crash output stay readable. `label` names the thing
+        // in the close-prompt. Used by both the client and CLI launch paths
+        // so the terminal/keep-open behaviour lives in one place.
+        static (bool Ok, string Detail) RunInTerminal(string repoRoot, string runCmd, string label)
+        {
             try
             {
                 ProcessStartInfo psi;
@@ -109,9 +139,9 @@ namespace ToolsLauncherAvalonia
                     var term = FindLinuxTerminal();
                     if (term == null)
                         return (false, "no terminal emulator found (install gnome-terminal, konsole, or xterm)");
-                    // Keep the shell open after the REPL exits so the final
+                    // Keep the shell open after the command exits so the final
                     // output stays readable.
-                    string script = $"{runCmd}; echo; echo '[CLI exited -- press enter to close]'; read";
+                    string script = $"{runCmd}; echo; echo '[{label} exited -- press enter to close]'; read";
                     psi = new ProcessStartInfo { FileName = term.Value.Bin, WorkingDirectory = repoRoot, UseShellExecute = false };
                     psi.ArgumentList.Add(term.Value.DashDash ? "--" : "-e");
                     psi.ArgumentList.Add("bash");
