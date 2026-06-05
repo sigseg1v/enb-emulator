@@ -191,6 +191,9 @@ namespace MobEditorAvalonia
             c_SaturationValue.Value = 0;
             c_LightnessValue.Value  = 0;
             UpdateTintSwatch();
+            c_ShieldModValue.Value  = 0;
+            c_DamageModValue.Value  = 0;
+            c_RangeModValue.Value   = 0;
             _equippedRows.Clear();   c_EquippedList.Items.Clear();
             _inventoryRows.Clear();  c_InventoryList.Items.Clear();
             ClearEquippedProps();
@@ -224,6 +227,10 @@ namespace MobEditorAvalonia
             c_SaturationValue.Value = ToDecimal(_selectedMob["s"]);
             c_LightnessValue.Value  = ToDecimal(_selectedMob["v"]);
             UpdateTintSwatch();
+
+            c_ShieldModValue.Value  = ToDecimal(_selectedMob["shield_modifier"]);
+            c_DamageModValue.Value  = ToDecimal(_selectedMob["damage_modifier"]);
+            c_RangeModValue.Value   = ToDecimal(_selectedMob["range_modifier"]);
 
             PopulateMobItems(Convert.ToInt32(_selectedMob["mob_id"]));
 
@@ -312,6 +319,24 @@ namespace MobEditorAvalonia
         {
             if (_suppressEditEvents || _selectedMob == null) return;
             _selectedMob["ai"] = c_AiText.Text ?? "";
+        }
+
+        void OnShieldModChanged(object sender, NumericUpDownValueChangedEventArgs e)
+        {
+            if (_suppressEditEvents || _selectedMob == null) return;
+            _selectedMob["shield_modifier"] = (int)(e.NewValue ?? 0);
+        }
+
+        void OnDamageModChanged(object sender, NumericUpDownValueChangedEventArgs e)
+        {
+            if (_suppressEditEvents || _selectedMob == null) return;
+            _selectedMob["damage_modifier"] = (int)(e.NewValue ?? 0);
+        }
+
+        void OnRangeModChanged(object sender, NumericUpDownValueChangedEventArgs e)
+        {
+            if (_suppressEditEvents || _selectedMob == null) return;
+            _selectedMob["range_modifier"] = (int)(e.NewValue ?? 0);
         }
 
         void OnHueChanged(object sender, NumericUpDownValueChangedEventArgs e)

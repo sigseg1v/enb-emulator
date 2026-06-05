@@ -129,6 +129,26 @@
             <Rectangle Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="3"
                        Height="32" Margin="0,4" StrokeThickness="1" Stroke="Gray"
                        Name="c_TintSwatch" />
+
+            <!-- Combat modifiers. The server has NO absolute hp/shield column:
+                 at spawn it interpolates a base shield-points value off the
+                 mob's level, then scales it by shield_modifier (MOBClass.cpp).
+                 So shield_modifier is the lever for "tankier" mobs; damage_ and
+                 range_modifier scale outgoing damage and weapon range the same
+                 way. All three are integer percent-style multipliers. -->
+            <TextBlock Grid.Row="6" Grid.Column="0" Text="Shield mod:" VerticalAlignment="Center" Margin="0,4" />
+            <NumericUpDown Grid.Row="6" Grid.Column="1" Name="c_ShieldModValue" Margin="0,4"
+                           FormatString="0" Minimum="0" Increment="1"
+                           ValueChanged="OnShieldModChanged" />
+            <TextBlock Grid.Row="6" Grid.Column="2" Text="Damage mod:" VerticalAlignment="Center" Margin="0,4" />
+            <NumericUpDown Grid.Row="6" Grid.Column="3" Name="c_DamageModValue" Margin="0,4"
+                           FormatString="0" Minimum="0" Increment="1"
+                           ValueChanged="OnDamageModChanged" />
+
+            <TextBlock Grid.Row="7" Grid.Column="0" Text="Range mod:" VerticalAlignment="Center" Margin="0,4" />
+            <NumericUpDown Grid.Row="7" Grid.Column="1" Name="c_RangeModValue" Margin="0,4"
+                           FormatString="0" Minimum="0" Increment="1"
+                           ValueChanged="OnRangeModChanged" />
           </Grid>
         </TabItem>
 

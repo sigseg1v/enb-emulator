@@ -42,8 +42,9 @@ namespace MobEditorAvalonia.SQL
             DB.Instance.executeCommand(
                 "INSERT INTO \"mob_base\" (\"mob_id\", \"name\", \"level\", \"type\", " +
                 "\"altruism\", \"aggressiveness\", \"bravery\", \"intelligence\", " +
-                "\"faction_id\", \"base_asset_id\", \"h\", \"s\", \"v\", \"scale\", \"ai\") " +
-                "VALUES (@id, @n, 1, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 1, '');",
+                "\"faction_id\", \"base_asset_id\", \"h\", \"s\", \"v\", \"scale\", \"ai\", " +
+                "\"shield_modifier\", \"damage_modifier\", \"range_modifier\") " +
+                "VALUES (@id, @n, 1, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 1, '', 1, 1, 1);",
                 new[] { "id", "n" },
                 new[] { lastID.ToString(), "<New Mob>" });
 
@@ -63,6 +64,9 @@ namespace MobEditorAvalonia.SQL
             row["v"]             = 0;
             row["scale"]         = 1;
             row["ai"]            = "";
+            row["shield_modifier"] = 1;
+            row["damage_modifier"] = 1;
+            row["range_modifier"]  = 1;
             _mobs.Rows.Add(row);
             row.AcceptChanges();
             _mobs.AcceptChanges();
@@ -82,10 +86,11 @@ namespace MobEditorAvalonia.SQL
             DB.Instance.executeCommand(
                 "UPDATE \"mob_base\" SET \"name\"=@n, \"level\"=@lvl, \"type\"=@t, " +
                 "\"altruism\"=@al, \"aggressiveness\"=@ag, \"bravery\"=@br, \"intelligence\"=@intel, " +
-                "\"faction_id\"=@fid, \"base_asset_id\"=@baid, \"h\"=@h, \"s\"=@s, \"v\"=@v, \"scale\"=@sc, \"ai\"=@ai " +
+                "\"faction_id\"=@fid, \"base_asset_id\"=@baid, \"h\"=@h, \"s\"=@s, \"v\"=@v, \"scale\"=@sc, \"ai\"=@ai, " +
+                "\"shield_modifier\"=@sm, \"damage_modifier\"=@dm, \"range_modifier\"=@rm " +
                 "WHERE \"mob_id\"=@id;",
                 new[] { "n", "lvl", "t", "al", "ag", "br", "intel",
-                        "fid", "baid", "h", "s", "v", "sc", "ai", "id" },
+                        "fid", "baid", "h", "s", "v", "sc", "ai", "sm", "dm", "rm", "id" },
                 new[] {
                     dr["name"].ToString(),
                     dr["level"].ToString(),
@@ -101,6 +106,9 @@ namespace MobEditorAvalonia.SQL
                     dr["v"].ToString(),
                     dr["scale"].ToString(),
                     dr["ai"].ToString(),
+                    dr["shield_modifier"].ToString(),
+                    dr["damage_modifier"].ToString(),
+                    dr["range_modifier"].ToString(),
                     dr["mob_id"].ToString(),
                 });
         }
@@ -113,11 +121,12 @@ namespace MobEditorAvalonia.SQL
             DB.Instance.executeCommand(
                 "INSERT INTO \"mob_base\" (\"mob_id\", \"name\", \"level\", \"type\", " +
                 "\"altruism\", \"aggressiveness\", \"bravery\", \"intelligence\", " +
-                "\"faction_id\", \"base_asset_id\", \"h\", \"s\", \"v\", \"scale\", \"ai\") " +
+                "\"faction_id\", \"base_asset_id\", \"h\", \"s\", \"v\", \"scale\", \"ai\", " +
+                "\"shield_modifier\", \"damage_modifier\", \"range_modifier\") " +
                 "VALUES (@id, @n, @lvl, @t, @al, @ag, @br, @intel, " +
-                "@fid, @baid, @h, @s, @v, @sc, @ai);",
+                "@fid, @baid, @h, @s, @v, @sc, @ai, @sm, @dm, @rm);",
                 new[] { "id", "n", "lvl", "t", "al", "ag", "br", "intel",
-                        "fid", "baid", "h", "s", "v", "sc", "ai" },
+                        "fid", "baid", "h", "s", "v", "sc", "ai", "sm", "dm", "rm" },
                 new[] {
                     lastID.ToString(),
                     src["name"].ToString(),
@@ -134,6 +143,9 @@ namespace MobEditorAvalonia.SQL
                     src["v"].ToString(),
                     src["scale"].ToString(),
                     src["ai"].ToString(),
+                    src["shield_modifier"].ToString(),
+                    src["damage_modifier"].ToString(),
+                    src["range_modifier"].ToString(),
                 });
 
             var row = _mobs.NewRow();
