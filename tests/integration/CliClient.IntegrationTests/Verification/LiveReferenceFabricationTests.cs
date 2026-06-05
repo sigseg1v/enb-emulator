@@ -13,7 +13,7 @@ namespace N7.CliClient.IntegrationTests.Verification;
 /// Phase AF (plans/33) -- byte-pins for the proxy FABRICATION band
 /// (0x2012 START_PROSPECT / 0x2013 TRACTOR_ORE / 0x2014 LOOT_ITEM)
 /// against bytes captured from the LIVE Net-7 reference server
-/// (216.219.87.147), cleartext proxy&lt;-&gt;server UDP leg.
+/// cleartext proxy&lt;-&gt;server UDP leg.
 ///
 /// <para>
 /// These records were already verified to MATCH the live wire

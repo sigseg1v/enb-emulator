@@ -1,5 +1,5 @@
 # 0x003A SERVER_HANDOFF -- server->client gate-jump handoff. 112 bytes.
-# Source: live Net-7 reference server 216.219.87.147:3573, SingleGateJump frame #45
+# Source: live reference server, port 3573, SingleGateJump frame #45
 # (jumping Ishuan/Castor -> Yokan/Capella). Decode (matches ServerHandoffRecord):
 # AvatarIdLsb@10=0x2A990340, ToSectorID@14=1920 (BE), FromSectorID@18=2005 (BE),
 # Ticket@2C="MY_Avatar_Ticket", FromSector="Ishuan (Castor System)",

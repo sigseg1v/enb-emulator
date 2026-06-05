@@ -11,7 +11,7 @@ This directory contains the modded Earth & Beyond Windows client binary plus its
 
 ## Provenance
 
-All of the above came from `/data/dev/tada-o-enb-fork/Source Code/Client Mods/` verbatim. The tada-o tree is itself an svn checkout of Net-7's repo at r2974 (2010-03-15) — these binaries were produced by the Net-7 team using internal tooling that was not part of the public source release.
+All of the above came from the tada-o fork source tree (`Source Code/Client Mods/`) verbatim. The tada-o tree is itself an svn checkout of Net-7's repo at r2974 (2010-03-15) — these binaries were produced by the Net-7 team using internal tooling that was not part of the public source release.
 
 ## Use today
 

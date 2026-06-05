@@ -2,7 +2,7 @@
 
 Small extracts from `archive/kyp-snapshot/capturedPackets/capture_1.rar`
 (54MB textual hex-dump of a real 2006-era Earth & Beyond session against
-the live retail server at `159.153.232.146`). These extracts contain
+the live retail server). These extracts contain
 post-decrypt application-layer bytes for individual opcodes, ready to
 feed straight into a codec's `DecodeInbound` / `EncodeOutbound`.
 
@@ -28,7 +28,7 @@ the primary-source proof per the server-integrity rules in CLAUDE.md.
 ### Live Net-7 reference corpus (Phase AF, plans/33)
 
 Extracted from traces captured 2026-06-04 against the **live Net-7
-reference server 216.219.87.147**, on the cleartext proxy↔server UDP leg
+reference server**, on the cleartext proxy↔server UDP leg
 (server→client inner frames reassembled from 0x2016/0x201A via the
 production `SectorStreamReassembler`). The owner directed we treat that
 server as a reference implementation to copy, so these are canonical

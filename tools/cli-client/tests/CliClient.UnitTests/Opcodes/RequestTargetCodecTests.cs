@@ -10,7 +10,7 @@ namespace N7.CliClient.UnitTests.Opcodes;
 
 /// <summary>
 /// Byte-pins <see cref="RequestTargetCodec"/> (0x0017 REQUEST_TARGET,
-/// client -&gt; server) against the live reference server (216.219.87.147)
+/// client -&gt; server) against the live reference server
 /// SkillTrainingHostileDevice2 capture. The 8-byte RequestTarget struct followed
 /// the 12-byte outer sector header on the proxy&lt;-&gt;server leg; the outer
 /// header is added by the transport, so we pin only the codec's payload.

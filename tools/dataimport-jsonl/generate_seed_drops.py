@@ -79,7 +79,8 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_DB = "/data/dev/enb-emu-data-reconstruct-backup/db"
+RECONSTRUCT_DB = os.environ.get("ENB_RECONSTRUCT_DB", "reconstruct-data")
+DEFAULT_DB = os.path.join(RECONSTRUCT_DB, "db")
 DEFAULT_OUT = REPO_ROOT / "db" / "postgres" / "seed_phase_y_drops.sql"
 DEFAULT_CSV = Path(__file__).resolve().parent / "phase_y8_unresolvable_drops.csv"
 

@@ -3,7 +3,7 @@
 ## What this phase is
 
 On 2026-06-04 the project owner captured packet traces against the **live
-Net-7 production server (216.219.87.147)** and directed: treat that server as
+Net-7 production server (the live reference server)** and directed: treat that server as
 a **reference implementation we copy**. Per CLAUDE.md "Server modification
 rules", a capture of the live retail/reference server is the canonical
 primary source -- the highest-weight evidence for what correct wire behaviour

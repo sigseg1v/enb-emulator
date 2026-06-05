@@ -10,7 +10,7 @@ namespace N7.CliClient.UnitTests.Opcodes;
 
 /// <summary>
 /// Byte-pins <see cref="EquipUseCodec"/> (0x005D EQUIP_USE, client -&gt; server)
-/// against the live reference server (216.219.87.147) captures. The 6-byte
+/// against the live reference server captures. The 6-byte
 /// EquipUse struct followed the 12-byte outer sector header on the
 /// proxy&lt;-&gt;server leg; the outer header is added by the transport, so we pin
 /// only the codec's payload.

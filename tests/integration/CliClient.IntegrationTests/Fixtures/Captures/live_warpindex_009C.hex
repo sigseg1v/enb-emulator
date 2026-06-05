@@ -1,5 +1,5 @@
 # 0x009C WARP_INDEX -- server->client warp progress/end. 4 bytes.
-# Source: live Net-7 reference server 216.219.87.147:3573, SingleGateJump frame #2.
+# Source: live reference server, port 3573, SingleGateJump frame #2.
 # Decode (matches WarpIndexRecord): Index@0 = -1 (FF FF FF FF; sent for both
 # arrival and boundary-interrupt -- see AE narration note).
 FF FF FF FF

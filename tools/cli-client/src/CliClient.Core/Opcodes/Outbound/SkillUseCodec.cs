@@ -39,7 +39,7 @@ namespace N7.CliClient.Opcodes.Outbound;
 /// captured value is 0; we default to it to match the retail client wire shape.
 /// </para>
 /// <para>
-/// Byte-pinned against the live reference server (216.219.87.147)
+/// Byte-pinned against the live reference server
 /// SkillTrainingHostileDevice2 capture dg #28:
 /// <c>2A 99 03 40  00 00 00 00  2E 00 00 00</c> = GameID 0x4003992A LE,
 /// Action 0 LE, AbilityIndex 46 LE.

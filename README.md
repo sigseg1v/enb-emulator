@@ -166,14 +166,14 @@ ENBREPLAY binary that the CLI replay tool can parse:
 # Convert a pcap to ENBREPLAY and replay it in one step:
 just pcap-replay proxy/local-debug/foo.pcap
 
-# With custom IPs (default: 216.219.87.147 -> 192.168.0.150):
+# With custom IPs (pass the reference server IP and the client/proxy IP):
 just pcap-replay proxy/local-debug/foo.pcap 10.0.0.1 10.0.0.2
 
 # Or run the converter directly to produce a persistent .bin:
 python3 tools/pcap-to-replay/pcap_to_replay.py \
     --pcap proxy/local-debug/foo.pcap \
     --out  /tmp/foo.bin \
-    --server 216.219.87.147 --client 192.168.0.150 --verbose
+    --server SERVER_IP --client CLIENT_IP --verbose
 
 # Then replay the .bin at any time:
 printf 'replay /tmp/foo.bin\nquit\n' | \

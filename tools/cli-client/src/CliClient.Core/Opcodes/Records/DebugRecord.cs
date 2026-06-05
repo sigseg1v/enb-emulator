@@ -12,7 +12,7 @@ namespace N7.CliClient.Opcodes.Records;
 /// no-op -- it only LogDebug's "Received Debug packet" and never parses the body --
 /// and there is no Debug struct in PacketStructures.h, so the field layout cannot be
 /// proven from a parser. Only the leading GameID is ground-truthed, and strongly:
-/// in the capture, the 0x1A frame from session 159.153.232.44:3029 (packet #543)
+/// in the capture, the 0x1A frame from session :3029 (packet #543)
 /// carries GameID bytes EE CC AA 00, the identical value the SAME session's
 /// StarbaseRoomChange 0x9F frames (#553/#611/#1225/#1242) carry as their AvatarID --
 /// and 0x9F's byte order is proven little-endian (Player::HandleStarbaseRoomChange

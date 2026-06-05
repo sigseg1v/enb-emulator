@@ -121,7 +121,7 @@ After the user installed the full dev dependency set (cmake/ninja/clang, OpenSSL
 - **Phase C (Postgres)**: `psql -f db/postgres/schema.sql` applies 71/71 tables clean against a freshly-launched Postgres 16 (worked around a host-port collision on 5432 by binding the dev container to 127.0.0.1:5433).
 - **Phase D (.NET 10 tools)**: `dotnet build tools/Net7Tools.slnx` succeeds with 0 errors and ~4489 CA1416 platform warnings (expected — WinForms on Linux).
 - **Phase G (tests)**: all 6 gtest cases pass via ctest, including the env-gated libpq Postgres smoke (with `NET7_TEST_DB_DSN` pointed at the Phase-C container).
-- **Phase H (captures)**: with `unrar` available, extracted all three captures (78 MB + 8.4 MB + 14 MB), confirmed 120,431 packets / 95 distinct opcodes, and rewrote `docs/03-network-protocol.md` §8 with a real histogram cross-referenced against `Opcodes.h`. Captures' destination IPs (159.153.232.* / EA-Westwood range, 2006-dated) suggest these are original-server traces, which is more authoritative than Net-7 self-captures would have been.
+- **Phase H (captures)**: with `unrar` available, extracted all three captures (78 MB + 8.4 MB + 14 MB), confirmed 120,431 packets / 95 distinct opcodes, and rewrote `docs/03-network-protocol.md` §8 with a real histogram cross-referenced against `Opcodes.h`. Captures' destination IPs (the retail server / EA-Westwood range, 2006-dated) suggest these are original-server traces, which is more authoritative than Net-7 self-captures would have been.
 - **Phase I (lint)**: `pre-commit run --all-files` clean after adding excludes for vendored autotools scripts.
 
 Two real bugs surfaced during verification, both fixed:
@@ -7022,7 +7022,7 @@ upstream code preserved verbatim.
 
 ## 2026-06-01 -- Wiki reconstruct backup is NOT a runtime-import source (Phase Y Y4/Y6/Y7/Y8/Y9 rejected)
 
-The user granted blanket approval to run "all the import phases" from `/data/dev/enb-emu-data-reconstruct-backup/db` (sectors, missions, mobs, npcs, prospecting, item-drop tables). I investigated and **declined to inject sectors/missions/mobs/item-drops/prospecting into the runtime tables.** The honest answer to "import this data" is that the runtime is already authoritative and the wiki scrape would corrupt it.
+The user granted blanket approval to run "all the import phases" from the external reconstruct dataset (sectors, missions, mobs, npcs, prospecting, item-drop tables). I investigated and **declined to inject sectors/missions/mobs/item-drops/prospecting into the runtime tables.** The honest answer to "import this data" is that the runtime is already authoritative and the wiki scrape would corrupt it.
 
 **Decision.** Y1 (NPCs) stays imported -- it added roster rows the runtime lacked, placed in real rooms, gated behind synth ids >= 100000. Y4 (sector navs), Y6 (missions), Y7 (mobs), Y8 (item-drops), Y9 (prospecting) are **rejected** and marked `[!]` blocked in `plans/25-phase-y-data-import.md`.
 
@@ -7774,7 +7774,7 @@ send-every-nav path (commit 636c6175). Client verification tracked as CV-07
 ## 2026-06-04 -- Phase AF live reference corpus closed; 0x008B mob id is big-endian
 
 The owner captured 6 traces against the live Net-7 production server
-(216.219.87.147) and directed we treat it as a reference implementation to
+(the live reference server) and directed we treat it as a reference implementation to
 copy. Phase AF parsed all 6 (cleartext proxy<->server UDP leg) and byte-pinned
 the fabrication (0x2012/0x2013/0x2014), combat (0x0064/0x000B/0x000E/0x008B),
 vendor (0x0054/0x0056/0x006A), and gate-jump (0x003A/0x0034/0x0097/0x009C)

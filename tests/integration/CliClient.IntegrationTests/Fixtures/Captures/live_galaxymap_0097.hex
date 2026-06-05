@@ -1,5 +1,5 @@
 # 0x0097 GALAXY_MAP -- server->client map update (Type 4). 31 bytes.
-# Source: live Net-7 reference server 216.219.87.147:3569, SingleGateJump frame #49
+# Source: live reference server, port 3569, SingleGateJump frame #49
 # (arrival in Yokan/Capella). Decode (matches GalaxyMapRecord): Type@0=4, Size@4=23,
 # PlayerID@8=0x0003992A, System="Capella", Sector="Yokan", Station="", trailer 375.
 04 00 00 00 17 00 00 00 2A 99 03 00 43 61 70 65

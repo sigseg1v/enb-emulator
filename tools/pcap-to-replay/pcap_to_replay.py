@@ -16,7 +16,7 @@
 #   python3 tools/pcap-to-replay/pcap_to_replay.py \
 #       --pcap proxy/local-debug/foo.pcap \
 #       --out  /tmp/foo.bin \
-#       [--server 216.219.87.147] [--client 192.168.0.150]
+#       --server SERVER_IP --client CLIENT_IP
 #
 # Then replay in the CLI:
 #   printf 'replay /tmp/foo.bin\nquit\n' | \
@@ -174,10 +174,10 @@ def main():
         description='Convert a server->proxy UDP pcap to ENBREPLAY format for the CLI replay tool')
     ap.add_argument('--pcap',   required=True, help='input .pcap file')
     ap.add_argument('--out',    required=True, help='output .bin file')
-    ap.add_argument('--server', default='216.219.87.147',
-                    help='server (sender) IP address (default: %(default)s)')
-    ap.add_argument('--client', default='192.168.0.150',
-                    help='client/proxy (receiver) IP address (default: %(default)s)')
+    ap.add_argument('--server', default='',
+                    help='server (sender) IP address -- pass the reference server IP')
+    ap.add_argument('--client', default='',
+                    help='client/proxy (receiver) IP address')
     ap.add_argument('--verbose', '-v', action='store_true')
     args = ap.parse_args()
 

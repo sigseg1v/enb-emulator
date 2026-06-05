@@ -46,7 +46,7 @@ std::vector<unsigned char> ExtractHexBytes(const std::string& line) {
 
 std::vector<Packet> ParseCapture(const std::string& text) {
     // Header regex tolerates variable whitespace.
-    // Example: "Packet #217: 86 bytes, Server->Client  159.153.232.146:3801"
+    // Example: "Packet #217: 86 bytes, Server->Client  10.0.0.1:3801"
     static const std::regex header_re(
         R"(^Packet\s+#(\d+):\s+(\d+)\s+bytes,\s+(Client->Server|Server->Client)\s+([0-9.]+):(\d+)\s*$)");
 

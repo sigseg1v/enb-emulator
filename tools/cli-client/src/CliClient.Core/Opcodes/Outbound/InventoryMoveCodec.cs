@@ -70,7 +70,7 @@ public sealed record InventoryMoveMessage(
 /// byte order. Field order on the wire: GameID, FromInv, FromSlot, ToInv, ToSlot,
 /// Num.
 /// <para>
-/// Byte-pinned against the live reference server (216.219.87.147) capture
+/// Byte-pinned against the live reference server capture
 /// VendorInvEco frame #20 (cargo slot 28 -> vault, first free) and the vendor
 /// buy/sell frames in the same capture. The inbound half is
 /// <see cref="N7.CliClient.Opcodes.Records.InventoryMoveRecord"/>.

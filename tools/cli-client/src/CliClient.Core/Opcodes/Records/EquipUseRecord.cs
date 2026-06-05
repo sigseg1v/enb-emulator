@@ -18,7 +18,7 @@ namespace N7.CliClient.Opcodes.Records;
 /// GameID is 0x003ACEB4 = 3854004 little-endian (big-endian would be 0xB4CE3A00,
 /// ~3 billion, outside any world id range), and it is the IDENTICAL id carried by the
 /// two 0x58 SKILL_ABILITY frames immediately bracketing this packet in the same
-/// 159.153.232.99:3367 session (one of them the skillability_index_44 fixture, also
+/// :3367 session (one of them the skillability_index_44 fixture, also
 /// decoded little-endian) -- same ship, same session. InvNum/InvSlot are single bytes
 /// (order-independent). Source: struct EquipUse (PacketStructures.h:929),
 /// Player::HandleEquipUse (PlayerConnection.cpp:4556). Pinned to capture_3.rar.

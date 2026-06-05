@@ -1879,7 +1879,7 @@ prepend the line being typed ("the chat msg overwrites my prompt completion").
       ManualActivate(), a raw char index -- order-independent), and GameID is LE because
       it is the EXACT id (3854004 = B4 CE 3A 00 LE) carried by the two 0x58
       SKILL_ABILITY frames immediately bracketing this packet in the same
-      159.153.232.99:3367 session (one is the skillability_index_44 fixture) -- same
+      :3367 session (one is the skillability_index_44 fixture) -- same
       ship, same session. 0x87 -> Player::HandleMissionDismissal
       (PlayerConnection.cpp:11013): struct MissionDismissal {int32 PlayerID, int32
       MissionID}, BOTH BE (handler ntohl's both); captured PlayerID 10045 / MissionID 2

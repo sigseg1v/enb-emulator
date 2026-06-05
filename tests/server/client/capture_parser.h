@@ -3,7 +3,7 @@
 // Parser for the human-readable packet-capture text format under
 // archive/kyp-snapshot/capturedPackets/. Captures look like:
 //
-//     Packet #217: 86 bytes, Server->Client  159.153.232.146:3801
+//     Packet #217: 86 bytes, Server->Client  10.0.0.1:3801
 //     -----------------------------------------------------------
 //
 //      01               ACK1

@@ -50,7 +50,7 @@ public sealed class GateCommandTests
         Assert.Equal(19, BinaryPrimitives.ReadInt32LittleEndian(frame.AsSpan(4)));
     }
 
-    // Byte-pins against the live reference server (216.219.87.147)
+    // Byte-pins against the live reference server
     // SingleGateJump capture, proxy<->server UDP cleartext leg (same leg the
     // CLI/integration harness talks on). The 16-byte ActionPacket payload
     // followed the 12-byte outer sector header; we pin only the payload here.

@@ -45,7 +45,7 @@ format & byte order", Trap 2).
   (`proxy/UDPProxyToClient_linux.cpp`, `UDPClient::CreateObject`.)
 - **Primary source**: `proxy/local-debug/net7-live-2026-06-02-login-undock-clicknavs-warp-logout.pcap`.
   Endpoint check (2026-06-03): this is a capture of the **real net7 retail
-  server** (`216.219.87.147`) talking to a player-side proxy
+  server** (the live reference server) talking to a player-side proxy
   (`192.168.0.150`), on the cleartext server<->proxy UDP leg -- i.e. the
   canonical primary source CLAUDE.md ranks highest, NOT a capture of our own
   stack. The 51x `0x2018` frames come from the retail server's sector port
@@ -269,7 +269,7 @@ format & byte order", Trap 2).
   a byte-reversed attacker id, looked it up in its object pool, got NULL, and
   could fault on the next dispatch -- the classic Trap-1 (CLAUDE.md "Wire
   format & byte order").
-- **Primary source**: live Net-7 reference server 216.219.87.147:3573,
+- **Primary source**: live Net-7 reference server, port 3573,
   cleartext proxy<->server UDP leg, `Combat-...-20260604-072157.pcapng`
   frame #26 emits mob 0x000186F5 as the trailing bytes `00 01 86 F5`
   (big-endian). The Ishuan / SkillTrainingHostileDevice2 / KillLoot2 captures

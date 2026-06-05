@@ -1,7 +1,7 @@
 # 0x000E OBJECT_TO_OBJECT_LINKED_EFFECT -- server->client, 58 bytes FIXED. A
 # linked weapon effect from player 0x4003992A to mob 0x000186F5.
 #
-# Source: live Net-7 reference server 216.219.87.147:3573 (sector), cleartext
+# Source: live reference server, port 3573 (sector), cleartext
 # proxy<->server UDP leg, Combat capture frame #14 (reassembled inner frame;
 # see plans/33 AF-7).
 #

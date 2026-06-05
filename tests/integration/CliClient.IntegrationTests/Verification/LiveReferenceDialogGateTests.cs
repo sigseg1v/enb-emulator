@@ -11,7 +11,7 @@ namespace N7.CliClient.IntegrationTests.Verification;
 /// <summary>
 /// Phase AF (plans/33) -- byte-pins for the vendor/dialog and gate-jump bands
 /// against frames captured from the LIVE Net-7 reference server
-/// (216.219.87.147). Each of these opcodes already had a dedicated CLI record;
+/// Each of these opcodes already had a dedicated CLI record;
 /// this confirms those records decode the live reference bytes with full
 /// coverage (no undecoded gap, no truncation flag) and produce the expected
 /// fields. See <see cref="LiveReferenceFabricationTests"/> for the fabrication

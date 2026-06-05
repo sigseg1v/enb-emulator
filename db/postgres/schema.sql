@@ -5,9 +5,9 @@ SET client_min_messages = warning;
 
 /*
 MySQL Data Transfer
-Source Host: 209.222.96.90
+Source Host: (redacted)
 Source Database: net7
-Target Host: 209.222.96.90
+Target Host: (redacted)
 Target Database: net7
 Date: 5/4/2010 11:34:22 PM
 */

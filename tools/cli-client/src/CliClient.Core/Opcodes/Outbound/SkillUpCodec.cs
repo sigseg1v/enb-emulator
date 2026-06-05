@@ -37,7 +37,7 @@ namespace N7.CliClient.Opcodes.Outbound;
 /// retail client wire shape, but the field has no server effect.
 /// </para>
 /// <para>
-/// Byte-pinned against the live reference server (216.219.87.147)
+/// Byte-pinned against the live reference server
 /// SkillTrainingHostileDevice2 capture dg #18:
 /// <c>2A 99 03 40  01 00 00 00  37 00 00 00</c> = GameID 0x4003992A LE,
 /// SkillPoints 1 LE, SkillID 55 LE.

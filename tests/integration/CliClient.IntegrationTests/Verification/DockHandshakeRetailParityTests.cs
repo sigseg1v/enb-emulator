@@ -77,27 +77,17 @@ public sealed class DockHandshakeRetailParityTests
     /// <c>StationLogin</c> runs. Caller owns the returned session and must
     /// clean up the created character on <paramref name="slot"/>.
     /// </summary>
-    private async Task<SectorHandshake.Session> EstablishAtStationAsync(
+    // Delegates to the shared two-stage helper, which logs off the stage-1
+    // home session cleanly via Session.DisposeAsync (0x00B9 ->
+    // DropPlayerFromGalaxy) before relogging in at the station. Note the
+    // shared helper takes (stationSectorId, homeSpaceSectorId) in that order.
+    private Task<SectorHandshake.Session> EstablishAtStationAsync(
         string ticket, string username, int slot,
         int homeSpaceSectorId, int stationSectorId,
         string firstName, string shipName, CancellationToken ct)
-    {
-        var homeSession = await SectorHandshake.EstablishAsync(
-            _server, ticket, username, slot, homeSpaceSectorId, firstName, shipName, ct);
-        try
-        {
-            byte[] logoffPayload = new byte[8];
-            await homeSession.Sector.SendAsync(
-                Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, logoffPayload), ct);
-            await SectorHandshake.DrainUntilOpcode(
-                homeSession.Sector, OpcodeId.Known.LogoffConfirmation.Value, ct);
-        }
-        finally
-        {
-            await homeSession.DisposeAsync();
-        }
-        return await SectorHandshake.ReestablishAsync(_server, ticket, slot, stationSectorId, ct);
-    }
+        => SectorHandshake.EstablishAtStationAsync(
+            _server, ticket, username, slot, stationSectorId, homeSpaceSectorId,
+            firstName, shipName, ct);
 
     /// <summary>
     /// Wave 113 regression pin. The station-sector handshake stream

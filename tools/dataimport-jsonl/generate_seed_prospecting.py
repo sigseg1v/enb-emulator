@@ -108,7 +108,8 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_PROSPECTING = "/data/dev/enb-emu-data-reconstruct-backup/db/prospecting/prospecting.jsonl"
+RECONSTRUCT_DB = os.environ.get("ENB_RECONSTRUCT_DB", "reconstruct-data")
+DEFAULT_PROSPECTING = os.path.join(RECONSTRUCT_DB, "db", "prospecting", "prospecting.jsonl")
 DEFAULT_OUT = REPO_ROOT / "db" / "postgres" / "seed_phase_y_prospecting.sql"
 
 DEFAULT_PG_HOST = "127.0.0.1"

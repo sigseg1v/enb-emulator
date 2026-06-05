@@ -646,8 +646,9 @@ cli-replay CAPTURE='capture_1':
 # The pcap must contain 0x2016/0x201A PACKET_SEQUENCE frames (what the Net-7
 # server sends to the proxy over UDP). Requires Python 3.
 #
-# Usage: just pcap-replay proxy/local-debug/foo.pcap [216.219.87.147] [192.168.0.150]
-pcap-replay PCAP SERVER='216.219.87.147' CLIENT='192.168.0.150':
+# Usage: just pcap-replay proxy/local-debug/foo.pcap SERVER_IP CLIENT_IP
+#   (pass the reference server IP and the client/proxy IP -- no defaults)
+pcap-replay PCAP SERVER CLIENT:
     #!/usr/bin/env bash
     set -euo pipefail
     tmp=$(mktemp /tmp/enbreplay-XXXXXX.bin)

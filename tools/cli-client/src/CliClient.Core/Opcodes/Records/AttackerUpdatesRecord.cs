@@ -14,7 +14,7 @@ namespace N7.CliClient.Opcodes.Records;
 ///   int32  MobId   @5   (game id of the attacker -- BIG-ENDIAN on the wire)
 ///
 /// MobId is the lone byte-swapped field. The live Net-7 reference
-/// (216.219.87.147, Combat/Ishuan/SkillTraining/KillLoot2 captures) emits it
+/// (Combat/Ishuan/SkillTraining/KillLoot2 captures) emits it
 /// big-endian: e.g. the mob the 0x0064 CLIENT_DAMAGE frames report as source
 /// 0x000187EC (little-endian) appears here as the trailing bytes 00 01 87 EC.
 /// The Update field is little-endian (00.. = stop, 01.. = start), matching the

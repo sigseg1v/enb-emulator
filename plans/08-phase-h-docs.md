@@ -10,7 +10,7 @@ Phase A docs were already substantial (overview 1086 lines, architecture 617 lin
 
 - [x] `docs/03-network-protocol.md` deepening: open `capturedPackets/*.rar` (extract with `unrar x`), classify packet types, add a packet-type table.
       Touches: docs/03-network-protocol.md (§8 rewritten)
-      Notes: 120,431 packets across the 3 captures (54,529 C→S + 65,902 S→C); 95 distinct opcodes; top-25 table cross-referenced against `Opcodes.h`. Captures appear to be 2006 Westwood-server traces (159.153.232.* / EA IP range), making them more authoritative than Net-7-server-only captures. Aux_Data (0x1B) + Advanced_Positional_Update (0x3E) = 71% of all packets, confirming the per-tick flush model in `PlayerManager::RunMovementThread`.
+      Notes: 120,431 packets across the 3 captures (54,529 C→S + 65,902 S→C); 95 distinct opcodes; top-25 table cross-referenced against `Opcodes.h`. Captures appear to be 2006 Westwood-server traces (the retail server / EA IP range), making them more authoritative than Net-7-server-only captures. Aux_Data (0x1B) + Advanced_Positional_Update (0x3E) = 71% of all packets, confirming the per-tick flush model in `PlayerManager::RunMovementThread`.
 - [x] `docs/04-server-modules.md` deepening: add sequence diagrams (mermaid) for login → character select → enter sector.
       Touches: docs/04-server-modules.md (new §8 "Flow walkthroughs (Phase H)" — three mermaid sequenceDiagrams: login flow, character-select / sector handoff, packet receive → dispatch → response)
 - [x] `docs/05-abilities.md` deepening: for each ability, link to its `.cpp`, summarise effect, list cooldown/range/damage formula.

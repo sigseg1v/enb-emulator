@@ -10,7 +10,7 @@ namespace N7.CliClient.UnitTests.Opcodes;
 
 /// <summary>
 /// Byte-pins <see cref="InventoryMoveCodec"/> (0x0027 INVENTORY_MOVE,
-/// client -> server) against the live reference server (216.219.87.147)
+/// client -> server) against the live reference server
 /// capture VendorInvEco-...-072833.pcapng. Each pinned body is the 24-byte
 /// InvMove struct that followed the 12-byte outer sector header on the
 /// proxy<->server leg; the outer header (length/opcode/gameid/seq) is added

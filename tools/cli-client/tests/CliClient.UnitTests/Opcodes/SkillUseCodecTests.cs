@@ -10,7 +10,7 @@ namespace N7.CliClient.UnitTests.Opcodes;
 
 /// <summary>
 /// Byte-pins <see cref="SkillUseCodec"/> (0x0058 SKILL_ABILITY / SkillUse,
-/// client -&gt; server) against the live reference server (216.219.87.147)
+/// client -&gt; server) against the live reference server
 /// SkillTrainingHostileDevice2 capture. The 12-byte SkillUse struct followed the
 /// 12-byte outer sector header on the proxy&lt;-&gt;server leg; the outer header
 /// is added by the transport, so we pin only the codec's payload.

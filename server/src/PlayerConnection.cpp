@@ -3615,7 +3615,7 @@ void Player::SendAttackerUpdates(long mob_id, long update)
 	// end on Linux; pin both slots to 4B.
 	//
 	// Phase AF (plans/33 AF-7): mob_id goes on the wire BIG-ENDIAN. The live
-	// Net-7 reference server (216.219.87.147, Combat capture frame #26 and the
+	// Net-7 reference server (Combat capture frame #26 and the
 	// Ishuan/SkillTraining/KillLoot2 captures) emits e.g. mob 0x000186F5 as the
 	// bytes 00 01 86 F5 -- the same mob the 0x000B/0x000E/0x0064 frames report
 	// little-endian. Writing mob_id host-order (LE on x86) handed the real

@@ -13,7 +13,7 @@ namespace N7.CliClient.IntegrationTests.Verification;
 /// Phase AF (plans/33, AF-7) -- byte-pins for the combat band
 /// (0x000B OBJECT_TO_OBJECT_EFFECT, 0x000E OBJECT_TO_OBJECT_LINKED_EFFECT,
 /// 0x008B ATTACKER_UPDATES) against frames captured from the LIVE Net-7
-/// reference server (216.219.87.147), cleartext proxy&lt;-&gt;server UDP leg.
+/// reference server, cleartext proxy&lt;-&gt;server UDP leg.
 ///
 /// <para>
 /// 0x008B carries the lone byte-swapped field in this corpus: its MobId is

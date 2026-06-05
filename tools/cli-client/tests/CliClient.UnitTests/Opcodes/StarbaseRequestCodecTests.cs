@@ -10,7 +10,7 @@ namespace N7.CliClient.UnitTests.Opcodes;
 
 /// <summary>
 /// Byte-pins <see cref="StarbaseRequestCodec"/> (0x004E STARBASE_REQUEST,
-/// client -&gt; server) against the live reference server (216.219.87.147)
+/// client -&gt; server) against the live reference server
 /// VendorInvEco capture. The 9-byte StarbaseRequest struct followed the 12-byte
 /// outer sector header on the proxy&lt;-&gt;server leg; the outer header is added
 /// by the transport, so we pin only the codec's payload.

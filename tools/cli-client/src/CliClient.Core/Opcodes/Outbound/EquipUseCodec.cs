@@ -31,7 +31,7 @@ namespace N7.CliClient.Opcodes.Outbound;
 /// put it outside any world id range.
 /// </para>
 /// <para>
-/// Byte-pinned against the live reference server (216.219.87.147) captures:
+/// Byte-pinned against the live reference server captures:
 /// KillLoot2 dg #3 (GameID 0x4003992A LE, InvNum=2, InvSlot=3 -- fire the weapon
 /// in equip slot 3) and SkillTrainingHostileDevice2 dg #44 (same GameID/InvNum,
 /// InvSlot=11 -- activate the device in equip slot 11). The inbound half is

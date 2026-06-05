@@ -37,7 +37,7 @@ namespace N7.CliClient.Opcodes.Outbound;
 /// explicitly; this codec does not derive it.
 /// </para>
 /// <para>
-/// Byte-pinned against the live reference server (216.219.87.147) VendorInvEco
+/// Byte-pinned against the live reference server VendorInvEco
 /// capture dg #4: <c>2A 99 03 00  C4 01 00 00  04</c> = PlayerID 0x0003992A LE,
 /// StarbaseID 452 LE, Action 4 (talk to NPC).
 /// </para>

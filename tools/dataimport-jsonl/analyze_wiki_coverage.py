@@ -41,7 +41,8 @@ import re
 import subprocess
 import sys
 
-DEFAULT_DB_DIR = "/data/dev/enb-emu-data-reconstruct-backup/db"
+RECONSTRUCT_DB = os.environ.get("ENB_RECONSTRUCT_DB", "reconstruct-data")
+DEFAULT_DB_DIR = os.path.join(RECONSTRUCT_DB, "db")
 
 
 def norm(s) -> str:

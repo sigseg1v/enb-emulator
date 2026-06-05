@@ -1,6 +1,6 @@
 # 0x008B ATTACKER_UPDATES -- server->client, 9 bytes FIXED. Mob STOPS attacking.
 #
-# Source: live Net-7 reference server 216.219.87.147:3573 (sector), cleartext
+# Source: live reference server, port 3573 (sector), cleartext
 # proxy<->server UDP leg, Combat capture frame #26 (reassembled inner frame;
 # see plans/33 AF-7).
 #

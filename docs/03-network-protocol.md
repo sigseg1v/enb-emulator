@@ -727,7 +727,7 @@ archives in `archive/kyp-snapshot/capturedPackets/`:
 - `capture_3.rar` (14MB extracted)
 
 The file timestamps (2006-10-29) and the destination IPs they target
-(`159.153.232.*`, the historical EA/Westwood address range) make
+(the retail server, the historical EA/Westwood address range) make
 these almost certainly captures of the **original Westwood Earth &
 Beyond servers**, not of Net-7. That makes them more valuable than
 "a Net-7 packet dump" would be — they are the closest thing on disk
@@ -767,8 +767,8 @@ This matches the handshake in `server/src/Connection.cpp::DoKeyExchange`.
 | server→client | | | | 65,902 |
 | distinct opcodes | | | | 95 |
 
-All three captures target the same observed server hosts:
-`159.153.232.{35,38,40,42,44,46,47,146}` on ports `3022, 3029, 3034,
+All three captures target the same observed server (the retail server,
+last octets `{35,38,40,42,44,46,47,146}`) on ports `3022, 3029, 3034,
 3088, 3338, 3363, 3387, 3388, 3434, 3500, 3501, 3503, 3505, 3801`.
 The dynamic-per-sector pattern in section 4 holds — sector listeners
 are scattered around `3022-3505` rather than the `3501+` range the

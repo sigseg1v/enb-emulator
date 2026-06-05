@@ -40,7 +40,7 @@ will provide newer references when each task is approved.
   references). Acceptance: `DockHandshakeFriendship7Tests` ItemBase
   count climbs from 4 toward 77.
   **STATUS: PARTIAL IMPORT LANDED 2026-05-31, room placement added
-  same day.** Source: `/data/dev/enb-emu-data-reconstruct-backup/db/npcs/npcs.jsonl`
+  same day.** Source: the external reconstruct dataset (`db/npcs/npcs.jsonl`)
   (JSONL reconstruct dataset, NOT a Net-7 server dump). Importer:
   `tools/dataimport-jsonl/generate_seed.py`. Output:
   `db/postgres/seed_phase_y.sql` (applied at boot via the
@@ -115,7 +115,7 @@ will provide newer references when each task is approved.
   the `m_ObjectMgr->SendAllNavs` curatorial gap on the SectorLogin
   (space-arm) path.
   **STATUS: IMPORT LANDED 2026-06-02. 48 markers.** Source:
-  `/data/dev/enb-emu-data-reconstruct-backup/db/sectors/json/*.jsonl`.
+  the external reconstruct dataset (`db/sectors/json/*.jsonl`).
   Importer: `tools/dataimport-jsonl/generate_seed_navs.py`. Output:
   `db/postgres/seed_phase_y_navs.sql` (applied at boot by the
   `schema-init` service after `seed_phase_y.sql`, gated on
@@ -170,7 +170,7 @@ will provide newer references when each task is approved.
   resolve to a real template, not the placeholder-or-NULL most rows
   currently return.
   **STATUS: PARTIAL IMPORT LANDED 2026-05-31.** Source:
-  `/data/dev/enb-emu-data-reconstruct-backup/db/json/cat*_lvl*.jsonl`
+  the external reconstruct dataset (`db/json/cat*_lvl*.jsonl`)
   (JSONL reconstruct dataset). Same importer / output / gate as Y1. Loaded:
   5003 unique `item_base` rows (real itemId range, no synth offset
   here because itemIds are <10k and won't collide with future
@@ -385,7 +385,7 @@ will provide newer references when each task is approved.
 
 ## Finding 2026-06-01..02: per-category diff of the reconstruct dataset
 
-The user pointed at `/data/dev/enb-emu-data-reconstruct-backup/db`
+The user pointed at the external reconstruct dataset
 (items/missions/mobs/npcs/prospecting/sectors) and asked for a real
 diff -- not a wholesale insert -- to find and import the genuine gaps.
 Investigation (`tools/dataimport-jsonl/analyze_wiki_coverage.py`,

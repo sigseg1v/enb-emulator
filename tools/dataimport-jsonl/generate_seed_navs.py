@@ -74,7 +74,8 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_SECTORS_GLOB = "/data/dev/enb-emu-data-reconstruct-backup/db/sectors/json/*.jsonl"
+RECONSTRUCT_DB = os.environ.get("ENB_RECONSTRUCT_DB", "reconstruct-data")
+DEFAULT_SECTORS_GLOB = os.path.join(RECONSTRUCT_DB, "db", "sectors", "json", "*.jsonl")
 DEFAULT_OUT = REPO_ROOT / "db" / "postgres" / "seed_phase_y_navs.sql"
 
 DEFAULT_PG_HOST = "127.0.0.1"

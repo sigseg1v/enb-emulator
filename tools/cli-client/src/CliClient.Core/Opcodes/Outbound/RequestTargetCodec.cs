@@ -32,7 +32,7 @@ namespace N7.CliClient.Opcodes.Outbound;
 /// <c>ShipIndex()-&gt;GetTargetGameID()</c>, not from its own payload.
 /// </para>
 /// <para>
-/// Byte-pinned against the live reference server (216.219.87.147)
+/// Byte-pinned against the live reference server
 /// SkillTrainingHostileDevice2 capture dg #35:
 /// <c>2A 99 03 40  ED 87 01 00</c> = GameID 0x4003992A LE, TargetID 0x000187ED
 /// (100333) LE. The inbound half is

@@ -318,7 +318,7 @@ xUnit `[Collection("server")]` ensures the docker stack stands up exactly once p
       Notes:
         ▸ Source data: archive/kyp-snapshot/capturedPackets/capture_1.rar
            is a 54MB textual hex-dump of a real 2006-era EnB session
-           against the live retail server (159.153.232.146). We extract
+           against the live retail server. We extract
            individual opcode payloads as hex-with-comments fixtures
            rather than committing the RAR — fixture files stay KB-scale,
            CI doesn't need unrar, and reviewers can eyeball the bytes
