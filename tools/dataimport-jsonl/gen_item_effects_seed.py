@@ -51,6 +51,66 @@ import statistics
 import sys
 
 
+# --- Stat wiring for minted bases -----------------------------------------
+# Effect keys absent from item_effect_base get a base minted for them. Most are
+# left as NO_STAT placeholders (inert) and flagged for manual review (--sus-out).
+# The few below have an UNAMBIGUOUS existing analog -- same stat semantics AND
+# the same EffectType direction (an activated->activated or equip->equip "Item C"
+# / "Item P" sibling) -- so we clone that analog's proven mechanical columns
+# instead of guessing. Each value is:
+#   (Var1Stat, Var1Type, Var2Stat, Var2Type, Buff_Name, Var1_mod, Var2_mod, VisualEffect)
+# Source analog cited per line. Anything with a direction/type ambiguity is
+# deliberately NOT here -- it goes to the SUS list for owner approval instead.
+MINTED_STAT_WIRING = {
+    # clone of "Increases Reactor capacity Item C"
+    "Increase Reactor Capacity Self (Activated)":
+        ("STAT_ENERGY", 1, "NO_STAT", 5, "Reactor_Boost", 1.0, 1.33, 0),
+    # clone of "Scan Range Boost Item C"
+    "Increase Scan Range (Activated)":
+        ("STAT_SCAN_RANGE", 1, "NO_STAT", 0, "BOOST Increase Scan Range", 1.33, 1.0, 462),
+    # clone of "Reduces Projectile Energy Item P" (conservation == uses less energy)
+    "Projectile Energy Conservation (Equip)":
+        ("STAT_PROJECTILE_ENERGY", 4, "NO_STAT", 0, "BUFF_NONE", 1.0, 1.0, 0),
+    # clone of "See Cloaked Item C"
+    "See Cloaked (Activated)":
+        ("STAT_SEE_CLOAKED", 5, "NO_STAT", 0, "See Cloaked", 1.0, 1.0, 0),
+    # clone of "Worsen Beam Handling Item C"
+    "Worsen Beam Handling Self (Activated)":
+        ("STAT_BEAM_ACCURACY", 3, "STAT_BEAM_DAMAGE", 4, "Lower Beam Weapon Skill", 1.33, 1.33, 447),
+    # clone of "Worsen Missile Handling Item C"
+    "Worsen Missile Handling Self (Activated)":
+        ("STAT_MISSILE_ACCURACY", 3, "STAT_MISSILE_DAMAGE", 4, "Lower Missile Weapon Skill", 1.33, 1.33, 447),
+}
+
+# Suggested-but-unconfirmed stat for the SUS list. NOT applied -- shown to the
+# owner so a manual fix is a confirm/edit rather than a from-scratch lookup.
+# Reason states why it is not auto-wired.
+SUS_SUGGESTIONS = {
+    "Improved Critical Targeting Self (Activated)":
+        ("STAT_CRITICAL_HIT", "stat clear, but only an EQUIP analog exists; this is activated/self"),
+    "Improved Jumpstart (Equip)":
+        ("SKILL_JUMPSTART", "skill exists but NO existing base uses it -- no analog to clone"),
+    "Improved Navigation (Equip)":
+        ("SKILL_NAVIGATE", "ambiguous: SKILL_NAVIGATE vs STAT_TURN_RATE vs STAT_WARP"),
+    "Increase Engine Thrust (Activated)":
+        ("STAT_IMPULSE", "ambiguous: STAT_IMPULSE (accel) vs STAT_ENGINE_TOP_SPEED"),
+    "Equipment Damage Magnification - Reactor Self (Activated)":
+        ("STAT_EQUIPMENT_DAMAGE_CONTROL_REACTOR", "only an EQUIP analog exists; this is activated/self"),
+    "Lower Shield Capacity Self (Activated)":
+        ("STAT_SHIELD", "stat clear (reduce), but no activated/self analog to clone the type from"),
+    "Weapon Engineering (Equip)":
+        ("SKILL_BUILD_WEAPONS", "ambiguous: SKILL_BUILD_WEAPONS vs STAT_EQUIPMENT_ENGINEERING"),
+    "Recalibrate Shielding System (Activated)":
+        ("STAT_SHIELD_RECHARGE", "ambiguous: STAT_SHIELD_RECHARGE vs SKILL_RECHARGE_SHIELDS"),
+    "Dread (Activated)":
+        ("SKILL_MENACE", "ambiguous fear/aggro: SKILL_MENACE vs SKILL_ENRAGE"),
+    "One Time Wormhole (Activated)":
+        ("SKILL_WORMHOLE", "likely a scripted create-wormhole device, not a stat buff"),
+    "Worsen Scan Range Increase Ship Signature (Activated)":
+        ("STAT_SCAN_RANGE + STAT_SIGNATURE", "COMPOUND name: two stats; slot order unknown"),
+}
+
+
 def load_tsv(path):
     rows = []
     with open(path, encoding="utf-8") as fh:
@@ -80,6 +140,7 @@ def main():
     ap.add_argument("--item-info", required=True, help="external item-info/ directory")
     ap.add_argument("--learn-dir", required=True, help="dir with the DB dump TSVs")
     ap.add_argument("--report", help="write a per-row CONFIRMED/GENERATED report here")
+    ap.add_argument("--sus-out", help="write the minted bases needing owner review here")
     args = ap.parse_args()
 
     ld = args.learn_dir
@@ -135,9 +196,7 @@ def main():
         lo, hi = fab_range[(descr, slot)]
         return max(lo, min(hi, val))
 
-    # --- mint new effect bases for unmatched effect keys (deterministic order) ---
-    # Collect every effect key seen in the source, find the ones with no base.
-    seen_keys = set()
+    # --- read the external item records ---
     info_files = sorted(glob.glob(os.path.join(args.item_info, "*.jsonl")))
     records = []
     for f in info_files:
@@ -148,20 +207,41 @@ def main():
                     continue
                 d = json.loads(line)
                 records.append(d)
-                for e in d.get("effects") or []:
-                    nm, ty = e.get("name"), e.get("type")
-                    if nm and ty:
-                        seen_keys.add(f"{nm} ({ty})")
 
-    new_bases = []  # (eid, etype, name, descr)
+    def resolve_iid(d):
+        iid = d.get("item_id")
+        if iid is None:
+            iid = name_to_id.get(d.get("name"))
+        return None if iid is None else int(iid)
+
+    # Mint a base ONLY for effect keys that have no base AND will actually
+    # receive at least one new link -- otherwise we would create an orphan base
+    # no item references (the "Improved Enrage" bug). Deterministic, sorted ids.
+    mintable = set()
+    for d in records:
+        iid = resolve_iid(d)
+        if iid is None:
+            continue
+        for e in d.get("effects") or []:
+            nm, ty = e.get("name"), e.get("type")
+            if not (nm and ty):
+                continue
+            key = f"{nm} ({ty})"
+            if key not in base_by_descr and (iid, key) not in have_link:
+                mintable.add(key)
+
+    new_bases = []  # (eid, etype, name, descr, wiring|None)
     next_eid = max_effect_id + 1
-    for key in sorted(k for k in seen_keys if k not in base_by_descr):
+    for key in sorted(mintable):
         # type from the trailing "(...)"; Equip -> 0, Activated/Instant -> 1
         etype = 0 if key.endswith("(Equip)") else 1
         name = key.rsplit(" (", 1)[0]
+        wiring = MINTED_STAT_WIRING.get(key)
+        stats = (["NO_STAT", "NO_STAT", "NO_STAT"] if not wiring
+                 else [wiring[0], wiring[2], "NO_STAT"])
         base_by_descr[key] = {"eid": next_eid, "etype": etype,
-                              "stats": ["NO_STAT", "NO_STAT", "NO_STAT"], "minted": True}
-        new_bases.append((next_eid, etype, name, key))
+                              "stats": stats, "minted": True}
+        new_bases.append((next_eid, etype, name, key, wiring))
         next_eid += 1
 
     # --- walk items, build the import set ---
@@ -268,15 +348,31 @@ def main():
         '       GREATEST((SELECT COALESCE(MAX("EffectID"),0) FROM item_effect_base),1));\n\n')
 
     if new_bases:
-        out.write("-- minted effect bases for effect keys absent from item_effect_base\n")
-        vals = ",\n  ".join(
-            "(%d,%d,%s,%s,%s)" % (eid, et, sql_str(nm), sql_str(descr), sql_str(descr))
-            for eid, et, nm, descr in new_bases)
+        n_wired = sum(1 for *_, w in new_bases if w)
+        out.write("-- minted effect bases for effect keys absent from item_effect_base.\n")
+        out.write("-- %d of %d carry a wired stat (cloned from a proven analog, see\n"
+                  "-- MINTED_STAT_WIRING in the generator); the rest are NO_STAT\n"
+                  "-- placeholders pending owner review (see the SUS list).\n"
+                  % (n_wired, len(new_bases)))
+        rows = []
+        for eid, et, nm, descr, w in new_bases:
+            if w:
+                v1s, v1t, v2s, v2t, buff, v1m, v2m, vis = w
+            else:
+                v1s, v1t, v2s, v2t, buff, v1m, v2m, vis = \
+                    "NO_STAT", 0, "NO_STAT", 0, "BUFF_NONE", 1.0, 1.0, -1
+            rows.append("(%d,%d,%s,%s,%s,%s,%d,%s,%d,%s,%s,%s,%d)" % (
+                eid, et, sql_str(nm), sql_str(descr), sql_str(descr),
+                sql_str(v1s), v1t, sql_str(v2s), v2t, sql_str(buff),
+                fmt(v1m), fmt(v2m), vis))
         out.write(
-            'INSERT INTO item_effect_base ("EffectID","EffectType","Name","Description","Tooltip")\n'
-            "SELECT v.eid,v.et,v.nm,v.descr,v.tip FROM (VALUES\n  "
-            + vals +
-            "\n) AS v(eid,et,nm,descr,tip)\n"
+            'INSERT INTO item_effect_base\n'
+            '  ("EffectID","EffectType","Name","Description","Tooltip",\n'
+            '   "Var1Stat","Var1Type","Var2Stat","Var2Type","Buff_Name",\n'
+            '   "Var1_mod","Var2_mod","VisualEffect")\n'
+            "SELECT v.* FROM (VALUES\n  "
+            + ",\n  ".join(rows) +
+            "\n) AS v(eid,et,nm,descr,tip,v1s,v1t,v2s,v2t,buff,v1m,v2m,vis)\n"
             'WHERE NOT EXISTS (SELECT 1 FROM item_effect_base b WHERE b."EffectID"=v.eid);\n\n')
 
     if container_items:
@@ -323,14 +419,34 @@ def main():
                     iid, key, eid, fmt(var[0]), fmt(var[1]), fmt(var[2]),
                     conf[0], conf[1], conf[2]))
 
+    # --- SUS list: minted bases left as NO_STAT placeholders for owner review ---
+    link_count = {}
+    for _, eid, *_ in eff_rows:
+        link_count[eid] = link_count.get(eid, 0) + 1
+    sus = [(eid, et, nm, descr) for eid, et, nm, descr, w in new_bases if not w]
+    if args.sus_out:
+        with open(args.sus_out, "w", encoding="utf-8") as sf:
+            sf.write("# Minted item_effect_base rows still set to NO_STAT (inert).\n")
+            sf.write("# Each needs an owner decision: confirm/correct the suggested\n")
+            sf.write("# stat, then add it to MINTED_STAT_WIRING and regenerate.\n")
+            sf.write("# A blank suggestion means no candidate stat was found at all\n")
+            sf.write("# (likely a scripted/cosmetic effect, not a stat modifier).\n")
+            sf.write("EffectID\ttype\tname\tlinked_items\tsuggested_stat\treason\n")
+            for eid, et, nm, descr in sus:
+                sugg, reason = SUS_SUGGESTIONS.get(descr, ("", "no candidate stat found"))
+                sf.write("%d\t%s\t%s\t%d\t%s\t%s\n" % (
+                    eid, "Equip" if et == 0 else "Activated", nm,
+                    link_count.get(eid, 0), sugg, reason))
+
     n_conf = sum(1 for _, _, _, _, conf in report for c in conf if c == "confirmed")
     n_gen = sum(1 for _, _, _, _, conf in report for c in conf if c.startswith("generated"))
     n_zero = sum(1 for _, _, _, _, conf in report for c in conf if c == "zero")
+    n_wired = sum(1 for *_, w in new_bases if w)
     sys.stderr.write(
-        "rows=%d  minted_bases=%d  containers=%d  no_id_unresolved=%d\n"
+        "rows=%d  minted_bases=%d (wired=%d sus=%d)  containers=%d  no_id_unresolved=%d\n"
         "slots: confirmed=%d generated=%d zero=%d\n" % (
-            len(eff_rows), len(new_bases), len(container_items),
-            len(skipped_no_id), n_conf, n_gen, n_zero))
+            len(eff_rows), len(new_bases), n_wired, len(sus),
+            len(container_items), len(skipped_no_id), n_conf, n_gen, n_zero))
 
 
 def sql_str(s):

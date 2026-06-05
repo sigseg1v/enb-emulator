@@ -1,0 +1,27 @@
+# Minted item_effect_base rows still set to NO_STAT (inert).
+# Each needs an owner decision: confirm/correct the suggested
+# stat, then add it to MINTED_STAT_WIRING and regenerate.
+# A blank suggestion means no candidate stat was found at all
+# (likely a scripted/cosmetic effect, not a stat modifier).
+EffectID	type	name	linked_items	suggested_stat	reason
+240	Activated	Access Key	4		no candidate stat found
+241	Equip	Counter-Strike	6		no candidate stat found
+242	Activated	Create Cobalt Ten-Gu Fangs	1		no candidate stat found
+243	Activated	Create Ossified Ten-Gu Fangs	1		no candidate stat found
+244	Activated	Creates Fireworks	1		no candidate stat found
+245	Activated	Dread	1	SKILL_MENACE	ambiguous fear/aggro: SKILL_MENACE vs SKILL_ENRAGE
+246	Activated	Equipment Damage Magnification - Reactor Self	1	STAT_EQUIPMENT_DAMAGE_CONTROL_REACTOR	only an EQUIP analog exists; this is activated/self
+247	Equip	Genesis Effect	1		no candidate stat found
+248	Activated	Improved Critical Targeting Self	1	STAT_CRITICAL_HIT	stat clear, but only an EQUIP analog exists; this is activated/self
+249	Equip	Improved Jumpstart	1	SKILL_JUMPSTART	skill exists but NO existing base uses it -- no analog to clone
+250	Equip	Improved Navigation	2	SKILL_NAVIGATE	ambiguous: SKILL_NAVIGATE vs STAT_TURN_RATE vs STAT_WARP
+251	Activated	Increase Engine Thrust	2	STAT_IMPULSE	ambiguous: STAT_IMPULSE (accel) vs STAT_ENGINE_TOP_SPEED
+254	Activated	Loony's Shield Hammer Energy	1		no candidate stat found
+255	Activated	Loony's Shield Hammer Impact	1		no candidate stat found
+256	Activated	Loony's Shield Hammer Plasma	1		no candidate stat found
+257	Activated	Lower Shield Capacity Self	1	STAT_SHIELD	stat clear (reduce), but no activated/self analog to clone the type from
+258	Activated	One Time Wormhole	2	SKILL_WORMHOLE	likely a scripted create-wormhole device, not a stat buff
+260	Activated	Projectile Force	1		no candidate stat found
+261	Activated	Recalibrate Shielding System	1	STAT_SHIELD_RECHARGE	ambiguous: STAT_SHIELD_RECHARGE vs SKILL_RECHARGE_SHIELDS
+263	Equip	Weapon Engineering	1	SKILL_BUILD_WEAPONS	ambiguous: SKILL_BUILD_WEAPONS vs STAT_EQUIPMENT_ENGINEERING
+266	Activated	Worsen Scan Range Increase Ship Signature	1	STAT_SCAN_RANGE + STAT_SIGNATURE	COMPOUND name: two stats; slot order unknown

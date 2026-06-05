@@ -1,21 +1,21 @@
 item_id	effect_key	eid	Var1	Var2	Var3	conf1	conf2	conf3
-6931	One Time Wormhole (Activated)	259	180	0	0	generated:180	zero	zero
-6770	One Time Wormhole (Activated)	259	180	0	0	generated:180	zero	zero
+6931	One Time Wormhole (Activated)	258	180	0	0	generated:180	zero	zero
+6770	One Time Wormhole (Activated)	258	180	0	0	generated:180	zero	zero
 6321	Weaken EMP (Activated)	18	20	0	0	confirmed	confirmed	zero
 6323	Weaken Energy (Activated)	19	20	0	0	confirmed	confirmed	zero
 6322	Weaken Explosive (Activated)	15	20	0	0	confirmed	confirmed	zero
 5902	Weaken Chemical (Activated)	17	20	0	0	confirmed	confirmed	zero
 6324	Weaken Plasma (Activated)	94	20	0	0	confirmed	confirmed	zero
 6320	Weaken Psionic (Activated)	105	20	0	0	confirmed	confirmed	zero
-6338	Projectile Energy Conservation (Equip)	260	20	0	0	confirmed	zero	zero
+6338	Projectile Energy Conservation (Equip)	259	20	0	0	confirmed	zero	zero
 6338	Device Energy Conservation (Equip)	132	10	0	0	confirmed	zero	zero
 6338	Equipment Engineering (Equip)	79	10	0	0	confirmed	zero	zero
 6338	Reactor Drain (Activated)	198	20	165	0	confirmed	confirmed	zero
-6339	Projectile Energy Conservation (Equip)	260	30	0	0	confirmed	zero	zero
+6339	Projectile Energy Conservation (Equip)	259	30	0	0	confirmed	zero	zero
 6339	Device Energy Conservation (Equip)	132	15	0	0	confirmed	zero	zero
 6339	Equipment Engineering (Equip)	79	15	0	0	confirmed	zero	zero
 6339	Reactor Drain (Activated)	198	30	180	0	confirmed	confirmed	zero
-6340	Projectile Energy Conservation (Equip)	260	30	0	0	confirmed	zero	zero
+6340	Projectile Energy Conservation (Equip)	259	30	0	0	confirmed	zero	zero
 6340	Device Energy Conservation (Equip)	132	15	0	0	confirmed	zero	zero
 6340	Equipment Engineering (Equip)	79	15	0	0	confirmed	zero	zero
 6340	Reactor Drain (Activated)	198	30	195	0	confirmed	confirmed	zero
@@ -25,13 +25,13 @@ item_id	effect_key	eid	Var1	Var2	Var3	conf1	conf2	conf3
 2483	Boost Beam Range (Equip)	22	78	0	0	confirmed	zero	zero
 1885	Equipment Damage Control - Engine (Equip)	65	44	0	0	confirmed	zero	zero
 1885	Hull Damage Control (Equip)	28	25	0	0	confirmed	zero	zero
-6291	Worsen Beam Handling Self (Activated)	265	16.7	0	0	confirmed	zero	zero
-6291	Worsen Missile Handling Self (Activated)	266	16.7	0	0	confirmed	zero	zero
+6291	Worsen Beam Handling Self (Activated)	264	16.7	6.7	1200	confirmed	confirmed	confirmed
+6291	Worsen Missile Handling Self (Activated)	265	16.7	6.7	1200	confirmed	confirmed	confirmed
 6291	Improved Critical Targeting Self (Activated)	248	19	0	0	confirmed	zero	zero
 6291	Scan Boost (Equip)	41	999	0	0	confirmed	zero	zero
 6292	Improved Powerdown (Equip)	181	1.5	0	0	confirmed	zero	zero
 6292	Improved Self Destruct (Equip)	184	1.5	1800	0	confirmed	generated	zero
-6292	Increase Reactor Capacity Self (Activated)	253	180	0	0	generated:180	zero	zero
+6292	Increase Reactor Capacity Self (Activated)	252	0	180	0	zero	generated:180	zero
 6292	Equipment Damage Magnification - Reactor Self (Activated)	246	180	0	0	generated:180	zero	zero
 6292	Boost Projectile Range (Equip)	60	26	0	0	confirmed	zero	zero
 6402	Slow Warp (Equip)	168	500	880	0	confirmed	generated	zero
@@ -68,7 +68,7 @@ item_id	effect_key	eid	Var1	Var2	Var3	conf1	conf2	conf3
 6491	Deflect Chemical (Equip)	29	30	0	0	confirmed	zero	zero
 6491	Deflect Impact (Equip)	30	30	0	0	confirmed	zero	zero
 6491	Recharge Shields - BOOST (Activated)	116	392	10	0	confirmed	confirmed	zero
-2269	Projectile Energy Conservation (Equip)	260	40	0	0	confirmed	zero	zero
+2269	Projectile Energy Conservation (Equip)	259	40	0	0	confirmed	zero	zero
 6122	Turbo Missile (Equip)	66	40	0	0	confirmed	zero	zero
 6131	Turbo Weapons (Equip)	232	5	0	0	confirmed	zero	zero
 928	Improved Beam Handling (Equip)	178	1.6	7.8	0	confirmed	generated	zero
@@ -100,13 +100,13 @@ item_id	effect_key	eid	Var1	Var2	Var3	conf1	conf2	conf3
 6447	Weaken Plasma (Activated)	94	45	60	0	confirmed	confirmed	zero
 6447	Beam Energy Conservation (Equip)	90	40	0	0	confirmed	zero	zero
 6447	Missile Energy Conservation (Equip)	37	40	0	0	confirmed	zero	zero
-6447	Projectile Energy Conservation (Equip)	260	40	0	0	confirmed	zero	zero
+6447	Projectile Energy Conservation (Equip)	259	40	0	0	confirmed	zero	zero
 6454	Prospect Skill (Equip)	49	2.4	0	0	confirmed	zero	zero
 6454	Improved Powerdown (Equip)	181	51.7	0	0	confirmed	zero	zero
-6454	Projectile Energy Conservation (Equip)	260	35.8	0	0	confirmed	zero	zero
-2430	Loony's Shield Hammer Plasma (Activated)	257	15	0	0	confirmed	zero	zero
-2430	Loony's Shield Hammer Impact (Activated)	256	15	0	0	confirmed	zero	zero
-2430	Loony's Shield Hammer Energy (Activated)	255	15	0	0	confirmed	zero	zero
+6454	Projectile Energy Conservation (Equip)	259	35.8	0	0	confirmed	zero	zero
+2430	Loony's Shield Hammer Plasma (Activated)	256	15	0	0	confirmed	zero	zero
+2430	Loony's Shield Hammer Impact (Activated)	255	15	0	0	confirmed	zero	zero
+2430	Loony's Shield Hammer Energy (Activated)	254	15	0	0	confirmed	zero	zero
 6518	Boost Missile Range (Equip)	24	12	0	0	confirmed	zero	zero
 6518	Missile Energy Conservation (Equip)	37	10	0	0	confirmed	zero	zero
 2790	Equipment Engineering (Equip)	79	56	0	0	confirmed	zero	zero
@@ -124,7 +124,7 @@ item_id	effect_key	eid	Var1	Var2	Var3	conf1	conf2	conf3
 2347	Equipment Engineering (Equip)	79	60	0	0	confirmed	zero	zero
 2445	Equipment Engineering (Equip)	79	65	0	0	confirmed	zero	zero
 2446	Recharge Shields (Equip)	61	20	0	0	confirmed	zero	zero
-2470	Projectile Energy Conservation (Equip)	260	40	0	0	confirmed	zero	zero
+2470	Projectile Energy Conservation (Equip)	259	40	0	0	confirmed	zero	zero
 6667	Fast Tractor Beam (Equip)	52	23	0	0	confirmed	zero	zero
 6667	Long Tractor Beam (Equip)	77	34	0	0	confirmed	zero	zero
 6668	Fast Tractor Beam (Equip)	52	39	0	0	confirmed	zero	zero
@@ -155,13 +155,13 @@ item_id	effect_key	eid	Var1	Var2	Var3	conf1	conf2	conf3
 6457	Improved Shield Inversion (Equip)	89	4.4	0	0	confirmed	zero	zero
 6457	Recharge Shields Skill (Equip)	25	2.2	0	0	confirmed	zero	zero
 6457	Increase Speed (Equip)	51	168	0	0	confirmed	zero	zero
-2471	Projectile Energy Conservation (Equip)	260	40	0	0	confirmed	zero	zero
-2379	Projectile Energy Conservation (Equip)	260	40	0	0	confirmed	zero	zero
-2096	Projectile Energy Conservation (Equip)	260	30	0	0	confirmed	zero	zero
-2186	Projectile Energy Conservation (Equip)	260	35	0	0	confirmed	zero	zero
-2277	Projectile Energy Conservation (Equip)	260	40	0	0	confirmed	zero	zero
+2471	Projectile Energy Conservation (Equip)	259	40	0	0	confirmed	zero	zero
+2379	Projectile Energy Conservation (Equip)	259	40	0	0	confirmed	zero	zero
+2096	Projectile Energy Conservation (Equip)	259	30	0	0	confirmed	zero	zero
+2186	Projectile Energy Conservation (Equip)	259	35	0	0	confirmed	zero	zero
+2277	Projectile Energy Conservation (Equip)	259	40	0	0	confirmed	zero	zero
 2178	Counter-Strike (Equip)	241	8.4	0	0	confirmed	zero	zero
-3107	Projectile Energy Conservation (Equip)	260	30	0	0	confirmed	zero	zero
+3107	Projectile Energy Conservation (Equip)	259	30	0	0	confirmed	zero	zero
 3737	Counter-Strike (Equip)	241	10.8	0	0	confirmed	zero	zero
 3695	Counter-Strike (Equip)	241	7.7	0	0	confirmed	zero	zero
 3765	Counter-Strike (Equip)	241	12.3	0	0	confirmed	zero	zero
@@ -171,17 +171,17 @@ item_id	effect_key	eid	Var1	Var2	Var3	conf1	conf2	conf3
 6257	Creates Fireworks (Activated)	244	180	0	0	generated:180	zero	zero
 6344	Reactor Renewal (Equip)	122	5	0	0	confirmed	zero	zero
 6344	Reduce Ship Signature (Equip)	26	10	0	0	confirmed	zero	zero
-6344	Projectile Energy Conservation (Equip)	260	20	0	0	confirmed	zero	zero
-6346	Projectile Energy Conservation (Equip)	260	30	0	0	confirmed	zero	zero
+6344	Projectile Energy Conservation (Equip)	259	20	0	0	confirmed	zero	zero
+6346	Projectile Energy Conservation (Equip)	259	30	0	0	confirmed	zero	zero
 6346	Reactor Renewal (Equip)	122	10	0	0	confirmed	zero	zero
 6346	Reduce Ship Signature (Equip)	26	25	0	0	confirmed	zero	zero
-6347	Projectile Energy Conservation (Equip)	260	40	0	0	confirmed	zero	zero
+6347	Projectile Energy Conservation (Equip)	259	40	0	0	confirmed	zero	zero
 6347	Reactor Renewal (Equip)	122	15	0	0	confirmed	zero	zero
 6347	Turbo Projectile (Equip)	78	30	0	0	confirmed	zero	zero
 6347	Reduce Ship Signature (Equip)	26	50	0	0	confirmed	zero	zero
 6412	Scan Blind (Equip)	63	80	0	0	confirmed	zero	zero
 6412	Reduce Ship Signature (Equip)	26	20	0	0	confirmed	zero	zero
-6332	Projectile Energy Conservation (Equip)	260	25	0	0	confirmed	zero	zero
+6332	Projectile Energy Conservation (Equip)	259	25	0	0	confirmed	zero	zero
 7129	Turbo Projectile (Equip)	78	40	0	0	confirmed	zero	zero
 7129	Projectile Force (Equip)	145	4	0	0	confirmed	zero	zero
 7117	Turbo Beam (Equip)	143	40	0	0	confirmed	zero	zero
@@ -193,8 +193,8 @@ item_id	effect_key	eid	Var1	Var2	Var3	conf1	conf2	conf3
 6439	Increase Speed (Equip)	51	120	0	0	confirmed	zero	zero
 6439	Boost Missile Range (Equip)	24	20	0	0	confirmed	zero	zero
 6993	Equipment Engineering (Equip)	79	62	0	0	confirmed	zero	zero
-6993	Projectile Energy Conservation (Equip)	260	40	0	0	confirmed	zero	zero
-3172	Projectile Energy Conservation (Equip)	260	40	0	0	confirmed	zero	zero
+6993	Projectile Energy Conservation (Equip)	259	40	0	0	confirmed	zero	zero
+3172	Projectile Energy Conservation (Equip)	259	40	0	0	confirmed	zero	zero
 6405	Reactor Renewal (Equip)	122	2.2	0	0	confirmed	zero	zero
 6405	Recharge Shields (Equip)	61	10	0	0	confirmed	zero	zero
 6406	Reactor Renewal (Equip)	122	2.8	0	0	confirmed	zero	zero
@@ -206,7 +206,7 @@ item_id	effect_key	eid	Var1	Var2	Var3	conf1	conf2	conf3
 6932	Fast Tractor Beam (Equip)	52	140	0	0	confirmed	zero	zero
 5336	Energy Feedback (Equip)	206	6	0	0	confirmed	zero	zero
 5337	Energy Feedback (Equip)	206	3	0	0	confirmed	zero	zero
-3318	Projectile Energy Conservation (Equip)	260	40	0	0	confirmed	zero	zero
+3318	Projectile Energy Conservation (Equip)	259	40	0	0	confirmed	zero	zero
 7093	Hull Damage Control (Equip)	28	22	0	0	confirmed	zero	zero
 7093	Improved Projectile Handling (Equip)	92	1.3	6.9	0	confirmed	generated	zero
 7093	Improved Beam Handling (Equip)	178	1.3	7	0	confirmed	generated	zero
@@ -219,7 +219,7 @@ item_id	effect_key	eid	Var1	Var2	Var3	conf1	conf2	conf3
 7097	Improved Missile Handling (Equip)	136	1.9	8.2	0	confirmed	generated	zero
 7097	Device Energy Conservation (Equip)	132	10	0	0	confirmed	zero	zero
 6436	Improved Build Reactors (Equip)	144	0.35	0	0	confirmed	zero	zero
-2473	Projectile Energy Conservation (Equip)	260	40	0	0	confirmed	zero	zero
+2473	Projectile Energy Conservation (Equip)	259	40	0	0	confirmed	zero	zero
 6316	Improved Critical Targeting (Equip)	36	23	0	0	confirmed	zero	zero
 6316	Hull Damage Control (Equip)	28	100	0	0	confirmed	zero	zero
 6316	Enhance Beam (Equip)	99	30	0	0	confirmed	zero	zero
@@ -233,7 +233,7 @@ item_id	effect_key	eid	Var1	Var2	Var3	conf1	conf2	conf3
 6479	Maximize Shields (Activated)	126	10	2100	0	confirmed	confirmed	zero
 7135	Turbo Weapons (Activated)	5	5	1780	0	confirmed	confirmed	zero
 1778	Access Key (Activated)	240	180	0	0	generated:180	zero	zero
-3030	Projectile Energy Conservation (Equip)	260	9	0	0	confirmed	zero	zero
+3030	Projectile Energy Conservation (Equip)	259	9	0	0	confirmed	zero	zero
 1779	Access Key (Activated)	240	180	0	0	generated:180	zero	zero
 6416	Decrease Speed (Activated)	177	20	100	1080	confirmed	confirmed	generated
 6416	Decrease Maneuverability (Activated)	102	10	100	0	confirmed	confirmed	zero
@@ -241,10 +241,10 @@ item_id	effect_key	eid	Var1	Var2	Var3	conf1	conf2	conf3
 2827	Cripple Reactor (Equip)	59	10	0	0	confirmed	zero	zero
 6294	Projectile Force (Equip)	145	5	0	0	confirmed	zero	zero
 6294	Increase Ship Signature (Equip)	44	1000	0	0	confirmed	zero	zero
-6356	Improved Navigation (Equip)	251	3.05	0	0	confirmed	zero	zero
+6356	Improved Navigation (Equip)	250	3.05	0	0	confirmed	zero	zero
 6356	Improved Wormhole (Equip)	167	1	4.3	0	confirmed	generated	zero
 6356	Additive Turbo Warp (Equip)	139	100	0	0	confirmed	zero	zero
-6355	Improved Navigation (Equip)	251	1.93	0	0	confirmed	zero	zero
+6355	Improved Navigation (Equip)	250	1.93	0	0	confirmed	zero	zero
 1131	Warp Charge (Equip)	53	58	0	0	confirmed	zero	zero
 6488	Recharge Shields Skill (Equip)	25	3.93	0	0	confirmed	zero	zero
 6488	Equipment Engineering (Equip)	79	70	0	0	confirmed	zero	zero
@@ -268,7 +268,7 @@ item_id	effect_key	eid	Var1	Var2	Var3	conf1	conf2	conf3
 6333	Weaken Chemical (Equip)	47	20	0	0	confirmed	zero	zero
 5373	Energy Feedback (Equip)	206	6	0	0	confirmed	zero	zero
 5374	Energy Feedback (Equip)	206	3	0	0	confirmed	zero	zero
-2580	Projectile Energy Conservation (Equip)	260	31.8	0	0	confirmed	zero	zero
+2580	Projectile Energy Conservation (Equip)	259	31.8	0	0	confirmed	zero	zero
 6408	Hull Damage Control (Equip)	28	25	0	0	confirmed	zero	zero
 6409	Hull Damage Control (Equip)	28	38	0	0	confirmed	zero	zero
 6409	Scan Blind (Equip)	63	30	0	0	confirmed	zero	zero
@@ -304,7 +304,7 @@ item_id	effect_key	eid	Var1	Var2	Var3	conf1	conf2	conf3
 6480	Enhance Weapons (Activated)	192	10	2100	0	confirmed	confirmed	zero
 6293	Improved Shield Inversion (Equip)	89	2	0	0	confirmed	zero	zero
 6293	Weaken Explosive (Activated)	15	25	120	0	confirmed	confirmed	zero
-6293	Lower Shield Capacity Self (Activated)	258	33	0	0	confirmed	zero	zero
+6293	Lower Shield Capacity Self (Activated)	257	33	0	0	confirmed	zero	zero
 6252	Shunt to Shield (Activated)	188	25	25	25	confirmed	confirmed	confirmed
 6252	Recharge Reactor (Activated)	16	3.2	880	0	confirmed	generated	zero
 7170	Turbo Weapons (Equip)	232	40	870	0	confirmed	generated	zero
@@ -327,18 +327,18 @@ item_id	effect_key	eid	Var1	Var2	Var3	conf1	conf2	conf3
 6506	Enhance Missiles (Equip)	42	20	0	0	confirmed	zero	zero
 6506	Enhance Projectiles (Equip)	68	20	0	0	confirmed	zero	zero
 6506	Recharge Reactor - BOOST! (Activated)	189	42.7	20	0	confirmed	confirmed	zero
-3673	Projectile Energy Conservation (Equip)	260	27	0	0	confirmed	zero	zero
-6341	See Cloaked (Activated)	263	15	0	0	confirmed	zero	zero
+3673	Projectile Energy Conservation (Equip)	259	27	0	0	confirmed	zero	zero
+6341	See Cloaked (Activated)	262	0	15	0	zero	confirmed	zero
 6341	Scan Blind (Activated)	113	30	15	0	confirmed	confirmed	zero
-6342	See Cloaked (Activated)	263	30	0	0	confirmed	zero	zero
+6342	See Cloaked (Activated)	262	0	30	0	zero	confirmed	zero
 6342	Weaken Impact (Activated)	96	25	192	0	confirmed	confirmed	zero
-6343	See Cloaked (Activated)	263	60	0	0	confirmed	zero	zero
-6343	Projectile Force (Activated)	261	3	0	0	confirmed	zero	zero
+6343	See Cloaked (Activated)	262	0	60	0	zero	confirmed	zero
+6343	Projectile Force (Activated)	260	3	0	0	confirmed	zero	zero
 6343	Weaken Impact (Activated)	96	30	216	0	confirmed	confirmed	zero
-6212	Worsen Scan Range Increase Ship Signature (Activated)	267	20	0	0	confirmed	zero	zero
+6212	Worsen Scan Range Increase Ship Signature (Activated)	266	20	0	0	confirmed	zero	zero
 6212	Improved Critical Targeting (Equip)	36	5.99	0	0	confirmed	zero	zero
 6212	Recharge Shields - BOOST (Activated)	116	20	30	0	confirmed	confirmed	zero
-6212	See Cloaked (Activated)	263	30	0	0	confirmed	zero	zero
+6212	See Cloaked (Activated)	262	0	30	0	zero	confirmed	zero
 6206	Group Hug (Activated)	221	6	1440	0	confirmed	confirmed	zero
 6205	Group Hug (Activated)	221	3	720	0	confirmed	confirmed	zero
 6204	Group Hug (Activated)	221	1	240	0	confirmed	confirmed	zero
@@ -349,21 +349,21 @@ item_id	effect_key	eid	Var1	Var2	Var3	conf1	conf2	conf3
 7134	Improved Hacking (Equip)	33	90	0	0	confirmed	zero	zero
 3719	Weaken Psionic (Equip)	56	20	0	0	confirmed	zero	zero
 3742	Weaken Psionic (Equip)	56	20	0	0	confirmed	zero	zero
-2366	Projectile Energy Conservation (Equip)	260	40	0	0	confirmed	zero	zero
+2366	Projectile Energy Conservation (Equip)	259	40	0	0	confirmed	zero	zero
 6930	Long Tractor Beam (Equip)	77	58	0	0	confirmed	zero	zero
 6930	Fast Tractor Beam (Equip)	52	125	0	0	confirmed	zero	zero
 6335	Improved Shield Inversion (Equip)	89	2.5	0	0	confirmed	zero	zero
 6335	Reduce Experience Debt (Equip)	203	10	0	0	confirmed	zero	zero
-6335	Increase Scan Range (Activated)	254	10	0	0	confirmed	zero	zero
+6335	Increase Scan Range (Activated)	253	10	165	0	confirmed	confirmed	zero
 6335	Increase Shield Capacity (Equip)	109	5	0	0	confirmed	zero	zero
 6336	Increase Shield Capacity (Equip)	109	10	0	0	confirmed	zero	zero
 6336	Improved Shield Inversion (Equip)	89	3	0	0	confirmed	zero	zero
 6336	Reduce Experience Debt (Equip)	203	20	0	0	confirmed	zero	zero
-6336	Increase Scan Range (Activated)	254	20	0	0	confirmed	zero	zero
+6336	Increase Scan Range (Activated)	253	20	180	0	confirmed	confirmed	zero
 6337	Increase Shield Capacity (Equip)	109	15	0	0	confirmed	zero	zero
 6337	Reduce Experience Debt (Equip)	203	30	0	0	confirmed	zero	zero
-6337	Increase Scan Range (Activated)	254	30	0	0	confirmed	zero	zero
-6337	Improved Jumpstart (Equip)	250	50	0	0	confirmed	zero	zero
+6337	Increase Scan Range (Activated)	253	30	195	0	confirmed	confirmed	zero
+6337	Improved Jumpstart (Equip)	249	50	0	0	confirmed	zero	zero
 6456	Increase Maneuverability (Equip)	34	72	0	0	confirmed	zero	zero
 6456	Increase Speed (Equip)	51	276	0	0	confirmed	zero	zero
 6456	See Cloaked (Equip)	146	40	0	0	generated	zero	zero
@@ -375,9 +375,9 @@ item_id	effect_key	eid	Var1	Var2	Var3	conf1	conf2	conf3
 6470	Reactor Renewal (Equip)	122	4.6	0	0	confirmed	zero	zero
 6470	Increase Reactor Capacity (Equip)	57	700	0	0	confirmed	zero	zero
 6470	Increase Speed (Equip)	51	108	0	0	confirmed	zero	zero
-2050	Projectile Energy Conservation (Equip)	260	34	0	0	confirmed	zero	zero
-1965	Projectile Energy Conservation (Equip)	260	28.5	0	0	confirmed	zero	zero
-3176	Projectile Energy Conservation (Equip)	260	36.5	0	0	confirmed	zero	zero
+2050	Projectile Energy Conservation (Equip)	259	34	0	0	confirmed	zero	zero
+1965	Projectile Energy Conservation (Equip)	259	28.5	0	0	confirmed	zero	zero
+3176	Projectile Energy Conservation (Equip)	259	36.5	0	0	confirmed	zero	zero
 6365	Boost Missile Range (Equip)	24	30	0	0	confirmed	zero	zero
 6365	Reactor Renewal (Equip)	122	5	0	0	confirmed	zero	zero
 6365	Improved Missile Handling (Equip)	136	2.3	8.6	0	confirmed	generated	zero
@@ -409,7 +409,7 @@ item_id	effect_key	eid	Var1	Var2	Var3	conf1	conf2	conf3
 6495	Beam Focus (Equip)	128	3	7	0	confirmed	generated	zero
 6495	Equipment Damage Control - Weapons (Equip)	32	250	0	0	confirmed	zero	zero
 3223	Reduce Ship Signature (Equip)	26	37	0	0	confirmed	zero	zero
-6721	Increase Engine Thrust (Activated)	252	100	0	0	confirmed	zero	zero
+6721	Increase Engine Thrust (Activated)	251	100	0	0	confirmed	zero	zero
 6721	Increase Maneuverability (Activated)	55	50	300	0	confirmed	confirmed	zero
 6721	Weaken Plasma (Equip)	103	30	0	0	confirmed	zero	zero
 6721	Weaken EMP (Equip)	87	30	0	0	confirmed	zero	zero
@@ -428,8 +428,8 @@ item_id	effect_key	eid	Var1	Var2	Var3	conf1	conf2	conf3
 7175	Weaken Explosive (Activated)	15	22	72	0	confirmed	confirmed	zero
 3332	Turbo (Activated)	2	107	10	0	confirmed	confirmed	zero
 3332	Boost Missile Range (Equip)	24	33	0	0	confirmed	zero	zero
-6276	Weapon Engineering (Equip)	264	25	0	0	confirmed	zero	zero
-6276	Increase Engine Thrust (Activated)	252	60	0	0	confirmed	zero	zero
+6276	Weapon Engineering (Equip)	263	25	0	0	confirmed	zero	zero
+6276	Increase Engine Thrust (Activated)	251	60	0	0	confirmed	zero	zero
 6276	Turbo Warp (Activated)	106	500	30	0	confirmed	confirmed	zero
 6276	Reduce Warp Cost (Equip)	38	20	0	0	confirmed	zero	zero
 6469	Improved Shield Inversion (Equip)	89	6	0	0	confirmed	zero	zero
@@ -441,14 +441,14 @@ item_id	effect_key	eid	Var1	Var2	Var3	conf1	conf2	conf3
 6433	Warp Charge (Equip)	53	25	0	0	confirmed	zero	zero
 6895	Deflect Energy (Equip)	43	30	0	0	confirmed	zero	zero
 6895	Enhance Ship Signature (Activated)	222	20	5	0	confirmed	confirmed	zero
-3317	Projectile Energy Conservation (Equip)	260	40	0	0	confirmed	zero	zero
+3317	Projectile Energy Conservation (Equip)	259	40	0	0	confirmed	zero	zero
 6513	Turbo Weapons (Activated)	5	12	1820	0	confirmed	confirmed	zero
 6513	Dread (Activated)	245	30	0	0	confirmed	zero	zero
-5156	Projectile Energy Conservation (Equip)	260	40	0	0	confirmed	zero	zero
-3851	Recalibrate Shielding System (Activated)	262	180	0	0	generated:180	zero	zero
-3851	Projectile Energy Conservation (Equip)	260	40	0	0	confirmed	zero	zero
-985	Projectile Energy Conservation (Equip)	260	35	0	0	confirmed	zero	zero
-2572	Projectile Energy Conservation (Equip)	260	18	0	0	confirmed	zero	zero
+5156	Projectile Energy Conservation (Equip)	259	40	0	0	confirmed	zero	zero
+3851	Recalibrate Shielding System (Activated)	261	180	0	0	generated:180	zero	zero
+3851	Projectile Energy Conservation (Equip)	259	40	0	0	confirmed	zero	zero
+985	Projectile Energy Conservation (Equip)	259	35	0	0	confirmed	zero	zero
+2572	Projectile Energy Conservation (Equip)	259	18	0	0	confirmed	zero	zero
 6452	Weaken Plasma (Activated)	94	43.7	128	0	confirmed	confirmed	zero
 6452	Improved Hacking (Equip)	33	124	0	0	confirmed	zero	zero
 6452	Recharge Reactor (Equip)	27	7.3	0	0	confirmed	zero	zero
@@ -459,11 +459,11 @@ item_id	effect_key	eid	Var1	Var2	Var3	conf1	conf2	conf3
 2717	Deflect Impact (Equip)	30	24	0	0	confirmed	zero	zero
 2744	Deflect Explosive (Equip)	35	27	0	0	confirmed	zero	zero
 2744	Deflect Impact (Equip)	30	27	0	0	confirmed	zero	zero
-1876	Projectile Energy Conservation (Equip)	260	24	0	0	confirmed	zero	zero
-913	Projectile Energy Conservation (Equip)	260	27.5	0	0	confirmed	zero	zero
-838	Projectile Energy Conservation (Equip)	260	22.5	0	0	confirmed	zero	zero
-1953	See Cloaked (Activated)	263	1200	0	0	confirmed	zero	zero
-2036	See Cloaked (Activated)	263	1450	0	0	confirmed	zero	zero
+1876	Projectile Energy Conservation (Equip)	259	24	0	0	confirmed	zero	zero
+913	Projectile Energy Conservation (Equip)	259	27.5	0	0	confirmed	zero	zero
+838	Projectile Energy Conservation (Equip)	259	22.5	0	0	confirmed	zero	zero
+1953	See Cloaked (Activated)	262	0	1200	0	zero	confirmed	zero
+2036	See Cloaked (Activated)	262	0	1450	0	zero	confirmed	zero
 2415	Turbo (Activated)	2	128	10	0	confirmed	confirmed	zero
 2415	Enhance Missiles (Equip)	42	35	0	0	confirmed	zero	zero
 2415	Turbo Missile (Equip)	66	40	0	0	confirmed	zero	zero
