@@ -707,6 +707,17 @@ seed-account USER='testuser' PASS='testpass':
             -v username={{ quote(USER) }} -v phc="$phc"
     @echo ">>> seeded {{USER}} / {{PASS}} (status=100)"
 
+# Seed a dev account with a full roster: TW JE JW(jd) TT TE(ts), each at total
+# level 75 (combat/explore/trade = 25 each), every class skill at max rank, and
+# 10,000,000 credits. Characters are named <username><suffix> (Grievertw,
+# Grieverje, Grieverjd, Grievertt, Grieverts). Unlike seed-account this is not
+# pure SQL: it drives the CLI to create+enter each character so the SERVER lays
+# down the starting gear / position / faction state correctly, then bumps the
+# stored levels/credits/slots/skills. Honours ENB_NOREBUILD=1. Re-runnable: an
+# existing roster for the account is wiped first. See tools/seed-dev-account/.
+seed-dev-account USER='devuser' PASS='devpass':
+    @tools/seed-dev-account/seed-dev-account.sh {{ quote(USER) }} {{ quote(PASS) }}
+
 # Grant SKILL_PROSPECT (id 41) and a high Explore level to an existing
 # character, so a Jenquai Explorer can mine without first completing the
 # retail mission that normally grants Prospect (Skills.xml marks it
