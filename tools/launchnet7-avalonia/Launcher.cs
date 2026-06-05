@@ -149,7 +149,12 @@ namespace LaunchNet7Avalonia
             if (addrs.Length == 0)
                 throw new InvalidOperationException($"Could not resolve hostname '{_setting.Hostname}'.");
 
-            var dir = Path.Combine(Directory.GetCurrentDirectory(), "bin");
+            // Resolve relative to the launcher exe's own location, NOT the
+            // process CWD. Double-clicking in Explorer happens to set CWD to
+            // the exe folder, but launching from a shell elsewhere or via a
+            // shortcut with a different "Start in" would otherwise break the
+            // spawn. AppContext.BaseDirectory is always the exe's folder.
+            var dir = Path.Combine(AppContext.BaseDirectory, "bin");
             var exe = Path.Combine(dir, "Net7Proxy.exe");
             var info = WinExe(dir, exe, $"/ADDRESS:{addrs[0]}");
 
@@ -168,7 +173,9 @@ namespace LaunchNet7Avalonia
             // server/build/server (or the docker-compose service). This
             // launcher path therefore only fires on Windows / WINE where
             // someone genuinely wants the SP loopback flow.
-            var dir = Path.Combine(Directory.GetCurrentDirectory(), "bin");
+            // Resolve relative to the launcher exe's own location (see the
+            // note in LaunchNet7Proxy) rather than the process CWD.
+            var dir = Path.Combine(AppContext.BaseDirectory, "bin");
             var exe = Path.Combine(dir, "Net7.exe");
             var info = WinExe(dir, exe, null);
 
