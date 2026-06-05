@@ -20,15 +20,28 @@ CLAUDE.md welcomes.
 
 ## Status
 
-In progress -- 2026-06-03. Wave 1 (opcode parity Tier-1 + dead-twin
+In progress -- updated 2026-06-05. Wave 1 (opcode parity Tier-1 + dead-twin
 deletion + docs) landed. Wave 2 fixed the C->S TURN/TILT throttle (was
-unconditional, now only-while-moving). Wave 3 found that Wave 2's claim
+unconditional, now only-while-moving; speed read hardened against undersized
+frames in the 2026-06-05 follow-up). Wave 3 found that Wave 2's claim
 "S->C consume set matches the reference exactly" was WRONG for the
 fabrication band: the reference EXPANDS `0x2012/0x2013/0x2014` (and
 `0x2018/0x2019`) into full client packets and we drop them -- a real,
 active regression for mining/tractor/loot beam + object-spawn effects.
-The misleading code/plan comments are corrected and the reconstructed
-fabrication spec is captured in §3a; implementation is in progress.
+
+**Where it stands (the safely-implementable parity work is DONE; the
+remainder is BLOCKED, not skipped).** Landed: S->C opcode parity (Wave 1),
+C->S throttle + `0x3a` removal + undersized-frame guard (Wave 2), and the
+fabrication expansions that do NOT need a live mining harness -- `0x2012`
+START_PROSPECT (`UDPClient::StartProspecting`) and `0x2018`/`0x2019`
+OBJECT_CREATE (`UDPClient::CreateObject`) (Wave 3). Still open and BLOCKED:
+`0x2013`/`0x2014` TRACTOR/LOOT expansion, the prospector `0x1b`/`0x1d`
+ability messages, and byte-pinning each fabricated packet -- all three
+require the live mine/loot harness, which sits in the **paused mining/loot
+region** (owner said "I'll tell you when to resume mining debug"; [[#49]]
+loot tractor-in is explicitly do-not-start) and is additionally
+capture-blocked. So #44's remaining gaps are gated on that pause + captures,
+not on available work.
 
 ---
 
@@ -194,6 +207,17 @@ in-space / 0x3008 if station visibility kick), `0x14`/`0x2c`/`0x9b`/`0x9f`
       exact ones the retail client+server pair exchanged), changes no wire
       bytes, and loosens no server posture (TURN is a normal gameplay
       opcode the server already accepts at any cadence).
+  - [x] **Hardened the speed read against undersized frames (2026-06-05,
+        commit `8654a082`).** The offset-4 speed float is only valid when the
+        frame carries it (`GameID + speed = 8 bytes`). A real client TURN/TILT
+        always does, but an undersized/malformed frame would have made the
+        unconditional `*((float*)&m_RecvBuffer[4])` test a stale prior-packet
+        byte (memory-safe -- fixed buffer -- but a wrong throttle decision that
+        could silently drop a short frame the server should see). Now
+        `speed = (bytes >= 8) ? *(float*)&m_RecvBuffer[4] : 0.0f`, so a short
+        frame degrades to never-throttle / always-forward. Pure defensive
+        tightening of our own added read; wire format unchanged, no real frame
+        affected. Both targets rebuilt clean.
 - [x] **Removed the redundant `0x3a` C->S case.** `0x3a` SERVER_HANDOFF is
       a *server->client* opcode: the proxy consumes its side-effects in
       `UDPClient::IncommingOpcodePreProcessing` on the S->C path and then
