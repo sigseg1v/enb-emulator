@@ -62,8 +62,13 @@ from collections import defaultdict
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_NPCS = "/data/dev/enb-emu-data-reconstruct-backup/db/npcs/npcs.jsonl"
-DEFAULT_ITEMS_GLOB = "/data/dev/enb-emu-data-reconstruct-backup/db/json/cat*_lvl*.jsonl"
+# The reconstruct dataset lives OUTSIDE the repo (it is not redistributed
+# here). Point ENB_RECONSTRUCT_DB at its `db/` dir, or pass --npcs/--items-glob
+# explicitly. No absolute external path is hardcoded (CLAUDE.md: no paths
+# outside the repo root in committed files).
+RECONSTRUCT_DB = os.environ.get("ENB_RECONSTRUCT_DB", "reconstruct-data")
+DEFAULT_NPCS = f"{RECONSTRUCT_DB}/npcs/npcs.jsonl"
+DEFAULT_ITEMS_GLOB = f"{RECONSTRUCT_DB}/json/cat*_lvl*.jsonl"
 DEFAULT_OUT = REPO_ROOT / "db" / "postgres" / "seed_phase_y.sql"
 
 # Live Postgres connection for fetching starbases + starbase_rooms at
@@ -195,7 +200,22 @@ def fetch_rooms(host: str, port: str, user: str, password: str, dbname: str):
         if len(row) >= 3:
             existing_names.add((row[0], row[1], int(row[2])))
 
-    return starbase_by_norm, dict(rooms_by_starbase), room_next_index, existing_names
+    # Real factions keyed by lowered/trimmed name, so NPC `faction` strings
+    # map onto the EXISTING faction table instead of minting synthetic
+    # >=100000 duplicates (which shadowed the 28 real factions: a second
+    # "The Red Dragon", "Bogeril", etc.).
+    factions_by_name: dict[str, int] = {}
+    for row in run('SELECT faction_id, name FROM factions WHERE faction_id < %d AND name IS NOT NULL;' % SYNTH_ID_FLOOR):
+        factions_by_name[row[1].strip().lower()] = int(row[0])
+
+    # Same idea for manufacturers: item `manufacturer` strings map onto the
+    # real item_manufacturer_base rows by name; the old generator minted a
+    # synthetic id per string and produced 48 duplicate manufacturer rows.
+    manufacturers_by_name: dict[str, int] = {}
+    for row in run('SELECT id, name FROM item_manufacturer_base WHERE id < %d AND name IS NOT NULL;' % SYNTH_ID_FLOOR):
+        manufacturers_by_name[row[1].strip().lower()] = int(row[0])
+
+    return starbase_by_norm, dict(rooms_by_starbase), room_next_index, existing_names, factions_by_name, manufacturers_by_name
 
 
 def resolve_starbase(station: str,
@@ -262,7 +282,7 @@ def main():
     # Fetch room placement data from the live DB (the source of truth
     # is schema.sql, but parsing 200+ multi-tuple INSERTs is fragile;
     # the live DB already has them loaded).
-    starbase_by_norm, rooms_by_starbase, room_next_index, existing_names = fetch_rooms(
+    starbase_by_norm, rooms_by_starbase, room_next_index, existing_names, factions_by_name, manufacturers_by_name = fetch_rooms(
         args.pg_host, args.pg_port, args.pg_user, args.pg_password, args.pg_db
     )
     print(f"  fetched {len(starbase_by_norm)//2} starbases, "
@@ -308,9 +328,58 @@ def main():
         if o.get("faction"):
             factions.add(o["faction"])
 
-    # Assign synth IDs deterministically (sorted by name).
-    faction_id = {name: SYNTH_ID_FLOOR + i for i, name in enumerate(sorted(factions))}
-    manu_id = {name: SYNTH_ID_FLOOR + i for i, name in enumerate(sorted(manufacturers))}
+    # Resolve NPC `faction` strings onto the EXISTING faction table by name
+    # rather than minting a synthetic >=100000 id per distinct string. The
+    # old behaviour produced 28 duplicate faction rows ("100024 The Red
+    # Dragon" next to the real "22 The Red Dragon"). Policy now:
+    #   - exact (case-insensitive, trimmed) name match -> existing id
+    #   - a couple of known sloppy variants aliased to the real faction
+    #   - placeholder noise ("?", "Not specified", "Unkown") and anything
+    #     that matches no real faction -> None (NULL faction; already a
+    #     valid value in starbase_npcs). NO synthetic faction row is emitted.
+    # If a genuinely-new real faction ever appears it would resolve to None
+    # and surface in the unmatched report below -- add it to the real
+    # factions table on purpose, don't let the importer invent one.
+    FACTION_ALIASES = {
+        "earth corps": "earthcorps warriors",
+        "red dragon": "the red dragon",
+    }
+
+    def resolve_faction(name: str):
+        key = (name or "").strip().lower()
+        if not key:
+            return None
+        if key in factions_by_name:
+            return factions_by_name[key]
+        alias = FACTION_ALIASES.get(key)
+        if alias is not None:
+            return factions_by_name.get(alias)
+        return None
+
+    faction_id = {name: resolve_faction(name) for name in factions}
+    unmatched_factions = sorted(n for n in factions if faction_id[n] is None)
+    if unmatched_factions:
+        print(f"  factions: {len(unmatched_factions)} NPC faction strings matched "
+              f"no real faction -> NULL: {unmatched_factions}", file=sys.stderr)
+    # Manufacturers: map onto existing item_manufacturer_base by name; only
+    # mint a synthetic id for a manufacturer string that genuinely has no
+    # real row (the old generator minted one for ALL of them, duplicating 48
+    # of 50 real manufacturers). new_manufacturers holds just the unmatched
+    # names that still need a synthetic row emitted.
+    manu_id: dict[str, int] = {}
+    new_manufacturers: list[str] = []
+    _next_manu = SYNTH_ID_FLOOR
+    for name in sorted(manufacturers):
+        existing = manufacturers_by_name.get(name.strip().lower())
+        if existing is not None:
+            manu_id[name] = existing
+        else:
+            manu_id[name] = _next_manu
+            new_manufacturers.append(name)
+            _next_manu += 1
+    if new_manufacturers:
+        print(f"  manufacturers: {len(new_manufacturers)} genuinely-new "
+              f"(synthesized >= {SYNTH_ID_FLOOR}): {new_manufacturers}", file=sys.stderr)
 
     # Categories: split the cat namespace into rough (<100) and fine
     # (>=100). Item rows get category=rough_cat, sub_category=fine_cat
@@ -343,9 +412,8 @@ def main():
 
     w("-- Generated by tools/dataimport-jsonl/generate_seed.py.")
     w("-- Do not edit by hand. Re-run the script to regenerate.")
-    w("-- Sources:")
-    w(f"--   NPCs:  {args.npcs}")
-    w(f"--   Items: {args.items_glob}")
+    w("-- Sources: the external reconstruct dataset (NPCs from db/npcs/npcs.jsonl,")
+    w("-- items from db/json/cat*_lvl*.jsonl under ENB_RECONSTRUCT_DB).")
     w("-- All inserts use ON CONFLICT DO NOTHING so re-applying is safe.")
     w("")
     w("BEGIN;")
@@ -366,15 +434,13 @@ def main():
     w(f"DELETE FROM factions WHERE faction_id >= {SYNTH_ID_FLOOR};")
     w("")
 
-    # ---- factions (synth from JSONL faction strings) ----
-    w("-- factions: derived from NPC `faction` strings. IDs >= 100000.")
-    for name in sorted(factions):
-        fid = faction_id[name]
-        w(
-            f"INSERT INTO factions (faction_id, name, description, \"player_PDA\", \"PDA_text\") "
-            f"VALUES ({fid}, {sql_str(name)}, {sql_str(name)}, 1, '') "
-            f"ON CONFLICT (faction_id) DO NOTHING;"
-        )
+    # ---- factions ----
+    # No synthetic faction rows: NPC faction strings are mapped onto the
+    # existing factions table by name (see resolve_faction above). The
+    # DELETE >= 100000 above stays so re-applying this seed scrubs the
+    # duplicate rows the old generator created.
+    w("-- factions: NPC `faction` strings are mapped onto existing faction ids;")
+    w("-- no synthetic faction rows are emitted (the DELETE above scrubs old junk).")
     w("")
 
     # ---- item_manufacturer_base (the table the server actually queries) ----
@@ -382,8 +448,13 @@ def main():
     # `item_manufacturer_base` (see server/src/ItemBaseSQL.cpp's
     # "Inner Join item_manufacturer_base"). `manufacturers` is an
     # editor-suite lookup that the runtime ignores; we skip it.
-    w("-- item_manufacturer_base: derived from item `manufacturer` strings. IDs >= 100000.")
-    for name in sorted(manufacturers):
+    # Only emit rows for manufacturers that have no real row: existing names
+    # are mapped onto their real id (item_base.manufacturer below uses
+    # manu_id, which now points at the real id for known names).
+    w("-- item_manufacturer_base: only genuinely-new manufacturer strings are")
+    w("-- emitted (>= 100000); known names map onto existing ids. DELETE above")
+    w("-- scrubs the duplicate rows the old generator created.")
+    for name in new_manufacturers:
         mid = manu_id[name]
         w(
             f"INSERT INTO item_manufacturer_base (id, name) "
@@ -639,8 +710,10 @@ def main():
 
     # -------- Summary --------
     print(f"wrote {out}", file=sys.stderr)
-    print(f"  factions: {len(factions)} (synth IDs {SYNTH_ID_FLOOR}+)", file=sys.stderr)
-    print(f"  item_manufacturer_base: {len(manufacturers)} (synth IDs {SYNTH_ID_FLOOR}+)", file=sys.stderr)
+    print(f"  factions: {len(factions)} NPC strings -> existing ids "
+          f"({len(unmatched_factions)} unmatched -> NULL); 0 synthetic rows", file=sys.stderr)
+    print(f"  item_manufacturer_base: {len(manufacturers)} strings -> existing ids "
+          f"({len(new_manufacturers)} genuinely-new synth >= {SYNTH_ID_FLOOR})", file=sys.stderr)
     print(f"  item_categories: {sum(1 for c in cat_ids if c<100)}", file=sys.stderr)
     print(f"  item_subcategories: {sum(1 for c in cat_ids if c>=100)}", file=sys.stderr)
     print(f"  item_base: {len(item_rows)} unique itemIds", file=sys.stderr)
