@@ -88,6 +88,35 @@ build-proxy-win64:
     @cp proxy/build-win64/Net7Proxy.exe bin/Net7Proxy.exe
     @echo ">>> done. bin/Net7Proxy.exe is what 'just launch-net7' will spawn under WINE."
 
+# Standalone Windows client package. Produces dist/enb-client-windows/ holding a
+# self-contained launcher (LaunchNet7.exe -- no .NET runtime needed) + the Win32
+# proxy (bin/Net7Proxy.exe) + a package-only LaunchNet7.cfg that defaults to the
+# public server. The end user extracts the folder on Windows and runs
+# LaunchNet7.exe: no docker, no dev environment, nothing to install beyond Earth
+# & Beyond itself. The launcher connects to a remote upstream (default
+# enb.sigsegv.land; the Server box is editable so they can point it anywhere).
+# Note: this packaging-only cfg is what flips the defaults to Multi-Player +
+# enb.sigsegv.land -- `just launch-net7` / `just play-*` keep the localhost dev
+# cfg untouched.
+package-client-windows: build-proxy-win64
+    @echo ">>> publishing self-contained win-x64 launcher (single-file)"
+    dotnet publish tools/launchnet7-avalonia/LaunchNet7Avalonia.csproj -c Release -r win-x64 \
+        --self-contained true \
+        -p:PublishSingleFile=true \
+        -p:IncludeNativeLibrariesForSelfExtract=true \
+        -p:EnableCompressionInSingleFile=true \
+        -p:DebugType=none \
+        -o tools/launchnet7-avalonia/bin/win-x64-publish
+    @echo ">>> assembling dist/enb-client-windows/"
+    @rm -rf dist/enb-client-windows
+    @mkdir -p dist/enb-client-windows/bin
+    @cp tools/launchnet7-avalonia/bin/win-x64-publish/LaunchNet7Avalonia.exe dist/enb-client-windows/LaunchNet7.exe
+    @cp bin/Net7Proxy.exe dist/enb-client-windows/bin/Net7Proxy.exe
+    @cp tools/launchnet7-avalonia/LaunchNet7.windows-package.cfg dist/enb-client-windows/LaunchNet7.cfg
+    @echo ">>> done. dist/enb-client-windows/  --  zip it and ship."
+    @echo "    Contents: LaunchNet7.exe + bin/Net7Proxy.exe + LaunchNet7.cfg"
+    @echo "    User extracts the folder on Windows and runs LaunchNet7.exe."
+
 # Smoke-run Net7Proxy.exe under WINE (no game client, just the proxy).
 # Confirms WSAStartup + binds TCP 3801/3805 + opens both UDP planes.
 # Set NET7_UPSTREAM_HOST=<host> in the env to point the proxy at a non-local

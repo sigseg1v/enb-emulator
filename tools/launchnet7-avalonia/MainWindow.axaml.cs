@@ -37,6 +37,14 @@ namespace LaunchNet7Avalonia
         HostConfig _lastSelectedHost;
         Launcher _activeLauncher;
 
+        // Monotonic token for in-flight status probes. Each new probe bumps it
+        // and captures the value; a probe only writes the status label if its
+        // token still matches. Without this, switching the Emulator/Server
+        // selection races: an earlier probe (e.g. the stale-host one kicked
+        // while FillHosts clears the list) can land AFTER the current one and
+        // leave the label showing the wrong server's status.
+        int _statusProbeGen;
+
         public MainWindow()
         {
             InitializeComponent();
@@ -53,7 +61,12 @@ namespace LaunchNet7Avalonia
             emu = CurrentEmulator;
             host = null;
             if (emu == null) return false;
-            var name = c_ComboBox_Servers.SelectedItem as string;
+
+            // The Server control is a free-text AutoCompleteBox: the typed text
+            // is authoritative. If it matches a known host from the config we
+            // reuse that entry (to carry its configured auth port); otherwise we
+            // synthesize a host from the typed value + the port box.
+            var name = (c_ComboBox_Servers.Text ?? "").Trim();
             if (string.IsNullOrEmpty(name))
             {
                 if (_lastSelectedHost != null) { host = _lastSelectedHost; return true; }
@@ -61,7 +74,27 @@ namespace LaunchNet7Avalonia
             }
             host = emu.Hosts.FirstOrDefault(h =>
                 string.Equals(h.Hostname, name, StringComparison.OrdinalIgnoreCase));
-            return host != null;
+            if (host == null)
+            {
+                int port = int.TryParse(c_TextBox_Port.Text, out var p) && p > 0 && p < 65536
+                    ? p : 443;
+                host = new HostConfig { Hostname = name, AuthenticationPort = port };
+            }
+            return true;
+        }
+
+        // Strip a URL scheme / path so a value like "https://enb.sigsegv.land"
+        // resolves: the proxy + client speak raw DNS/TCP, not HTTP, so only the
+        // bare host survives to Dns.GetHostAddresses / TcpClient.ConnectAsync.
+        static string NormalizeHost(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return raw;
+            var s = raw.Trim();
+            int scheme = s.IndexOf("://", StringComparison.Ordinal);
+            if (scheme >= 0) s = s.Substring(scheme + 3);
+            int slash = s.IndexOf('/');
+            if (slash >= 0) s = s.Substring(0, slash);
+            return s.Trim();
         }
 
         // ---- lifecycle ----
@@ -148,19 +181,26 @@ namespace LaunchNet7Avalonia
         void FillHosts()
         {
             var emu = CurrentEmulator;
-            c_ComboBox_Servers.Items.Clear();
-            if (emu == null) return;
-
-            int idx = -1;
-            for (int i = 0; i < emu.Hosts.Count; i++)
+            if (emu == null)
             {
-                c_ComboBox_Servers.Items.Add(emu.Hosts[i].Hostname);
-                if (string.Equals(emu.Hosts[i].Hostname, _user.LastServerName,
-                    StringComparison.OrdinalIgnoreCase))
-                    idx = i;
+                c_ComboBox_Servers.ItemsSource = null;
+                c_ComboBox_Servers.Text = "";
+                return;
             }
-            if (emu.Hosts.Count > 0)
-                c_ComboBox_Servers.SelectedIndex = idx >= 0 ? idx : 0;
+
+            var hostnames = emu.Hosts.Select(h => h.Hostname).ToList();
+            c_ComboBox_Servers.ItemsSource = hostnames;
+
+            // Default the editable box: prefer the user's last server if it's one
+            // of this emulator's known hosts, else the first configured host.
+            string def = emu.Hosts.FirstOrDefault(h =>
+                string.Equals(h.Hostname, _user.LastServerName, StringComparison.OrdinalIgnoreCase))?.Hostname
+                ?? (emu.Hosts.Count > 0 ? emu.Hosts[0].Hostname : "");
+
+            // Setting .Text fires OnServerTextChanged (clears the stale status);
+            // we then kick a fresh probe for the new default.
+            c_ComboBox_Servers.Text = def;
+            UpdateForSelectedHost();
         }
 
         void FillClientPath()
@@ -168,15 +208,26 @@ namespace LaunchNet7Avalonia
             string path = _user.ClientPath;
             if (string.IsNullOrEmpty(path) || !File.Exists(path))
             {
-                // Best-effort default; user almost certainly needs to Browse.
+                path = null;
+                // Best-effort default to the EnB installer's location. The Linux
+                // WINE installer drops the client at
+                //   C:\Program Files\EA GAMES\Earth & Beyond\release\client.exe
+                // (non-x86; see client/linux-installer/install-enb-linux.sh).
+                // We also probe Program Files (x86) since a native-Windows EA
+                // installer may land a 32-bit title there.
                 if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
                 {
-                    path = Path.Combine(
+                    foreach (var pf in new[]
+                    {
                         Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-                        "EA GAMES", "Earth & Beyond", "release", "client.exe");
-                    if (!File.Exists(path)) path = null;
+                        Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+                    })
+                    {
+                        if (string.IsNullOrEmpty(pf)) continue;
+                        var cand = Path.Combine(pf, "EA GAMES", "Earth & Beyond", "release", "client.exe");
+                        if (File.Exists(cand)) { path = cand; break; }
+                    }
                 }
-                else path = null;
             }
             if (!string.IsNullOrEmpty(path))
             {
@@ -192,13 +243,38 @@ namespace LaunchNet7Avalonia
         void OnEmulatorsChanged(object sender, SelectionChangedEventArgs e)
             => FillHosts();
 
-        void OnServersChanged(object sender, SelectionChangedEventArgs e)
+        // User typed in (or picked from) the editable Server box. Wipe any stale
+        // status immediately so a previously-probed "ONLINE" never lingers on a
+        // different server; the actual probe fires on commit (focus-leave) or
+        // the Check button, not per keystroke.
+        void OnServerTextChanged(object sender, TextChangedEventArgs e)
+        {
+            _statusProbeGen++;          // invalidate any in-flight probe
+            if (CurrentEmulator?.IsSinglePlayer == true)
+            {
+                c_ServerStatus.Text = "READY";
+                c_Button_Check.IsEnabled = false;
+            }
+            else
+            {
+                c_ServerStatus.Text = "";
+                c_Button_Check.IsEnabled = true;
+            }
+        }
+
+        // Picked a known host from the dropdown -> probe it immediately.
+        void OnServerSelected(object sender, SelectionChangedEventArgs e)
+            => UpdateForSelectedHost();
+
+        // Typed a custom value and moved focus away -> probe on commit.
+        void OnServerCommitted(object sender, RoutedEventArgs e)
             => UpdateForSelectedHost();
 
         void UpdateForSelectedHost()
         {
             if (!TryGetSelectedHost(out var emu, out var host))
             {
+                _statusProbeGen++;
                 c_ServerStatus.Text = "";
                 return;
             }
@@ -207,14 +283,16 @@ namespace LaunchNet7Avalonia
 
             if (emu.IsSinglePlayer)
             {
+                _statusProbeGen++;
                 c_ServerStatus.Text = "READY";
                 c_Button_Check.IsEnabled = false;
             }
             else
             {
+                int gen = ++_statusProbeGen;
                 c_ServerStatus.Text = "CHECKING";
                 c_Button_Check.IsEnabled = true;
-                _ = CheckServerStatusAsync(host.Hostname, GetProbePort(host));
+                _ = CheckServerStatusAsync(NormalizeHost(host.Hostname), GetProbePort(host), gen);
             }
             _lastSelectedHost = host;
         }
@@ -230,10 +308,21 @@ namespace LaunchNet7Avalonia
             return host.AuthenticationPort;
         }
 
-        async Task CheckServerStatusAsync(string host, int port)
+        async Task CheckServerStatusAsync(string host, int port, int gen)
         {
             // TCP connect probe of the auth port. We don't speak TLS here —
-            // just verify the port accepts connections.
+            // just verify the port accepts connections. `gen` is the probe token
+            // captured when this probe was kicked: if the selection has changed
+            // since (gen != _statusProbeGen), this result is stale and we drop it
+            // rather than stomp the label for the now-current server.
+            void Write(string text)
+            {
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (gen == _statusProbeGen) c_ServerStatus.Text = text;
+                });
+            }
+
             try
             {
                 using var client = new TcpClient();
@@ -242,27 +331,25 @@ namespace LaunchNet7Avalonia
                 var finished = await Task.WhenAny(connectTask, timeoutTask);
                 if (finished == timeoutTask)
                 {
-                    await Dispatcher.UIThread.InvokeAsync(() => c_ServerStatus.Text = "OFFLINE");
+                    Write("OFFLINE");
                     return;
                 }
                 await connectTask;
-                await Dispatcher.UIThread.InvokeAsync(() => c_ServerStatus.Text = "ONLINE");
+                Write("ONLINE");
             }
             catch (Exception ex)
             {
-                await Dispatcher.UIThread.InvokeAsync(() =>
-                {
-                    c_ServerStatus.Text = "OFFLINE";
-                    AppendLog($"Server probe {host}:{port} failed: {ex.Message}");
-                });
+                Write("OFFLINE");
+                AppendLog($"Server probe {host}:{port} failed: {ex.Message}");
             }
         }
 
         void OnCheckClick(object sender, RoutedEventArgs e)
         {
             if (!TryGetSelectedHost(out _, out var host)) return;
+            int gen = ++_statusProbeGen;
             c_ServerStatus.Text = "CHECKING";
-            _ = CheckServerStatusAsync(host.Hostname, GetProbePort(host));
+            _ = CheckServerStatusAsync(NormalizeHost(host.Hostname), GetProbePort(host), gen);
         }
 
         async void OnBrowseClient(object sender, RoutedEventArgs e)
@@ -310,10 +397,12 @@ namespace LaunchNet7Avalonia
             }
 
             _setting.AuthenticationPort = port;
-            _setting.Hostname           = host.Hostname;
+            // Normalize away any scheme/path the user typed (https://host -> host)
+            // so the raw DNS/TCP paths in Launcher resolve it.
+            _setting.Hostname           = NormalizeHost(host.Hostname);
             _setting.LaunchName         = emu.GetLaunchName();
 
-            // Persist
+            // Persist (keep the raw typed value so the box redisplays it verbatim)
             _user.AuthenticationPort = c_TextBox_Port.Text;
             _user.LastEmulatorName   = emu.Name;
             _user.LastServerName     = host.Hostname;

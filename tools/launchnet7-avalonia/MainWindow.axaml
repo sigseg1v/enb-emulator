@@ -19,9 +19,15 @@
                    SelectionChanged="OnEmulatorsChanged" />
 
         <TextBlock Grid.Row="1" Grid.Column="0" Text="Server:" VerticalAlignment="Center" Margin="0,8,0,0" />
-        <ComboBox  Grid.Row="1" Grid.Column="1" Name="c_ComboBox_Servers"
-                   Margin="0,8,8,0" HorizontalAlignment="Stretch"
-                   SelectionChanged="OnServersChanged" />
+        <!-- Editable: a user can type their own server URL, or pick a known one
+             from the dropdown. The typed text is the source of truth. -->
+        <AutoCompleteBox Grid.Row="1" Grid.Column="1" Name="c_ComboBox_Servers"
+                         Margin="0,8,8,0" HorizontalAlignment="Stretch"
+                         Watermark="server hostname or URL"
+                         FilterMode="Contains" MinimumPrefixLength="0"
+                         TextChanged="OnServerTextChanged"
+                         SelectionChanged="OnServerSelected"
+                         LostFocus="OnServerCommitted" />
 
         <TextBlock Grid.Row="1" Grid.Column="2" Text="Status:" VerticalAlignment="Center" Margin="0,8,0,0" />
         <TextBlock Grid.Row="1" Grid.Column="3" Name="c_ServerStatus"

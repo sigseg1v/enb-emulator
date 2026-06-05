@@ -40,6 +40,9 @@ compile_commands.json
 # .NET / C#
 bin/
 obj/
+
+# packaged release artifacts (just package-client-windows)
+/dist/
 *.user
 *.suo
 *.userprefs
