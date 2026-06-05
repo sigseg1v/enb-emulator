@@ -341,62 +341,6 @@ namespace CommonTools.Database
             return DB.Instance.executeQuery(query, new string[] { idField.ToString() + "0" }, new string[] { value });
         }
 
-        public String getVersion(String toolName)
-        {
-            String toolParameter = "ToolName";
-            String query = "SELECT "
-                         + ColumnData.GetName(Net7.Table_versions._Version)
-                         + " FROM "
-                         + Net7.Tables.versions.ToString()
-                         + " WHERE "
-                         + ColumnData.GetName(Net7.Table_versions._EName)
-                         + " = "
-                         + DB.QueryParameterCharacter + toolParameter;
-
-            DataTable dataTable = DB.Instance.executeQuery(query, new String[] { toolParameter }, new String[] { toolName });
-            return dataTable.Rows.Count == 0
-                 ? ""
-                 : ColumnData.GetString(dataTable.Rows[0], Net7.Table_versions._Version);
-        }
-
-        public void setVersion(String toolName, String version)
-        {
-            String toolNameParameter = "ToolName";
-            String toolVersionParameter = "ToolVersion";
-            String query = "UPDATE "
-                         + Net7.Tables.versions
-                         + " SET "
-                         + ColumnData.GetName(Net7.Table_versions._Version)
-                         + " = " + DB.QueryParameterCharacter + toolVersionParameter
-                         + " WHERE "
-                         + ColumnData.GetName(Net7.Table_versions._EName)
-                         + " = "
-                         + DB.QueryParameterCharacter + toolNameParameter;
-
-            int rowsAffected = DB.Instance.executeCommand(query, new String[] { toolVersionParameter, toolNameParameter }, new String[] { version, toolName });
-            if (rowsAffected == 0)
-            {
-                // INSERT INTO Persons (P_Id, LastName, FirstName) VALUES (5, 'Tjessem', 'Jakob')
-                query = "INSERT INTO "
-                      + Net7.Tables.versions
-                      + " ("
-                      + ColumnData.GetName(Net7.Table_versions._EName) + ","
-                      + ColumnData.GetName(Net7.Table_versions._Version)
-                      + ") VALUES ("
-                      + DB.QueryParameterCharacter + toolNameParameter + ","
-                      + DB.QueryParameterCharacter + toolVersionParameter
-                      + ")";
-                rowsAffected = DB.Instance.executeCommand(query, new String[] { toolVersionParameter, toolNameParameter }, new String[] { version, toolName });
-                if (rowsAffected == 0)
-                {
-                    DBErrorReporter.Show("DB.setVersion()",
-                                         "Unable to update/create the version information into the "
-                                       + Net7.Tables.versions
-                                       + " table");
-                }
-            }
-        }
-
         /// <summary>
         /// Import the contents of a file into a database table
         /// </summary>

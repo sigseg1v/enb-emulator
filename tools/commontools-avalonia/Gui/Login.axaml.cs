@@ -14,13 +14,12 @@ using MsBoxIcon = MsBox.Avalonia.Enums.Icon;
 namespace CommonTools.Gui
 {
     // Avalonia port of Gui/Login.cs. Preserves the public API
-    // (isValid()/updateVersion()/LoginData) so downstream tools can swap
+    // (isValid()/LoginData) so downstream tools can swap
     // CommonTools.dll for CommonToolsAvalonia.dll with no source change.
     public partial class Login : Window
     {
         bool m_Cancel = false;
         bool m_HasChanged;
-        bool m_updateVersion = false;
 
         public Login()
         {
@@ -56,7 +55,6 @@ namespace CommonTools.Gui
         // produce NREs when the constructor touches LoginUsername et al.).
 
         public bool isValid() => !m_Cancel;
-        public void updateVersion() => m_updateVersion = true;
 
         async void OnTextBoxKey(object sender, KeyEventArgs e)
         {
@@ -151,52 +149,23 @@ namespace CommonTools.Gui
                 return;
             }
 
-            var assemblyName = System.Reflection.Assembly.GetEntryAssembly()?.GetName();
             string connStr = LoginData.ConnStr(Database.DB.DATABASE_NAME);
 
             try
             {
-                // result codes: 0 = ok, 1 = version updated (stop), 2 = outdated.
-                // currentVersion is filled for the outdated message.
-                string currentVersion = null;
-                int outcome = await System.Threading.Tasks.Task.Run(() =>
+                // Verify the DB is reachable, off the UI thread. There is no
+                // version gate: these editors ship together with the DB schema,
+                // so the old "your editor is outdated, please update" nag had no
+                // upstream to point at -- and its lookup queried the `versions`
+                // table by the new assembly name (SectorEditorAvalonia, ...),
+                // which never matches the legacy row keys, so it fired on every
+                // login. A successful connect is the whole check now.
+                await System.Threading.Tasks.Task.Run(() =>
                 {
-                    using (var conn = new NpgsqlConnection(connStr))
-                    {
-                        conn.Open();
-                        conn.Close();
-                    }
-
-                    if (assemblyName == null) return 0; // library-only host: skip version check
-
-                    if (m_updateVersion)
-                    {
-                        Database.DB.Instance.setVersion(assemblyName.Name, assemblyName.Version.ToString());
-                        return 1;
-                    }
-
-                    currentVersion = Database.DB.Instance.getVersion(assemblyName.Name);
-                    if (assemblyName.Version.ToString().CompareTo(currentVersion) != 0) return 2;
-                    return 0;
+                    using var conn = new NpgsqlConnection(connStr);
+                    conn.Open();
+                    conn.Close();
                 });
-
-                if (outcome == 1)
-                {
-                    await ShowWarning("Version Updated",
-                        "Database entry for " + assemblyName.Name + " has been updated to "
-                        + LoginData.ApplicationVersion);
-                    m_loginInProgress = false;
-                    return;
-                }
-                if (outcome == 2)
-                {
-                    await ShowWarning("Incorrect Version",
-                        assemblyName.Name + " " + LoginData.ApplicationVersion
-                        + " is outdated.\nPlease update your editor to "
-                        + LoginData.FormattedVersion(currentVersion));
-                    m_loginInProgress = false;
-                    return;
-                }
 
                 if (m_HasChanged) WriteConfiguration();
                 m_Cancel = false;
