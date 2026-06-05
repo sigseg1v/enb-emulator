@@ -93,6 +93,12 @@ namespace ToolsLauncherAvalonia
             c_Status.Text = ok ? $"started launchnet7 ({detail})" : $"failed: {detail}";
         }
 
+        void OnLaunchNet7Cli(object sender, RoutedEventArgs e)
+        {
+            var (ok, detail) = EditorLauncher.LaunchNet7Cli(_settings);
+            c_Status.Text = ok ? $"started CLI ({detail})" : $"failed: {detail}";
+        }
+
         async void OnSettings(object sender, RoutedEventArgs e)
         {
             var dlg = new SettingsWindow(_settings);

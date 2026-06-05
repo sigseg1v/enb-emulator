@@ -16,12 +16,14 @@
       </MenuItem>
     </Menu>
 
-    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
-                HorizontalAlignment="Stretch" Margin="6" Spacing="6">
-      <Button x:Name="c_LaunchN7Btn" Content="Launch Net7"
-              HorizontalAlignment="Stretch" Width="120"
+    <StackPanel DockPanel.Dock="Bottom" Margin="6" Spacing="6">
+      <Button x:Name="c_LaunchN7Btn" Classes="accent" Content="Launch Net7"
+              HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
               Click="OnLaunchNet7" />
-      <TextBlock x:Name="c_Status" VerticalAlignment="Center"
+      <Button x:Name="c_LaunchCliBtn" Classes="accent" Content="Launch Net7 CLI"
+              HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+              Click="OnLaunchNet7Cli" />
+      <TextBlock x:Name="c_Status" HorizontalAlignment="Center"
                  Foreground="Gray" Text="" />
     </StackPanel>
 
