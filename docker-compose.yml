@@ -418,6 +418,21 @@ services:
           echo "schema-init: applying /db/seed_phase_y_prospecting.sql -> net7"
           psql -h postgres -U net7 -d net7 -v ON_ERROR_STOP=1 -f /db/seed_phase_y_prospecting.sql
         fi
+        # Item effect-link backfill. The external item dataset lists item->effect
+        # links absent from the runtime DB; seed_item_effects.sql adds them
+        # (item_effects rows, plus any missing item_effect_container gate and any
+        # minted item_effect_base for effect keys we lack). CONFIRMED magnitudes
+        # come from the source; slots the source does not carry are filled with
+        # deterministic in-range values (see the file header + the generator's
+        # --report). Minted bases start at EffectID 240; gated on the first one.
+        # The seed is internally idempotent (every INSERT is NOT EXISTS-guarded).
+        if psql -h postgres -U net7 -d net7 -tA \
+             -c "SELECT to_regclass('public.item_effect_base') IS NOT NULL AND EXISTS (SELECT 1 FROM item_effect_base WHERE \"EffectID\" = 240)" | grep -q t; then
+          echo "schema-init: net7.item_effect_base backfill already present -- skipping seed_item_effects.sql"
+        else
+          echo "schema-init: applying /db/seed_item_effects.sql -> net7"
+          psql -h postgres -U net7 -d net7 -v ON_ERROR_STOP=1 -f /db/seed_item_effects.sql
+        fi
         # Sequence sync (ALWAYS, idempotent). schema.sql and the Phase Y
         # seeds bulk-load identity columns with explicit ids without
         # advancing their backing sequences, so every IDENTITY sequence is
