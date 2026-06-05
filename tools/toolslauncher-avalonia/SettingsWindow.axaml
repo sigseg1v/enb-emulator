@@ -2,9 +2,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        mc:Ignorable="d" d:DesignWidth="500" d:DesignHeight="220"
+        mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="440"
         x:Class="ToolsLauncherAvalonia.SettingsWindow"
-        Title="Tools Launcher Settings" Width="500" Height="220"
+        Title="Tools Launcher Settings" Width="1000" Height="440"
         WindowStartupLocation="CenterOwner">
   <DockPanel Margin="12" LastChildFill="True">
     <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"

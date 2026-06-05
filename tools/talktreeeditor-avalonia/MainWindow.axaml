@@ -3,9 +3,9 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:TalkTreeEditorAvalonia"
-        mc:Ignorable="d" d:DesignWidth="940" d:DesignHeight="450"
+        mc:Ignorable="d" d:DesignWidth="1880" d:DesignHeight="900"
         x:Class="TalkTreeEditorAvalonia.MainWindow"
-        Title="Talk Tree" Width="940" Height="450"
+        Title="Talk Tree" Width="1880" Height="900"
         WindowStartupLocation="CenterScreen">
   <DockPanel LastChildFill="True">
     <!-- Bottom buttons -->

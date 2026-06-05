@@ -1,7 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="MobEditorAvalonia.ItemBaseAssetsWindow"
-        Width="560" Height="540"
+        Width="1120" Height="1080"
         Title="Choose Item Base Asset"
         WindowStartupLocation="CenterOwner">
   <DockPanel Margin="8">

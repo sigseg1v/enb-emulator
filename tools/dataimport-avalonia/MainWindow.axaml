@@ -4,7 +4,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         x:Class="DataImportAvalonia.MainWindow"
-        Width="486" Height="283"
+        Width="972" Height="566"
         Title="Data Import"
         CanResize="False"
         WindowStartupLocation="CenterScreen">

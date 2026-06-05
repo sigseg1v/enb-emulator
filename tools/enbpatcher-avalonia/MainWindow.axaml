@@ -4,7 +4,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         x:Class="EnbPatcherAvalonia.MainWindow"
-        Width="573" Height="363"
+        Width="1146" Height="726"
         Title="E&amp;B Patcher"
         CanResize="False">
   <Grid Margin="12" RowDefinitions="Auto,Auto,Auto,Auto,Auto,*">

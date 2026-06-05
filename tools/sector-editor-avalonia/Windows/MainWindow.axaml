@@ -1,7 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="SectorEditorAvalonia.Windows.MainWindow"
-        Width="1100" Height="720"
+        Width="2200" Height="1440"
         Title="Net7 Sector Editor (Avalonia)">
   <DockPanel>
     <Menu DockPanel.Dock="Top">

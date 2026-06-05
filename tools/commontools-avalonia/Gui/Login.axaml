@@ -2,8 +2,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="CommonTools.Gui.Login"
         Title="Login"
-        Width="440" Height="280"
-        MinWidth="360" MinHeight="240"
+        Width="880" Height="560"
+        MinWidth="720" MinHeight="480"
         CanResize="True"
         WindowStartupLocation="CenterScreen">
     <Grid Margin="20" RowDefinitions="Auto,Auto,Auto,Auto,*,Auto"

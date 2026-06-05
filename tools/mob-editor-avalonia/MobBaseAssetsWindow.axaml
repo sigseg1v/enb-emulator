@@ -1,7 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="MobEditorAvalonia.MobBaseAssetsWindow"
-        Width="500" Height="500"
+        Width="1000" Height="1000"
         Title="Choose Mob Base Asset"
         WindowStartupLocation="CenterOwner">
   <DockPanel Margin="8">

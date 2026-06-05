@@ -2,9 +2,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        mc:Ignorable="d" d:DesignWidth="260" d:DesignHeight="380"
+        mc:Ignorable="d" d:DesignWidth="390" d:DesignHeight="380"
         x:Class="ToolsLauncherAvalonia.MainWindow"
-        Title="Net7 Tools Launch Pad" Width="260" Height="380"
+        Title="Net7 Tools Launch Pad" Width="390" Height="380"
         CanResize="False"
         WindowStartupLocation="CenterScreen">
   <DockPanel LastChildFill="True">

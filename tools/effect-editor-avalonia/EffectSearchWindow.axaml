@@ -2,9 +2,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        mc:Ignorable="d" d:DesignWidth="640" d:DesignHeight="420"
+        mc:Ignorable="d" d:DesignWidth="1280" d:DesignHeight="840"
         x:Class="EffectEditorAvalonia.EffectSearchWindow"
-        Title="Effect Search" Width="640" Height="420"
+        Title="Effect Search" Width="1280" Height="840"
         WindowStartupLocation="CenterOwner">
   <DockPanel Margin="8" LastChildFill="True">
     <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"

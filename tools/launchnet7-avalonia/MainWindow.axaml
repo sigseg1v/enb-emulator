@@ -4,7 +4,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         x:Class="LaunchNet7Avalonia.MainWindow"
-        Width="640" Height="340"
+        Width="1280" Height="680"
         Title="LaunchNet7"
         Background="{DynamicResource SystemRegionBrush}"
         CanResize="True">
