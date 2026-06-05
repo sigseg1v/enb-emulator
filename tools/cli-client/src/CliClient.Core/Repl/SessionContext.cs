@@ -701,17 +701,61 @@ public sealed class SessionContext : IAsyncDisposable
         }
     }
 
+    // server/src/SectorData.h:29 -- #define PLAYER_TAG (1<<30). The retail
+    // client sends the avatar's GameID with this bit cleared in the PlayerID
+    // field of most request structs (see UndockCommand for the same convention).
+    private const int PlayerTag = 1 << 30;
+
     /// <summary>
-    /// Cleanly log out: stop the keepalive / comms-alive / sector-drain loops
-    /// and close both TCP planes. Closing the sockets is what the real client
-    /// does on quit -- the server reaps the player on disconnect
-    /// (PlayerConnection.cpp drop-on-disconnect -> LeaveGroup +
-    /// DropPlayerFromGalaxy), so no synthetic logoff opcode is needed (and
-    /// inventing one would be an unpinned wire change). Idempotent -- safe to
-    /// call from the <c>quit</c> command and again from <see cref="DisposeAsync"/>.
+    /// Build the 8-byte 0x00B9 LOGOFF_REQUEST payload (struct LogoffRequest,
+    /// common/include/net7/PacketStructures.h:583 -- <c>int32 PlayerID,
+    /// int32 LogOutType</c>, both little-endian). The real client sends this
+    /// when the player quits to character select; the server's
+    /// <c>Player::HandleLogoffRequest</c> (PlayerConnection.cpp:7722) drops the
+    /// player immediately (LeaveGroup + DropPlayerFromGalaxy) and replies
+    /// 0x00BA. The server ignores both fields (the struct cast is commented
+    /// out), but we reproduce the retail values for fidelity: PlayerID = our
+    /// untagged GameID, LogOutType = 0.
+    /// </summary>
+    public static byte[] BuildLogoffRequest(int gameId)
+    {
+        var payload = new byte[8];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0), gameId & ~PlayerTag);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4), 0); // LogOutType
+        return payload;
+    }
+
+    /// <summary>
+    /// Cleanly log out. First send the real client's 0x00B9 LOGOFF_REQUEST on
+    /// the sector connection so the server drops the player node *now*
+    /// (HandleLogoffRequest -> DropPlayerFromGalaxy) rather than waiting for the
+    /// disconnect-timeout reaper -- without this the account stays "logged in"
+    /// for the reaper's grace period and a fresh login is rejected with
+    /// G_ERROR_ACCOUNT_IN_USE (CheckAccountInUse on the still-Active player).
+    /// Then stop the keepalive / comms-alive / sector-drain loops and close both
+    /// TCP planes. Best-effort: the logoff send is wrapped so a half-dead
+    /// connection still tears down. Idempotent -- safe to call from the
+    /// <c>quit</c> command and again from <see cref="DisposeAsync"/>.
     /// </summary>
     public async Task LogoutAsync()
     {
+        // Tell the server we're leaving *before* we drop the socket, so it
+        // reaps the player synchronously instead of on idle-timeout.
+        if (_sector is { } sector && GameId is { } gameId)
+        {
+            try
+            {
+                await sector.SendAsync(
+                    Packet.ForOpcode(OpcodeId.Known.LogoffRequest.Value, BuildLogoffRequest(gameId)),
+                    CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // Connection already dead -> the disconnect reaper covers us.
+                try { DumpOutput.WriteLine($"[logoff] send skipped: {ex.GetType().Name}: {ex.Message}"); } catch { }
+            }
+        }
+
         await StopKeepaliveAsync().ConfigureAwait(false);
         await StopCommsAliveAsync().ConfigureAwait(false);
         await StopSectorDrainAsync().ConfigureAwait(false);
