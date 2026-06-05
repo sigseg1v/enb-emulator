@@ -101,6 +101,38 @@ ROOM_FALLBACK_VENDOR = (2, 1, 0, 3)
 ROOM_FALLBACK_NONVENDOR = (3, 2, 1, 0)
 
 
+def norm_npc_name(s: str) -> str:
+    """Collapse an NPC name to a split-/punctuation-/case-independent key.
+
+    The real roster and the wiki split a multi-word name differently
+    (real stores "Don Jose"|"de Sevilla", split_name() yields
+    "Don"|"Jose de Sevilla"), so an exact (first,last) tuple never matches
+    across the two. Reducing to lowercase alphanumerics sidesteps the split
+    convention AND the per-column varchar(19) truncation.
+    """
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+# Wiki NPC names that are SPELLING VARIANTS of a real (npc_Id < 100000)
+# roster NPC -- same person, mis-spelled in the wiki, so even a normalized
+# full-name match against the real roster does not catch them. Each is the
+# wiki-side full name; suppressed exactly like an exact duplicate. Verified
+# one-by-one against the real NPC they shadow; the deliberately-EXCLUDED
+# near-miss is "Sub-Commander Trask" vs real "Sub Commander Frank" -- those
+# are different NPCs.
+NPC_SPELLING_VARIANT_DUPS: set[str] = {
+    norm_npc_name(n) for n in (
+        "Administrator Luzzini",   # real: Administrator Luzzinni
+        "Captain Gerald Braun",    # real: Captain Gerard Braun
+        "Anjuren Khan",            # real: Anjuren Kahn
+        "Chronos Christopher",     # real: Crones Christopher
+        "Orkael Lazzara",          # real: Orkael Lazarra
+        "Santis Sauls",            # real: Santin Sauls
+        "Everro Verr",             # real: Everro Verri
+    )
+}
+
+
 def norm_name(s: str) -> str:
     """Lowercase + strip whitespace + strip apostrophes for fuzzy match."""
     return (s or "").strip().lower().replace("'", "").replace("’", "")
@@ -186,19 +218,25 @@ def fetch_rooms(host: str, port: str, user: str, password: str, dbname: str):
     for row in rows:
         room_next_index[int(row[0])] = int(row[1])
 
-    # Pre-existing NPCs indexed by (lowered first, lowered last, starbase_id).
-    # Used downstream to suppress synth NPC room placement when the wiki
-    # JSONL would otherwise duplicate an NPC who already lives at that
-    # starbase under their own avatar template + inventory row.
-    existing_names: set[tuple[str, str, int]] = set()
+    # Pre-existing NPCs indexed by (lowered first, lowered last) -- name only,
+    # across the ENTIRE real roster (every npc_Id < 100000, placed or not).
+    # A named NPC is globally unique in EnB, so if the wiki JSONL carries a
+    # name that already exists in the real roster it IS that same NPC and the
+    # synth copy must be suppressed entirely -- NOT just when it happens to
+    # resolve to the same starbase. The earlier (first,last,starbase_id) key
+    # gated on a resolved starbase let every space / "N/A" / unresolved-station
+    # wiki NPC bypass the check and land as a duplicate of a real NPC (40 exact
+    # collisions: Don Jose de Sevilla, Admiral Diego Herrera, ...).
+    existing_names: set[str] = set()
     rows = run(
-        'SELECT LOWER(COALESCE(n.first_name, \'\')), LOWER(COALESCE(n.last_name, \'\')), r.starbase_id '
-        'FROM starbase_npcs n JOIN starbase_rooms r ON n.room_id = r.room_id '
-        'WHERE n."npc_Id" < 100000 AND r.starbase_id IS NOT NULL;'
+        'SELECT COALESCE(first_name, \'\'), COALESCE(last_name, \'\') '
+        'FROM starbase_npcs WHERE "npc_Id" < 100000;'
     )
     for row in rows:
-        if len(row) >= 3:
-            existing_names.add((row[0], row[1], int(row[2])))
+        if len(row) >= 2:
+            existing_names.add(norm_npc_name(f"{row[0]} {row[1]}"))
+    # Fold in the hand-verified wiki spelling-variants of real NPCs.
+    existing_names |= NPC_SPELLING_VARIANT_DUPS
 
     # Real factions keyed by lowered/trimmed name, so NPC `faction` strings
     # map onto the EXISTING faction table instead of minting synthetic
@@ -558,8 +596,12 @@ def main():
         has_inv = bool(o.get("sellsItems"))
         sb_id = resolve_starbase(station, starbase_by_norm)
         first, last = split_name(o.get("name") or "")
-        key = (first.lower(), last.lower(), sb_id) if sb_id is not None else None
-        if sb_id is not None and key in existing_names:
+        # Name-only dedup against the ENTIRE real roster, regardless of whether
+        # this NPC's station resolved to a starbase. A wiki NPC whose name
+        # already exists in the real roster IS that NPC -- never mint a synth
+        # copy of it (the real row owns the avatar template + inventory).
+        # Match on the normalized FULL name (split-convention-independent).
+        if norm_npc_name(o.get("name") or "") in existing_names:
             npc_state.append(SKIPPED)
             npc_placement.append((None, None))
             skipped += 1
