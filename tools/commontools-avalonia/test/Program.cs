@@ -213,7 +213,26 @@ namespace CommonToolsAvaloniaSmoke
                   "no DataRowView property columns leaked in");
 
             var b0 = (grid.Columns[0] as DataGridTextColumn)?.Binding as Avalonia.Data.Binding;
-            Check(b0 != null && b0.Path == "[id]", "column 0 bound to the [id] indexer (path=" + b0?.Path + ")");
+            Check(b0 != null && b0.Path == "id", "column 0 bound to the plain column name (path=" + b0?.Path + ")");
+
+            // THE load-bearing check: the column binding must actually RESOLVE to
+            // the cell value against a real DataRowView. The earlier version of
+            // this test only asserted the binding PATH string and passed while
+            // every cell rendered empty -- because Avalonia cannot read a
+            // DataRowView column without DataRowViewAccessorPlugin. Apply each
+            // column's binding to a TextBlock with the row as DataContext and
+            // read back the resolved text.
+            object drv = table.DefaultView[0];
+            foreach (var (col, expect) in new[] { ("id", "7"), ("name", "Skeletor") })
+            {
+                var binding = (grid.Columns.First(c => c.Header.ToString() == col)
+                    as DataGridTextColumn).Binding;
+                var tb = new TextBlock { DataContext = drv };
+                tb.Bind(TextBlock.TextProperty, binding);
+                Dispatcher.UIThread.RunJobs();
+                Check(tb.Text == expect,
+                    $"column '{col}' resolves to its cell value (got \"{tb.Text}\", want \"{expect}\")");
+            }
 
             // Bind(null) clears columns + source without throwing.
             DataGridBinder.Bind(grid, null);

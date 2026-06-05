@@ -133,6 +133,7 @@ namespace CommonTools.Gui
                     throw new Exception("DlgSearch.configure() does not handle the table " + table.ToString());
             }
 
+            CommonTools.Gui.DataRowViewAccessorPlugin.Register();
             guiResultTbl.Columns.Clear();
             for (int i = 0; i < m_columns.Length; i++)
             {
@@ -140,7 +141,10 @@ namespace CommonTools.Gui
                 guiResultTbl.Columns.Add(new DataGridTextColumn
                 {
                     Header  = colName,
-                    Binding = new Avalonia.Data.Binding("[" + colName + "]"),
+                    // Plain column name -- resolved against the DataRowView by
+                    // DataRowViewAccessorPlugin; the "[col]" indexer form does
+                    // not resolve under Avalonia and yields empty cells.
+                    Binding = new Avalonia.Data.Binding(colName),
                     Width   = DataGridLength.SizeToCells,
                 });
             }

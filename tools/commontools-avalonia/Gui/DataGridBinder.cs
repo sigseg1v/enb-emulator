@@ -17,13 +17,18 @@ namespace CommonTools.Gui
     // editor grid gets it.)
     //
     // Bind() forces AutoGenerateColumns off and builds one DataGridTextColumn
-    // per data column, bound to the DataRowView string indexer "[ColumnName]"
-    // (which is what actually resolves to the cell value, and stays two-way for
-    // editable grids). ItemsSource is then the DefaultView as before.
+    // per data column, bound by plain column name. A DataRowView column is NOT
+    // resolvable by Avalonia's default binding accessors (neither "[col]" nor
+    // "col" works -- you get the right headers but empty cells), so
+    // DataRowViewAccessorPlugin is registered to make the "col" path read
+    // drv[col]. ItemsSource stays the DefaultView, so SelectedItem remains a
+    // DataRowView for every caller that pattern-matches on it.
     public static class DataGridBinder
     {
         public static void Bind(DataGrid grid, DataTable table)
         {
+            DataRowViewAccessorPlugin.Register();
+
             grid.AutoGenerateColumns = false;
             grid.Columns.Clear();
 
@@ -38,9 +43,7 @@ namespace CommonTools.Gui
                 grid.Columns.Add(new DataGridTextColumn
                 {
                     Header = col.ColumnName,
-                    // DataRowView string indexer -- this is what resolves to the
-                    // cell value (same pattern DlgSearch uses for its results).
-                    Binding = new Binding("[" + col.ColumnName + "]"),
+                    Binding = new Binding(col.ColumnName),
                 });
             }
 
