@@ -5,7 +5,10 @@
 #
 # Seed a developer account with a full roster of five ready-to-fly characters,
 # one per archetype, each at total level 75 (combat/explore/trade = 25 each),
-# with every class-appropriate skill at max rank and 10,000,000 credits.
+# with every class-appropriate skill at max rank, 10,000,000 credits, an
+# upgraded hull (hull-upgrade level 4), and a level-appropriate gear loadout
+# in the four core slots -- shield, reactor, engine, weapon -- matched to the
+# maxed skills (see gen_equip_sql.py).
 #
 # Characters are named <username><suffix>, e.g. for username "Griever":
 #   Grievertw  Terran  Warrior  (TW)
@@ -21,7 +24,9 @@
 # script drives the CLI to `create` + `enter` each character (letting the server
 # initialise it correctly), then runs gen_bump_sql.py to bump the plain stored
 # values the server trusts verbatim on a normal load: levels, credits, ship
-# slots/hull (from StaticData.h), and skills (from Skills.xml).
+# slots/hull (from StaticData.h), and skills (from Skills.xml). A final step
+# (gen_equip_sql.py) swaps the tier-1 starting shield/reactor/engine/weapon
+# for the best items each maxed class can actually equip.
 #
 # Usage:  tools/seed-dev-account/seed-dev-account.sh <username> <password>
 # Env:    ENB_NOREBUILD=1  reuse existing cli/proxy images without building.
@@ -52,10 +57,10 @@ cleanup_proxy() {
 }
 trap cleanup_proxy EXIT
 
-echo ">>> [1/6] ensuring shared stack is up (no recreate)"
+echo ">>> [1/7] ensuring shared stack is up (no recreate)"
 docker compose up -d --no-recreate postgres server login proxy >/dev/null
 
-echo ">>> [2/6] generating Argon2id PHC + (re)creating account '$USER'"
+echo ">>> [2/7] generating Argon2id PHC + (re)creating account '$USER'"
 PHC=$(printf '%s' "$PASS" | python3 -c 'import nacl.pwhash,sys; sys.stdout.write(nacl.pwhash.argon2id.str(sys.stdin.buffer.read()).decode())')
 if [ -z "$PHC" ]; then
     echo "seed-dev-account: failed to generate Argon2id PHC -- install python3-nacl (sudo apt install python3-nacl)" >&2
@@ -76,13 +81,13 @@ printf '%s\n' \
     | "${PSQL_USER[@]}" -v username="$USER" -v phc="$PHC" >/dev/null
 echo "    account '$USER' ready (status=100)"
 
-echo ">>> [3/6] bringing up dedicated CLI proxy for unit '$UNIT'"
+echo ">>> [3/7] bringing up dedicated CLI proxy for unit '$UNIT'"
 if [ -z "${ENB_NOREBUILD:-}" ]; then
     docker compose -f docker-compose.cli.yml -p "$UNIT" build >/dev/null
 fi
 docker compose -f docker-compose.cli.yml -p "$UNIT" up -d proxy >/dev/null
 
-echo ">>> [4/6] creating + entering ${#ROSTER[@]} characters (server-side init)"
+echo ">>> [4/7] creating + entering ${#ROSTER[@]} characters (server-side init)"
 for entry in "${ROSTER[@]}"; do
     suffix="${entry%%:*}"
     cls="${entry##*:}"
@@ -119,11 +124,47 @@ for entry in "${ROSTER[@]}"; do
     sleep 3
 done
 
-echo ">>> [5/6] bumping levels / credits / slots / skills"
+echo ">>> [5/7] bumping levels / credits / slots / skills"
 python3 "$SCRIPT_DIR/gen_bump_sql.py" "$REPO_ROOT/server/data/Skills.xml" \
     | "${PSQL_USER[@]}" -v acctname="$USER" >/dev/null
 
-echo ">>> [6/6] result"
+echo ">>> [6/7] equipping level-appropriate gear (shield/reactor/engine/weapon)"
+# Resolve the best EQUIPPABLE item per class/slot from the net7 CONTENT db
+# (gen_equip_sql.py mirrors exactly the gates Equipable::CanEquip enforces:
+# slot/sub_category, skill-rank >= item tech level, race + profession masks).
+# The two DBs are isolated, so we cannot join content tables from the
+# net7_user connection -- resolve on net7, then apply on net7_user keyed by
+# each avatar's class_index. The resulting item ids are integers straight
+# from this query, never user input.
+PSQL_NET7=(docker compose exec -T -e PGPASSWORD=net7 postgres psql -U net7 -d net7 -v ON_ERROR_STOP=1)
+EQUIP_QUERY="$(python3 "$SCRIPT_DIR/gen_equip_sql.py" "$REPO_ROOT/server/data/Skills.xml")"
+# rows: class_index|slot|item_id
+RESOLVED="$("${PSQL_NET7[@]}" -At -F'|' -c "$EQUIP_QUERY")"
+EQUIP_VALUES="$(printf '%s\n' "$RESOLVED" \
+    | awk -F'|' 'NF==3 && $3!="" { printf "%s(%d,%d,%d)", sep, $1, $2, $3; sep="," }')"
+if [ -z "$EQUIP_VALUES" ]; then
+    echo "seed-dev-account: no equippable gear resolved -- leaving starting gear" >&2
+else
+    # Overwrite slots 0-3 (which the server already created in
+    # ReInitializeSavedData) with the resolved upgrades. UPDATE, not INSERT:
+    # the slot rows already exist, so no ON CONFLICT / unique-constraint
+    # assumption. quality/structure pinned to a pristine 1.0.
+    printf '%s\n' \
+        "BEGIN;" \
+        "WITH av AS (" \
+        "  SELECT ai.avatar_id, (ad.race*3 + ad.prof) AS ci" \
+        "    FROM avatar_info ai JOIN avatar_data ad ON ad.avatar_id = ai.avatar_id" \
+        "   WHERE ai.account_id = (SELECT id FROM accounts WHERE username = :'acctname'))," \
+        "m(ci, slot, item_id) AS (VALUES ${EQUIP_VALUES})" \
+        "UPDATE avatar_equipment e" \
+        "   SET item_id = m.item_id, quality = 1.0, structure = 1.0, builder_name = ''" \
+        "  FROM av, m" \
+        " WHERE e.avatar_id = av.avatar_id AND av.ci = m.ci AND e.equipment_slot = m.slot;" \
+        "COMMIT;" \
+        | "${PSQL_USER[@]}" -v acctname="$USER" >/dev/null
+fi
+
+echo ">>> [7/7] result"
 "${PSQL_USER[@]}" -At -v username="$USER" <<'SQL'
 SELECT '    ' || ad.first_name
        || '  L' || (ai.combat + ai.explore + ai.trade)
