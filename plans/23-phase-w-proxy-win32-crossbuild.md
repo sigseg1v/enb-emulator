@@ -86,3 +86,39 @@ cmake -B build-win64 -S . \
 cmake --build build-win64
 # output: proxy/build-win64/Net7Proxy.exe
 ```
+
+## Standalone Windows client package (`just package-client-windows`) -- landed 2026-06-05 (9590c077)
+
+The Win32 proxy exe by itself is not shippable to a player; it needs the
+launcher and a server pointer. `just package-client-windows` produces a
+single extract-and-run folder for end users with NO dev environment:
+
+- [x] Recipe `package-client-windows: build-proxy-win64` in the justfile.
+      Publishes the Avalonia launcher (`tools/launchnet7-avalonia/`)
+      self-contained single-file win-x64 (`--self-contained
+      -p:PublishSingleFile -p:IncludeNativeLibrariesForSelfExtract
+      -p:EnableCompressionInSingleFile -p:DebugType=none`), then assembles
+      `dist/enb-client-windows/` = `LaunchNet7.exe` + `bin/Net7Proxy.exe` +
+      package-only `LaunchNet7.cfg`. `/dist/` is gitignored.
+- [x] Launcher csproj `OutputType` Exe -> WinExe (GUI subsystem; no stray
+      console window on Windows; Linux dev flow unaffected).
+- [x] Package-only `LaunchNet7.windows-package.cfg`: Emulator defaults to
+      Multi-Player, Server defaults to `https://enb.sigsegv.land`, auth port
+      443 (the protocol TLS port; the dev stack's 4443 is only a docker
+      host-side remap and is NOT shipped). Dev `LaunchNet7.cfg`
+      (localhost) is untouched -- `just launch-net7` / `just play-*` keep
+      the dev defaults.
+- [x] Server control is now an editable `AutoCompleteBox`: a user types
+      their own server URL or picks a known one. `NormalizeHost()` strips
+      scheme/path before DNS/TCP (proxy+client speak raw DNS/TCP, not HTTP).
+- [x] Status probe-staleness fixed with a generation token: switching the
+      Emulator/Server selection invalidates any in-flight TCP probe, so a
+      stale "ONLINE" can no longer land on the label.
+- [x] Client EXE default probes both Program Files and Program Files (x86)
+      for `EA GAMES\Earth & Beyond\release\client.exe` (installer drops it
+      in non-x86 Program Files; see install-enb-linux.sh:409).
+
+Owner verification (not blocking, but the package is not DONE until
+confirmed on a real Windows box): console window gone, window renders, EA
+path auto-detect, proxy spawns from `./bin/Net7Proxy.exe`, ONLINE probe
+against the live server, full client connect through the upstream.
