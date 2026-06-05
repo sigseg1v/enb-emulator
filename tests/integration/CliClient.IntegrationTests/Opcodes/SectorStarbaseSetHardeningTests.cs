@@ -197,13 +197,22 @@ public sealed class SectorStarbaseSetHardeningTests
             stationSectorId, homeSpaceSectorId,
             firstName: "SbSet80", shipName: "SbSet80Ship", cts.Token);
 
-        var starbaseSetFrames = session.HandshakeFrames
-            .Where(f => f.Opcode == OpcodeId.Known.StarbaseSet.Value)
-            .ToList();
+        try
+        {
+            var starbaseSetFrames = session.HandshakeFrames
+                .Where(f => f.Opcode == OpcodeId.Known.StarbaseSet.Value)
+                .ToList();
 
-        Assert.NotEmpty(starbaseSetFrames);
-        Assert.All(starbaseSetFrames, f =>
-            Assert.Equal(ExpectedStarbaseSetPayloadLength, f.PayloadLength));
+            Assert.NotEmpty(starbaseSetFrames);
+            Assert.All(starbaseSetFrames, f =>
+                Assert.Equal(ExpectedStarbaseSetPayloadLength, f.PayloadLength));
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup; primary assertion already reported */ }
+        }
     }
 
     /// <summary>
@@ -295,14 +304,23 @@ public sealed class SectorStarbaseSetHardeningTests
             stationSectorId, homeSpaceSectorId,
             firstName: "SbSet97", shipName: "SbSet97Ship", cts.Token);
 
-        var starbaseSetFrames = session.HandshakeFrames
-            .Where(f => f.Opcode == OpcodeId.Known.StarbaseSet.Value)
-            .ToList();
+        try
+        {
+            var starbaseSetFrames = session.HandshakeFrames
+                .Where(f => f.Opcode == OpcodeId.Known.StarbaseSet.Value)
+                .ToList();
 
-        // Wave 97 pins the 1-frame invariant: StationLogin2 entering-starbase
-        // emit (SectorManager.cpp:514). LaunchIntoSpace at SectorManager.cpp:537
-        // does not fire during passive station login.
-        var single = Assert.Single(starbaseSetFrames);
-        Assert.Equal(ExpectedStarbaseSetPayloadLength, single.PayloadLength);
+            // Wave 97 pins the 1-frame invariant: StationLogin2 entering-starbase
+            // emit (SectorManager.cpp:514). LaunchIntoSpace at SectorManager.cpp:537
+            // does not fire during passive station login.
+            var single = Assert.Single(starbaseSetFrames);
+            Assert.Equal(ExpectedStarbaseSetPayloadLength, single.PayloadLength);
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup; primary assertion already reported */ }
+        }
     }
 }

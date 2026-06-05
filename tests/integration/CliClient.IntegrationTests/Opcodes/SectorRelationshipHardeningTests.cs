@@ -201,13 +201,22 @@ public sealed class SectorRelationshipHardeningTests
             _server, login.Ticket!, account.Username, slot, stationSectorId,
             firstName: "Rel79", shipName: "Rel79Ship", cts.Token);
 
-        var relationshipFrames = session.HandshakeFrames
-            .Where(f => f.Opcode == OpcodeId.Known.Relationship.Value)
-            .ToList();
+        try
+        {
+            var relationshipFrames = session.HandshakeFrames
+                .Where(f => f.Opcode == OpcodeId.Known.Relationship.Value)
+                .ToList();
 
-        Assert.NotEmpty(relationshipFrames);
-        Assert.All(relationshipFrames, f =>
-            Assert.Equal(ExpectedRelationshipPayloadLength, f.PayloadLength));
+            Assert.NotEmpty(relationshipFrames);
+            Assert.All(relationshipFrames, f =>
+                Assert.Equal(ExpectedRelationshipPayloadLength, f.PayloadLength));
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup; primary assertion already reported */ }
+        }
     }
 
     /// <summary>
@@ -313,15 +322,24 @@ public sealed class SectorRelationshipHardeningTests
             stationSectorId, homeSpaceSectorId,
             firstName: "Rel92", shipName: "Rel92Ship", cts.Token);
 
-        var relationshipFrames = session.HandshakeFrames
-            .Where(f => f.Opcode == OpcodeId.Known.Relationship.Value)
-            .ToList();
+        try
+        {
+            var relationshipFrames = session.HandshakeFrames
+                .Where(f => f.Opcode == OpcodeId.Known.Relationship.Value)
+                .ToList();
 
-        // Wave 92 pins the 2-frame invariant: SendLoginShipData (self
-        // RELATIONSHIP_FRIENDLY at PlayerClass.cpp:893) + StationLogin
-        // (ManuID RELATIONSHIP_FRIENDLY at SectorManager.cpp:479).
-        Assert.Equal(2, relationshipFrames.Count);
-        Assert.All(relationshipFrames, f =>
-            Assert.Equal(ExpectedRelationshipPayloadLength, f.PayloadLength));
+            // Wave 92 pins the 2-frame invariant: SendLoginShipData (self
+            // RELATIONSHIP_FRIENDLY at PlayerClass.cpp:893) + StationLogin
+            // (ManuID RELATIONSHIP_FRIENDLY at SectorManager.cpp:479).
+            Assert.Equal(2, relationshipFrames.Count);
+            Assert.All(relationshipFrames, f =>
+                Assert.Equal(ExpectedRelationshipPayloadLength, f.PayloadLength));
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup; primary assertion already reported */ }
+        }
     }
 }

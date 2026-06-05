@@ -207,13 +207,22 @@ public sealed class SectorConstantPositionalUpdateHardeningTests
             stationSectorId, homeSpaceSectorId,
             firstName: "CnstPos82", shipName: "CnstPos82Ship", cts.Token);
 
-        var constantPositionalUpdateFrames = session.HandshakeFrames
-            .Where(f => f.Opcode == OpcodeId.Known.ConstantPositionalUpdate.Value)
-            .ToList();
+        try
+        {
+            var constantPositionalUpdateFrames = session.HandshakeFrames
+                .Where(f => f.Opcode == OpcodeId.Known.ConstantPositionalUpdate.Value)
+                .ToList();
 
-        Assert.NotEmpty(constantPositionalUpdateFrames);
-        Assert.All(constantPositionalUpdateFrames, f =>
-            Assert.Equal(ExpectedConstantPositionalUpdatePayloadLength, f.PayloadLength));
+            Assert.NotEmpty(constantPositionalUpdateFrames);
+            Assert.All(constantPositionalUpdateFrames, f =>
+                Assert.Equal(ExpectedConstantPositionalUpdatePayloadLength, f.PayloadLength));
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup; primary assertion already reported */ }
+        }
     }
 
     /// <summary>
@@ -317,15 +326,24 @@ public sealed class SectorConstantPositionalUpdateHardeningTests
             stationSectorId, homeSpaceSectorId,
             firstName: "CnstPos96", shipName: "CnstPos96Ship", cts.Token);
 
-        var constantPositionalUpdateFrames = session.HandshakeFrames
-            .Where(f => f.Opcode == OpcodeId.Known.ConstantPositionalUpdate.Value)
-            .ToList();
+        try
+        {
+            var constantPositionalUpdateFrames = session.HandshakeFrames
+                .Where(f => f.Opcode == OpcodeId.Known.ConstantPositionalUpdate.Value)
+                .ToList();
 
-        // Wave 96 pins the 1-frame invariant: StationLogin manu-lab
-        // anchor (SectorManager.cpp:480). Only known caller of
-        // SendConstantPositionalUpdate in the entire server during
-        // the station-sector handshake path.
-        var single = Assert.Single(constantPositionalUpdateFrames);
-        Assert.Equal(ExpectedConstantPositionalUpdatePayloadLength, single.PayloadLength);
+            // Wave 96 pins the 1-frame invariant: StationLogin manu-lab
+            // anchor (SectorManager.cpp:480). Only known caller of
+            // SendConstantPositionalUpdate in the entire server during
+            // the station-sector handshake path.
+            var single = Assert.Single(constantPositionalUpdateFrames);
+            Assert.Equal(ExpectedConstantPositionalUpdatePayloadLength, single.PayloadLength);
+        }
+        finally
+        {
+            using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            try { await SectorHandshake.DeleteCreatedCharacterAsync(session.Global, slot, cleanupCts.Token); }
+            catch { /* best-effort cleanup; primary assertion already reported */ }
+        }
     }
 }
