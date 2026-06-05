@@ -17,7 +17,6 @@ namespace MissionEditorAvalonia.Database
         private Net7.Tables m_table;
         private Enum m_id;
         private Enum[] m_description;
-        private static DlgSearch m_dlgSearch;
 
         private static Dictionary<DataConfiguration.DataType, DataConfiguration> m_DataConfigurations;
 
@@ -140,10 +139,23 @@ namespace MissionEditorAvalonia.Database
             if (errorMessage.Length == 0 && query.Length != 0)
             {
                 DataTable dataTable = DB.Instance.executeQuery(query, parameters.ToArray(), values.ToArray());
+
+                // Each sub-SELECT tags its row with its validation index in
+                // column 0, but the rows come back through a UNION -- which
+                // guarantees NO row order and may dedup. The old code matched
+                // positionally (Rows[i][0] == i), so any out-of-order or missing
+                // row misaligned every check and reported the WRONG entity as
+                // missing (e.g. "npc 41 does not exist" when 41 exists but some
+                // other referenced code did not, or when 41 was referenced
+                // twice). Match by membership instead: a validation passed iff a
+                // row tagged with its index came back.
+                var presentIndices = new HashSet<string>();
+                foreach (DataRow row in dataTable.Rows)
+                    presentIndices.Add(row[0].ToString());
+
                 for (int validation = 0; validation < dbDataValidations.Count; validation++)
                 {
-                    if (dataTable.Rows.Count <= validation
-                        || !dataTable.Rows[validation][0].ToString().Equals(validation.ToString()))
+                    if (!presentIndices.Contains(validation.ToString()))
                     {
                         errorMessage = dbDataValidations[validation].errorMessage;
                         break;
@@ -160,10 +172,13 @@ namespace MissionEditorAvalonia.Database
             if (!m_DataConfigurations.TryGetValue(dataType, out dataConfiguration))
                 throw (new Exception("Unable to convert '" + dataType.ToString() + "' into a DataConfiguration.DataType"));
 
-            if (m_dlgSearch == null) m_dlgSearch = new DlgSearch();
-            m_dlgSearch.configure(dataConfiguration.m_table);
-            await m_dlgSearch.ShowDialog(owner);
-            return m_dlgSearch.getSelectedId();
+            // A fresh dialog per search: an Avalonia Window cannot be re-shown
+            // once closed ("Cannot re-show a closed window"), so caching one
+            // static instance threw on the second search.
+            var dlgSearch = new DlgSearch();
+            dlgSearch.configure(dataConfiguration.m_table);
+            await dlgSearch.ShowDialog(owner);
+            return dlgSearch.getSelectedId();
         }
 
         public static String getDescription(DataType dataType, String id)

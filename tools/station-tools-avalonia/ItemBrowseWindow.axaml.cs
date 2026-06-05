@@ -121,15 +121,29 @@ namespace StationToolsAvalonia
                 return;
             }
 
+            // "Type" comes back as an integer column; we want to show the
+            // human-readable type name. A DataColumn's type is fixed, so the
+            // numeric value cannot be overwritten in place with a string (that
+            // threw "Couldn't store <Ammo> in type Column. Expected type is
+            // Int64."). Project into a separate string column and swap it in
+            // where the numeric Type used to sit.
+            int typeOrdinal = dt.Columns["Type"].Ordinal;
+            var typeName = new DataColumn("TypeName", typeof(string));
+            dt.Columns.Add(typeName);
+
             g_Description.Clear();
             foreach (DataRow r in dt.Rows)
             {
                 g_Description.Add(r["Description"]?.ToString() ?? "");
                 int typeIdx = Convert.ToInt32(r["Type"]);
-                if (typeIdx >= 0 && typeIdx < g_ItemType.Length)
-                    r["Type"] = g_ItemType[typeIdx];
+                r["TypeName"] = (typeIdx >= 0 && typeIdx < g_ItemType.Length)
+                    ? g_ItemType[typeIdx]
+                    : typeIdx.ToString();
             }
             dt.Columns.Remove("Description");
+            dt.Columns.Remove("Type");
+            typeName.ColumnName = "Type";
+            typeName.SetOrdinal(typeOrdinal);
 
             CommonTools.Gui.DataGridBinder.Bind(c_ItemList, dt);
             c_RowCount.Text = "Number of Results: " + dt.Rows.Count;

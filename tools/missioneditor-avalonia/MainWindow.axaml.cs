@@ -43,13 +43,11 @@ namespace MissionEditorAvalonia
         string m_currentMissionId;
         bool m_fieldChangesMuted;
 
-        DlgConditionsWindow m_dlgConditions;
-        DlgStagesWindow m_dlgStages;
-        DlgCompletionsWindow m_dlgCompletions;
-        DlgRewardsWindow m_dlgRewards;
-        DlgReportWindow m_dlgReport;
-        DlgSearch m_dlgSearch;
-        DlgEditXml m_dlgEditXml;
+        // Modal dialogs are constructed fresh at each show site: an Avalonia
+        // Window cannot be re-shown once closed ("Cannot re-show a closed
+        // window"), so a single cached instance threw on the second open. Only
+        // DB-init readiness is cached here.
+        bool m_searchAvailable;
 
         public MainWindow()
         {
@@ -59,18 +57,10 @@ namespace MissionEditorAvalonia
             m_mission = new Mission();
             m_fieldChangesMuted = false;
 
-            m_dlgConditions = new DlgConditionsWindow();
-            m_dlgStages = new DlgStagesWindow();
-            m_dlgCompletions = new DlgCompletionsWindow();
-            m_dlgRewards = new DlgRewardsWindow();
-            m_dlgReport = new DlgReportWindow();
-            m_dlgEditXml = new DlgEditXml();
-
             try
             {
                 DataConfiguration.init();
-                m_dlgSearch = new DlgSearch();
-                m_dlgSearch.configure(Net7.Tables.missions);
+                m_searchAvailable = true;
             }
             catch (Exception ex)
             {
@@ -324,10 +314,11 @@ namespace MissionEditorAvalonia
 
         async void OnRecordEdit(object sender, RoutedEventArgs e)
         {
-            m_dlgEditXml.setXml(m_mission.getXML());
-            await m_dlgEditXml.ShowDialog(this);
+            var dlgEditXml = new DlgEditXml();
+            dlgEditXml.setXml(m_mission.getXML());
+            await dlgEditXml.ShowDialog(this);
             string xml;
-            if (m_dlgEditXml.getValues(out xml))
+            if (dlgEditXml.getValues(out xml))
             {
                 setState(State.Edit);
                 m_mission.clear();
@@ -338,9 +329,11 @@ namespace MissionEditorAvalonia
 
         async void OnRecordSearch(object sender, RoutedEventArgs e)
         {
-            if (m_dlgSearch == null) { Show("Search is unavailable (DB init failed)"); return; }
-            await m_dlgSearch.ShowDialog(this);
-            string selected = m_dlgSearch.getSelectedId();
+            if (!m_searchAvailable) { Show("Search is unavailable (DB init failed)"); return; }
+            var dlgSearch = new DlgSearch();
+            dlgSearch.configure(Net7.Tables.missions);
+            await dlgSearch.ShowDialog(this);
+            string selected = dlgSearch.getSelectedId();
             if (selected.Length != 0)
             {
                 c_TabControl.SelectedIndex = 0;
@@ -360,9 +353,10 @@ namespace MissionEditorAvalonia
 
         async void OnRecordReport(object sender, RoutedEventArgs e)
         {
-            try { m_dlgReport.set(m_mission.getReport()); }
+            var dlgReport = new DlgReportWindow();
+            try { dlgReport.set(m_mission.getReport()); }
             catch (Exception ex) { Show(ex.Message); return; }
-            await m_dlgReport.ShowDialog(this);
+            await dlgReport.ShowDialog(this);
         }
 
         // ----- mission tab field handlers -----
@@ -419,9 +413,10 @@ namespace MissionEditorAvalonia
 
         async void OnConditionAdd(object sender, RoutedEventArgs e)
         {
-            await m_dlgConditions.ShowDialog(this);
+            var dlgConditions = new DlgConditionsWindow();
+            await dlgConditions.ShowDialog(this);
             Condition cond;
-            if (m_dlgConditions.getValues(out cond))
+            if (dlgConditions.getValues(out cond))
             {
                 onChanged();
                 m_mission.addCondition(cond);
@@ -432,10 +427,11 @@ namespace MissionEditorAvalonia
         async void OnConditionEdit(object sender, RoutedEventArgs e)
         {
             if (c_ConditionsTbl.SelectedItem is not ConditionRow row) return;
-            m_dlgConditions.editCondition(row.Condition);
-            await m_dlgConditions.ShowDialog(this);
+            var dlgConditions = new DlgConditionsWindow();
+            dlgConditions.editCondition(row.Condition);
+            await dlgConditions.ShowDialog(this);
             Condition cond;
-            if (m_dlgConditions.getValues(out cond))
+            if (dlgConditions.getValues(out cond))
             {
                 onChanged();
                 int idx = c_ConditionsTbl.SelectedIndex;
@@ -483,9 +479,10 @@ namespace MissionEditorAvalonia
             bool add = true;
             if (showDialog)
             {
-                m_dlgStages.setId(stageId);
-                await m_dlgStages.ShowDialog(this);
-                add = m_dlgStages.getValues(out stage);
+                var dlgStages = new DlgStagesWindow();
+                dlgStages.setId(stageId);
+                await dlgStages.ShowDialog(this);
+                add = dlgStages.getValues(out stage);
             }
             else
             {
@@ -578,9 +575,10 @@ namespace MissionEditorAvalonia
         async void OnCompletionAdd(object sender, RoutedEventArgs e)
         {
             if (m_stage == null) return;
-            await m_dlgCompletions.ShowDialog(this);
+            var dlgCompletions = new DlgCompletionsWindow();
+            await dlgCompletions.ShowDialog(this);
             Completion completion;
-            if (m_dlgCompletions.getValues(out completion))
+            if (dlgCompletions.getValues(out completion))
             {
                 onChanged();
                 m_stage.addCompletion(completion);
@@ -598,10 +596,11 @@ namespace MissionEditorAvalonia
         async void OnCompletionEdit(object sender, RoutedEventArgs e)
         {
             if (c_CompletionsTbl.SelectedItem is not CompletionRow row) return;
-            m_dlgCompletions.editCompletion(row.Completion);
-            await m_dlgCompletions.ShowDialog(this);
+            var dlgCompletions = new DlgCompletionsWindow();
+            dlgCompletions.editCompletion(row.Completion);
+            await dlgCompletions.ShowDialog(this);
             Completion completion;
-            if (m_dlgCompletions.getValues(out completion))
+            if (dlgCompletions.getValues(out completion))
             {
                 onChanged();
                 int idx = c_CompletionsTbl.SelectedIndex;
@@ -634,9 +633,10 @@ namespace MissionEditorAvalonia
         async void OnRewardsAdd(object sender, RoutedEventArgs e)
         {
             if (m_stage == null) return;
-            await m_dlgRewards.ShowDialog(this);
+            var dlgRewards = new DlgRewardsWindow();
+            await dlgRewards.ShowDialog(this);
             Reward reward;
-            if (m_dlgRewards.getValues(out reward))
+            if (dlgRewards.getValues(out reward))
             {
                 onChanged();
                 m_stage.addReward(reward);
@@ -647,10 +647,11 @@ namespace MissionEditorAvalonia
         async void OnRewardEdit(object sender, RoutedEventArgs e)
         {
             if (c_RewardsTbl.SelectedItem is not RewardRow row) return;
-            m_dlgRewards.editReward(row.Reward);
-            await m_dlgRewards.ShowDialog(this);
+            var dlgRewards = new DlgRewardsWindow();
+            dlgRewards.editReward(row.Reward);
+            await dlgRewards.ShowDialog(this);
             Reward reward;
-            if (m_dlgRewards.getValues(out reward))
+            if (dlgRewards.getValues(out reward))
             {
                 onChanged();
                 int idx = c_RewardsTbl.SelectedIndex;

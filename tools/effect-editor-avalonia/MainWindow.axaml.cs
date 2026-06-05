@@ -40,7 +40,6 @@ namespace EffectEditorAvalonia
     public partial class MainWindow : Window
     {
         int _effectId;
-        EditItemWindow _itemEditor;
 
         public MainWindow()
         {
@@ -291,8 +290,10 @@ namespace EffectEditorAvalonia
 
         async void OnEditItems(object sender, RoutedEventArgs e)
         {
-            _itemEditor ??= new EditItemWindow();
-            await _itemEditor.ShowDialog(this);
+            // Fresh dialog each time: a closed Avalonia Window cannot be
+            // re-shown ("Cannot re-show a closed window").
+            var itemEditor = new EditItemWindow();
+            await itemEditor.ShowDialog(this);
         }
 
         // Write the recorded mutating SQL to a user-chosen .sql file. The

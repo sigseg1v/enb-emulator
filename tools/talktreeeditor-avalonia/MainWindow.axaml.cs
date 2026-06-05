@@ -57,7 +57,6 @@ namespace TalkTreeEditorAvalonia
         TreeItem _currentItem;
         readonly Stack<TreeItem> _previousItems = new();
         List<CodeValue> _stages;
-        DlgEditXml _dlgEditXml;
 
         public MainWindow()
         {
@@ -481,13 +480,15 @@ namespace TalkTreeEditorAvalonia
 
         async void OnEditXml(object sender, RoutedEventArgs e)
         {
-            if (_dlgEditXml == null) _dlgEditXml = new DlgEditXml();
+            // Fresh dialog each time: a closed Avalonia Window cannot be
+            // re-shown ("Cannot re-show a closed window").
+            var dlgEditXml = new DlgEditXml();
             string conversation = _conversation;
             SaveConversation();
-            _dlgEditXml.setXml(_conversation);
+            dlgEditXml.setXml(_conversation);
             SetConversation(conversation);
-            await _dlgEditXml.ShowDialog(this);
-            if (_dlgEditXml.getValues(out string updated))
+            await dlgEditXml.ShowDialog(this);
+            if (dlgEditXml.getValues(out string updated))
                 LoadConversation(updated);
         }
 
