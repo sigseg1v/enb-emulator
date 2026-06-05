@@ -458,7 +458,15 @@ void Connection::ProcessSectorServerOpcode(short opcode, short bytes)
         // therefore "drop iff within the 250ms window AND speed != 0", which
         // matches a known-good proxy<->client stream. (We previously threw
         // away stationary turns by throttling unconditionally.)
-        float speed = *((float *) &m_RecvBuffer[4]);
+        //
+        // The speed float lives at offset 4..7, so the read is only valid when
+        // the frame actually carries it (GameID + speed = 8 bytes). A real
+        // client TURN always does; an undersized/malformed frame does not, and
+        // reading past its end would test a stale prior-packet byte. Default
+        // speed to 0 in that case so the gate degrades to "never throttle,
+        // always forward" -- the server, not the proxy, decides on a short
+        // frame, and we never silently drop one on a stale-buffer misread.
+        float speed = (bytes >= 8) ? *((float *) &m_RecvBuffer[4]) : 0.0f;
         if (tick <= (m_Turn_Sent + 250) && speed != 0.0f) {
             return; // throttled while moving
         }
@@ -469,8 +477,9 @@ void Connection::ProcessSectorServerOpcode(short opcode, short bytes)
     }
 
     case ENB_OPCODE_0013_TILT: {
-        // Same moving-only 250ms throttle as TURN, with its own timestamp.
-        float speed = *((float *) &m_RecvBuffer[4]);
+        // Same moving-only 250ms throttle as TURN, with its own timestamp and
+        // the same undersized-frame guard (read speed only when present).
+        float speed = (bytes >= 8) ? *((float *) &m_RecvBuffer[4]) : 0.0f;
         if (tick <= (m_Tilt_Sent + 250) && speed != 0.0f) {
             return; // throttled while moving
         }
