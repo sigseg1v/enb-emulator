@@ -218,6 +218,24 @@ in-space / 0x3008 if station visibility kick), `0x14`/`0x2c`/`0x9b`/`0x9f`
         frame degrades to never-throttle / always-forward. Pure defensive
         tightening of our own added read; wire format unchanged, no real frame
         affected. Both targets rebuilt clean.
+  - [x] **Fixed dead socket-handle checks in `UDPClient_linux.cpp`
+        (2026-06-05, commit `490b2523`).** Found while reconciling the
+        Win32-PE cross-build: nine `m_Listen_Socket` sites used POSIX-style
+        `< 0` / `>= 0` guards and assigned `-1` as the invalid sentinel.
+        `SOCKET` is `int` on the Linux docker build (`Net7.h:118`, `_WIN32`-
+        guarded) so these worked there -- but on the MinGW/Win32-PE build
+        (the proxy players actually run under WINE) `SOCKET` is winsock's
+        *unsigned* type, making `< 0` always-false and `>= 0` always-true.
+        Consequences on the WINE build: `socket()`-failure detection and the
+        `UDP_Send` guard never fired, and `RecvThread`'s `if (sock < 0) break`
+        teardown guard never fired -- leaving the recv loop to busy-spin
+        `continue` on a closed socket during shutdown. g++ flagged all of
+        these as `-Wtype-limits` *only* in the win64 build. Switched every
+        socket-handle site to the portable `INVALID_SOCKET` sentinel (`==`/
+        `!=`, assign `INVALID_SOCKET`), matching `Connection.cpp` /
+        `SSL_Listener.cpp` / `ServerManager.cpp`. The libc return-value checks
+        (`bind`/`connect`/`recv` `< 0`) are signed `int` and untouched.
+        win64 cross-build now compiles `UDPClient_linux.cpp` warning-free.
 - [x] **Removed the redundant `0x3a` C->S case.** `0x3a` SERVER_HANDOFF is
       a *server->client* opcode: the proxy consumes its side-effects in
       `UDPClient::IncommingOpcodePreProcessing` on the S->C path and then
