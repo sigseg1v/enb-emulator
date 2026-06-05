@@ -8,152 +8,85 @@ using MissionEditorAvalonia.Nodes;
 
 namespace MissionEditorAvalonia.Database
 {
-    // Ported verbatim from tools/missioneditor/Database/Database.cs.
-    // Already uses parameterised SQL; no changes needed beyond namespaces.
+    // Ported from tools/missioneditor/Database/Database.cs, then rewritten to
+    // drop the old keyword-builder DSL in favour of plain literal
+    // SQL with bound parameters (CLAUDE.md "no string-concat SQL"). The "mission_XML"
+    // column has mixed case, so every identifier stays double-quoted or Postgres
+    // folds it to lowercase and the lookup misses.
     public class Database
     {
         public const String LOG_FILE = "missions.xml";
 
+        // Dapper maps each aliased column onto a constructor parameter by name
+        // (case-insensitive). mission_type is smallint, mission_key is int.
+        private sealed record MissionRow(string xml, string name, short type, int key);
+
         public static String getFirstMissionId()
         {
-            String query = DB.SELECT
-                         + ColumnData.GetQuotedName(Net7.Table_missions._mission_id)
-                         + DB.FROM
-                         + Net7.Tables.missions.ToString()
-                         + DB.LIMIT1;
-            DataTable dataTable = DB.Instance.executeQuery(query, null, null);
-
-            return dataTable.Rows.Count == 0 ? null : ColumnData.GetString(dataTable.Rows[0], Net7.Table_missions._mission_id);
+            int? id = DB.Instance.queryScalar<int?>("SELECT \"mission_id\" FROM missions LIMIT 1");
+            return id?.ToString();
         }
 
         public static Mission getMission(String id)
         {
-            Mission mission = null;
-            String parameter = "id";
-            String query = DB.SELECT
-                         + "*"
-                         + DB.FROM
-                         + Net7.Tables.missions
-                         + DB.WHERE
-                         + ColumnData.GetQuotedName(Net7.Table_missions._mission_id)
-                         + DB.EQUALS
-                         + DB.QueryParameterCharacter
-                         + parameter;
-            DataTable dataTable = DB.Instance.executeQuery(query, new String[] { parameter }, new String[] { id });
-            if (dataTable.Rows.Count == 1)
-            {
-                mission = new Mission();
-                mission.setId(id);
-                mission.setXml(ColumnData.GetString(dataTable.Rows[0], Net7.Table_missions._mission_XML));
-                mission.setName(ColumnData.GetString(dataTable.Rows[0], Net7.Table_missions._mission_name));
-                String type = ColumnData.GetString(dataTable.Rows[0], Net7.Table_missions._mission_type);
-                CommonTools.MissionType missionType;
-                CommonTools.Enumeration.TryParse<CommonTools.MissionType>(type, out missionType);
-                mission.setType(missionType);
-                mission.setKey(ColumnData.GetString(dataTable.Rows[0], Net7.Table_missions._mission_key));
-            }
+            if (!Int32.TryParse(id, out int missionId)) return null;
+
+            MissionRow row = DB.Instance.queryRow<MissionRow>(
+                "SELECT \"mission_XML\" AS xml, \"mission_name\" AS name, " +
+                "\"mission_type\" AS type, \"mission_key\" AS key " +
+                "FROM missions WHERE \"mission_id\" = @id",
+                new { id = missionId });
+            if (row == null) return null;
+
+            var mission = new Mission();
+            mission.setId(id);
+            mission.setXml(row.xml);
+            mission.setName(row.name);
+            CommonTools.Enumeration.TryParse<CommonTools.MissionType>(row.type.ToString(), out var missionType);
+            mission.setType(missionType);
+            mission.setKey(row.key.ToString());
             return mission;
         }
 
         public static String getNextMissionId()
         {
-            String query = "SELECT MAX("
-                         + ColumnData.GetQuotedName(Net7.Table_missions._mission_id)
-                         + ") FROM "
-                         + Net7.Tables.missions;
-            DataTable dataTable = DB.Instance.executeQuery(query, null, null);
-            Int32 nextId = 1;
-            if (dataTable.Rows.Count == 1 && dataTable.Rows[0] != null)
-            {
-                DataRow dataRow = dataTable.Rows[0];
-                Int32.TryParse(dataRow[0].ToString(), out nextId);
-                ++nextId;
-            }
-            return nextId.ToString();
+            int? max = DB.Instance.queryScalar<int?>("SELECT MAX(\"mission_id\") FROM missions");
+            return ((max ?? 0) + 1).ToString();
         }
 
         public static void setMission(Mission mission, Boolean newMission)
         {
-            String query;
             String[] parameters = new String[] { "id", "xml", "name", "key", "type" };
             String[] values = new String[] { mission.getId(), mission.getXML(), mission.getName(), mission.getKey(), ((int)mission.getType()).ToString() };
             if (newMission)
             {
+                // mission_id is pre-allocated by getNextMissionId() before we get
+                // here, so INSERT it explicitly. (The old path INSERTed without an
+                // id then tried to recover it via "WHERE mission_id IS NULL", which
+                // only worked against MySQL's NULL-on-missing-PK quirk and fails on
+                // a Postgres NOT NULL primary key.)
                 writeXmlLog(mission, LogAction.Add);
-                query = "INSERT INTO "
-                      + Net7.Tables.missions
-                      + " ( "
-                      + ColumnData.GetQuotedName(Net7.Table_missions._mission_XML) + ","
-                      + ColumnData.GetQuotedName(Net7.Table_missions._mission_name) + ","
-                      + ColumnData.GetQuotedName(Net7.Table_missions._mission_key) + ","
-                      + ColumnData.GetQuotedName(Net7.Table_missions._mission_type)
-                      + " )"
-                      + " VALUES ("
-                      + DB.QueryParameterCharacter + parameters[1] + ","
-                      + DB.QueryParameterCharacter + parameters[2] + ","
-                      + DB.QueryParameterCharacter + parameters[3] + ","
-                      + DB.QueryParameterCharacter + parameters[4]
-                      + "); "
-                      + DB.SELECT
-                      + ColumnData.GetQuotedName(Net7.Table_missions._mission_id)
-                      + DB.FROM
-                      + Net7.Tables.missions
-                      + DB.WHERE
-                      + ColumnData.GetQuotedName(Net7.Table_missions._mission_id)
-                      + " IS NULL;";
-                DataTable dataTable = DB.Instance.executeQuery(query, parameters, values);
-
-                mission.setId(ColumnData.GetString(dataTable.Rows[0], Net7.Table_missions._mission_id));
-                values[0] = mission.getId();
-                values[1] = mission.getXML();
-                query = "UPDATE "
-                      + Net7.Tables.missions
-                      + " SET "
-                      + ColumnData.GetQuotedName(Net7.Table_missions._mission_XML)
-                      + DB.EQUALS
-                      + DB.QueryParameterCharacter + parameters[1]
-                      + DB.WHERE
-                      + ColumnData.GetQuotedName(Net7.Table_missions._mission_id)
-                      + DB.EQUALS
-                      + DB.QueryParameterCharacter + parameters[0];
+                DB.Instance.executeCommand(
+                    "INSERT INTO missions (\"mission_id\", \"mission_XML\", \"mission_name\", \"mission_key\", \"mission_type\") " +
+                    "VALUES (@id, @xml, @name, @key, @type)",
+                    parameters, values);
             }
             else
             {
                 writeXmlLog(mission, LogAction.Edit);
-                query = "UPDATE "
-                      + Net7.Tables.missions
-                      + " SET "
-                      + ColumnData.GetQuotedName(Net7.Table_missions._mission_XML)
-                      + DB.EQUALS
-                      + DB.QueryParameterCharacter + parameters[1] + ","
-                      + ColumnData.GetQuotedName(Net7.Table_missions._mission_name)
-                      + DB.EQUALS
-                      + DB.QueryParameterCharacter + parameters[2] + ","
-                      + ColumnData.GetQuotedName(Net7.Table_missions._mission_key)
-                      + DB.EQUALS
-                      + DB.QueryParameterCharacter + parameters[3] + ","
-                      + ColumnData.GetQuotedName(Net7.Table_missions._mission_type)
-                      + DB.EQUALS
-                      + DB.QueryParameterCharacter + parameters[4]
-                      + DB.WHERE
-                      + ColumnData.GetQuotedName(Net7.Table_missions._mission_id)
-                      + DB.EQUALS
-                      + DB.QueryParameterCharacter + parameters[0];
+                DB.Instance.executeCommand(
+                    "UPDATE missions SET \"mission_XML\" = @xml, \"mission_name\" = @name, " +
+                    "\"mission_key\" = @key, \"mission_type\" = @type WHERE \"mission_id\" = @id",
+                    parameters, values);
             }
-            DB.Instance.executeQuery(query, parameters, values);
         }
 
         public static void deleteMission(Mission mission)
         {
             writeXmlLog(mission, LogAction.Delete);
-            String parameter = "id";
-            String query = "DELETE FROM "
-                         + Net7.Tables.missions
-                          + DB.WHERE
-                          + ColumnData.GetQuotedName(Net7.Table_missions._mission_id)
-                          + DB.EQUALS
-                          + DB.QueryParameterCharacter + parameter;
-            DB.Instance.executeQuery(query, new String[] { parameter }, new String[] { mission.getId() });
+            DB.Instance.executeCommand(
+                "DELETE FROM missions WHERE \"mission_id\" = @id",
+                new String[] { "id" }, new String[] { mission.getId() });
         }
 
         private enum LogAction { Add, Delete, Edit };

@@ -118,18 +118,13 @@ namespace MissionEditorAvalonia.Database
                 }
 
                 parameter = dataValidation.dataConfiguration.m_id.ToString() + queryCount.ToString();
+                String idCol = ColumnData.GetQuotedName(dataValidation.dataConfiguration.m_id);
+                String table = dataValidation.dataConfiguration.m_table.ToString();
+                // Table/column are schema identifiers (enum-derived), not user
+                // values; the only value -- the referenced code -- is bound as @parameter.
                 if (query.Length != 0) query += " UNION ";
-                query += DB.SELECT
-                       + queryCount.ToString()
-                       + ","
-                       + ColumnData.GetQuotedName(dataValidation.dataConfiguration.m_id)
-                       + DB.FROM
-                       + dataValidation.dataConfiguration.m_table
-                       + DB.WHERE
-                       + ColumnData.GetQuotedName(dataValidation.dataConfiguration.m_id)
-                       + DB.EQUALS
-                       + DB.QueryParameterCharacter
-                       + parameter;
+                query += "SELECT " + queryCount + ", " + idCol
+                       + " FROM " + table + " WHERE " + idCol + " = @" + parameter;
                 parameters.Add(parameter);
                 values.Add(dataValidation.code);
                 dbDataValidations.Add(dataValidation);
@@ -186,26 +181,22 @@ namespace MissionEditorAvalonia.Database
             DataConfiguration dataConfiguration;
             if (m_DataConfigurations.TryGetValue(dataType, out dataConfiguration))
             {
-                String query = "";
+                // Description columns and the id column are schema identifiers
+                // (enum-derived), not user values; the id is bound as @id.
+                String columns = "";
                 foreach (Enum field in dataConfiguration.m_description)
                 {
-                    if (query.Length == 0) query += DB.SELECT;
-                    else                   query += ",";
-                    query += ColumnData.GetQuotedName(field);
+                    if (columns.Length != 0) columns += ", ";
+                    columns += ColumnData.GetQuotedName(field);
                 }
 
-                String parameter = "id";
-                query += DB.FROM
-                       + dataConfiguration.m_table.ToString()
-                       + DB.WHERE
-                       + ColumnData.GetQuotedName(dataConfiguration.m_id)
-                       + DB.EQUALS
-                       + DB.QueryParameterCharacter
-                       + parameter;
+                String query = "SELECT " + columns
+                             + " FROM " + dataConfiguration.m_table.ToString()
+                             + " WHERE " + ColumnData.GetQuotedName(dataConfiguration.m_id) + " = @id";
                 DataTable dataTable;
                 try
                 {
-                    dataTable = DB.Instance.executeQuery(query, new String[] { parameter }, new String[] { id });
+                    dataTable = DB.Instance.executeQuery(query, new String[] { "id" }, new String[] { id });
                 }
                 catch
                 {

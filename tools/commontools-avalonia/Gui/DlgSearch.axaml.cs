@@ -171,14 +171,15 @@ namespace CommonTools.Gui
 
             if (query.Length == 0) return;
 
-            string select = "";
+            // Columns and table are schema identifiers (enum-derived); the WHERE
+            // clause's values are all bound parameters built by SearchCriteria.
+            string columns = "";
             foreach (Enum col in m_columns)
             {
-                if (select.Length == 0) select = DB.SELECT;
-                else                    select += ",";
-                select += ColumnData.GetQuotedName(col);
+                if (columns.Length != 0) columns += ", ";
+                columns += ColumnData.GetQuotedName(col);
             }
-            query = select + DB.FROM + m_table.ToString() + DB.WHERE + query;
+            query = "SELECT " + columns + " FROM " + m_table.ToString() + " WHERE " + query;
 
             DataTable dt = DB.Instance.executeQuery(query, sqlParameters.ToArray(), sqlValues.ToArray());
             guiResultTbl.ItemsSource = dt.DefaultView;

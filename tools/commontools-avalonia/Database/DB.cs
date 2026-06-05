@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using Dapper;
 using Npgsql;
 using NpgsqlTypes;
 using System.Data;
@@ -29,27 +30,12 @@ namespace CommonTools.Database
         /// </summary>
         public const String DATABASE_NAME = "net7";
 
-        public const String SELECT = "SELECT ";
-        public const String FROM = " FROM ";
-        public const String WHERE = " WHERE ";
-        public const String EQUALS = " = ";
-        public const String ORDER_BY = " ORDER BY ";
-        public const String LIMIT = " LIMIT ";
-        public const String LIMIT1 = " LIMIT 1";
-
         private Boolean m_showExecutionTime = false;
 
         /// <summary>
         /// A Postgres transaction
         /// </summary>
         private NpgsqlTransaction m_transaction;
-
-        /// <summary>
-        ///   <para>Npgsql named query parameters use the @ character.</para>
-        ///   <para>(MySQL used ?; Npgsql has no ?-positional support, so the
-        ///   convention is @name and parameters are added by bare name.)</para>
-        /// </summary>
-        public const String QueryParameterCharacter = "@";
 
         /// <summary>
         /// The Postgres connection
@@ -160,6 +146,26 @@ namespace CommonTools.Database
                 NpgsqlDbType = NpgsqlDbType.Unknown,
                 Value = (Object)value ?? DBNull.Value,
             };
+        }
+
+        /// <summary>
+        ///   Dapper-mapped read of a single row (or default if none). For
+        ///   fixed-schema reads where the result maps cleanly onto a record --
+        ///   unlike the dynamic search paths, which query a runtime-chosen table
+        ///   whose identifiers can't be parameterised and so must stay on the
+        ///   DataTable adapter. Values bind as proper typed parameters via the
+        ///   anonymous <paramref name="param"/> object (NOT the string/Unknown
+        ///   coercion executeQuery needs for its all-strings call sites).
+        /// </summary>
+        public T queryRow<T>(String sql, Object param = null)
+        {
+            return openConnection().QueryFirstOrDefault<T>(sql, param, m_transaction);
+        }
+
+        /// <summary>Dapper-mapped scalar read (or default if no row).</summary>
+        public T queryScalar<T>(String sql, Object param = null)
+        {
+            return openConnection().ExecuteScalar<T>(sql, param, m_transaction);
         }
 
         public DataTable executeQuery(String query, String[] parameter, String[] value)
@@ -322,29 +328,18 @@ namespace CommonTools.Database
 
         public String createSelect(Enum[] field, Net7.Tables table, Enum idField, String value, Int32 queryCount)
         {
-            String query = "";
-            foreach(Enum enumField in field)
+            // Columns, table and id column are schema identifiers (enum-derived);
+            // the only value is bound as @<idField><queryCount>.
+            String columns = "";
+            foreach (Enum enumField in field)
             {
-                if (query.Length == 0)
-                {
-                    query = SELECT;
-                }
-                else
-                {
-                    query += ",";
-                }
-                query += ColumnData.GetQuotedName(enumField);
+                if (columns.Length != 0) columns += ", ";
+                columns += ColumnData.GetQuotedName(enumField);
             }
-            query += FROM
-                   + table.ToString()
-                   + WHERE
-                   + ColumnData.GetQuotedName(idField)
-                   + " = "
-                   + DB.QueryParameterCharacter
-                   + idField.ToString() + queryCount.ToString()
-                   + ";";
-            //System.Windows.Forms.MessageBox.Show(query, value);
-            return query;
+            return "SELECT " + columns
+                 + " FROM " + table.ToString()
+                 + " WHERE " + ColumnData.GetQuotedName(idField)
+                 + " = @" + idField.ToString() + queryCount.ToString() + ";";
         }
 
         public DataTable select(Enum[] field, Net7.Tables table, Enum idField, String value)

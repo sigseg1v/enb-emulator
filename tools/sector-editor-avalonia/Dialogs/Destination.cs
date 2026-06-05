@@ -79,15 +79,23 @@ namespace SectorEditorAvalonia.Dialogs
 
         private void ReloadGrid()
         {
-            string query = _typeCombo.SelectedIndex switch
+            DataTable t;
+            switch (_typeCombo.SelectedIndex)
             {
-                0 => "SELECT sector_id, name FROM sectors order by name",
-                1 => "SELECT sector_object_id, name FROM sector_objects " +
-                     "where sector_id='" + EditorGlobals.SectorID + "' order by name",
-                _ => "",
-            };
-            if (string.IsNullOrEmpty(query)) return;
-            DataTable t = Database.executeQuery(Database.DatabaseName.net7, query);
+                case 0:
+                    t = Database.executeQuery(Database.DatabaseName.net7,
+                            "SELECT sector_id, name FROM sectors ORDER BY name");
+                    break;
+                case 1:
+                    // sector_id is bound -- never spliced into the SQL text.
+                    t = Database.executeQuery(Database.DatabaseName.net7,
+                            "SELECT sector_object_id, name FROM sector_objects " +
+                            "WHERE sector_id = @sid ORDER BY name",
+                            new[] { "sid" }, new[] { EditorGlobals.SectorID.ToString() });
+                    break;
+                default:
+                    return;
+            }
             CommonTools.Gui.DataGridBinder.Bind(_grid, t);
         }
     }

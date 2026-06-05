@@ -22,6 +22,7 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Npgsql" Version="8.0.3" />
+    <PackageReference Include="Dapper" Version="2.1.35" />
     <PackageReference Include="Avalonia" Version="11.2.3" />
     <PackageReference Include="Avalonia.Controls.DataGrid" Version="11.2.3" />
     <PackageReference Include="MessageBox.Avalonia" Version="3.2.0" />

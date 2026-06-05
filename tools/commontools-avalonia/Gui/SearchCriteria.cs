@@ -38,7 +38,7 @@ namespace CommonTools.Gui
         public override String ToString()
         {
             String cleanedQuery = subQuery;
-            String parameter = DB.QueryParameterCharacter + sqlParameter;
+            String parameter = "@" + sqlParameter;
             if(cleanedQuery.Contains(parameter))
             {
                 int position = cleanedQuery.IndexOf(parameter);
@@ -57,7 +57,7 @@ namespace CommonTools.Gui
             // ColName, so the case matches and quoting is always correct.
             return "\"" + column + "\" "
                  + getComparatorSymbol() + " "
-                 + DB.QueryParameterCharacter + sqlParameter;
+                 + "@" + sqlParameter;
         }
 
         public String getComparatorSymbol()

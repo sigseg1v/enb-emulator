@@ -115,7 +115,7 @@ namespace CommonTools.Gui
                 m_searchCriteria.comparisonSymbol = (string.IsNullOrEmpty(guiPatternTxt.Text)) ? 2 : 5;
                 m_searchCriteria.criteria         = guiPatternTxt.Text ?? "";
                 m_searchCriteria.subQuery         = col.Name + " " + m_searchCriteria.getComparatorSymbol()
-                                                  + " " + DB.QueryParameterCharacter + col.Name;
+                                                  + " @" + col.Name;
                 m_searchCriteria.sqlParameter     = col.Name;
                 m_searchCriteria.sqlValue         = guiPatternTxt.Text ?? "";
             }
@@ -132,7 +132,7 @@ namespace CommonTools.Gui
                 m_searchCriteria.comparisonSymbol = guiComparisonCbo.SelectedIndex;
                 m_searchCriteria.criteria         = guiComparisonTxt.Text;
                 m_searchCriteria.subQuery         = col.Name + " " + m_searchCriteria.getComparatorSymbol()
-                                                  + " " + DB.QueryParameterCharacter + col.Name;
+                                                  + " @" + col.Name;
                 m_searchCriteria.sqlParameter     = col.Name;
                 m_searchCriteria.sqlValue         = guiComparisonTxt.Text;
             }
