@@ -35,7 +35,7 @@ namespace StationToolsAvalonia
         void SqlLoadVenders()
         {
             var dt = DB.Instance.executeQuery(
-                "SELECT `GroupID`, `GroupName` FROM `starbase_vender_groups`",
+                "SELECT \"GroupID\", \"GroupName\" FROM \"starbase_vender_groups\"",
                 new string[0], new string[0]);
 
             c_SelectGroup.Items.Clear();
@@ -79,7 +79,7 @@ namespace StationToolsAvalonia
             if (CurrentEditingItem <= 0) return;
 
             DB.Instance.executeCommand(
-                "UPDATE `starbase_vender_inventory` SET `itemid` = @i, `sell_price` = @s, `buy_price` = @b, `quanity` = @q WHERE `id` = @id",
+                "UPDATE \"starbase_vender_inventory\" SET \"itemid\" = @i, \"sell_price\" = @s, \"buy_price\" = @b, \"quanity\" = @q WHERE \"id\" = @id",
                 new[] { "@i", "@s", "@b", "@q", "@id" },
                 new[] { c_NewItemID.Text, c_SellPrice.Text, c_BuyPrice.Text, c_Quanity.Text, CurrentEditingItem.ToString() });
 
@@ -110,7 +110,7 @@ namespace StationToolsAvalonia
                 if (sel is DataRowView drv)
                 {
                     DB.Instance.executeCommand(
-                        "DELETE FROM `starbase_vender_inventory` WHERE `id` = @id",
+                        "DELETE FROM \"starbase_vender_inventory\" WHERE \"id\" = @id",
                         new[] { "@id" }, new[] { drv.Row["ID"].ToString() });
                 }
             }
@@ -122,7 +122,7 @@ namespace StationToolsAvalonia
             if (VenderGroupID == 0) { Error("You must select a group!"); return; }
 
             DB.Instance.executeCommand(
-                "INSERT INTO `starbase_vender_inventory` (`groupid`, `itemid`, `sell_price`, `buy_price`, `quanity`) VALUES (@g, '0', '0', '0', '0')",
+                "INSERT INTO \"starbase_vender_inventory\" (\"groupid\", \"itemid\", \"sell_price\", \"buy_price\", \"quanity\") VALUES (@g, '0', '0', '0', '0')",
                 new[] { "@g" }, new[] { VenderGroupID.ToString() });
 
             LoadGroupItems();
@@ -146,7 +146,7 @@ namespace StationToolsAvalonia
                     {
                         int itemId = browse.GetSelectedItemID(i);
                         DB.Instance.executeCommand(
-                            "INSERT INTO `starbase_vender_inventory` (`groupid`, `itemid`, `sell_price`, `buy_price`, `quanity`) VALUES (@g, @i, '0', '0', '-1')",
+                            "INSERT INTO \"starbase_vender_inventory\" (\"groupid\", \"itemid\", \"sell_price\", \"buy_price\", \"quanity\") VALUES (@g, @i, '0', '0', '-1')",
                             new[] { "@g", "@i" }, new[] { VenderGroupID.ToString(), itemId.ToString() });
                     }
                     LoadGroupItems();
@@ -190,7 +190,7 @@ namespace StationToolsAvalonia
             if (string.IsNullOrEmpty(c_BuyMult.Text))   c_BuyMult.Text  = "0";
 
             DB.Instance.executeCommand(
-                "INSERT INTO `starbase_vender_groups` (`GroupName`, `SellMultiplyer`, `BuyMultiplyer`, `BuyOnlyList`) VALUES (@n, @s, @b, @o)",
+                "INSERT INTO \"starbase_vender_groups\" (\"GroupName\", \"SellMultiplyer\", \"BuyMultiplyer\", \"BuyOnlyList\") VALUES (@n, @s, @b, @o)",
                 new[] { "@n", "@s", "@b", "@o" },
                 new[] { c_GroupName.Text, c_SellMult.Text, c_BuyMult.Text, (c_BuyList.IsChecked ?? false) ? "1" : "0" });
 
@@ -205,7 +205,7 @@ namespace StationToolsAvalonia
             if (string.IsNullOrEmpty(c_BuyMult.Text))   c_BuyMult.Text  = "0";
 
             DB.Instance.executeCommand(
-                "UPDATE `starbase_vender_groups` SET `GroupName` = @n, `SellMultiplyer` = @s, `BuyMultiplyer` = @b, `BuyOnlyList` = @o WHERE `GroupID` = @id",
+                "UPDATE \"starbase_vender_groups\" SET \"GroupName\" = @n, \"SellMultiplyer\" = @s, \"BuyMultiplyer\" = @b, \"BuyOnlyList\" = @o WHERE \"GroupID\" = @id",
                 new[] { "@n", "@s", "@b", "@o", "@id" },
                 new[] { c_GroupName.Text, c_SellMult.Text, c_BuyMult.Text, (c_BuyList.IsChecked ?? false) ? "1" : "0", VenderGroupID.ToString() });
 
@@ -219,11 +219,11 @@ namespace StationToolsAvalonia
 
             int gid = VGroups[c_SelectGroup.SelectedIndex].GroupID;
 
-            DB.Instance.executeCommand("DELETE FROM `starbase_vender_groups`    WHERE `GroupID` = @g",
+            DB.Instance.executeCommand("DELETE FROM \"starbase_vender_groups\"    WHERE \"GroupID\" = @g",
                 new[] { "@g" }, new[] { gid.ToString() });
-            DB.Instance.executeCommand("DELETE FROM `starbase_vender_inventory` WHERE `groupid` = @g",
+            DB.Instance.executeCommand("DELETE FROM \"starbase_vender_inventory\" WHERE \"groupid\" = @g",
                 new[] { "@g" }, new[] { gid.ToString() });
-            DB.Instance.executeCommand("UPDATE `starbase_vendors` SET `groupid` = '-1' WHERE `groupid` = @g",
+            DB.Instance.executeCommand("UPDATE \"starbase_vendors\" SET \"groupid\" = '-1' WHERE \"groupid\" = @g",
                 new[] { "@g" }, new[] { gid.ToString() });
 
             SqlLoadVenders();
@@ -235,7 +235,7 @@ namespace StationToolsAvalonia
             VenderGroupID = VGroups[c_SelectGroup.SelectedIndex].GroupID;
 
             var grp = DB.Instance.executeQuery(
-                "SELECT `GroupName`, `SellMultiplyer`, `BuyMultiplyer`, `BuyOnlyList` FROM `starbase_vender_groups` WHERE `GroupID` = @g",
+                "SELECT \"GroupName\", \"SellMultiplyer\", \"BuyMultiplyer\", \"BuyOnlyList\" FROM \"starbase_vender_groups\" WHERE \"GroupID\" = @g",
                 new[] { "@g" }, new[] { VenderGroupID.ToString() });
 
             if (grp != null && grp.Rows.Count > 0)
@@ -255,15 +255,15 @@ namespace StationToolsAvalonia
             if (VenderGroupID == 0) { c_ItemLists.ItemsSource = null; return; }
 
             _itemsTable = DB.Instance.executeQuery(
-                "SELECT `starbase_vender_inventory`.`id` AS ID, " +
-                "       `item_base`.`name`              AS Name, " +
-                "       `itemid`                        AS ItemID, " +
-                "       `sell_price`                    AS SellPrice, " +
-                "       `buy_price`                     AS BuyPrice, " +
-                "       `quanity`                       AS Qty " +
-                "FROM   `starbase_vender_inventory` " +
-                "INNER JOIN `item_base` ON `starbase_vender_inventory`.`itemid` = `item_base`.`id` " +
-                "WHERE  `groupid` = @g",
+                "SELECT \"starbase_vender_inventory\".\"id\" AS ID, " +
+                "       \"item_base\".\"name\"              AS Name, " +
+                "       \"itemid\"                        AS ItemID, " +
+                "       \"sell_price\"                    AS SellPrice, " +
+                "       \"buy_price\"                     AS BuyPrice, " +
+                "       \"quanity\"                       AS Qty " +
+                "FROM   \"starbase_vender_inventory\" " +
+                "INNER JOIN \"item_base\" ON \"starbase_vender_inventory\".\"itemid\" = \"item_base\".\"id\" " +
+                "WHERE  \"groupid\" = @g",
                 new[] { "@g" }, new[] { VenderGroupID.ToString() });
 
             c_ItemLists.ItemsSource = _itemsTable?.DefaultView;

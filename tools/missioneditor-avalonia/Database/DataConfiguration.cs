@@ -123,11 +123,11 @@ namespace MissionEditorAvalonia.Database
                 query += DB.SELECT
                        + queryCount.ToString()
                        + ","
-                       + ColumnData.GetName(dataValidation.dataConfiguration.m_id)
+                       + ColumnData.GetQuotedName(dataValidation.dataConfiguration.m_id)
                        + DB.FROM
                        + dataValidation.dataConfiguration.m_table
                        + DB.WHERE
-                       + ColumnData.GetName(dataValidation.dataConfiguration.m_id)
+                       + ColumnData.GetQuotedName(dataValidation.dataConfiguration.m_id)
                        + DB.EQUALS
                        + DB.QueryParameterCharacter
                        + parameter;
@@ -176,14 +176,14 @@ namespace MissionEditorAvalonia.Database
                 {
                     if (query.Length == 0) query += DB.SELECT;
                     else                   query += ",";
-                    query += ColumnData.GetName(field);
+                    query += ColumnData.GetQuotedName(field);
                 }
 
                 String parameter = "id";
                 query += DB.FROM
                        + dataConfiguration.m_table.ToString()
                        + DB.WHERE
-                       + ColumnData.GetName(dataConfiguration.m_id)
+                       + ColumnData.GetQuotedName(dataConfiguration.m_id)
                        + DB.EQUALS
                        + DB.QueryParameterCharacter
                        + parameter;

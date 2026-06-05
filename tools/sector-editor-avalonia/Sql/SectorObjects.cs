@@ -46,7 +46,7 @@ namespace N7.Sql
                     // original would have thrown a syntax error if ever exercised. No call
                     // sites reach this method in the source we audited.
                     String sosecQuery =
-                        "SELECT stargate_id,classSpecific,faction_id FROM " +
+                        "SELECT stargate_id,\"classSpecific\",faction_id FROM " +
                         "sector_objects_stargates left join sector_objects on " +
                         "sector_objects.sector_object_id = sector_objects_stargates.stargate_id " +
                         "where sector_objects.sector_id=@sid;";

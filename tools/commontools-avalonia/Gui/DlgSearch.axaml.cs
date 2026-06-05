@@ -172,7 +172,7 @@ namespace CommonTools.Gui
             {
                 if (select.Length == 0) select = DB.SELECT;
                 else                    select += ",";
-                select += ColumnData.GetName(col);
+                select += ColumnData.GetQuotedName(col);
             }
             query = select + DB.FROM + m_table.ToString() + DB.WHERE + query;
 

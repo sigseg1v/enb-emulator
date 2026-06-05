@@ -84,7 +84,7 @@ namespace EffectEditorAvalonia
                 DataTable statsDt = null, buffsDt = null;
                 await Task.Run(() =>
                 {
-                    statsDt = DB.Instance.executeQuery("SELECT Stat_Name FROM item_effect_stats", null, null);
+                    statsDt = DB.Instance.executeQuery("SELECT \"Stat_Name\" FROM item_effect_stats", null, null);
                     buffsDt = DB.Instance.executeQuery("SELECT buff_name FROM buffs", null, null);
                 });
 

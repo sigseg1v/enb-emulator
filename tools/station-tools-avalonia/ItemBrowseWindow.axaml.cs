@@ -16,7 +16,7 @@ namespace StationToolsAvalonia
     // overloaded ShowDialog(bool Multi).
     //
     // Wire change: every SELECT goes through DB.Instance.executeQuery
-    // with parameter binding. The original built `LIKE '%" + textbox + "%'`
+    // with parameter binding. The original built \"LIKE '%" + textbox + "%'\"
     // by string concatenation, which is a textbook SQL-injection hole —
     // closed silently here without behaviour change.
     public partial class ItemBrowseWindow : Window
@@ -75,21 +75,21 @@ namespace StationToolsAvalonia
 
             if (!string.IsNullOrEmpty(c_NameQuery.Text))
             {
-                clauses.Add("`item_base`.`name` LIKE @name");
+                clauses.Add("\"item_base\".\"name\" LIKE @name");
                 keys.Add("@name");
                 vals.Add("%" + c_NameQuery.Text + "%");
             }
 
             if (c_LevelQuery.SelectedIndex > 0)
             {
-                clauses.Add("`item_base`.`level` = @level");
+                clauses.Add("\"item_base\".\"level\" = @level");
                 keys.Add("@level");
                 vals.Add(c_LevelQuery.SelectedIndex.ToString());
             }
 
             if (c_TypeQuery.SelectedIndex > 0)
             {
-                clauses.Add("`item_base`.`type` = @type");
+                clauses.Add("\"item_base\".\"type\" = @type");
                 keys.Add("@type");
                 vals.Add((c_TypeQuery.SelectedIndex - 1).ToString());
             }
@@ -100,9 +100,9 @@ namespace StationToolsAvalonia
                 return;
             }
 
-            string sql = "SELECT `id` AS ItemID, `name` AS Name, `type` AS Type, " +
-                         "`level` AS Level, `price` AS Price, `description` AS Description " +
-                         "FROM `item_base` WHERE " + string.Join(" AND ", clauses);
+            string sql = "SELECT \"id\" AS ItemID, \"name\" AS Name, \"type\" AS Type, " +
+                         "\"level\" AS Level, \"price\" AS Price, \"description\" AS Description " +
+                         "FROM \"item_base\" WHERE " + string.Join(" AND ", clauses);
 
             DataTable dt;
             try

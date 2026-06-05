@@ -102,7 +102,7 @@ namespace StationToolsAvalonia
 
             c_StationFaction.Items.Clear();
             var dt = DB.Instance.executeQuery(
-                "SELECT `name` FROM `factions` ORDER BY `faction_id` ASC",
+                "SELECT \"name\" FROM \"factions\" ORDER BY \"faction_id\" ASC",
                 new string[0], new string[0]);
             if (dt != null)
                 foreach (DataRow r in dt.Rows)
@@ -166,7 +166,7 @@ namespace StationToolsAvalonia
             m_VenderGroups.Clear();
             m_VenderGroups.Add(-1);
             var dt = DB.Instance.executeQuery(
-                "SELECT `GroupID`, `GroupName` FROM `starbase_vender_groups`",
+                "SELECT \"GroupID\", \"GroupName\" FROM \"starbase_vender_groups\"",
                 new string[0], new string[0]);
             if (dt != null)
             {
@@ -182,7 +182,7 @@ namespace StationToolsAvalonia
         {
             c_StationCombo.Items.Clear();
             var dt = DB.Instance.executeQuery(
-                "SELECT `name` FROM `starbases` ORDER BY `name`",
+                "SELECT \"name\" FROM \"starbases\" ORDER BY \"name\"",
                 new string[0], new string[0]);
             if (dt != null)
                 foreach (DataRow r in dt.Rows)
@@ -206,7 +206,7 @@ namespace StationToolsAvalonia
             try
             {
                 DB.Instance.executeCommand(
-                    "INSERT INTO `starbases` (`sector_id`, `name`, `type`, `is_active`, `description`, `welcome_message`, `target_sector_object`, `faction_id`) " +
+                    "INSERT INTO \"starbases\" (\"sector_id\", \"name\", \"type\", \"is_active\", \"description\", \"welcome_message\", \"target_sector_object\", \"faction_id\") " +
                     "VALUES ('0', 'New Station', '0', '0', 'Enter Description', 'Enter Welcome', '0', '1')",
                     new string[0], new string[0]);
                 LoadStarbasesIntoCombo();
@@ -246,9 +246,9 @@ namespace StationToolsAvalonia
             _roots.Clear();
 
             var rooms = DB.Instance.executeQuery(
-                "SELECT `starbase_rooms`.`room_id`, `starbase_rooms`.`starbase_id`, `starbases`.`type` " +
-                "FROM `starbases` INNER JOIN `starbase_rooms` ON `starbases`.`starbase_id` = `starbase_rooms`.`starbase_id` " +
-                "WHERE `starbases`.`name` = @n",
+                "SELECT \"starbase_rooms\".\"room_id\", \"starbase_rooms\".\"starbase_id\", \"starbases\".\"type\" " +
+                "FROM \"starbases\" INNER JOIN \"starbase_rooms\" ON \"starbases\".\"starbase_id\" = \"starbase_rooms\".\"starbase_id\" " +
+                "WHERE \"starbases\".\"name\" = @n",
                 new[] { "@n" }, new[] { stationName });
 
             if (rooms == null || rooms.Rows.Count == 0) return;
@@ -278,7 +278,7 @@ namespace StationToolsAvalonia
                 var npcFolder  = new TreeNodeVM { Label = "NPC's",     Kind = NodeKind.NpcsFolder,      Id = roomId };
 
                 var terms = DB.Instance.executeQuery(
-                    "SELECT `terminal_id`, `terminal_index` FROM `starbase_terminals` WHERE `room_id` = @r ORDER BY `terminal_index`",
+                    "SELECT \"terminal_id\", \"terminal_index\" FROM \"starbase_terminals\" WHERE \"room_id\" = @r ORDER BY \"terminal_index\"",
                     new[] { "@r" }, new[] { roomId.ToString() });
                 if (terms != null)
                 {
@@ -293,7 +293,7 @@ namespace StationToolsAvalonia
                 }
 
                 var npcs = DB.Instance.executeQuery(
-                    "SELECT `npc_Id`, `first_name`, `last_name` FROM `starbase_npcs` WHERE `room_id` = @r",
+                    "SELECT \"npc_Id\", \"first_name\", \"last_name\" FROM \"starbase_npcs\" WHERE \"room_id\" = @r",
                     new[] { "@r" }, new[] { roomId.ToString() });
                 if (npcs != null)
                 {
@@ -337,8 +337,8 @@ namespace StationToolsAvalonia
             if (string.IsNullOrEmpty(m_CurrentStationName)) return;
 
             var dt = DB.Instance.executeQuery(
-                "SELECT `starbase_id`, `sector_id`, `name`, `type`, `is_active`, `description`, `welcome_message`, `target_sector_object`, `faction_id` " +
-                "FROM `starbases` WHERE `name` = @n",
+                "SELECT \"starbase_id\", \"sector_id\", \"name\", \"type\", \"is_active\", \"description\", \"welcome_message\", \"target_sector_object\", \"faction_id\" " +
+                "FROM \"starbases\" WHERE \"name\" = @n",
                 new[] { "@n" }, new[] { m_CurrentStationName });
             if (dt == null || dt.Rows.Count == 0) { Error("Could not load station"); return; }
 
@@ -359,8 +359,8 @@ namespace StationToolsAvalonia
         void LoadRoomData(int roomId)
         {
             var dt = DB.Instance.executeQuery(
-                "SELECT `type`, `style`, `fog_near`, `fog_far`, `description`, `fog_red`, `fog_green`, `fog_blue` " +
-                "FROM `starbase_rooms` WHERE `room_id` = @r",
+                "SELECT \"type\", \"style\", \"fog_near\", \"fog_far\", \"description\", \"fog_red\", \"fog_green\", \"fog_blue\" " +
+                "FROM \"starbase_rooms\" WHERE \"room_id\" = @r",
                 new[] { "@r" }, new[] { roomId.ToString() });
             if (dt == null || dt.Rows.Count == 0) return;
 
@@ -388,8 +388,8 @@ namespace StationToolsAvalonia
         void LoadTerminalData(int terminalId)
         {
             var dt = DB.Instance.executeQuery(
-                "SELECT `location`, `type`, `attribute`, `description` " +
-                "FROM `starbase_terminals` WHERE `terminal_id` = @t",
+                "SELECT \"location\", \"type\", \"attribute\", \"description\" " +
+                "FROM \"starbase_terminals\" WHERE \"terminal_id\" = @t",
                 new[] { "@t" }, new[] { terminalId.ToString() });
             if (dt == null || dt.Rows.Count == 0) return;
 
@@ -403,9 +403,9 @@ namespace StationToolsAvalonia
         void LoadNpcData(int npcId)
         {
             var dt = DB.Instance.executeQuery(
-                "SELECT `description`, `faction_id`, `location`, `last_name`, `first_name`, `level`, `booth_type`, `npc_Id`, `groupid`, `talk_tree_handle` " +
-                "FROM `starbase_npcs` INNER JOIN `starbase_vendors` ON `starbase_npcs`.`npc_Id` = `starbase_vendors`.`vendor_id` " +
-                "WHERE `npc_Id` = @n",
+                "SELECT \"description\", \"faction_id\", \"location\", \"last_name\", \"first_name\", \"level\", \"booth_type\", \"npc_Id\", \"groupid\", \"talk_tree_handle\" " +
+                "FROM \"starbase_npcs\" INNER JOIN \"starbase_vendors\" ON \"starbase_npcs\".\"npc_Id\" = \"starbase_vendors\".\"vendor_id\" " +
+                "WHERE \"npc_Id\" = @n",
                 new[] { "@n" }, new[] { npcId.ToString() });
             if (dt == null || dt.Rows.Count == 0) return;
 
@@ -456,9 +456,9 @@ namespace StationToolsAvalonia
         {
             if (m_CurrentStationID <= 0) return;
             DB.Instance.executeCommand(
-                "UPDATE `starbases` SET `name` = @n, `sector_id` = @s, `type` = @t, `is_active` = @a, " +
-                "`description` = @d, `welcome_message` = @w, `target_sector_object` = @o, `faction_id` = @f " +
-                "WHERE `starbase_id` = @id",
+                "UPDATE \"starbases\" SET \"name\" = @n, \"sector_id\" = @s, \"type\" = @t, \"is_active\" = @a, " +
+                "\"description\" = @d, \"welcome_message\" = @w, \"target_sector_object\" = @o, \"faction_id\" = @f " +
+                "WHERE \"starbase_id\" = @id",
                 new[] { "@n", "@s", "@t", "@a", "@d", "@w", "@o", "@f", "@id" },
                 new[]
                 {
@@ -491,9 +491,9 @@ namespace StationToolsAvalonia
             if (c_RoomFog.IsChecked       ?? false) style |= 0x100;
 
             DB.Instance.executeCommand(
-                "UPDATE `starbase_rooms` SET `type` = @t, `style` = @s, `fog_near` = @fn, `fog_far` = @ff, " +
-                "`description` = @d, `fog_red` = @fr, `fog_green` = @fg, `fog_blue` = @fb " +
-                "WHERE `room_id` = @id",
+                "UPDATE \"starbase_rooms\" SET \"type\" = @t, \"style\" = @s, \"fog_near\" = @fn, \"fog_far\" = @ff, " +
+                "\"description\" = @d, \"fog_red\" = @fr, \"fog_green\" = @fg, \"fog_blue\" = @fb " +
+                "WHERE \"room_id\" = @id",
                 new[] { "@t", "@s", "@fn", "@ff", "@d", "@fr", "@fg", "@fb", "@id" },
                 new[]
                 {
@@ -513,8 +513,8 @@ namespace StationToolsAvalonia
         {
             if (_selectedNode == null || _selectedNode.Kind != NodeKind.Terminal) return;
             DB.Instance.executeCommand(
-                "UPDATE `starbase_terminals` SET `location` = @l, `type` = @t, `attribute` = @a, `description` = @d " +
-                "WHERE `terminal_id` = @id",
+                "UPDATE \"starbase_terminals\" SET \"location\" = @l, \"type\" = @t, \"attribute\" = @a, \"description\" = @d " +
+                "WHERE \"terminal_id\" = @id",
                 new[] { "@l", "@t", "@a", "@d", "@id" },
                 new[]
                 {
@@ -532,8 +532,8 @@ namespace StationToolsAvalonia
 
             int boothIdx = c_NPCBoothType.SelectedIndex - 1;
             DB.Instance.executeCommand(
-                "UPDATE `starbase_npcs` SET `first_name` = @fn, `last_name` = @ln, `description` = @d, " +
-                "`faction_id` = @f, `location` = @l, `talk_tree_handle` = @tt WHERE `npc_Id` = @id",
+                "UPDATE \"starbase_npcs\" SET \"first_name\" = @fn, \"last_name\" = @ln, \"description\" = @d, " +
+                "\"faction_id\" = @f, \"location\" = @l, \"talk_tree_handle\" = @tt WHERE \"npc_Id\" = @id",
                 new[] { "@fn", "@ln", "@d", "@f", "@l", "@tt", "@id" },
                 new[]
                 {
@@ -549,8 +549,8 @@ namespace StationToolsAvalonia
             int gidIdx = c_VenderGroupBox.SelectedIndex;
             int gid = (gidIdx >= 0 && gidIdx < m_VenderGroups.Count) ? m_VenderGroups[gidIdx] : -1;
             DB.Instance.executeCommand(
-                "UPDATE `starbase_vendors` SET `level` = @lvl, `booth_type` = @bt, `groupid` = @g " +
-                "WHERE `vendor_id` = @id",
+                "UPDATE \"starbase_vendors\" SET \"level\" = @lvl, \"booth_type\" = @bt, \"groupid\" = @g " +
+                "WHERE \"vendor_id\" = @id",
                 new[] { "@lvl", "@bt", "@g", "@id" },
                 new[]
                 {
@@ -571,7 +571,7 @@ namespace StationToolsAvalonia
             try
             {
                 DB.Instance.executeCommand(
-                    "INSERT INTO `starbase_rooms` (`type`, `style`, `fog_near`, `fog_far`, `description`, `starbase_id`) " +
+                    "INSERT INTO \"starbase_rooms\" (\"type\", \"style\", \"fog_near\", \"fog_far\", \"description\", \"starbase_id\") " +
                     "VALUES ('0', '0', '0', '0', 'Enter Description', @sb)",
                     new[] { "@sb" }, new[] { m_CurrentStationID.ToString() });
                 LoadStationTree(m_CurrentStationName);
@@ -587,10 +587,10 @@ namespace StationToolsAvalonia
             try
             {
                 int idx = (int)(DB.Instance.executeQuery(
-                    "SELECT COUNT(*) AS n FROM `starbase_terminals` WHERE `room_id` = @r",
+                    "SELECT COUNT(*) AS n FROM \"starbase_terminals\" WHERE \"room_id\" = @r",
                     new[] { "@r" }, new[] { roomId.ToString() })?.Rows[0]?["n"] ?? 0);
                 DB.Instance.executeCommand(
-                    "INSERT INTO `starbase_terminals` (`location`, `type`, `attribute`, `description`, `room_id`, `terminal_index`) " +
+                    "INSERT INTO \"starbase_terminals\" (\"location\", \"type\", \"attribute\", \"description\", \"room_id\", \"terminal_index\") " +
                     "VALUES ('0', '0', '0', 'Enter Description', @r, @i)",
                     new[] { "@r", "@i" }, new[] { roomId.ToString(), idx.ToString() });
                 LoadStationTree(m_CurrentStationName);
@@ -606,10 +606,10 @@ namespace StationToolsAvalonia
             try
             {
                 int idx = (int)(DB.Instance.executeQuery(
-                    "SELECT COUNT(*) AS n FROM `starbase_npcs` WHERE `room_id` = @r",
+                    "SELECT COUNT(*) AS n FROM \"starbase_npcs\" WHERE \"room_id\" = @r",
                     new[] { "@r" }, new[] { roomId.ToString() })?.Rows[0]?["n"] ?? 0);
                 DB.Instance.executeCommand(
-                    "INSERT INTO `starbase_npcs` (`first_name`, `last_name`, `description`, `faction_id`, `location`, `room_id`, `npc_index`, `talk_tree_handle`) " +
+                    "INSERT INTO \"starbase_npcs\" (\"first_name\", \"last_name\", \"description\", \"faction_id\", \"location\", \"room_id\", \"npc_index\", \"talk_tree_handle\") " +
                     "VALUES ('New', 'NPC', 'Enter Description', '1', '0', @r, @i, '')",
                     new[] { "@r", "@i" }, new[] { roomId.ToString(), idx.ToString() });
                 LoadStationTree(m_CurrentStationName);
@@ -638,7 +638,7 @@ namespace StationToolsAvalonia
                 switch (_selectedNode.Kind)
                 {
                     case NodeKind.Station:
-                        DB.Instance.executeCommand("DELETE FROM `starbases` WHERE `starbase_id` = @id",
+                        DB.Instance.executeCommand("DELETE FROM \"starbases\" WHERE \"starbase_id\" = @id",
                             new[] { "@id" }, new[] { _selectedNode.Id.ToString() });
                         LoadStarbasesIntoCombo();
                         _roots.Clear();
@@ -646,25 +646,25 @@ namespace StationToolsAvalonia
                         m_CurrentStationName = null;
                         break;
                     case NodeKind.Room:
-                        DB.Instance.executeCommand("DELETE FROM `starbase_rooms`     WHERE `room_id`     = @id",
+                        DB.Instance.executeCommand("DELETE FROM \"starbase_rooms\"     WHERE \"room_id\"     = @id",
                             new[] { "@id" }, new[] { _selectedNode.Id.ToString() });
-                        DB.Instance.executeCommand("DELETE FROM `starbase_terminals` WHERE `room_id`     = @id",
+                        DB.Instance.executeCommand("DELETE FROM \"starbase_terminals\" WHERE \"room_id\"     = @id",
                             new[] { "@id" }, new[] { _selectedNode.Id.ToString() });
-                        DB.Instance.executeCommand("DELETE FROM `starbase_npcs`      WHERE `room_id`     = @id",
+                        DB.Instance.executeCommand("DELETE FROM \"starbase_npcs\"      WHERE \"room_id\"     = @id",
                             new[] { "@id" }, new[] { _selectedNode.Id.ToString() });
                         LoadStationTree(m_CurrentStationName);
                         break;
                     case NodeKind.Terminal:
-                        DB.Instance.executeCommand("DELETE FROM `starbase_terminals` WHERE `terminal_id` = @id",
+                        DB.Instance.executeCommand("DELETE FROM \"starbase_terminals\" WHERE \"terminal_id\" = @id",
                             new[] { "@id" }, new[] { _selectedNode.Id.ToString() });
                         LoadStationTree(m_CurrentStationName);
                         break;
                     case NodeKind.Npc:
-                        DB.Instance.executeCommand("DELETE FROM `starbase_npcs`              WHERE `npc_Id`               = @id",
+                        DB.Instance.executeCommand("DELETE FROM \"starbase_npcs\"              WHERE \"npc_Id\"               = @id",
                             new[] { "@id" }, new[] { _selectedNode.Id.ToString() });
-                        DB.Instance.executeCommand("DELETE FROM `starbase_vendors`           WHERE `vendor_id`            = @id",
+                        DB.Instance.executeCommand("DELETE FROM \"starbase_vendors\"           WHERE \"vendor_id\"            = @id",
                             new[] { "@id" }, new[] { _selectedNode.Id.ToString() });
-                        DB.Instance.executeCommand("DELETE FROM `starbase_npc_avatar_templates` WHERE `avatar_template_id` = @id",
+                        DB.Instance.executeCommand("DELETE FROM \"starbase_npc_avatar_templates\" WHERE \"avatar_template_id\" = @id",
                             new[] { "@id" }, new[] { _selectedNode.Id.ToString() });
                         LoadStationTree(m_CurrentStationName);
                         break;
@@ -711,7 +711,7 @@ namespace StationToolsAvalonia
                 string hex = Convert.ToHexString(bytes);
 
                 DB.Instance.executeCommand(
-                    "REPLACE INTO `starbase_npc_avatar_templates` (`avatar_template_id`, `avatar_version`) VALUES (@id, UNHEX(@h))",
+                    "REPLACE INTO \"starbase_npc_avatar_templates\" (\"avatar_template_id\", \"avatar_version\") VALUES (@id, UNHEX(@h))",
                     new[] { "@id", "@h" },
                     new[] { _selectedNode.Id.ToString(), hex });
 

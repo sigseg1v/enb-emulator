@@ -51,7 +51,11 @@ namespace CommonTools.Gui
 
         public String getQuery()
         {
-            return column + " "
+            // Quote the column for Postgres: `column` is the bare schema name
+            // (mixed-case columns like npc_Id would otherwise fold to lowercase
+            // and miss). The name comes straight from the schema-generated
+            // ColName, so the case matches and quoting is always correct.
+            return "\"" + column + "\" "
                  + getComparatorSymbol() + " "
                  + DB.QueryParameterCharacter + sqlParameter;
         }

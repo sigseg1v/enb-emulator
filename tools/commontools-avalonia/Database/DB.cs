@@ -321,12 +321,12 @@ namespace CommonTools.Database
                 {
                     query += ",";
                 }
-                query += ColumnData.GetName(enumField);
+                query += ColumnData.GetQuotedName(enumField);
             }
             query += FROM
                    + table.ToString()
                    + WHERE
-                   + ColumnData.GetName(idField)
+                   + ColumnData.GetQuotedName(idField)
                    + " = "
                    + DB.QueryParameterCharacter
                    + idField.ToString() + queryCount.ToString()

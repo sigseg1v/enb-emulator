@@ -17,7 +17,7 @@ namespace MissionEditorAvalonia.Database
         public static String getFirstMissionId()
         {
             String query = DB.SELECT
-                         + ColumnData.GetName(Net7.Table_missions._mission_id)
+                         + ColumnData.GetQuotedName(Net7.Table_missions._mission_id)
                          + DB.FROM
                          + Net7.Tables.missions.ToString()
                          + DB.LIMIT1;
@@ -35,7 +35,7 @@ namespace MissionEditorAvalonia.Database
                          + DB.FROM
                          + Net7.Tables.missions
                          + DB.WHERE
-                         + ColumnData.GetName(Net7.Table_missions._mission_id)
+                         + ColumnData.GetQuotedName(Net7.Table_missions._mission_id)
                          + DB.EQUALS
                          + DB.QueryParameterCharacter
                          + parameter;
@@ -58,7 +58,7 @@ namespace MissionEditorAvalonia.Database
         public static String getNextMissionId()
         {
             String query = "SELECT MAX("
-                         + ColumnData.GetName(Net7.Table_missions._mission_id)
+                         + ColumnData.GetQuotedName(Net7.Table_missions._mission_id)
                          + ") FROM "
                          + Net7.Tables.missions;
             DataTable dataTable = DB.Instance.executeQuery(query, null, null);
@@ -83,10 +83,10 @@ namespace MissionEditorAvalonia.Database
                 query = "INSERT INTO "
                       + Net7.Tables.missions
                       + " ( "
-                      + ColumnData.GetName(Net7.Table_missions._mission_XML) + ","
-                      + ColumnData.GetName(Net7.Table_missions._mission_name) + ","
-                      + ColumnData.GetName(Net7.Table_missions._mission_key) + ","
-                      + ColumnData.GetName(Net7.Table_missions._mission_type)
+                      + ColumnData.GetQuotedName(Net7.Table_missions._mission_XML) + ","
+                      + ColumnData.GetQuotedName(Net7.Table_missions._mission_name) + ","
+                      + ColumnData.GetQuotedName(Net7.Table_missions._mission_key) + ","
+                      + ColumnData.GetQuotedName(Net7.Table_missions._mission_type)
                       + " )"
                       + " VALUES ("
                       + DB.QueryParameterCharacter + parameters[1] + ","
@@ -95,11 +95,11 @@ namespace MissionEditorAvalonia.Database
                       + DB.QueryParameterCharacter + parameters[4]
                       + "); "
                       + DB.SELECT
-                      + ColumnData.GetName(Net7.Table_missions._mission_id)
+                      + ColumnData.GetQuotedName(Net7.Table_missions._mission_id)
                       + DB.FROM
                       + Net7.Tables.missions
                       + DB.WHERE
-                      + ColumnData.GetName(Net7.Table_missions._mission_id)
+                      + ColumnData.GetQuotedName(Net7.Table_missions._mission_id)
                       + " IS NULL;";
                 DataTable dataTable = DB.Instance.executeQuery(query, parameters, values);
 
@@ -109,11 +109,11 @@ namespace MissionEditorAvalonia.Database
                 query = "UPDATE "
                       + Net7.Tables.missions
                       + " SET "
-                      + ColumnData.GetName(Net7.Table_missions._mission_XML)
+                      + ColumnData.GetQuotedName(Net7.Table_missions._mission_XML)
                       + DB.EQUALS
                       + DB.QueryParameterCharacter + parameters[1]
                       + DB.WHERE
-                      + ColumnData.GetName(Net7.Table_missions._mission_id)
+                      + ColumnData.GetQuotedName(Net7.Table_missions._mission_id)
                       + DB.EQUALS
                       + DB.QueryParameterCharacter + parameters[0];
             }
@@ -123,20 +123,20 @@ namespace MissionEditorAvalonia.Database
                 query = "UPDATE "
                       + Net7.Tables.missions
                       + " SET "
-                      + ColumnData.GetName(Net7.Table_missions._mission_XML)
+                      + ColumnData.GetQuotedName(Net7.Table_missions._mission_XML)
                       + DB.EQUALS
                       + DB.QueryParameterCharacter + parameters[1] + ","
-                      + ColumnData.GetName(Net7.Table_missions._mission_name)
+                      + ColumnData.GetQuotedName(Net7.Table_missions._mission_name)
                       + DB.EQUALS
                       + DB.QueryParameterCharacter + parameters[2] + ","
-                      + ColumnData.GetName(Net7.Table_missions._mission_key)
+                      + ColumnData.GetQuotedName(Net7.Table_missions._mission_key)
                       + DB.EQUALS
                       + DB.QueryParameterCharacter + parameters[3] + ","
-                      + ColumnData.GetName(Net7.Table_missions._mission_type)
+                      + ColumnData.GetQuotedName(Net7.Table_missions._mission_type)
                       + DB.EQUALS
                       + DB.QueryParameterCharacter + parameters[4]
                       + DB.WHERE
-                      + ColumnData.GetName(Net7.Table_missions._mission_id)
+                      + ColumnData.GetQuotedName(Net7.Table_missions._mission_id)
                       + DB.EQUALS
                       + DB.QueryParameterCharacter + parameters[0];
             }
@@ -150,7 +150,7 @@ namespace MissionEditorAvalonia.Database
             String query = "DELETE FROM "
                          + Net7.Tables.missions
                           + DB.WHERE
-                          + ColumnData.GetName(Net7.Table_missions._mission_id)
+                          + ColumnData.GetQuotedName(Net7.Table_missions._mission_id)
                           + DB.EQUALS
                           + DB.QueryParameterCharacter + parameter;
             DB.Instance.executeQuery(query, new String[] { parameter }, new String[] { mission.getId() });

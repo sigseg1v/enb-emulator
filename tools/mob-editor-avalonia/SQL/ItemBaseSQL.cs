@@ -9,9 +9,10 @@ namespace MobEditorAvalonia.SQL
 
         public ItemBaseSQL()
         {
-            // Quote 2d_asset because it starts with a digit.
+            // Quote 2d_asset because it starts with a digit (Postgres uses
+            // double quotes for identifiers, not MySQL backticks).
             _itemBase = DB.Instance.executeQuery(
-                "SELECT id, level, name, sub_category, `2d_asset` FROM item_base ORDER BY name;",
+                "SELECT id, level, name, sub_category, \"2d_asset\" FROM item_base ORDER BY name;",
                 null, null);
         }
 
