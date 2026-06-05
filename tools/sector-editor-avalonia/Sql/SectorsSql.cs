@@ -1,5 +1,6 @@
 using System;
 using System.Data;
+using CommonTools.Database;
 
 namespace N7.Sql
 {
@@ -20,15 +21,10 @@ namespace N7.Sql
         public DataTable getSectorTable() => sectors;
 
         public DataRow[] findRowsByName(String name)
-        {
-            String esc = name.Replace("'", "''");
-            return sectors.Select("name Like '" + esc + "'");
-        }
+            => sectors.WhereTextEquals("name", name);
 
         public DataRow[] getRowsBySystemID(String systemID)
-        {
-            return sectors.Select("system_id = '" + systemID + "'");
-        }
+            => sectors.WhereIntEquals("system_id", long.Parse(systemID));
 
         public DataTable queryBySystemID(String systemID)
         {
@@ -40,7 +36,7 @@ namespace N7.Sql
 
         public int getIDFromName(String name)
         {
-            DataRow[] foundRows = sectors.Select("name Like '" + name + "'");
+            DataRow[] foundRows = sectors.WhereTextEquals("name", name);
             return int.Parse(foundRows[0]["sector_id"].ToString());
         }
 

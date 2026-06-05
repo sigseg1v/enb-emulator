@@ -16,15 +16,14 @@ namespace MobEditorAvalonia.SQL
         public DataTable getAssetsTable() => _assets;
 
         public DataRow[] getRowsbyCategory(string mainCat)
-            // DataTable.Select takes a filter expression — escape single quotes.
-            => _assets.Select("main_cat LIKE '" + mainCat.Replace("'", "''") + "'");
+            => _assets.WhereTextEquals("main_cat", mainCat);
 
         // Reproduces the original's filename-mangling: file.w3d → file.jpg,
         // anything else → "null". Used for thumbnail lookups beside the
         // editor binary (which we no longer ship).
         public string getFileNameByID(int id)
         {
-            var rows = _assets.Select("base_id = " + id);
+            var rows = _assets.WhereIntEquals("base_id", id);
             if (rows.Length == 0) return "null";
             string name = rows[0]["filename"]?.ToString() ?? "";
             if (name.Length < 4) return "null";

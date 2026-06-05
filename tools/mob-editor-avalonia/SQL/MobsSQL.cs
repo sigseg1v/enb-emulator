@@ -23,15 +23,19 @@ namespace MobEditorAvalonia.SQL
 
         public DataRow getRowByID(int id)
         {
-            var rows = _mobs.Select("mob_id = " + id);
+            var rows = _mobs.WhereIntEquals("mob_id", id);
             return rows.Length > 0 ? rows[0] : null;
         }
 
-        public DataRow[] getRowsByNameQuery(string filterExpr)
-            => _mobs.Select(filterExpr);
+        // exact == case-insensitive equality; otherwise case-insensitive
+        // substring. The search text is matched as a captured value, not spliced
+        // into a filter expression.
+        public DataRow[] searchByName(string text, bool exact)
+            => exact ? _mobs.WhereTextEquals("name", text)
+                     : _mobs.WhereTextContains("name", text);
 
         public DataRow[] getRowsBetween(int level)
-            => _mobs.Select("level = " + level);
+            => _mobs.WhereIntEquals("level", level);
 
         public int newRecord()
         {

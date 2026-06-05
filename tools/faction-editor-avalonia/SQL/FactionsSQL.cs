@@ -26,7 +26,7 @@ namespace FactionEditorAvalonia.SQL
 
         public DataRow getRowByID(int id)
         {
-            var rows = _factions.Select("faction_id = " + id);
+            var rows = _factions.WhereIntEquals("faction_id", id);
             return rows.Length > 0 ? rows[0] : null;
         }
 

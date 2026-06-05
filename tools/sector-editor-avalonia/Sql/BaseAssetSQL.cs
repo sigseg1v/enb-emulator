@@ -1,5 +1,6 @@
 using System;
 using System.Data;
+using CommonTools.Database;
 
 namespace N7.Sql
 {
@@ -18,12 +19,6 @@ namespace N7.Sql
         }
 
         public DataRow[] getRowsbyCategory(String name)
-        {
-            // DataRow.Select takes a DataTable filter expression — apostrophes need
-            // doubling per System.Data.Select syntax (this is not SQL, so the
-            // commontools parameterised path doesn't apply here).
-            String esc = name.Replace("'", "''");
-            return baseAssets.Select("main_cat LIKE '" + esc + "'");
-        }
+            => baseAssets.WhereTextEquals("main_cat", name);
     }
 }

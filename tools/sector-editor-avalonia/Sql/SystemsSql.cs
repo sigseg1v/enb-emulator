@@ -1,5 +1,6 @@
 using System;
 using System.Data;
+using CommonTools.Database;
 
 namespace N7.Sql
 {
@@ -16,19 +17,17 @@ namespace N7.Sql
         public DataTable getSystemTable() => systems;
 
         public DataRow[] findRowsByName(String name)
-        {
-            return systems.Select("name Like '" + name + "'");
-        }
+            => systems.WhereTextEquals("name", name);
 
         public String findRowNameByID(int id)
         {
-            DataRow[] foundRows = systems.Select("system_id='" + id + "'");
+            DataRow[] foundRows = systems.WhereIntEquals("system_id", id);
             return foundRows[0]["name"].ToString();
         }
 
         public int getIDFromName(String name)
         {
-            DataRow[] foundRows = systems.Select("name Like '" + name + "'");
+            DataRow[] foundRows = systems.WhereTextEquals("name", name);
             return int.Parse(foundRows[0]["system_id"].ToString());
         }
 

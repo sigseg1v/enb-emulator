@@ -42,12 +42,16 @@ namespace ItemEditorAvalonia.SQL
 
         public DataRow getRowByID(long id)
         {
-            var rows = _items.Select("id = " + id);
+            var rows = _items.WhereIntEquals("id", id);
             return rows.Length > 0 ? rows[0] : null;
         }
 
-        public DataRow[] getRowsByNameQuery(string filterExpr)
-            => _items.Select(filterExpr);
+        // exact == case-insensitive equality; otherwise case-insensitive
+        // substring. The search text is matched as a captured value, not spliced
+        // into a filter expression.
+        public DataRow[] searchByName(string text, bool exact)
+            => exact ? _items.WhereTextEquals("name", text)
+                     : _items.WhereTextContains("name", text);
 
         // --- writes ----------------------------------------------------------
 

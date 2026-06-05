@@ -89,13 +89,9 @@ namespace ItemEditorAvalonia
         {
             if (_items == null) return;
             string raw = c_SearchText.Text ?? "";
-            // DataTable.Select filter expression; escape is doubling single quotes.
-            string esc = raw.Replace("'", "''");
-            string expr = c_SearchMode.SelectedIndex == 0
-                ? "name = '" + esc + "'"
-                : "name LIKE '%" + esc + "%'";
+            bool exact = c_SearchMode.SelectedIndex == 0;
             _gridRows.Clear();
-            foreach (var dr in _items.getRowsByNameQuery(expr)) AddGridRow(dr);
+            foreach (var dr in _items.searchByName(raw, exact)) AddGridRow(dr);
             c_Status.Text = $"{_gridRows.Count} items matched '{raw}'.";
         }
 

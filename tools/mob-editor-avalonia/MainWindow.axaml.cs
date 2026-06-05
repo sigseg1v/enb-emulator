@@ -163,14 +163,11 @@ namespace MobEditorAvalonia
         {
             if (_mobs == null) return;
             string raw = c_SearchText.Text ?? "";
-            // DataTable.Select takes a filter expression. We don't reach
-            // SQL here so the escape is just doubling single quotes.
-            string esc = raw.Replace("'", "''");
-            string expr = c_SearchMode.SelectedIndex == 1
-                ? "name LIKE '%" + esc + "%'"
-                : "name = '" + esc + "'";
+            // SelectedIndex 1 == "Contains", otherwise "Equals". The text is a
+            // matched value, not part of any filter expression.
+            bool exact = c_SearchMode.SelectedIndex != 1;
             _gridRows.Clear();
-            foreach (var dr in _mobs.getRowsByNameQuery(expr)) AddGridRow(dr);
+            foreach (var dr in _mobs.searchByName(raw, exact)) AddGridRow(dr);
             c_Status.Text = $"{_gridRows.Count} mobs matched '{raw}'.";
         }
 

@@ -20,11 +20,11 @@ namespace MobEditorAvalonia.SQL
 
         public DataRow getRowByID(int id)
         {
-            var rows = _itemBase.Select("id = " + id);
+            var rows = _itemBase.WhereIntEquals("id", id);
             return rows.Length > 0 ? rows[0] : null;
         }
 
         public DataRow[] getRowsByCategory(int subcatID)
-            => _itemBase.Select("sub_category = " + subcatID);
+            => _itemBase.WhereIntEquals("sub_category", subcatID);
     }
 }

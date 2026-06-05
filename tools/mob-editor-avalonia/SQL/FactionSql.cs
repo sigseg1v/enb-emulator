@@ -18,14 +18,14 @@ namespace MobEditorAvalonia.SQL
         public string findNameByID(int factionID)
         {
             if (factionID <= 0) return "None";
-            var rows = _factions.Select("faction_id = " + factionID);
+            var rows = _factions.WhereIntEquals("faction_id", factionID);
             return rows.Length > 0 ? rows[0]["name"].ToString() : "None";
         }
 
         public int findIDbyName(string name)
         {
             if (name == "None") return -1;
-            var rows = _factions.Select("name LIKE '" + name.Replace("'", "''") + "'");
+            var rows = _factions.WhereTextEquals("name", name);
             return rows.Length > 0 ? System.Convert.ToInt32(rows[0]["faction_id"]) : -1;
         }
     }

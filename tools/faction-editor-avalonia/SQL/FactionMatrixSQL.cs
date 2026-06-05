@@ -21,11 +21,11 @@ namespace FactionEditorAvalonia.SQL
         public DataTable getFactionMatrixTable() => _matrix;
 
         public DataRow[] getRowsByID(int factionId)
-            => _matrix.Select("faction_id = " + factionId);
+            => _matrix.WhereIntEquals("faction_id", factionId);
 
         public DataRow getRowByID(int id)
         {
-            var rows = _matrix.Select("id = " + id);
+            var rows = _matrix.WhereIntEquals("id", id);
             return rows.Length > 0 ? rows[0] : null;
         }
 

@@ -17,7 +17,7 @@ namespace MobEditorAvalonia.SQL
         public DataTable getMobItemsTable() => _mobItems;
 
         public DataRow[] getRowsByID(int mobID)
-            => _mobItems.Select("mob_id = " + mobID);
+            => _mobItems.WhereIntEquals("mob_id", mobID);
 
         public void deleteRecord(DataRow dr)
         {

@@ -1,5 +1,6 @@
 using System;
 using System.Data;
+using CommonTools.Database;
 
 namespace N7.Sql
 {
@@ -18,9 +19,6 @@ namespace N7.Sql
         }
 
         public DataRow[] findRowsByName(String name)
-        {
-            String esc = name.Replace("'", "''");
-            return systems.Select("name Like '" + esc + "'");
-        }
+            => systems.WhereTextEquals("name", name);
     }
 }

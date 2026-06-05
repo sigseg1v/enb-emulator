@@ -1,5 +1,6 @@
 using System;
 using System.Data;
+using CommonTools.Database;
 
 namespace N7.Sql
 {
@@ -15,7 +16,7 @@ namespace N7.Sql
         public String findNameByID(int factionID)
         {
             if (factionID <= 0) return "None";
-            DataRow[] foundRows = factions.Select("faction_id = '" + factionID + "'");
+            DataRow[] foundRows = factions.WhereIntEquals("faction_id", factionID);
             if (foundRows.Length == 0) return "None";
             return foundRows[0]["name"].ToString();
         }
@@ -23,8 +24,7 @@ namespace N7.Sql
         public int findIDbyName(String name)
         {
             if (name == "None") return -1;
-            String esc = name.Replace("'", "''");
-            DataRow[] foundRows = factions.Select("name LIKE '" + esc + "'");
+            DataRow[] foundRows = factions.WhereTextEquals("name", name);
             if (foundRows.Length == 0) return -1;
             return int.Parse(foundRows[0]["faction_id"].ToString());
         }
