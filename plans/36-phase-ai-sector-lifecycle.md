@@ -241,7 +241,7 @@ The naive AI-9 "free/reset obj_manager" is UNSAFE as originally written. Facts:
 
 ### Tasks
 
-- [~] AI-8 (implemented 2026-06-06, build-clean): Per-sector clean stop.
+- [x] AI-8 (implemented 2026-06-06, build-clean; verified via AI-AUDIT + AI-11; pushed a009f1a8): Per-sector clean stop.
   `volatile bool m_SectorShutdownRequested`; event loop
   `while(!g_ServerShutdown && !m_SectorShutdownRequested)` (SectorManager.cpp);
   `StopSectorThread()` sets the flag + pthread_join + m_SectorThreadRunning=false
@@ -252,7 +252,7 @@ The naive AI-9 "free/reset obj_manager" is UNSAFE as originally written. Facts:
   thread). `ClearAllEventSlots()` NULLs every m_CoarseEventSlots/m_EventSlots
   pointer + zeroes m_EventSlotsIndex under m_Mutex (slot pointers, NOT the pooled
   node memory).
-- [~] AI-9 (implemented 2026-06-06, build-clean -- PARK, don't unmap):
+- [x] AI-9 (implemented 2026-06-06, build-clean; verified via AI-AUDIT + AI-11; pushed a009f1a8 -- PARK, don't unmap):
   `ServerManager::TeardownSector(sector_id)` under m_SectorStartMutex. Re-checks
   online + space-sector (id<9999) + occupancy==0 UNDER THE LOCK (EnsureSectorStarted,
   the only path that adds players, takes the same mutex, so the reading is
