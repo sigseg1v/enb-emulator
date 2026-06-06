@@ -73,6 +73,13 @@ void UDP_Connection::ProcessHandoff(char *msg, EnbUdpHeader *hdr, const long sou
 		// Cast to unsigned short before promotion so the printed value matches
 		// the wire.
 		LogMessage("[UDP port:%u IP:%d.%d.%d.%d] Master handoff player %s [%08x], to sector %d\n", (unsigned short) source_port, ip[0], ip[1], ip[2], ip[3], player->Name(), player->GameID(), sector_id);
+        // Phase AI: bring the target sector online on demand BEFORE LookupSectorServer
+        // reads its port. EnsureSectorStarted loads the sector's objects, binds its
+        // deterministic UDP port, and starts its thread (no-op if already running),
+        // so the port reported in the 0x2009 MASTER_HANDOFF_CONFIRM below is always a
+        // real, listening port. This is the single funnel for both initial login and
+        // gate jumps.
+        m_ServerMgr->EnsureSectorStarted((long) sector_id);
         if (m_ServerMgr->m_SectorServerMgr.LookupSectorServer(redirect))
         {
             //LogMessage("Found sector %d\n",sector_id);

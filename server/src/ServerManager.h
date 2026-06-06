@@ -20,6 +20,8 @@
 #ifndef _SERVER_MANAGER_H_INCLUDED_
 #define _SERVER_MANAGER_H_INCLUDED_
 
+#include <mutex>
+
 #include "AccountManager.h"
 #include "SectorServerManager.h"
 #include "SectorManager.h"
@@ -56,6 +58,14 @@ public:
 public:
 	void	RunServer();
 	bool	SetupSectorServer(long sector_id);
+	// Phase AI: bring a sector fully online (load its objects, claim a manager,
+	// bind its deterministic UDP port, start its event thread) if it is not
+	// already running, and return its manager. Idempotent and thread-safe -- a
+	// lock-free O(1) GetSectorManager() fast path, then m_SectorStartMutex guards
+	// the actual start (the manager-pool claim + g_SectorObjects population are
+	// global shared state, so the start critical section is globally serialized;
+	// cold starts are rare, ~tens of ms each). Called on the handoff path.
+	SectorManager *EnsureSectorStarted(long sector_id);
 	bool	IsSectorServerReady(short port);
 	short	SetSectorServerReady(long sector, bool ready);
     void    StoreCharacterData(CharacterDatabase &character_database);
@@ -69,7 +79,12 @@ public:
 	void	SetSectorMap(long sector_id, SectorManager * sectormanager);
 	void	SetObjectManMap(long sector_id, ObjectManager * objectmanager);
 
-	short	GetSectorPort()								{ ++m_Port; return (m_Port - 1); }
+	// Immutable base port for sector listeners (SECTOR_SERVER_PORT). A sector's
+	// deterministic port is GetSectorBasePort() + its slot index -- see
+	// SectorManager::BeginSectorThread. (Replaces the old mutating GetSectorPort()
+	// sequential allocator, which only produced correct ports when sectors were
+	// bound in slot order at boot -- incompatible with on-demand start.)
+	short	GetSectorBasePort()							{ return m_Port; }
 
     void	ReloadAllObjects(); // this is quite slow
 	void	ReloadSectorObjects(long sector_id);
@@ -172,6 +187,7 @@ private:
 	mapSectors			m_SectorMap;
 	mapObjectMan		m_ObjectManMap;
     Mutex               m_Mutex;
+	std::mutex			m_SectorStartMutex;   // Phase AI: serializes on-demand sector starts (EnsureSectorStarted)
 	bool				m_SectorAssignmentsComplete;
 	long				m_SectorEffectID;
 

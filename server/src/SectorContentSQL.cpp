@@ -62,17 +62,25 @@ SectorContentParser::~SectorContentParser()
 
 bool SectorContentParser::LoadSectorContent()
 {
-	ParseSectorContent(-1);
+	// GM /rsectorall: wipe and reload EVERY sector's objects (skeleton + deferred).
+	ParseSectorContent(-1, SECTOR_LOAD_ALL);
     return true;
 }
 
-bool SectorContentParser::LoadSectorContent(long sector_id)
+bool SectorContentParser::LoadSectorContent(long sector_id, SectorLoadMode mode)
 {
-	ParseSectorContent(sector_id);
+	ParseSectorContent(sector_id, mode);
     return true;
 }
 
-bool SectorContentParser::ParseSectorContent(long parse_id)
+bool SectorContentParser::LoadSectorMetadata()
+{
+	// Boot pass: all sectors, metadata + nav skeleton only (no MOBs/fields). See header.
+	ParseSectorContent(-1, SECTOR_LOAD_SKELETON_ONLY);
+	return true;
+}
+
+bool SectorContentParser::ParseSectorContent(long parse_id, SectorLoadMode mode)
 {
     long sector_count = 0;
     SectorData * current_sector = 0;
@@ -97,8 +105,14 @@ bool SectorContentParser::ParseSectorContent(long parse_id)
     sql_result_c object_result;
 	sql_result_c *Sector_result = &result;
 
-	LoadSystems(&connection);
-	LoadAsteroidContentSelection(&connection);
+	// Systems + asteroid-content are global; load once (the boot metadata pass),
+	// not again on every on-demand cold-sector start.
+	if (!m_GlobalsLoaded)
+	{
+		LoadSystems(&connection);
+		LoadAsteroidContentSelection(&connection);
+		m_GlobalsLoaded = true;
+	}
 
 	if (parse_id != -1)
 	{
@@ -115,9 +129,19 @@ bool SectorContentParser::ParseSectorContent(long parse_id)
     }
     
     SectorTb.store(Sector_result);
-    
+
     if (!Sector_result->n_rows() || !Sector_result->n_fields()) {
-        printf("Error loading rows/fields\n");
+        // Zero rows means different things depending on the query:
+        //  - Boot-time full load (parse_id == -1): the `sectors` table is empty
+        //    or unreadable. That is a genuine, fatal content failure -- shout.
+        //  - Targeted on-demand load (parse_id != -1): the requested id simply
+        //    has no row in `sectors`. This is EXPECTED for station-instance
+        //    sector ids (e.g. 10151 = the docked instance of Luna/1015): those
+        //    are not content sectors, their furniture comes from StationLogin,
+        //    not `sector_objects`. EnsureSectorStarted still brings the manager
+        //    online; there is just nothing to load here. Not an error.
+        if (parse_id == -1)
+            printf("Error loading rows/fields\n");
         return 0;
     }
     
@@ -161,8 +185,12 @@ bool SectorContentParser::ParseSectorContent(long parse_id)
 				return false;
 			}
 		}
-		else
+		else if (mode == SECTOR_LOAD_ALL)
 		{
+			// GM reload: wipe and rebuild. The lazy deferred load (first sector
+			// entry) must NOT reach here -- it appends MOBs/fields to the already
+			// resident skeleton and would otherwise wipe the skeleton plus any
+			// MOB a mission pre-placed into this sector before the player arrived.
 			current_sector->obj_manager->DeleteAllObjects();
 		}
 
@@ -221,6 +249,11 @@ bool SectorContentParser::ParseSectorContent(long parse_id)
 
 		//printf("XMax: %f YMax: %f ZMax: %f\n", current_sector->server_params.XMax, current_sector->server_params.YMax, current_sector->server_params.ZBandMax );
 
+        // Phase AI: the object query runs in EVERY mode; the per-object
+        // residency skip below (see SectorLoadMode) decides which rows actually
+        // materialise -- skeleton on the boot pass, MOBs/fields on first entry,
+        // everything on a GM reload.
+        {
         // Game Objects
         sql_query_c GameObjects( &connection );
         sql_result_c *Object_result = &object_result;
@@ -267,20 +300,32 @@ bool SectorContentParser::ParseSectorContent(long parse_id)
 			bool new_object = false;
 			bool treat_as_mob;
 
+			// A turret_mob_id promotes a generic object row to a stationary MOB.
+			// Classify the effective type BEFORE the residency skip below so a
+			// turret is correctly treated as deferred, not skeleton.
+			short turret_id = ObjectData["turret_mob_id"];
+			if (turret_id != 0 && type != 42)
+			{
+				type = 1;
+			}
+
+			// Phase AI: type-aware residency skip. Skeleton (gates 10/11, station
+			// 12, planet 3, deco/nav 37, gravity well 41, radiation 40) is resident
+			// galaxy-wide; MOBs (0/1/42) and asteroid fields/resources (38) are
+			// deferred to first sector entry. (See SectorLoadMode in the header for
+			// why the skeleton must stay resident -- cross-sector mission/gate reads.)
+			bool deferred_type = (type == 0 || type == 1 || type == 42 || type == 38);
+			if (mode == SECTOR_LOAD_SKELETON_ONLY && deferred_type)
+				continue;
+			if (mode == SECTOR_LOAD_DEFERRED_ONLY && !deferred_type)
+				continue;
+
 			if (parse_id == -1)
 				current_object = g_SectorObjects[object_uid];
 			else
 				current_object = NULL;
 
 			short base_asset = (short)ObjectData["base_asset_id"];
-
-			//see if this is a turret
-			short turret_id = ObjectData["turret_mob_id"];
-
-			if (turret_id != 0 && type != 42)
-			{
-				type = 1;
-			}
 
 			//create new object if needed
 			if (current_object == 0)
@@ -528,8 +573,9 @@ bool SectorContentParser::ParseSectorContent(long parse_id)
         }
 
 		LoadSectorOreAvailability(current_sector, &connection);
+        } // end object-load block
     }
-    
+
     /////////////////////////
     // PARSING IS COMPLETE
     /////////////////////////

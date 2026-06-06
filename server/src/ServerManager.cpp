@@ -231,7 +231,13 @@ void ServerManager::RunMasterServer()
 	}
 
 	m_ItemBaseMgr.Initialize();
-	m_SectorContent.LoadSectorContent();
+	// Phase AI: at boot, load per-sector metadata + the navigation skeleton
+	// (gates/planets/stations/navs/gwell/radiation) for ALL sectors, but DEFER the
+	// heavy MOBs + asteroid fields. The skeleton must stay resident galaxy-wide
+	// because mission generation and gate-sealing read remote sectors' gates and
+	// planets cross-sector (see SectorLoadMode). The deferred MOBs/fields load on
+	// demand per sector on the first handoff (ServerManager::EnsureSectorStarted).
+	m_SectorContent.LoadSectorMetadata();
 
 	// Load Stations from database
 	m_StationMgr.LoadStations();
@@ -263,29 +269,25 @@ void ServerManager::RunMasterServer()
 
 		//m_SectorCount = i;
 
-		// Drive sector assignment to completion before returning to MainLoop.
-		// CheckConnections assigns one sector per ServerCheck tick (with an
-		// internal usleep(100ms)), and BeginSectorThread -- which binds each
-		// sector's UDP port via StartListener -- only fires once, in the same
-		// tick that m_SectorAssignmentsComplete first flips to true. Until
-		// then, GetSectorManager(id) for an assigned-but-not-yet-bound sector
-		// returns a manager whose m_Port is still the -1 initializer value,
-		// and UDP_Master::ProcessHandoff would happily emit that -1 in the
-		// 0x2009 MASTER_HANDOFF_CONFIRM reply. The master listener's recv
-		// thread is therefore NOT started yet (see StartReceiver() call
-		// below) -- the master_udp_listener constructor only bound the
-		// socket so SectorServerManager::AssignSectorToAvailableServer can
-		// still call ValidateSectorServer() through m_UDPMasterConnection
-		// during this wait.
-		while (!m_SectorAssignmentsComplete && !g_ServerShutdown)
-		{
-			usleep(50 * 1000);
-			ServerCheck();
-		}
+		// Phase AI -- on-demand sector start. We no longer pre-assign and
+		// pre-bind all ~130 sectors at boot. Each sector is content-loaded,
+		// UDP-bound, and thread-started lazily on the first handoff to it
+		// (UDP_Master::ProcessHandoff -> ServerManager::EnsureSectorStarted),
+		// which binds the target's deterministic port BEFORE LookupSectorServer
+		// reads it -- so the 0x2009 MASTER_HANDOFF_CONFIRM always carries a real,
+		// listening port. That makes the old "wait until every sector is bound
+		// before starting the master receiver" ordering unnecessary: the
+		// per-handoff bind (serialized in EnsureSectorStarted) now provides it.
+		//
+		// Marking assignments complete here means "the server is up and ready to
+		// route handoffs on demand" -- it gates the ServerCheck auto-assign branch
+		// off (we assign on demand instead) and lets MVAS logins through
+		// (UDP_MVAS.cpp IsSectorAssignmentsComplete()).
+		m_SectorAssignmentsComplete = true;
 
-		// Sectors are bound; safe to begin dispatching master-plane
-		// MASTER_HANDOFF (0x2008) packets -- ProcessHandoff will now find
-		// real sector ports instead of -1.
+		// Safe to begin dispatching master-plane MASTER_HANDOFF (0x2008): the
+		// handler starts the target sector on demand and only then reports its
+		// port.
 		master_udp_listener.StartReceiver();
 
 		// Phase S (2026-06-01): start the MVAS (move-assist) receiver. The
@@ -558,8 +560,8 @@ void ServerManager::ReloadSectorObjects(long sector_id)
 		ObjectManager * om = sm->GetObjectManager();
 		if (om)
 		{
-			m_MOBList.LoadMOBContent(); 
-			m_SectorContent.LoadSectorContent(sector_id);
+			m_MOBList.LoadMOBContent();
+			m_SectorContent.LoadSectorContent(sector_id, SECTOR_LOAD_ALL);
 			om->InitialiseResourceContent();
 		}
 	}
@@ -625,6 +627,58 @@ bool ServerManager::SetupSectorServer(long sector_id)
     }
 
 	return (success);
+}
+
+SectorManager *ServerManager::EnsureSectorStarted(long sector_id)
+{
+	// Fast path: already started. m_SectorMap[sector_id] is set inside
+	// SectorManager::SetupSectorServer, and EnsureSectorStarted is now the ONLY
+	// path that starts a sector, so a non-null manager here means fully online
+	// (objects loaded, port bound, thread running). No lock needed to read it --
+	// a started sector never reverts on this path (teardown, Phase AI Stage 2,
+	// takes the same mutex).
+	SectorManager *mgr = GetSectorManager(sector_id);
+	if (mgr)
+		return mgr;
+
+	// Slow path: bring it online under the global start lock. The lock spans the
+	// whole start because the pieces touch GLOBAL shared state, not just this
+	// sector: LoadSectorContent populates the process-wide g_SectorObjects map,
+	// and SetupSectorServer claims a manager from the shared unassigned pool
+	// (GetSectorManager(-1)) and bumps m_SectorCount. Per-sector locking would
+	// not make those safe, so we serialize cold starts globally -- they are rare
+	// (first entry into an empty sector) and cost only tens of ms each.
+	std::lock_guard<std::mutex> guard(m_SectorStartMutex);
+
+	// Re-check under the lock (another thread may have started it while we waited).
+	mgr = GetSectorManager(sector_id);
+	if (mgr)
+		return mgr;
+
+	LogMessage("EnsureSectorStarted: cold-starting sector_id=%d\n", sector_id);
+
+	// 1) Load THIS sector's DEFERRED objects (MOBs + asteroid fields/resources)
+	//    from the DB into its obj_manager + g_SectorObjects. The boot pass already
+	//    loaded the nav skeleton (gates/planets/stations/navs) for every sector, so
+	//    this appends only the heavy populating objects (mode defaults to
+	//    SECTOR_LOAD_DEFERRED_ONLY -- it must NOT wipe the resident skeleton).
+	m_SectorContent.LoadSectorContent(sector_id);
+
+	// 2) Claim a free manager and wire it to the sector (registers m_SectorMap,
+	//    points m_ObjectMgr at the now-populated obj_manager, InitialiseResourceContent,
+	//    InitialiseSector, ++m_SectorCount).
+	if (!SetupSectorServer(sector_id))
+	{
+		LogMessage("EnsureSectorStarted: FAILED to set up sector_id=%d\n", sector_id);
+		return NULL;
+	}
+
+	// 3) Bind the deterministic UDP port and start the event thread.
+	mgr = GetSectorManager(sector_id);
+	if (mgr)
+		mgr->BeginSectorThread();
+
+	return mgr;
 }
 
 bool ServerManager::IsSectorServerReady(short port)

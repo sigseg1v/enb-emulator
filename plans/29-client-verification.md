@@ -320,3 +320,37 @@ format & byte order", Trap 2).
   fault when the beam starts.
 - **Setup**: `just play-local` as a JE Explorer; `just grant-prospect <user>`
   if the skill is not trained; mine a roid in a resource sector.
+
+### [ ] CV-10 -- On-demand sector start (Phase AI) is invisible on the real client
+
+- **Change**: Phase AI Stage 1 (lazy sector lifecycle). Sectors no longer start
+  at boot; the first arrival (handoff/undock/gate/warp) cold-starts the
+  destination sector: load its deferred objects (MOBs + asteroid fields), claim
+  a manager, bind its deterministic UDP port, start its thread. The nav skeleton
+  (gates/planets/stations/navs/gwell/radiation) stays resident galaxy-wide so
+  cross-sector mission generation + gate-sealing still see remote sectors.
+  Server files: `ServerManager::EnsureSectorStarted`, `SectorContentSQL.cpp`
+  (SectorLoadMode), `Player::ChangeSectorID` (PlayerConnection.cpp:9336 -- the
+  cold-start hook that fixed the undock-into-space segfault). NO WIRE CHANGE:
+  the 0x003A handoff bytes and the sector-entry fanout are byte-identical to the
+  eager-boot build; only the TIMING of allocation + mob-AI activation moves to
+  first entry.
+- **Primary source (format)**: none needed -- no emitted bytes change. The full
+  Phase-T lazy-path slice (SectorMining, SectorUndockHandoffFollow, SectorWarp,
+  SectorGateHandoffFollow, SectorStartAck, BootLogHealth) is byte-pinned and
+  passes against the cold-start path; cold-starts fire for stations AND space
+  sectors on demand with no server restart.
+- **CLI proof**: the above slice drives a real undock/gate/warp through the
+  master handoff, which cold-starts the target sector before sector login; the
+  re-joined sector announces live mob spawns + asteroid fields (asserted). This
+  proves the player lands in a fully populated, threaded sector that was offline
+  microseconds earlier.
+- **What to look for (play-local / real client)**: (1) undock from a station you
+  just logged into -- you must arrive in open space with NPC ships + roids
+  present and animating, no hang, no "empty sector". (2) Gate or warp to a
+  sector no one has visited since server boot -- same: it must populate on
+  arrival with no perceptible extra delay and no client fault. (3) Combat-mission
+  MOBs pre-placed into an unvisited sector: confirm they are present + hostile
+  when you arrive (their AI now starts on first entry, not at boot).
+- **Setup**: `just play-local`; log in at a station, undock, then gate to a
+  fresh sector. Watch the first-arrival moment specifically.

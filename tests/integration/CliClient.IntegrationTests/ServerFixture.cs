@@ -105,22 +105,25 @@ public sealed class ServerFixture : IAsyncLifetime
         await WaitForPortAsync(SectorHost, SectorPort, ReadyTimeout);
 
         // The proxy's TCP listeners come up in seconds, but the server's
-        // sector subsystem takes ~30–60s to load all ~200 sectors from
-        // postgres. Until the sector the test wants to enter has logged
-        // "BeginSectorThread sector_id=<id>" the MasterHandoff path will
-        // fail with "Unable to locate sector server" and the proxy times
-        // out the MasterLogin retry loop (5 attempts × 1s).
+        // sector subsystem takes ~30-60s to load all ~130 sectors' metadata
+        // and nav skeleton from postgres plus generate the mission catalog.
         //
-        // We poll for sector 10151 (Luna Station) because every current
-        // sector-login test enters via the warrior starting station. If
-        // a future test enters a different sector first, add its id to
-        // the list -- or generalise this to per-test parameters.
-        await WaitForServerSectorAsync(10151, TimeSpan.FromMinutes(3));
+        // Phase AI (on-demand sector start): sectors are no longer bound at
+        // boot -- the target sector is content-loaded, UDP-bound, and
+        // thread-started lazily on the FIRST handoff to it (the first login
+        // test triggers it, well within the proxy's MasterLogin retry window
+        // since a single sector's deferred load is sub-second). So the boot
+        // readiness gate can no longer key on a specific sector's
+        // "BeginSectorThread" line. Instead we wait for the server to finish
+        // boot and start its master + MVAS receivers -- it logs "Registering
+        // sector server: port=" immediately before entering its main loop, at
+        // which point it is ready to route handoffs on demand.
+        await WaitForServerBootCompleteAsync(TimeSpan.FromMinutes(3));
     }
 
-    private static async Task WaitForServerSectorAsync(int sectorId, TimeSpan timeout)
+    private static async Task WaitForServerBootCompleteAsync(TimeSpan timeout)
     {
-        var marker = $"BeginSectorThread sector_id={sectorId}";
+        var marker = "Registering sector server: port=";
         var deadline = DateTime.UtcNow + timeout;
         string lastTail = "";
         while (DateTime.UtcNow < deadline)

@@ -80,9 +80,21 @@ void SectorManager::BeginSectorThread()
 		if (pthread_create(&m_SectorThread, NULL, RunEventThreadAPI, this) != 0)
 			LogMessage("SectorManager [%d]: pthread_create failed (%s)\n", m_SectorID, strerror(errno));
 		//now start this sector's listener
-		// Find a port that will work!
-		while(StartListener(g_ServerMgr->GetSectorPort()) == false);
-		LogMessage("BeginSectorThread sector_id=%d bound UDP port %d\n", m_SectorID, m_Port);
+		// Deterministic port: base (SECTOR_SERVER_PORT) + this manager's pool-slot
+		// index (m_SectorNumber, fixed at boot in the standalone setup loop). The
+		// port is a pure function of the manager slot, so it never depends on the
+		// ORDER in which sectors are brought online, and it matches the formula
+		// ServerManager::SetSectorServerReady reports (m_Port + GetSectorNumber()).
+		// The old sequential GetSectorPort() allocator only produced a usable port
+		// when BeginSectorThread ran in slot order at boot; on-demand start breaks
+		// that order, so the allocator had to go. (Routing reads the live bound
+		// m_Port via LookupSectorServer regardless, so bound and reported never
+		// diverge -- this just keeps the bind itself order-independent.)
+		short port = g_ServerMgr->GetSectorBasePort() + GetSectorNumber();
+		if (!StartListener(port))
+			LogMessage("SectorManager [%d]: FAILED to bind UDP port %d\n", m_SectorID, port);
+		else
+			LogMessage("BeginSectorThread sector_id=%d bound UDP port %d\n", m_SectorID, m_Port);
 	}
 }
 
@@ -94,7 +106,8 @@ void SectorManager::ShutdownListener()
 
 void SectorManager::ReStartListener()
 {
-	StartListener(g_ServerMgr->GetSectorPort());
+	// Same deterministic port the sector was first bound to (see BeginSectorThread).
+	StartListener(g_ServerMgr->GetSectorBasePort() + GetSectorNumber());
 }
 
 SectorManager::~SectorManager()
@@ -606,7 +619,10 @@ void SectorManager::Dock(Player *player, long target)
         player->SendVaMessage("Station has no destination set - Please add station destination in DASE.");
 		return;
 	}
-    if (!m_ServerMgr->GetSectorManager(destination))
+    // Phase AI: start the destination station sector on demand (idempotent). A
+    // null return means the sector genuinely does not exist in the DB, so the
+    // "offline" rejection still holds for truly-invalid destinations.
+    if (!m_ServerMgr->EnsureSectorStarted(destination))
     {
         player->SendVaMessage("Station is offline, no access permitted.");
         return;
@@ -672,7 +688,9 @@ bool SectorManager::Gate(Player *player, long target)
 		AddTimedCall(player, B_LOCAL_GATE, 2000, 0, gate->Destination(), target );
 		return true;
 	}
-    else if (!m_ServerMgr->GetSectorManager(gate->Destination()))
+    // Phase AI: start the destination sector on demand (idempotent). A null
+    // return means the sector does not exist in the DB -> genuinely inoperative.
+    else if (!m_ServerMgr->EnsureSectorStarted(gate->Destination()))
     {
         LogMessage("SECTOR OFFLINE. Gate Inoperative.\n");
         player->SendVaMessage("Destination sector is offline. Gate inoperative.");

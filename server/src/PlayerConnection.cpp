@@ -9337,8 +9337,18 @@ void Player::ChangeSectorID(long SectorID)
 {
 	PlayerIndex()->SetSectorNum(SectorID);
 	//Add Player to new sector
-	SectorManager *sm = g_ServerMgr->GetSectorManager(SectorID);
-    sm->AddPlayerToSectorList(this);
+	// Phase AI: the destination sector is started on demand, so it may not be
+	// online yet when a handoff pre-registers the arriving player into its list.
+	// EnsureSectorStarted cold-starts it (idempotent: a no-op once running) so
+	// the manager is never NULL here. Under the old all-sectors-resident boot
+	// this was always non-NULL; lazy start made GetSectorManager() able to
+	// return NULL and segfault on the AddPlayerToSectorList deref.
+	SectorManager *sm = g_ServerMgr->EnsureSectorStarted(SectorID);
+	if (sm)
+		sm->AddPlayerToSectorList(this);
+	else
+		LogMessage("ChangeSectorID: sector %ld could not be started; "
+			"player %s not added to its sector list\n", SectorID, Name());
 }
 
 bool Player::HandleFetchRequest()
