@@ -2,6 +2,16 @@
 
 > A consolidated, modernised home for the Earth & Beyond MMO server emulator. The goal is to keep the game playable on contemporary hardware; Linux server, Linux or Windows client; and bring the codebase forward enough that contributors can actually work on it again.
 
+## Major changes in this fork
+
+- server ported to Linux
+- switched database to Postgres and parameterized queries
+- tooling ported from WinForms to cross-platform Avalonia
+- upgraded OpenSSL
+- sector servers spin up/down as needed when players gate/enter (cuts memory footprint 70%)
+- added full integration test suite
+- added CLI that can fully parse all network packet fields and can stimulate a client via REPL (you can log in and play the game through the CLI)
+
 ## Quick Start
 
 ```
