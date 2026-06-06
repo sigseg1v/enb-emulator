@@ -82,6 +82,11 @@ Thumbs.db
 # Postgres dev data dir from docker-compose
 pgdata/
 
+# Claude Code runtime scratch (per-session locks / scheduled-task state).
+# settings.local.json stays tracked; these transient runtime files do not.
+.claude/scheduled_tasks.lock
+.claude/scheduled_tasks.json
+
 # Logs
 *.log
 
