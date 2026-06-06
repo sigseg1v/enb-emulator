@@ -1,4 +1,4 @@
-# Content pipeline — editor → DB → server
+# Content pipeline -- editor to DB to server
 
 How sectors, mobs, missions, and items get from a designer's editor into
 the running server.
@@ -6,59 +6,60 @@ the running server.
 ## Overview
 
 ```
-┌────────────────┐    SQL    ┌────────────┐  startup load   ┌──────────────┐
-│ C# editor      │ ────────► │  MySQL     │ ───────────────►│ C++ server   │
-│ (Avalonia or   │           │  (3307 in  │   (per-Manager  │ (managers in │
-│  WinForms,     │           │   dev)     │    Load* call)  │  global mem) │
-│  tools/*)      │           │            │                 │              │
-└────────────────┘           └────────────┘                 └──────────────┘
++----------------+    SQL    +------------+  startup load   +--------------+
+| C# editor      | -------->  |  Postgres  | --------------> | C++ server   |
+| (Avalonia,     |           |  (net7     |   (per-Manager  | (managers in |
+|  tools/*       |           |   content  |    Load* call)  |  global mem) |
+|  -avalonia)    |           |   DB)      |                 |              |
++----------------+           +------------+                 +--------------+
 ```
 
 The server is **read-mostly** at content boundaries: editors write the
 DB, the server reads it. Live reloads exist for sector content (see §4)
-but are the exception. The Postgres schema is staged at
-`db/postgres/schema.sql` but the runtime is still MySQL pending Phase N
-Wave 3.
+but are the exception. Content lives in the `net7` Postgres database
+(schema at `db/postgres/schema.sql`); the `db/mysql/` dumps are the
+historical upstream source the Postgres schema was converted from, not a
+runtime store.
 
 ## 1. The editors and the tables they touch
 
-The recommended Avalonia ports run natively on Linux; the legacy
-WinForms ports are kept alongside for diff reference and Windows / WINE
-use.
+The Avalonia editors run natively on Linux. The legacy WinForms ports are
+kept alongside for diff reference and Windows / WINE use.
 
-| Editor | Avalonia path (recommended) | Legacy WinForms path | Primary tables |
+| Editor | Avalonia path | Legacy WinForms path | Primary tables |
 |---|---|---|---|
 | Sector | `tools/sector-editor-avalonia/` | `tools/sector-editor/` | `sectors`, `systems`, `sector_objects`, `factions` |
 | Mob | `tools/mob-editor-avalonia/` | `tools/mob-editor/` | `mob_base`, `mob_items`, `mob_type`, `mob_spawn_group` |
-| Item | — (no upstream csproj) | `tools/itemeditor/` | `item_base` (+ category sub-tables) |
+| Item | `tools/item-editor-avalonia/` | `tools/itemeditor/` | `item_base` (+ category sub-tables) |
 | Mission | `tools/missioneditor-avalonia/` | `tools/missioneditor/` | `missions` (mission XML lives in a column) |
 | Faction | `tools/faction-editor-avalonia/` | `tools/faction-editor/` | `factions`, `faction_matrix` |
 | Effect | `tools/effect-editor-avalonia/` | `tools/effect-editor/` | `item_effect_base`, `item_effects`, `item_effect_stats`, `item_effect_container`, `buffs` |
 | TalkTree | `tools/talktreeeditor-avalonia/` | `tools/talktreeeditor/` | mission dialogue trees (XML-based; minimal direct SQL) |
 | Station | `tools/station-tools-avalonia/` | `tools/station-tools/` | `starbases`, `starbase_vender_groups`, `starbase_vender_inventory`, `sector_objects_starbases` |
 
-Per-table source of truth is `db/mysql/net7.sql` (and the converted
-`db/postgres/schema.sql`). Editor table refs (legacy paths still hold
-the original SQL templates the Avalonia ports inherit):
+Per-table source of truth is the live `net7` schema
+(`db/postgres/schema.sql`; the historical `db/mysql/net7.sql` dump is
+where it was converted from). Editor table refs (the legacy paths still
+hold the original SQL templates the Avalonia ports inherit):
 `tools/sector-editor/SectorsSql.cs:15`,
 `tools/mob-editor/MobsSQL.cs:15`,
 `tools/itemeditor/TableIO.cs:75`.
 
 ## 2. Schema, by content type
 
-- **Sectors** — `sectors` (system FK, dimensions, backdrop,
+- **Sectors** -- `sectors` (system FK, dimensions, backdrop,
   type), plus `sector_objects` for everything that lives in
   them (mobs, stargates, starbases, asteroids). Stargates get
   `sector_objects_stargates`; mobs get `sector_objects_mob`;
   starbases get `sector_objects_starbases`.
-- **Mobs** — `mob_base` is the type definition (level, faction,
+- **Mobs** -- `mob_base` is the type definition (level, faction,
   AI script, skill 0-9 slots, base asset). `mob_items` equips
   the mob. `mob_type` is the type-name lookup. `mob_spawn_group`
   groups several mobs for spawning together.
-- **Missions** — `missions` holds the mission XML in a column
+- **Missions** -- `missions` holds the mission XML in a column
   (`mission_XML`). Player progress lives in `avatar_missions` and
   `mission_objectives`, written at runtime (see §5).
-- **Items** — `item_base` joined with `item_manufacturer_base`,
+- **Items** -- `item_base` joined with `item_manufacturer_base`,
   with category-specific sub-tables for beams, engines, ammo,
   etc. Effects/buffs are normalized into the `item_effect_*`
   family.
@@ -86,7 +87,7 @@ Most content is **load-once at boot.** Restart the server to
 pick up new mobs or items.
 
 The exception is sectors: `ServerManager::ReloadSectorObjects()`
-(ServerManager.cpp:488) sets `g_ResetContent`, reloads
+(ServerManager.cpp:584) sets `g_ResetContent`, reloads
 `m_MOBList`, and re-parses one sector's objects via
 `m_SectorContent.LoadSectorContent(sector_id)`. Triggered by
 GM command (see `docs/11-gm-commands.md`).
@@ -111,12 +112,11 @@ place it. Player kills, loot pickups, etc. write to
 ## 6. Practical implications
 
 - After editing content in a tool, **restart the server**
-  (or `/reloadsector` if the change is sector-scoped) — there's
+  (or `/reloadsector` if the change is sector-scoped) -- there's
   no live-edit feedback loop.
-- The C# tools and the server both need to agree on schema. The
-  eventual Postgres cutover (whenever Phase N Wave 3 completes the
-  DAO migration) renames or retypes columns in places; cross-check
+- The C# tools and the server both need to agree on schema. When a
+  schema change renames or retypes a column, cross-check
   `db/postgres/schema.sql` against the editors' SQL constants before
-  shipping any schema change.
+  shipping it.
 - Mission XML lives in a DB column, not the filesystem.
   Re-importing missions means rewriting `missions.mission_XML`.

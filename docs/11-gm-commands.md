@@ -110,7 +110,9 @@ the syntax pattern. Replace angle-bracketed names with concrete values.
 - `//adduser` is the same command referenced in
   `09-running-locally.md` for creating a dev account.
 - Item IDs for `/createitem` correspond to `item_base.id`. The Item
-  Editor (`tools/itemeditor/`) is the easiest way to look them up.
-- This document will be expanded as additional commands are verified
-  against the server source. The Phase H docs deepening pass is the
-  natural time to do that audit.
+  Editor (`tools/item-editor-avalonia/`) is the easiest way to look
+  them up.
+- This document covers the commands present in
+  `reference/gm-commands-original.txt`. Additional commands exist in the
+  server source; they are added here as each is verified against the
+  running server.

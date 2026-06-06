@@ -3,14 +3,11 @@
 This document covers building the four components of the project:
 
 1. The C++ server / proxy / login-server (Linux primary, Windows secondary).
-2. The C# tool suite (`tools/Net7Tools.slnx`) — Avalonia ports run native
+2. The C# tool suite (`tools/Net7Tools.slnx`) -- Avalonia ports run native
    on Linux; legacy WinForms ports build cross-platform but only run on
    Windows / WINE.
 3. The Linux client installer (`client/linux-installer/install-enb-linux.sh`).
 4. The dev environment (`just dev` / `docker compose`).
-
-If something here is wrong, plans diverged from reality. Check
-`plans/00-master.md` for the current phase and update plans before code.
 
 ## Server -- Linux (current build path)
 
@@ -27,26 +24,26 @@ cmake -S login-server -B build/login-server -G Ninja && cmake --build build/logi
 
 All three targets build clean against:
 
-- System OpenSSL 3.x (Phase E for the server; Phase O for proxy + login).
-  The vendored 2010 OpenSSL 1.0 header tree at `server/src/openssl/` was
-  deleted in Phase O+.
-- libpqxx 7.x (Phase N rewrote `mysqlplus.cpp` against libpqxx; a few
-  DAOs still use libmysqlclient pending Phase N Wave 3).
-- libmysqlclient (transitional — see above).
+- System OpenSSL 3.x. The server, proxy, and login-server build against
+  the OpenSSL 3.x headers and libraries shipped by the host. (The proxy's
+  Win32 / WINE build statically links a MinGW-built OpenSSL from
+  `proxy/third_party/openssl-mingw64/` instead.)
+- libpqxx 7.x is the C++ Postgres client. `server/src/db/sqlplus.cpp` and
+  the login-server's `LinuxAuth.cpp` both speak Postgres through libpqxx;
+  the server links `PkgConfig::LIBPQXX` and `PostgreSQL::PostgreSQL`. No
+  server-native code links libmysqlclient.
 
-Phase M (see `plans/13-phase-m-win32-elimination.md`) deleted the
-`server/compat/`, `proxy/compat/`, and `login-server/Net7SSL/compat/`
-shim directories. The minimum typedef set the legacy code still names
-(`SOCKET`, `INVALID_SOCKET`, `SOCKET_ERROR` and the `closesocket` /
-`Net7TickMs` macros) is provided inline in each target's umbrella header
-(`server/src/Net7.h`, `proxy/Net7.h`, `login-server/Net7SSL/Net7SSL.h`).
-The mailslot IPC was replaced with AF_UNIX SOCK_DGRAM via
+There are no Win32 compat shim trees. The minimum typedef set the legacy
+code still names (`SOCKET`, `INVALID_SOCKET`, `SOCKET_ERROR` and the
+`closesocket` / `Net7TickMs` macros) is provided inline in each target's
+umbrella header (`server/src/Net7.h`, `proxy/Net7.h`,
+`login-server/Net7SSL/Net7SSL.h`). IPC uses AF_UNIX SOCK_DGRAM via
 `net7ipc::PosixIpc` (see `common/include/net7/PosixIpc.h`); the
 single-instance lock uses `flock` on a pidfile via `net7ipc::SingleInstance`
 (`common/include/net7/SingleInstance.h`). Shared wire-format headers
 (opcodes, packet structures, port numbers, RSA/RC4) live under
 `common/include/net7/` and are included as a PRIVATE include dir by all
-three targets — see Phase R notes in the master plan.
+three targets.
 
 ## Server -- Linux (legacy path, reference only)
 
@@ -73,9 +70,9 @@ This will not work as-is on a 2026 system:
   drop or replace with `march=x86-64-v3`.
 - `-I/usr/local/ssl/include` assumes a hand-built OpenSSL 1.0 in
   `/usr/local`; system OpenSSL 3 ships headers in `/usr/include/openssl/`.
-- Many source files still `#include <windows.h>` — the live Linux build
-  drops the includes outright in Phase M and uses system OpenSSL 3.x
-  (Phase E/O). The legacy Makefile predates both.
+- Many source files in the original tree `#include <windows.h>`; the live
+  Linux build drops those includes and uses system OpenSSL 3.x. The
+  legacy Makefile predates both changes.
 - `cryptopp` is now packaged as `libcrypto++` on Debian/Ubuntu (yes, with
   the plus signs).
 
@@ -105,10 +102,10 @@ There is also `tools/launchnet7-old/LaunchNet7.dsp`, `tools/chunktypes/`,
 
 ## C# tools
 
-Phase D upgraded every C# project that had an upstream `.csproj` to
-SDK-style `net10.0-windows`; Phase L then added Avalonia 11 ports for
-every user-facing editor, targeting `net10.0` (no `-windows`) so they
-run natively on Linux. Build everything:
+Every C# project that had an upstream `.csproj` is SDK-style and targets
+`net10.0-windows`. Every user-facing editor also has an Avalonia 11 port
+targeting `net10.0` (no `-windows`) so it runs natively on Linux. Build
+everything:
 
 ```sh
 dotnet build tools/Net7Tools.slnx
@@ -120,7 +117,7 @@ Run the central Avalonia launcher (recommended entry point):
 just launch                   # tools/toolslauncher-avalonia
 ```
 
-Or jump directly to an editor — every Avalonia port has a `just launch-*`
+Or jump directly to an editor -- every Avalonia port has a `just launch-*`
 recipe (`just launch-sector-editor`, `just launch-mob-editor`,
 `just launch-mission-editor`, etc.). `just --list` prints them all.
 
@@ -152,8 +149,8 @@ download from `https://dotnet.microsoft.com/download/dotnet/10.0`.
 
 The Avalonia ports (`tools/<name>-avalonia/`) run on Linux, macOS, and
 Windows with only the .NET 10 runtime installed. This is the recommended
-path — every user-facing editor except `itemeditor` has an Avalonia
-build.
+path -- every user-facing editor, including the Item Editor
+(`tools/item-editor-avalonia/`), has an Avalonia build.
 
 The legacy WinForms ports (`tools/<name>/`) are **Windows-only**:
 WinForms has not been ported to Linux/macOS. To run them on Linux,
@@ -190,36 +187,38 @@ the current matrix.
 
 ## Dev environment -- justfile + docker-compose
 
-Phase I (closed) and the per-phase polish since have stabilised the dev
-environment. The interface:
+The dev environment interface:
 
 ```sh
-just init                # bring up mysql:8.0 on :3307 and load both dumps
-just dev                 # = just run-stack-bg — server + proxy + login in the background
-just build               # cmake build server + proxy + login, dotnet build tools
+just init                # bring up Postgres 16 + apply the schema (schema-init)
+just dev                 # = just run-stack-bg: server + proxy + login in the background
+just build               # cmake build the server
+just build-tools         # dotnet build tools/Net7Tools.slnx
 just test                # ctest + dotnet test
 just launch              # central Avalonia tool launcher (recommended)
-just launch-mob-editor   # per-tool recipes — see `just --list`
-just package             # build OCI image of the server
+just launch-mob-editor   # per-tool recipes -- see `just --list`
+just package             # build OCI images of the server + login
 just down                # tear down the compose stack
-just logs server | logs proxy | logs login | logs db
+just logs server         # tail a service's logs (server | proxy | login | postgres)
 just shell server        # exec into the running server container
 ```
 
 `docker-compose.yml` brings up:
 
-- `mysql`: MySQL 8.0 on host port 3307, auto-loads `db/mysql/net7.sql`
-  and `db/mysql/net7_user.sql`.
+- `postgres`: Postgres 16, the runtime database. The `schema-init`
+  one-shot applies `db/postgres/schema.sql` (and the seed scripts) to the
+  `net7` (content) and `net7_user` (accounts) databases. Host port 5434
+  maps to container 5432.
 - `server`: the C++ sector/world server, built from `server/Dockerfile`.
 - `proxy`: Net7Proxy, built from `proxy/Dockerfile`.
-- `login`: the login server, built from `login-server/Dockerfile`.
-- `postgres` (profile-gated): Postgres 16 with `db/postgres/schema.sql`
-  pre-applied — staged for the eventual cutover, not the runtime DB
-  today.
+- `login`: the login server, built from `login-server/Dockerfile`. Reads
+  the `net7_user` database on Postgres for auth.
+- `mysql` (profile `mysql-legacy`, opt-in): MySQL 8.0 loading the
+  historical `db/mysql/` dumps. Kept for reference only; not the runtime
+  DB.
 
-All four C++ services build clean and the stack passes the CLI-driven
-integration test suite (33/33). See `09-running-locally.md` for the
-walkthrough.
+All three C++ services build clean and the stack passes the CLI-driven
+integration test suite. See `09-running-locally.md` for the walkthrough.
 
 ## Dependencies
 
@@ -236,6 +235,7 @@ sudo apt install \
     libtinyxml-dev \
     liblua5.4-dev \
     libpqxx-dev \
+    libsodium-dev \
     pkg-config \
     docker.io \
     docker-compose-v2 \
@@ -249,11 +249,12 @@ Per-package rationale:
 | Package | Why |
 |---|---|
 | `g++`, `build-essential`, `cmake`, `ninja-build`, `pkg-config` | C++ toolchain. g++ 13+ required for `-Wall -Wextra` clean code per CLAUDE.md. |
-| `libssl-dev` | OpenSSL 3.x headers. Phase E migrates code off OpenSSL 1.0 APIs. |
+| `libssl-dev` | OpenSSL 3.x headers. The server-native code is clean against the OpenSSL 3.x API. |
 | `libcrypto++-dev` | Crypto++ headers. Used by the original RSA/RC4 client crypto. |
 | `libtinyxml-dev` | TinyXML, used by content loaders. |
 | `liblua5.4-dev` | Lua 5.4 runtime + headers. The server embeds Lua for scripting. |
-| `libpqxx-dev` | C++ Postgres client. Pulled in by Phase C for the MySQL-to-Postgres migration. |
+| `libpqxx-dev` | C++ Postgres client. The server and login-server speak Postgres through it. |
+| `libsodium-dev` | libsodium, used for Argon2id password hashing. |
 | `docker.io`, `docker-compose-v2` | Dev environment runs in compose. |
 | `just` | Task runner; `justfile` at repo root. |
 | `dotnet-sdk-10.0` | C# tools require .NET 10. |
@@ -266,13 +267,13 @@ a newer build from the Postgres APT repository
 
 Equivalent packages: `gcc-c++`, `cmake`, `ninja-build`, `openssl-devel`,
 `cryptopp-devel`, `tinyxml-devel`, `lua-devel`, `libpqxx-devel`,
-`docker`, `docker-compose`, `just`. The .NET SDK is `dotnet-sdk-10.0`
+`libsodium-devel`, `docker`, `docker-compose`, `just`. The .NET SDK is `dotnet-sdk-10.0`
 from the Microsoft RPM repo or the dnf module.
 
 ### Arch
 
 `base-devel`, `cmake`, `ninja`, `openssl`, `crypto++`, `tinyxml`, `lua`,
-`libpqxx`, `docker`, `docker-compose`, `just`, `dotnet-sdk` (AUR).
+`libpqxx`, `libsodium`, `docker`, `docker-compose`, `just`, `dotnet-sdk` (AUR).
 
 ### Windows
 
@@ -300,15 +301,10 @@ from the Microsoft RPM repo or the dnf module.
 **`cmake` configure fails on `find_package(OpenSSL)`** -- you need
 `libssl-dev` (Debian/Ubuntu) or `openssl-devel` (Fedora).
 
-**Link errors against `mysql_*` symbols** -- the server still links
-against `libmysqlclient` for the DAOs that Phase N Wave 3 has not yet
-moved to libpqxx. If you see these errors, install `libmysqlclient-dev`
-(Debian/Ubuntu) — they are expected, not a regression.
-
 **`dotnet build` reports `net2.0` or `net4.x` not found** -- you are
-trying to build pre-Phase-D source. Every project that exists today
-has been upgraded to SDK-style; if you hit this, your tree is stale,
-not the project file.
+building a stale tree. Every project that exists today is SDK-style and
+targets `net10.0` / `net10.0-windows`; if you hit this, pull the latest
+source.
 
 **`just: command not found`** -- install `just`
 (`apt install just` on 24.04+, otherwise the upstream install

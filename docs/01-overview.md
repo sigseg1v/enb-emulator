@@ -18,8 +18,9 @@ This project does three things:
 
 1. Consolidates the three upstream sources into one cleanly-laid-out repo.
 2. Preserves the original license headers and the upstream history.
-3. Sets up a multi-phase plan (`plans/`) for moving the code forward
-   enough that someone can actually build, run, and contribute to it again.
+3. Moves the code forward enough that someone can actually build, run, and
+   contribute to it again on a modern Linux system. Internal progress notes
+   live under `plans/`.
 
 Nothing here is novel game content. The goal is **conservation**: keep the
 code buildable, keep the protocol decoded, keep the install path working.
@@ -42,38 +43,24 @@ load-bearing facts are:
 
 ## Current status
 
-The work is broken into phases tracked in `plans/`. Live status is in
-`plans/00-master.md`. As of 2026-05-26:
+The server **runs natively on Linux** today. Server, proxy, and
+login-server build clean via CMake + Ninja, link against system OpenSSL
+3.x and libpqxx, and pass the gtest suite plus the CLI-driven integration
+tests. They speak Postgres at runtime (no libmysqlclient), use AF_UNIX
+SOCK_DGRAM for IPC, and share one canonical copy of every cross-process
+wire struct from `common/include/net7/`. The Win32-specific `compat/`
+shim trees are gone; all three umbrella `Net7.h` files now expose only
+SOCKET typedefs plus the canonical socket macros.
 
-| Phase | What it does | Status |
-|---|---|---|
-| A | Repo merge, docs, scaffolding | complete |
-| B | Best-effort Linux server build via CMake | complete |
-| C | MySQL to Postgres scaffolding (schema conversion) | complete (scaffold only) |
-| D | C# tools to .NET 10 SDK-style csproj | complete |
-| E | OpenSSL 1.0 to 3.x for the server target | complete |
-| F | Compiler warning cleanup | complete (baseline + 2 categories) |
-| G | Test scaffolding (GoogleTest + smoke tests) | complete |
-| H | Deepen docs (protocol RE, sequence diagrams, ability internals) | complete |
-| I | Dev env polish (justfile, docker-compose, OCI images, CI matrix) | complete |
-| J | End-to-end runnable: server + proxy + login on Linux, integration tests green | complete |
-| K | In-game opcode handlers + UDP plane | in progress |
-| L | C# tools to Avalonia (Linux-native UI; no WINE) | complete |
-| M | Eliminate Win32 from server-native code (mailslot → AF_UNIX, etc.) | complete |
-| N | `mysqlplus.cpp` → libpqxx rewrite (Phase C continuation) | complete |
-| O | OpenSSL 3.x for proxy + login-server | complete |
-| P | Stub-debt audit | complete |
-| Q | Delete dead kyp-era TCP cluster | complete |
-| R | Extract `common/include/net7/` for shared protocol headers | complete |
-| S | Headless CLI client (C# / .NET 10) | complete (14/17 items; 3 blocked on Phase K) |
-| T | CLI-driven integration test suite (xUnit) | complete (9/10 items; enumerate blocked on Phase K) |
+The C# editor and tool suite runs natively on Linux via Avalonia 11 /
+.NET 10 (no WINE), and a headless CLI client plus an xUnit integration
+suite drive and verify the server end to end.
 
-The server **runs natively on Linux** today: server + proxy + login-server
-build clean, link against system OpenSSL 3.x and libpqxx, and pass the gtest
-suite plus the CLI-driven integration tests (33/33). The legacy `compat/`
-shim directories are gone; all three umbrella `Net7.h` files now expose only
-SOCKET typedefs + the canonical socket macros. See `plans/00-master.md` for
-the per-phase breakdown.
+What is still incomplete is the in-sector UDP opcode plane: the
+inside-the-sector handlers for combat, ability execution, MOB AI, and
+world updates are still being filled in. See
+`10-modernization-roadmap.md` for the present-tense capability summary
+and known limitations. Internal progress notes are under `plans/`.
 
 ## License summary
 
@@ -122,23 +109,22 @@ locally.
 
 The server runs on Linux today. Two paths:
 
-1. Dev stack via docker-compose: `just init` to start MySQL and load the
-   dumps, then `just dev` (= `just run-stack-bg`) to bring up
+1. Dev stack via docker-compose: `just init` to start Postgres and apply
+   the schema, then `just dev` (= `just run-stack-bg`) to bring up
    server + proxy + login. See `08-build.md` and `09-running-locally.md`.
 2. Build the server binary by hand:
    `cmake -S server -B build/server -G Ninja && cmake --build build/server`.
    Same for `proxy/` and `login-server/`. All three build clean against
-   system OpenSSL 3.x, libpqxx 7.x, and libmysqlclient (only required
-   for the few DAOs still on the MySQL path while Phase N's per-DAO Wave 3
-   is open).
+   system OpenSSL 3.x and libpqxx 7.x. They no longer link
+   libmysqlclient; every DAO speaks Postgres through libpqxx.
 
 The legacy `server/Makefile.legacy` (vintage 2010, g++ 4.x style) is kept
 for reference only; it does not match the current source tree.
 
 ### "I want to edit game content (sectors, mobs, missions, items)"
 
-The C# editors live in `tools/`. Phase L re-ported every user-facing editor
-to **Avalonia 11 / .NET 10**, so they run **natively on Linux** — no WINE
+The C# editors live in `tools/`. Every user-facing editor is ported to
+**Avalonia 11 / .NET 10**, so they run **natively on Linux** -- no WINE
 required. The fastest way to discover them:
 
 ```
@@ -150,10 +136,9 @@ just --list                 # shows every launch-* recipe
 
 The legacy WinForms projects under `tools/<name>/` (without `-avalonia`)
 still build cross-platform via `dotnet build tools/Net7Tools.slnx`, but
-their runtime is Windows / WINE only. They are kept for diff reference.
-
-`item-editor` is the only editor that has NOT been ported — the original
-`tools/itemeditor/` never had a `.csproj` in the upstream snapshot.
+their runtime is Windows / WINE only. They are kept for diff reference;
+the Item Editor's WinForms original lives at `tools/itemeditor/` and has
+been superseded by `tools/item-editor-avalonia/`.
 
 Per-tool documentation is in `07-tools-toolchain.md`; the
 `tools/README.md` has the quickstart-with-credentials cheat sheet.
@@ -165,16 +150,16 @@ Read in this order:
 1. `01-overview.md` (you are here)
 2. `02-architecture.md` -- server architecture, login flow, sector handoff.
 3. `04-server-modules.md` -- per-manager-class summary with file:line refs.
-4. `06-database-schema.md` -- table-by-table summary of the 71-table MySQL
-   schema.
+4. `06-database-schema.md` -- table-by-table summary of the 71-table
+   runtime schema (`db/postgres/schema.sql`).
 5. `05-abilities.md` -- ability implementations, with notes on which are new
    in the tada-o fork.
 
 For the network protocol, `03-network-protocol.md` is the starting point.
 The shared wire-format structs, opcode tables, port numbers, RC4/RSA
-helpers and the Mutex wrapper live under `common/include/net7/` (added in
-Phase R); the server, proxy, and login-server all include from there so
-there is one canonical copy of every cross-process struct.
+helpers and the Mutex wrapper live under `common/include/net7/`; the
+server, proxy, and login-server all include from there so there is one
+canonical copy of every cross-process struct.
 
 ### "I want to contribute"
 
@@ -182,8 +167,8 @@ Read `CLAUDE.md` first. It documents the plans workflow, the repo layout,
 the coding rules (Linux first, no new Win32 in new code, Postgres syntax in
 new SQL, license-header preservation), and the where-do-I-put-X table.
 
-Then look at `plans/00-master.md` to see what is in progress and pick
-something off the current phase's checklist.
+The `plans/` directory holds internal progress notes if you want to see
+what is in flight.
 
 ## What this project is not
 
@@ -191,9 +176,10 @@ something off the current phase's checklist.
 - Not a public server operator. We package the software; running a server is
   your problem.
 - Not a relicense project. CC BY-NC-SA 3.0 is the legal floor.
-- Not a complete protocol reverse-engineering effort. Existing RE notes
-  (captured packets, architecture document) are preserved and supplemented
-  during Phase H, but a clean-room reimplementation is out of scope.
+- Not a complete protocol reverse-engineering effort. The existing
+  protocol knowledge -- preserved architecture documents, packet captures,
+  and the in-tree protocol code -- is conserved and documented, but a
+  clean-room reimplementation is out of scope.
 
 ## Credits
 
@@ -213,7 +199,6 @@ something off the current phase's checklist.
 
 - `../README.md` -- top-level project overview and quickstart.
 - `../CLAUDE.md` -- repo map, license rules, coding rules.
-- `../plans/00-master.md` -- modernization phase status.
 - `reference/net7-architecture-original.rtf` -- primary source for the
   architecture doc.
 - `reference/faq-original.txt` -- 2006 player-facing FAQ.

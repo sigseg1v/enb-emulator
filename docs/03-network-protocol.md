@@ -1,17 +1,19 @@
 # 03 - Network protocol
 
 This is a reference for the wire protocol the Net-7 server speaks. It is
-reconstructed from the C++ source in `server/src/` plus the original
-Net-7 architecture document at
-`docs/reference/net7-architecture-original.rtf`. Where the source code is
-the source of truth, that's noted as `path:line`. Where a detail is
-unverified or reverse-engineered from the original Westwood client, that
-is called out explicitly.
+drawn from the C++ source in `server/src/`, the shared wire headers in
+`common/include/net7/`, the preserved Net-7 architecture document at
+`docs/reference/net7-architecture-original.rtf`, and packet captures.
+Where the source code is the source of truth, that's noted as
+`path:line`. Where a detail is unverified, that is called out
+explicitly.
 
-The fork in this repo (tada-o, svn r2974, 2010-03-15) sits halfway
-through a TCP-to-UDP rewrite. Both transports compile, but only UDP is
-exercised by the modern client/proxy. Read this with that history in
-mind.
+The wire format inherited from the original *Earth & Beyond* protocol
+once carried game traffic over TCP. In this codebase the game data plane
+is UDP between the proxy and the server; the client-facing TCP leg
+terminates in the proxy. A few legacy TCP opcode constants survive in
+the headers for the proxy's framing and for reference, but no live
+server code consumes them. Read this with that split in mind.
 
 ## Contents
 
@@ -35,11 +37,15 @@ There are six distinct transports in the code base:
 |---|---|---|---|
 | **HTTP (plaintext)** | **127.0.0.1:4180 (loopback only)** | **EnB client (authlogin.dll) <-> LocalAuthRelay (in-launcher)** | **Active** |
 | HTTPS (TLS over TCP) | port 443 | LocalAuthRelay <-> Net7SSL (loopback or remote) | Active |
-| TCP (Westwood RSA+RC4) | ports 3801, 3805, 3501+ | Legacy direct client connection | Deleted (Phase Q) — handshake moved into the proxy |
-| TCP | port 3500 (Net7Proxy local) | EnB client <-> Net7Proxy | Active |
-| UDP | ports 3806, 3808, 3809, sector dynamic | Net7Proxy <-> server | Active (game) |
+| TCP (Westwood RSA+RC4) | port 3500 (Net7Proxy local) | EnB client <-> Net7Proxy | Active (handshake terminates here) |
+| UDP | ports 3806, 3808, 3810, sector dynamic | Net7Proxy <-> server | Active (game) |
 | UDP loopback | between server and login | server <-> login | Active (auth handoff) |
-| AF_UNIX SOCK_DGRAM | `/run/net7-ipc/` | server <-> login | Active (liveness pings, post-Phase M) |
+| AF_UNIX SOCK_DGRAM | `/run/net7-ipc/` | server <-> login | Active (liveness pings) |
+
+The Westwood RSA+RC4 handshake the original client did directly against
+the server is now terminated by the proxy; the server side of that
+direct TCP link (ports 3801, 3805, 3501+) no longer exists in the
+running build. See the per-port detail in section 4.
 
 The EnB game client itself only knows TCP and HTTPS. Two loopback
 middlemen sit between the client and anything that crosses the host's
@@ -52,7 +58,7 @@ network interfaces:
   on loopback and translates to UDP (Westwood RSA+RC4) toward the
   server. See §3.1 and §5.3.
 
-Net-traffic invariant — read this carefully:
+Net-traffic invariant -- read this carefully:
 
 > **No plaintext HTTP, and no plaintext TCP game traffic, ever leaves
 > the local machine.** The two loopback middlemen above are the only
@@ -111,9 +117,8 @@ leg.
 
 ### 2.1. TCP framing (legacy + auth)
 
-The legacy TCP header is `EnbTcpHeader`. Defined at
-`common/include/net7/PacketStructures.h:25-29` (Phase R moved this out
-of `server/src/`):
+The TCP header is `EnbTcpHeader`. Defined at
+`common/include/net7/PacketStructures.h:29-33`:
 
 ```c
 struct EnbTcpHeader
@@ -127,32 +132,34 @@ That's it. Four bytes, little-endian. `size` includes the header
 itself. `opcode` is one of the `ENB_OPCODE_*` constants. Payload
 immediately follows.
 
-The TCP receive code that used this framing lived in
-`server/src/Connection.cpp::RunRecvThread` and was deleted in Phase Q
-(2026-05-23) once the handshake moved into the proxy. The proxy now
-implements the same length-prefixed read in `proxy/Connection.cpp`,
-and the CLI client (Phase S) reimplements it in C# inside
-`tools/cli-client/CliClient.Core/Wire/EncryptedTcpConnection.cs`.
+This framing is the client-facing TCP wire. The proxy implements the
+length-prefixed read in `proxy/Connection.cpp`, and the CLI client
+reimplements it in C# inside
+`tools/cli-client/CliClient.Core/Wire/EncryptedTcpConnection.cs`. The
+server itself no longer reads this framing directly: the proxy
+terminates the client TCP link and bridges to the server over UDP.
 
 ### 2.2. UDP framing
 
 The UDP header is `EnbUdpHeader`. Defined at
-`common/include/net7/PacketStructures.h:39-45` (Phase R relocation):
+`common/include/net7/PacketStructures.h:45-55`:
 
 ```c
 struct EnbUdpHeader
 {
-    short size;
-    short opcode;
-    long  player_id;
-    long  packet_sequence;
-};
+    short   size;
+    short   opcode;
+    int32_t player_id;
+    int32_t packet_sequence;
+} ATTRIB_PACKED;
 ```
 
-Note: the UDP struct deliberately does not use `ATTRIB_PACKED`. The
-fields naturally pack on every supported platform (no odd-sized
-fields and no internal padding), but if anyone ever inserts a
-`char` in here, this will break.
+The `player_id` and `packet_sequence` fields are `int32_t`, not `long`:
+`long` is 8 bytes on Linux x86_64 versus 4 bytes on Win32, which would
+make `sizeof(header)` 20 on Linux while the wire format is 12. Pinning
+them to `int32_t` keeps the header at exactly 12 bytes on every
+platform, and `ATTRIB_PACKED` forbids any padding the compiler might
+otherwise insert.
 
 `size` includes the 12-byte header. `opcode` is the same opcode
 namespace as TCP. `player_id` is the server-assigned `GameID` of the
@@ -161,13 +168,13 @@ is for the client-side reorder/dedup logic (see opcodes 0x2016 and
 0x2017).
 
 The maximum size enforced by `UDP_Connection::SendOpcode` is 2060
-bytes (`server/src/UDPConnection.cpp:351`). Per-player send buffers
+bytes (`server/src/UDPConnection.cpp:358`). Per-player send buffers
 are `UDP_BUFFER_SEND_SIZE` (defined in `Player`).
 
 ### 2.3. Send and receive paths
 
 UDP receive: `UDP_Connection::RunRecvThread`
-(`server/src/UDPConnection.cpp:167-246`). One thread per
+(`server/src/UDPConnection.cpp:174`). One thread per
 `UDP_Connection`, blocks on `recvfrom`, validates the header
 (`received == bytes + sizeof(EnbUdpHeader)`), dispatches by
 `m_ServerType` to one of `HandleMVASOpcode`, `HandleGlobalOpcode`,
@@ -175,8 +182,8 @@ UDP receive: `UDP_Connection::RunRecvThread`
 opcode ranges per type.
 
 UDP send: two overloads of `UDP_Connection::SendOpcode`.
-- Address-only form for pre-login: `SendOpcode(opcode, data, length, ip, port)` at `server/src/UDPConnection.cpp:341`.
-- Per-player form for in-game: `SendOpcode(opcode, Player*, data, length, ip, port, seq)` at `server/src/UDPConnection.cpp:368`.
+- Address-only form for pre-login: `SendOpcode(opcode, data, length, ip, port)` at `server/src/UDPConnection.cpp:348`.
+- Per-player form for in-game: `SendOpcode(opcode, Player*, data, length, ip, port, seq)` at `server/src/UDPConnection.cpp:375`.
 
 The per-player form sets `header->player_id = p->GameID()` and uses
 the player-owned send buffer (so concurrent sends from worker threads
@@ -204,27 +211,27 @@ Westwood-style RSA + RC4 handshake. The implementation lives in three
 places that all agree:
 
 - `common/include/net7/WestwoodRSA.h` + impl in `proxy/WestwoodRSA.cpp`
-  — 512-bit RSA modulus.
+  -- 512-bit RSA modulus (64-byte block, `WWRSA_BLOCK_SIZE`).
 - `common/include/net7/WestwoodRC4.h` + impl in `proxy/WestwoodRC4.cpp`
-  — 64-bit-key RC4 (and a 128-bit variant for some channels).
+  -- 64-bit-key RC4 (and a 128-bit variant for some channels).
 - `proxy/Connection.cpp::DoKeyExchange` and `DoClientKeyExchange`.
 - C# port for the CLI client / integration tests:
   `tools/cli-client/CliClient.Core/Wire/WestwoodRsa.cs` +
-  `WestwoodRc4.cs` (Phase S).
+  `WestwoodRc4.cs`.
 
 Two RC4 streams are kept per proxy connection: `m_CryptIn` and
 `m_CryptOut`. After the RSA exchange, RC4 takes over and the rest of
 the connection is RC4-encrypted, opcode by opcode.
 
-The original constants block (`RC4_KEY_SIZE`, `RC4_UDP_KEY_SIZE`,
+The constants block (`RC4_KEY_SIZE`, `RC4_UDP_KEY_SIZE`,
 `TCP_BUFFER_SIZE`, `SEND_BUFFER_SIZE`, `CONNECTION_TIMEOUT`,
-`MAX_RETRIES`, `MAX_TCP_BUFFER`) survived the Phase Q deletion only on
-the proxy side — see `proxy/Connection.h`.
+`MAX_RETRIES`, `MAX_TCP_BUFFER`) lives on the proxy side -- see
+`proxy/Connection.h`.
 
-The RSA modulus and the Westwood key derivation are reverse-engineered
-from the original *Earth & Beyond* binary. They are not standards; do
-not try to replace them with a modern handshake without keeping the
-old one for compatibility.
+The RSA modulus and the Westwood key derivation come from the original
+*Earth & Beyond* protocol. They are not standards; do not try to
+replace them with a modern handshake without keeping the old one for
+compatibility, because the retail client demands exactly this scheme.
 
 ### 3.2. UDP encryption
 
@@ -249,7 +256,7 @@ network interface:
   ────────────────────────         ───────────────             ───────
   HTTP/1.x plaintext      ───►     accept on                   accept on
   to 127.0.0.1:4180                127.0.0.1:4180              :443 TLS
-  (loopback, never                 (loopback bind —
+  (loopback, never                 (loopback bind --
    reaches a NIC)                   IPAddress.Loopback)
                                           │
                                           ▼
@@ -264,7 +271,7 @@ network interface:
                                    the client socket
 ```
 
-**Hop 1 — client ↔ relay (loopback HTTP, plaintext).**
+**Hop 1 -- client ↔ relay (loopback HTTP, plaintext).**
 `authlogin.dll` always speaks plaintext HTTP to `127.0.0.1:4180`. The
 launcher's `Patching/AuthLoginPatcher.cs` byte-patches the dll at fixed
 offsets every launch:
@@ -272,7 +279,7 @@ offsets every launch:
 - `0x8328` (HTTPS flag) → `0x40` (HTTP), never `0xC0` (HTTPS).
 - `Software\EACom\AuthAuth\AuthLoginServer` registry value → `"localhost"`.
 
-`Launcher.PatchAuthLoginFile` writes those values unconditionally — they
+`Launcher.PatchAuthLoginFile` writes those values unconditionally -- they
 are not driven by any setting. `_setting.AuthenticationPort` (the only
 auth-port field in the launcher) is the *upstream* port the relay dials
 on hop 2, not what the dll speaks on the wire.
@@ -284,7 +291,7 @@ Plaintext bytes on this hop never traverse a NIC. They live entirely
 inside the kernel's loopback path. An off-host attacker would need to
 already own the loopback interface (i.e. be root on the box) to MITM.
 
-**Hop 2 — relay ↔ upstream Net7SSL (TLS, always).**
+**Hop 2 -- relay ↔ upstream Net7SSL (TLS, always).**
 `LocalAuthRelay.HandleClient` (in `tools/launchnet7-avalonia/Network/LocalAuthRelay.cs`)
 opens a TCP connection to the user-configured upstream host/port and
 wraps it in `SslStream` with `EnabledSslProtocols = Tls12 | Tls13`.
@@ -301,30 +308,30 @@ poisoned DNS answer claiming `prod.example.com → 127.0.0.1` would
 downgrade verify. With a syntactic check, only literal `localhost`,
 `127.0.0.0/8`, and `::1` qualify.
 
-**Hop 3 — Net7SSL ↔ Net7 server (UDP loopback opcodes).**
+**Hop 3 -- Net7SSL ↔ Net7 server (UDP loopback opcodes).**
 Once auth succeeds, Net7SSL hands off the ticket to the Net7 server
 process over UDP loopback (opcodes `0x4003` `SSL_AVATARLOGIN_SSL_S` and
 `0x4004` `SSL_AVATARCONFIRM_S_SSL`; see §5.1). This is between two
-processes on the same host — when Net7SSL and Net7 are in the same
+processes on the same host -- when Net7SSL and Net7 are in the same
 docker network they share the bridge; in a single-host dev stack they
 are on `lo`.
 
-**Net-traffic guarantee — no plaintext HTTP escapes the box, period.**
+**Net-traffic guarantee -- no plaintext HTTP escapes the box, period.**
 
 The only places in the launcher's source where a port + scheme combine
 to make an HTTP URL the client sees are:
 
-1. `Launcher.PatchAuthLoginFile` — hardcoded `Port=4180, UseHttps=false`
+1. `Launcher.PatchAuthLoginFile` -- hardcoded `Port=4180, UseHttps=false`
    (the const + literal pair, with no setting feeding either value).
-2. `Launcher.PatchAuthIniFile` — `Auth.ini` URLs (`AAIUrl`, `LKeyUrl`).
+2. `Launcher.PatchAuthIniFile` -- `Auth.ini` URLs (`AAIUrl`, `LKeyUrl`).
    Scheme is hardcoded `https` in the source; host is the *registration*
    hostname, which the launcher writes to `_setting.Hostname` or
    `_setting.RegistrationHostname` (default `localhost` in `play-local`).
-3. `Launcher.PatchRegDataFile` — `rg_regdata.ini`'s `regserverurl`.
+3. `Launcher.PatchRegDataFile` -- `rg_regdata.ini`'s `regserverurl`.
    Same hardcoded `https` and same registration hostname as (2).
 
 Of these, (1) is the only HTTP-bound endpoint, and its target is
-*literally* `127.0.0.1:4180` — a constant in the source tree, not a
+*literally* `127.0.0.1:4180` -- a constant in the source tree, not a
 setting. (2) and (3) are hardcoded `https://`, period; the launcher
 has no code path that ever writes `http://` to those keys.
 
@@ -340,36 +347,43 @@ cannot downgrade hop 2's TLS.
 The login process uses OpenSSL. Dev cert files are generated by
 `just gen-certs` into `deploy/certs/` and mounted into the container
 at runtime. The server links against **system OpenSSL 3.x**
-(`OPENSSL_API_COMPAT=0x30000000L`); the 73-file vendored 2010
-OpenSSL 1.0 header tree that used to live at `server/src/openssl/`
-was deleted in Phase O+ (2026-05-24) once the include order was
-fixed to prefer the system headers.
+(`OPENSSL_API_COMPAT=0x30000000L`).
 
 The relay's TLS uses .NET's `SslStream` (the runtime's OpenSSL on
 Linux, schannel on Windows). The dev cert it talks to on hop 2 is
 the same OpenSSL-3-signed cert Net7SSL serves on `:443`. There is no
-WINE-side schannel in the auth path anymore — the WINE prefix only
-sees plaintext on loopback, which schannel never touches.
+WINE-side schannel in the auth path: the WINE prefix only sees
+plaintext on loopback, which schannel never touches.
 
 ---
 
 ## 4. Port assignments
 
-From `common/include/net7/Ports.h` (Phase R Wave 2 — was triplicated
-across the three trees):
+The wire-load-bearing port assignments live in
+`common/include/net7/Ports.h`, shared across `proxy/`, `server/`, and
+`login-server/`:
 
 | Port | Macro | Transport | Speakers |
 |---|---|---|---|
 | **4180** | **`LocalAuthRelay.ListenPort`** | **TCP/HTTP plaintext, loopback-only** | **EnB client (authlogin.dll) <-> LocalAuthRelay** |
 | 443 | `SSL_PORT` | TCP/TLS | LocalAuthRelay <-> Net7SSL (upstream) |
-| 3500 | (Net7Proxy) | TCP | EnB client <-> Net7Proxy (local) |
-| 3501 | `SECTOR_SERVER_PORT` | TCP (legacy) | starts here, incremented per sector |
-| 3801 | `MASTER_SERVER_PORT` | TCP (legacy) | client <-> master |
-| 3805 | `GLOBAL_SERVER_PORT` | TCP (legacy) | client <-> global |
-| 3806 | `MVAS_LOGIN_PORT` | UDP | Net7Proxy <-> Net7 (MVAS / launcher) |
-| 3807 | `SSL_LOCALCERT_LOGIN_PORT` | TCP/TLS | dev-mode auth listener (local cert) |
-| 3808 | `UDP_MASTER_SERVER_PORT` | UDP | Net7Proxy <-> Net7 (master) |
+| 3500 | `PROXY_LOCAL_TCP_PORT` | TCP (Westwood RSA+RC4) | EnB client <-> Net7Proxy (local) |
+| 3501 | `SECTOR_SERVER_PORT` | TCP (legacy, unused) | base port; sectors add an offset |
+| 3801 | `MASTER_SERVER_PORT` | TCP (legacy, unused) | client <-> master |
+| 3805 | `GLOBAL_SERVER_PORT` | TCP (legacy, unused) | client <-> global |
+| 3806 | `MVAS_LOGIN_PORT` | UDP | Net7Proxy / Net7SSL -> Net7 (MVAS / login handoff) |
+| 3807 | `SSL_LOCALCERT_LOGIN_PORT` | TCP/TLS (legacy) | out-of-band local-cert login |
+| 3808 | `UDP_MASTER_SERVER_PORT` | UDP | Net7Proxy -> Net7 (master handoff) |
 | 3809 | `PROXY_SERVER_PORT` | UDP | Net7Proxy local |
+| 3810 | `UDP_GLOBAL_SERVER_PORT` | UDP | Net7Proxy -> Net7 (global control plane) |
+
+The TCP ports marked "legacy, unused" are the ports the original direct
+client-to-server TCP link used. That link no longer exists in the
+running build (the proxy terminates the client TCP connection and
+bridges to the server over UDP), but the macros remain for the proxy's
+framing and as protocol reference. The proxy-to-server game data plane
+runs over the UDP ports 3806 / 3808 / 3810 plus the per-sector UDP
+listeners.
 
 There is no SRV or DNS record convention; the server's hostname and
 ports are baked into the client through Net7Proxy and through the
@@ -380,9 +394,10 @@ A typical firewall rule for a production server only needs:
 - TCP/443 (auth)
 - UDP/3806 (MVAS)
 - UDP/3808 (master)
+- UDP/3810 (global)
 - UDP in the dynamic range used by sectors (in standalone mode, just
-  3806/3808 plus whatever sector listeners are wired up; see
-  section 5)
+  the control-plane UDP ports plus whatever sector listeners are wired
+  up; see section 5)
 
 ---
 
@@ -402,12 +417,12 @@ sequenceDiagram
     participant SSL as Net7SSL
     participant Net7 as Net7
 
-    Note over Client,Relay: hop 1 — loopback HTTP (plaintext)
+    Note over Client,Relay: hop 1 -- loopback HTTP (plaintext)
     Client->>Relay: HTTP POST to 127.0.0.1:4180 (user/pass)
-    Note over Relay,SSL: hop 2 — TLS to upstream (always)
+    Note over Relay,SSL: hop 2 -- TLS to upstream (always)
     Relay->>SSL: HTTPS over TLS to upstream:443
     SSL->>SSL: validate creds against ticket DB
-    Note over SSL,Net7: hop 3 — UDP loopback opcodes
+    Note over SSL,Net7: hop 3 -- UDP loopback opcodes
     SSL->>Net7: UDP 0x4003 SSL_AVATARLOGIN_SSL_S
     Net7->>Net7: allocate player slot in GMemoryHandler
     Net7-->>SSL: UDP 0x4004 SSL_AVATARCONFIRM_S_SSL
@@ -690,10 +705,9 @@ feed. Used by external dashboards. Handler:
 
 ## 7. Server-to-server opcodes
 
-These were sent over TCP between distinct Net7 processes when running
-in distributed mode. They use the same wire format
-(`EnbTcpHeader` + payload, RC4-encrypted) as the legacy client-server
-TCP path.
+These were sent over TCP between distinct Net7 processes in distributed
+mode. They use the same wire format (`EnbTcpHeader` + payload,
+RC4-encrypted) as the original client-server TCP path.
 
 `common/include/net7/Opcodes.h:182-189`:
 
@@ -707,13 +721,13 @@ TCP path.
 | `0x7902` | CHARACTER_DATA | Master -> Sector |
 | `0x7905` | PLAYER_LOCATION | Master -> Sector |
 
-The handlers (`Connection::HandleSectorServerAssignment` etc) lived in
-`server/src/Connection.h` and were **deleted in Phase Q (2026-05-23)**
-along with the rest of the TCP cluster. The opcode constants are
-preserved in `common/include/net7/Opcodes.h` for reference and for the
-proxy's framing, but no live server code consumes them. In standalone
-mode all sectors share the same process and the equivalent calls are
-in-process direct invocations on `SectorManager`.
+The handlers (`Connection::HandleSectorServerAssignment` etc) that once
+lived in `server/src/Connection.h` are gone along with the rest of the
+TCP cluster. The opcode constants are preserved in
+`common/include/net7/Opcodes.h` for reference and for the proxy's
+framing, but no live server code consumes them. In standalone mode all
+sectors share the same process and the equivalent calls are in-process
+direct invocations on `SectorManager`.
 
 ---
 
@@ -730,7 +744,7 @@ The file timestamps (2006-10-29) and the destination IPs they target
 (the retail server, the historical EA/Westwood address range) make
 these almost certainly captures of the **original Westwood Earth &
 Beyond servers**, not of Net-7. That makes them more valuable than
-"a Net-7 packet dump" would be — they are the closest thing on disk
+"a Net-7 packet dump" would be -- they are the closest thing on disk
 to the original protocol that Net-7 is trying to reimplement.
 
 ### 8.1. Format
@@ -752,11 +766,11 @@ For the legacy TCP handshake (port 3801 and per-sector login), the
 annotator labels the Westwood RSA+RC4 stages explicitly:
 
 ```
-SYN1 / ACK1 / SYN2 / ACK2  — RSA modulus + exponent exchange
-K1 / K2                    — RC4 session-key derivation
+SYN1 / ACK1 / SYN2 / ACK2  -- RSA modulus + exponent exchange
+K1 / K2                    -- RC4 session-key derivation
 ```
 
-This matches the handshake in `server/src/Connection.cpp::DoKeyExchange`.
+This matches the handshake in `proxy/Connection.cpp::DoKeyExchange`.
 
 ### 8.2. Headline numbers
 
@@ -770,7 +784,7 @@ This matches the handshake in `server/src/Connection.cpp::DoKeyExchange`.
 All three captures target the same observed server (the retail server,
 last octets `{35,38,40,42,44,46,47,146}`) on ports `3022, 3029, 3034,
 3088, 3338, 3363, 3387, 3388, 3434, 3500, 3501, 3503, 3505, 3801`.
-The dynamic-per-sector pattern in section 4 holds — sector listeners
+The dynamic-per-sector pattern in section 4 holds -- sector listeners
 are scattered around `3022-3505` rather than the `3501+` range the
 Net-7 source defaults to.
 
@@ -808,7 +822,7 @@ Aggregated across all three captures:
 
 Quick reading: the captures are dominated by per-tick state updates
 (`Aux_Data` + `Advanced_Positional_Update` are 71% of all packets),
-which matches what the source does — `PlayerManager::RunMovementThread`
+which matches what the source does -- `PlayerManager::RunMovementThread`
 flushes those every 100ms.
 
 ### 8.4. Workflow for opening a capture
@@ -851,27 +865,28 @@ recoverable from code reading alone:
   Future work item: extract the implicit schema for each opcode and
   put it in a per-opcode table.
 - **Westwood RSA key exchange details.** The math is implemented in
-  `server/src/WestwoodRSA.cpp` but it is reverse-engineered from the
-  original Westwood binary. A description of the key derivation would
-  need to come from the original protocol RE notes that the Net-7
-  team kept and which were not included in the source dump.
+  `proxy/WestwoodRSA.cpp` (and `server/src/WestwoodRSA.cpp` where the
+  server-side processes need it directly). The modulus and key
+  derivation come from the original *Earth & Beyond* protocol. A
+  field-level description of the key derivation would need the
+  original Net-7 protocol notes, which were not part of the source
+  dump.
 - **Net7Proxy's translation rules.** Net7Proxy lives in `proxy/`; it
   is the one piece that knows how to take a TCP `EnbTcpHeader` from
   the client and re-emit it as `EnbUdpHeader` plus envelope opcodes
   to Net7. The translation table is in the proxy source, not here.
   See `proxy/` for that side.
 - **Opcode obsolescence.** The 0x7802 etc. server-to-server opcodes
-  are documented in the comment block at the end of `Connection.h`
-  but are mostly unused in standalone mode. Distributed mode is not
-  tested in the current build.
+  remain defined in `common/include/net7/Opcodes.h` but no live server
+  code consumes them; standalone mode handles the equivalent work
+  in-process. Distributed mode is not tested in the current build.
 - **Galaxy map and patch download protocol.** The `0x0097`
   GALAXY_MAP / `0x0098` GALAXY_MAP_REQUEST opcodes are part of a
-  patcher-served data flow that is delegated to the EnB patcher
-  (Westwood's update tool) and Net7Proxy. The server side just
-  acknowledges the request; the actual data is served by the
-  patcher (HTTPS / static file). See `Connection.h:17` for the
-  "not used anymore for anything. Galaxy map is stored locally and
-  we update it via the patcher" note.
+  patcher-served data flow delegated to the EnB patcher (Westwood's
+  update tool) and Net7Proxy. The galaxy map is stored locally on the
+  client and updated via the patcher; the server side just
+  acknowledges the request, and the actual data is served by the
+  patcher (HTTPS / static file).
 
 Unknown from code reading; would need protocol capture analysis or
 original Net-7 team notes:

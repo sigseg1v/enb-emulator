@@ -1,23 +1,31 @@
 # 06 - Database schema
 
-Source-of-truth dump: `db/mysql/net7.sql` (71 tables, world/content data) and
-`db/mysql/net7_user.sql` (42 tables, account/character/guild/galaxy data).
+The runtime database is Postgres. The server and login-server talk to it
+via libpqxx. There are two isolated databases:
 
-Both dumps are mysqldump output from the tada-o snapshot (2010). They use
-MySQL idioms (`int(N) unsigned`, `AUTO_INCREMENT`, backticked identifiers,
-`ENGINE=InnoDB`, mixed `latin1`/`utf8` charsets) that do not parse cleanly in
-Postgres. Phase C converted them via `db/postgres/convert.sh`; the
-converted artefacts are committed at `db/postgres/schema.sql` and
-`db/postgres/seed.sql`, and `db/postgres/README.md` lists the residual
-manual fixes. Note: at runtime the server still talks to MySQL on
-`localhost:3307` via the dev-stack `docker-compose.yml`; the Postgres
-conversion is staged and verified separately. The C++ DAO migration to
-libpqxx happened in Phase N — see `mysqlplus.cpp` and the per-DAO sweep
-in `plans/14-phase-n-libpqxx.md`. A handful of DAOs still use the MySQL
-path; Wave 3 of Phase N tracks the remainder.
+- `net7` (content / world data): defined by `db/postgres/schema.sql`,
+  71 tables.
+- `net7_user` (account / character / guild / galaxy save-state): defined
+  by `db/postgres/seed.sql`, 42 tables.
 
-This document covers the 71 tables in `net7.sql`. The 42 tables in
-`net7_user.sql` are summarised at the end.
+`db/postgres/schema.sql` is the authoritative runtime schema for the
+content database. It is plain Postgres: double-quoted identifiers,
+`bigint` for the old unsigned integer columns, `GENERATED ALWAYS AS
+IDENTITY` for auto-increment keys, `timestamp` for datetimes, and
+separate `CREATE INDEX` statements instead of inline MySQL `KEY` clauses.
+`db/postgres/README.md` documents the conversion the committed schema was
+produced from and the residual manual-fix list.
+
+The original 2010 mysqldump output is retained only as historical source
+under `db/mysql/net7.sql` and `db/mysql/net7_user.sql`. It is not the
+runtime schema; the MySQL container ships behind a `mysql-legacy`
+docker-compose profile for reference and is not used by the running
+stack. Do not treat the MySQL dumps as authoritative -- the Postgres
+files are.
+
+This document covers the 71 content tables in `db/postgres/schema.sql`.
+The 42 account/character tables in `db/postgres/seed.sql` are summarised
+at the end.
 
 ## Conventions in this doc
 
@@ -30,12 +38,13 @@ This document covers the 71 tables in `net7.sql`. The 42 tables in
   effective in-game value is `column * (quality / 100.0)`.
 - "Editor" cross-references the C# tool under `tools/` that primarily edits
   the table. "(none)" means it is read-only seed data with no dedicated
-  editor. Editor paths below use the legacy `tools/<name>/` directory for
-  brevity; the recommended Avalonia ports live alongside as
-  `tools/<name>-avalonia/` and run natively on Linux (see `tools/README.md`
-  and the cross-reference table in `docs/07-tools-toolchain.md`).
-  `tools/itemeditor/` is the only un-ported editor — it never had a csproj
-  in the upstream snapshot.
+  editor. Editor paths below name the legacy WinForms `tools/<name>/`
+  directory for brevity; the cross-platform Avalonia ports live alongside
+  as `tools/<name>-avalonia/` and run natively on Linux (see
+  `tools/README.md` and the cross-reference table in
+  `docs/07-tools-toolchain.md`). The Item Editor is ported as
+  `tools/item-editor-avalonia/` (the legacy WinForms project remains at
+  `tools/itemeditor/`).
 
 ## Group: world geometry
 
@@ -280,7 +289,7 @@ Lookup: aggressiveness id to name. (Note the original spelling
 ## Group: avatars / character templates
 
 These are the **template** rows -- one per Race+Profession combination --
-not per-player data. Per-player rows live in `net7_user.sql`.
+not per-player data. Per-player rows live in the `net7_user` database.
 
 ### `avatar_base`
 
@@ -328,7 +337,7 @@ Template row for every item. Categories are referenced numerically into
   `price`, `man_cost*` (manufacture cost fields), pricing modifiers,
   `quality_mod`.
 - Referenced by: every `item_*` subtype table.
-- Editor: Item Editor (`tools/itemeditor/`).
+- Editor: Item Editor (`tools/item-editor-avalonia/`).
 
 ### `item_categories`, `item_subcategories`, `item_type`
 
@@ -815,7 +824,7 @@ Per-component version pins ("EName" is editor name).
 - cols: 2
 - Editor: written by Tools Patcher / each editor on startup.
 
-## Summary of net7.sql
+## Summary of the content database (`db/postgres/schema.sql`)
 
 71 tables, grouped above:
 
@@ -852,16 +861,19 @@ Per-component version pins ("EName" is editor name).
 
 (The counts above add to slightly more than 71 because a handful of
 tables are referenced in multiple groups; the canonical count is
-71 distinct `CREATE TABLE` statements in `db/mysql/net7.sql`.)
+71 distinct `CREATE TABLE` statements in `db/postgres/schema.sql`.)
 
-## net7_user.sql (account / character / per-player data)
+## `net7_user` (account / character / per-player data)
 
-Loaded separately. 42 tables. This dump holds the live state -- accounts,
+The `net7_user` database is a separate Postgres database, defined by
+`db/postgres/seed.sql`. 42 tables. It holds the live state -- accounts,
 characters, inventories, guild membership, position, mission progress --
-that gets created and mutated at runtime. The world tables in `net7.sql`
-are read-mostly content; `net7_user.sql` is read-write live data.
+that gets created and mutated at runtime. The world tables in the `net7`
+content database are read-mostly; `net7_user` is read-write live data.
+The two databases are isolated: a single connection cannot join across
+them, so cross-database reads are done with separate connections.
 
-Tables (alphabetical, names preserved verbatim from the dump):
+Tables (alphabetical, names preserved verbatim):
 
 - `account_avatar_forumname`
 - `account_infractions`
@@ -906,9 +918,9 @@ Tables (alphabetical, names preserved verbatim from the dump):
 - `status_levels`
 - `warning_levels`
 
-Notable overlap with `net7.sql`: `avatar_base`, `hulls`, `factions`
-exist in both dumps. The user-database versions are the live per-player
-records; the content-database versions are templates. The schema does
+Notable overlap with the content database: `avatar_base`, `hulls`,
+`factions` exist in both. The `net7_user` versions are the live
+per-player records; the `net7` versions are templates. The schema does
 not enforce that distinction, so be careful when comparing.
 
 Account flow: `accounts` -> `avatar_info` (per-character) ->
@@ -924,7 +936,7 @@ Guild flow: `guilds` -> `guild_ranks` -> `guild_members`.
 |---|---|
 | Sector Editor (`tools/sector-editor/`) | `systems`, `sectors`, `sector_objects` and all `sector_objects_*` subtype tables, `sector_nav_points`, `sector_allocation`, `base_ore_list` |
 | Mob Editor (`tools/mob-editor/`) | `mob_base`, `mob_items`, `mob_spawn_group`, plus references to `sector_objects_mob` |
-| Item Editor (`tools/itemeditor/`) | `item_base`, all `item_*` subtype tables (`item_ammo`, `item_beam`, `item_engine`, `item_shield`, `item_reactor`, `item_device`, `item_missile`, `item_projectile`, `item_manufacture`, `item_other_req`, `item_refine`, `item_effects`) |
+| Item Editor (`tools/item-editor-avalonia/`) | `item_base`, all `item_*` subtype tables (`item_ammo`, `item_beam`, `item_engine`, `item_shield`, `item_reactor`, `item_device`, `item_missile`, `item_projectile`, `item_manufacture`, `item_other_req`, `item_refine`, `item_effects`) |
 | Effect Editor (`tools/effect-editor/`) | `effects`, `item_effect_base`, `item_effect_container`, `item_effect_stats`, `buffs` |
 | Faction Editor (`tools/faction-editor/`) | `factions`, `faction_matrix`, `manufacturers` |
 | Station Tools (`tools/station-tools/`) | `starbases`, `starbase_rooms`, `starbase_npcs`, `starbase_npc_avatar_templates`, `starbase_terminals`, `starbase_vendors`, `starbase_vender_groups`, `starbase_vender_inventory` |
@@ -933,40 +945,40 @@ Guild flow: `guilds` -> `guild_ranks` -> `guild_members`.
 | Data Import (`tools/dataimport/`) | Bulk seed loads -- `assets`, `skills`, `skill_levels`, `skill_abilities`, ammunition/category lookups |
 | EnB Ini Parser (`tools/enb-ini-parser/`) | Imports `BaseAsset`, `effects`, `buffs`, `skill_abilities` from extracted client `.ini` files |
 
-## Postgres migration notes
+## Postgres schema notes
 
-Phase C (`plans/03-phase-c-postgres.md`) defines the conversion rules. The
-high-level transformations the conversion script needs to apply:
+The committed Postgres schema reflects these type and identifier choices
+(relevant if you compare it to the historical MySQL dumps, or add a new
+table and want to match house style):
 
-- Drop `ENGINE=InnoDB`, `DEFAULT CHARSET=...`, `COLLATE ...`.
-- Backtick to double-quote: `` `name` `` -> `"name"`.
-- `int(N) unsigned` -> `bigint` (safe upper bound for unsigned ranges);
-  other `int(N)` -> `integer`.
-- `tinyint(1)` -> `boolean` for clear flags, otherwise `smallint`.
-- `AUTO_INCREMENT` -> `GENERATED ALWAYS AS IDENTITY`.
-- `datetime` -> `timestamp`.
-- Inline `KEY ...(cols)` -> separate `CREATE INDEX` statements after the
-  table definition.
-- `\\0` -> `E'\\x00'` in INSERT rows (for binary-shaped values in
-  `net7_user.sql`).
+- No `ENGINE=InnoDB`, `DEFAULT CHARSET=...`, or `COLLATE ...` clauses.
+- Identifiers are double-quoted (`"name"`), not backticked.
+- The old `int(N) unsigned` columns are `bigint` (a safe upper bound for
+  the unsigned ranges); plain integers are `integer`.
+- Flag columns are `boolean` where the value is a clear flag, otherwise
+  `smallint`.
+- Auto-increment keys are `GENERATED ALWAYS AS IDENTITY`.
+- Datetimes are `timestamp`.
+- Indexes are separate `CREATE INDEX` statements after the table
+  definition (no inline `KEY` clauses).
 
-Known oddities to watch for:
+Oddities preserved in the schema (do not "fix" these casually -- the
+names are load-bearing across the C++ server and the C# tools):
 
-- Column name with a literal space: `sectors`.`Radius Value`. Either quote
-  in Postgres or rename.
-- Misspelled identifiers preserved: `mob_agressiveness` table,
-  `tirgger_save` table, `sentinal_max_level` column,
-  `SellMultiplyer`/`BuyMultiplyer` columns, `quanity` column. The
-  conversion does not fix these (changing them would break every C++ and
-  C# call site). Rename in a follow-up if/when the code is comprehensively
-  refactored.
-- `binary(1)` on `item_effect_container.EquipEffect`: keep as `bytea` or
-  convert to `boolean` -- needs caller-side audit.
-- `int(11) unsigned zerofill` on `starbase_rooms.fog_*`: zerofill is
-  display-only in MySQL; drop in Postgres conversion.
-- `double(11,4)` (faction values): becomes `double precision` in Postgres;
-  precision/scale specifiers are ignored.
-- `float(N,M)` columns: becomes `real`; precision specifier ignored.
+- Column name with a literal space: `sectors."Radius Value"`. It must be
+  double-quoted to reference it.
+- Misspelled identifiers: `mob_agressiveness` table, `tirgger_save`
+  table, `sentinal_max_level` column, `SellMultiplyer`/`BuyMultiplyer`
+  columns, `quanity` column. These are kept verbatim because renaming
+  them would break every C++ and C# call site.
+- Mixed-case identifiers (`npc_Id`, `EquipEffect`, `SellMultiplyer`,
+  etc.) only resolve when double-quoted. An unquoted mixed-case
+  identifier folds to lowercase in Postgres and will not match the
+  declared column, which is a recurring runtime-path trap -- always quote
+  them.
+- Faction value columns are `double precision`; `real` is used where the
+  source was a single-precision float. Postgres ignores the old
+  precision/scale specifiers.
 
 See `db/postgres/README.md` for the residual manual-fix list and the
-exact transformations `db/postgres/convert.sh` applies.
+provenance of the committed schema.

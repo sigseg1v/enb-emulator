@@ -7,11 +7,14 @@ lives. Modules are roughly grouped by layer.
 
 Conventions:
 
-- `path:line` references point to the current (tada-o r2974) source.
+- `path:line` references point into the current source. Line numbers
+  drift as the source changes; treat them as a starting point and grep
+  for the symbol if a line has moved.
 - "Reference" lines are header files unless stated otherwise.
 - The `g_` prefix means a global pointer declared in `server/src/Net7.h`
-  (lines 261-268). The pattern is "one instance per process, owned by
-  `ServerManager`, exposed globally for terse access".
+  (the `extern <Manager> * g_...;` block, around lines 402-409). The
+  pattern is "one instance per process, owned by `ServerManager`,
+  exposed globally for terse access".
 
 ## Contents
 
@@ -44,16 +47,17 @@ Conventions:
    - [Other content loaders](#66-other-content-loaders)
 7. [Network](#7-network)
    - [UDP_Connection](#71-udp_connection)
-   - [Deleted in Phase Q (TCP cluster + EffectManager)](#72-deleted-in-phase-q-tcp-cluster--effectmanager)
+   - [Classes no longer in server/src (TCP cluster + EffectManager)](#72-classes-no-longer-in-serversrc-tcp-cluster--effectmanager)
 
-> **Phase Q deletions** (2026-05-23). The TCP cluster
-> (`Connection`, `ConnectionManager`, `TcpListener`,
-> `SSL_Listener`, `SSL_Connection`, `ClientTo{Master,Global,Sector}Server`),
-> `EffectManager`, and `JobManager_DEP_` were removed from
-> `server/src/`. The previous §1.2 ConnectionManager, §2.3
-> EffectManager, §7.2 Connection (TCP), and §7.3 SSL_Listener /
-> SSL_Connection sections were deleted from this doc to match. See
-> `plans/17-phase-q-kyp-cluster-deletion.md` for the rationale.
+> **Not in the server-native build.** The old TCP cluster
+> (`Connection`, `ConnectionManager`, `TcpListener`, `SSL_Listener`,
+> `SSL_Connection`, `ClientTo{Master,Global,Sector}Server`) and
+> `EffectManager` are no longer present in `server/src/`. The
+> server-native binary speaks UDP only; the client-facing TCP / RSA /
+> RC4 path lives in the `login-server` process and the `proxy`. This
+> doc has no ConnectionManager, EffectManager (as a class), Connection
+> (TCP), or SSL_Listener / SSL_Connection sections because those
+> classes are gone. See section 7.2 for the full list.
 
 ---
 
@@ -63,11 +67,11 @@ Conventions:
 
 **Header**: `server/src/ServerManager.h:52-183`
 **Implementation**: `server/src/ServerManager.cpp` (1013 lines)
-**Global**: `g_ServerMgr` (`server/src/Net7.h:261`)
+**Global**: `g_ServerMgr` (`server/src/Net7.h:402`)
 
-The root object. Constructed in `main()` at
-`server/src/Net7.cpp:381`. Owns essentially every other manager - many
-as direct members, some as pointers.
+The root object. Constructed in `main()` (`server/src/Net7.cpp:436`,
+the `ServerManager server_mgr(...)` local). Owns essentially every
+other manager - many as direct members, some as pointers.
 
 Public modes:
 
@@ -86,13 +90,31 @@ Entry points:
 | `RunSectorServer` | sector-only mode | `ServerManager.cpp:281` |
 | `MainLoop` | 50ms-tick polling loop | `ServerManager.cpp:439` |
 | `ServerCheck` | one tick of work (mailslots, movement, SSL watchdog) | `ServerManager.cpp:339` |
-| `SetupSectorServer` | activate a sector by id | `ServerManager.cpp:547` |
+| `SetupSectorServer` | activate a sector by id | `ServerManager.cpp` |
 | `SetSectorServerReady` | mark a sector ready, hand back its port | (in cpp) |
-| `ReloadAllObjects` / `ReloadSectorObjects` | content hot-reload | `ServerManager.cpp:470` / `:486` |
+| `EnsureSectorStarted(long sector_id)` | lazily start (or restart a parked) sector on the handoff path | `ServerManager.cpp:662` |
+| `TeardownSector(long sector_id)` | park one idle sector and free its deferred objects | `ServerManager.cpp:760` |
+| `ReloadAllObjects` / `ReloadSectorObjects` | content hot-reload | `ServerManager.cpp` |
 | `GetSectorManager(short port)` / `GetSectorManager(long sector_id)` | sector lookup | (in cpp) |
-| `GetNextEffectID` | server-wide unique effect id allocator | `ServerManager.cpp:270` |
+| `GetNextEffectID` | server-wide unique effect id allocator | `ServerManager.cpp` |
 
-Members of note (`ServerManager.h:121-181`):
+**Lazy sector start + idle teardown.** Sectors are not all stood up at
+boot. A sector loads its content the first time a player is handed off
+to it: `UDP_Master::ProcessHandoff` (`server/src/UDP_Master.cpp:82`)
+calls `EnsureSectorStarted`, which takes a lock-free `GetSectorManager`
+fast path and, on a miss, serializes the actual cold start under
+`m_SectorStartMutex` (`ServerManager.h:195`) -- claiming a manager-pool
+slot, binding the sector's deterministic port, and populating its
+objects. A throttled scan from `ServerCheck` parks sectors that have
+gone idle: `TeardownSector` stops the sector's event thread and calls
+`ObjectManager::PurgeDeferredObjects` to free the galaxy-resident
+skeleton (navs / gates / planets / stations / deco). A parked sector is
+cold-started again on the next handoff. Teardown is guarded:
+`ObjectManager::CanPurgeDeferredObjects` (`ObjectManager.h:69`) probes
+first, and a sector whose skeleton is not a contiguous, tail-purgeable
+prefix is left fully online rather than parked.
+
+Members of note (in `ServerManager.h`):
 
 - `m_AccountMgr` (pointer) - section 4.1
 - `m_PlayerMgr` (value) - section 3.1
@@ -101,9 +123,19 @@ Members of note (`ServerManager.h:121-181`):
   `m_SkillsList`, `m_SectorContent`, `m_CBassetList` - content
   loaders
 - `m_SectorMgrList[MAX_SECTORS]` - per-sector managers, lazily filled
+  (see lazy sector start above)
 - `m_SectorServerMgr` (value) - section 1.3
-- `m_UDPConnection`, `m_UDPMasterConnection` - section 7.1
-- `m_GlobMemMgr`, `m_StringMgr`, `m_SaveMgr`, `m_JobMgr`
+- `m_UDPConnection`, `m_UDPMasterConnection`, `m_UDPGlobalConnection`
+  (the proxy<->server global control plane) - section 7.1
+- `m_GlobMemMgr`, `m_StringMgr`, `m_SaveMgr`
+
+`ServerManager.h:173` still declares a `JobManager * m_JobMgr` member,
+and the ctor/loader still reference `new JobManager()` and
+`m_JobMgr->InitialiseJobs()`. This is a vestigial reference: the only
+`JobManager` definition is `JobManager_DEP_.cpp`, which the build
+excludes (the `_DEP_.cpp` CMake filter), and its `JobManager.h` header
+is not in `server/src/`. The crafting-jobs subsystem is not built or
+wired; treat `m_JobMgr` as a dead stub, not a live manager.
 
 Threading: most members are touched from many threads. `m_Mutex`
 guards the file-timer fields. Per-manager mutexes guard the rest.
@@ -136,10 +168,9 @@ on the same UDP socket.
 **Global**: `g_MailMgr` (`server/src/Net7.h:268`)
 
 Local IPC layer between the server and the login process. The class
-keeps its historical name for source-history continuity; the
-transport, post-Phase M (2026-05-23), is an **AF_UNIX SOCK_DGRAM**
-socket pair under `/run/net7-ipc/`. The wrapper is
-`net7ipc::PosixIpc` in `common/include/net7/PosixIpc.h`.
+keeps its historical name for source-history continuity; the transport
+is an **AF_UNIX SOCK_DGRAM** socket pair under `/run/net7-ipc/`. The
+wrapper is `net7ipc::PosixIpc` in `common/include/net7/PosixIpc.h`.
 
 Allocated in `RunMasterServer` at `server/src/ServerManager.cpp:163`.
 
@@ -174,9 +205,8 @@ first in the dtor (`ServerManager.cpp:108`) so saves drain before
 the rest of the process tears down.
 
 The save thread is the reason for the 5-second `usleep` at the end of
-`MainLoop` (`ServerManager.cpp:467`) - that's the "let the save
-thread finish" path that the in-source TODO calls out as needing real
-event-based shutdown. (Phase M replaced the original `Sleep` call.)
+`MainLoop` - that is the "let the save thread finish" path that the
+in-source TODO calls out as needing real event-based shutdown.
 
 ### 1.6. StringManager / GMemoryHandler
 
@@ -293,15 +323,13 @@ The two `_DEFAULT_TEMP_OBJLIST_SIZE = 200_` slot count
 (`ObjectManager.h:44`) is the per-sector reserve of temporary object
 slots, used for things like loot containers that come and go.
 
-### 2.3. EffectManager (deleted in Phase Q)
+### 2.3. EffectManager (no longer a class)
 
-Originally lived at `server/src/EffectManager.{h,cpp}` and maintained
-a global list of in-flight visual effects keyed by a `Connection*`
-pointer. The class never made the cut to the per-sector model and was
-TCP-bound through that `Connection*` pointer; once Phase Q removed the
-TCP cluster it had nothing left to point at. Deleted 2026-05-23 along
-with the rest of the cluster. Visual-effect bookkeeping today happens
-inside `ObjectManager` via per-object and per-player visibility lists.
+There is no `EffectManager` class in `server/src/`. The old version
+maintained a global list of in-flight visual effects keyed by a
+`Connection*` pointer, which tied it to the now-removed TCP cluster.
+Visual-effect bookkeeping today happens inside `ObjectManager` via
+per-object and per-player visibility lists.
 
 ---
 
@@ -584,15 +612,19 @@ added can be removed - this is the "exit the buff cleanly" pattern.
 
 ### 4.1. AccountManager
 
-**Header**: `server/src/AccountManager.h:52-131`
-**Implementation**: `server/src/AccountManager.cpp` (1272 lines)
-**Global**: `g_AccountMgr` (`server/src/Net7.h:266`)
+**Header**: `server/src/AccountManager.h:52-105`
+**Implementation**: `server/src/AccountManager.cpp`
+**Global**: `g_AccountMgr` (`server/src/Net7.h:407`)
 
 Master-server-only. Constructed in the `ServerManager` ctor when
-`m_IsMasterServer || m_IsStandaloneServer`.
+`m_IsMasterServer || m_IsStandaloneServer`. (A second `AccountManager`,
+with the same wire-facing surface, lives in
+`login-server/Net7SSL/AccountManager.h` -- that copy serves the
+client-facing auth / avatar-list path. The two share opcode and packet
+structures; keep them in sync when either changes.)
 
 Constants (`AccountManager.h:27-28`):
-- `MAX_ACCOUNTS = 1024` (for in-memory mode; SQL mode is unbounded)
+- `MAX_ACCOUNTS = 1024`
 - `TICKET_EXPIRE_TIME = 300000` (5 minutes in ms)
 
 ID arithmetic (`AccountManager.h:47-50`):
@@ -624,24 +656,20 @@ bool   ReadDatabase(CharacterDatabase *database, long avatar_id);
 void   BuildAvatarList(GlobalAvatarList *list, long account_id);
 ```
 
-Account statuses (`AccountManager.h:110`):
-0=Player, 10=donor, 20=Helper, 30=Beta Tester, 50=GM, 60=DGM, 70=HGM,
-80=developer, 100=Admin, -1=Banned, -2=Disabled.
+Account statuses follow the convention 0=Player, 10=donor, 20=Helper,
+30=Beta Tester, 50=GM, 60=DGM, 70=HGM, 80=developer, 100=Admin,
+-1=Banned, -2=Disabled. The GM/DGM/HGM permission levels are defined in
+`Net7.h` (e.g. `GM 50`, `DGM 60`, `HGM 70` around `Net7.h:356-358`),
+which is what GMCommands.txt uses.
 
-The status numbers parallel the permission levels in `Net7.h:212-221`,
-which are what GMCommands.txt uses.
+Tickets are a linked list of `AccountTicket` records keyed by expire
+time. Issued by `BuildTicket(username)`, validated against the username
+on receipt of `0x2002 TICKET` in `UDP_Connection::ProcessTicketInfo`
+(`server/src/UDP_Global.cpp`). Expired tickets are rejected.
 
-Tickets are a linked list of `AccountTicket` records keyed by
-expire time. Issued by `BuildTicket(username)`, validated against the
-username on receipt of `0x2002 TICKET` in
-`UDP_Connection::ProcessTicketInfo`
-(`server/src/UDP_Global.cpp:114`). Expired tickets are rejected.
-
-When `USE_MYSQL_ACCOUNT_DATA` is undefined the class falls back to an
-in-memory `_User m_Accounts[MAX_ACCOUNTS]` (`AccountManager.h:104-118`).
-The build in this fork has SQL enabled (`Net7.h:36-41`) so the
-non-SQL path is essentially dead code; the macros for it remain in
-case someone wants to compile a fileserver-less variant.
+Account data is read from SQL; the server-side `AccountManager.h` holds
+only the ticket list (`AccountTicket * m_Tickets`) and a mutex, with no
+in-memory account array.
 
 ---
 
@@ -752,9 +780,8 @@ subsystem in the fork.
 
 These all share a common pattern: a header declaring a small content
 struct, a `.cpp` implementing in-memory lookup, and a sibling `*SQL.cpp`
-implementing the MySQL load path. The split is so the Postgres
-migration in Phase C can swap loaders without touching the lookup hot
-path.
+implementing the SQL load path. The split lets the SQL backend change
+without touching the lookup hot path.
 
 ### 6.1. ItemBaseManager
 
@@ -872,11 +899,13 @@ ship template id, behaviour, stats, loot table id). MOB instances
 - **MissionHandler** (`m_Missions`, `MissionManager.h`,
   `MissionParser.cpp`, `MissionDatabaseSQL.cpp`) - missions.
   Loaded at `ServerManager.cpp:212`.
-- **JobManager** — Originally `m_JobMgr` / `JobManager_DEP_.h/.cpp`,
-  the `_DEP_` suffix flagging it as deprecated. **Deleted in Phase Q
-  (2026-05-23)** along with the rest of the dead kyp-era cluster.
-  `ServerManager` no longer holds the field; the `InitialiseJobs`
-  call at the old `ServerManager.cpp:215` is gone.
+- **JobManager** (crafting jobs) - not built. The only definition is
+  `JobManager_DEP_.cpp` (the `_DEP_` suffix marks it deprecated), which
+  the CMake build excludes via the `_DEP_.cpp` filter, and its header
+  is not in `server/src/`. `ServerManager` still declares a leftover
+  `m_JobMgr` member and references `InitialiseJobs`, but nothing
+  provides those symbols in the built tree; treat the subsystem as
+  absent. See the note under section 1.1.
 
 ---
 
@@ -939,44 +968,45 @@ void SendPlayerCount();
 
 See `docs/03-network-protocol.md` for the protocol semantics.
 
-### 7.2. Deleted in Phase Q (TCP cluster + EffectManager)
+### 7.2. Classes no longer in server/src (TCP cluster + EffectManager)
 
-Phase Q (2026-05-23) removed 15 files from `server/src/` that were
-dead-on-Linux:
+The following classes are not present in `server/src/`. They were the
+old in-server TCP / SSL stack, dead on the Linux build; the
+client-facing TCP / RSA / RC4 path now lives in the `login-server`
+process and the `proxy`. Listed here so the names resolve when you find
+them in git history or in the kyp archive:
 
 | File(s) | What it was |
 |---|---|
-| `Connection.{cpp,h}` | Per-client TCP connection with the Westwood RSA+RC4 handshake and ~25 opcode handlers (`HandleVersionRequest`, `HandleLogin`, `HandleMasterJoin`, `HandleGlobalConnect`, `HandleGlobalTicketRequest`, `HandleCreateCharacter`, `HandleDeleteCharacter`, …). |
+| `Connection.{cpp,h}` | Per-client TCP connection with the Westwood RSA+RC4 handshake and ~25 opcode handlers (`HandleVersionRequest`, `HandleLogin`, `HandleMasterJoin`, `HandleGlobalConnect`, `HandleGlobalTicketRequest`, `HandleCreateCharacter`, `HandleDeleteCharacter`, ...). |
 | `ConnectionManager.{cpp,h}` | Linked-list bookkeeping over active `Connection`s + `SSL_Connection`s + the `OpcodeCommsThread` that pumped queued sends. |
 | `TcpListener.h` | `accept()`-loop wrapper used by `RunMasterServer` (the call sites were already commented out). |
 | `SSL_Listener.{cpp,h}` / `SSL_Connection.{cpp,h}` | OpenSSL TCP listener for port 443 + per-client TLS connection. Its role moved to the sidecar `login` process years ago; the in-server classes were never reachable in the Linux build. |
 | `ClientToMasterServer.{cpp,h}` / `ClientToGlobalServer.{cpp,h}` / `ClientToSectorServer.{cpp,h}` | Per-server-type TCP opcode handlers (`ProcessMasterServerOpcode` etc) that hung off `Connection`. |
-| `EffectManager.{cpp,h}` | Global visual-effect bookkeeping keyed by `Connection*`. See §2.3. |
-| `JobManager_DEP_.{cpp,h}` | Crafting-jobs manager already marked `_DEP_` upstream. |
+| `EffectManager.{cpp,h}` | Global visual-effect bookkeeping keyed by `Connection*`. See section 2.3. |
 
-`ServerManager.h` lost the `m_ConnectionMgr` field, the
-`GetSSLConnection` declaration, and a small set of Phase-P loud-abort
-stubs that pointed into the dead cluster. The Westwood RSA+RC4
-handshake itself was preserved: the proxy reimplements it in
-`proxy/Connection.cpp` and shares the wire-format constants via
-`common/include/net7/WestwoodRC4.h` / `WestwoodRSA.h`.
+`ServerManager.h` has no `m_ConnectionMgr` field and no
+`GetSSLConnection` declaration. The Westwood RSA+RC4 handshake is not
+lost: the proxy implements it in `proxy/Connection.cpp` and shares the
+wire-format constants via `common/include/net7/WestwoodRC4.h` /
+`WestwoodRSA.h`.
 
-`PlayerConnection.cpp` was **kept** despite its misleading name —
-it is the live UDP send layer for `Player::Send*` calls, not a TCP
+`PlayerConnection.cpp` is **present** despite its misleading name -- it
+is the live UDP send layer for `Player::Send*` calls, not a TCP
 connection.
 
-If you need the pre-deletion source it is in git history; see
-`plans/17-phase-q-kyp-cluster-deletion.md` for the audit that found
-the cluster dead.
+The crafting-jobs `JobManager_DEP_.cpp` is also still on disk but
+excluded from the build (see section 6.6); it is not part of the running
+server.
 
 ---
 
-## 8. Flow walkthroughs (Phase H)
+## 8. Flow walkthroughs
 
 The previous sections describe what each module does. This section traces
 three runtime flows across modules so the boundaries are visible.
 
-### 8.1 Login flow (TCP connect → credential check → response)
+### 8.1 Login flow (TCP connect -> credential check -> response)
 
 Client TCP-connects to the MasterServer process; the connection is keyed
 with RSA + RC4. On `GLOBAL_CONNECT`, GlobalServer pulls the ticket apart,
@@ -994,7 +1024,7 @@ sequenceDiagram
     Client->>MasterServer: TCP connect
     MasterServer->>Client: RSA public key
     Client->>MasterServer: Encrypted RC4 session key
-    MasterServer->>MasterServer: DoKeyExchange (decrypt) → SetRC4Key
+    MasterServer->>MasterServer: DoKeyExchange (decrypt) -> SetRC4Key
     Client->>GlobalServer: 0x006D GLOBAL_CONNECT + ticket
     GlobalServer->>AccountManager: GetUsernameFromTicket
     AccountManager->>DB: SELECT * FROM accounts WHERE username
@@ -1003,7 +1033,7 @@ sequenceDiagram
     alt valid
         GlobalServer->>AccountManager: BuildAvatarList(account_id)
         AccountManager->>DB: SELECT * FROM avatar_data WHERE account_id
-        DB-->>AccountManager: 0–5 avatar rows
+        DB-->>AccountManager: 0-5 avatar rows
         AccountManager-->>GlobalServer: avatar list
         GlobalServer->>Client: 0x0070 GLOBAL_AVATAR_LIST
     else invalid
@@ -1011,18 +1041,18 @@ sequenceDiagram
     end
 ```
 
-Phase Q deleted the TCP-cluster duplicates that previously lived in
-`server/src/`; this flow now executes entirely inside the **login-server**
-process. Key code lives under `login-server/Net7SSL/`:
+This flow executes entirely inside the **login-server** process (the
+server-native binary has no TCP-cluster copy of it). Key code lives
+under `login-server/Net7SSL/`:
 `Connection.cpp:45` (`ReSetConnection`), `Connection.cpp:147`
-(`DoKeyExchange`), `ClientToGlobalServer.cpp:128` (`HandleGlobalConnect`),
-`AccountManager.cpp:839` (`GetUsernameFromTicket`),
-`ClientToGlobalServer.cpp:218` (`SendAvatarList`),
-`AccountManager.cpp:972` (`BuildAvatarList`). The Westwood RSA/RC4 key
-exchange uses the shared headers in `common/include/net7/WestwoodRsa.h`
+(`DoKeyExchange`), `ClientToGlobalServer.cpp:128` (`HandleGlobalConnect`,
+which calls `g_AccountMgr->GetUsernameFromTicket`),
+`ClientToGlobalServer.cpp:222` (`SendAvatarList`, which calls
+`g_AccountMgr->BuildAvatarList`). The Westwood RSA/RC4 key
+exchange uses the shared headers in `common/include/net7/WestwoodRSA.h`
 and `WestwoodRC4.h`.
 
-### 8.2 Character select → sector handoff
+### 8.2 Character select -> sector handoff
 
 Client picks an avatar slot. GlobalServer loads the full character record
 into a Player object, asks SectorManager which sector that character is in
@@ -1067,11 +1097,11 @@ All handlers live in the login-server under `login-server/Net7SSL/`:
 `connection_B.h:122` (`HandleMasterJoin`), `connection_B.h:144`
 (`SendServerRedirect`). The handoff from login-server to the actual
 sector-running server process uses the AF_UNIX SOCK_DGRAM mailbus
-(formerly Win32 mailslots) — see §4.1 MailManager.
+(formerly Win32 mailslots) -- see section 4.1 MailManager.
 
-### 8.3 Packet receive → opcode dispatch → response
+### 8.3 Packet receive -> opcode dispatch -> response
 
-This flow now lives in two places — the **login-server** owns the
+This flow lives in two places: the **login-server** owns the
 client-facing TCP/RSA/RC4 path that authenticates and hands the client
 off, and the **proxy** owns the same path for the live session. The
 server-native binary speaks UDP only (see `UDP_*.cpp`).
@@ -1095,17 +1125,17 @@ sequenceDiagram
     participant Handler as Handle*
 
     Client->>Sock: TCP packet
-    Sock->>Conn: ConnectionManager::CheckConnections → ProcessRecvInputs
+    Sock->>Conn: ConnectionManager::CheckConnections -> ProcessRecvInputs
     Conn->>Conn: recv 4-byte EnbTcpHeader (size, opcode)
     Conn->>Conn: RC4 decrypt header (if client type)
     Conn->>Conn: recv payload (size bytes)
     Conn->>Conn: RC4 decrypt payload
-    Conn->>Dispatch: ProcessGlobalServerOpcode | ProcessMasterServerOpcode | …
-    Dispatch->>Handler: HandleGlobalConnect / HandleCreateCharacter / …
+    Conn->>Dispatch: ProcessGlobalServerOpcode | ProcessMasterServerOpcode | ...
+    Dispatch->>Handler: HandleGlobalConnect / HandleCreateCharacter / ...
     Handler->>Conn: SendResponse(opcode, data, len)
     Conn->>Conn: build header, RC4 encrypt
     Conn->>MQ: queue outgoing buffer
-    Conn->>Sock: PulseConnectionOutput → send()
+    Conn->>Sock: PulseConnectionOutput -> send()
     Sock->>Client: TCP response
 ```
 
@@ -1113,11 +1143,11 @@ Key code in **login-server** (`login-server/Net7SSL/`):
 `ConnectionManager.cpp:96` (`PulseConnectionOutput` drain pump),
 `Connection.cpp:45` (`ReSetConnection`), `Connection.cpp:147`
 (`DoKeyExchange`). Key code in **proxy** (`proxy/`):
-`Connection.cpp:135` (`DoKeyExchange` — primary copy used at runtime),
+`Connection.cpp:135` (`DoKeyExchange` -- primary copy used at runtime),
 `Connection.cpp:597` (`SendResponse`), `Connection.cpp:895`
-(`DoKeyExchange` — Linux mirror with RSA + RC4 over POSIX sockets).
-The headless reference client (Phase S) ports the same handshake to C#
-in `tools/cli-client/CliClient.Core/Wire/EncryptedTcpConnection.cs` —
+(`DoKeyExchange` -- Linux mirror with RSA + RC4 over POSIX sockets).
+The headless C# reference client ports the same handshake in
+`tools/cli-client/CliClient.Core/Wire/EncryptedTcpConnection.cs` --
 useful when you need a byte-by-byte trace of the protocol without
 launching the Win32 client.
 

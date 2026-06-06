@@ -1,27 +1,27 @@
 # Integration tests (`tests/integration/CliClient.IntegrationTests/`)
 
-The integration suite is the **opcode-correctness gate** for the
-project. xUnit 2.9 / .NET 10, references the `CliClient.Core` library
-from Phase S, drives the live docker-compose stack
-(mysql + login-server + proxy + server), and asserts protocol fidelity
-opcode-by-opcode.
+The xUnit integration suite
+(`tests/integration/CliClient.IntegrationTests/`) is the
+**opcode-correctness gate** for the project. xUnit 2.9 / .NET 10, it
+references the `CliClient.Core` library, drives the live docker-compose
+stack (postgres + login-server + proxy + server), and asserts protocol
+fidelity opcode-by-opcode.
 
 If a server change silently breaks the wire format, this suite catches
 it. If a `CliClient.Core` codec drifts, this suite catches it. If
 either side starts retry-storming under distress, this suite catches
 it.
 
-Phase plan: `plans/20-phase-t-cli-integration-tests.md`. Phase S
-(the CLI client itself) is the dependency: `docs/15-cli-client.md`.
+The CLI client it drives is documented in `docs/15-cli-client.md`.
 
-## Hard rules (verbatim from the plan)
+## Hard rules
 
-These mirror the Phase S rules and apply doubly — the integration
+These mirror the CLI client's rules and apply doubly -- the integration
 suite is the most aggressive consumer of the CLI client, and the
 CLI client is the most aggressive consumer of the server:
 
 1. **NEVER modify the server to make a test pass.** If a test fails
-   because the server behaves unlike the real client, fix the test —
+   because the server behaves unlike the real client, fix the test --
    or fix the server *to match the real client*, never to match the
    test. The escape hatch (the only one) is a primary-source
    citation in the commit message per the "Server integrity rules"
@@ -33,7 +33,7 @@ CLI client is the most aggressive consumer of the server:
 3. The CLI MAY request broader data than a real Win32 client would
    (e.g. enumerate-all-X), but only when the server is willing to
    serve it unmodified.
-4. **Real client wins on protocol-shape disagreements** — the same
+4. **Real client wins on protocol-shape disagreements** -- the same
    way `docs/15-cli-client.md` describes it.
 
 ## Layout
@@ -42,16 +42,18 @@ CLI client is the most aggressive consumer of the server:
 tests/integration/CliClient.IntegrationTests/
 ├── CliClient.IntegrationTests.csproj   net10.0, xunit, ref's CliClient.Core
 ├── Directory.Build.props               nullable + TreatWarningsAsErrors
-├── ServerFixture.cs                    IAsyncLifetime — docker compose up + TCP probes
+├── ServerFixture.cs                    IAsyncLifetime: docker compose up + TCP probes
 ├── ServerCollection.cs                 [CollectionDefinition("ServerCollection")]
 ├── ClientFixture.cs                    per-test seam: builds OpcodeRegistry + AuthLoginClient
 ├── RepoRoot.cs                         walks up from bin/ to find docker-compose.yml
 ├── TestAccounts.cs                     on-demand Npgsql INSERT per test
+├── Coverage/                           opcode-coverage ratchet (see below)
 ├── Fixtures/
 │   └── Captures/                       hex-with-comments extracts from retail captures
 │       ├── README.md
 │       ├── masterjoin_packet220.hex
-│       └── serverredirect_packet222.hex
+│       ├── serverredirect_packet222.hex
+│       └── live_*.hex                  per-opcode live-reference frames
 ├── Smoke/                              no-docker harness self-tests
 ├── Handshake/                          TLS auth + RSA+RC4 round-trips
 ├── Opcodes/                            per-opcode round-trip (one file per opcode)
@@ -60,7 +62,7 @@ tests/integration/CliClient.IntegrationTests/
 └── Robustness/                         bad-server scenarios (uses ScriptedServer)
 ```
 
-The folder names match xUnit's discovery — `dotnet test --filter
+The folder names match xUnit's discovery -- `dotnet test --filter
 "FullyQualifiedName~Robustness"` runs only the Robustness folder.
 
 ## What the categories assert
@@ -70,7 +72,7 @@ The folder names match xUnit's discovery — `dotnet test --filter
 | Smoke | Project loads, RepoRoot resolves, OpcodeRegistry constructs | No |
 | Handshake | `/AuthLogin` returns valid+invalid tickets correctly; RSA+RC4 handshake completes on global/master/sector | Yes |
 | Opcodes | Single-opcode round-trip: send typed packet, drain for the typed reply, assert decoded fields | Yes |
-| Workflows | Composite operations like ConnectAndLogin — HealthGuard not tripped, stage transitions correct, abort surfaces login rejection | Yes |
+| Workflows | Composite operations like ConnectAndLogin -- HealthGuard not tripped, stage transitions correct, abort surfaces login rejection | Yes |
 | Verification | Capture-replay: load real retail bytes, decode via our codecs, re-encode, assert bytes-equal-original (codec round-trip identity) | No |
 | Robustness | Client behaviour under server distress: mid-handshake disconnect, malformed reply, rate-limit. Uses ScriptedServer (in-process bad-server) | No |
 
@@ -110,8 +112,8 @@ Cross-run isolation comes from `down -v` in DisposeAsync.
 `127.0.0.1` bound to an OS-assigned port. It runs a caller-supplied
 `Func<NetworkStream, CancellationToken, Task>` on the accepted
 connection, then closes. This is the standard escape hatch for
-"the test needs the server to do something bad" — instead of breaking
-the real proxy (forbidden — see Hard Rules #1), we ship a fake
+"the test needs the server to do something bad" -- instead of breaking
+the real proxy (forbidden -- see Hard Rules #1), we ship a fake
 responder we can program.
 
 `ScriptedServer.HandshakeAsServerAsync(stream, ct)` drives the
@@ -123,7 +125,7 @@ encrypted frames via `ScriptedServer.EncryptFrame(outboundRc4,
 opcode, payload)` or deliberately corrupt ones.
 
 ScriptedServer **must not** be used for "test the real server's
-behaviour" — that's the live-stack categories' job. It is exclusively
+behaviour" -- that's the live-stack categories' job. It is exclusively
 for asserting the *client's* response to bad server behaviour.
 
 ## Capture-replay (Verification)
@@ -133,7 +135,7 @@ for asserting the *client's* response to bad server behaviour.
 `CliClient.Core`, asserts every transcribed field, then re-encodes
 and asserts the bytes equal the original. This **round-trip
 identity** is the strongest fidelity check we have for any codec
-that touches the wire — if it fails, the codec has silently drifted
+that touches the wire -- if it fails, the codec has silently drifted
 from the real retail format and any "fix" must come with primary-
 source proof (per `CLAUDE.md` server-integrity rules).
 
@@ -141,7 +143,7 @@ Fixtures are textual hex with `#` line comments, parsed by
 `Verification/HexFixture.cs`. The format was chosen so reviewers
 can eyeball bytes against `common/include/net7/PacketStructures.h`
 in PR diffs. Source files (capture name + frame number) are cited
-in the fixture comment header — that's the primary-source
+in the fixture comment header -- that's the primary-source
 chain-of-custody required for the bytes to count as preservation
 reference material.
 
@@ -152,14 +154,14 @@ reference material.
    textual hex-dump of a real 2006-era session against the live
    retail server.
 2. Extract just the payload bytes for one opcode frame (NOT the
-   4-byte EnB header — that's `DecodeInbound`'s job to consume; the
+   4-byte EnB header -- that's `DecodeInbound`'s job to consume; the
    fixture is just what the opcode codec sees). Note the frame
    number and any sibling-frame context that helps interpret the
    bytes.
 3. Write `Fixtures/Captures/<opcode>_packetNNN.hex`:
    ```
    # Source: archive/kyp-snapshot/capturedPackets/capture_1.rar (frame 220).
-   # <one paragraph explaining what this is — header bytes, what
+   # <one paragraph explaining what this is -- header bytes, what
    #  fields the payload decodes to, any divergence findings to
    #  flag for future investigation>
    00 00 00 02
@@ -198,12 +200,42 @@ reference material.
    convenience), send the typed packet via the codec, drain
    inbound packets in a loop until the expected opcode arrives,
    decode via the typed codec, assert the fields.
-4. Drain on *opcode*, not on ordering. Phase K may add an
+4. Drain on *opcode*, not on ordering. The server may add an
    unsolicited hello-packet on connect; tests that assert "the
    first packet is X" will false-break. Loop until you see X.
 5. Each test gets its own `EncryptedTcpConnection` so the per-
    test cancellation tokens stay independent. Don't share
    sessions across tests.
+
+## Opcode-coverage ratchet (`Coverage/`)
+
+`Coverage/` holds a meta-test that counts how many opcodes from
+`common/include/net7/Opcodes.h` have at least one round-trip test and
+enforces "never goes down". Three lists keep it honest:
+
+- `TestedOpcodes.Opcodes` -- every opcode with a real round-trip
+  test in this suite. `CoverageRatchetTests.Ratchet_CountEqualsFloor`
+  asserts `TestedOpcodes.Opcodes.Count == TestedOpcodes.MinTestedCount`.
+  The equality (not `>=`) is deliberate: every add MUST be paired
+  with a constant bump, every delete with a decrement and a commit
+  message explaining what coverage went away. Drift breaks the build.
+- `KnownUnimplementedOpcodes.Opcodes` -- opcodes that exist in the
+  wire protocol but for which the current server has zero
+  implementation. These are server gaps, not test debt. Each entry
+  is paired with a `[Fact(Skip = ...)]` stub in
+  `UnimplementedOpcodeStubTests` whose body throws immediately.
+  `UnimplementedOpcodeStubTests.EveryEntry_HasMatchingSkippedStub`
+  asserts the list and the stubs stay in lockstep.
+
+When an opcode that was on the unimplemented list gets wired up
+server-side, the migration is forced to be clean: drop the `Skip`
+on the matching stub (the throw now fires, so a real round-trip
+test has to replace it), remove the `KnownUnimplementedOpcodes`
+entry, add a `TestedOpcodes` entry, and bump `MinTestedCount`. The
+two ratchet tests are paired by design so the migration cannot be
+half-done. Coverage ramps as more opcodes get wired server-side and
+gain round-trip tests here; the in-sector UDP opcode plane is the
+main area still filling in.
 
 ## How to debug a failing test
 
@@ -215,9 +247,20 @@ just dev                      # bring up the live stack
 just cli-integration          # full xUnit suite; reuses the live stack
 ```
 
+`ServerFixture` (`IAsyncLifetime`) owns the docker-compose stack by
+default: `docker compose up -d --wait` on startup, TCP-probe the
+login/global/master/sector ports until they accept, then
+`docker compose down -v` on dispose. Set
+`CLI_INTEGRATION_SKIP_COMPOSE=1` to run against an externally-managed
+stack instead (one already brought up by `just dev` /
+`just run-stack-bg`, or a sibling CI job): the port probe still runs,
+but the up/down commands are skipped so the suite never tears down a
+stack it didn't start. `just cli-integration` exports this
+automatically when it detects the ports already listening.
+
 When a test fails, the assertion message includes the decoded
 fields and (for round-trip tests) the byte-level diff. For
-mid-flight diagnostics, drop a `Console.WriteLine` — xUnit
+mid-flight diagnostics, drop a `Console.WriteLine` -- xUnit
 captures stdout per-test and surfaces it in the failure report.
 
 ### CI
@@ -225,11 +268,11 @@ captures stdout per-test and surfaces it in the failure report.
 The `cli-integration-test` GitHub Actions job uploads two
 artifacts on every run:
 
-- `cli-integration-trx` — TRX file with per-test results,
+- `cli-integration-trx` -- TRX file with per-test results,
   consumed by the GitHub Actions "Test summary" tab. Click a
   failed test for the assertion message + stdout capture.
 - On failure, the job also dumps `docker compose logs` for
-  mysql, login, proxy, and server into the job log.
+  postgres, login, proxy, and server into the job log.
 
 If a flake repros locally, the most useful first step is
 `docker compose logs server | tail -200` while the failing test
@@ -239,7 +282,7 @@ is running.
 
 | Recipe | What it runs | Wall-clock |
 |---|---|---|
-| `just cli-integration` | Full suite. Probes live ports — reuses an existing `just run-stack-bg` if found, else hands lifecycle to `ServerFixture`. | ~10s + compose-boot if cold |
+| `just cli-integration` | Full suite. Probes live ports -- reuses an existing `just run-stack-bg` if found, else hands lifecycle to `ServerFixture`. | ~10s + compose-boot if cold |
 | `just cli-integration-fast` | No-docker subset (Smoke + Verification + Robustness). | ~540ms |
 
 The fast variant is the inner-loop default for changes that don't
@@ -253,7 +296,7 @@ ScriptedServer scenarios).
   compose stack lifecycle exactly right.
 - `Assert.Equal(expected, actual)` on `byte[]` gives readable
   failures with hex dumps.
-- TRX integrates with GitHub Actions test summaries — failed
+- TRX integrates with GitHub Actions test summaries -- failed
   opcodes get linked directly in the PR view.
 
 ## What this suite is NOT

@@ -1,4 +1,4 @@
-# Gameplay loop — server's view
+# Gameplay loop -- server's view
 
 What happens server-side when a player does the things players
 do: shoot, jump, take a mission, trade, join a guild, talk.
@@ -18,23 +18,23 @@ equippable activation. Energy weapons specifically go through
 1. Check energy reserves (line 241).
 2. Deduct energy cost (line 248).
 3. Roll hit/miss/crit via `Player::CalcDamage()`
-   (PlayerCombat.cpp:331) — uses weapon subcategory, stat
+   (PlayerCombat.cpp:331) -- uses weapon subcategory, stat
    modifiers, and `CalcMissChanceVersus()`
    (PlayerCombat.cpp:299).
-4. Apply impact radius across sector — damage every target in
+4. Apply impact radius across sector -- damage every target in
    the AoE (PlayerCombat.cpp:262-294).
 
 **Damage application.** Funnels through
 `Player::DamageObject()` (PlayerCombat.cpp:28): shields
 first, then deflects, then hull. Hull zero triggers
-`Player::RemoveHull()` (PlayerCombat.cpp:77) — incapacitation,
+`Player::RemoveHull()` (PlayerCombat.cpp:77) -- incapacitation,
 XP debt accounting, player immobilization. Warp transit
 short-circuits damage (PlayerCombat.cpp:38) and aborts
 prospecting (line 50).
 
 ## 2. Exploration and sector travel
 
-Two distinct mechanisms — impulse warp and stargate jump.
+Two distinct mechanisms -- impulse warp and stargate jump.
 
 **Impulse warp** (within or between adjacent sectors):
 `Player::HandleWarp()` (PlayerConnection.cpp:1825) walks the nav
@@ -43,17 +43,20 @@ chain via `Player::SetupWarpNavs()`, then `PrepareForWarp()` /
 player action or arrival.
 
 **Stargate jump** (cross-system): `Player::OpenStargate()`
-(PlayerConnection.cpp:9365) opens the gate → render-state change →
+(PlayerConnection.cpp:9365) opens the gate, render-state change,
 `SectorManager::GateJump()` (SectorManager.h:107) transfers the
 player to the target sector. Stargate objects are typed
-`OT_STARGATE` (StarGateClass.h). Phase Q deleted the kyp-era
-`ClientToSectorServer.cpp` that previously held these handlers —
-the proxy still owns a TCP-facing copy at
+`OT_STARGATE` (StarGateClass.h). The server-native stargate handlers
+live in `PlayerConnection.cpp`; the proxy owns a TCP-facing copy at
 `proxy/ClientToSectorServer.cpp` for the legacy connect path.
 
-Sector handoff is documented in `docs/04-server-modules.md`
-§8.2 — the actual entry into the new sector goes through
-the sector-server connection.
+Target sectors are started lazily: `SectorManager::GateJump()` (and
+warp arrival) call `ServerManager::EnsureSectorStarted()`
+(SectorManager.cpp:682,750) to spin a sector up on first entry, and an
+idle sector is parked again once empty (`m_SectorOnline`,
+SectorManager.h:247). Sector handoff is documented in
+`docs/04-server-modules.md` §8.2 -- the actual entry into the new
+sector goes through the sector-server connection.
 
 ## 3. Missions
 
@@ -69,7 +72,7 @@ KillMob, ScanObject, etc. Progress lives in the player's
 and persists to `avatar_missions` + `mission_objectives`.
 
 Rewards (XP, credits, items) dispatch from stage-complete
-callbacks. Mission XML is interpreted at load — the runtime
+callbacks. Mission XML is interpreted at load -- the runtime
 form is `MissionTree` graphs in
 `g_ServerMgr->m_Missions.m_Missions`.
 
@@ -98,7 +101,7 @@ fans out to `HandleCreateGuild()` (line 66),
 (line 91), `HandleListAllGuildMembers()` (line 74), etc.
 
 Guild state loads at boot via
-`PlayerManager::LoadGuildsFromSQL()` (GuildManager.cpp:26) —
+`PlayerManager::LoadGuildsFromSQL()` (GuildManager.cpp:26) --
 tables `guilds`, `guild_ranks`, `guild_members`. Per-player
 guild hookup is `Player::SetupGuildInfo()` (PlayerGuild.cpp:25),
 which auto-subscribes the player to the guild chat channel.
@@ -129,21 +132,21 @@ Routing helpers on `PlayerManager`:
 ## 7. The big picture
 
 ```
-client packet ──► ConnectionManager (recv loop) ──► HandleXxx() dispatch
-                                                            │
-                                                            ▼
-                                          ┌────────────────────────────────┐
-                                          │ Player / sector / guild logic  │
-                                          │  (mutates in-memory state)     │
-                                          └────────────────────────────────┘
-                                                            │
-                              ┌─────────────────────────────┼─────────────────────────────┐
-                              ▼                             ▼                             ▼
+client packet --> ConnectionManager (recv loop) --> HandleXxx() dispatch
+                                                            |
+                                                            v
+                                          +--------------------------------+
+                                          | Player / sector / guild logic  |
+                                          |  (mutates in-memory state)     |
+                                          +--------------------------------+
+                                                            |
+                              +-----------------------------+-----------------------------+
+                              v                             v                             v
                        Player object              Sector object lists              DAO writes
                        (m_PlayerIndex)            (mobs, npcs, items)            (avatar_*, guild_*)
-                              │
-                              ▼
-                       Outbound MessageQueue ──► PulseConnectionOutput ──► client
+                              |
+                              v
+                       Outbound MessageQueue --> PulseConnectionOutput --> client
 ```
 
 The packet-dispatch and per-tick scheduling that drives all of

@@ -1,97 +1,71 @@
-# 10 - Modernization roadmap
+# 10 - Project status and known limitations
 
-A retrospective on phases A through T plus an honest accounting of what
-still needs doing. Authoritative source for current status is
-`plans/00-master.md`; if this document and the plans disagree, the plans
-win.
+A present-tense summary of what works today, what is still incomplete, and
+an explicit list of things this project deliberately does not do. Internal
+progress notes live under `plans/`.
 
-This is **not a marketing pitch**. The codebase was a 2010 Windows-targeted
-~162K-LOC C++ project with a 2008-vintage C# editor suite and a 2024 GPLv3
-bash installer bolted on. The "modernization" was bringing it to the point
-where a contributor with current tools can build, test, and extend it on
-Linux. Most of that work landed across phases A-T; the parts that remain
-are listed at the bottom.
+This is **not a marketing pitch**. The codebase started as a 2010
+Windows-targeted ~162K-LOC C++ project with a 2008-vintage C# editor suite
+and a 2024 GPLv3 bash installer bolted on. The goal of the modernization
+work was to bring it to the point where a contributor with current tools
+can build, test, and extend it on Linux. Most of that is done; the parts
+that remain are listed below.
 
-## What's done
+## What works today
 
-| Phase | Scope | Status |
-|---|---|---|
-| A | Repo merge, docs, scaffolding | complete |
-| B | Best-effort Linux server build via CMake | complete |
-| C | MySQL → Postgres scaffolding (schema conversion) | complete (schema scaffold; DAO migration is Phase N) |
-| D | C# tools to .NET 10 SDK-style csproj | complete |
-| E | OpenSSL 1.0 → 3.x for the server target | complete |
-| F | Compiler warning cleanup | complete (baseline + 2 categories) |
-| G | Test scaffolding (GoogleTest + smoke tests) | complete |
-| H | Deepen docs (protocol RE, sequence diagrams, ability internals) | complete |
-| I | Dev env polish (justfile, docker-compose, OCI images, CI matrix) | complete |
-| J | End-to-end runnable: server + proxy + login on Linux, integration tests | complete |
-| L | C# tools to Avalonia (Linux-native UI; no WINE) | complete |
-| M | Eliminate Win32 from server-native code (mailslot → AF_UNIX, etc.) | complete |
-| N | `mysqlplus.cpp` → libpqxx rewrite (Phase C continuation) | complete |
-| O | OpenSSL 3.x for proxy + login-server | complete |
-| P | Stub-debt audit | complete |
-| Q | Delete dead kyp-era TCP cluster | complete |
-| R | Extract `common/include/net7/` for shared protocol headers | complete |
-| S | Headless CLI client (C# / .NET 10) | complete (14/17 items; 3 blocked on Phase K) |
-| T | CLI-driven integration test suite (xUnit) | complete (9/10 items; enumerate blocked on Phase K) |
+The server runs natively on Linux. Concretely:
 
-Concrete outcomes:
-
-- Server + proxy + login-server build clean on Linux via CMake + Ninja
-  against system OpenSSL 3.x and libpqxx 7.x; the gtest suite and the
-  CLI-driven integration tests pass (33/33).
-- The Win32-specific shim trees (`server/compat/`, `proxy/compat/`,
-  `login-server/Net7SSL/compat/`) are deleted. Mailslot IPC is replaced
-  with AF_UNIX SOCK_DGRAM (`net7ipc::PosixIpc`); single-instance lock is
+- Server, proxy, and login-server build clean on Linux via CMake + Ninja
+  against system OpenSSL 3.x and libpqxx 7.x. The gtest suite and the
+  CLI-driven integration tests pass.
+- The runtime database is Postgres. The schema is `db/postgres/schema.sql`
+  (71 tables). Every DAO speaks Postgres through libpqxx; none of the C++
+  targets link libmysqlclient. The original MySQL dumps under `db/mysql/`
+  are kept only as historical source.
+- The Win32-specific shim trees are not present. Mailslot IPC is replaced
+  with AF_UNIX SOCK_DGRAM (`net7ipc::PosixIpc`); single-instance locking is
   `flock` on a pidfile (`net7ipc::SingleInstance`); threading is plain
   pthreads.
 - Cross-process headers (opcodes, packet structures, port numbers,
-  RSA/RC4) live in `common/include/net7/` and are shared by all three
-  C++ targets.
-- 13 Avalonia editor ports replace the 2008-era WinForms suite for
-  Linux runtime; `tools/itemeditor/` is the only un-ported editor (it
-  never had a `.csproj` in the upstream snapshot).
-- The kyp-era TCP cluster (Connection, ConnectionManager, TcpListener,
-  SSL_Listener, SSL_Connection, ClientTo{Master,Global,Sector}Server,
-  EffectManager, JobManager_DEP_ — 15 files) is gone from `server/src/`.
-  The proxy and login-server still own the equivalent code where it's
-  load-bearing.
+  RSA/RC4, the Mutex wrapper) live in `common/include/net7/` and are
+  shared by all three C++ targets, so there is one canonical copy of every
+  struct that crosses a process boundary.
+- The C# editor and tool suite is ported to Avalonia 11 / .NET 10 and runs
+  natively on Linux without WINE. There are 13 Avalonia executables (the
+  content editors -- sector, mob, mission, faction, item, effect, talktree,
+  station tools -- plus the launcher, patchers, data import, and
+  LaunchNet7) on top of the shared `commontools-avalonia` library. The
+  Item Editor is ported (`tools/item-editor-avalonia/`); its WinForms
+  original at `tools/itemeditor/` is kept for reference only.
+- A headless C# CLI client (`tools/cli-client/`) and an xUnit integration
+  suite drive the live server end to end and byte-pin its packets.
+- The Linux client installer (`client/linux-installer/`, GPLv3, verbatim
+  from upstream) installs the original Windows client under WINE.
 
-For per-phase deliverables and decision history, see
-`plans/00-master.md`, the per-phase `plans/NN-phase-*.md` files, and
-the append-only `plans/99-decisions-log.md`.
+The kyp-era TCP cluster (Connection, ConnectionManager, TcpListener,
+SSL_Listener, SSL_Connection, ClientTo{Master,Global,Sector}Server,
+EffectManager, JobManager_DEP_) is not present in `server/src/`. The
+proxy and login-server own the equivalent TCP plumbing where it is
+load-bearing.
 
-## What's left
+## What is incomplete
 
-### Phase K — in-game opcode handlers + UDP plane
+### In-sector UDP opcode plane
 
-The remaining open phase. Plan: `plans/11-phase-k-opcodes.md`. The
-master-server / global-server / sector-server handlers all exist in
-`login-server/Net7SSL/` and `proxy/`; the inside-the-sector UDP opcode
-dispatch (combat, ability execution, MOB AI, world updates) is the
-next pass. Three Phase S and one Phase T item are blocked on this work
-finishing.
+The master-server, global-server, and sector-server handlers exist in
+`login-server/Net7SSL/` and `proxy/`. The inside-the-sector UDP opcode
+dispatch -- combat, ability execution, MOB AI, and world updates -- is
+still being filled in. This is the main capability gap: a player can log
+in, reach a sector, and chat, but the in-game simulation handlers are
+incomplete. A few CLI and integration-test features that depend on those
+handlers are parked until the corresponding server-side opcode lands.
 
-### Phase N Wave 3 — DAO sweep tail
+### Optional C++23 bump
 
-Phase N replaced `mysqlplus.cpp` with libpqxx and migrated most DAOs;
-a handful still use the libmysqlclient path. Wave 3 closes the tail.
-Tracked in `plans/14-phase-n-libpqxx.md`.
-
-### Optional — C++23 bump
-
-Task #60 in the TaskList. The server's CMake currently sets a
-conservative C++ standard; bumping to C++23 would unlock std::expected
-and friends but requires a manual approval pass to confirm no
-regressions on the supported compilers. Not autonomous.
-
-### `tools/itemeditor/` Avalonia port
-
-No upstream `.csproj` to start from. Doable as a from-scratch Avalonia
-build against the same `commontools-avalonia` shared library the other
-editors use — but it is the only remaining WinForms-only editor. Not
-prioritised; tracked in `plans/12-phase-l-avalonia.md`.
+The server's CMake currently sets a conservative C++ standard. Bumping to
+C++23 would unlock `std::expected` and friends but requires a manual pass
+to confirm no regressions on the supported compilers, so it is not done
+automatically.
 
 ## What we deliberately skipped
 
@@ -99,11 +73,11 @@ Things we are **not** doing. Each has a reason; in some cases the reason
 is "out of scope" rather than "bad idea".
 
 - **No full clean-room protocol reverse engineering.** The existing
-  Net-7 RE work (architecture document, packet captures, UdpDump, the
-  in-tree protocol code) is preserved and documented. Going beyond that
-  requires sustained packet-capture work that is bigger than the rest
-  of this roadmap combined. Phases H and K deepen what we have; they
-  do not start over.
+  protocol knowledge -- preserved architecture documents, packet captures,
+  and the in-tree protocol code -- is conserved and documented. Going
+  beyond that requires sustained packet-capture work that is bigger than
+  the rest of this roadmap combined. We deepen what we have; we do not
+  start over.
 
 - **No new gameplay content.** Adding new sectors / missions / mobs is
   something the editors enable; the preservation project itself is
@@ -131,9 +105,9 @@ is "out of scope" rather than "bad idea".
 - **No "modernise to async/await/coroutines".** Tempting in a few
   hot-paths but invasive. The threading model works. Leave it.
 
-- **No replacing Crypto++ with OpenSSL** (or vice versa). Phases E and O
-  touched OpenSSL only. Crypto++ is used for the client-protocol RSA/RC4
-  in `tools/udpdump/` and is a stable, narrow surface; leaving it alone
+- **No replacing Crypto++ with OpenSSL** (or vice versa). The OpenSSL
+  work was scoped to TLS; Crypto++ is used for the client-protocol RSA/RC4
+  in `tools/udpdump/` and is a stable, narrow surface, so leaving it alone
   is the right call.
 
 - **No `boost::asio` migration.** The original code rolls its own

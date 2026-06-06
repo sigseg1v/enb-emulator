@@ -4,8 +4,8 @@ This document covers the player/MOB ability system: how abilities are
 declared, instantiated, dispatched, and cooled down, followed by a
 table of every ability class shipped in `server/src/Abilities/`.
 
-All file:line references are against the tada-o fork checkpoint
-imported into `server/src/`. The `--binary-files=text` flag is needed
+All file:line references are against the C++ server source in
+`server/src/`. The `--binary-files=text` flag (or `grep -a`) is needed
 when grepping the source tree (ISO-8859 + CRLF).
 
 ## Concepts
@@ -14,14 +14,14 @@ when grepping the source tree (ISO-8859 + CRLF).
 
 The codebase distinguishes:
 
-- **Skill** — a trainable proficiency on the character sheet. There
+- **Skill** -- a trainable proficiency on the character sheet. There
   are 58 of these, defined as `SKILL_*` constants in
   `server/src/PlayerSkills.h:86-143` (`SKILL_AFTERBURN=0` through
   `SKILL_TERRAN_CULTURE=57`). A skill's "rank" determines which ranks
   of the related abilities the player can use.
-- **Ability** — a single button on the player's hotbar with its own
+- **Ability** -- a single button on the player's hotbar with its own
   activation cost, charge time, cooldown, range, and effect. There are
-  138 of these (`MAX_ABILITY_IDS=138` —
+  138 of these (`MAX_ABILITY_IDS=138`,
   `server/src/PlayerSkills.h:275`). Each ability is mapped to a
   `#define` constant in the same header (`CLOAK=28`, `PATCH_HULL=77`,
   `JUMPSTART=65`, etc.).
@@ -100,19 +100,19 @@ So lookup is O(1) by ability ID, and the destructor at
 `CMobClass.cpp:855-883` is careful to `delete` only the rank-1 slot
 of each ability family to avoid double-frees.
 
-### CombatTrance — the one outlier
+### CombatTrance -- the one outlier
 
 `m_CombatTrance` (`server/src/CMobClass.h`) is a separate pointer,
 not stored in `m_AbilityList`. It is instantiated unconditionally at
 `CMobClass.cpp:1091` and runs as a passive buff, not a clickable
-ability — there is no ability ID assigned to it, so it doesn't fit
+ability -- there is no ability ID assigned to it, so it doesn't fit
 the array model.
 
 ### Ability ID ranges
 
 Looking at the constants in
 `server/src/PlayerSkills.h:146-269`, abilities are roughly grouped
-alphabetically but the numbering is not contiguous — there are gaps
+alphabetically but the numbering is not contiguous -- there are gaps
 (e.g. 83-88 are vacant). New ranks added by tada-o (e.g.
 `REACTOR_BOOST=82` through `REACTOR_OPTIMISATION=86`) plug into those
 gaps at the end of the header (lines 270-274), out of alphabetical
@@ -139,32 +139,32 @@ firing a one-shot effect. The struct is declared in
 
 ```
 Client clicks hotbar button
-    │
-    ▼
+    |
+    v
 UDP packet OPCODE_USE_ABILITY arrives at sector server
-    │
-    ▼
+    |
+    v
 CMob::Use(target, ability_id, skill_id, activation_id)
-    │
-    ▼
+    |
+    v
 m_AbilityList[ability_id]->Use(...)
-    │
-    ├─→ CanUse(): range, energy, state, hostility checks
-    │
-    ├─→ Deduct energy, set state to CHARGING
-    │
-    ├─→ Broadcast charge-up effect to nearby clients
-    │
-    └─→ Schedule Execute() after ChargeTime ms
-        │
-        ▼
+    |
+    +-> CanUse(): range, energy, state, hostility checks
+    |
+    +-> Deduct energy, set state to CHARGING
+    |
+    +-> Broadcast charge-up effect to nearby clients
+    |
+    +-> Schedule Execute() after ChargeTime ms
+        |
+        v
     Execute(activation_id)
-        │
-        ├─→ Apply damage / heal / buff
-        │
-        ├─→ Broadcast effect packet
-        │
-        └─→ Set cooldown timer
+        |
+        +-> Apply damage / heal / buff
+        |
+        +-> Broadcast effect packet
+        |
+        +-> Set cooldown timer
 ```
 
 The activation_id is a per-cast unique counter so that cancellations
@@ -179,7 +179,7 @@ implementations for most combat and utility abilities. Looking at
 git/svn blame would be the authoritative way to mark these, but
 neither is preserved at file granularity in the merged tree. As a
 proxy: the abilities flagged "tada-o new" below are the ones called
-out in the project README under "What it brought" — namely the
+out in the project README under "What it brought" -- namely the
 following 22:
 
 Befriend, BioRepression, CombatTrance, EnergyLeech, Enrage,
@@ -189,7 +189,7 @@ SelfDestruct, ShieldCharging, ShieldInversion, ShieldLeech, Summon,
 Afterburn.
 
 The remaining five (Cloak, HullPatch, WormHole, JumpStart,
-RechargeShields, ShieldSap — that's six, but ShieldSap straddles the
+RechargeShields, ShieldSap -- that's six, but ShieldSap straddles the
 boundary as it is referenced in older comments and may have existed
 in stub form before tada-o) appear to predate tada-o. Treat that
 split as best-effort; the only authoritative source would be the
@@ -220,20 +220,20 @@ Class names start with `A` (e.g. `ACloak`). Filenames are
 | `AGravityLink` | `Abilities/AbilityGravityLink.h:26` | MASS_FIELD, GRAVITY_FIELD, IMMOBILIZATION_FIELD, AREA_MASS_FIELD, AREA_IMMOBILIZATION_FIELD | Slows or immobilises target(s). EffectID 219. | yes |
 | `ASelfDestruct` | `Abilities/AbilitySelfDestruct.h:23` | SELF_DESTRUCT_1/2/3/4/5 | Caster blows up and deals area damage. EffectID 206. | yes |
 | `AShieldInversion` | `Abilities/AbilityShieldInversion.h:23` | SHIELD_RAM, SHIELD_SPIKE, SHIELD_BURN, SHIELD_FLARE, SHIELD_NOVA | Converts shields into a damage pulse. The rank-1 ability is called SHIELD_RAM but the class is `AShieldInversion`. EffectID 98. | yes |
-| `AHacking` | `Abilities/AbilityHacking.h:23` | HACK_SYSTEMS, HACK_WEAPONS, MULTI_HACK, AREA_SYSTEM_HACK, AREA_MULTI_HACK | Disables target's equipment slots (weapons, devices, etc.). The class declares its skill ID as `STAT_SKILL_HULL_PATCH` (`AbilityHacking.h`), which is suspicious — likely a copy-paste from `AHullPatch` that was never fixed. EffectID 193. | yes |
+| `AHacking` | `Abilities/AbilityHacking.h:23` | HACK_SYSTEMS, HACK_WEAPONS, MULTI_HACK, AREA_SYSTEM_HACK, AREA_MULTI_HACK | Disables target's equipment slots (weapons, devices, etc.). The class declares its skill ID as `STAT_SKILL_HULL_PATCH` (`AbilityHacking.h`), which is suspicious -- likely a copy-paste from `AHullPatch` that was never fixed. EffectID 193. | yes |
 | `ABioRepression` | `Abilities/AbilityBioRepression.h:23` | BIOREPRESS, BIOSUPPRESS, BIOREPRESSION_SPHERE, BIOSUPPRESSION_SPHERE, BIOCESSATION | Debuff against organic enemies (suppresses regeneration / dampens psionic effects). | yes |
-| `ARally` | `Abilities/AbilityRally.h:23` | DAMAGE_TACTICS, DEFENSE_TACTICS, FIRING_TACTICS, STEALTH_TACTICS | Group buff that boosts one stat (damage, defence, firing speed, stealth). Note: FIRING_TACTICS maps to rank 5 but there is no rank-6 entry — the comments at `CMobClass.cpp:1010-1013` list only ranks 1/3/5/7. | yes |
+| `ARally` | `Abilities/AbilityRally.h:23` | DAMAGE_TACTICS, DEFENSE_TACTICS, FIRING_TACTICS, STEALTH_TACTICS | Group buff that boosts one stat (damage, defence, firing speed, stealth). Note: FIRING_TACTICS maps to rank 5 but there is no rank-6 entry -- the comments at `CMobClass.cpp:1010-1013` list only ranks 1/3/5/7. | yes |
 | `AEnvironmentShield` | `Abilities/AbilityEnvironmentShield.h:23` | ENVIRONMENTAL_BARRIER, LESSER_ENVIRONMENTAL_SHIELD, ENVIRONMENTAL_SHIELD, GREATER_ENVIRONMENTAL_SHIELD, ULTRA_ENVIRONMENTAL_SHIELD | Buffs resistance to environmental damage (e.g. nebula damage). EffectID 216. | yes |
-| `AFoldSpace` | `Abilities/AbilityFoldSpace.h:23` | TELEPORT_SELF, TELEPORT_ENEMY, TELEPORT_FRIEND, DIRECTIONAL_TELEPORT, AREA_TELEPORT | Teleport caster, an ally, or an enemy. DIRECTIONAL_TELEPORT shares rank-5 with TELEPORT_FRIEND in the mapping (`CMobClass.cpp:1031`) — both point to the same class instance, distinguished by ability ID at runtime. EffectID 202. | yes |
+| `AFoldSpace` | `Abilities/AbilityFoldSpace.h:23` | TELEPORT_SELF, TELEPORT_ENEMY, TELEPORT_FRIEND, DIRECTIONAL_TELEPORT, AREA_TELEPORT | Teleport caster, an ally, or an enemy. DIRECTIONAL_TELEPORT shares rank-5 with TELEPORT_FRIEND in the mapping (`CMobClass.cpp:1031`) -- both point to the same class instance, distinguished by ability ID at runtime. EffectID 202. | yes |
 | `AShieldLeech` | `Abilities/AbilityShieldLeech.h:23` | SHIELD_DRAIN, SHIELD_LEECH, GROUP_LEECH, SHIELD_LEECHING_SPHERE, GROUP_LEECHING_SPHERE | Drains target's shields without transferring them to caster (compare to ShieldSap which does transfer). | yes |
 | `ARepulsorField` | `Abilities/AbilityRepulsorField.h:25` | MINOR_REPULSOR_FIELD, LESSER_REPULSOR_FIELD, REPULSOR_FIELD, GREATER_REPULSOR_FIELD, MAJOR_REPULSOR_FIELD | Installs a reactive damage shield (`DamageShield`) that pushes attackers back when they hit. The header `#define REPULSOR_FIELD_ID 42` is a hardcoded effect/ability marker used elsewhere. | yes |
-| `AMenace` | `Abilities/AbilityMenace.h:23` | INTIMIDATE, SCARE, TERRIFY, AREA_INTIMIDATE, AREA_TERRIFY | Fear effect — causes target to flee. EffectIDs: scare 199, intimidate 198. | yes |
+| `AMenace` | `Abilities/AbilityMenace.h:23` | INTIMIDATE, SCARE, TERRIFY, AREA_INTIMIDATE, AREA_TERRIFY | Fear effect -- causes target to flee. EffectIDs: scare 199, intimidate 198. | yes |
 | `AEnergyLeech` | `Abilities/AbilityEnergyLeech.h:23` | ENERGY_DRAIN, ENERGY_LEECH, RENDER_ENERGY, ENERGY_LEECHING_SPHERE, RENDER_ENERGY_SPHERE | Drains target's reactor energy. The leech variants likely transfer to caster, the render variants likely just deplete (verify in `.cpp`). | yes |
 | `APsionicShield` | `Abilities/AbilityPsionicShield.h:23` | PSIONIC_BARRIER, LESSER_PSIONIC_SHIELD, PSIONIC_SHIELD, GREATER_PSIONIC_SHIELD, PSIONIC_INVULNERABILITY | Buffs resistance to psionic-class damage. EffectID 214. | yes |
 | `ASummon` | `Abilities/AbilitySummon.h:23` | SUMMON_ENEMY, SUMMON_FRIEND, SUMMON_GROUP, SUMMON_ENEMY_GROUP, RETURN_FRIEND | Pulls a target (friendly or hostile) to the caster's position. Friendly summons require confirmation. | yes |
 | `AAfterburn` | `Abilities/AbilityAfterburn.h:25` | AFTERBURN | Temporary movement-speed boost at energy cost. Single rank only. | yes |
 | `AReactorOptimisation` | `Abilities/AbilityReactorOpt.h:23` | REACTOR_BOOST, REACTOR_SURGE, REACTOR_EXTENSION, REACTOR_AUGMENTATION, REACTOR_OPTIMISATION | Increases reactor regeneration rate for a duration. Comment in source calls this "JT's new Reactor ability" (`CMobClass.cpp:1083`). | yes |
-| `ACombatTrance` | `Abilities/AbilityCombatTrance.h:24` | (none — passive) | Passive Jenquai-tier-9 buff that grows in strength over a fight. Instantiated as `m_CombatTrance` (separate pointer, not in `m_AbilityList`) at `CMobClass.cpp:1091`. Driven by `Update()` calls, not by player hotbar input. | yes |
+| `ACombatTrance` | `Abilities/AbilityCombatTrance.h:24` | (none -- passive) | Passive Jenquai-tier-9 buff that grows in strength over a fight. Instantiated as `m_CombatTrance` (separate pointer, not in `m_AbilityList`) at `CMobClass.cpp:1091`. Driven by `Update()` calls, not by player hotbar input. | yes |
 
 Total: 28 ability classes (27 hotbar-driven + 1 passive). They
 collectively service all 138 ability IDs except the gaps in the
@@ -256,18 +256,19 @@ skill isn't implemented yet".
   comment "this wasn't being deleted. Memory leak!" indicating
   someone fixed the leak in this fork; useful as a marker for
   what the upstream was missing.
-- `ARally` only covers ranks 1/3/5/7 — there is no rank-6 entry.
+- `ARally` only covers ranks 1/3/5/7 -- there is no rank-6 entry.
   Either rank 6 was deliberately omitted from the design or the
   mapping is incomplete; unresolved.
 - `AFoldSpace` maps both TELEPORT_FRIEND and DIRECTIONAL_TELEPORT
   to "rank 5" in the comments (`CMobClass.cpp:1030-1031`). Two
   abilities at the same rank tier; the design intent is unclear
   from code alone.
-- Ability cooldown/cost/range values are not in the C++ source —
-  they live in the `abilities` table in the MySQL schema (and are
-  loaded into memory at startup, then looked up by ability ID
-  during `CanUse()`). See `docs/06-database-schema.md` for the
-  table layout.
+- Ability cost/cooldown/range values are not hardcoded in the C++
+  source. Skill-granted activation cost lives in the
+  `skill_abilities` table (`activation_cost`, keyed by `ability_id`);
+  the recharge/range/energy values for activatable item effects come
+  through the item effect system (`item_effect_container`). See
+  `docs/06-database-schema.md` for the table layouts.
 
 ## Adding a new ability (cookbook)
 
@@ -282,7 +283,7 @@ To add a 29th ability:
    `AbilityBase`. Implement at minimum `CanUse()`, `UseSkill()`, and
    `Execute()`.
 4. Wire it into `CMob::SetupAbilities()` at
-   `server/src/CMobClass.cpp:907+` — add a `new AFoo(this)`
+   `server/src/CMobClass.cpp:907+` -- add a `new AFoo(this)`
    assignment for rank 1, then alias higher-rank ability IDs to the
    same pointer.
 5. Add the corresponding `delete m_AbilityList[FOO_RANK_1]` line in
@@ -291,20 +292,22 @@ To add a 29th ability:
 6. Add an `Init()` call in the init block at
    `CMobClass.cpp:792-849` if your ability needs per-MOB
    setup work.
-7. Add the ability row to the `abilities` table in
-   `db/postgres/schema.sql` (or `db/mysql/net7.sql`) with its
-   cost, range, cooldown, charge time, and effect IDs.
+7. Add the ability's data row to the relevant table in
+   `db/postgres/schema.sql` (the `skill_abilities` row for a
+   skill-granted ability's activation cost; the item effect tables
+   for an activatable item effect's recharge/range/energy) plus its
+   effect IDs.
 
 ## What's NOT in this doc
 
-- Per-ability damage formulas, balance numbers, cooldowns — those
+- Per-ability damage formulas, balance numbers, cooldowns -- those
   are data, not code, and live in the database.
-- AI ability use (which abilities a MOB uses, when, against whom) —
+- AI ability use (which abilities a MOB uses, when, against whom) --
   driven by `MOB_Behaviour` enum and the AI tick loop in
   `MOBClass.cpp`, covered in `docs/04-server-modules.md`.
-- Visual/audio effect details — effect IDs are referenced in the
+- Visual/audio effect details -- effect IDs are referenced in the
   ability classes but the effect definitions live in client-side
   `effect.ini` files.
 - Permission/access checking beyond skill rank (e.g. faction
-  restrictions on certain abilities) — handled higher up in the
+  restrictions on certain abilities) -- handled higher up in the
   call chain in `PlayerCombat.cpp`.
