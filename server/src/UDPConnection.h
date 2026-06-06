@@ -21,6 +21,7 @@
 #define _UDP_CONNECTION_H_INCLUDED_
 
 #include <vector>
+#include <atomic>
 #include <net7/Mutex.h>
 #include "MessageQueue.h"
 #include "PlayerManager.h"
@@ -74,6 +75,12 @@ public:
 	void				QueueResetAndLogin(long MVAS_index);
     void                FlushQueue();
   	void                Shutdown();
+	// Phase AI Stage 2: stop the recv thread at RUNTIME (not process shutdown)
+	// and REALLY join it. ~UDP_Connection only spin-waits 100ms then proceeds,
+	// and the recv loop has no runtime exit path on its own (it spins on
+	// m_ThreadRunning, which nothing else clears), so this is the only safe way
+	// to quiesce a sector listener before the obj_manager it reads is purged.
+	void                StopReceiver();
 
 	bool				IsRegisteredIP(long addr);
 	void				RegisterIP(long addr);
@@ -129,7 +136,7 @@ private:
 	SOCKET				m_Socket;
 //	SOCKADDR_IN			m_SocketAddr;
 	short				m_Port;
-    bool                m_ThreadRunning;			// true if thread is running
+    std::atomic<bool>   m_ThreadRunning;			// true if thread is running (written by StopReceiver on another thread)
     unsigned char       m_RecvBuffer[MAX_BUFFER];			// UDP Receive buffer
 	unsigned char       m_SendBuffer[MAX_BUFFER];   // UDP Send buffer
 	ServerManager     * m_ServerMgr;				// Reference to the Server Manager

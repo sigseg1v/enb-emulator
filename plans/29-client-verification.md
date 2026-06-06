@@ -354,3 +354,37 @@ format & byte order", Trap 2).
   when you arrive (their AI now starts on first entry, not at boot).
 - **Setup**: `just play-local`; log in at a station, undock, then gate to a
   fresh sector. Watch the first-arrival moment specifically.
+
+### [ ] CV-11 -- Idle sector teardown + re-entry (Phase AI Stage 2) is invisible on the real client
+
+- **Change**: Phase AI Stage 2 (idle teardown). A space sector that has sat
+  continuously empty past NET7_SECTOR_IDLE_TEARDOWN_MS (default 5 min) is PARKED:
+  the whole shared-obj_manager family (the space sector + every station built on
+  it, since stations reuse the parent's obj_manager) is taken offline, its event
+  + recv threads are joined, and the deferred objects (MOBs / asteroid fields /
+  husks / dropped loot) are freed; the nav skeleton + the manager mapping stay
+  resident. The next arrival restarts the parked family in place (reload deferred
+  content, rebind port, restart thread) -- same code as a Stage 1 cold-start.
+  Server files: `ServerManager::TeardownSector` / `IdleSectorPoll`,
+  `ObjectManager::PurgeDeferredObjects` / `CanPurgeDeferredObjects`,
+  `SectorManager::StopSectorThread` / `ClearAllEventSlots` / `DropListener`,
+  `UDP_Connection::StopReceiver`. NO WIRE CHANGE: a parked sector emits nothing;
+  re-entry reuses the byte-identical cold-start fanout.
+- **Primary source (format)**: none needed -- no emitted bytes change. Same
+  Phase-T lazy-path slice as CV-10 exercises the restart path (re-entry after a
+  park is a cold-start). Verified live 2026-06-06 with low thresholds: park ->
+  freed 111 deferred objects in sector 1015 (family of 2) -> re-entry restarted
+  both station+space and the undock test re-passed with asteroids present.
+- **What to look for (play-local / real client)**: (1) Visit a sector, populate
+  some transient state (drop loot / jettison cargo / partially mine a roid /
+  aggro a mob), LEAVE it empty for > teardown interval, then RE-ENTER -- the
+  transient state must be RESET (fresh roids, no dropped loot, mobs at full /
+  de-aggroed, respawn cycle restarted from the top). This is expected and
+  correct, not a bug. (2) Re-entry itself must be seamless: arrive in a fully
+  populated, animating sector with no hang, no "empty sector", no client fault --
+  identical feel to a first cold-start. (3) Persistent state (your inventory,
+  ship, missions, vault) is UNAFFECTED -- only sector-transient objects reset.
+- **Setup**: `just play-local` with NET7_SECTOR_IDLE_TEARDOWN_MS set low (e.g.
+  15000) and NET7_SECTOR_IDLE_POLL_MS=5000; enter a space sector, drop loot /
+  mine a roid, fly to a station and wait out the interval, then return.
+

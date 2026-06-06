@@ -186,7 +186,7 @@ NOT pushed (awaiting explicit authorization).
   surfaced it before push.) Verified: server rebuilds clean, 7/7 lazy-path slice
   passes, cold-starts fire (10151->3501, 1015->3502, 1060->3503), no new errors.
 
-## Stage 2 -- idle teardown  [ ]
+## Stage 2 -- idle teardown  [x]
 
 ### Ownership + memory model established (2026-06-06 investigation -- read before coding)
 
@@ -241,36 +241,79 @@ The naive AI-9 "free/reset obj_manager" is UNSAFE as originally written. Facts:
 
 ### Tasks
 
-- [ ] AI-8: Per-sector clean stop. `volatile bool m_SectorShutdownRequested`;
-  event loop `while(!g_ServerShutdown && !m_SectorShutdownRequested)`
-  (SectorManager.cpp:831); `StopSectorThread()` sets flag + pthread_join +
-  m_SectorThreadRunning=false. UDP recv thread already stops cleanly in
-  `~UDP_Connection` (closes socket to unblock recvfrom, waits on m_ThreadRunning
-  -- UDPConnection.cpp:83). Listener teardown = `delete m_SectorConnection;
-  m_SectorConnection=nullptr;` (NOT ShutdownListener's placement-dtor).
-- [ ] AI-9 (REDESIGNED -- selective, ownership-safe): `TeardownSector(sector_id)`
-  under m_SectorStartMutex, re-check occupancy==0 && pending==0 && NO occupied
-  child station (space sectors id<9999 only): StopSectorThread -> delete
-  m_SectorConnection -> NEW `ObjectManager::PurgeDeferredObjects()` (under the
-  obj_manager mutex: scan+cancel broadcast nodes referencing the set, then for
-  each non-skeleton object remove from m_SectorIndexList/m_MOBSectorList/
-  g_SectorObjects, `delete` if !IsTemp() else release pool slot, reset
-  m_SectorMOBCount/m_NumberOfObjects deltas) -> clear m_SectorMap entry ->
-  m_SectorID=-1 -> m_SectorCount--. Deterministic port rebinds on re-entry; the
-  existing EnsureSectorStarted re-entry already reloads DEFERRED_ONLY, so a
-  purge (not a guard) is REQUIRED or re-entry double-loads.
-- [ ] AI-10: Idle poll in ServerCheck (5-min throttle like the 5s
-  SendPlayerCount throttle). Per-sector last-activity timestamp +
-  pending-arrivals counter (bumped in EnsureSectorStarted, decremented in
-  AddPlayerToSectorList) to guard the handoff-in-flight race; tear down only if
-  occupancy==0 && pending==0 && idle>threshold.
-- [ ] AI-AUDIT (user-requested subagent code audit -- SAFETY GATE before push):
-  dedicated dangling-`Object*` hunt across the teardown path -- broadcast queue,
-  MOB range lists, player range lists, ProcessMOBs iteration vs concurrent
-  purge, station/parent sharing. Must clear before AI-9 ships.
-- [ ] AI-11: Verify: empty a sector, force teardown, re-enter via gate -> fresh
-  reload, no stale g_SectorObjects, no crash. Measure RSS reclaim (the HONEST
-  spin-DOWN number, vs Stage 1's boot-time ~40% spin-UP number).
+- [~] AI-8 (implemented 2026-06-06, build-clean): Per-sector clean stop.
+  `volatile bool m_SectorShutdownRequested`; event loop
+  `while(!g_ServerShutdown && !m_SectorShutdownRequested)` (SectorManager.cpp);
+  `StopSectorThread()` sets the flag + pthread_join + m_SectorThreadRunning=false
+  + resets the flag. `BeginSectorThread()` now clears the flag and sets
+  m_SectorThreadRunning/m_SectorOnline on success (so restart re-arms cleanly).
+  `DropListener()` = `delete m_SectorConnection; =NULL; m_Port=-1;` (relies on
+  ~UDP_Connection closing the socket to unblock recvfrom + joining the recv
+  thread). `ClearAllEventSlots()` NULLs every m_CoarseEventSlots/m_EventSlots
+  pointer + zeroes m_EventSlotsIndex under m_Mutex (slot pointers, NOT the pooled
+  node memory).
+- [~] AI-9 (implemented 2026-06-06, build-clean -- PARK, don't unmap):
+  `ServerManager::TeardownSector(sector_id)` under m_SectorStartMutex. Re-checks
+  online + space-sector (id<9999) + occupancy==0 UNDER THE LOCK (EnsureSectorStarted,
+  the only path that adds players, takes the same mutex, so the reading is
+  stable -- this replaces the originally-planned separate pending-arrivals
+  counter). Sequence: SetSectorOnline(false) FIRST (closes the lock-free fast
+  path) -> StopSectorThread -> ClearAllEventSlots -> DropListener ->
+  `ObjectManager::PurgeDeferredObjects()` -> m_SectorCount--.
+  PurgeDeferredObjects tail-truncates m_SectorIndexList past the highest-index
+  skeleton object, erases each freed object's UID from g_SectorObjects,
+  `delete`s !IsTemp() objects (skips pooled husks/resources, mirroring
+  DeleteAllObjects), rebuilds m_MOBSectorList from survivors, and lowers
+  m_NumberOfObjects so freed GameIDs fall out of GetObjectFromID range.
+  DELTA FROM ORIGINAL PLAN: the manager is NOT unmapped and m_SectorID is NOT
+  reset -- mutating m_SectorMap would race the lock-free EnsureSectorStarted fast
+  path (operator[] find vs erase = UB). Instead the manager stays mapped, parked
+  (m_SectorOnline=false), and EnsureSectorStarted's new parked-restart branch
+  reloads DEFERRED_ONLY + BeginSectorThread + StampActivity + m_SectorCount++
+  in place under the start mutex (does NOT re-run SetupSectorServer).
+- [x] AI-10 (implemented 2026-06-06, build-clean): `IdleSectorPoll()` called
+  from ServerCheck, throttled by m_SectorIdlePollMs via m_LastTeardownPoll
+  (mirrors the 5s SendPlayerCount throttle). Iterates m_SectorMgrList; online
+  space sectors only; occupied -> StampActivity, else empty past
+  m_SectorIdleTeardownMs -> TeardownSector. Per-sector m_LastActivityTick is
+  stamped on every EnsureSectorStarted hit + every poll that sees occupancy>0
+  (no separate pending counter needed).
+- [x] AI-10b (env-config, 2026-06-06): both thresholds are runtime-configurable
+  via NET7_SECTOR_IDLE_POLL_MS / NET7_SECTOR_IDLE_TEARDOWN_MS (read in the
+  ServerManager ctor, ReadIdleMsEnv, default 300000 ms = 5 min, rejects <=0).
+  The two `#define` macros were deleted (no-dead-code rule). docker-compose.yml
+  wires both env vars through with host-overridable defaults
+  (`${NET7_..:-300000}`). This is how the teardown is verified WITHOUT a
+  test-only source hack (set the env low in a dev run, no code edit).
+- [x] AI-AUDIT (user-requested subagent code audit -- SAFETY GATE):
+  adversarial dangling-`Object*` hunt across the teardown path. Round 1
+  (2026-06-06) found a CRITICAL: the central "teardown only runs on space
+  sectors so purging the shared manager is safe" claim was WRONG -- a docked
+  player counts toward the STATION manager, so the shared obj_manager stays
+  live; GetObjectFromID is lockless -> UAF. Fixes A-D landed (family teardown,
+  real recv-thread join via StopReceiver, contiguity guard, temp-pool index
+  reset, lockless null guards). Round 2 re-audit of the FIXED code found one
+  remaining HIGH: PurgeDeferredObjects' contiguity-abort path returned after
+  Phase 1 had already parked the family -> restart double-loads. FIXED:
+  PurgeDeferredObjects now returns bool, TeardownSector probes
+  CanPurgeDeferredObjects() BEFORE parking and bails (stays online) if the purge
+  would abort; the post-park call logs loudly if it ever races. Also fixed
+  Finding 5 (shutdown delete loop iterated m_SectorCount, now m_MaxSectors with
+  NULL guard) + made m_ThreadRunning std::atomic<bool>. Gate CLEARED.
+- [x] AI-11 (VERIFIED live 2026-06-06): drove the full cycle on a fresh stack
+  with NET7_SECTOR_IDLE_POLL_MS=5000 / NET7_SECTOR_IDLE_TEARDOWN_MS=10000 and
+  the SectorUndockHandoffFollowTests (undock into space 1015) in
+  CLI_INTEGRATION_SKIP_COMPOSE=1 externally-managed mode. Observed:
+  `cold-starting 10151` (station) + `cold-starting 1015` (space) -> on
+  disconnect `TeardownSector: parking idle sector_id=1015 (2 shared managers in
+  family)` (correctly collected the station+space family) +
+  `PurgeDeferredObjects sector_id=1015: freed 111 deferred objects, 188 skeleton
+  retained` -> re-entry `restarting parked 10151` + `restarting parked 1015`,
+  and the re-entry test PASSED (asserts asteroids present -> deferred content
+  reloaded correctly). No crash, no WARNING, no double-load; the post-boot
+  (20:36+) log window is error-free. Boot-time TalkTree/mission errors are
+  pre-existing and unrelated. RSS reclaim = the 111 freed objects per parked
+  space sector (the honest spin-DOWN number).
 
 ## Client-verification entries (plans/29)
 

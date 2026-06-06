@@ -7803,3 +7803,40 @@ citable) but NOT the proxy's client-facing OUTPUT chain (encrypted leg,
 uncaptured) -- AD-2/AD-3 narrowed to output-only CV-gate. Also closed AD-1:
 GLOBAL_ERROR 0x0075 got a structured GlobalErrorRecord (layout citable from two
 agreeing in-repo emitters).
+
+## 2026-06-06 -- Phase AI Stage 2 idle teardown: family-scoped on the shared obj_manager
+
+Stage 2 parks idle space sectors. The load-bearing correctness fact: station
+sectors (id > 9999) do NOT own their own ObjectManager -- SetupSectorServer
+binds m_ObjectMgr = GetSectorData(id/10)->obj_manager, so a station SHARES its
+parent space sector's manager. GetOccupancy() walks the per-SM player list, so a
+docked player counts toward the STATION manager, not the space one. The original
+Stage-2 design ("teardown only runs on space sectors, so the space sector being
+empty means the shared manager is idle") was WRONG and would UAF the lockless
+GetObjectFromID on a station recv thread. Two adversarial sub-agent audit rounds
+drove the fix:
+
+- Round 1 (CRITICAL): redesigned TeardownSector to treat the shared obj_manager
+  as the teardown UNIT -- collect the whole family (every online SM sharing the
+  manager), bail if ANY member has occupancy>0, then quiesce EVERY member's
+  event + recv thread before purging the deferred objects exactly once. Added a
+  real recv-thread join (UDP_Connection::StopReceiver: shutdown()+close() to wake
+  the blocked recvfrom, then pthread_join) because the runtime dtor only
+  spin-waited and nothing cleared m_ThreadRunning at runtime. Added a
+  skeleton-contiguity guard + temp-pool index reset to PurgeDeferredObjects, and
+  null guards to the lockless slot derefs.
+- Round 2 (HIGH): the contiguity-abort path returned AFTER Phase 1 had already
+  parked the family -> restart double-loads the still-resident deferred objects.
+  Fix: PurgeDeferredObjects returns bool; TeardownSector probes
+  CanPurgeDeferredObjects() BEFORE parking and bails (sector stays fully online)
+  if the purge would abort. Also fixed the shutdown delete loop to iterate
+  m_MaxSectors (not the now-dynamic m_SectorCount) + made m_ThreadRunning atomic.
+
+Thresholds are env-configurable (NET7_SECTOR_IDLE_POLL_MS / _TEARDOWN_MS,
+default 5 min) -- the #define macros were deleted (no-dead-code). This is also
+how teardown is verified without a test-only source hack: set the env low in a
+dev run. AI-11 verified live (park freed 111 objects in sector 1015 family of 2;
+re-entry restarted both station+space cleanly; no crash, no double-load).
+NO WIRE CHANGE -- parked sectors emit nothing, re-entry reuses the cold-start
+fanout. Real-client confirm tracked as CV-11.
+

@@ -407,3 +407,28 @@ void UDP_Connection::Shutdown()
 	closesocket(m_Socket);
 	m_Socket = INVALID_SOCKET;
 }
+
+void UDP_Connection::StopReceiver()
+{
+	// The recv loop runs while (!g_ServerShutdown && m_ThreadRunning). At runtime
+	// g_ServerShutdown is false, so clearing m_ThreadRunning is what asks it to
+	// exit; closing the socket unblocks an in-flight recvfrom. Then a REAL join
+	// (vs ~UDP_Connection's 100ms spin-and-give-up) guarantees the recv thread is
+	// gone -- no handler can touch sector objects after we return. Guard on
+	// m_ThreadRunning: if the thread was never started (m_Thread invalid) we must
+	// not join it.
+	if (!m_ThreadRunning)
+		return;
+	m_ThreadRunning = false;
+	if (m_Socket != INVALID_SOCKET)
+	{
+#ifdef WIN32
+		shutdown(m_Socket, SD_BOTH);
+#else
+		shutdown(m_Socket, SHUT_RDWR);
+#endif
+		closesocket(m_Socket);
+		m_Socket = INVALID_SOCKET;
+	}
+	pthread_join(m_Thread, NULL);
+}

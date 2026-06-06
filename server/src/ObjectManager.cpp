@@ -91,6 +91,143 @@ void ObjectManager::DeleteAllObjects()
 	m_Mutex.Unlock();
 }
 
+// Phase AI Stage 2 -- selective idle-teardown purge. See header. The skeleton
+// occupies the boot-loaded prefix [0..S) of m_SectorIndexList; deferred +
+// runtime objects append at the tail, and the slot index IS the GameID offset
+// (GameID = m_StartObjectID + index), so surviving skeleton MUST keep its slot.
+// We therefore truncate the contiguous tail past the highest-index skeleton
+// object rather than erase-shifting mid-list. new'd objects are deleted;
+// IsTemp() pool slots are left for the fixed circular pool to recycle (mirrors
+// DeleteAllObjects). Lowering m_NumberOfObjects to the truncate point makes any
+// stale lookup of a freed GameID fall out of range in GetObjectFromID -> NULL.
+static inline bool IsSkeletonObjectType(object_type t)
+{
+	switch (t)
+	{
+	case OT_STATION: case OT_STARGATE: case OT_NAV:
+	case OT_PLANET:  case OT_DECO:     case OT_GWELL:
+	case OT_RADIATION: case OT_PLAYER:
+		return true;
+	default:
+		return false;
+	}
+}
+
+// Probe: would PurgeDeferredObjects be able to tail-truncate cleanly? True iff
+// every skeleton object forms a contiguous prefix (no deferred object below the
+// highest skeleton index). Cheap, lock-held, no mutation. The caller uses this
+// to decide whether to park a sector at all -- parking a sector whose purge
+// would abort leaves it parked-but-resident and a restart double-loads.
+bool ObjectManager::CanPurgeDeferredObjects()
+{
+	m_Mutex.Lock();
+	long last_skeleton = -1;
+	for (long i = 0; i < (long)m_SectorIndexList.size(); ++i)
+	{
+		Object *o = m_SectorIndexList[i];
+		if (o && IsSkeletonObjectType(o->ObjectType()))
+			last_skeleton = i;
+	}
+	for (long i = 0; i < last_skeleton + 1; ++i)
+	{
+		Object *o = m_SectorIndexList[i];
+		if (o && !IsSkeletonObjectType(o->ObjectType()))
+		{
+			m_Mutex.Unlock();
+			return false;
+		}
+	}
+	m_Mutex.Unlock();
+	return true;
+}
+
+bool ObjectManager::PurgeDeferredObjects()
+{
+	m_Mutex.Lock();
+
+	// The skeleton (stations/gates/navs/planets/deco/gwell/radiation/players) is
+	// loaded as a contiguous prefix at boot; deferred + runtime objects append at
+	// the tail. Find the highest-index skeleton object -- everything past it is
+	// free-able, everything at/below it is kept.
+	long last_skeleton = -1;
+	for (long i = 0; i < (long)m_SectorIndexList.size(); ++i)
+	{
+		Object *o = m_SectorIndexList[i];
+		if (o && IsSkeletonObjectType(o->ObjectType()))
+			last_skeleton = i;
+	}
+	long truncate_point = last_skeleton + 1;
+
+	// Guard the contiguity invariant the tail-truncate relies on. If a deferred
+	// (non-skeleton) object sits BELOW the highest skeleton index, some runtime
+	// path appended a skeleton-typed object AFTER the deferred load (e.g. the DEV
+	// /deco command's OT_DECO). Tail-truncating would then keep deferred objects
+	// and a restart would double-load them. Bail rather than corrupt. The CALLER
+	// (TeardownSector) probes CanPurgeDeferredObjects() before parking, so in the
+	// normal flow we never reach this abort post-park; if we do (a runtime append
+	// raced the probe), refuse to free anything and report it loudly.
+	for (long i = 0; i < truncate_point; ++i)
+	{
+		Object *o = m_SectorIndexList[i];
+		if (o && !IsSkeletonObjectType(o->ObjectType()))
+		{
+			LogMessage("PurgeDeferredObjects sector_id=%d: ABORT -- deferred object (type %d) at index %d is below skeleton tail %d; skeleton not contiguous, leaving sector resident\n",
+				(int)m_SectorID, (int)o->ObjectType(), (int)i, (int)last_skeleton);
+			m_Mutex.Unlock();
+			return false;
+		}
+	}
+
+	// Free everything from truncate_point to the end (all non-skeleton).
+	long freed = 0;
+	for (long i = truncate_point; i < (long)m_SectorIndexList.size(); ++i)
+	{
+		Object *o = m_SectorIndexList[i];
+		if (!o)
+			continue;
+		long uid = o->GetDatabaseUID();
+		GlobalObjectList::iterator git = g_SectorObjects.find(uid);
+		if (git != g_SectorObjects.end() && git->second == o)
+			g_SectorObjects.erase(git);
+		if (!o->IsTemp())
+		{
+			delete o;
+		}
+		else
+		{
+			// Pool-owned (husk/resource): NOT deleted (the MemorySlot pool owns the
+			// memory and frees it at obj_manager dtor), but it must forget the index
+			// + GameID it held in the now-truncated list. Otherwise the pool reuses
+			// it with a stale index/GameID after restart (AddObjectToSectorList
+			// remaps the index but never fixes GameID -> unreachable-by-id / GameID
+			// collision). -1 forces a fresh registration on next reuse.
+			o->SetObjectIndex(-1);
+			o->SetGameID(0);
+		}
+		++freed;
+	}
+	m_SectorIndexList.resize(truncate_point);
+
+	// m_MOBSectorList aliases the same MOB/MOBSpawn pointers we just freed via
+	// the index list; rebuild it from the surviving prefix (no double-free).
+	ObjectList survivors;
+	for (long i = 0; i < (long)m_SectorIndexList.size(); ++i)
+	{
+		Object *o = m_SectorIndexList[i];
+		if (o && (o->ObjectType() == OT_MOB || o->ObjectType() == OT_MOBSPAWN))
+			survivors.push_back(o);
+	}
+	m_MOBSectorList.swap(survivors);
+	m_SectorMOBCount  = (long)m_MOBSectorList.size();
+	m_NumberOfObjects = truncate_point;
+
+	m_Mutex.Unlock();
+
+	LogMessage("PurgeDeferredObjects sector_id=%d: freed %d deferred objects, %d skeleton retained\n",
+		(int)m_SectorID, (int)freed, (int)truncate_point);
+	return true;
+}
+
 Object * ObjectManager::AddNewMOB(bool static_obj) //if static obj is set true this will be a permanent MOB
 {
     long object_index; 
@@ -590,7 +727,12 @@ Object *ObjectManager::GetObjectFromID(long object_id)
     else if (object_id >= m_StartObjectID && object_id < (m_StartObjectID + m_NumberOfObjects))
     {
         obj = m_SectorIndexList[object_id - m_StartObjectID];
-        obj->SetLastAccessTime(GetNet7TickCount());
+        // A slot in range may be NULL (object freed / not yet populated, e.g.
+        // around a Phase AI sector park/restart). Never deref blind: return NULL,
+        // which every caller already handles. (Runtime guard, NOT assert -- this
+        // is a real concurrent-state condition and assert compiles out in release.)
+        if (obj)
+            obj->SetLastAccessTime(GetNet7TickCount());
     }
     else if (IS_PLAYER(object_id))
     {
@@ -608,7 +750,7 @@ Object *ObjectManager::GetObjectFromName(char *object_name)
 
 	for (itrOList = m_SectorIndexList.begin(); itrOList < m_SectorIndexList.end(); ++itrOList) 
 	{
-        if ((*itrOList)->Name() == object_name)
+        if (*itrOList && (*itrOList)->Name() == object_name)
         {
             return (*itrOList);
         }
@@ -633,6 +775,8 @@ void ObjectManager::PerformObjectAdmin()
 	for (index = 0; index < size; ++index)	
 	{
 		obj = m_SectorIndexList[index];
+        if (!obj)
+            continue; // skip NULL slots (object freed / not populated)
         if (obj->RespawnTick() == 0)
         {
             switch (obj->ObjectType())
@@ -686,6 +830,8 @@ void ObjectManager::DisplayDynamicObjects(Player *player, bool all_objects)
 	for (index = 0; index < size; ++index) 
 	{
 		obj = m_SectorIndexList[index];
+		if (!obj)
+			continue; // skip NULL slots (object freed / not populated)
 		if (obj->RespawnTick() == 0 && obj->Active())
         {
             switch (obj->ObjectType())
@@ -902,6 +1048,8 @@ void ObjectManager::InitialiseResourceContent()
 	for (index = 0; index < size; ++index) 
 	{
 		obj = m_SectorIndexList[index];        
+		if (!obj)
+			continue; // skip NULL slots (object freed / not populated)
 		switch (obj->ObjectType())
         {
             case OT_RESOURCE:

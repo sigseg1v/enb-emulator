@@ -31,6 +31,32 @@
 #include "ObjectManager.h"
 #include <net7/Opcodes.h>
 
+// Phase AI Stage 2: idle sector teardown tuning. Defaults below; both are
+// overridable at runtime via the NET7_SECTOR_IDLE_POLL_MS /
+// NET7_SECTOR_IDLE_TEARDOWN_MS env vars (read in the ctor). Scan at most once
+// per poll interval, and park a space sector once it has been continuously
+// empty at least the teardown interval.
+#define SECTOR_IDLE_POLL_MS_DEFAULT		300000  // 5 min between idle scans
+#define SECTOR_IDLE_TEARDOWN_MS_DEFAULT	300000  // 5 min empty before teardown
+
+// Read a positive-millisecond tuning value from an env var, falling back to a
+// default when unset/blank/unparseable. Zero or negative is rejected (would
+// busy-poll / tear down instantly), so it also falls back.
+static u32 ReadIdleMsEnv(const char *name, u32 fallback)
+{
+	const char *v = getenv(name);
+	if (!v || !*v)
+		return fallback;
+	long parsed = atol(v);
+	if (parsed <= 0)
+	{
+		LogMessage("%s=\"%s\" is not a positive integer; using default %u\n",
+			name, v, (unsigned)fallback);
+		return fallback;
+	}
+	return (u32)parsed;
+}
+
 // Constructor
 ServerManager::ServerManager(bool is_master_server, unsigned long ip_address, short port, short max_sectors, bool standalone, unsigned long internal_ip_address)
 	:
@@ -97,6 +123,11 @@ ServerManager::ServerManager(bool is_master_server, unsigned long ip_address, sh
 	m_Halloween = false;
 
 	m_LastPlayerCount = 0;
+	m_LastTeardownPoll = 0;
+	m_SectorIdlePollMs     = ReadIdleMsEnv("NET7_SECTOR_IDLE_POLL_MS",     SECTOR_IDLE_POLL_MS_DEFAULT);
+	m_SectorIdleTeardownMs = ReadIdleMsEnv("NET7_SECTOR_IDLE_TEARDOWN_MS", SECTOR_IDLE_TEARDOWN_MS_DEFAULT);
+	LogMessage("Phase AI Stage 2 idle teardown: poll=%u ms, teardown=%u ms\n",
+		(unsigned)m_SectorIdlePollMs, (unsigned)m_SectorIdleTeardownMs);
 
 	memset(m_JobCatCount, 0, sizeof(m_JobCatCount));
 }
@@ -311,10 +342,18 @@ void ServerManager::RunMasterServer()
 
 		MainLoop();
 
-		for (i = 0; i < m_SectorCount; i++)
+		// Every slot [0, m_MaxSectors) was allocated at boot (see ctor loop) and
+		// lives at a fixed index regardless of online/parked state. m_SectorCount
+		// is now an active-online tally (Phase AI: cold-start bumps it, idle
+		// teardown decrements it), so it is NOT the right bound here -- iterate the
+		// allocation range and NULL-guard.
+		for (i = 0; i < m_MaxSectors; i++)
 		{
-			delete m_SectorMgrList[i];
-			m_SectorMgrList[i] = NULL;
+			if (m_SectorMgrList[i])
+			{
+				delete m_SectorMgrList[i];
+				m_SectorMgrList[i] = NULL;
+			}
 		}
     }
     else
@@ -432,6 +471,13 @@ void ServerManager::ServerCheck()
 	{
 		m_LastPlayerCount = start_tick;
 		m_UDPConnection->SendPlayerCount();
+	}
+
+	// Phase AI Stage 2: periodically park sectors that have sat empty.
+	if (start_tick > (m_LastTeardownPoll + m_SectorIdlePollMs))
+	{
+		m_LastTeardownPoll = start_tick;
+		IdleSectorPoll();
 	}
 
     //===========================================
@@ -622,8 +668,11 @@ SectorManager *ServerManager::EnsureSectorStarted(long sector_id)
 	// a started sector never reverts on this path (teardown, Phase AI Stage 2,
 	// takes the same mutex).
 	SectorManager *mgr = GetSectorManager(sector_id);
-	if (mgr)
+	if (mgr && mgr->IsSectorOnline())
+	{
+		mgr->StampActivity(GetNet7TickCount());
 		return mgr;
+	}
 
 	// Slow path: bring it online under the global start lock. The lock spans the
 	// whole start because the pieces touch GLOBAL shared state, not just this
@@ -636,8 +685,23 @@ SectorManager *ServerManager::EnsureSectorStarted(long sector_id)
 
 	// Re-check under the lock (another thread may have started it while we waited).
 	mgr = GetSectorManager(sector_id);
-	if (mgr)
+	if (mgr && mgr->IsSectorOnline())
 		return mgr;
+
+	// Parked-restart path: the manager + its galaxy-resident skeleton are still
+	// mapped (Phase AI Stage 2 teardown PARKS rather than unmaps, to avoid racing
+	// the lock-free fast path above). Reload only the deferred objects the purge
+	// freed, rebind the deterministic port, and restart the event thread. We must
+	// NOT re-run SetupSectorServer here -- the manager is already claimed and wired.
+	if (mgr)
+	{
+		LogMessage("EnsureSectorStarted: restarting parked sector_id=%d\n", sector_id);
+		m_SectorContent.LoadSectorContent(sector_id);
+		mgr->BeginSectorThread();
+		mgr->StampActivity(GetNet7TickCount());
+		m_SectorCount++;
+		return mgr;
+	}
 
 	LogMessage("EnsureSectorStarted: cold-starting sector_id=%d\n", sector_id);
 
@@ -663,6 +727,115 @@ SectorManager *ServerManager::EnsureSectorStarted(long sector_id)
 		mgr->BeginSectorThread();
 
 	return mgr;
+}
+
+// Phase AI Stage 2: scan all online space sectors. An occupied sector gets its
+// activity tick refreshed; a sector empty past m_SectorIdleTeardownMs is parked.
+void ServerManager::IdleSectorPoll()
+{
+	u32 now = GetNet7TickCount();
+	for (int i = 0; i < m_MaxSectors; i++)
+	{
+		SectorManager *mgr = m_SectorMgrList[i];
+		if (!mgr || !mgr->IsSectorOnline())
+			continue;
+		long sid = mgr->GetSectorID();
+		if (sid < 0 || sid >= 9999)   // space sectors only; stations share a parent
+			continue;
+		if (mgr->GetOccupancy() > 0)
+		{
+			mgr->StampActivity(now);
+			continue;
+		}
+		if (now > (mgr->GetLastActivityTick() + m_SectorIdleTeardownMs))
+			TeardownSector(sid);
+	}
+}
+
+// Phase AI Stage 2: PARK one empty space sector. Stops its event thread, drops
+// its UDP listener, and frees its deferred objects, while leaving the manager
+// MAPPED and its galaxy-resident skeleton intact. Mutating m_SectorMap would
+// race the lock-free EnsureSectorStarted fast path, so we never unmap -- a
+// later entry restarts the parked manager in place (same start mutex).
+void ServerManager::TeardownSector(long sector_id)
+{
+	std::lock_guard<std::mutex> guard(m_SectorStartMutex);
+	SectorManager *space = GetSectorManager(sector_id);
+	if (!space || !space->IsSectorOnline())
+		return;
+	if (sector_id < 0 || sector_id >= 9999)
+		return;
+
+	// CRITICAL: the obj_manager is SHARED by this space sector and every station
+	// instance built on it (station id/10 == space id; see
+	// SectorManager::SetupSectorServer). A docked player counts toward the STATION
+	// manager's occupancy, NOT the space manager's, so "space is empty" does NOT
+	// mean the shared manager is idle. Purging the shared manager while a station
+	// recv/event thread is live is a use-after-free (GetObjectFromID is lockless).
+	// So treat the shared obj_manager as the teardown UNIT: collect the whole
+	// family, bail if ANY member still has players, then quiesce EVERY member
+	// before purging the shared pool exactly once.
+	ObjectManager *shared = space->GetObjectManager();
+	SectorManager *family[MAX_SECTORS];
+	int family_count = 0;
+	for (int i = 0; i < m_MaxSectors; i++)
+	{
+		SectorManager *m = m_SectorMgrList[i];
+		if (!m || !m->IsSectorOnline())
+			continue;
+		if (m->GetObjectManager() != shared)
+			continue;
+		if (m->GetOccupancy() > 0)
+		{
+			// Family still occupied (e.g. a docked player at a station). Refresh the
+			// space sector's activity stamp so the idle poll re-arms cleanly.
+			space->StampActivity(GetNet7TickCount());
+			return;
+		}
+		family[family_count++] = m;
+	}
+
+	// Probe BEFORE parking anything: if the shared manager's skeleton is not a
+	// contiguous prefix (e.g. a DEV /deco appended an OT_DECO after the deferred
+	// load), PurgeDeferredObjects would abort and free nothing. Parking the family
+	// first and then aborting the purge would leave it parked-but-resident, and the
+	// restart path would double-load the still-resident deferred objects. So if we
+	// can't purge cleanly, leave the whole family fully online and re-arm the timer.
+	if (!shared->CanPurgeDeferredObjects())
+	{
+		LogMessage("TeardownSector: sector_id=%d not tail-purgeable (non-contiguous skeleton); leaving online\n",
+			(int)sector_id);
+		space->StampActivity(GetNet7TickCount());
+		return;
+	}
+
+	LogMessage("TeardownSector: parking idle sector_id=%d (%d shared managers in family)\n",
+		(int)sector_id, family_count);
+
+	// Phase 1: take every family member offline and FULLY quiesce its threads
+	// (event thread joined, recv thread joined via StopReceiver, event slots
+	// nulled) BEFORE touching the shared manager. After this loop no event or
+	// recv thread of any family member is in flight, so the purge cannot race a
+	// lockless reader.
+	for (int i = 0; i < family_count; i++)
+	{
+		family[i]->SetSectorOnline(false);   // close the lock-free fast path first
+		family[i]->StopSectorThread();
+		family[i]->ClearAllEventSlots();
+		family[i]->DropListener();
+		m_SectorCount--;
+	}
+
+	// Phase 2: now that the whole family is quiesced, free the shared manager's
+	// deferred objects exactly once. We probed CanPurgeDeferredObjects() above
+	// before parking, so this must succeed; a false here means a runtime append
+	// raced the probe during quiesce -- the family is now parked-but-resident and
+	// a restart will double-load. Flag it as the defect it is.
+	if (!shared->PurgeDeferredObjects())
+	{
+		LogMessage("TeardownSector: WARNING sector_id=%d purge aborted AFTER parking (append raced probe); deferred objects resident, restart will double-load\n",
+			(int)sector_id);
+	}
 }
 
 bool ServerManager::IsSectorServerReady(short port)

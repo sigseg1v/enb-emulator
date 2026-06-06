@@ -166,6 +166,19 @@ public:
 
 	void	BeginSectorThread();
 
+	// Phase AI Stage 2: idle teardown. A started sector is "online"; teardown
+	// PARKS it (stops thread, drops listener, purges deferred objects) WITHOUT
+	// unmapping it -- mutating m_SectorMap would race the lock-free
+	// EnsureSectorStarted fast path. EnsureSectorStarted restarts a parked
+	// manager under the start mutex.
+	void	StopSectorThread();
+	void	ClearAllEventSlots();
+	void	DropListener();
+	bool	IsSectorOnline()				{ return m_SectorOnline; }
+	void	SetSectorOnline(bool v)			{ m_SectorOnline = v; }
+	u32		GetLastActivityTick()			{ return m_LastActivityTick; }
+	void	StampActivity(u32 tick)			{ m_LastActivityTick = tick; }
+
 	void	MOBBlastDamage(Player *p, float *position, float damage);
 
 	int		GetJobList(u8* buffer);
@@ -230,6 +243,9 @@ private:
     ObjectManager * m_ObjectMgr;
 
 	bool			m_SectorThreadRunning;
+	volatile bool	m_SectorShutdownRequested; // Phase AI Stage 2 event-loop stop flag
+	volatile bool	m_SectorOnline;            // false == parked (teardown done, awaiting restart)
+	u32				m_LastActivityTick;        // last time this sector had occupancy / a start
 
 	long			m_JobTerminalLevel;
 	vecJobList		m_JobList;

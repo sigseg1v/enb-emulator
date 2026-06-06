@@ -85,6 +85,13 @@ services:
       # ~975MiB to ~910MiB (~65MiB) with no functional change. Concurrency
       # here is tiny, so the arena-contention tradeoff is irrelevant.
       MALLOC_ARENA_MAX: "2"
+      # Phase AI Stage 2 idle-sector teardown tuning (ServerManager.cpp). A space
+      # sector continuously empty past TEARDOWN_MS is parked (threads stopped,
+      # deferred objects freed) and restarted on next entry; POLL_MS bounds how
+      # often the idle scan runs. Both default to 5 min; override from the host
+      # env (e.g. NET7_SECTOR_IDLE_TEARDOWN_MS=15000 for a fast teardown test).
+      NET7_SECTOR_IDLE_POLL_MS: "${NET7_SECTOR_IDLE_POLL_MS:-300000}"
+      NET7_SECTOR_IDLE_TEARDOWN_MS: "${NET7_SECTOR_IDLE_TEARDOWN_MS:-300000}"
     # The server resolves g_DomainName via gethostbyname(); in docker we
     # remap local.net-7.org to the container's loopback so it succeeds
     # without external DNS.

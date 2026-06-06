@@ -51,6 +51,9 @@ SectorManager::SectorManager(ServerManager *server_mgr)
 
 	//need to start up a timer thread
 	m_SectorThreadRunning = false;
+	m_SectorShutdownRequested = false;
+	m_SectorOnline = false;
+	m_LastActivityTick = 0;
 
 	memset(m_EventSlots, 0, sizeof(m_EventSlots));
 	memset(m_CoarseEventSlots, 0, sizeof(m_CoarseEventSlots));
@@ -76,9 +79,12 @@ void SectorManager::BeginSectorThread()
 {
 	if (m_SectorID != -1)
 	{
+		m_SectorShutdownRequested = false;
 		// Don't actually create the thread until we know it's needed.
 		if (pthread_create(&m_SectorThread, NULL, RunEventThreadAPI, this) != 0)
 			LogMessage("SectorManager [%d]: pthread_create failed (%s)\n", m_SectorID, strerror(errno));
+		else
+			m_SectorThreadRunning = true;
 		//now start this sector's listener
 		// Deterministic port: base (SECTOR_SERVER_PORT) + this manager's pool-slot
 		// index (m_SectorNumber, fixed at boot in the standalone setup loop). The
@@ -94,7 +100,58 @@ void SectorManager::BeginSectorThread()
 		if (!StartListener(port))
 			LogMessage("SectorManager [%d]: FAILED to bind UDP port %d\n", m_SectorID, port);
 		else
+		{
 			LogMessage("BeginSectorThread sector_id=%d bound UDP port %d\n", m_SectorID, m_Port);
+			m_SectorOnline = true;
+		}
+	}
+}
+
+// Phase AI Stage 2: request the event thread to exit and join it. Safe to call
+// when the thread is not running (no-op). After this returns no event-thread
+// code touches the sector's objects, so a purge can run without racing it.
+void SectorManager::StopSectorThread()
+{
+	if (!m_SectorThreadRunning)
+		return;
+	m_SectorShutdownRequested = true;
+	pthread_join(m_SectorThread, NULL);
+	m_SectorThreadRunning = false;
+	m_SectorShutdownRequested = false;
+}
+
+// Detach every residual timed-call slot pointer. With occupancy==0 the only
+// slots that can still be set are connectionless ones (e.g. MOB respawn); we
+// NULL the slot pointers (not the pooled node memory) so MakeTimedCall, which
+// skips NULL slots, can never fire a call into a freed object after teardown.
+void SectorManager::ClearAllEventSlots()
+{
+	m_Mutex.Lock();
+	for (int i = 0; i < LONG_TERM_NODES; i++)
+		m_CoarseEventSlots[i] = NULL;
+	for (int i = 0; i < TIMESLOT_DURATION*10; i++)
+	{
+		for (int j = 0; j < 100; j++)
+			m_EventSlots[i][j] = NULL;
+		m_EventSlotsIndex[i] = 0;
+	}
+	m_Mutex.Unlock();
+}
+
+// Unbind this sector's UDP listener. StopReceiver() clears the recv loop's run
+// flag, closes the socket to unblock a recvfrom in flight, and REALLY joins the
+// recv thread -- so on return no recv-thread handler is in flight and the
+// obj_manager it reads can be purged safely. (~UDP_Connection alone only
+// spin-waits 100ms and the recv loop has no runtime self-exit, so a bare delete
+// would leak a busy-spinning thread onto a freed object.) Port rebinds on restart.
+void SectorManager::DropListener()
+{
+	if (m_SectorConnection)
+	{
+		m_SectorConnection->StopReceiver();
+		delete m_SectorConnection;
+		m_SectorConnection = NULL;
+		m_Port = -1;
 	}
 }
 
@@ -828,7 +885,7 @@ void SectorManager::RunSectorEventThread()
 
 	RefreshJobs();
 
-	while (!g_ServerShutdown)
+	while (!g_ServerShutdown && !m_SectorShutdownRequested)
 	{
 		current_tick = GetNet7TickCount();
 		starting_tick = current_tick;

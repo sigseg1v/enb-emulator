@@ -128,6 +128,11 @@ public:
 
 private:
     void    ServerCheck();
+	// Phase AI Stage 2: park sectors that have sat empty past the idle threshold
+	// (stop thread, drop listener, free deferred objects). IdleSectorPoll is the
+	// throttled scan from ServerCheck; TeardownSector parks one sector.
+	void	IdleSectorPoll();
+	void	TeardownSector(long sector_id);
 	void	MainLoop();
 	void	RunMasterServer();
 	void	RunSectorServer();
@@ -197,6 +202,9 @@ private:
 
 	bool				m_Halloween;
 	u32					m_LastPlayerCount;
+	u32					m_LastTeardownPoll; // Phase AI Stage 2: last idle-sector scan tick
+	u32					m_SectorIdlePollMs;     // NET7_SECTOR_IDLE_POLL_MS (default 300000)
+	u32					m_SectorIdleTeardownMs; // NET7_SECTOR_IDLE_TEARDOWN_MS (default 300000)
 	u32					m_JobCatCount[4];
 };
 

@@ -13,7 +13,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -55,6 +55,18 @@ public:
 
 public:
 	void		DeleteAllObjects();
+	// Phase AI Stage 2: free this sector's deferred + runtime objects (MOBs,
+	// fields, resources, husks, runtime spawns) while keeping the
+	// galaxy-resident skeleton (navs/gates/planets/stations/deco/gwell/
+	// radiation) that cross-sector mission gen + gate-seal dereference. Caller
+	// MUST have stopped this sector's event thread and ensured occupancy==0.
+	// Returns true if the deferred objects were freed; false if the contiguity
+	// invariant was violated and nothing could be freed (see CanPurgeDeferredObjects).
+	bool		PurgeDeferredObjects();
+	// Phase AI Stage 2: cheap probe -- true iff PurgeDeferredObjects would succeed
+	// (the skeleton is a contiguous prefix). Call this BEFORE parking a sector so
+	// an un-purgeable sector stays fully online rather than parked-but-unpurged.
+	bool		CanPurgeDeferredObjects();
     Object    * AddNewObject(object_type ot, bool static_obj = false);
     Object    * GetObjectFromID(long object_id);
     Object    * GetObjectFromName(char *object_name); //NB this call is slow! Try to avoid use within game loop (used for setting up missions).
