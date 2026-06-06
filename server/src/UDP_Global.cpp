@@ -251,22 +251,6 @@ void UDP_Connection::HandleGlobalTicketRequest(char *msg, EnbUdpHeader *hdr, con
     }
 }
 
-//this method pings the corresponding sector connection to activate it, and assign a sector id
-void UDP_Connection::ValidateSectorServer(long sector_id)
-{
-    //ping the sector server with its assigned sector
-    //SendOpcode(ENB_OPCODE_2006_SECTOR_VALIDATE, (unsigned char *) &sector_id, sizeof(long), ip_address, port);
-    if (m_ServerMgr->SetupSectorServer(sector_id))
-    {
-        short port = m_ServerMgr->SetSectorServerReady(sector_id, true);
-        LogMessage("Port: %d, Sector: %d '%s'\n", port, sector_id, g_ServerMgr->GetSectorName(sector_id));
-    }
-	else
-	{
-		LogMessage("Error loading Sector: %d '%s'\n", sector_id, g_ServerMgr->GetSectorName(sector_id));
-	}
-}
-
 void UDP_Connection::HandleAvatarCreateRequest(char *msg, EnbUdpHeader *hdr, const long source_addr, const short source_port)
 {
     GlobalCreateCharacter *create = (GlobalCreateCharacter *) msg;

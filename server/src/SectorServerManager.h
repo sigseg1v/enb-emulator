@@ -38,7 +38,6 @@ public:
 
 public:
 	bool	RegisterSectorServer(unsigned long ip_address, short port_number, short max_sectors, char *username);
-	bool	CheckConnections();
 	void	SetServerManager(ServerManager * server_mgr);
 	char  * GetSystemName(long sector_id);
 	char  * GetSectorName(long sector_id);
@@ -70,7 +69,6 @@ private:
 	void	LoadSectorList();
 	bool	LoadSectorServers();
 	bool	ConnectBackToSectorServer(SectorServer *server);
-	bool	AssignSectorToAvailableServer(long sector_id, char * sector_name);
 
 private:
     Mutex   m_Mutex;

@@ -56,10 +56,9 @@ public:
 	// Start the receiver pthread. The constructor binds the socket but does
 	// NOT spawn the recv thread -- callers must invoke StartReceiver()
 	// explicitly. This split exists so the master-plane listener can be
-	// constructed early (so other code can call ValidateSectorServer() on
-	// the object pointer) yet not begin dispatching MASTER_HANDOFF packets
-	// until every sector's UDP port has been bound -- see
-	// ServerManager::Run for the deferred-start sequence.
+	// constructed early yet only begin dispatching MASTER_HANDOFF packets
+	// once the on-demand routing path is live -- see ServerManager::Run
+	// for the deferred-start sequence.
 	void				StartReceiver();
     void				RunRecvThread();
     void				RunSendThread();
@@ -76,7 +75,6 @@ public:
     void                FlushQueue();
   	void                Shutdown();
 
-    void                ValidateSectorServer(long sector_id);
 	bool				IsRegisteredIP(long addr);
 	void				RegisterIP(long addr);
 

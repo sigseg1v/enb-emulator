@@ -159,16 +159,13 @@ void ServerManager::RunMasterServer()
 	// Instantiate the TCP Listener object for the Master (galaxy) Server
 	//TcpListener proxy_tcp_listener(m_IpAddressInternal, PROXY_SERVER_PORT, *this, CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY);
     //UdpListener master_tcp_listener(m_IpAddressInternal, MASTER_SERVER_PORT, *this, CONNECTION_TYPE_CLIENT_TO_MASTER_SERVER);
-    // The master listener OBJECT is constructed early so other code paths
-    // (notably SectorServerManager::AssignSectorToAvailableServer) can call
-    // ValidateSectorServer() on m_UDPMasterConnection during the sector-
-    // assignment loop below. The RECEIVER THREAD is deferred (see
-    // StartReceiver() call after the assignment wait): if it starts now, the
-    // proxy's MASTER_HANDOFF (0x2008) packets get serviced before any
-    // sector's UDP port has been bound, so ProcessHandoff returns the
-    // sentinel port=-1 in MASTER_HANDOFF_CONFIRM (0x2009), the proxy parses
-    // that as "no sector", falls back to a proxy-local ServerRedirect, and
-    // the client hangs at the loading screen.
+    // The master listener OBJECT is constructed here; its RECEIVER THREAD is
+    // started separately (StartReceiver(), below). Under Phase AI on-demand
+    // start there is no sector-assignment wait to defer past: ProcessHandoff
+    // calls EnsureSectorStarted, which binds the target sector's deterministic
+    // UDP port BEFORE the MASTER_HANDOFF_CONFIRM (0x2009) reports it -- so the
+    // confirm always carries a real, listening port and the proxy never has to
+    // fall back to a proxy-local ServerRedirect.
     UDP_Connection master_udp_listener(UDP_MASTER_SERVER_PORT, this, CONNECTION_TYPE_MASTER_SERVER_TO_PROXY);
     m_UDPMasterConnection = &master_udp_listener;
 
@@ -279,10 +276,10 @@ void ServerManager::RunMasterServer()
 		// before starting the master receiver" ordering unnecessary: the
 		// per-handoff bind (serialized in EnsureSectorStarted) now provides it.
 		//
-		// Marking assignments complete here means "the server is up and ready to
-		// route handoffs on demand" -- it gates the ServerCheck auto-assign branch
-		// off (we assign on demand instead) and lets MVAS logins through
-		// (UDP_MVAS.cpp IsSectorAssignmentsComplete()).
+		// We still flip the assignments-complete flag here: it means "the server
+		// is up and ready to route handoffs on demand" and is what lets MVAS
+		// logins through -- UDP_MVAS.cpp returns the pre-start 0x100B response
+		// while IsSectorAssignmentsComplete() is still false.
 		m_SectorAssignmentsComplete = true;
 
 		// Safe to begin dispatching master-plane MASTER_HANDOFF (0x2008): the
@@ -415,19 +412,6 @@ void ServerManager::ServerCheck()
 	}
 
 	m_SectorUpdateSelect = !m_SectorUpdateSelect;
-
-	if (!m_SectorAssignmentsComplete && (m_IsMasterServer || m_IsStandaloneServer))
-	{
-		m_SectorAssignmentsComplete = m_SectorServerMgr.CheckConnections();
-		if (m_SectorAssignmentsComplete)
-		{
-			//start sector threads
-			for (int i = 0; i < m_SectorCount; i++)
-			{		
-				m_SectorMgrList[i]->BeginSectorThread();
-			}
-		}
-	}
 
 	if (m_SectorUpdateSelect && (GetNet7TickCount() > (g_SSL_receive_time + 60000)))
 	{

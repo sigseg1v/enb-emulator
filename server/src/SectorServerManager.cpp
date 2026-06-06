@@ -194,59 +194,6 @@ bool SectorServerManager::RegisterSectorServer(unsigned long ip_address, short p
 	return success;
 }
 
-bool SectorServerManager::CheckConnections()
-{
-	bool assignments_complete = true;
-    // Called by the Main thread in the Main Loop
-
-	// Assign a sector to an available server if we have any unassigned sectors
-	// Scan through the linked list
-	// Do we have any available servers?
-	if (m_NumUnassignedSectors > 0)
-	{
-		for (long i=0; i < m_NumSectors; i++)
-		{
-			if (!m_SectorAssigned[i])
-			{
-                if  (m_SectorID[i] >= 973)
-                {
-				    if (AssignSectorToAvailableServer(m_SectorID[i], m_SectorName[i]))
-				    {
-						//LogMessage("Assigned ID: %d out of %d\n", i, m_NumUnassignedSectors);
-					    m_SectorAssigned[i] = true;
-    					m_NumUnassignedSectors--;
-                        usleep(100 * 1000); // wait 100 ms between assignments 
-						assignments_complete = false;
-                        break;
-                    } 
-                    else 
-                    {
-						//LogMessage("Cant assign Sector: %d to server\n", m_SectorID[i]);
-					}
-                }
-			}
-		}
-	}
-
-	return assignments_complete;
-}
-
-bool SectorServerManager::AssignSectorToAvailableServer(long sector_id, char *sector_name)
-{
-	//LogMessage("Looking for an available server for sector %d (%s)\n", sector_id, sector_name);
-	// Loop through the list of servers to find one that is available
-	for (long i=0; i < m_NumSectors; i++)
-	{
-		if (!m_SectorAssigned[i] && m_SectorID[i] >= 970)
-		{
-			g_ServerMgr->m_UDPMasterConnection->ValidateSectorServer(sector_id);
-			return true;
-		}
-	}
-
-	return false;
-}
-
 //Unused code
 bool SectorServerManager::LoadSectorServers()
 {

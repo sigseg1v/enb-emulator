@@ -171,12 +171,20 @@ NOT pushed (awaiting explicit authorization).
 
 ## Follow-ups (Stage 1 left these dead -- clean up next)
 
-- Delete the dead distributed-cluster auto-assignment path made unreachable by
-  AI-6: `SectorServerManager::CheckConnections` / `AssignSectorToAvailableServer`
-  / `UDP_Connection::ValidateSectorServer` / the `ServerCheck` auto-assign branch
-  (ServerManager.cpp:419-429) / the BeginSectorThread loop inside it. It was
-  already only-ever the single-process no-op assignment loop; AI-6 makes it fully
-  dead. (no-dead-code rule -- tracked, not yet done.)
+- [x] Deleted the dead distributed-cluster auto-assignment path made unreachable
+  by AI-6: `SectorServerManager::CheckConnections` / `AssignSectorToAvailableServer`
+  / `UDP_Connection::ValidateSectorServer` / the `ServerCheck` auto-assign branch +
+  its BeginSectorThread loop. Standalone (the only functional mode -- docker runs
+  it) sets `m_SectorAssignmentsComplete = true` at boot, so the branch's guard was
+  always false there; the distributed master+sector-server multi-process mode it
+  served was already non-functional upstream (remote `ValidateSectorServer` ping
+  and `RunSectorServer` registration both commented out). KEPT
+  `m_SectorAssignmentsComplete` + `IsSectorAssignmentsComplete()`: still
+  load-bearing -- the MVAS login handler (UDP_MVAS.cpp:184) returns the pre-start
+  0x100B response until it flips true at boot. (Near-miss: the grep
+  binary-detection trap on the CRLF .cpp first hid that caller; the build error
+  surfaced it before push.) Verified: server rebuilds clean, 7/7 lazy-path slice
+  passes, cold-starts fire (10151->3501, 1015->3502, 1060->3503), no new errors.
 
 ## Stage 2 -- idle teardown  [ ]
 
