@@ -15,6 +15,7 @@
 
 #include "Net7SSL.h"
 #include "SSL_Listener.h"
+#include <openssl/err.h>     // ERR_peek_last_error / ERR_GET_REASON -- classify clean probes
 #ifdef WIN32
 // Phase J: SSL_Connection / ServerManager / ConnectionManager are all
 // WIN32-walled for now. The Linux accept loop in RunThread() drives the
@@ -259,7 +260,22 @@ void SSL_Listener::HandleAcceptedConnection(SSL_CTX *ctx, SOCKET sock, unsigned 
 	if (hs <= 0)
 	{
 		int err = SSL_get_error(ssl, hs);
-		LogMessage("  SSL_accept failed (err=%d). Likely missing/invalid cert.\n", err);
+		// The cert/key are validated once at startup (see Initialise); if they
+		// were missing/invalid the listener would have refused to come up. So a
+		// failure HERE is a per-connection handshake abort, not a cert fault --
+		// almost always a non-TLS port probe or a peer that closed mid-handshake.
+		// Stay silent for the clean-disconnect signatures: SYSCALL/ZERO_RETURN,
+		// and (OpenSSL 3.x) SSL_ERROR_SSL whose reason is UNEXPECTED_EOF -- a
+		// liveness probe that connects then closes with no ClientHello. Only a
+		// genuine protocol error gets one truthful, non-alarming line.
+		unsigned long reason = ERR_GET_REASON(ERR_peek_last_error());
+		bool clean_probe = (err == SSL_ERROR_SYSCALL) ||
+						   (err == SSL_ERROR_ZERO_RETURN) ||
+						   (err == SSL_ERROR_SSL &&
+							reason == SSL_R_UNEXPECTED_EOF_WHILE_READING);
+		if (!clean_probe)
+			LogMessage("  SSL handshake aborted by peer (ssl_err=%d)\n", err);
+		ERR_clear_error();
 	}
 	else
 	{

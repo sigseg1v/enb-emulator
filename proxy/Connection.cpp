@@ -804,6 +804,22 @@ bool SendAll(int sock, const unsigned char* buf, int n)
     return true;
 }
 
+// Like RecvAll but returns how many bytes were actually read before the peer
+// closed: 0 means a clean disconnect before any byte arrived (a port probe or
+// server ping), <n means the peer closed mid-message (a truncated handshake).
+// Lets callers stay silent on a clean pre-handshake close while still flagging
+// a genuinely malformed partial read.
+int RecvCount(int sock, unsigned char* buf, int n)
+{
+    int got = 0;
+    while (got < n) {
+        int r = (int) recv(sock, buf + got, n - got, 0);
+        if (r <= 0) break;
+        got += r;
+    }
+    return got;
+}
+
 }  // namespace
 
 static void* LaunchConnectionWorker(void* arg);
@@ -927,9 +943,19 @@ bool Connection::DoKeyExchange()
         return false;
     }
 
-    if (!RecvAll((int) m_Socket, buffer, 4)) {
-        LogMessage("DoKeyExchange: failed to read 4-byte key length\n");
-        return false;
+    // A clean disconnect *before any byte arrives* is a port probe / server
+    // ping, not a client handshake -- the Win32 twin documents this as "a
+    // server ping with no consequences" and stays silent. Only a *partial*
+    // read (some bytes, then a close) is a genuinely malformed handshake worth
+    // logging.
+    {
+        int got = RecvCount((int) m_Socket, buffer, 4);
+        if (got == 0)
+            return false;            // clean probe/ping -- silent, by design
+        if (got != 4) {
+            LogMessage("DoKeyExchange: short read on 4-byte key length (got %d)\n", got);
+            return false;
+        }
     }
     // Phase K Wave 11: see notes at top DoKeyExchange -- wire field is 4B.
     long key_length = (long) ntohl(*((uint32_t *) buffer));
