@@ -13,6 +13,20 @@
     <RootNamespace>LaunchNet7Avalonia</RootNamespace>
     <AssemblyName>LaunchNet7Avalonia</AssemblyName>
   </PropertyGroup>
+
+  <!-- When building/publishing for a Windows RID (the standalone package via
+       `just package-client-windows`, which passes -r win-x64), compile the
+       HKLM registry-patch path IN and pull the Microsoft.Win32.Registry
+       package. Without this, WindowsRegistryHelpers.EnsureRegistered() falls
+       to its #else and throws PlatformNotSupportedException on EVERY launch,
+       i.e. the shipped Windows build had the registry patch stripped out and
+       "Play" always failed with "Could not patch registry-settings". Linux dev
+       builds (no RID) deliberately leave it out; PatchRegistry only calls it
+       when RuntimeInformation.IsOSPlatform(Windows), so it is never reached.
+       (Single hyphens only in here: XML comments reject a double hyphen.) -->
+  <PropertyGroup Condition="$(RuntimeIdentifier.StartsWith('win'))">
+    <DefineConstants>$(DefineConstants);WINDOWS_BUILD</DefineConstants>
+  </PropertyGroup>
   <ItemGroup>
     <AvaloniaResource Include="Assets\**" />
     <None Include="LaunchNet7.cfg" CopyToOutputDirectory="PreserveNewest" />

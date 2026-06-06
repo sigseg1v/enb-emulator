@@ -62,32 +62,45 @@ namespace LaunchNet7Avalonia
         public void Launch()
         {
             StartLocalAuthRelay();
-            PatchAuthLoginFile();
-            PatchRegDataFileNames();
-            PatchRegDataFile();
-            PatchAuthIniFile();
-            PatchNetworkIniFile();
-            PatchRegistry();
-
-            switch ((_setting.LaunchName ?? "").ToUpperInvariant())
+            try
             {
-                case "NET7SP":
-                    LaunchNet7Server();
-                    System.Threading.Thread.Sleep(25000);
-                    LaunchNet7Proxy();
-                    System.Threading.Thread.Sleep(2000);
-                    LaunchClient();
-                    break;
+                PatchAuthLoginFile();
+                PatchRegDataFileNames();
+                PatchRegDataFile();
+                PatchAuthIniFile();
+                PatchNetworkIniFile();
+                PatchRegistry();
 
-                case "NET7MP":
-                    LaunchNet7Proxy();
-                    System.Threading.Thread.Sleep(2000);
-                    LaunchClient();
-                    break;
+                switch ((_setting.LaunchName ?? "").ToUpperInvariant())
+                {
+                    case "NET7SP":
+                        LaunchNet7Server();
+                        System.Threading.Thread.Sleep(25000);
+                        LaunchNet7Proxy();
+                        System.Threading.Thread.Sleep(2000);
+                        LaunchClient();
+                        break;
 
-                default:
-                    LaunchClient();
-                    break;
+                    case "NET7MP":
+                        LaunchNet7Proxy();
+                        System.Threading.Thread.Sleep(2000);
+                        LaunchClient();
+                        break;
+
+                    default:
+                        LaunchClient();
+                        break;
+                }
+            }
+            catch
+            {
+                // A later step failed. The loopback relay we started above is
+                // still holding its bound port; if we leave it running the next
+                // "Play" can't rebind and fails with "Could not start local auth
+                // relay". Tear it down so a retry starts clean.
+                AuthRelay?.Dispose();
+                AuthRelay = null;
+                throw;
             }
         }
 
@@ -289,6 +302,19 @@ namespace LaunchNet7Avalonia
                     info.UseHttps = false;
                     AuthLoginPatcher.WriteInformation(_setting.AuthLoginFileName, info);
                 }
+            }
+            catch (FileNotFoundException e)
+            {
+                throw new ApplicationException(
+                    $"authlogin.dll not found at {_setting.AuthLoginFileName}. The standalone " +
+                    "package does not ship the client mods -- you need a Net-7-patched Earth & " +
+                    "Beyond install (authlogin.dll present in the client's release folder).", e);
+            }
+            catch (UnauthorizedAccessException e)
+            {
+                throw new ApplicationException(
+                    $"Access denied writing {_setting.AuthLoginFileName}. Run the launcher as " +
+                    "Administrator (the client lives under Program Files, which is write-protected).", e);
             }
             catch (Exception e)
             {

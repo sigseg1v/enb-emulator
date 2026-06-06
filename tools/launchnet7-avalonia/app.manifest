@@ -1,4 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
   <assemblyIdentity version="1.0.0.0" name="LaunchNet7Avalonia"/>
+
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <!-- The launcher binary-patches authlogin.dll (which lives under
+             C:\Program Files\... for a default EA install) and writes HKLM
+             registry keys. Both require elevation on Windows; without it the
+             patch fails with UnauthorizedAccessException. Request admin up
+             front so the user gets one UAC prompt instead of a cryptic
+             "Could not patch AuthLogin.dll" error. Ignored on Linux/wine. -->
+        <requestedExecutionLevel level="requireAdministrator" uiAccess="false" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+
+  <!-- Declare Windows 10/11 compatibility so OS-version APIs behave. -->
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+    </application>
+  </compatibility>
 </assembly>
