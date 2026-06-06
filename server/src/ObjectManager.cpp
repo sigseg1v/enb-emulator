@@ -13,7 +13,7 @@
 **
 ** The license can be modified at our discretion within the bounds of Creative Commons at any time.
 **
-** Copyright of our assets/code/software began in 2005-2009 ©, Net-7 Entertainment.
+** Copyright of our assets/code/software began in 2005-2009 ï¿½, Net-7 Entertainment.
 **
 */
 
@@ -34,8 +34,13 @@ ObjectManager::ObjectManager()
     m_StartSectorFXID   = 1000000;
     m_SectorFXID        = 0;
     m_NumberOfObjects   = 0;
-    m_TempResources     = new MemorySlot<Resource>(DEFAULT_TEMP_OBJLIST_SIZE); //create slotted array of temporary objects
-	m_TempHusks			= new MemorySlot<Husk>(DEFAULT_TEMP_OBJLIST_SIZE); //create slotted array of temporary objects
+    // Temp resource/husk pools each preallocate DEFAULT_TEMP_OBJLIST_SIZE fully
+    // constructed objects. Only sectors that actually create temp objects at
+    // runtime (mining husks, corpses, GM-tossed resources) ever need them, and
+    // an idle sector with no players never does. Allocate lazily on first use
+    // so the ~130 mostly-idle sectors don't each pay for 200+200 unused objects.
+    m_TempResources     = 0;
+	m_TempHusks			= 0;
 
     m_SectorMOBCount    = 0;
 
@@ -215,6 +220,8 @@ Object * ObjectManager::AddNewResource(bool static_obj) //if static obj is set t
 
     if (!static_obj)
     {
+        if (!m_TempResources) //lazy: only sectors that create temp resources pay for the pool
+            m_TempResources = new MemorySlot<Resource>(DEFAULT_TEMP_OBJLIST_SIZE);
         object = this->m_TempResources->GetNode();
         HandleTempCreation(object); //destroy the object if necessary
         object_index = object->ObjectIndex();
@@ -245,6 +252,8 @@ Object * ObjectManager::AddNewHusk(bool static_obj) //if static obj is set true 
 
     if (!static_obj)
     {
+        if (!m_TempHusks) //lazy: only sectors that create temp husks pay for the pool
+            m_TempHusks = new MemorySlot<Husk>(DEFAULT_TEMP_OBJLIST_SIZE);
         object = m_TempHusks->GetNode();
         HandleTempCreation(object); //destroy the object if necessary
         object_index = object->ObjectIndex();
