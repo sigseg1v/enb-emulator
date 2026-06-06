@@ -34,9 +34,12 @@ variable "droplet_region" {
 }
 
 variable "droplet_size" {
-  description = "Droplet size slug. The stack (Postgres + 3 C++ services) wants >=4GB."
+  # Stack idles ~1.5GB (server ~975MiB + postgres ~140MiB + OS/dockerd). 2GB is
+  # the dev/single-tester floor (~500MiB headroom); bump to s-2vcpu-4gb before
+  # any real player load.
+  description = "Droplet size slug. 2GB dev floor; >=4GB for public play."
   type        = string
-  default     = "s-2vcpu-4gb"
+  default     = "s-1vcpu-2gb"
 }
 
 variable "droplet_image" {

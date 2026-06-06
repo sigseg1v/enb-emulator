@@ -146,6 +146,35 @@ from the launcher, the fix is a one-line server change to
 That is a server change governed by the repo's server-integrity rules; it is not
 applied automatically.
 
+## Database backups
+
+The droplet runs a `pg_dump` of both databases (`net7` content + `net7_user`
+save-state) **every 6 hours**, driven by a systemd timer (`enb-db-backup.timer`,
+installed by cloud-init). Dumps land gzip'd in the host directory
+**`/opt/enb/backups`** as `net7-<ts>.sql.gz` / `net7_user-<ts>.sql.gz`, and
+anything older than **7 days** is pruned. The job uses the postgres container's
+own credentials and skips cleanly if the stack isn't up yet.
+
+```bash
+ls -la /opt/enb/backups                  # see the dumps
+systemctl list-timers enb-db-backup.timer
+systemctl start enb-db-backup.service    # force a backup now
+journalctl -u enb-db-backup.service      # logs
+
+# restore one DB (DESTRUCTIVE -- drops + recreates the target):
+gunzip -c /opt/enb/backups/net7_user-<ts>.sql.gz \
+  | docker exec -i $(docker compose --env-file /opt/enb/.env \
+      -f /opt/enb/docker-compose.prod.yml ps -q postgres) \
+      psql -U net7 -d net7_user
+```
+
+**Scope:** this is on-box logical backup -- it protects against bad migrations,
+a corrupt `pgdata` volume, and accidental data loss. It is on the droplet's own
+disk, so it does **not** survive losing the droplet (e.g. `just destroy`, or any
+Terraform change that replaces the droplet -- `user_data` edits do). For
+droplet-loss durability, sync `/opt/enb/backups` to DO Spaces / S3 or turn on DO
+droplet backups.
+
 ## Ports opened
 
 From `common/include/net7/Ports.h`:
@@ -175,9 +204,15 @@ either topology working; tighten the firewall once you've settled on one.
   remote login may need config tuning + a real-client test before it fully
   works. This is the load-bearing unknown for public play; do not assume it
   works until you've tested with `client.exe`.
-- **Cost.** Roughly a $24/mo droplet (`s-2vcpu-4gb`) + ~$5/mo registry (basic)
-  + a reserved IP (free while attached) + trivial S3. Drop the droplet size if
-  player counts are low.
+- **Cost.** Default is a **$12/mo droplet (`s-1vcpu-2gb`)** -- the dev/single-
+  tester floor (stack idles ~1.5GB, leaving ~500MiB headroom). Bump
+  `DROPLET_SIZE=s-2vcpu-4gb` (~$24/mo) before real player load. Plus ~$5/mo
+  registry (basic) + a reserved IP (free while attached) + trivial S3.
+- **DB backups are on-box only.** The 6-hourly `pg_dump` (below) lands in
+  `/opt/enb/backups` on the droplet -- it survives bad migrations / a corrupt
+  pgdata volume / accidental wipes, but NOT droplet loss (same disk). For
+  droplet-loss durability, copy the dumps off-box (Spaces/S3) or enable DO
+  droplet backups.
 
 ## tfstate storage
 

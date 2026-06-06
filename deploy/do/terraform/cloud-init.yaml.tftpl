@@ -80,15 +80,66 @@ write_files:
       [Install]
       WantedBy=timers.target
 %{ endif ~}
+  - path: /opt/enb/db-backup.sh
+    permissions: "0700"
+    content: |
+      #!/usr/bin/env bash
+      # Logical Postgres backup: pg_dump both DBs every 6h to the host dir
+      # /opt/enb/backups, keep the most recent 7 days. This guards against bad
+      # migrations / accidental data loss / a corrupt pgdata volume. It does
+      # NOT survive droplet loss (same disk) -- copy off-box if you need that.
+      set -euo pipefail
+      cd /opt/enb
+      if [ ! -f docker-compose.prod.yml ] || [ ! -f .env ]; then
+        echo "stack not deployed yet; skipping backup"; exit 0
+      fi
+      CID="$(docker compose --env-file .env -f docker-compose.prod.yml ps -q postgres || true)"
+      if [ -z "$CID" ]; then echo "postgres not running; skipping backup"; exit 0; fi
+      DIR=/opt/enb/backups
+      mkdir -p "$DIR"
+      ts="$(date +%Y%m%d-%H%M%S)"
+      for db in net7 net7_user; do
+        tmp="$DIR/$db-$ts.sql.gz.partial"
+        out="$DIR/$db-$ts.sql.gz"
+        # Use the container's own POSTGRES_USER/PASSWORD; pipefail aborts before
+        # the mv if pg_dump fails, so a partial never gets promoted.
+        docker exec "$CID" sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -U "$POSTGRES_USER" -d "$1"' _ "$db" | gzip > "$tmp"
+        mv "$tmp" "$out"
+        echo "wrote $out"
+      done
+      # Retention: keep only the most recent 7 days.
+      find "$DIR" -name '*.sql.gz' -mtime +7 -delete
+      find "$DIR" -name '*.partial' -mtime +1 -delete
+      echo "backup complete: $ts"
+  - path: /etc/systemd/system/enb-db-backup.service
+    content: |
+      [Unit]
+      Description=Earth & Beyond Postgres backup (pg_dump -> /opt/enb/backups)
+      Wants=docker.service
+      After=docker.service
+      [Service]
+      Type=oneshot
+      ExecStart=/opt/enb/db-backup.sh
+  - path: /etc/systemd/system/enb-db-backup.timer
+    content: |
+      [Unit]
+      Description=Earth & Beyond Postgres backup every 6h
+      [Timer]
+      OnCalendar=00/6:00:00
+      RandomizedDelaySec=120
+      Persistent=true
+      [Install]
+      WantedBy=timers.target
 
 runcmd:
-  - mkdir -p /opt/enb/certs /opt/enb/db /opt/enb/server-data
+  - mkdir -p /opt/enb/certs /opt/enb/db /opt/enb/server-data /opt/enb/backups
   # Belt-and-suspenders: install docker + compose plugin if the base image
   # lacks them (so a plain Ubuntu image also works).
   - bash -c 'command -v docker >/dev/null 2>&1 || curl -fsSL https://get.docker.com | sh'
   - bash -c 'docker compose version >/dev/null 2>&1 || (apt-get update && apt-get install -y docker-compose-plugin)'
   - systemctl enable --now docker
-%{ if manage_cert ~}
   - systemctl daemon-reload
+  - systemctl enable --now enb-db-backup.timer
+%{ if manage_cert ~}
   - systemctl enable --now enb-cert-renew.timer
 %{ endif ~}
