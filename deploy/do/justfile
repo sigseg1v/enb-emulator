@@ -1,0 +1,37 @@
+# DigitalOcean production deploy recipes. Run from deploy/do/:  just <recipe>
+# This is a SEPARATE justfile from the repo-root one by design -- deploy
+# commands are not mixed into the dev/build justfile.
+set shell := ["pwsh", "-NoProfile", "-Command"]
+
+# List recipes.
+default:
+    @just --list
+
+# One-time: create the encrypted, versioned S3 bucket for terraform state.
+bootstrap:
+    ./scripts/Bootstrap-State.ps1
+
+# Bring up / converge infra: droplet, reserved IP, firewall, registry,
+# Route53 record, Let's Encrypt cert. Idempotent; also renews the cert.
+up:
+    ./scripts/Deploy-Infra.ps1
+
+# Build + push the 3 server images to the DO registry. Optional tag.
+push tag="":
+    ./scripts/Build-And-Push.ps1 -Tag "{{tag}}"
+
+# Ship config/certs/data + pull images + (re)start the stack. Optional tag.
+update tag="":
+    ./scripts/Update-Stack.ps1 -Tag "{{tag}}"
+
+# Start an already-deployed stack (no image pull).
+start:
+    ./scripts/Start-Stack.ps1
+
+# Stop the stack; data + infra preserved.
+stop:
+    ./scripts/Stop-Stack.ps1
+
+# Destroy ALL infra incl. the droplet + its DB volume. Asks for confirm.
+destroy:
+    ./scripts/Destroy-Infra.ps1 -Confirm

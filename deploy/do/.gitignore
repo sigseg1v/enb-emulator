@@ -1,0 +1,20 @@
+# Secrets + per-operator config
+.env
+backend.hcl
+
+# Issued certs (LE leaf/key written by terraform's acme resource)
+certs-prod/
+
+# Terraform local working dir + any stray local state (state is in S3)
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Deploy bundle scratch
+*.tgz

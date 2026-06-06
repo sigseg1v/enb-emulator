@@ -1,0 +1,184 @@
+# Production stack for the DigitalOcean droplet.
+#
+# Differences from the repo-root docker-compose.yml (the dev stack):
+#   - images are PULLED from the private DO registry, not built here
+#     (the droplet does not have the source tree);
+#   - login publishes 443:443 (rootful docker on the droplet can bind <1024;
+#     the dev stack uses 4443 only to satisfy rootless docker);
+#   - postgres is NOT published to the internet (internal to the compose net);
+#   - no mysql-legacy / pgadmin / dev replay+bisect knobs.
+#
+# It is driven from /opt/enb on the droplet with an .env that defines
+# REGISTRY, IMAGE_TAG, DOMAIN and COMPOSE_PROJECT_NAME (written by
+# Update-Stack.ps1). Run as:
+#   docker compose --env-file .env -f docker-compose.prod.yml up -d
+name: ${COMPOSE_PROJECT_NAME:-enb-emulator}
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: net7
+      POSTGRES_PASSWORD: net7
+      POSTGRES_DB: net7
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C.UTF-8"
+    command:
+      - "postgres"
+      - "-c"
+      - "log_line_prefix=%m [%p] %q%u@%d app=%a "
+    # Internal only -- never expose the database to the internet.
+    expose:
+      - "5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U net7 -d net7"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # Idempotent schema/seed apply. KEEP THIS BLOCK IN SYNC with the schema-init
+  # service in the repo-root docker-compose.yml -- it is the same gated apply
+  # (every step is "is the target table already present?"), so first boot runs
+  # the full load and every later boot exits in under a second.
+  schema-init:
+    image: postgres:16
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: net7
+    volumes:
+      - ./db:/db:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        psql -h postgres -U net7 -d postgres -tA \
+          -c "SELECT 1 FROM pg_database WHERE datname='net7_user'" \
+          | grep -q 1 \
+          || psql -h postgres -U net7 -d postgres -c \
+               "CREATE DATABASE net7_user OWNER net7 ENCODING 'UTF8' LC_COLLATE 'C.UTF-8' LC_CTYPE 'C.UTF-8' TEMPLATE template0;"
+        if psql -h postgres -U net7 -d net7 -tA \
+             -c "SELECT to_regclass('public.item_base') IS NOT NULL" | grep -q t; then
+          echo "schema-init: net7.item_base present -- skipping schema.sql"
+        else
+          psql -h postgres -U net7 -d net7 -v ON_ERROR_STOP=1 -f /db/schema.sql
+        fi
+        if psql -h postgres -U net7 -d net7_user -tA \
+             -c "SELECT to_regclass('public.accounts') IS NOT NULL" | grep -q t; then
+          echo "schema-init: net7_user.accounts present -- skipping seed.sql"
+        else
+          psql -h postgres -U net7 -d net7_user -v ON_ERROR_STOP=1 -f /db/seed.sql
+        fi
+        if psql -h postgres -U net7 -d net7 -tA \
+             -c "SELECT to_regclass('public.starbase_npcs') IS NOT NULL AND EXISTS (SELECT 1 FROM starbase_npcs WHERE \"npc_Id\" = 100000)" | grep -q t; then
+          echo "schema-init: Phase Y roster present -- skipping seed_phase_y.sql"
+        else
+          psql -h postgres -U net7 -d net7 -v ON_ERROR_STOP=1 -f /db/seed_phase_y.sql
+        fi
+        if psql -h postgres -U net7 -d net7 -tA \
+             -c "SELECT to_regclass('public.sector_objects') IS NOT NULL AND EXISTS (SELECT 1 FROM sector_objects WHERE sector_object_id = 100000)" | grep -q t; then
+          echo "schema-init: Phase Y navs present -- skipping seed_phase_y_navs.sql"
+        else
+          psql -h postgres -U net7 -d net7 -v ON_ERROR_STOP=1 -f /db/seed_phase_y_navs.sql
+        fi
+        if psql -h postgres -U net7 -d net7 -tA \
+             -c "SELECT to_regclass('public.mob_items') IS NOT NULL AND EXISTS (SELECT 1 FROM mob_items WHERE id = 100000)" | grep -q t; then
+          echo "schema-init: Phase Y drops present -- skipping seed_phase_y_drops.sql"
+        else
+          psql -h postgres -U net7 -d net7 -v ON_ERROR_STOP=1 -f /db/seed_phase_y_drops.sql
+        fi
+        if psql -h postgres -U net7 -d net7 -tA \
+             -c "SELECT to_regclass('public.sector_objects') IS NOT NULL AND EXISTS (SELECT 1 FROM sector_objects WHERE sector_object_id = 200000 AND type = 38)" | grep -q t; then
+          echo "schema-init: Phase Y prospecting present -- skipping seed_phase_y_prospecting.sql"
+        else
+          psql -h postgres -U net7 -d net7 -v ON_ERROR_STOP=1 -f /db/seed_phase_y_prospecting.sql
+        fi
+        if psql -h postgres -U net7 -d net7 -tA \
+             -c "SELECT to_regclass('public.item_effect_base') IS NOT NULL AND EXISTS (SELECT 1 FROM item_effect_base WHERE \"EffectID\" = 240)" | grep -q t; then
+          echo "schema-init: item effect backfill present -- skipping seed_item_effects.sql"
+        else
+          psql -h postgres -U net7 -d net7 -v ON_ERROR_STOP=1 -f /db/seed_item_effects.sql
+        fi
+        echo "schema-init: syncing identity sequences -> net7"
+        psql -h postgres -U net7 -d net7 -v ON_ERROR_STOP=1 -f /db/sync_sequences.sql
+        echo "schema-init: done"
+    restart: "no"
+
+  server:
+    image: ${REGISTRY}/enb-server:${IMAGE_TAG:-latest}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      schema-init:
+        condition: service_completed_successfully
+      login:
+        condition: service_started
+    environment:
+      TZ: UTC
+    # Resolve our own domain to loopback inside the container, mirroring the
+    # dev stack's local.net-7.org remap. See the README "remote addressing"
+    # caveat -- this is the load-bearing UNVERIFIED bit for remote play.
+    extra_hosts:
+      - "${DOMAIN}:127.0.0.1"
+    volumes:
+      - ./Net7Config.cfg:/app/Net7Config.cfg:ro
+      - ./certs/${DOMAIN}.cer:/app/${DOMAIN}.cer:ro
+      - ./certs/${DOMAIN}.pem:/app/${DOMAIN}.pem:ro
+      - ./server-data:/database:ro
+      - net7-ipc:/run/net7-ipc
+    ports:
+      - "3501-3800:3501-3800/udp"
+      - "3806:3806/udp"
+      - "3808:3808/udp"
+      - "3810:3810/udp"
+    restart: unless-stopped
+
+  proxy:
+    image: ${REGISTRY}/enb-proxy:${IMAGE_TAG:-latest}
+    depends_on:
+      server:
+        condition: service_started
+    extra_hosts:
+      - "${DOMAIN}:127.0.0.1"
+    ports:
+      - "3801:3801/tcp"
+      - "3805:3805/tcp"
+      - "3500:3500/tcp"
+    restart: unless-stopped
+
+  login:
+    image: ${REGISTRY}/enb-login:${IMAGE_TAG:-latest}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      schema-init:
+        condition: service_completed_successfully
+    extra_hosts:
+      - "${DOMAIN}:127.0.0.1"
+    environment:
+      DB_HOST: "postgres:5432"
+      DB_USER: "net7"
+      DB_PASS: "net7"
+      DB_NAME: "net7_user"
+    volumes:
+      - ./certs/${DOMAIN}.cer:/app/${DOMAIN}.cer:ro
+      - ./certs/${DOMAIN}.pem:/app/${DOMAIN}.pem:ro
+      - net7-ipc:/run/net7-ipc
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        mkdir -p /run/net7-ipc
+        chmod 0777 /run/net7-ipc
+        exec /app/net7ssl
+    # Rootful docker on the droplet binds the protocol-correct 443 directly.
+    ports:
+      - "443:443/tcp"
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  net7-ipc:
