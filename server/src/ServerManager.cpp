@@ -679,8 +679,18 @@ SectorManager *ServerManager::EnsureSectorStarted(long sector_id)
 	// sector: LoadSectorContent populates the process-wide g_SectorObjects map,
 	// and SetupSectorServer claims a manager from the shared unassigned pool
 	// (GetSectorManager(-1)) and bumps m_SectorCount. Per-sector locking would
-	// not make those safe, so we serialize cold starts globally -- they are rare
-	// (first entry into an empty sector) and cost only tens of ms each.
+	// not make those safe, so we serialize cold starts globally.
+	//
+	// NOTE: this is a SYNCHRONOUS blocking load on the caller's thread. For a
+	// gate/dock the caller is the SOURCE sector's event thread, so that sector
+	// hitches for the duration. Live measurement (2026-06-06) puts the whole
+	// cold-start (this load + SetupSectorServer + port bind) at 27ms for a
+	// station sector up to ~236ms for the busiest space sector; the worst-
+	// populated sector in the content DB extrapolates to ~300ms. It also fires
+	// at most once per sector per process uptime -- the lock-free fast path
+	// above serves every later entry, and a parked-restart is cheaper still.
+	// That is well under the threshold where an async refactor would pay for
+	// its complexity, so keep it sync for now.
 	std::lock_guard<std::mutex> guard(m_SectorStartMutex);
 
 	// Re-check under the lock (another thread may have started it while we waited).
