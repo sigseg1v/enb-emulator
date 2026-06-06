@@ -188,24 +188,89 @@ NOT pushed (awaiting explicit authorization).
 
 ## Stage 2 -- idle teardown  [ ]
 
+### Ownership + memory model established (2026-06-06 investigation -- read before coding)
+
+The naive AI-9 "free/reset obj_manager" is UNSAFE as originally written. Facts:
+
+1. **obj_manager is cache-owned (process lifetime), NOT sector-owned.**
+   `SectorManager::m_ObjectMgr` is a BORROWED pointer into
+   `m_SectorData->obj_manager`, owned by the `SectorDataMap` content cache.
+   Station sectors (id>9999) SHARE the parent space sector's obj_manager
+   (`GetSectorData(id/10)`). So you cannot `delete` it on teardown, and you
+   cannot `DeleteAllObjects()` it -- that wipes the galaxy-resident skeleton
+   (navs/gates/planets/stations/deco/gwell/radiation) other sectors' mission
+   gen + gate-seal dereference cross-sector. Teardown must therefore do a
+   **selective purge of deferred-only objects**, leaving the skeleton resident.
+
+2. **Deferred set (what to purge), from SectorContentSQL.cpp:317** -- source
+   `type in (0,1,42,38)` => `OT_MOBSPAWN, OT_MOB, OT_FIELD, OT_RESOURCE`, plus
+   anything spawned at runtime from those (runtime MOBs from spawners, husks,
+   floating ore, mined resources). Keep everything else. Cleanest predicate:
+   purge `ObjectType()` NOT in the skeleton whitelist {OT_STARGATE, OT_STATION,
+   OT_PLANET, OT_DECO, OT_NAV, OT_GWELL, OT_RADIATION}.
+
+3. **Two allocation classes.** MOBs/MOBSpawns/loaded fields+resources are
+   `new`'d (ObjectManager.cpp:94/128 -- the temp-MOB pool path is commented
+   out) => must `delete` + remove from m_SectorIndexList / m_MOBSectorList /
+   g_SectorObjects. Runtime husks/resources come from fixed circular
+   `MemorySlot` pools (m_TempHusks/m_TempResources), IsTemp()==true => must NOT
+   `delete` (DeleteAllObjects already skips IsTemp); mark slot reusable. The
+   pool ARENA is fixed-size and freed only at obj_manager dtor, so its RAM is a
+   bounded per-sector cost that teardown does NOT reclaim -- acceptable.
+
+4. **Cross-sector pointer safety: PROVEN OK.** Player->object refs are GameID
+   (`long`), resolved per-op, never a retained raw `Object*` (HandleFaceRequest
+   etc. take `long Target`). The 5 cross-sector `g_SectorObjects[id]` reads
+   (SectorManager.cpp:674, PlayerMissions.cpp:149/500/702, TalkTreeParser:272)
+   are transient locals, safe once the map entry is erased (lookup returns
+   NULL, all sites null-check -- AI-4 risk note). Retained `Object*` members
+   point either at skeleton (Player::m_NearestNav/m_CurrentDecoObj -- never
+   purged) or at same-sector MOBs (MOB::m_Destination/m_SpawnGroup/m_MenaceObject
+   -- torn down together). No cross-sector raw pointer into the deferred set.
+
+5. **THE residual hazard: the global broadcast/timed-call queue.** `TimeNode`
+   holds a raw `Object *obj` (TimeNode.h:48) and lives in the process-wide
+   GMemoryHandler pool; player actions (prospect/mine/tractor,
+   PlayerSkills.cpp:702/803) queue a node pointing at a sector resource/MOB. A
+   node is live only while `player_id != 0`. If a player could gate out leaving
+   a live node, purging its `obj` => use-after-free when the timer fires.
+   **Safety-by-construction:** during purge, BEFORE freeing, walk the broadcast
+   queue and set `player_id = NODE_NO_LONGER_NEEDED` on any node whose `obj` is
+   in the purge set. Do NOT rely on player-exit having cleared it. (Subagent
+   audit AI-AUDIT below must also confirm player sector-exit cancels these.)
+
+### Tasks
+
 - [ ] AI-8: Per-sector clean stop. `volatile bool m_SectorShutdownRequested`;
   event loop `while(!g_ServerShutdown && !m_SectorShutdownRequested)`
-  (SectorManager.cpp:813); `StopSectorThread()` sets flag + pthread_join. UDP
-  recv thread already stops cleanly in `~UDP_Connection` (UDPConnection.cpp:83).
-- [ ] AI-9: `TeardownSector(sector_id)` (under the same per-sector mutex,
-  re-check occupancy==0 && pending==0): StopSectorThread -> delete
-  m_SectorConnection (unbind) -> PURGE g_SectorObjects of this sector's UIDs
-  (new ObjectManager helper iterating m_SectorIndexList GetDatabaseUID) ->
-  free/reset obj_manager -> clear m_SectorMap entry, m_Started=false,
-  m_SectorID back to unassigned. Port stays the deterministic value (rebinds on
-  re-entry).
+  (SectorManager.cpp:831); `StopSectorThread()` sets flag + pthread_join +
+  m_SectorThreadRunning=false. UDP recv thread already stops cleanly in
+  `~UDP_Connection` (closes socket to unblock recvfrom, waits on m_ThreadRunning
+  -- UDPConnection.cpp:83). Listener teardown = `delete m_SectorConnection;
+  m_SectorConnection=nullptr;` (NOT ShutdownListener's placement-dtor).
+- [ ] AI-9 (REDESIGNED -- selective, ownership-safe): `TeardownSector(sector_id)`
+  under m_SectorStartMutex, re-check occupancy==0 && pending==0 && NO occupied
+  child station (space sectors id<9999 only): StopSectorThread -> delete
+  m_SectorConnection -> NEW `ObjectManager::PurgeDeferredObjects()` (under the
+  obj_manager mutex: scan+cancel broadcast nodes referencing the set, then for
+  each non-skeleton object remove from m_SectorIndexList/m_MOBSectorList/
+  g_SectorObjects, `delete` if !IsTemp() else release pool slot, reset
+  m_SectorMOBCount/m_NumberOfObjects deltas) -> clear m_SectorMap entry ->
+  m_SectorID=-1 -> m_SectorCount--. Deterministic port rebinds on re-entry; the
+  existing EnsureSectorStarted re-entry already reloads DEFERRED_ONLY, so a
+  purge (not a guard) is REQUIRED or re-entry double-loads.
 - [ ] AI-10: Idle poll in ServerCheck (5-min throttle like the 5s
-  SendPlayerCount throttle at :445). Guard the handoff-in-flight race with a
-  per-sector last-activity timestamp + pending-arrivals counter (bumped in
-  EnsureSectorStarted/ProcessHandoff, decremented in AddPlayerToSectorList);
-  only tear down if occupancy==0 && pending==0 && idle>threshold.
+  SendPlayerCount throttle). Per-sector last-activity timestamp +
+  pending-arrivals counter (bumped in EnsureSectorStarted, decremented in
+  AddPlayerToSectorList) to guard the handoff-in-flight race; tear down only if
+  occupancy==0 && pending==0 && idle>threshold.
+- [ ] AI-AUDIT (user-requested subagent code audit -- SAFETY GATE before push):
+  dedicated dangling-`Object*` hunt across the teardown path -- broadcast queue,
+  MOB range lists, player range lists, ProcessMOBs iteration vs concurrent
+  purge, station/parent sharing. Must clear before AI-9 ships.
 - [ ] AI-11: Verify: empty a sector, force teardown, re-enter via gate -> fresh
-  reload, no stale g_SectorObjects, no crash. Measure RSS reclaim.
+  reload, no stale g_SectorObjects, no crash. Measure RSS reclaim (the HONEST
+  spin-DOWN number, vs Stage 1's boot-time ~40% spin-UP number).
 
 ## Client-verification entries (plans/29)
 
