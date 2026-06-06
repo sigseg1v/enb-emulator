@@ -153,6 +153,22 @@ ProcessHandoff reads the port).
   pre-existing documented content gap (BootLogHealthTests excludes them by design;
   mission NPC resolution reads the global MOB table, not deferred sector objects).
 
+- [x] AI-9 (log-noise fix 2026-06-06): a targeted deferred load of a
+  station-instance id (10151 = docked instance of Luna/1015) has no row in
+  `sectors` and returns 0 rows -> the old code printed "Error loading
+  rows/fields" on every station cold-start. Station furniture comes from
+  StationLogin, not `sector_objects`, so 0 rows is EXPECTED there. Suppressed
+  the print for parse_id != -1 (kept loud for the boot-time full load).
+  SectorContentSQL.cpp:133. Verified absent in the re-run.
+
+**Stage 1 COMMITTED: cb7eecae** (2026-06-06). Verified twice post-fix:
+6/6 isolated (fresh stack) + 4/4 against a live stack driving real login ->
+station cold-start (10151) -> undock into Luna space (1015). Server log clean,
+no spurious "Error loading rows/fields", distinct ports 3501/3502. The
+full-suite OperationCanceledException cluster is the pre-existing
+session-accumulation wedge (#35-#39), load-dependent and absent in isolation.
+NOT pushed (awaiting explicit authorization).
+
 ## Follow-ups (Stage 1 left these dead -- clean up next)
 
 - Delete the dead distributed-cluster auto-assignment path made unreachable by
