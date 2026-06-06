@@ -79,6 +79,12 @@ services:
       # Net7Config.cfg is the file the server actually reads on boot
       # (server/src/Net7.cpp:124). We mount one in via volumes:.
       TZ: UTC
+      # The server spawns ~392 threads (2-3 per sector), and glibc malloc
+      # gives each thread its own arena (cap 8 x ncores), each retaining
+      # freed memory. Measured: capping arenas at 2 cuts settled RSS from
+      # ~975MiB to ~910MiB (~65MiB) with no functional change. Concurrency
+      # here is tiny, so the arena-contention tradeoff is irrelevant.
+      MALLOC_ARENA_MAX: "2"
     # The server resolves g_DomainName via gethostbyname(); in docker we
     # remap local.net-7.org to the container's loopback so it succeeds
     # without external DNS.
