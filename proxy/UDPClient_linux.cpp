@@ -389,6 +389,15 @@ void UDPClient::RecvThread()
                 m_Dtls->ForgetPeer(peer);
                 continue;
             }
+            if (step.handshake_done)
+            {
+                // Client-role 4-flight completed (and the server cert verified
+                // against the configured name) -- this association now carries
+                // encrypted gameplay. One line per (server_ip, server_port).
+                unsigned char *b = (unsigned char *) &src_addr;
+                LogMessage("UDPClient(Linux): DTLS association ESTABLISHED to "
+                           "%u.%u.%u.%u:%u\n", b[0], b[1], b[2], b[3], src_port);
+            }
             for (const std::vector<uint8_t> &rec : step.app_data)
             {
                 if (rec.size() < sizeof(EnbUdpHeader) ||

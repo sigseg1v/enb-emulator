@@ -45,6 +45,16 @@ services:
     environment:
       # Upstream game server is the remote host (game UDP over the internet).
       - NET7_GAME_SERVER_HOST=${ENB_ONLINE_HOST:?set ENB_ONLINE_HOST (or use `just play-online-cli`)}
+      # Phase AH: the cloud server runs proxy<->server DTLS ON (production never
+      # opts out), so this online proxy MUST speak DTLS and is intentionally
+      # NOT opted out. Connect-by-IP / verify-by-name: the proxy verifies the
+      # cloud's real (Let's Encrypt) cert against ENB_ONLINE_HOST via
+      # SSL_set1_host. CA defaults to the runtime image's system trust store
+      # (ca-certificates, which carries the LE roots); override with
+      # NET7_DTLS_CA only for a private CA. A name mismatch / missing root makes
+      # the proxy fail-closed (refuse to start), never silently downgrade.
+      - NET7_GAME_SERVER_DOMAIN=${ENB_ONLINE_HOST:?set ENB_ONLINE_HOST (or use `just play-online-cli`)}
+      - NET7_DTLS_CA=${NET7_DTLS_CA-}
     restart: unless-stopped
 
   cli:

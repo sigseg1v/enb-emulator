@@ -92,6 +92,18 @@ services:
       # env (e.g. NET7_SECTOR_IDLE_TEARDOWN_MS=15000 for a fast teardown test).
       NET7_SECTOR_IDLE_POLL_MS: "${NET7_SECTOR_IDLE_POLL_MS:-300000}"
       NET7_SECTOR_IDLE_TEARDOWN_MS: "${NET7_SECTOR_IDLE_TEARDOWN_MS:-300000}"
+      # Phase AH: the proxy<->server UDP leg is DTLS-by-default and fail-closed
+      # (ServerManager::InitDtlsServerPolicy). This dev/test stack runs on a
+      # trusted private docker bridge, and the Phase T CLI integration suite
+      # talks UDP straight to the server (it has no DTLS client yet), so the
+      # ONLY way the suite can drive the server is a cleartext channel. We
+      # therefore explicitly OPT OUT here with the exact sentinel -- the server
+      # prints a LOUD banner and runs plaintext on the bridge. A real deploy
+      # (deploy/do/) does NOT set this and provisions real certs instead, so
+      # production stays encrypted. To exercise DTLS locally, set
+      # NET7_DTLS_ALLOW_PLAINTEXT= (empty) in the host env and provision certs;
+      # the `-` (not `:-`) default lets an explicit empty override force DTLS.
+      NET7_DTLS_ALLOW_PLAINTEXT: "${NET7_DTLS_ALLOW_PLAINTEXT-i-accept-unencrypted-udp}"
     # The server resolves g_DomainName via gethostbyname(); in docker we
     # remap local.net-7.org to the container's loopback so it succeeds
     # without external DNS.
@@ -217,6 +229,17 @@ services:
       - PROXY_S2C_HEXDUMP=${PROXY_S2C_HEXDUMP:-}
       - PROXY_S2C_REPLAY=${PROXY_S2C_REPLAY:-}
       - PROXY_LIVE_AVATAR_ID=${PROXY_LIVE_AVATAR_ID:-}
+      # Phase AH: proxy<->server DTLS. Mirrors the server's opt-out above --
+      # on this trusted dev bridge the proxy also runs the leg in cleartext
+      # (InitProxyDtlsPolicy prints a LOUD banner). Both ends MUST agree: a
+      # DTLS-on proxy against an opted-out server (or vice-versa) cannot
+      # handshake. The domain/CA knobs are wired with neutral defaults so a
+      # future "DTLS on locally" flip (set NET7_DTLS_ALLOW_PLAINTEXT= empty +
+      # provision a CA the proxy can verify localhost against) needs no compose
+      # edit. Production (deploy/do/) sets a real NET7_GAME_SERVER_DOMAIN + CA.
+      - NET7_DTLS_ALLOW_PLAINTEXT=${NET7_DTLS_ALLOW_PLAINTEXT-i-accept-unencrypted-udp}
+      - NET7_GAME_SERVER_DOMAIN=${NET7_GAME_SERVER_DOMAIN-localhost}
+      - NET7_DTLS_CA=${NET7_DTLS_CA-}
     volumes:
       - ./archive/replay:/app/replay:ro
     command: ["sh", "-c", "exec /app/net7proxy ${PROXY_EXTRA_ARGS:-}"]

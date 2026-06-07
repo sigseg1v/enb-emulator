@@ -288,8 +288,23 @@ dispatch game opcodes) -- one persistent in-game association, but it changes the
 server's in-game C->S dispatch port (high hot-path blast radius, needs primary-source
 proof). Proxy-only wins on risk; the server is slated for rewrite anyway.
 
-- [ ] **AH-3. Proxy side: DTLS-connect with NAME verification (per the verified
-  topology above).** Add a client-role `DtlsTransport` (`DtlsRole::Client`) to
+- [x] **AH-3. Proxy side: DTLS-connect with NAME verification (per the verified
+  topology above).** DONE -- commit `ea21c054`. Client-role `DtlsTransport` per
+  proxy UDP socket, multiplexing one association per `(server_ip, server_port)`;
+  master socket made unconnected when DTLS on; recv feeds DTLS + dispatches via
+  `DispatchServerDatagram`; send routes through `SendApp` (never cleartext while
+  DTLS on); handshakes kicked at `OpenFixedPort` + `SetClientPort`; fail-closed
+  policy gate (`InitProxyDtlsPolicy`) + LOUD opt-out. `common/DtlsTransport.cpp`
+  added to PROXY_SRC for both targets. **VALIDATED 2026-06-07:** forced DTLS on
+  locally (server cert=localhost self-signed, proxy verify host=localhost,
+  CA=the cert) -- the proxy logged `DTLS association ESTABLISHED to
+  <server>:3808` AND `:3810` at idle, proving the full client 4-flight +
+  server response + per-(ip,port) keying + name verification all work. App
+  encrypt/decrypt during real gameplay + the 3806/3501+N associations are the
+  CV-13 real-client check (the CLI has no DTLS client). Original sketch below:
+
+- [ ] **AH-3 (original sketch). Proxy side: DTLS-connect with NAME verification.**
+  Add a client-role `DtlsTransport` (`DtlsRole::Client`) to
   EACH proxy `UDPClient` socket, gated on the same opt-out sentinel. Verify the
   server cert against the **cert NAME** (LE) via `SetVerifyHostname(g_DomainName)`
   (-> `SSL_set1_host`) + system trust store -- NOT a pin. Steps:
@@ -314,7 +329,33 @@ proof). Proxy-only wins on risk; the server is slated for rewrite anyway.
     5. Add `common/DtlsTransport.cpp` to the proxy CMake (both Linux + MinGW
        targets). One source tree, two build targets -- do NOT fork it.
 
-- [ ] **AH-4. CLI / integration-suite escape hatch -- the LOUD explicit opt-out.**
+- [x] **AH-4. CLI / integration-suite escape hatch -- the LOUD explicit opt-out.**
+  DONE -- wired the sentinel into the dev/test compose. `docker-compose.yml`
+  (server + proxy) and `docker-compose.cli.yml` (per-unit proxy) default to
+  `NET7_DTLS_ALLOW_PLAINTEXT=i-accept-unencrypted-udp` via `${VAR-default}`
+  (the `-`, not `:-`, so an explicit empty in the host env flips both ends to
+  DTLS together). `docker-compose.cli-online.yml`'s proxy is intentionally NOT
+  opted out -- it sets `NET7_GAME_SERVER_DOMAIN=${ENB_ONLINE_HOST}` +
+  `NET7_DTLS_CA=` (system trust store / LE roots) because the cloud server runs
+  DTLS-on. No `just play-local/play-cli` edit needed -- they go through these
+  compose files and inherit the default. **VALIDATED 2026-06-07:** rebuilt +
+  booted the full dev stack -- server and proxy both print the LOUD opt-out
+  banner and run cleartext (no FATAL, all containers stable); the full server
+  docker image also compiled/linked clean (first full build of AH-2, not just
+  -fsyntax-only). NOTE this restores bootability -- AH-2 alone left the stack
+  fail-closed at server start with no DTLS env.
+
+  **Production key-perms finding (surfaced by the AH-3 validation).** When DTLS
+  is required, the server (`ServerManager::InitDtlsServerPolicy`) loads the
+  cert+key as uid 999 (`net7`). A `0600` key owned by another uid -> "Permission
+  denied" -> fail-closed at boot (correct, but it WILL block a deploy). The
+  committed dev key `deploy/certs/localhost.pem` is `0600` host-owned, so the
+  DTLS-on smoke test needed a world-readable /tmp copy. **Deploy requirement
+  (AH-6): the DTLS private key must be readable by the container's net7 uid/gid
+  -- group-read for gid 999, NOT world-readable.** The login container sidesteps
+  this only because it runs as root.
+
+- [ ] **AH-4 (original sketch). CLI / integration-suite escape hatch.**
   DTLS is REQUIRED by default (AH-2), so the CLI (`CliClient.Core`) and the Phase T
   suite -- which speak cleartext UDP over the loopback/docker private bridge --
   would fail to connect unless the operator EXPLICITLY opts out. The opt-out is a
@@ -342,7 +383,14 @@ proof). Proxy-only wins on risk; the server is slated for rewrite anyway.
 
 - [ ] **AH-6. Firewall / hosting note.** Update the hosting write-up -- the
   externally-open UDP game ports are unchanged in NUMBER, just DTLS-wrapped. No
-  new ports.
+  new ports. **Also document the DTLS key-perms requirement** (from the AH-4
+  finding): the server container runs as uid/gid 999 (`net7`) and must be able
+  to read the DTLS private key; provision the key group-readable by gid 999
+  (NOT world-readable). The prod compose already mounts `${DOMAIN}.cer/.pem` at
+  the path the server's `g_DomainName + ".cer"` resolves to, and prod templates
+  `domain=__DOMAIN__` in `Net7Config.cfg` -> the cert path matches; the open
+  item is the key file mode on the droplet. Player-side proxies under WINE need
+  a CA bundle reachable for LE verification (system store, or `NET7_DTLS_CA`).
 
 - [ ] **AH-7. plans/29 client-verification entry.** The END-TO-END path (real
   client.exe -> local proxy -> DTLS -> server, with the token on C->S) must be

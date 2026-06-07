@@ -62,6 +62,12 @@ services:
     environment:
       # Upstream game server on the shared stack network.
       - NET7_GAME_SERVER_HOST=server
+      # Phase AH: the shared stack's server (docker-compose.yml) opts out of
+      # proxy<->server DTLS on this trusted bridge, so this per-unit proxy MUST
+      # match it -- a DTLS-on proxy against an opted-out server cannot
+      # handshake. Same `-` default as the shared stack: an explicit empty in
+      # the host env flips both ends to DTLS together.
+      - NET7_DTLS_ALLOW_PLAINTEXT=${NET7_DTLS_ALLOW_PLAINTEXT-i-accept-unencrypted-udp}
     restart: unless-stopped
 
   cli:
