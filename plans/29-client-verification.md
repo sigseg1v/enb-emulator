@@ -389,7 +389,14 @@ format & byte order", Trap 2).
   mine a roid, fly to a station and wait out the interval, then return.
 
 
-### [ ] CV-12 -- Sector entry over real internet (NAT-traversed global UDP) works on the real client
+### [x] CV-12 -- Sector entry over real internet (NAT-traversed global UDP) works on the real client
+
+> **VERIFIED 2026-06-07** against `enb.sigsegv.land` with the real Win32 client
+> (after the CV-20 loopback-redirect fix unblocked sector entry). Sector load
+> completed and rendered -- no login-stage-3 timeout / loading-screen hang --
+> and a gate jump (0x009B WARP) worked, which re-exercises the same
+> MasterJoin -> handoff -> NAT-punched global UDP path. Still nice-to-confirm:
+> sit stationary > 2 min to watch the 0x3005 keepalive refresh the reaper.
 
 - **Change**: proxy global-plane NAT-hole punch. On the sector `0x0002 LOGIN`
   the proxy now sends a `0x3005 PLAYER_COMMS_ALIVE` FROM the global UDP socket
