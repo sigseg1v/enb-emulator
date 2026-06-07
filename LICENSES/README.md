@@ -37,6 +37,10 @@ The Earth & Beyond emulator preservation project combines code from multiple ups
 | `Tada-O` | Statement that tada-o fork added no separate license; modifications inherit Net-7 under ShareAlike. |
 | `enb-linux-installer` | GPLv3 verbatim — governs `client/linux-installer/`. |
 
+The repo-root `NOTICE` file carries the single project-level attribution
+statement (original Net-7 content vs. this fork's modifications). It is a
+summary pointer, not a substitute for the per-file headers.
+
 ## Practical implications
 
 - **Non-commercial only.** The NC clause means you cannot run a paid server, sell mods, charge for access, or otherwise commercialise this project or any derivative. This applies to the *combined* work regardless of which subset you redistribute.

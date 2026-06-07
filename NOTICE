@@ -1,0 +1,20 @@
+Earth & Beyond Emulator -- attribution and copyright notice
+============================================================
+
+Original code and content: © 2005-2009 Net-7 Entertainment, licensed under
+CC BY-NC-SA 3.0 US (see per-file headers).
+
+Modifications and additions: © 2026 Max Verigin and contributors, licensed
+under the same CC BY-NC-SA 3.0 US.
+
+----------------------------------------------------------------------------
+
+This is the project-level attribution notice. It does not replace the
+per-file license headers or the per-folder LICENSE files -- those take
+precedence (per-file header > per-folder LICENSE > project default). See
+LICENSES/README.md for the full license map and LICENSES/enb-emulator for
+the project default terms.
+
+The GPLv3-licensed Linux client installer under client/linux-installer/ is
+governed by its own LICENSE and is not covered by the CC BY-NC-SA terms
+above; see LICENSES/enb-linux-installer.
