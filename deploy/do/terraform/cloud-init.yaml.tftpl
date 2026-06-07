@@ -133,6 +133,16 @@ write_files:
       WantedBy=timers.target
 
 runcmd:
+  # Swap FIRST, before the stack can start. The 2GB dev-floor droplet has no
+  # swap, and the server's boot-time content load (all missions/sectors) spikes
+  # the resident set past total RAM -- with no swap the kernel global-OOM-kills
+  # net7 on every boot, crash-looping it (RestartCount climbs, UDP planes never
+  # stay bound, clients cannot reach the char list). A 4GiB swapfile absorbs the
+  # transient; swappiness=10 keeps steady-state off swap so latency is unharmed.
+  # Idempotent: no-op if /swapfile already exists. Bump the droplet to >=4GB RAM
+  # before real multiplayer load (see droplet_size in variables.tf).
+  - bash -c 'test -e /swapfile || (fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && (grep -q "^/swapfile" /etc/fstab || echo "/swapfile none swap sw 0 0" >> /etc/fstab))'
+  - bash -c 'sysctl -w vm.swappiness=10 && (grep -q "^vm.swappiness" /etc/sysctl.conf || echo "vm.swappiness=10" >> /etc/sysctl.conf)'
   - mkdir -p /opt/enb/certs /opt/enb/db /opt/enb/server-data /opt/enb/backups
   # Install docker + compose plugin. The plain Ubuntu base ships neither; the
   # `command -v` guard makes this a no-op if a Docker-preloaded image is used.
