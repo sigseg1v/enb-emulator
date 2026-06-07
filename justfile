@@ -514,6 +514,83 @@ play-local CLIENT_PATH='':
     echo ">>> launching (WINEPREFIX=$WINEPREFIX WINEDEBUG=${WINEDEBUG:-<unset>}) -- click Play in the GUI"
     dotnet run --no-build --project tools/launchnet7-avalonia
 
+# Connect to the REMOTE cloud server -- no local docker stack at all.
+#
+# Unlike `play-local` (which boots postgres + server + login + proxy in docker
+# and points the client at localhost), this brings up NOTHING locally except the
+# two per-client Win32 processes the launcher itself spawns under WINE:
+#   1. Net7Proxy.exe -- the single-client bridge, dialed at the cloud's resolved
+#      IP (/ADDRESS:<ip>). It speaks the cleartext game UDP planes + login to the
+#      remote box. The Net7Proxy IS the local half of the topology; there is no
+#      such thing as "connect with nothing running locally" -- the proxy must run
+#      on the player's machine (see CLAUDE.md "proxy is single-client"). The
+#      launcher just spawns it for you.
+#   2. client.exe -- talks only to the local proxy.
+# The launcher's in-process LocalAuthRelay terminates the client's plaintext-HTTP
+# auth on loopback and re-wraps it as TLS to the cloud login on :443 (a real
+# Let's Encrypt cert, so no UseLocalCert).
+#
+# Selecting the "Net7MP" emulator is what makes the launcher's switch take the
+# NET7MP case (spawn proxy + client) instead of client-only. The Server box is
+# prefilled to the cloud host; override with ENB_ONLINE_HOST=<host> or arg 2.
+#
+# Client path: same resolution as play-local (arg 1 / ENB_CLIENT_PATH / default
+# linux-installer location).
+#
+#   just play-online
+#   just play-online /path/to/client.exe
+#   ENB_ONLINE_HOST=myserver.example just play-online
+play-online CLIENT_PATH='' HOST='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cp="{{CLIENT_PATH}}"
+    if [ -z "$cp" ]; then cp="${ENB_CLIENT_PATH:-}"; fi
+    if [ -z "$cp" ]; then cp="$HOME/.wine-enb/drive_c/Program Files/EA GAMES/Earth & Beyond/release/client.exe"; fi
+    if [ ! -f "$cp" ]; then
+        echo "play-online: client.exe not found at: $cp" >&2
+        echo "  pass the path as the recipe arg or set ENB_CLIENT_PATH." >&2
+        exit 1
+    fi
+
+    host="{{HOST}}"
+    if [ -z "$host" ]; then host="${ENB_ONLINE_HOST:-enb.sigsegv.land}"; fi
+    echo ">>> online target: $host:443 (no local docker stack)"
+
+    # The launcher spawns <launcher-dir>/bin/Net7Proxy.exe under WINE. Build the
+    # Win32 proxy and stage it where LaunchNet7Proxy() looks (AppContext.BaseDirectory/bin).
+    echo ">>> building Win32 Net7Proxy.exe (idempotent; layer-cached)"
+    just build-proxy-win64
+
+    echo ">>> building launcher"
+    dotnet build tools/launchnet7-avalonia >/dev/null
+
+    SETTINGS_DIR=tools/launchnet7-avalonia/bin/Debug/net10.0
+    mkdir -p "$SETTINGS_DIR/bin"
+    cp bin/Net7Proxy.exe "$SETTINGS_DIR/bin/Net7Proxy.exe"
+    echo ">>> staged $SETTINGS_DIR/bin/Net7Proxy.exe"
+
+    cp_json=$(printf '%s' "$cp"   | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+    host_json=$(printf '%s' "$host" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+    cat > "$SETTINGS_DIR/LaunchNet7.settings.json" <<JSON
+    {
+      "ClientPath": $cp_json,
+      "LastEmulatorName": "Net7MP",
+      "LastServerName": $host_json,
+      "UseClientDetours": false,
+      "UseLocalCert": false,
+      "UseSecureAuthentication": true,
+      "AuthenticationPort": "443",
+      "FormMainPositionX": -1,
+      "FormMainPositionY": -1
+    }
+    JSON
+    echo ">>> wrote $SETTINGS_DIR/LaunchNet7.settings.json (Net7MP -> $host:443)"
+
+    : "${WINEPREFIX:=$HOME/.wine-enb}"
+    export WINEPREFIX
+    echo ">>> launching (WINEPREFIX=$WINEPREFIX) -- pick Multi-Player if not preselected, then click Play"
+    dotnet run --no-build --project tools/launchnet7-avalonia
+
 # Same as `play-local`, but with three diagnostic knobs flipped on:
 #   1. WINEDEBUG=+seh,+module,err+module so wine prints the structured-
 #      exception backtrace (module + function names) to stderr on
