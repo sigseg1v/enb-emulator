@@ -9,6 +9,19 @@ This lives under `deploy/do/` and is completely separate from the dev files in
 `deploy/` (`Net7Config.cfg`, `certs/`), which the repo-root `docker-compose.yml`
 uses for local development. Nothing here touches those.
 
+## Quick update of server
+
+After landing server/login changes, ship them to the live droplet with (run
+from `deploy/do/`):
+
+```
+just push && just update
+```
+
+`push` builds + pushes the server + login images to the DO registry; `update`
+pulls them on the droplet and recreates the changed containers. See
+[Day-to-day](#day-to-day) for the rest.
+
 ## What it builds
 
 ```
