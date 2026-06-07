@@ -69,6 +69,8 @@ set(NET7_COMPAT_SRC
     "${CMAKE_CURRENT_SOURCE_DIR}/../common/PosixIpc.cpp"
     # Phase AH: shared per-peer DTLS transport for the proxy<->server UDP leg.
     "${CMAKE_CURRENT_SOURCE_DIR}/../common/DtlsTransport.cpp"
+    # Single source of truth for Mutex (server + login-server + proxy all link it).
+    "${CMAKE_CURRENT_SOURCE_DIR}/../common/Mutex.cpp"
 )
 
 message(STATUS "net7: ${CMAKE_CURRENT_SOURCE_DIR}")

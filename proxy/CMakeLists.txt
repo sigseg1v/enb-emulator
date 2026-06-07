@@ -45,6 +45,8 @@ file(GLOB PROXY_SRC CONFIGURE_DEPENDS
 # for BOTH proxy targets -- Linux-native (docker) and Win32-PE/MinGW (WINE).
 list(APPEND PROXY_SRC
     "${CMAKE_CURRENT_SOURCE_DIR}/../common/DtlsTransport.cpp"
+    # Single source of truth for Mutex (server + login-server + proxy all link it).
+    "${CMAKE_CURRENT_SOURCE_DIR}/../common/Mutex.cpp"
 )
 
 list(LENGTH PROXY_SRC _proxy_src_count)

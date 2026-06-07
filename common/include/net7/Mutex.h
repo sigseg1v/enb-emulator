@@ -40,8 +40,6 @@ public:
 
 private:
     pthread_mutex_t m_Mutex;
-    pthread_t m_ThreadID;
-    int m_LockCount;
 };
 
 #endif // _MUTEX_H_INCLUDED_
