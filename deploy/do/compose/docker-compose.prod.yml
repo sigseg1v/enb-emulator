@@ -110,6 +110,14 @@ services:
         else
           psql -h postgres -U net7 -d net7 -v ON_ERROR_STOP=1 -f /db/seed_item_effects.sql
         fi
+        # AH-9 ticket-handoff table. CREATE TABLE IF NOT EXISTS is idempotent
+        # and, unlike the seed.sql block above, this is NOT gated on the accounts
+        # probe -- it must land on PRE-EXISTING volumes too. The table is new, so
+        # an old prod volume already has `accounts` and a gated apply would skip
+        # it, leaving the game server's ticket validation failing closed for every
+        # login (G_ERROR_TICKET_INVALID). See db/postgres/login_ticket.sql.
+        echo "schema-init: applying /db/login_ticket.sql -> net7_user"
+        psql -h postgres -U net7 -d net7_user -v ON_ERROR_STOP=1 -f /db/login_ticket.sql
         echo "schema-init: syncing identity sequences -> net7"
         psql -h postgres -U net7 -d net7 -v ON_ERROR_STOP=1 -f /db/sync_sequences.sql
         echo "schema-init: done"
