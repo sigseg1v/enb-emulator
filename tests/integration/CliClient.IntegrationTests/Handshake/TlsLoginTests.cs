@@ -38,16 +38,18 @@ public sealed class TlsLoginTests
             $"login should have succeeded for '{account.Username}' — raw body: {response.RawBody.TrimEnd()}");
         Assert.False(string.IsNullOrEmpty(response.Ticket),
             "Ticket should be non-empty on success");
-        // LinuxAuth.cpp BuildTicketLocked emits "%s-%d" (username +
-        // hyphen + rand()), so the ticket starts with the username
-        // and contains a '-' before a decimal number. Asserting on
-        // the format keeps us honest if the format changes; pinning
-        // to a min length used to flake (rand() under 100M gave us
-        // a 19-char ticket for a 10-char username).
+        // LinuxAuth.cpp BuildTicketLocked emits "%s-%s" (username +
+        // hyphen + a CSPRNG token). The token is 16 bytes drawn from
+        // libsodium's randombytes_buf, hex-encoded to exactly 32
+        // lowercase hex chars -- no '-' inside it, so the game server's
+        // strtok(ticket, "-") still splits username from token cleanly.
+        // Asserting on the format keeps us honest if it changes: we pin
+        // both the length (16 bytes -> 32 hex) and the alphabet.
         Assert.StartsWith(account.Username + "-", response.Ticket);
         var suffix = response.Ticket[(account.Username.Length + 1)..];
-        Assert.True(suffix.Length >= 1 && suffix.All(char.IsDigit),
-            $"Ticket suffix should be digits: '{response.Ticket}'");
+        Assert.True(
+            suffix.Length == 32 && suffix.All(Uri.IsHexDigit),
+            $"Ticket suffix should be 32 hex chars (16-byte CSPRNG token): '{response.Ticket}'");
     }
 
     [Fact]
