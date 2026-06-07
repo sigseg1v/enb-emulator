@@ -67,9 +67,19 @@ SSL_Listener::SSL_Listener(unsigned long ip_address, unsigned short port)
 		return;
 	}
 
-	if ( SSL_CTX_use_certificate_file(m_ssl_context, certf, SSL_FILETYPE_PEM) <= 0 )
+	// Use the *chain* loader, not SSL_CTX_use_certificate_file: the latter
+	// installs only the first (leaf) certificate from the file and silently
+	// drops any intermediates, so the server hands the client a leaf-only
+	// chain. A strict client (the launcher's LocalAuthRelay validates the
+	// upstream against the OS trust store; .NET on Linux does no AIA fetch)
+	// then can't build a path to the root and fails the handshake -- which
+	// surfaces in the EnB client as a WinINet 12029 / "EA.com temporarily
+	// unavailable (INV-300)" at login. certf (<domain>.cer) is provisioned
+	// as the FULLCHAIN (leaf + intermediate) by deploy/do, so chain-loading
+	// it sends the intermediate too. PEM-only (no SSL_FILETYPE arg).
+	if ( SSL_CTX_use_certificate_chain_file(m_ssl_context, certf) <= 0 )
 	{
-		LogMessage("SSL Init: SSL_CTX_use_certificate_file failed (looked for '%s'); SSL listener will refuse connections.\n", certf);
+		LogMessage("SSL Init: SSL_CTX_use_certificate_chain_file failed (looked for '%s'); SSL listener will refuse connections.\n", certf);
 		// Phase J: don't bail — let the accept loop run so port 443 binds
 		// even without a cert. Operators will see the warning in the log
 		// and provision a cert before going live.

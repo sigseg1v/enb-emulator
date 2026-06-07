@@ -660,3 +660,31 @@ format & byte order", Trap 2).
 - **Setup**: a deploy with Phase AI lazy sectors active (the default) and an
   empty/fresh save state so the character is created and reinitialised on first
   login.
+
+### [ ] CV-19 -- Online login no longer fails with "EA.com temporarily unavailable (INV-300)" (TLS full-chain fix)
+
+- **Change**: login-server `SSL_Listener::SSL_Listener` now loads the cert with
+  `SSL_CTX_use_certificate_chain_file` instead of `SSL_CTX_use_certificate_file`.
+  The leaf-only loader silently dropped the intermediate, so port 443 handed
+  clients a leaf-only chain.
+- **Primary source (root cause)**: live probe of `enb.sigsegv.land:443`
+  (`openssl s_client -showcerts` returned exactly 1 certificate; `-verify`
+  failed num=20 "unable to get local issuer certificate"). The launcher's
+  `LocalAuthRelay` validates the upstream against the OS trust store (remote
+  upstream => full validation; .NET on Linux does no AIA fetch), so the broken
+  chain failed the relay's TLS handshake and the EnB client reported WinINet
+  12029 / INV-300. The deploy provisions `<domain>.cer` as the FULLCHAIN
+  (deploy/do README), so chain-loading sends the intermediate.
+- **Why the CLI/integration suite cannot fully validate it**: the online auth
+  path (authlogin.dll -> LocalAuthRelay -> remote 443 TLS) is exercised only by
+  the real client + launcher against a real CA-signed deploy; the integration
+  suite connects with verify-skip / local self-signed single certs and never
+  sees an incomplete public chain.
+- **What to look for (real client)**: `just play-online` against a redeployed
+  `enb.sigsegv.land`, enter member name + password, click Accept. Login must
+  proceed to character select instead of the ~30s hang + INV-300. Independently
+  confirm with `openssl s_client -connect enb.sigsegv.land:443 -showcerts`
+  returning 2 certs (leaf + LE intermediate) and `Verify return code: 0`.
+- **Setup**: REQUIRES redeploy of the login binary (the code fix) AND the
+  remote `<domain>.cer` being the fullchain. If after redeploy s_client still
+  shows 1 cert, the deployed `.cer` is leaf-only -- regenerate it as fullchain.
