@@ -165,31 +165,101 @@ Do them in order; verify the integration suite stays green at every step.
   that one cert name (then a wildcard/multi-SAN LE cert is the other option).
   Document the chosen path in `docs/17-traffic-and-ports.md`.
 
+### Architecture reality (mapped 2026-06-07) -- the per-peer state model
+
+Both sides use ONE socket multiplexing many peers, NOT connected-per-peer. DTLS
+needs one association per `(socket, peer addr:port)`, so a naive "wrap the fd"
+does NOT fit. The concrete shape:
+
+- **Server:** every listener is one `SOCK_DGRAM` socket; `RunRecvThread`
+  (`server/src/UDPConnection.cpp:174-253`) blocks in `recvfrom` via `UDP_RecvS`
+  (`:302-346`, returns `source_addr`+`source_port`), then dispatches by connection
+  type (`:212-233`) to `HandleClientOpcode`/`HandleGlobalOpcode`/`HandleMVASOpcode`/
+  `HandleMasterOpcode`. Send is `UDP_Send` (`:276-295`) `sendto` to the per-player
+  stored `m_Player_IPAddr`/`m_Player_Port` (`Player::SetPlayerPortIP`,
+  `PlayerConnection.cpp:78`). Socket create+bind at `UDPConnection.cpp:40`/`:58`.
+- **Proxy:** master plane = ONE *connected* socket to `:3808`
+  (`UDPClient_linux.cpp:225`); global plane = ONE *unconnected* socket that by
+  design receives from TWO server ports, `:3810` AND `:3806`
+  (`UDPClient.h:28-35`, `UDP_RecvFromServer` `:453-489`, source-IP filtered but
+  NOT port-filtered). Send via `UDP_Send` (`:543-583`): connected `send` (master)
+  or `sendto` (global / explicit port). Server IP comes from
+  `ResolveGameServerIP` (`:125-160`) via `NET7_GAME_SERVER_HOST` -> `getaddrinfo`.
+
+**The crux: the global plane is two DTLS associations on one socket** (server:3810
++ server:3806). So the transport shim must key DTLS state by peer `(ip,port)`, not
+by socket. Build a small `DtlsTransport` helper used by BOTH sides:
+  - holds `SSL_CTX` + a `map<peerkey, SSL*>` where peerkey = `(ip,port)`;
+  - each `SSL` gets a memory-BIO pair (`BIO_s_mem`) -- we pump bytes manually
+    between `recvfrom`/`sendto` and the BIOs (the standard single-socket
+    multi-peer DTLS pattern; avoids `BIO_new_dgram`'s connect-per-peer model);
+  - `feed(datagram, peer)` -> `BIO_write` to rbio -> `SSL_read` -> cleartext (or
+    drives the handshake, including server-side `DTLSv1_listen` cookie exchange);
+  - `send(cleartext, peer)` -> `SSL_write` -> `BIO_read` wbio -> `sendto`.
+  This isolates ALL DTLS mechanics from the existing opcode dispatch, which keeps
+  consuming cleartext exactly as today.
+
 - [ ] **AH-2. Server side: DTLS-wrap the externally-reachable UDP listeners.**
-  The server binds multiple UDP ports (MVAS 3806, sector 3501-3800, master 3808,
-  global 3810; see `common/include/net7/Ports.h`). Each datagram socket the
-  remote proxy dials needs a DTLS layer (`SSL_CTX` with `DTLS_method()`, per-peer
-  `SSL` over a datagram BIO, cookie-exchange anti-DoS via `DTLSv1_listen`). Scope
-  which ports the remote proxy actually dials vs. which stay docker-internal --
-  only the externally-reachable ones need DTLS; do not wrap a loopback/internal
-  socket for nothing.
+  Add the `DtlsTransport` (server role) per listener. **Policy: DTLS REQUIRED by
+  default, fail-closed.** At startup the server calls `DtlsPlaintextOptedOut()`
+  (`common/DtlsTransport.h`, checks `NET7_DTLS_ALLOW_PLAINTEXT` ==
+  `i-accept-unencrypted-udp` byte-for-byte):
+    - **NOT opted out (default):** build the `DtlsTransport`, `LoadServerCert` the
+      LE cert/key (`SSL_CTX_use_certificate_chain_file` + `..._PrivateKey_file`,
+      mirror `login-server/Net7SSL/SSL_Listener.cpp:40-91`). If `!Ok()` (missing/
+      bad cert, CTX error) -> log `FATAL` + `exit(non-zero)`. **No silent plaintext
+      fallback** -- the process FAILS TO START.
+    - **Opted out (sentinel set):** run the listeners cleartext exactly as today,
+      but print a LOUD multi-line startup warning ("UDP ENCRYPTION DISABLED ...
+      every gameplay packet is plaintext and forgeable") so it can never happen
+      unnoticed.
+  Hook at the `UDP_RecvS` return in `RunRecvThread` (`UDPConnection.cpp:197`): when
+  DTLS is on, route the raw datagram through `DtlsTransport::Feed` and only dispatch
+  the decrypted `app_data`; route `UDP_Send` (`:291`) through
+  `DtlsTransport::SendApp`. Cookie-exchange (`DTLSv1_listen`) anti-DoS is the
+  AH-2a follow-up; interim guard is the transport's `SetMaxPeers` half-open cap.
+  Scope: only the externally-reachable listeners (sector/global/MVAS/master that
+  the remote proxy dials) -- do not wrap a purely docker-internal socket for
+  nothing. OpenSSL is already linked (`server/CMakeLists.txt:79`/`:181-182`). Add
+  `common/DtlsTransport.cpp` to `server/CMakeLists.txt` (mirror `PosixIpc.cpp` at
+  `:69`).
 
-- [ ] **AH-3. Proxy side: DTLS-connect with pin verification.** The proxy opens
-  DTLS to the server, verifies the server cert against the pinned SPKI hash
-  (custom verify callback -- NOT the system trust store), then runs the existing
-  cleartext UDP framing INSIDE the DTLS channel. One source tree, two build
-  targets (Linux-native + Win32-PE/WINE) -- do NOT fork it.
+- [ ] **AH-3. Proxy side: DTLS-connect with NAME verification.** Add the
+  `DtlsTransport` (client mode, `DTLS_client_method()`) to `UDPClient`, gated on
+  the same flag. Verify the server cert against the **cert NAME** (LE), via
+  `SSL_set1_host(ssl, <domain>)` + `SSL_set_verify(SSL_VERIFY_PEER)` against the
+  system trust store -- NOT a pin. **Integration gap to close:** the UDP layer
+  (`UDPClient_linux.cpp`) does NOT currently see `g_DomainName` -- it resolves by
+  `NET7_GAME_SERVER_HOST`. Add a `NET7_GAME_SERVER_DOMAIN` env (the cert SAN, e.g.
+  the public hostname) read in `OpenFixedPort`, used ONLY for `SSL_set1_host`
+  verification while the socket still connects to the resolved IP (connect-by-IP,
+  verify-by-name). Hook `UDP_Send` (`:543`) -> `DtlsTransport::send` and the
+  `UDP_RecvFromServer` (`:453`) return -> `DtlsTransport::feed`. **Global-plane
+  caveat:** that socket carries two associations (:3810 + :3806) -- the transport's
+  peerkey map already handles this; just feed each datagram with its real
+  `recvfrom` source port. One source tree, two build targets (Linux + Win32-PE via
+  MinGW, static OpenSSL in `proxy/third_party/openssl-mingw64/`) -- do NOT fork it.
 
-- [ ] **AH-4. CLI / integration-suite escape hatch.** The CLI (`CliClient.Core`)
-  and the Phase T suite speak cleartext UDP (the integration stack runs over
-  loopback/docker, on a private bridge with no untrusted network). DTLS + token
-  enforcement on the server's UDP ports break them unless gated. Make BOTH DTLS
-  and token-enforcement a single server config flag, OFF for the docker
-  integration stack and ON for the public deploy. The secure mode is the default
-  for the public deploy; the cleartext mode is the explicit, loopback-only test
-  topology. **Do NOT** weaken any server auth/state guard to make tooling easier
-  (CLAUDE.md) -- a config-gated transport+token toggle on a private test bridge is
-  a topology choice, not a loosened check.
+- [ ] **AH-4. CLI / integration-suite escape hatch -- the LOUD explicit opt-out.**
+  DTLS is REQUIRED by default (AH-2), so the CLI (`CliClient.Core`) and the Phase T
+  suite -- which speak cleartext UDP over the loopback/docker private bridge --
+  would fail to connect unless the operator EXPLICITLY opts out. The opt-out is a
+  single deliberate, unmistakable sentinel, NOT a generic enable flag:
+
+      NET7_DTLS_ALLOW_PLAINTEXT=i-accept-unencrypted-udp
+
+  decided in `common/DtlsTransport` (`DtlsPlaintextOptedOut()` matches it
+  byte-for-byte; a stray `1`/`true`/`yes` does NOT trip it -- pinned by
+  `dtls_transport_test.PlaintextOptOutRequiresExactSentinel`). Set this sentinel
+  ONLY in the trusted-loopback compose/launch files that need cleartext:
+  `docker-compose.yml` (server + login + proxy services), `just play-local`,
+  `just play-cli`, and the Phase T integration stack. Each path that runs cleartext
+  prints the LOUD startup warning. The PUBLIC deploy sets nothing -> DTLS required
+  -> fail-closed if the cert is missing. **Do NOT** weaken any server auth/state
+  guard to make tooling easier (CLAUDE.md) -- an explicit loopback-only plaintext
+  opt-out on a private bridge is a topology choice, not a loosened check. The token
+  layer (AH-9) follows the same gate: when plaintext is opted out on the private
+  bridge, token enforcement is off there too; the public default enforces both.
 
 - [ ] **AH-5. Preserve the capture workflow.** Keep the config flag OFF on the
   local-debug stack so `proxy/local-debug/` dumps stay cleartext, or wire an

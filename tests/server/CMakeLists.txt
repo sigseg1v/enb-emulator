@@ -215,6 +215,24 @@ if(OpenSSL_FOUND)
         Threads::Threads
     )
     gtest_discover_tests(sector_login_test)
+
+    # Phase AH: shared per-peer DTLS transport (proxy<->server UDP leg).
+    # Compiles the real common/DtlsTransport.cpp TU and drives a full
+    # client<->server handshake + bidirectional app round-trip over its
+    # in-memory BIO pump. Needs libssl (DTLS) on top of libcrypto.
+    add_executable(dtls_transport_test
+        protocol/dtls_transport_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../common/DtlsTransport.cpp
+    )
+    target_include_directories(dtls_transport_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../common/include
+    )
+    target_link_libraries(dtls_transport_test PRIVATE
+        GTest::gtest_main
+        OpenSSL::SSL
+        OpenSSL::Crypto
+    )
+    gtest_discover_tests(dtls_transport_test)
 else()
     message(STATUS "net7-tests: OpenSSL not found — skipping handshake_test")
 endif()
