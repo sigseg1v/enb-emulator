@@ -842,11 +842,23 @@ char * AccountManager::BuildTicket(char *username)
         time_slot = last->next;
     }
 
-    //Seed the randomizer
-    srand((unsigned int)time(NULL));
+    // The ticket suffix is the only secret guarding a presented ticket
+    // against account takeover, so it must be a CSPRNG draw, not glibc
+    // rand(). rand() is an LCG seeded from time() at 1-second granularity:
+    // its whole sequence is recoverable from one observed ticket or the
+    // boot time. libsodium is already linked (Phase X Argon2id) and
+    // randombytes_buf draws from the kernel CSPRNG. 16 bytes -> 32 hex
+    // chars, no '-', so ProcessTicketInfo's strtok(ticket, "-") still
+    // splits username from token. Mirrors login-server LinuxAuth.cpp's
+    // BuildTicketLocked.
+    EnsureAccountSodiumReady();
+    unsigned char token_bin[16];
+    char token_hex[sizeof(token_bin) * 2 + 1];
+    randombytes_buf(token_bin, sizeof(token_bin));
+    sodium_bin2hex(token_hex, sizeof(token_hex), token_bin, sizeof(token_bin));
 
     //Fill the slot
-    sprintf_s(time_slot->ticket, sizeof(time_slot->ticket), "%s-%d", username, rand());
+    sprintf_s(time_slot->ticket, sizeof(time_slot->ticket), "%s-%s", username, token_hex);
     //time_slot->username = g_StringMgr->GetStr(username);
 	strncpy_s(time_slot->username, sizeof(time_slot->username), username, 64);
 	time_slot->username[63]='\0'; //force termination of string

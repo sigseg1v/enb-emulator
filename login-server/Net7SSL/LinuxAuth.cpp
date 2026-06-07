@@ -113,12 +113,22 @@ const char *BuildTicketLocked(const char *username)
     }
     if (chosen < 0) chosen = 0;
 
-    // Seed once per call — same pattern as Win32 BuildTicket().
-    static bool seeded = false;
-    if (!seeded) { srand((unsigned int)time(nullptr)); seeded = true; }
+    // The ticket suffix is the only secret standing between a presented
+    // ticket and an account takeover, so it must be a CSPRNG draw, not
+    // glibc rand(). rand() is a non-cryptographic LCG seeded once from
+    // time(), so its full sequence is recoverable from a single observed
+    // ticket (or guessable from the boot time). libsodium is already
+    // initialised by ValidateAccountLinux before any ticket is built;
+    // randombytes_buf draws from the kernel CSPRNG (getrandom(2)) and
+    // never fails. 16 bytes -> 32 hex chars, no '-' so the game server's
+    // strtok(ticket, "-") still splits username from token cleanly.
+    unsigned char token_bin[16];
+    char token_hex[sizeof(token_bin) * 2 + 1];
+    randombytes_buf(token_bin, sizeof(token_bin));
+    sodium_bin2hex(token_hex, sizeof(token_hex), token_bin, sizeof(token_bin));
 
     snprintf(g_Tickets[chosen].ticket, sizeof(g_Tickets[chosen].ticket),
-             "%s-%d", username, rand());
+             "%s-%s", username, token_hex);
     strncpy(g_Tickets[chosen].username, username,
             sizeof(g_Tickets[chosen].username) - 1);
     g_Tickets[chosen].username[sizeof(g_Tickets[chosen].username) - 1] = 0;
