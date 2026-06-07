@@ -35,10 +35,10 @@ with that in mind.
 A running deployment has between three and five distinct processes:
 
 ```
-+----------------------+        +----------------------+
-|     Net7Proxy        |  UDP   |     server (Net7)    |
-| (per-client cleartext|<------>| Master/Global/Sector |
-|  bridge; receives    |        | runtime; Postgres    |
++----------------------+    UDP +----------------------+
+|     Net7Proxy        | (DTLS) |     server (Net7)    |
+| (per-client bridge;  |<------>| Master/Global/Sector |
+|  receives encrypted  |        | runtime; Postgres    |
 |  TCP from the EnB    |        | client (libpqxx)     |
 |  client, sends UDP   |        +----------+-----------+
 |  to server + login)  |                   |
@@ -117,8 +117,10 @@ login handoff, 0x3004/0x3008 visibility kicks, the MVAS position feed),
 **reassembles** split packets, and **re-frames** everything that survives
 onto its own client-facing TCP framing. Only opcodes `0x01..0xFE` are
 ever forwarded to the client's game receiver; anything else is consumed
-or rejected. It also **encrypts**: client<->proxy TCP is Westwood RSA +
-dual RC4, while proxy<->server UDP is cleartext.
+or rejected. It also **encrypts both legs**: client<->proxy TCP is
+Westwood RSA + dual RC4, and proxy<->server UDP is DTLS 1.2 (plus a
+per-packet auth token on the client->server direction). See
+`docs/03-network-protocol.md` §3.2 for the DTLS/auth design.
 
 The practical consequence -- spelled out in CLAUDE.md and in
 `docs/03-network-protocol.md` -- is that a Net7 server-side packet capture

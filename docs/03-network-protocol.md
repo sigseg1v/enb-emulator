@@ -38,7 +38,7 @@ There are six distinct transports in the code base:
 | **HTTP (plaintext)** | **127.0.0.1:4180 (loopback only)** | **EnB client (authlogin.dll) <-> LocalAuthRelay (in-launcher)** | **Active** |
 | HTTPS (TLS over TCP) | port 443 | LocalAuthRelay <-> Net7SSL (loopback or remote) | Active |
 | TCP (Westwood RSA+RC4) | port 3500 (Net7Proxy local) | EnB client <-> Net7Proxy | Active (handshake terminates here) |
-| UDP | ports 3806, 3808, 3810, sector dynamic | Net7Proxy <-> server | Active (game) |
+| UDP (DTLS 1.2 + per-packet auth token) | ports 3806, 3808, 3810, sector dynamic | Net7Proxy <-> server | Active (game; encrypted, see §3.2) |
 | UDP loopback | between server and login | server <-> login | Active (auth handoff) |
 | AF_UNIX SOCK_DGRAM | `/run/net7-ipc/` | server <-> login | Active (liveness pings) |
 
@@ -55,19 +55,25 @@ network interfaces:
   loopback (as plaintext HTTP) and re-wraps it as TLS to the upstream
   auth server. See §3.3 and §5.1.
 - **Net7Proxy** terminates the client's plaintext-TCP game connection
-  on loopback and translates to UDP (Westwood RSA+RC4) toward the
-  server. See §3.1 and §5.3.
+  on loopback (Westwood RSA+RC4 on that local TCP leg), and translates
+  to UDP toward the server. That proxy->server UDP leg is wrapped in
+  **DTLS 1.2** (encrypted + server-cert-authenticated), and each
+  client->server datagram additionally carries a per-packet auth token.
+  See §3.1 (client-facing TCP), §3.2 (DTLS), and §5.3 (handoff).
 
 Net-traffic invariant -- read this carefully:
 
-> **No plaintext HTTP, and no plaintext TCP game traffic, ever leaves
-> the local machine.** The two loopback middlemen above are the only
-> things on the box that *can* speak to a remote host, and both of
-> them always speak TLS (LocalAuthRelay) or Westwood RSA+RC4
-> (Net7Proxy) outbound. There is no config flag, env var, settings
-> file, registry key, or CLI argument that can move the client off
-> loopback or downgrade either middleman's outbound transport to
-> plaintext. See §3.3 for the proof on the auth path.
+> **No plaintext HTTP, no plaintext TCP game traffic, and no plaintext
+> UDP game traffic ever leaves the local machine.** The two loopback
+> middlemen above are the only things on the box that *can* speak to a
+> remote host, and both always encrypt outbound: LocalAuthRelay speaks
+> TLS, and Net7Proxy speaks DTLS 1.2 (its client-facing Westwood RC4
+> TCP leg never leaves loopback). There is no config flag, env var,
+> settings file, registry key, or CLI argument that can move the client
+> off loopback or downgrade either middleman's outbound transport to
+> plaintext. The only DTLS opt-out is a deliberate server+proxy
+> operator sentinel (§3.2), not anything the client can reach. See §3.3
+> for the proof on the auth path.
 
 ### Net7Proxy is not a dumb relay (captures are NOT directly client-applicable)
 
@@ -95,7 +101,9 @@ reconstruction. On the server->client leg the proxy:
   handoff, `0x3004`/`0x3008` in-space visibility kicks, the MVAS position
   feed -- and **reassembles** split packets.
 - **encrypts** -- client<->proxy TCP is Westwood RSA + dual RC4 (§3.1);
-  proxy<->server UDP is cleartext (§3.2).
+  proxy<->server UDP is DTLS 1.2 (§3.2). DTLS is transport plumbing
+  wrapped *around* the same EnbUdp frames described below -- it does
+  not change the framing or opcodes, it just encrypts the datagram.
 
 **Therefore a Net7 server-side packet capture can NOT be applied directly
 to `client.exe`, and a client-side capture can NOT be replayed straight at
@@ -108,8 +116,10 @@ direction. The proxy's per-opcode behaviour is the source of truth:
 client->server. The committed reference captures are under
 `archive/kyp-snapshot/capturedPackets/`; `proxy/local-debug/` is a
 gitignored, local-only scratch dir for your own working captures, taken on
-the **cleartext proxy<->server UDP leg**, not the encrypted client<->proxy
-leg.
+the **proxy<->server UDP leg**, not the client<->proxy leg. Note that this
+leg is now DTLS-encrypted on the wire (§3.2), so a raw capture shows only
+DTLS records; to inspect cleartext EnB frames you decrypt at the proxy/server
+endpoint or run with the DTLS plaintext opt-out (§3.2).
 
 ---
 
@@ -233,18 +243,81 @@ The RSA modulus and the Westwood key derivation come from the original
 replace them with a modern handshake without keeping the old one for
 compatibility, because the retail client demands exactly this scheme.
 
-### 3.2. UDP encryption
+### 3.2. UDP encryption (DTLS 1.2) and the per-packet auth token
 
-UDP frames in the modern client/proxy path are *not* RC4-encrypted at
-the UDP level. The encryption that used to happen on TCP between the
-client and the server now happens on TCP between the client and
-Net7Proxy (locally on the client host). The UDP between Net7Proxy and
-server is cleartext. `RC4_UDP_KEY_SIZE` (16 bytes) exists in
-`proxy/Connection.h` but is for a path that is not currently used in
-production.
+The proxy<->server UDP leg is **not** RC4-encrypted at the UDP level
+(`RC4_UDP_KEY_SIZE` in `proxy/Connection.h` is a legacy constant for a
+path not used in production). Instead it is wrapped in **DTLS 1.2**,
+plus a per-packet auth token on the client->server direction. These
+are two distinct layers solving two distinct problems (Phase AH;
+design in `plans/35-phase-ah-dtls.md`):
 
-For sniffing: a tcpdump of UDP between client host and server host
-will show readable opcodes and structure data.
+1. **DTLS 1.2 -- confidentiality + channel integrity.** Without it, the
+   proxy<->server datagrams (which leave the client host and cross the
+   public internet to a remote server) are readable and *injectable* by
+   anyone on the path. DTLS encrypts and authenticates the channel in
+   both directions.
+2. **Per-packet auth token -- player authentication.** DTLS only proves
+   "you hold a session to this server cert"; since every player runs the
+   same proxy against the same server, a valid DTLS session does not by
+   itself prove *which account* a datagram belongs to. So each
+   client->server gameplay datagram is prefixed with a 17-byte wrapper
+   (1 version byte + 16 token bytes) bound to the account at
+   character-select. The server strips and constant-time-verifies it
+   before dispatch.
+
+**DTLS layer (`common/DtlsTransport.cpp`, OpenSSL 3.0.16).** One
+`DtlsTransport` wraps one UDP socket and keeps a separate DTLS
+association per remote peer keyed by `(ip,port)`, driven over in-memory
+BIOs so the existing `recvfrom()`/`sendto()` loops are unchanged -- the
+multiplexed, unconnected EnB sockets (the global plane even fans in
+`:3810` + `:3806` on one fd) could not use a connected datagram BIO.
+DTLS is plumbing *around* the wire format: the bytes inside the channel
+are the same cleartext EnbUdp frames documented in §2, just encrypted
+on the wire.
+
+Security posture (err-on-security):
+
+- **DTLS 1.2 floor** -- DTLS 1.0 is refused.
+- **Mandatory server-cert verification by the proxy (client side).** The
+  proxy sets `SSL_set1_host` + `SSL_VERIFY_PEER` against the system
+  trust store (or a pinned CA file via `NET7_DTLS_CA`); a proxy with no
+  verify hostname (`g_DtlsVerifyDomain`) refuses to start a handshake.
+  Server authentication only -- mutual DTLS is intentionally *not* used,
+  because a shared proxy client-cert could not authenticate individual
+  accounts (that is the token's job).
+- **Server loads the real cert chain + key** (e.g. the Let's Encrypt
+  `fullchain.pem` + `privkey.pem`) via `NET7_DTLS_CERT` / `NET7_DTLS_KEY`.
+- **Fail-closed startup.** DTLS is REQUIRED by default. The *only* way to
+  run cleartext is the exact operator sentinel
+  `NET7_DTLS_ALLOW_PLAINTEXT=<sentinel>` on **both** server and proxy
+  (`net7::kDtlsOptOutSentinel`); any other value (unset, empty, `1`,
+  `true`) means "DTLS required". When required, if the transport fails to
+  configure (missing/bad cert, CTX error) the process **fails to start**
+  rather than silently falling back to plaintext. Opting out prints a
+  loud startup warning. This sentinel lives on the server/proxy host
+  only -- it is not reachable from the client.
+- Anti-amplification: an interim per-transport cap on simultaneous
+  associations (`SetMaxPeers`); cookie-exchange (HelloVerifyRequest) is a
+  tracked follow-up.
+
+**Per-packet auth token (`server/src/AuthWrapper.h`, validated in
+`server/src/UDPConnection.cpp`).** A 17-byte `EnbUdpAuthWrapper`
+(`NET7_UDP_AUTH_WRAPPER_VERSION` = `0x01`, then a 16-byte token) prefixes
+each client->server gameplay datagram. The token is a libsodium
+`randombytes_buf` draw issued at login and bound to the account's
+`GameID`. The server compares it in **constant time**
+(`ConstantTimeTokenEqual`, no early-out, so timing leaks no information
+about how many leading bytes matched) and drops on short/oversize frame,
+bad version, or token mismatch -- with a rate-limited log that never
+contains the token. Server->client needs no token (nobody impersonates
+the client to itself, and DTLS already authenticates the server).
+
+**For sniffing:** a tcpdump of the proxy<->server UDP now shows only
+DTLS records -- content type `0x17` (application_data), version `0xFEFD`
+(DTLS 1.2), epoch >= 1 -- followed by ciphertext. No EnB opcodes or
+structure data are readable on the wire. (The CLI client / integration
+suite uses a separate plaintext path, not this leg.)
 
 ### 3.3. HTTPS (auth) and the LocalAuthRelay
 
@@ -383,11 +456,11 @@ The wire-load-bearing port assignments live in
 | 3501 | `SECTOR_SERVER_PORT` | TCP (legacy, unused) | base port; sectors add an offset |
 | 3801 | `MASTER_SERVER_PORT` | TCP (legacy, unused) | client <-> master |
 | 3805 | `GLOBAL_SERVER_PORT` | TCP (legacy, unused) | client <-> global |
-| 3806 | `MVAS_LOGIN_PORT` | UDP | Net7Proxy / Net7SSL -> Net7 (MVAS / login handoff) |
+| 3806 | `MVAS_LOGIN_PORT` | UDP (DTLS 1.2) | Net7Proxy / Net7SSL -> Net7 (MVAS / login handoff) |
 | 3807 | `SSL_LOCALCERT_LOGIN_PORT` | TCP/TLS (legacy) | out-of-band local-cert login |
-| 3808 | `UDP_MASTER_SERVER_PORT` | UDP | Net7Proxy -> Net7 (master handoff) |
+| 3808 | `UDP_MASTER_SERVER_PORT` | UDP (DTLS 1.2) | Net7Proxy -> Net7 (master handoff) |
 | 3809 | `PROXY_SERVER_PORT` | UDP | Net7Proxy local |
-| 3810 | `UDP_GLOBAL_SERVER_PORT` | UDP | Net7Proxy -> Net7 (global control plane) |
+| 3810 | `UDP_GLOBAL_SERVER_PORT` | UDP (DTLS 1.2) | Net7Proxy -> Net7 (global control plane) |
 
 The TCP ports marked "legacy, unused" are the ports the original direct
 client-to-server TCP link used. That link no longer exists in the
