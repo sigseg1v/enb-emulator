@@ -631,3 +631,32 @@ format & byte order", Trap 2).
   logs in and plays -- the ticket suffix parse now splits on the last dash.
 - **Setup**: a deploy with DTLS enabled (no plaintext opt-out), valid server
   cert/key, and the proxy built with the DTLS client path. A normal character.
+
+### [ ] CV-18 -- Fresh character reaches space/station instead of hanging on the loading screen (lazy-sector login fix)
+
+- **Change**: server commit `765f1eca` -- at login stage 4, when
+  `Player::GetSectorManager()` resolves NULL (a fresh char's
+  `ReInitializeSavedData` reset sector_num to a not-yet-started home
+  StartSector under Phase AI lazy sectors), bring the sector online via
+  `ServerManager::EnsureSectorStarted()` and re-resolve before advancing, so
+  `HandleSectorLogin -> SendStart` (0x0005 START) actually fires.
+- **Primary source (format)**: login state-machine analysis
+  (`PlayerManager.cpp` case 4 -> `SectorManager::HandleSectorLogin` ->
+  `SendStart`) plus server-log evidence -- a fresh-char cold-start to a space
+  sector logged no "Sector login for player" line and emitted no START, while
+  warm/station logins did. Restores the pre-Phase-AI guarantee (all sectors
+  online at boot) that the sector-login stages run against a live manager.
+- **Why the CLI/integration suite cannot fully validate it**: the integration
+  suite confirms the START packet is now emitted (the two tests that wedged --
+  `StationHandshake_ManufactureSetManufactureIdPayload` and
+  `SlashUitriggerMissingArg` -- pass 2/2), but only the real Win32 client
+  proves the game session actually proceeds past the loading screen into space
+  / the station after receiving START.
+- **What to look for (real client)**: create a BRAND-NEW character (any
+  race/profession), log in for the first time. The client must load into the
+  home station (or space) and be playable, NOT hang on the loading screen.
+  Repeat for a race/profession whose StartSector differs (e.g. a Jenquai vs a
+  Terran) so a sector that is genuinely cold at first login is exercised.
+- **Setup**: a deploy with Phase AI lazy sectors active (the default) and an
+  empty/fresh save state so the character is created and reinitialised on first
+  login.
