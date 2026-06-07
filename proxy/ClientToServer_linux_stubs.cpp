@@ -402,9 +402,29 @@ void Connection::ProcessSectorServerOpcode(short opcode, short bytes)
         // The global-plane UDPClient's SendPacketSequence early-returns on
         // !m_ConnectionActive, so without this we drop every in-game packet
         // and the server's login-stage retry loop spins forever.
+        //
+        // NAT traversal (real internet, not docker-bridge): the global socket's
+        // only prior outbound was the AVATARLOGIN to server:3810, so client-side
+        // stateful NAT (home router + docker MASQUERADE) holds a mapping keyed on
+        // remote port 3810. The server's in-game UDP arrives from a DIFFERENT
+        // remote port -- MVASauth (server:3806, server/src/UDP_Master.cpp:73) --
+        // so a restricted-cone/symmetric NAT drops it before our recv() and the
+        // server times out at login stage 3. Punch a mapping for server:3806 by
+        // sending a 0x3005 PLAYER_COMMS_ALIVE FROM the global socket TO 3806, in
+        // lockstep right here: the player is already registered server-side
+        // (SetupPlayer runs in UDP_Global.cpp GlobalTicketRequest at avatar
+        // login, strictly before this sector LOGIN), so GetPlayer() resolves and
+        // the server will NOT answer with 0x100A MVAS_TERMINATE. Then keep the
+        // mapping warm on the global socket's own keepalive thread.
+        // Primary source for the 0x3005-to-3806 packet: proxy/local-debug/
+        // net7-live-2026-06-02-login-undock-clicknavs-warp-logout.pcap.
         if (g_ServerMgr->m_UDPGlobalClient) {
             g_ServerMgr->m_UDPGlobalClient->SetConnectionActive(true);
             g_ServerMgr->m_UDPGlobalClient->SetLoginComplete(false);
+            g_ServerMgr->m_UDPGlobalClient->SetPlayerID(
+                g_ServerMgr->m_UDPClient->PlayerID());
+            g_ServerMgr->m_UDPGlobalClient->SendServerKeepalive();
+            g_ServerMgr->m_UDPGlobalClient->StartMVASKeepalive();
         }
         m_SectorTCPRequest = false;
         break;

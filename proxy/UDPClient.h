@@ -43,6 +43,18 @@ public:
     // Public because a free-function pthread trampoline invokes it, mirroring
     // RecvThread/MVASThread.
     void    MVASKeepaliveThread();
+    // Linux server-side proxy: the periodic 0x3005 PLAYER_COMMS_ALIVE the real
+    // Net7Proxy streams to the server's MVAS port (every ~30s, movement-
+    // independent) so a stationary in-space avatar refreshes LastAccessTime and
+    // never trips the server's 2-minute idle reaper. Defined in
+    // UDPClient_linux.cpp. Public because Connection::ProcessSectorServerOpcode
+    // also calls these on the global-plane socket to punch + keep alive the NAT
+    // mapping to server:3806 (see ClientToServer_linux_stubs.cpp 0x0002 LOGIN).
+    void    SendServerKeepalive();
+    // Start the 0x3005 keepalive thread on THIS UDPClient (guarded so a re-login
+    // does not stack threads -- the surviving thread picks up the latest
+    // m_PlayerID on its next tick).
+    void    StartMVASKeepalive();
     bool    VerifyConnection();
 
 	unsigned long checksum(char *buffer, int size);		// checksum
@@ -144,15 +156,9 @@ private:
     //keepalive
     void    SendClientAlive();
     void    SendCommsAlive();
-    // Linux server-side proxy: the periodic 0x3005 PLAYER_COMMS_ALIVE the real
-    // Net7Proxy streams to the server's MVAS port (every ~30s, movement-
-    // independent) so a stationary in-space avatar never trips the server's
-    // 2-minute idle reaper. The full Win32 MVASThread (UDPProxyMVAS.cpp) also
-    // reads ship position out of the client process and streams 0x1004; that
-    // half has no client process to read on the server-side Linux proxy and is
-    // not needed for the idle-timer refresh. Defined in UDPClient_linux.cpp.
-    // MVASKeepaliveThread is declared in the public section (trampoline-called).
-    void    SendServerKeepalive();
+    // The 0x3005 server keepalive (SendServerKeepalive / StartMVASKeepalive /
+    // MVASKeepaliveThread) lives in the public section above -- it is called
+    // from Connection on the global-plane socket as well as internally.
 
 private:
     long m_Port;

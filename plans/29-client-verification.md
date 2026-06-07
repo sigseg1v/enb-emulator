@@ -388,3 +388,37 @@ format & byte order", Trap 2).
   15000) and NET7_SECTOR_IDLE_POLL_MS=5000; enter a space sector, drop loot /
   mine a roid, fly to a station and wait out the interval, then return.
 
+
+### [ ] CV-12 -- Sector entry over real internet (NAT-traversed global UDP) works on the real client
+
+- **Change**: proxy global-plane NAT-hole punch. On the sector `0x0002 LOGIN`
+  the proxy now sends a `0x3005 PLAYER_COMMS_ALIVE` FROM the global UDP socket
+  TO `server:3806` (MVAS port) and starts that socket's 0x3005 keepalive thread.
+  Without it, behind a restricted-cone/symmetric NAT (home router + the cloud
+  host's docker MASQUERADE) the server's in-game UDP -- which arrives from
+  server port 3806, not the 3810 the global socket last sent to -- has no
+  conntrack mapping and is dropped, so the client never receives the login-stage
+  `0x2020` confirm and the server times out at "login stage 3". Files:
+  `proxy/ClientToServer_linux_stubs.cpp` (0x0002 LOGIN handler),
+  `proxy/UDPClient_linux.cpp` / `UDPClient.h` (`StartMVASKeepalive`).
+- **Primary source (format)**: the 0x3005-to-3806 packet is unchanged and
+  already captured -- `proxy/local-debug/net7-live-2026-06-02-login-undock-clicknavs-warp-logout.pcap`
+  (4x P->S 0x3005 to udp/3806, bare 12-byte EnbUdpHeader). This change only
+  alters WHICH socket emits it and WHEN (one extra emit, in lockstep at LOGIN);
+  no new bytes. The race-free guarantee comes from the server registering the
+  player at avatar login (`UDP_Global.cpp` GlobalTicketRequest -> SetupPlayer)
+  BEFORE the sector LOGIN, so the punch's GetPlayer() resolves and no
+  `0x100A MVAS_TERMINATE` is returned.
+- **Why the CLI/integration suite cannot validate it**: the Phase T suite runs
+  proxy+server on one docker bridge with NO stateful NAT between them, so the
+  3806 return path is never filtered -- the bug is invisible locally and only a
+  real client (or the CLI) connecting over the real internet through NAT
+  exercises it. This is a transport/NAT fix, not a wire-format change.
+- **What to look for (real client over the internet)**: log in to the cloud
+  host, pick a character, ENTER the sector (dock at a station) -- it must reach
+  the sector and render, NOT hang at the loading screen / time out at login
+  stage 3. Then undock, gate, and sit stationary > 2 min to confirm the same
+  keepalive still refreshes the reaper (no "ship disappeared").
+- **Setup**: cloud deploy (`deploy/do/`), real client pointed at the cloud host
+  over the public internet (NOT loopback / same-LAN, which may not NAT the UDP
+  return path the same way).

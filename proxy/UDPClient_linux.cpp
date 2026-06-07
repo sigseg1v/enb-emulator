@@ -691,23 +691,33 @@ void UDPClient::FixedClientComm()
     // m_UDPClient, which is connect()'d to MVAS_LOGIN_PORT and has had its
     // m_PlayerID set by the avatar-login confirm), start the MVAS idle
     // keepalive so a stationary in-space avatar refreshes LastAccessTime and
-    // never trips the server's 2-minute reaper. Guarded so a sector re-login
-    // does not stack threads -- the surviving thread picks up the new
-    // m_PlayerID on its next tick.
-    if (!m_KeepaliveStarted)
+    // never trips the server's 2-minute reaper.
+    StartMVASKeepalive();
+}
+
+// ---------------------------------------------------------------------------
+// StartMVASKeepalive — spin up the 0x3005 keepalive thread on THIS UDPClient.
+// Guarded by m_KeepaliveStarted so a re-login does not stack threads (the
+// surviving thread picks up the latest m_PlayerID on its next tick). Called on
+// the sector plane (FixedClientComm) and the global plane (the 0x0002 LOGIN
+// handler in ClientToServer_linux_stubs.cpp, where it keeps the NAT mapping to
+// server:3806 alive so the server's in-game UDP keeps reaching this socket).
+// ---------------------------------------------------------------------------
+void UDPClient::StartMVASKeepalive()
+{
+    if (m_KeepaliveStarted) return;
+
+    pthread_t tid;
+    if (pthread_create(&tid, NULL,
+                       &LaunchUDPCKeepaliveThreadLinux, this) == 0)
     {
-        pthread_t tid;
-        if (pthread_create(&tid, NULL,
-                           &LaunchUDPCKeepaliveThreadLinux, this) == 0)
-        {
-            pthread_detach(tid);
-            m_KeepaliveStarted = true;
-        }
-        else
-        {
-            LogMessage("UDPClient(Linux): keepalive pthread_create failed: %s\n",
-                       strerror(errno));
-        }
+        pthread_detach(tid);
+        m_KeepaliveStarted = true;
+    }
+    else
+    {
+        LogMessage("UDPClient(Linux): keepalive pthread_create failed: %s\n",
+                   strerror(errno));
     }
 }
 
