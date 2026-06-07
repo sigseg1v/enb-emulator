@@ -559,8 +559,25 @@ void PlayerManager::RunLoginThread()
 					case 4:
 						//LogMessage("Stage %d\n",stage);
 						sm = p->GetSectorManager();
+						if (!sm)
+						{
+							// Phase AI lazy sectors: a fresh character's stage-1
+							// ReInitializeSavedData resets sector_num to the home
+							// StartSector (a station), which need not be the sector
+							// this login was routed to and may not be started yet.
+							// Before Phase AI every sector was brought online at boot,
+							// so this lookup was always non-NULL; with on-demand starts
+							// it can be NULL, and silently skipping HandleSectorLogin
+							// here strands the login -- SendStart (0x0005) never fires,
+							// yet the state machine still advances to "fully logged in"
+							// and the client wedges forever waiting for START. Bring the
+							// sector online on demand, exactly as the master-handoff and
+							// ChangeSectorID paths already do, then re-resolve.
+							g_ServerMgr->EnsureSectorStarted((long)p->GetSector());
+							sm = p->GetSectorManager();
+						}
 						if (sm)	sm->HandleSectorLogin(p);
-						p->SetLoginStage(5);	
+						p->SetLoginStage(5);
 						break;
 
 					case 7:
