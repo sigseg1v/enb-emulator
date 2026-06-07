@@ -1,0 +1,12 @@
+root = true
+
+# Force UTF-8 everywhere so the Net-7 copyright header's © (U+00A9) stops
+# getting re-encoded to Latin-1 / mojibake / U+FFFD by editors that guess
+# the file's charset. Every source file carrying the header was normalized
+# to UTF-8; keep it that way.
+#
+# Line endings are deliberately NOT pinned here: the upstream C++ sources are
+# CRLF and a handful of newer files are LF, and forcing either would rewrite
+# whole files (which re-triggers the charset guess we're trying to stop).
+[*]
+charset = utf-8
