@@ -4,9 +4,10 @@
 # images from the registry and recreates only the containers whose image
 # changed. Idempotent.
 #
-# -Tag selects which version SUFFIX to run for all three services -- 'latest'
+# -Tag selects which version SUFFIX to run for both services -- 'latest'
 # (default, from IMAGE_TAG in .env) or a pinned 'vN'. The compose file resolves
-# it as enb:server-<tag> / enb:proxy-<tag> / enb:login-<tag>.
+# it as enb:server-<tag> / enb:login-<tag>. (The proxy is client-side and never
+# deployed here.)
 param([string]$Tag)
 . "$PSScriptRoot/_Common.ps1"
 Import-DeployEnv

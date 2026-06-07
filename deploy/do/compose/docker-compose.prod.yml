@@ -8,11 +8,13 @@
 #   - postgres is NOT published to the internet (internal to the compose net);
 #   - no mysql-legacy / pgadmin / dev replay+bisect knobs.
 #
-# All three services live in ONE registry repository ("enb") as per-service
-# tags -- enb:server-<v>, enb:proxy-<v>, enb:login-<v> -- so the stack fits
-# DOCR's free Starter tier (1 repository). IMAGE_TAG is the version SUFFIX:
-# 'latest' (default) or a pinned 'vN' (e.g. v7); the three are always built and
-# bumped together, so a single 'vN' pins a coherent release across all of them.
+# The proxy is NOT here: it is a per-client, single-connection bridge that runs
+# on each player's own (Windows) machine, so it is never deployed server-side.
+# The two server-side services live in ONE registry repository ("enb") as
+# per-service tags -- enb:server-<v>, enb:login-<v> -- so the stack fits DOCR's
+# free Starter tier (1 repository). IMAGE_TAG is the version SUFFIX: 'latest'
+# (default) or a pinned 'vN' (e.g. v7); the two are always built and bumped
+# together, so a single 'vN' pins a coherent release across both.
 #
 # It is driven from /opt/enb on the droplet with an .env that defines
 # REGISTRY, IMAGE_TAG, DOMAIN and COMPOSE_PROJECT_NAME (written by
@@ -140,19 +142,6 @@ services:
       - "3806:3806/udp"
       - "3808:3808/udp"
       - "3810:3810/udp"
-    restart: unless-stopped
-
-  proxy:
-    image: ${REGISTRY}/enb:proxy-${IMAGE_TAG:-latest}
-    depends_on:
-      server:
-        condition: service_started
-    extra_hosts:
-      - "${DOMAIN}:127.0.0.1"
-    ports:
-      - "3801:3801/tcp"
-      - "3805:3805/tcp"
-      - "3500:3500/tcp"
     restart: unless-stopped
 
   login:

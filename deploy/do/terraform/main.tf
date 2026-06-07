@@ -1,8 +1,9 @@
 # ---------------------------------------------------------------------------
 # Earth & Beyond emulator -- DigitalOcean production infrastructure.
 #
-#   - 1 droplet running the docker-compose stack (server + login + proxy +
-#     postgres), images pulled from a private DigitalOcean Container Registry.
+#   - 1 droplet running the docker-compose stack (server + login + postgres),
+#     images pulled from a private DigitalOcean Container Registry. The proxy
+#     is per-client and runs on each player's own machine, not here.
 #   - 1 reserved IP so the address survives droplet rebuilds; DNS points here.
 #   - 1 cloud firewall opening exactly the game/auth ports.
 #   - (optional) Route53 A record + a Let's Encrypt cert via DNS-01.
@@ -16,8 +17,8 @@ resource "digitalocean_ssh_key" "enb" {
   public_key = var.ssh_public_key
 }
 
-# Private image registry. The droplet pulls enb-server / enb-login / enb-proxy
-# from here; the operator pushes to it (scripts/Build-And-Push.ps1).
+# Private image registry. The droplet pulls enb:server-* / enb:login-* from
+# here; the operator pushes to it (scripts/Build-And-Push.ps1).
 resource "digitalocean_container_registry" "enb" {
   name                   = var.registry_name
   subscription_tier_slug = var.registry_tier
@@ -68,19 +69,18 @@ resource "digitalocean_reserved_ip_assignment" "enb" {
 # ---------------------------------------------------------------------------
 # Firewall. Port list is the protocol's, from common/include/net7/Ports.h:
 #   443/tcp         auth TLS (login-server, the ONLY TLS leg)
-#   3500/tcp        proxy local (PROXY_LOCAL_TCP_PORT)  -- server-side proxy
-#   3801/tcp        master   (MASTER_SERVER_PORT)       -- server-side proxy
-#   3805/tcp        global   (GLOBAL_SERVER_PORT)       -- server-side proxy
 #   3501-3800/udp   per-sector UDP planes
 #   3806/udp        MVAS position channel (MVAS_LOGIN_PORT)
 #   3808/udp        master UDP (UDP_MASTER_SERVER_PORT)
 #   3810/udp        global UDP (UDP_GLOBAL_SERVER_PORT)
 #
-# Both the server-side-proxy TCP ports AND the server UDP ports are opened,
-# because the shipped Windows package runs a CLIENT-side proxy (which dials
-# the UDP planes) while the dev/server-side-proxy model uses the TCP ports.
-# Opening both keeps either topology working; tighten once you've settled on
-# one. NOTE: game UDP/TCP is CLEARTEXT on the wire by design (see README).
+# The proxy is NOT deployed here: it is a per-client, single-connection bridge
+# (one proxy per player), so it cannot be shared by a cloud and runs on each
+# player's own Windows machine instead. The player's local proxy dials login
+# 443 + these UDP planes, so those are the only inbound game ports the cloud
+# needs. The proxy's own client-facing TCP listeners (3500/3801/3805) live on
+# the player's box, never here. NOTE: game UDP is CLEARTEXT on the wire by
+# design (see README).
 # ---------------------------------------------------------------------------
 resource "digitalocean_firewall" "enb" {
   name        = "${var.project_name}-fw"
@@ -98,17 +98,8 @@ resource "digitalocean_firewall" "enb" {
     source_addresses = ["0.0.0.0/0", "::/0"]
   }
 
-  # Server-side proxy TCP listeners.
-  dynamic "inbound_rule" {
-    for_each = ["3500", "3801", "3805"]
-    content {
-      protocol         = "tcp"
-      port_range       = inbound_rule.value
-      source_addresses = ["0.0.0.0/0", "::/0"]
-    }
-  }
-
-  # Server UDP planes (sector range + master/global/MVAS).
+  # Server UDP planes (sector range + master/global/MVAS). The player's local
+  # proxy dials these directly; no server-side proxy TCP listeners are opened.
   dynamic "inbound_rule" {
     for_each = ["3501-3800", "3806", "3808", "3810"]
     content {

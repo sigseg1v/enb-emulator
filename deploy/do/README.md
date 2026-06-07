@@ -15,21 +15,24 @@ uses for local development. Nothing here touches those.
             AWS Route53                     DigitalOcean
    A enb.sigsegv.land -> reserved IP  ->  [ droplet, docker compose ]
                                             |- login   :443  (TLS auth)
-                                            |- proxy   :3500/3801/3805 tcp
                                             |- server  :3501-3800/3806/3808/3810 udp
                                             |- postgres (internal only)
    images pulled from  ->  DigitalOcean Container Registry (private)
    terraform state in  ->  AWS S3 (versioned, encrypted, locked)
    TLS cert from       ->  Let's Encrypt (DNS-01 via Route53)
+
+   The proxy is NOT here. It is a per-client, single-connection bridge (one
+   proxy per player), so each player runs their own on their Windows machine;
+   it dials login :443 + the server UDP planes above.
 ```
 
-One droplet runs the whole stack via `docker compose`. Images are built locally
-and pushed to a private **DigitalOcean Container Registry** (yes, DO has one);
-the droplet pulls from it. All three services share a **single repository**
-(`enb`) with per-service version tags, so the deploy fits DOCR's **free Starter
-tier** (1 repository, 500 MiB) -- see "Image registry layout" below. Terraform
-state lives in an **S3 bucket**, never on your machine (it holds the LE private
-key).
+One droplet runs the server-side stack via `docker compose`. Images are built
+locally and pushed to a private **DigitalOcean Container Registry** (yes, DO
+has one); the droplet pulls from it. The two server-side services (server +
+login) share a **single repository** (`enb`) with per-service version tags, so
+the deploy fits DOCR's **free Starter tier** (1 repository, 500 MiB) -- see
+"Image registry layout" below. Terraform state lives in an **S3 bucket**, never
+on your machine (it holds the LE private key).
 
 ## Prerequisites (on the machine you deploy from)
 
@@ -61,7 +64,7 @@ S3 bucket name, and your SSH key paths.
 ```powershell
 just bootstrap   # one-time: create the encrypted S3 state bucket
 just up          # infra: droplet, IP, firewall, registry, DNS record, TLS cert
-just push        # build + push enb:{server,login,proxy}-vN to the registry (+ -latest)
+just push        # build + push enb:{server,login}-vN to the registry (+ -latest)
 just update      # ship config/certs/seed data, pull images, start the stack
 ```
 
@@ -91,23 +94,25 @@ anything on a schedule.
 ## Image registry layout
 
 DOCR's free **Starter** tier allows exactly **one repository** (and 500 MiB).
-A naive deploy wants three image names (server/login/proxy) = three repos =
-paid Basic tier. To stay free, all three services live in a **single
+A naive deploy wants a separate image name per service = a repo per service =
+paid Basic tier. To stay free, the two server-side services live in a **single
 repository** named `enb`, distinguished by tag prefix:
 
 ```
-enb:server-vN   enb:login-vN   enb:proxy-vN     <- the immutable versioned build
-enb:server-latest / login-latest / proxy-latest <- moving alias, re-pointed at vN
+enb:server-vN   enb:login-vN          <- the immutable versioned build
+enb:server-latest / login-latest      <- moving alias, re-pointed at vN
 ```
 
-The whole stack is ~50 MiB of dedup'd, compressed layers -- nowhere near the
-500 MiB cap, so storage was never the constraint; the repo count was.
+The proxy is **not** in the registry at all -- it is a per-client bridge that
+runs on each player's Windows machine and ships with the client package, never
+server-side. The server-side stack is ~50 MiB of dedup'd, compressed layers --
+nowhere near the 500 MiB cap, so storage was never the constraint; the repo
+count was.
 
 `just push` (`Build-And-Push.ps1`):
 
 1. Reads existing tags, finds the highest `vN`, builds `v(N+1)` (or the `-Tag`
-   you pass). All three services share one monotonic counter -- they bump
-   together.
+   you pass). Both services share one monotonic counter -- they bump together.
 2. Builds + pushes each `enb:<svc>-v(N+1)` for `linux/amd64`.
 3. **Only after every versioned push succeeds**, re-points `enb:<svc>-latest`
    at the new version with `docker buildx imagetools create` (an alias of the
@@ -117,7 +122,7 @@ The whole stack is ~50 MiB of dedup'd, compressed layers -- nowhere near the
    the now-untagged blobs (deletion alone only untags; GC frees the bytes).
 
 `just update [vN|latest]` runs whichever tag suffix you name (default `latest`);
-the compose file resolves `enb:server-<tag>` / `proxy-<tag>` / `login-<tag>`.
+the compose file resolves `enb:server-<tag>` / `enb:login-<tag>`.
 
 ## HTTPS / the certificate
 
@@ -216,23 +221,24 @@ droplet backups.
 From `common/include/net7/Ports.h`:
 
 - `443/tcp` -- auth TLS (login-server)
-- `3500, 3801, 3805/tcp` -- server-side proxy listeners
 - `3501-3800, 3806, 3808, 3810/udp` -- server UDP planes (sector/MVAS/master/global)
 - `22/tcp` -- SSH, restricted to `SSH_ALLOWED_CIDR` (lock to your IP)
 
-Both the proxy TCP ports and the server UDP ports are opened because the shipped
-Windows package runs a **client-side** proxy (which dials the UDP planes),
-while the dev/server-side-proxy model uses the TCP ports. Opening both keeps
-either topology working; tighten the firewall once you've settled on one.
+The proxy's client-facing TCP ports (3500/3801/3805) are **not** opened here:
+the proxy runs on each player's own Windows machine, so those listeners live on
+the player's box. Each player's local proxy dials login `443` + the server UDP
+planes above, which are the only inbound game ports the cloud exposes.
 
 ## Honest caveats (read before trusting a public deploy)
 
-- **Game traffic is CLEARTEXT.** Only the 443 auth leg is encrypted. The
-  proxy<->server UDP (positions, chat, inventory, combat) is unencrypted on the
-  wire by design -- the Net7 proxy strips the client's RC4 and forwards
-  cleartext. TLS/Let's Encrypt does nothing for gameplay traffic. If you want
-  that encrypted, see `plans/35-phase-ah-dtls-proxy-server.md` (approval-gated)
-  or front it with WireGuard.
+- **Game traffic is CLEARTEXT, over the public internet.** Only the 443 auth
+  leg is encrypted. Each player's local proxy strips the client's RC4 and sends
+  cleartext UDP (positions, chat, inventory, combat) to the droplet -- so with
+  the proxy on the player's machine, that cleartext now crosses the open
+  internet, not just a localhost hop. TLS/Let's Encrypt does nothing for it.
+  Anyone on-path can read or tamper with gameplay traffic. If you want it
+  encrypted, see `plans/35-phase-ah-dtls-proxy-server.md` (approval-gated) or
+  front it with WireGuard.
 - **Remote addressing is UNVERIFIED.** `Net7Config.cfg`'s `internal_ip` is set
   to the droplet's public reserved IP at deploy time (the most-likely-correct
   value), but the in-game server->client handoff (ServerRedirect / sector IP)
