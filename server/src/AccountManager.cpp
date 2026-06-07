@@ -108,6 +108,81 @@ void AccountManager::SetupTickets()
 }
 
 
+    // AH-9: split a "username-token" ticket on its FIRST '-' (the same rule
+    // ProcessTicketInfo's strtok uses) and UPSERT the suffix into the shared
+    // net7_user.login_ticket table, keyed by the account name, with a
+    // wall-clock millisecond expiry. Non-fatal: a DB failure is logged loudly
+    // but does not abort ticket issue -- the later validation simply rejects
+    // the ticket and the player retries. Parameterised (CLAUDE.md: never
+    // string-concat a value into SQL).
+    static void StoreTicketRow(const char *ticket)
+    {
+        if (!ticket) return;
+
+        char buf[64];
+        strncpy_s(buf, sizeof(buf), ticket, sizeof(buf));
+        char *dash = strchr(buf, '-');
+        if (!dash) return;          // malformed; nothing to persist
+        *dash = '\0';
+        const char *key   = buf;
+        const char *token = dash + 1;
+
+        long expires_at = (long)time(NULL) * 1000L + TICKET_EXPIRE_TIME;
+
+        sql_query_c q(&m_SQL_Conn);
+        q.AddParam(key);
+        q.AddParam(token);
+        q.AddParam(expires_at);
+        if (!q.run_query_params(
+                "INSERT INTO `login_ticket` (`username`, `token`, `expires_at`) "
+                "VALUES (?, ?, ?) "
+                "ON CONFLICT (`username`) DO UPDATE "
+                "SET `token` = EXCLUDED.`token`, `expires_at` = EXCLUDED.`expires_at`"))
+        {
+            LogMessage("AccountManager: StoreTicketRow UPSERT failed for '%s' "
+                       "(game-server login validation will reject this ticket)\n", key);
+        }
+    }
+
+    // AH-9: validate a presented ticket suffix against the row the issuer
+    // persisted. Returns true only if a non-expired row exists for `username`
+    // and its token matches `token` in constant time. This closes the
+    // dropped-RegisterSectorServer hole: before this, ProcessTicketInfo never
+    // checked the suffix, so any host could present "victim-anything".
+    bool AccountManager::ValidateTicketSuffix(const char *username, const char *token)
+    {
+        if (!username || !token || !*username || !*token) return false;
+        if (!EnsureAccountSodiumReady()) return false;
+
+        sql_query_c q(&m_SQL_Conn);
+        sql_result_c result;
+        sql_row_c row;
+
+        q.AddParam(username);
+        if (!q.run_query_params(
+                "SELECT `token`, `expires_at` FROM `login_ticket` WHERE `username` = ?")
+            || q.n_rows() == 0)
+        {
+            return false;           // no issued ticket on record for this account
+        }
+
+        q.store(&result);
+        result.fetch_row(&row);
+
+        const char *stored_token = (const char *)row[0];
+        long expires_at = row[1];
+        if (!stored_token || !*stored_token) return false;
+
+        long now_ms = (long)time(NULL) * 1000L;
+        if (expires_at < now_ms) return false;          // ticket expired
+
+        // Constant-time compare. sodium_memcmp requires equal lengths; a
+        // length mismatch is itself a reject, and the length is not secret.
+        size_t sn = strlen(stored_token);
+        if (sn != strlen(token)) return false;
+        return sodium_memcmp(stored_token, token, sn) == 0;
+    }
+
     void AccountManager::UpdateLoginTime(long account_id)
     {
 	    sql_query_c TimeUpdate(&m_SQL_Conn);
@@ -864,9 +939,20 @@ char * AccountManager::BuildTicket(char *username)
 	time_slot->username[63]='\0'; //force termination of string
     time_slot->expire_time = cur_time + TICKET_EXPIRE_TIME;
 
+    // AH-9: copy the ticket out before unlocking so we can persist it for
+    // the validator without holding the ticket-list mutex over a DB round
+    // trip. This server's own BuildTicket feeds the 0x2000 ACCOUNTDATA ->
+    // 0x2001 path; the login-server's BuildTicketLocked feeds the :443 TLS
+    // path. Either issuer must leave a row, so both UPSERT.
+    char ticket_copy[64];
+    strncpy_s(ticket_copy, sizeof(ticket_copy), time_slot->ticket, sizeof(ticket_copy));
+    char *result = time_slot->ticket;
+
     m_Mutex.Unlock();
 
-    return time_slot->ticket;
+    StoreTicketRow(ticket_copy);
+
+    return result;
 }
 
 //This returns a string from the string manager

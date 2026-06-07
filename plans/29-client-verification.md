@@ -463,3 +463,49 @@ format & byte order", Trap 2).
   configured with NET7_GAME_SERVER_DOMAIN=<cert hostname> and, under WINE, a CA
   bundle reachable via NET7_DTLS_CA (or the system trust store). Real client over
   the public internet, NOT loopback.
+
+### [ ] CV-14 -- Real client still logs in with server-side ticket-suffix validation ON
+
+- **Change**: Phase AH-9. The game server now validates the full ticket suffix
+  presented on the global UDP plane. `server/src/UDP_Global.cpp ProcessTicketInfo`
+  calls the new `AccountManager::ValidateTicketSuffix` -- a parameterized SELECT
+  against the shared `net7_user.login_ticket` table + constant-time
+  `sodium_memcmp` token compare + expiry check -- and rejects with
+  G_ERROR_TICKET_INVALID (7) when the row is missing, expired, or the token does
+  not match. Both ticket issuers UPSERT the row when they mint a ticket:
+  login-server `LinuxAuth.cpp BuildTicketLocked` (TLS :443 path) and game-server
+  `AccountManager.cpp BuildTicket` (UDP 0x2000->0x2001 path). This is ALWAYS-ON
+  (not DTLS-gated): it is a pure tightening that rejects an input the real Win32
+  server rejected via the login->game `RegisterSectorServer` SSL ticket handoff,
+  which was dropped in the Linux port. Files: `server/src/UDP_Global.cpp`,
+  `server/src/AccountManager.{h,cpp}`, `login-server/Net7SSL/LinuxAuth.cpp`,
+  `db/postgres/login_ticket.sql`, `docker-compose.yml` (schema-init apply).
+- **Primary source (format)**: no payload change. The 0x2002 TICKET packet on the
+  internal UDP plane is unchanged (it already carried the full `username-<32hex>`
+  string via `strlen(ticket)`); only the server's acceptance criterion tightened.
+  The CSPRNG suffix format is byte-pinned in
+  `tests/integration/.../Handshake/TlsLoginTests.cs`; the accept (genuine ticket)
+  and reject (forged suffix) paths are pinned in
+  `GlobalConnectTests.ValidTicket_RoundTripsThroughUdpGlobalPlane_ReturnsAvatarList`
+  and `GlobalConnectTests.ForgedTicketSuffix_GlobalConnect_ReturnsGlobalErrorTicketInvalid`.
+- **Why the CLI/integration suite cannot fully validate it**: the suite proves the
+  server accepts a genuine issued ticket and rejects a forged one, but only the
+  real Win32 client proves the live login->character-select->sector-entry flow
+  still completes with the validation active -- i.e. that the real client's
+  ticket (issued by the same login-server BuildTicketLocked path) round-trips
+  through ProcessTicketInfo's new SELECT without false rejection, and that the
+  game-server-issued BuildTicket path (used on the 0x2000 ACCOUNTDATA flow) also
+  validates. A clock skew between the login-server and game-server containers, or
+  a net7_user connection failure in ValidateTicketSuffix, could falsely reject a
+  legitimate client login -- the suite's shared-clock single-host docker stack
+  would not surface that.
+- **What to look for (real client)**: full login -> character select -> sector
+  entry completes normally; the server log shows NO
+  "ProcessTicketInfo: rejected invalid/expired ticket" line for a legitimate
+  login, and the `login_ticket` table has a fresh row for the account
+  (`SELECT username, expires_at FROM login_ticket`) with `expires_at` in the
+  future. A relogin after >5 min (ticket expiry) re-issues and re-UPSERTs the row
+  cleanly. No added login latency.
+- **Setup**: any deploy (local docker or cloud). Ensure schema-init applied
+  `login_ticket.sql` to net7_user (`\d login_ticket` shows username/token/expires_at)
+  -- on a pre-existing volume the apply is unconditional so it lands on restart.

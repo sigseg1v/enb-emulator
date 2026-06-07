@@ -500,4 +500,136 @@ public sealed class GlobalConnectTests
         Assert.Equal(ExpectedLiteral,
             Encoding.ASCII.GetString(span.Slice(8, ExpectedLiteralByteCount)));
     }
+
+    /// <summary>
+    /// AH-9 keystone negative test: a ticket whose 16-byte CSPRNG suffix
+    /// has been tampered with -- the username prefix is the real one the
+    /// auth server issued, but the token after the '-' is forged -- MUST
+    /// be rejected by the server with G_ERROR_TICKET_INVALID (code 7).
+    ///
+    /// <para>
+    /// This is the test that proves the AJ-1 impersonation hole is closed.
+    /// Before AH-9, <c>server/src/UDP_Global.cpp ProcessTicketInfo</c>
+    /// strtok'd the username out of the ticket and validated only
+    /// account-exists / not-banned / not-in-use -- it NEVER checked the
+    /// token suffix. So any host that knew (or guessed) a victim's
+    /// username could present <c>victim-anythingatall</c> and be served
+    /// that account's avatar list and, after MasterJoin, that account's
+    /// in-sector session. The Win32 server closed this with the
+    /// login->game SSL <c>RegisterSectorServer</c> ticket handoff; that
+    /// handoff was dropped in the Linux port, reopening the hole.
+    /// </para>
+    ///
+    /// <para>
+    /// AH-9 restores it via the shared <c>net7_user.login_ticket</c> table:
+    /// both ticket issuers (login-server <c>LinuxAuth BuildTicketLocked</c>
+    /// and game-server <c>AccountManager BuildTicket</c>) UPSERT the
+    /// (username, token, expires_at) row when they mint a ticket, and
+    /// <c>ProcessTicketInfo</c> now calls
+    /// <c>AccountManager::ValidateTicketSuffix</c> -- a parameterized
+    /// SELECT + constant-time <c>sodium_memcmp</c> token compare + expiry
+    /// check -- before serving anything. A real ticket validates (proven by
+    /// <see cref="ValidTicket_RoundTripsThroughUdpGlobalPlane_ReturnsAvatarList"/>
+    /// and every handshake-driven test in the suite, which all use genuine
+    /// tickets); a forged suffix does not.
+    /// </para>
+    ///
+    /// <para>
+    /// The check is ALWAYS-ON (a pure server tightening, not DTLS-gated):
+    /// it rejects an input the real server would have rejected, so it runs
+    /// even on the opted-out cleartext test bridge. The integration suite
+    /// stays green because every other test presents a genuine issued
+    /// ticket.
+    /// </para>
+    ///
+    /// <para>
+    /// Error path mirrors the status=0 test above:
+    /// <code>
+    ///   client → proxy(TCP 3805)  [0x006D GlobalConnect, forged ticket]
+    ///   proxy → server(UDP 3810)  [0x2002 TICKET]
+    ///   server → proxy(UDP 3810)  [0x2004 GLOBAL_ERROR err=7]
+    ///   proxy → client(TCP 3805)  [0x0075 GLOBAL_ERROR err=7]
+    /// </code>
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task ForgedTicketSuffix_GlobalConnect_ReturnsGlobalErrorTicketInvalid()
+    {
+        var account = TestAccounts.New(_server);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password),
+            cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        // Tamper the LAST character of the suffix -- keep the "username-"
+        // prefix and the '-' separator intact (so the server's strtok still
+        // extracts the genuine username and the row lookup hits), but mutate
+        // one hex digit of the 16-byte CSPRNG token so the constant-time
+        // compare fails. Flipping a hex digit preserves the no-'-'-in-suffix
+        // invariant the strtok split relies on.
+        string realTicket = login.Ticket!;
+        int dash = realTicket.IndexOf('-');
+        Assert.True(dash > 0 && dash < realTicket.Length - 1,
+            $"issued ticket '{realTicket}' is not in the expected " +
+            "'username-<hexsuffix>' shape; AH-9 strtok split assumes it is.");
+        char last = realTicket[^1];
+        char flipped = last == '0' ? '1' : '0';
+        string forgedTicket = realTicket[..^1] + flipped;
+        Assert.NotEqual(realTicket, forgedTicket);
+
+        await using var conn = await EncryptedTcpConnection.ConnectAsync(
+            _server.GlobalHost, _server.GlobalPort, cts.Token);
+
+        byte[] ticketBytes = Encoding.ASCII.GetBytes(forgedTicket);
+        byte[] payload = new byte[4 + ticketBytes.Length + 1];
+        BinaryPrimitives.WriteUInt32BigEndian(payload.AsSpan(0, 4), (uint)ticketBytes.Length);
+        ticketBytes.CopyTo(payload, 4);
+        payload[^1] = 0;
+
+        var packet = Packet.ForOpcode(
+            OpcodeId.Known.GlobalConnect.Value,
+            payload);
+
+        await conn.SendAsync(packet, cts.Token);
+
+        // Drain until the 0x0075 GlobalError. If the server serves an
+        // AvatarList for a forged suffix the AJ-1 impersonation hole is
+        // OPEN -- fail loudly: that means ValidateTicketSuffix was removed,
+        // bypassed, or never reached.
+        Packet? errReply = null;
+        while (true)
+        {
+            var p = await conn.ReceiveAsync(cts.Token);
+            Assert.NotNull(p);
+
+            if (p!.Header.Opcode == 0x0075)
+            {
+                errReply = p;
+                break;
+            }
+
+            if (p.Header.Opcode == OpcodeId.Known.GlobalAvatarList.Value)
+            {
+                throw new Xunit.Sdk.XunitException(
+                    "server returned GlobalAvatarList for a ticket with a FORGED " +
+                    "suffix -- the AH-9 ticket-suffix validation has been removed " +
+                    "or bypassed and the AJ-1 impersonation hole is OPEN. Restore " +
+                    "AccountManager::ValidateTicketSuffix at server/src/UDP_Global.cpp " +
+                    "ProcessTicketInfo before reverting this test.");
+            }
+        }
+
+        Assert.NotNull(errReply);
+        var span = errReply!.Payload.Span;
+        Assert.True(span.Length >= 8,
+            $"GlobalError payload too short ({span.Length} bytes); expected at " +
+            "least [u32 msg_len][u32 be(err+7)] = 8 bytes of header.");
+
+        int errCode = BinaryPrimitives.ReadInt32BigEndian(span.Slice(4, 4)) - 7;
+        Assert.Equal(7, errCode); // G_ERROR_TICKET_INVALID
+    }
 }

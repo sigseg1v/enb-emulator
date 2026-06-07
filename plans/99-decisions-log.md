@@ -7840,3 +7840,37 @@ re-entry restarted both station+space cleanly; no crash, no double-load).
 NO WIRE CHANGE -- parked sectors emit nothing, re-entry reuses the cold-start
 fanout. Real-client confirm tracked as CV-11.
 
+
+## 2026-06-07 -- AH-9 keystone: server-side ticket-suffix validation (closes AJ-1)
+
+Landed the always-on DB ticket-suffix-validation half of AH-9 as ONE unit,
+closing the AJ-1 impersonation hole (task #89). The Linux port dropped the Win32
+login->game `RegisterSectorServer` SSL ticket handoff, so the game server's
+`ProcessTicketInfo` only strtok'd the username and validated account-exists /
+not-banned / not-in-use -- it NEVER checked the ticket token suffix. Any host
+could present `victim-anything` and be served that account.
+
+Source of truth = shared `net7_user.login_ticket(username PK, token, expires_at)`
+(DB handoff, NOT stateless HMAC -- the owner pinned "token = the 16-byte CSPRNG
+ticket suffix"; HMAC would force suffix = nonce||HMAC, contradicting that). Both
+issuers UPSERT on mint: login-server `LinuxAuth.cpp BuildTicketLocked` (via
+`StoreLoginTicket`, pqxx exec_params $1/$2/$3) and game-server
+`AccountManager.cpp BuildTicket` (via `StoreTicketRow`, run_query_params `?`).
+`ProcessTicketInfo` -> `AccountManager::ValidateTicketSuffix`: parameterized
+SELECT + expiry check (unix-ms) + constant-time `sodium_memcmp`; reject with
+G_ERROR_TICKET_INVALID (7) on miss/expiry/mismatch. ALL queries PARAMETERIZED.
+
+ALWAYS-ON, not DTLS-gated: a pure server tightening (rejects input the real
+server rejected), runs even on the opted-out cleartext test bridge. Integration
+suite stays green because every test presents a genuine issued ticket. Schema
+apply in docker-compose schema-init is UNCONDITIONAL (CREATE TABLE IF NOT EXISTS,
+not gated on the accounts probe) so it lands on pre-existing volumes.
+
+Verified the full CSPRNG suffix reaches ProcessTicketInfo intact: the 0x2002
+TICKET packet carries `strlen(ticket)` (the full `username-<32hex>` string), NOT
+the 20-byte MasterJoin handoff field -- so validation against the stored 32-hex
+token does not false-reject. Tests: GlobalConnectTests accept + forged-suffix
+reject (both green); TlsLoginTests + SectorActionTests confirm genuine end-to-end
+logins still validate (login_ticket rows written, zero false rejects in logs).
+Real-client check: plans/29 CV-14. The DTLS-gated per-packet token-bind half of
+AH-9 remains open under AH-8/AH-10.

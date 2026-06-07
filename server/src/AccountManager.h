@@ -59,6 +59,13 @@ public:
 	char  * IssueTicket(char *username, char *password);
     char  *	GetUsernameFromTicket(char *ticket);
 
+    // AH-9: validate a ticket suffix presented on the global UDP port
+    // against the row the issuer (this server's BuildTicket, or the
+    // login-server's BuildTicketLocked) persisted in net7_user.login_ticket.
+    // Constant-time token compare + expiry check. Returns true only if the
+    // row exists, has not expired, and the token matches.
+    bool    ValidateTicketSuffix(const char *username, const char *token);
+
     bool	GetEmailAddress(char *username, char *buffer, int buflen);
 	long	GetAccountID(char *username);
 	long	GetAvatarID(char *username, int slot);

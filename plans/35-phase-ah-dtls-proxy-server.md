@@ -434,12 +434,26 @@ After AH-3/AH-4 a Verification+TlsLogin slice showed 3 failures. Run to ground:
   common header so server + proxy + CLI share one definition. Pin the bytes in a
   CLI test.
 
-- [ ] **AH-9. Server binds + validates the token.** At ticket login
+- [~] **AH-9. Server binds + validates the token.** At ticket login
   (`ProcessTicketInfo`) the server stores the presented token against the
   resolved player (closing the dropped-handoff hole at the same time). Then every
   C->S datagram on the affected listeners is checked: strip the token prefix,
   constant-time compare against the bound token for that `GameID`; on mismatch
   drop the packet and log a single rate-limited warning (do NOT log the token).
+
+  **STATUS 2026-06-07: the always-on DB ticket-suffix-validation half (the AJ-1
+  keystone, task #89) is DONE and landed as one unit; the DTLS-gated per-packet
+  bind half remains (tracked under AH-8/AH-10).** Done in this unit:
+  `db/postgres/login_ticket.sql` (schema), `docker-compose.yml` (unconditional
+  schema-init apply), `login-server/Net7SSL/LinuxAuth.cpp` `StoreLoginTicket`
+  UPSERT in `HandleAuthLogin`, `server/src/AccountManager.cpp` `StoreTicketRow`
+  UPSERT in `BuildTicket` + `ValidateTicketSuffix` (parameterized SELECT +
+  `sodium_memcmp` + expiry), `server/src/UDP_Global.cpp` `ProcessTicketInfo`
+  reject-on-invalid. Tests: `GlobalConnectTests.ValidTicket_...` (accept) +
+  `GlobalConnectTests.ForgedTicketSuffix_..._ReturnsGlobalErrorTicketInvalid`
+  (reject). Real-client check: `plans/29` CV-14. All 9 GlobalConnect/TlsLogin/
+  SectorAction tests green; genuine login_ticket rows written with 32-hex tokens,
+  zero false rejects in server logs.
 
   **DECIDED 2026-06-07 -- token source of truth = shared `net7_user.login_ticket`
   table (DB handoff, NOT HMAC).** Rationale: the owner pinned "token = the 16-byte

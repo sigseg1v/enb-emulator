@@ -130,6 +130,24 @@ bool UDP_Connection::ProcessTicketInfo(char *msg, EnbUdpHeader *hdr, const long 
         return false;
     }
 
+    // AH-9: validate the ticket SUFFIX (the part after the first '-'), not
+    // just the username. The Win32 server received issued tickets over an
+    // SSL handoff (RegisterSectorServer) and matched them here; the Linux
+    // port dropped that handoff, so until now ProcessTicketInfo trusted any
+    // "username-anything" presented to the cleartext global UDP port. The
+    // issuer (login-server BuildTicketLocked, or this server's BuildTicket)
+    // now persists the suffix in net7_user.login_ticket; reject if the
+    // presented suffix has no matching, unexpired row. Do NOT log the token.
+    if (!g_AccountMgr->ValidateTicketSuffix(account_name, next_token ? next_token : ""))
+    {
+        unsigned char *ip = (unsigned char *)&source_addr;
+        LogMessage("ProcessTicketInfo: rejected invalid/expired ticket for "
+                   "'%s' from %u.%u.%u.%u\n",
+                   account_name, ip[0], ip[1], ip[2], ip[3]);
+        SendGlobalError(G_ERROR_TICKET_INVALID, source_addr, source_port);
+        return false;
+    }
+
     long account_id = g_AccountMgr->GetAccountID(account_name);
 	long account_status = g_AccountMgr->GetAccountStatus(account_name);
 	//check accounts in player list and logins

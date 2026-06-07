@@ -214,6 +214,52 @@ bool EnsureDbConnectedLocked()
     return true;
 }
 
+// Phase AH-9: persist the issued ticket so the game server can validate
+// the suffix a client later presents on the cleartext UDP global port.
+// The Win32 server received issued tickets over an SSL handoff
+// (RegisterSectorServer); the Linux port dropped that, leaving
+// ProcessTicketInfo unable to check the suffix at all. We restore the
+// handoff through the net7_user database both processes already share:
+// UPSERT (token, expires_at) keyed by the account name.
+//
+// `key` and `token` are split on the FIRST '-' of the issued ticket, the
+// SAME rule the game server's strtok(ticket, "-") uses -- so whatever the
+// validator extracts is exactly what we store, even if a username itself
+// contains a '-'. Failure is non-fatal to the login (we still return the
+// ticket); it just means the subsequent game-server validation will
+// reject it and the player retries. We log loudly rather than swallow it.
+void StoreLoginTicket(const char *key, const char *token,
+                      unsigned long long expires_at_ms)
+{
+    g_DbMutex.Lock();
+    if (!EnsureDbConnectedLocked()) {
+        g_DbMutex.Unlock();
+        LogMessage("LinuxAuth: StoreLoginTicket -- no DB connection, ticket "
+                   "for '%s' NOT persisted (game-server login will reject)\n",
+                   key);
+        return;
+    }
+
+    try {
+        pqxx::work tx(*g_DbConn);
+        tx.exec_params(
+            "INSERT INTO login_ticket (username, token, expires_at) "
+            "VALUES ($1, $2, $3) "
+            "ON CONFLICT (username) DO UPDATE "
+            "SET token = EXCLUDED.token, expires_at = EXCLUDED.expires_at",
+            key, token, static_cast<long long>(expires_at_ms));
+        tx.commit();
+    } catch (const pqxx::broken_connection &e) {
+        LogMessage("LinuxAuth: StoreLoginTicket lost connection: %s\n", e.what());
+        g_DbConn.reset();
+    } catch (const std::exception &e) {
+        LogMessage("LinuxAuth: StoreLoginTicket failed for '%s': %s\n",
+                   key, e.what());
+    }
+
+    g_DbMutex.Unlock();
+}
+
 // Phase X: sodium_init() is idempotent across threads -- returns 0 on
 // first success, 1 if already initialized, -1 on failure. Called once
 // per process from the first ValidateAccountLinux invocation under the
@@ -381,6 +427,24 @@ char *HandleAuthLogin(size_t *out_len, char *recv_buffer, unsigned long client_i
             strncpy(issued, ticket, sizeof(issued) - 1);
             issued[sizeof(issued) - 1] = 0;
             g_TicketMutex.Unlock();
+
+            // AH-9: persist the suffix so the game server can validate it.
+            // Split on the FIRST '-' (the game server's strtok rule): key =
+            // before, token = after. `issued` always contains a '-' because
+            // BuildTicketLocked formats "%s-%s".
+            char persisted[128];
+            strncpy(persisted, issued, sizeof(persisted) - 1);
+            persisted[sizeof(persisted) - 1] = 0;
+            char *dash = strchr(persisted, '-');
+            if (dash) {
+                *dash = 0;
+                const char *key = persisted;
+                const char *token = dash + 1;
+                unsigned long long now_ms =
+                    static_cast<unsigned long long>(time(nullptr)) * 1000ULL;
+                StoreLoginTicket(key, token, now_ms + kTicketExpireMs);
+            }
+
             snprintf(info, sizeof(info), "Valid=TRUE\r\nTicket=%s\r\n", issued);
             LogMessage("LinuxAuth: ticket issued for '%s'\n", u);
         } else {
