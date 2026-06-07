@@ -91,6 +91,25 @@ Ship a new build: `just push` then `just update`. **Cert renewal is
 automatic** -- the droplet renews itself (see below); you do not need to run
 anything on a schedule.
 
+## Admin (over SSH)
+
+Run from `deploy/do/`; both reach the droplet via SSH using the same key as the
+deploy. Scripts live in `deploy/do/tools/`.
+
+| Command | What it does |
+|---|---|
+| `just create-account <user> <pass>` | Create a player account in `net7_user.accounts`. Password is Argon2id-hashed **locally** (needs `python3-nacl`); only the hash crosses the wire. Refuses if the username already exists -- it will NOT overwrite a live account. |
+| `just get-server-status` | Container health + uptime, players online, and the sectors they occupy. |
+
+"Players online" is the server's own definition: an account with
+`last_login > last_logout` in `net7_user` (the server resets these on boot and
+maintains them on login/logout). "Sectors occupied" is the distinct set of
+sectors those online players are in -- sectors are started on demand and tracked
+only in server memory, so an idle-but-loaded sector does not appear.
+
+Creating characters is still done from the game client after the account
+exists; there is no server-side character creation path.
+
 ## Image registry layout
 
 DOCR's free **Starter** tier allows exactly **one repository** (and 500 MiB).

@@ -16,7 +16,8 @@ bootstrap:
 up:
     ./scripts/Deploy-Infra.ps1
 
-# Build + push the 3 server images to the DO registry. Optional tag.
+# Build + push the 2 server-side images (server + login) to the DO registry.
+# The proxy is client-side and never deployed here. Optional tag.
 push tag="":
     ./scripts/Build-And-Push.ps1 -Tag "{{tag}}"
 
@@ -35,3 +36,15 @@ stop:
 # Destroy ALL infra incl. the droplet + its DB volume. Asks for confirm.
 destroy:
     ./scripts/Destroy-Infra.ps1 -Confirm
+
+# ---- admin (over SSH to the droplet) ----
+
+# Create a player account on the live droplet. Password is Argon2id-hashed
+# locally (needs python3-nacl); refuses if the username already exists.
+#   just create-account <username> <password>
+create-account username password:
+    ./tools/Create-Account.ps1 -Username "{{username}}" -Password "{{password}}"
+
+# Show live status: container health/uptime, players online, sectors occupied.
+get-server-status:
+    ./tools/Get-ServerStatus.ps1

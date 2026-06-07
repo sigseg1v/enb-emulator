@@ -166,3 +166,24 @@ function Invoke-RemoteShell([string]$ReservedIp, [string]$Command) {
 function Copy-ToRemote([string]$ReservedIp, [string]$LocalPath, [string]$RemotePath) {
     Invoke-Native scp @(Get-SshArgs) $LocalPath "root@${ReservedIp}:${RemotePath}"
 }
+
+function Invoke-RemotePsql {
+    # Run SQL inside the droplet's postgres container against $Database and return
+    # psql's stdout. The SQL travels over ssh STDIN -- never as a shell argument
+    # -- so a value embedded with psql `\set var '...'` and re-quoted with
+    # `:'var'` is parsed only by psql, never by the remote shell (a '$' in an
+    # Argon2id PHC is therefore never shell-expanded). $Database is a fixed
+    # literal we control ('net7' / 'net7_user'), not user input.
+    param(
+        [Parameter(Mandatory)][string]$ReservedIp,
+        [Parameter(Mandatory)][string]$Database,
+        [Parameter(Mandatory)][string]$Sql,
+        [string[]]$PsqlFlags = @()
+    )
+    $flags  = ($PsqlFlags -join ' ')
+    $remote = "cd /opt/enb && docker compose --env-file .env -f docker-compose.prod.yml " +
+              "exec -T -e PGPASSWORD=net7 postgres psql -U net7 -d $Database -v ON_ERROR_STOP=1 $flags"
+    $out = $Sql | & ssh @(Get-SshArgs) "root@$ReservedIp" $remote
+    if ($LASTEXITCODE -ne 0) { throw "remote psql ($Database) exited with code $LASTEXITCODE" }
+    return $out
+}
