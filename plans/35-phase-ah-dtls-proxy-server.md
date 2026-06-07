@@ -397,6 +397,34 @@ proof). Proxy-only wins on risk; the server is slated for rewrite anyway.
   confirmed against the actual Win32 client before this is DONE. Add a CV-NN
   entry.
 
+### Post-AH-4 test triage (2026-06-07) -- 3 reds, root-caused, NOT a DTLS regression
+
+After AH-3/AH-4 a Verification+TlsLogin slice showed 3 failures. Run to ground:
+
+- **`TlsLoginTests.ValidAccount_ReturnsValidTicket`** -- a stale assertion left by
+  the AH-0 CSPRNG commit (`4cb31a72`). It still pinned the old `%s-%d` (glibc
+  `rand()`) ticket shape; the suffix is now 32 hex chars. FIXED (commit `8a5656a6`,
+  test-only): pins the 32-char all-hex CSPRNG suffix. All 3 `TlsLoginTests` green.
+
+- **`DockHandshakeRetailParityTests` x2** (`StationHandshake_*`) -- `ProxyWedgeException:
+  stalled before 0x0005 START`. PROVEN PRE-EXISTING, not an AH regression: checked
+  out the pre-everything baseline `57022cc7` (= `4cb31a72^`, before CSPRNG and all
+  DTLS work), rebuilt server/login/proxy, and the SAME two tests fail identically
+  (2 failed / 0 passed, same wedge). So the AH commits did not cause it. Server
+  logs show the player reaches "fully logged in" and the proxy reaches "SectorServer
+  LOGIN -- connection active", then 18s silence -> the `0x0005 START` never reaches
+  the CLI. This is the known two-stage **station** establish wedge
+  (`EstablishAtStationAsync`: establish-at-home -> logout -> reestablish-at-station),
+  the same flaky area as tasks #33/#35/#36/#37. One-STAGE sector establish passes
+  in 8s on the same clean stack, so the server->client START relay / proxy global
+  recv path are fine. **Left as a separate pre-existing defect; out of AH scope.**
+
+- **AH proxy code proven inert in opted-out mode:** `InitDtls` sets `m_Dtls=nullptr`
+  and returns; sockets keep their original connect state (master connected, global
+  unconnected -- confirmed in the proxy boot log); the cleartext recv path is
+  byte-identical to pre-AH-3 (`DispatchServerDatagram(received)` runs the same
+  opcode switch; the global-plane src-IP drop pre-dates AH-3).
+
 ### Auth-token layer (the C->S per-packet token)
 
 - [ ] **AH-8. Token wire envelope.** Define in `common/include/net7/` a fixed-size
@@ -412,12 +440,49 @@ proof). Proxy-only wins on risk; the server is slated for rewrite anyway.
   C->S datagram on the affected listeners is checked: strip the token prefix,
   constant-time compare against the bound token for that `GameID`; on mismatch
   drop the packet and log a single rate-limited warning (do NOT log the token).
-  Decide token source of truth: either (a) login-server -> game-server handoff of
-  issued tokens (restores the Win32 design), or (b) a **stateless signed token** --
-  login-server issues `token = nonce || HMAC(shared_secret, account||nonce||exp)`,
-  game server validates the HMAC with a secret shared between login-server and
-  game server, no cross-process store needed. (b) is less plumbing and no shared
-  mutable state; prefer it unless there's a reason to keep a server-side store.
+
+  **DECIDED 2026-06-07 -- token source of truth = shared `net7_user.login_ticket`
+  table (DB handoff, NOT HMAC).** Rationale: the owner pinned "token = the 16-byte
+  CSPRNG ticket suffix"; a stateless HMAC token (option b) would force the suffix
+  to become `nonce || HMAC`, contradicting that. Both processes ALREADY connect to
+  `net7_user` and query `accounts` there (login-server: `LinuxAuth.cpp` pqxx
+  `exec_params`, `BuildDsn` dbname=`net7_user`; game-server: `AccountManager.cpp:74`
+  `m_SQL_Conn.connect("net7_user", ...)` with `run_query_params` `?` placeholders).
+  So a shared table is zero new connections, no HMAC-key distribution, no new
+  network handoff. This is the DB form of option (a) -- it restores the Win32
+  `RegisterSectorServer` handoff via the database both halves already share.
+
+  Concrete shape (all queries PARAMETERIZED per CLAUDE.md -- no string-concat):
+    - **Schema:** new `net7_user.login_ticket(username TEXT PRIMARY KEY,
+      token TEXT NOT NULL, expires_at BIGINT NOT NULL)` (token = the 32-hex suffix;
+      `expires_at` = unix-ms, matching `kTicketExpireMs`). Add as
+      `db/postgres/login_ticket.sql` with `CREATE TABLE IF NOT EXISTS`, applied by
+      an UNCONDITIONAL `psql -f` step in `docker-compose.yml` schema-init (NOT gated
+      on the `accounts` probe, so it lands on existing volumes too). Idempotent.
+    - **login-server write** (`LinuxAuth.cpp` `BuildTicketLocked`, and the game
+      server's own `AccountManager::BuildTicket` for the 0x2001 UDP issue path):
+      after building the ticket, `INSERT ... ON CONFLICT (username) DO UPDATE` the
+      `(token, expires_at)`. So whichever issuer minted the presented ticket, the
+      row exists.
+    - **game-server validate** (`UDP_Global.cpp` `ProcessTicketInfo`): after
+      `strtok` username + token, `SELECT token, expires_at FROM login_ticket
+      WHERE username = $1`; reject (`SendGlobalError` + return false) if no row, if
+      `expires_at < now`, or if `sodium_memcmp(token, suffix)` != 0
+      (constant-time). This CLOSES AJ-1 / task #89 (the impersonation hole) and is
+      a pure server-side TIGHTENING -- always-on, NOT gated by the plaintext
+      opt-out (the integration suite uses genuine login-server tickets, so it stays
+      green with no opt-out). Primary source: the Win32 `RegisterSectorServer`
+      issued-ticket handoff + `GetUsernameFromTicket` path the Linux port dropped
+      (see the "intentionally NOT ported" comment in `LinuxAuth.cpp`).
+    - **per-packet bind** (the AH-8 envelope half, DTLS-gated): at successful
+      `ProcessTicketInfo` bind the 16 binary token bytes to the resolved player;
+      every in-game C->S datagram (after the envelope strip) constant-time-compares
+      its prefix against the bound token for that `GameID`. This half IS gated by
+      the plaintext opt-out (no DTLS -> no confidential channel to carry the token
+      -> enforcement off on the private test bridge; public default enforces both).
+  **CLAUDE.md sequencing:** land the schema + login write + server validate +
+  forged-suffix CLI rejection test as ONE unit (the table is never an orphan).
+  Add the `plans/29` CV entry for the real-client login path.
 
 - [ ] **AH-10. Proxy prepends the token on C->S after DTLS is up.** The proxy
   already holds the ticket (it presents it at global login). After the DTLS
