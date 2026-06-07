@@ -65,9 +65,9 @@ variable "registry_name" {
 }
 
 variable "registry_tier" {
-  description = "DOCR subscription tier. 'starter' allows 1 repo; we push 3 images, so 'basic'+."
+  description = "DOCR subscription tier. We publish a single repository ('enb') with per-service version tags, so the free 'starter' tier (1 repo, 500 MiB) is enough; 'basic'+ only buys headroom."
   type        = string
-  default     = "basic"
+  default     = "starter"
 }
 
 variable "manage_dns" {

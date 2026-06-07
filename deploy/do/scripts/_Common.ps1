@@ -96,6 +96,54 @@ function Get-RegistryEndpoint {
     return "registry.digitalocean.com/$($env:REGISTRY_NAME)"
 }
 
+# ---- DigitalOcean Container Registry REST API (no doctl dependency) ----
+# We publish a SINGLE repository ("enb") with per-service version tags so the
+# whole stack fits DOCR's free Starter tier (1 repository). These helpers list,
+# delete, and garbage-collect tags via the DO API, authenticating with the DO
+# token (the same token used for `docker login`).
+
+function Get-DocrApiBase {
+    return "https://api.digitalocean.com/v2/registry/$($env:REGISTRY_NAME)"
+}
+
+function Get-DocrHeaders {
+    return @{ Authorization = "Bearer $($env:DO_TOKEN)"; 'Content-Type' = 'application/json' }
+}
+
+function Get-DocrTags([string]$Repository) {
+    # Tag strings in $Repository, or @() if the repo does not exist yet (404 on
+    # the very first push). Follows pagination defensively.
+    $tags = @()
+    $url  = "$(Get-DocrApiBase)/repositories/$Repository/tags?per_page=200"
+    while ($url) {
+        $resp = Invoke-RestMethod -Method Get -Uri $url -Headers (Get-DocrHeaders) `
+            -SkipHttpErrorCheck -StatusCodeVariable sc
+        if ($sc -eq 404) { return @() }
+        if ($sc -ge 400) { throw "DOCR list-tags returned HTTP $sc for repository '$Repository'." }
+        if ($resp.tags) { $tags += ($resp.tags | ForEach-Object { $_.tag }) }
+        $url = $resp.links.pages.next
+    }
+    return $tags
+}
+
+function Remove-DocrTag([string]$Repository, [string]$Tag) {
+    $url = "$(Get-DocrApiBase)/repositories/$Repository/tags/$Tag"
+    $null = Invoke-RestMethod -Method Delete -Uri $url -Headers (Get-DocrHeaders) `
+        -SkipHttpErrorCheck -StatusCodeVariable sc
+    if ($sc -ge 400 -and $sc -ne 404) { throw "DOCR delete-tag '$Tag' returned HTTP $sc." }
+}
+
+function Start-DocrGarbageCollection {
+    # Reclaims storage from now-untagged manifests. DO allows one active GC at a
+    # time and briefly makes the registry read-only, so tolerate "already
+    # running" / "nothing to collect" instead of failing the whole push.
+    $url = "$(Get-DocrApiBase)/garbage-collection"
+    $null = Invoke-RestMethod -Method Post -Uri $url -Headers (Get-DocrHeaders) `
+        -SkipHttpErrorCheck -StatusCodeVariable sc
+    if ($sc -lt 400) { Write-Host "  garbage-collection: started (HTTP $sc)." }
+    else { Write-Host "  garbage-collection: skipped (HTTP $sc -- already running or nothing to collect)." }
+}
+
 function Get-SshArgs {
     return @('-i', (Resolve-Path $env:SSH_PRIVATE_KEY_PATH).Path, '-o', 'StrictHostKeyChecking=accept-new')
 }

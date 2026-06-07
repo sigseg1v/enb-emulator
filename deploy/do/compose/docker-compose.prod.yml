@@ -8,6 +8,12 @@
 #   - postgres is NOT published to the internet (internal to the compose net);
 #   - no mysql-legacy / pgadmin / dev replay+bisect knobs.
 #
+# All three services live in ONE registry repository ("enb") as per-service
+# tags -- enb:server-<v>, enb:proxy-<v>, enb:login-<v> -- so the stack fits
+# DOCR's free Starter tier (1 repository). IMAGE_TAG is the version SUFFIX:
+# 'latest' (default) or a pinned 'vN' (e.g. v7); the three are always built and
+# bumped together, so a single 'vN' pins a coherent release across all of them.
+#
 # It is driven from /opt/enb on the droplet with an .env that defines
 # REGISTRY, IMAGE_TAG, DOMAIN and COMPOSE_PROJECT_NAME (written by
 # Update-Stack.ps1). Run as:
@@ -108,7 +114,7 @@ services:
     restart: "no"
 
   server:
-    image: ${REGISTRY}/enb-server:${IMAGE_TAG:-latest}
+    image: ${REGISTRY}/enb:server-${IMAGE_TAG:-latest}
     depends_on:
       postgres:
         condition: service_healthy
@@ -137,7 +143,7 @@ services:
     restart: unless-stopped
 
   proxy:
-    image: ${REGISTRY}/enb-proxy:${IMAGE_TAG:-latest}
+    image: ${REGISTRY}/enb:proxy-${IMAGE_TAG:-latest}
     depends_on:
       server:
         condition: service_started
@@ -150,7 +156,7 @@ services:
     restart: unless-stopped
 
   login:
-    image: ${REGISTRY}/enb-login:${IMAGE_TAG:-latest}
+    image: ${REGISTRY}/enb:login-${IMAGE_TAG:-latest}
     depends_on:
       postgres:
         condition: service_healthy

@@ -25,8 +25,11 @@ uses for local development. Nothing here touches those.
 
 One droplet runs the whole stack via `docker compose`. Images are built locally
 and pushed to a private **DigitalOcean Container Registry** (yes, DO has one);
-the droplet pulls from it. Terraform state lives in an **S3 bucket**, never on
-your machine (it holds the LE private key).
+the droplet pulls from it. All three services share a **single repository**
+(`enb`) with per-service version tags, so the deploy fits DOCR's **free Starter
+tier** (1 repository, 500 MiB) -- see "Image registry layout" below. Terraform
+state lives in an **S3 bucket**, never on your machine (it holds the LE private
+key).
 
 ## Prerequisites (on the machine you deploy from)
 
@@ -58,7 +61,7 @@ S3 bucket name, and your SSH key paths.
 ```powershell
 just bootstrap   # one-time: create the encrypted S3 state bucket
 just up          # infra: droplet, IP, firewall, registry, DNS record, TLS cert
-just push        # build + push enb-server / enb-login / enb-proxy to the registry
+just push        # build + push enb:{server,login,proxy}-vN to the registry (+ -latest)
 just update      # ship config/certs/seed data, pull images, start the stack
 ```
 
@@ -75,7 +78,7 @@ stable across droplet rebuilds, so you set DNS once.
 | Command | What it does |
 |---|---|
 | `just up` | Converge infra. Idempotent. Issues the bootstrap cert; the droplet auto-renews thereafter (see below). |
-| `just push [tag]` | Build + push the 3 images (default tag = short git SHA). |
+| `just push [vN]` | Build + push the 3 services into repo `enb` as `*-vN` (default: auto-increment), re-point `*-latest`, prune to the newest 3 versions/service, GC. |
 | `just update [tag]` | Pull images + recreate changed containers on the droplet. |
 | `just start` | Start an already-deployed stack (no pull). |
 | `just stop` | Stop containers; droplet, DB volume, and infra stay. |
@@ -84,6 +87,37 @@ stable across droplet rebuilds, so you set DNS once.
 Ship a new build: `just push` then `just update`. **Cert renewal is
 automatic** -- the droplet renews itself (see below); you do not need to run
 anything on a schedule.
+
+## Image registry layout
+
+DOCR's free **Starter** tier allows exactly **one repository** (and 500 MiB).
+A naive deploy wants three image names (server/login/proxy) = three repos =
+paid Basic tier. To stay free, all three services live in a **single
+repository** named `enb`, distinguished by tag prefix:
+
+```
+enb:server-vN   enb:login-vN   enb:proxy-vN     <- the immutable versioned build
+enb:server-latest / login-latest / proxy-latest <- moving alias, re-pointed at vN
+```
+
+The whole stack is ~50 MiB of dedup'd, compressed layers -- nowhere near the
+500 MiB cap, so storage was never the constraint; the repo count was.
+
+`just push` (`Build-And-Push.ps1`):
+
+1. Reads existing tags, finds the highest `vN`, builds `v(N+1)` (or the `-Tag`
+   you pass). All three services share one monotonic counter -- they bump
+   together.
+2. Builds + pushes each `enb:<svc>-v(N+1)` for `linux/amd64`.
+3. **Only after every versioned push succeeds**, re-points `enb:<svc>-latest`
+   at the new version with `docker buildx imagetools create` (an alias of the
+   already-pushed manifest -- no rebuild, no extra storage).
+4. Prunes to the **newest 3 versions per service**, deleting older version tags
+   via the DO registry API, then triggers a **garbage-collection** to reclaim
+   the now-untagged blobs (deletion alone only untags; GC frees the bytes).
+
+`just update [vN|latest]` runs whichever tag suffix you name (default `latest`);
+the compose file resolves `enb:server-<tag>` / `proxy-<tag>` / `login-<tag>`.
 
 ## HTTPS / the certificate
 
@@ -208,8 +242,9 @@ either topology working; tighten the firewall once you've settled on one.
   works until you've tested with `client.exe`.
 - **Cost.** Default is a **$12/mo droplet (`s-1vcpu-2gb`)** -- the dev/single-
   tester floor (stack idles ~1.5GB, leaving ~500MiB headroom). Bump
-  `DROPLET_SIZE=s-2vcpu-4gb` (~$24/mo) before real player load. Plus ~$5/mo
-  registry (basic) + a reserved IP (free while attached) + trivial S3.
+  `DROPLET_SIZE=s-2vcpu-4gb` (~$24/mo) before real player load. The registry is
+  **free** (Starter tier -- single repo, ~50 MiB of images well under the 500
+  MiB cap), plus a reserved IP (free while attached) + trivial S3.
 - **DB backups are on-box only.** The 6-hourly `pg_dump` (below) lands in
   `/opt/enb/backups` on the droplet -- it survives bad migrations / a corrupt
   pgdata volume / accidental wipes, but NOT droplet loss (same disk). For

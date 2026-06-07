@@ -4,7 +4,9 @@
 # images from the registry and recreates only the containers whose image
 # changed. Idempotent.
 #
-# -Tag selects which image tag to run (default: IMAGE_TAG from .env, else latest).
+# -Tag selects which version SUFFIX to run for all three services -- 'latest'
+# (default, from IMAGE_TAG in .env) or a pinned 'vN'. The compose file resolves
+# it as enb:server-<tag> / enb:proxy-<tag> / enb:login-<tag>.
 param([string]$Tag)
 . "$PSScriptRoot/_Common.ps1"
 Import-DeployEnv
