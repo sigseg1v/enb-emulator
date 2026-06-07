@@ -107,4 +107,4 @@ if ($deletedAny) { Start-DocrGarbageCollection }
 
 Write-Host ""
 Write-Host "Pushed enb:{server,login,proxy}-$version (+ -latest)."
-Write-Host "Next: ./Update-Stack.ps1 -Tag $version   (or -Tag latest)"
+Write-Host "Next: just update $version   (or: just update latest)"

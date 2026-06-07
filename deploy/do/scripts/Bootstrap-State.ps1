@@ -34,4 +34,4 @@ aws s3api put-public-access-block --bucket $bucket `
     --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true | Out-Null
 
 Write-Host "State bucket ready (versioned + AES256 + public access blocked)."
-Write-Host "Next: ./Deploy-Infra.ps1"
+Write-Host "Next: just up"
