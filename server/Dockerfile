@@ -56,8 +56,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libcrypto++8t64 \
         libpqxx-7.8t64 \
     && rm -rf /var/lib/apt/lists/* \
-    && groupadd --system net7 \
-    && useradd  --system --gid net7 --home /app net7
+    && groupadd --system --gid 999 net7 \
+    && useradd  --system --uid 999 --gid 999 --home /app net7
+# The 999:999 uid/gid is a deployment CONTRACT, not an accident: the prod
+# deploy provisions the DTLS cert/key (deploy/do) owned by 999:999 so this
+# unprivileged runtime user can read them. A --system user without an
+# explicit --uid is allocated downward from 999 and would silently drift on
+# a base-image change, breaking that cert read and fail-closing the server
+# at boot. Pin it. If you change this, change the chown in
+# deploy/do/scripts/Update-Stack.ps1 and terraform/cloud-init.yaml.tftpl.
 
 WORKDIR /app
 COPY --from=build /build/net7 /app/net7

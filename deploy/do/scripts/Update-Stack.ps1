@@ -93,6 +93,13 @@ try {
         'cd /opt/enb'
         'tar -xzf bundle.tgz'
         'rm -f bundle.tgz'
+        # The bundle is tarred on the workstation, so tar -xzf (as root) restores
+        # the workstation uid onto any bootstrapped cert/key. The server container
+        # runs unprivileged as net7 (uid/gid 999, pinned in server/Dockerfile) and
+        # fail-closes at boot if it cannot READ the DTLS cert/key. Hand ownership
+        # to 999:999 so it can. No-op once the droplet-renewed cert is in place
+        # (renew.sh installs it 999:999 itself). login runs as root, unaffected.
+        'if ls certs/*.cer certs/*.pem >/dev/null 2>&1; then chown 999:999 certs/*.cer certs/*.pem; fi'
         'docker compose --env-file .env -f docker-compose.prod.yml pull'
         'docker compose --env-file .env -f docker-compose.prod.yml up -d'
         'docker compose --env-file .env -f docker-compose.prod.yml ps'
