@@ -59,15 +59,18 @@ direct re-read before fixing) and **LIVE** (compiles on the Linux build) or
 
 ## HIGH / CRITICAL -- reported, need direct re-read before fixing
 
-- [ ] **AJ-3. `HandleInventoryMove` slot indices unbounded.** REPORTED / LIVE.
-  `server/src/PlayerConnection.cpp` ~2510-3100 (opcode 0x0027): audit flags
-  `FromSlot`/`ToSlot` (wire `ntohl`) used to index `CargoInv.Item[]` (size 40),
-  ammo (20), equip (9), vault (40), trade (6) with no bounds check, on the
-  `GetData()/SetData()` paths. If true this is OOB read+write -> heap corruption /
-  item dupe / cross-player corruption. RE-READ the handler and confirm there is no
-  earlier guard before adding per-container bounds checks with the REAL slot
-  constants (do not hardcode the audit's guessed numbers -- read the Aux*Inventory
-  headers).
+- [ ] **AJ-3. `HandleInventoryMove` slot indices unbounded.** CONFIRMED / LIVE
+  (direct read 2026-06-07, task #90). `server/src/PlayerConnection.cpp`
+  HandleInventoryMove (2474-3100, opcode 0x0027): `InvMo.FromSlot`/`ToSlot` are
+  `ntohl()` of the wire fields (PlayerConnection.cpp:2494-2495) and index
+  `ShipIndex()->Inventory.CargoInv.Item[InvMo.FromSlot]` at line 2510 (first use)
+  with NO bounds check, then again across the FromInv/ToInv branches into
+  CargoInv / AmmoInv / `m_Equip` / SecureInv (vault) / TradeInv, on both GetData()
+  reads and SetData() writes. Real OOB read+write -> heap corruption / item dupe /
+  cross-player corruption. Fix: per-container bounds checks using the REAL slot
+  constants read from the Aux*Inventory headers (do NOT hardcode the audit's
+  guessed 40/20/9/40/6 -- verify each against the actual array declarations).
+  Pure tightening. CLI OOB test on 0x0027 (already parsed, #68/#69) + plans/29 CV.
 
 - [ ] **AJ-4. Chat sender GameID spoofing.** REPORTED / LIVE.
   `server/src/PlayerConnection.cpp` ~4642/4648/4654 (opcode 0x0033, Type 2/3/4 =

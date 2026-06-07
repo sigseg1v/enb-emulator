@@ -145,8 +145,10 @@ Do them in order; verify the integration suite stays green at every step.
   so the server's `strtok(ticket, "-")` still splits username from token. (Commit
   pending.)
 
-- [~] **AH-1. Decide endpoints + cert strategy + key material. RESOLVED: reuse
-  Let's Encrypt, connect-by-IP/verify-by-name.** Investigation (2026-06-07): the
+- [x] **AH-1. Decide endpoints + cert strategy + key material. DECIDED BY OWNER
+  2026-06-07: reuse Let's Encrypt PKI + NAME addressing** (connect-by-IP, verify
+  cert against `g_DomainName` via `SSL_set1_host`). No self-signed cert, no SPKI
+  pin. Investigation (2026-06-07): the
   proxy connects the UDP game leg by **IP** (from the server redirect --
   `SectorServerManager::LookupSectorServer` -> `ServerRedirect.m_IpAddress`,
   `inet_addr`), but it already holds a domain name `g_DomainName` (used today to
