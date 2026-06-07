@@ -4636,22 +4636,39 @@ void Player::HandleClientChat(unsigned char *data)
 		else
 			SendVaMessage("Error: You are not in a group!");
 	}
-	// Guild "To Guild"
-	else if (this && chat->Type == 2)
+	// AJ-4: the sender is ALWAYS this authenticated connection -- never the
+	// wire-controlled chat->GameID. GuildChat/LocalChat/BroadcastChat resolve
+	// the displayed sender via GetPlayer(GameID), so passing chat->GameID let
+	// an authenticated player attribute their guild/local/broadcast chat to
+	// ANY other avatar (and, for local, speak from the victim's position --
+	// the range gate uses the resolved sender's position). The retail client
+	// only ever sends its own id here, so this is a pure tightening; the
+	// GroupChat branch above already (correctly) uses GameID(). A mismatch is
+	// a spoof attempt -- log it at debug, then proceed with the real id.
+	else if (this && (chat->Type == 2 || chat->Type == 3 || chat->Type == 4))
 	{
-		g_ServerMgr->m_PlayerMgr.GuildChat(chat->GameID, chat->String);
-	}
-	// Local "To Local Area"
-	else if (this && chat->Type == 3)
-	{
-		if (Hijackee()) DoVrixEncoding(chat->String);
-		g_ServerMgr->m_PlayerMgr.LocalChat(chat->GameID, chat->String);
-	}
-	// Broadcast "To Entire Sector"
-	else if (this && chat->Type == 4)
-	{
-		if (Hijackee()) DoVrixEncoding(chat->String);
-		g_ServerMgr->m_PlayerMgr.BroadcastChat(chat->GameID, chat->String);
+		if (chat->GameID != GameID())
+			LogDebug("%s sent ClientChat type %d with spoofed sender GameID %d "
+			         "(real %d); using real id\n",
+			         Name(), chat->Type, chat->GameID, GameID());
+
+		// Guild "To Guild"
+		if (chat->Type == 2)
+		{
+			g_ServerMgr->m_PlayerMgr.GuildChat(GameID(), chat->String);
+		}
+		// Local "To Local Area"
+		else if (chat->Type == 3)
+		{
+			if (Hijackee()) DoVrixEncoding(chat->String);
+			g_ServerMgr->m_PlayerMgr.LocalChat(GameID(), chat->String);
+		}
+		// Broadcast "To Entire Sector"
+		else
+		{
+			if (Hijackee()) DoVrixEncoding(chat->String);
+			g_ServerMgr->m_PlayerMgr.BroadcastChat(GameID(), chat->String);
+		}
 	}
 }
 

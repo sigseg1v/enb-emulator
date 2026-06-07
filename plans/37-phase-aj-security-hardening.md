@@ -77,15 +77,27 @@ direct re-read before fixing) and **LIVE** (compiles on the Linux build) or
   guessed 40/20/9/40/6 -- verify each against the actual array declarations).
   Pure tightening. CLI OOB test on 0x0027 (already parsed, #68/#69) + plans/29 CV.
 
-- [ ] **AJ-4. Chat sender GameID spoofing.** REPORTED / LIVE.
-  `server/src/PlayerConnection.cpp` ~4642/4648/4654 (opcode 0x0033, Type 2/3/4 =
-  guild/local/broadcast): passes `chat->GameID` (from the wire) as the sender to
-  `GuildChat/LocalChat/BroadcastChat` instead of `this->GameID()`. GroupChat
-  (~4635) correctly uses `GameID()`. If confirmed, an authenticated player can
-  emit chat attributed to any other GameID -- exactly the owner's "spoof them to
-  chat" scenario. Fix: ignore the wire GameID, always use `GameID()` (or reject on
-  mismatch with a warn). Pure tightening. This one is high-value and low-risk;
-  prioritize after re-read.
+- [x] **AJ-4. Chat sender GameID spoofing.** CONFIRMED / LIVE. FIXED 2026-06-07
+  (task #91, CV-15). `server/src/PlayerConnection.cpp HandleClientChat` (opcode
+  0x0033, Type 2/3/4 = guild/local/broadcast) passed `chat->GameID` (from the
+  wire) as the sender to `GuildChat/LocalChat/BroadcastChat`. Both
+  `PlayerManager::BroadcastChat` (PlayerManager.cpp:701) and `LocalChat` (:735)
+  resolve the displayed sender via `Player *s = GetPlayer(GameID)` and emit
+  0x00A5 CLIENT_CHAT_EVENT attributed to `s` -- so an authenticated player could
+  put any avatar's GameID in the packet and broadcast chat AS that avatar, and
+  for Local speak from the victim's position (the 25000-unit range gate at
+  PlayerManager.cpp:761 measures from the resolved sender). GroupChat already
+  (correctly) used `GameID()`. **Fixed:** the three branches were combined to
+  always pass `GameID()` (the authenticated connection); a wire id != `GameID()`
+  is logged at debug as a spoof attempt and the real id is used. Pure tightening
+  (the retail client only sends its own id). Primary source: the
+  `GetPlayer(GameID)` sender-resolution + self-skip at PlayerManager.cpp:706/724.
+  **Test:** `tests/integration/.../Opcodes/TwoPlayerChatSenderSpoofTests.cs`
+  (attacker A broadcasts with `chat->GameID`=victim B's id; post-fix B sees a
+  0x00A5 with Sender == A's name, pre-fix B saw nothing). `[Fact(Skip)]` --
+  BLOCKED by proxy single-tenancy (same as the room-change fan-out test); the
+  shape is correct and runs once the proxy demultiplexes by session. Real-client
+  check: plans/29 CV-15.
 
 - [ ] **AJ-5. Character CREATE/DELETE not bound to an authenticated session.**
   REPORTED / LIVE. `server/src/UDP_Global.cpp` create (~254) / delete (~302)

@@ -509,3 +509,43 @@ format & byte order", Trap 2).
 - **Setup**: any deploy (local docker or cloud). Ensure schema-init applied
   `login_ticket.sql` to net7_user (`\d login_ticket` shows username/token/expires_at)
   -- on a pre-existing volume the apply is unconditional so it lands on restart.
+
+### [ ] CV-15 -- Real client chat is attributed to the speaker, never a spoofed id (AJ-4)
+
+- **What changed**: `server/src/PlayerConnection.cpp HandleClientChat` now passes
+  the authenticated connection's `GameID()` -- never the wire-controlled
+  `chat->GameID` -- to GuildChat/LocalChat/BroadcastChat (Type 2/3/4). The
+  GroupChat branch already used `GameID()`. A wire id that disagrees with
+  `GameID()` is logged at debug as a spoof attempt and the real id is used.
+  Pure tightening: the retail client only ever sends its own id here.
+- **Primary source (format)**: no wire-format change. The inbound 0x0033
+  CLIENT_CHAT layout is unchanged (`common/include/net7/PacketStructures.h:624`
+  `struct ClientChat`); only which field the server trusts as the sender
+  tightened. The displayed-sender attribution path is
+  `PlayerManager::BroadcastChat`/`LocalChat` -> `GetPlayer(GameID)` ->
+  `SendClientChatEvent(... s ...)` emitting 0x00A5 CLIENT_CHAT_EVENT with the
+  resolved sender's LastName (`server/src/PlayerManager.cpp:701-768`,
+  `PlayerConnection.cpp SendClientChatEvent`).
+- **Why the CLI/integration suite cannot fully validate it**: the spoof is
+  observable only at a SECOND avatar in the same sector (attacker broadcasts with
+  a victim's GameID; the fix makes the victim see the attacker's name, the bug
+  made the victim see nothing). The two-player integration test
+  (`tests/integration/.../Opcodes/TwoPlayerChatSenderSpoofTests.cs`) is written
+  and byte-correct but `[Fact(Skip)]` -- BLOCKED by Net7Proxy single-tenancy
+  (one UDPClient/m_MasterConnection per proxy; Player B's handshake clobbers
+  Player A's routing). It will run as-is once the proxy demultiplexes by session.
+  Until then only the real client (two clients, two proxies via `just play-cli`)
+  can witness the live fan-out.
+- **What to look for (real client)**: with two clients A and B in the same
+  sector, normal Local/Broadcast/Guild chat from A shows as sent by A on B's
+  client (regression guard: the fix must not have broken ordinary attribution).
+  The server log shows NO "sent ClientChat type N with spoofed sender GameID"
+  debug line during honest play (the real client never spoofs). The
+  authorization property -- that a crafted packet cannot make chat appear from
+  another avatar -- is not reachable from the stock client (it always sends its
+  own id); it is covered by the Skip'd integration test once the proxy
+  multiplexes. The owner-facing check here is purely the no-regression one:
+  Local range (~25000 units), Broadcast (whole sector), and Guild chat still
+  deliver and are attributed to the real speaker.
+- **Setup**: two real clients in one sector (`just play-cli` per client, distinct
+  accounts/avatars). Any deploy.
