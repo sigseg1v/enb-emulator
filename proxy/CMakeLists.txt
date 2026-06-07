@@ -40,6 +40,13 @@ file(GLOB PROXY_SRC CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
 )
 
+# Phase AH: shared per-peer DTLS transport for the proxy<->server UDP leg.
+# Same single source of truth the server links (server/CMakeLists.txt). Built
+# for BOTH proxy targets -- Linux-native (docker) and Win32-PE/MinGW (WINE).
+list(APPEND PROXY_SRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/../common/DtlsTransport.cpp"
+)
+
 list(LENGTH PROXY_SRC _proxy_src_count)
 message(STATUS "net7proxy: discovered ${_proxy_src_count} .cpp files under proxy/")
 

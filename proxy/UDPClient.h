@@ -9,6 +9,7 @@
 #define SLOT_RANGE						32
 
 #include <net7/PacketStructures.h>
+#include <cstdint>
 #include <vector>
 #include <map>
 
@@ -21,6 +22,7 @@ struct EffectCancel
 typedef std::map<unsigned long, char *> PacketList;
 
 class Connection;
+namespace net7 { class DtlsTransport; }
 
 class UDPClient
 {
@@ -82,7 +84,7 @@ public:
     short   SendMasterLogin(long avatar_id, long sector_id, long *sector_ipaddr);
     void    ForwardClientOpcode(short opcode, short bytes, char *packet);
 
-	void    SetClientPort(short port)               { m_ClientPort = port; }
+	void    SetClientPort(short port);   // Phase AH: defined in UDPClient_linux.cpp (kicks DTLS handshake)
     void    SetClientIP(long addr)                  { m_ClientIP = addr; }
     void    SetSectorID(long sector_id)             { m_SectorID = sector_id; }
     void    SetConnectionActive(bool active)        { m_ConnectionActive = active; }
@@ -105,7 +107,27 @@ public:
 	void	ProcessAvatarList(unsigned char *msg, short len);
 
 private:
-    int     UDP_RecvFromServer(char *buffer, int size);
+    int     UDP_RecvFromServer(char *buffer, int size,
+                               long &src_addr, unsigned short &src_port);
+    // Phase AH: dispatch one cleartext server->proxy datagram (sitting in
+    // m_RecvBuffer) through the opcode switch -- the post-DTLS-decrypt path and
+    // the plaintext-mode path share it.
+    void    DispatchServerDatagram(int received);
+    // Phase AH: raw sendto() bypassing DTLS, used to put handshake records (and
+    // nothing else) on the wire toward a specific server (ip, port).
+    void    RawSendToServer(const unsigned char *buffer, int bufferLen,
+                            long ip, unsigned short port);
+    // Phase AH: build this socket's client-role DTLS transport from the
+    // resolved proxy policy (g_DtlsPlaintext/g_DtlsVerifyDomain/g_DtlsCaFile).
+    // nullptr in opted-out plaintext mode; fail-closed exit on misconfig.
+    void    InitDtls();
+    // Phase AH: peer key for the DTLS association to (m_IPAddr, dest_port_host).
+    // dest_port_host==0 means the socket's default peer port.
+    uint64_t ServerPeerKey(short dest_port_host) const;
+    // Phase AH: proactively start the DTLS handshake to a server port so app
+    // data only flows once the association is Established (avoids pre-handshake
+    // record concatenation). No-op in plaintext mode or if already established.
+    void    DtlsKickHandshake(short dest_port_host);
     void    SignalWrongVersion(char *msg);
     void    TerminateClient(char *msg);
 	void	PreStartReceived(char *msg);
@@ -199,6 +221,12 @@ private:
     bool m_Resync;
     // Linux unconnected-socket flag — see ctor comment above. Win32 ignores.
     bool m_Unconnected;
+
+    // Phase AH: per-socket client-role DTLS transport. nullptr in opted-out
+    // plaintext mode -- then the recv/send paths behave exactly as before. One
+    // socket == one transport, multiplexing a DTLS association per server
+    // (ip,port) this socket talks to.
+    net7::DtlsTransport *m_Dtls;
 	unsigned long m_PacketResendTimer;
 
     // MVAS idle-keepalive (Linux): started once per session on the sector

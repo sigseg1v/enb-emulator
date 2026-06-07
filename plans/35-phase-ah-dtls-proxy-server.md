@@ -199,7 +199,21 @@ by socket. Build a small `DtlsTransport` helper used by BOTH sides:
   This isolates ALL DTLS mechanics from the existing opcode dispatch, which keeps
   consuming cleartext exactly as today.
 
-- [ ] **AH-2. Server side: DTLS-wrap the externally-reachable UDP listeners.**
+- [x] **AH-2. Server side: DTLS-wrap the externally-reachable UDP listeners.**
+  DONE (commit b41f4218). `ServerManager::InitDtlsServerPolicy()` settles the
+  policy once at the top of `RunMasterServer`/`RunSectorServer` (before any
+  listener serves): opt-out sentinel -> `m_DtlsRequired=false` + LOUD warning;
+  else resolve cert (`NET7_DTLS_CERT`/`_KEY` env, default `<g_DomainName>.cer`/
+  `.pem`), probe-load, and `exit(EXIT_FAILURE)` on failure (fail-closed, no
+  silent plaintext). `MakeServerDtlsTransport()` hands each listener a fresh
+  server-role transport (one socket == one peer map). `UDP_Connection` attaches
+  `m_Dtls` in `StartReceiver()` (post-policy), routes inbound through `Feed()`
+  (handshake via `RawSendTo`, `DispatchDatagram` per decrypted record) and
+  `UDP_Send` through `SendApp()` (drops if no association -- never cleartext
+  gameplay while DTLS on). Transport-level `std::mutex` added for the concurrent
+  recv/send-thread `SSL` access. 4/4 unit tests pass; 3 server TUs syntax-clean.
+  AH-2a cookie-exchange (`DTLSv1_listen`) anti-DoS still TODO (interim guard:
+  `SetMaxPeers` half-open cap).
   Add the `DtlsTransport` (server role) per listener. **Policy: DTLS REQUIRED by
   default, fail-closed.** At startup the server calls `DtlsPlaintextOptedOut()`
   (`common/DtlsTransport.h`, checks `NET7_DTLS_ALLOW_PLAINTEXT` ==
@@ -224,21 +238,81 @@ by socket. Build a small `DtlsTransport` helper used by BOTH sides:
   `common/DtlsTransport.cpp` to `server/CMakeLists.txt` (mirror `PosixIpc.cpp` at
   `:69`).
 
-- [ ] **AH-3. Proxy side: DTLS-connect with NAME verification.** Add the
-  `DtlsTransport` (client mode, `DTLS_client_method()`) to `UDPClient`, gated on
-  the same flag. Verify the server cert against the **cert NAME** (LE), via
-  `SSL_set1_host(ssl, <domain>)` + `SSL_set_verify(SSL_VERIFY_PEER)` against the
-  system trust store -- NOT a pin. **Integration gap to close:** the UDP layer
-  (`UDPClient_linux.cpp`) does NOT currently see `g_DomainName` -- it resolves by
-  `NET7_GAME_SERVER_HOST`. Add a `NET7_GAME_SERVER_DOMAIN` env (the cert SAN, e.g.
-  the public hostname) read in `OpenFixedPort`, used ONLY for `SSL_set1_host`
-  verification while the socket still connects to the resolved IP (connect-by-IP,
-  verify-by-name). Hook `UDP_Send` (`:543`) -> `DtlsTransport::send` and the
-  `UDP_RecvFromServer` (`:453`) return -> `DtlsTransport::feed`. **Global-plane
-  caveat:** that socket carries two associations (:3810 + :3806) -- the transport's
-  peerkey map already handles this; just feed each datagram with its real
-  `recvfrom` source port. One source tree, two build targets (Linux + Win32-PE via
-  MinGW, static OpenSSL in `proxy/third_party/openssl-mingw64/`) -- do NOT fork it.
+### VERIFIED proxy<->server UDP topology (mapped 2026-06-07) -- the in-game leg is ASYMMETRIC
+
+Traced in code (cited), NOT assumed. This corrects the earlier AH-3 sketch,
+which under-specified the in-game path. Two proxy sockets, both ephemeral-bound:
+
+- **Master socket** (`proxy/Net7.cpp:223`, `m_Unconnected=false`, `connect()`'d
+  to server:3808). SENDS to: 3808 (0x2008 handoff / 0x200F comm-port), the
+  **per-sector port 3501+N** (C->S in-game opcodes via `ForwardClientOpcode` ->
+  `SendResponse(m_ClientPort)`, `UDPClient_linux.cpp:537`; `m_ClientPort` is the
+  sector port from the 0x2009 handoff, `ClientToMasterServer.cpp:155`), and 3806
+  (0x3005 keepalive). RECEIVES from: **3808 ONLY** (connected-socket recv filter).
+- **Global socket** (`proxy/Net7.cpp:253`, `m_Unconnected=true`, default peer
+  3810). SENDS to: 3810 (0x2002/0x2004/0x200B/0x200D account ops) and 3806
+  (keepalive / NAT punch). RECEIVES from (IP-filtered, port-UNfiltered recvfrom):
+  3810 (account confirms) AND **3806 (ALL in-game S->C: 0x2010/0x2016/0x201A +
+  game opcodes)**. The server routes every player's S->C through
+  `player->m_UDPConnection` = the 3806 MVAS listener (`UDP_Master.cpp:96`
+  `SetUDPConnection(m_UDPConnection)`), NOT the per-sector socket.
+
+**The crux:** in-game **C->S** goes proxy-master(EPH1) -> server **3501+N**, while
+in-game **S->C** comes server **3806** -> proxy-global(EPH2). The sector listener
+(3501+N) NEVER sends on its own socket. So the C->S in-game leg `(EPH1, 3501+N)`
+has NO return path, and even if it did, the master socket -- `connect()`'d to 3808
+-- would DROP a DTLS handshake reply from 3501+N. A DTLS association needs records
+flowing BOTH ways through ONE `(ip,port)<->(ip,port)` pair; this split breaks that.
+
+**Design decision (proxy-only, ZERO server-routing change): make the in-game-C->S
+proxy socket UNCONNECTED so the sector listener's DTLS handshake replies reach it.**
+Each server listener already owns a `DtlsTransport` (AH-2) and already `RawSendTo`s
+handshake bytes on its own socket, so the sector listener (3501+N) can complete a
+handshake the moment the proxy drives one -- IF the proxy can receive its reply.
+Today it cannot (master socket is `connect()`'d to 3808). Switch the master socket
+to unconnected (`recvfrom`, IP-filtered like the global socket) so it accepts
+datagrams from 3808 AND 3501+N. Then:
+  - master socket: DTLS assoc with 3808 (account handoff) + a per-sector assoc with
+    3501+N (C->S game). The sector listener only ever emits DTLS *handshake* records
+    on its own socket (no app data S->C -- that stays on 3806), so after decrypt the
+    only app records arriving on the master socket are 0x2009 from 3808. Clean.
+  - global socket: DTLS assoc with 3810 (account) + with 3806 (S->C in-game +
+    keepalive C->S) -- already bidirectional, handshakes fine.
+This keeps the server's S->C-via-3806 design and the idle-reaper/keepalive design
+100% intact: NO server in-game routing change, so no server-integrity/primary-source
+burden beyond the DTLS wrapper itself. Cost: the proxy drives a fresh DTLS
+ClientHandshake to each sector port on entry/gate-jump (one extra RTT per sector),
+and the master socket switches connected->unconnected `recvfrom`. Rejected
+alternative (Option A: re-route C->S game through 3806 + teach the MVAS handler to
+dispatch game opcodes) -- one persistent in-game association, but it changes the
+server's in-game C->S dispatch port (high hot-path blast radius, needs primary-source
+proof). Proxy-only wins on risk; the server is slated for rewrite anyway.
+
+- [ ] **AH-3. Proxy side: DTLS-connect with NAME verification (per the verified
+  topology above).** Add a client-role `DtlsTransport` (`DtlsRole::Client`) to
+  EACH proxy `UDPClient` socket, gated on the same opt-out sentinel. Verify the
+  server cert against the **cert NAME** (LE) via `SetVerifyHostname(g_DomainName)`
+  (-> `SSL_set1_host`) + system trust store -- NOT a pin. Steps:
+    1. **Master socket -> unconnected.** Switch `proxy/Net7.cpp:223`'s UDPClient to
+       `m_Unconnected=true` (or make `OpenFixedPort` skip `connect()` when DTLS is
+       on) so it can `recvfrom` the sector listener's handshake replies. Apply the
+       same IP-filter the global socket uses (`UDP_RecvFromServer` unconnected path,
+       `:464-477`). Default-peer sends (port=0) become `sendto(m_SockAddr)`.
+    2. **Per-socket DtlsTransport, peer-keyed by recvfrom (ip,port).** `Feed` each
+       inbound datagram under `DtlsPeerKey(src_ip, src_port)`; dispatch only the
+       decrypted `app_data`. `SendApp` each outbound under the dest `(ip,port)`.
+    3. **Drive the handshake before first app send.** The proxy is the DTLS client:
+       call `ClientHandshake(peerkey)` when it first learns a peer -- 3808 at master
+       open, 3810 at global open, 3806 when the global keepalive/login starts, and
+       **3501+N when `SetClientPort` lands the sector port** (`ClientToMasterServer.cpp:155`).
+       Pump handshake `to_send`/`Feed` until `Established`, then send app data
+       (`SendApp` drops if not established -- never cleartext gameplay).
+    4. **`NET7_GAME_SERVER_DOMAIN`.** `UDPClient_linux.cpp` resolves by
+       `NET7_GAME_SERVER_HOST` and does not see `g_DomainName`; add a
+       `NET7_GAME_SERVER_DOMAIN` env (the cert SAN) read in `OpenFixedPort`, used
+       ONLY for `SetVerifyHostname` while the socket still connects-by-IP.
+    5. Add `common/DtlsTransport.cpp` to the proxy CMake (both Linux + MinGW
+       targets). One source tree, two build targets -- do NOT fork it.
 
 - [ ] **AH-4. CLI / integration-suite escape hatch -- the LOUD explicit opt-out.**
   DTLS is REQUIRED by default (AH-2), so the CLI (`CliClient.Core`) and the Phase T

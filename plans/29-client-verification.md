@@ -422,3 +422,44 @@ format & byte order", Trap 2).
 - **Setup**: cloud deploy (`deploy/do/`), real client pointed at the cloud host
   over the public internet (NOT loopback / same-LAN, which may not NAT the UDP
   return path the same way).
+
+
+### [ ] CV-13 -- Real client still plays end-to-end with proxy<->server DTLS ON
+
+- **Change**: Phase AH. The proxy<->server UDP leg is now wrapped in DTLS 1.2
+  (both directions), default-ON and fail-closed on both ends. The proxy opens a
+  client-role DTLS association per (server_ip, server_port) on each of its UDP
+  sockets (master plane -> 3808/3806/3501+N; global plane -> 3810/3806); the
+  server wraps its UDP receivers in a server-role transport keyed per proxy peer.
+  The cleartext opcode stream inside the channel is byte-for-byte unchanged --
+  DTLS is a transport wrapper (RFC 6347), not a new packet format -- so the
+  existing per-opcode CLI byte-pins still describe the plaintext payload exactly.
+  Files: `proxy/UDPClient_linux.cpp`, `proxy/Net7.cpp`, `proxy/UDPClient.h`,
+  `proxy/Net7.h`, `server/src/ServerManager.cpp`, `server/src/UDPConnection.cpp`,
+  `common/DtlsTransport.{h,cpp}`.
+- **Primary source (format)**: none needed for a payload change -- there is no
+  payload change. The plaintext inside the DTLS record is the identical
+  EnbUdpHeader+opcode stream the existing captures and CLI tests already pin.
+  DTLS framing itself is the OpenSSL implementation of RFC 6347; correctness of
+  the wrapper is proven by the handshake completing and the same opcodes arriving
+  decrypted (the integration suite, run with DTLS configured, is the byte-pin).
+- **Why the CLI/integration suite cannot fully validate it**: the dev/test stack
+  runs on a trusted private docker bridge and (until the CLI gains a DTLS client)
+  opts out via `NET7_DTLS_ALLOW_PLAINTEXT`, so locally the channel is cleartext.
+  Only a real client whose proxy runs with DTLS ON, verifying a real Let's
+  Encrypt server cert by name (connect-by-IP / verify-by-name via SSL_set1_host),
+  proves the handshake + verification + decrypt path works against the live
+  server over the public internet under WINE.
+- **What to look for (real client over the internet, DTLS ON)**: with the proxy
+  running DTLS-enabled (NOT opted out) and pointed at the cloud host's real
+  hostname, full login -> character select -> sector entry -> undock -> move ->
+  gate -> chat -> logout all work exactly as before, with NO added latency spikes
+  or disconnects. The proxy log prints "proxy<->server DTLS ENABLED (verify host
+  '<domain>' ...)" at startup and NOT the plaintext-opt-out banner. A cert-name
+  mismatch or missing CA must make the proxy refuse to start (fail-closed), not
+  silently fall back to cleartext.
+- **Setup**: cloud deploy (`deploy/do/`) with a provisioned LE cert/key for the
+  server (NET7_DTLS_CERT/KEY or <domain>.cer/.pem) and the player-side proxy
+  configured with NET7_GAME_SERVER_DOMAIN=<cert hostname> and, under WINE, a CA
+  bundle reachable via NET7_DTLS_CA (or the system trust store). Real client over
+  the public internet, NOT loopback.

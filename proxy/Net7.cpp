@@ -8,6 +8,7 @@
 #include "Net7.h"
 #include "ServerManager.h"
 #include "UDPClient.h"
+#include <net7/DtlsTransport.h>
 
 char g_LogFilename[MAX_PATH];
 char g_InternalIP[MAX_PATH];
@@ -44,6 +45,81 @@ bool g_LocalCert = false;
 unsigned short ssl_port = SSL_PORT;
 bool g_Packet_Opt_requested = false;
 bool g_Debug_Launch = false;
+
+// Phase AH: proxy<->server DTLS policy (resolved once at startup by
+// InitProxyDtlsPolicy, consumed per-socket by UDPClient::InitDtls).
+//   g_DtlsPlaintext   -- true ONLY when the operator explicitly opted out
+//                        (NET7_DTLS_ALLOW_PLAINTEXT == sentinel). Default false.
+//   g_DtlsVerifyDomain -- the server cert hostname the client verifies against
+//                        (connect-by-IP, verify-by-name). Required when DTLS on.
+//   g_DtlsCaFile      -- optional CA/cert file to trust instead of the system
+//                        store ("" = system trust store, which is correct for
+//                        a Let's Encrypt server cert).
+bool g_DtlsPlaintext = false;
+char g_DtlsVerifyDomain[MAX_PATH] = {0};
+char g_DtlsCaFile[MAX_PATH] = {0};
+
+// Resolve the proxy<->server DTLS policy ONCE, before any UDPClient is built.
+// Fail-closed: if DTLS is required (not opted out) but cannot be configured,
+// the proxy refuses to start rather than silently falling back to cleartext.
+static void InitProxyDtlsPolicy()
+{
+    if (net7::DtlsPlaintextOptedOut())
+    {
+        g_DtlsPlaintext = true;
+        LogMessage("\n");
+        LogMessage("==========================================================\n");
+        LogMessage("  WARNING: UDP ENCRYPTION DISABLED (proxy<->server DTLS off)\n");
+        LogMessage("  %s=%s is set.\n",
+                   net7::kDtlsOptOutEnv, net7::kDtlsOptOutSentinel);
+        LogMessage("  The proxy<->server UDP leg runs CLEARTEXT and\n");
+        LogMessage("  UNAUTHENTICATED. This is for local/offline debugging\n");
+        LogMessage("  ONLY -- never run a real deployment like this.\n");
+        LogMessage("==========================================================\n");
+        LogMessage("\n");
+        return;
+    }
+
+    // DTLS required. Connect-by-IP / verify-by-name: resolve the cert hostname.
+    // NET7_GAME_SERVER_DOMAIN is the explicit knob; otherwise the upstream host
+    // name (NET7_UPSTREAM_HOST / g_UpstreamHost) is typically the cert SAN.
+    const char *dom = getenv("NET7_GAME_SERVER_DOMAIN");
+    if ((!dom || !*dom) && g_UpstreamHost[0]) dom = g_UpstreamHost;
+    if (!dom || !*dom)
+    {
+        LogMessage("FATAL: proxy<->server DTLS is required but no server cert\n"
+                   "  hostname is configured. Set NET7_GAME_SERVER_DOMAIN to the\n"
+                   "  game server's certificate hostname, or set %s=%s\n"
+                   "  to run cleartext (NOT for production).\n",
+                   net7::kDtlsOptOutEnv, net7::kDtlsOptOutSentinel);
+        exit(EXIT_FAILURE);
+    }
+    snprintf(g_DtlsVerifyDomain, MAX_PATH, "%s", dom);
+
+    const char *ca = getenv("NET7_DTLS_CA");
+    snprintf(g_DtlsCaFile, MAX_PATH, "%s", (ca && *ca) ? ca : "");
+
+    // Probe-build a client transport so a misconfiguration fails the process at
+    // startup (fail-closed) instead of at first connect.
+    net7::DtlsTransport probe(net7::DtlsRole::Client);
+    probe.SetVerifyHostname(g_DtlsVerifyDomain);
+    if (g_DtlsCaFile[0] && !probe.SetVerifyCaFile(g_DtlsCaFile))
+    {
+        LogMessage("FATAL: proxy<->server DTLS CA '%s' failed to load: %s\n",
+                   g_DtlsCaFile, probe.LastError().c_str());
+        exit(EXIT_FAILURE);
+    }
+    if (!probe.Ok())
+    {
+        LogMessage("FATAL: proxy<->server DTLS client transport failed to "
+                   "configure: %s\n", probe.LastError().c_str());
+        exit(EXIT_FAILURE);
+    }
+
+    LogMessage("Net7Proxy: proxy<->server DTLS ENABLED (verify host '%s', CA: %s)\n",
+               g_DtlsVerifyDomain,
+               g_DtlsCaFile[0] ? g_DtlsCaFile : "system trust store");
+}
 
 void Usage()
 {
@@ -199,6 +275,12 @@ int main(int argc, char* argv[])
     LogMessage("Net7Proxy: binding TCP %d (GLOBAL_SERVER_PORT) on %s\n",
                GLOBAL_SERVER_PORT, g_internal_addr);
 
+    // Phase AH: resolve the proxy<->server DTLS policy BEFORE any UDPClient is
+    // constructed. Fail-closed (exit) on misconfiguration unless the operator
+    // explicitly opted out. Sets g_DtlsPlaintext / g_DtlsVerifyDomain /
+    // g_DtlsCaFile, which UDPClient::InitDtls reads per socket.
+    InitProxyDtlsPolicy();
+
     // The "is_master_server", "max_sectors", "standalone" constructor args
     // are ServerManager's; for the proxy-as-listener role we want the
     // master-server path (RunMasterServer creates the TCP listeners).
@@ -220,9 +302,18 @@ int main(int argc, char* argv[])
     // such — see UDPClient_linux.cpp::OpenFixedPort). Win32 historically
     // passed MVAS_LOGIN_PORT here; that was a launcher-side artefact and
     // is wrong server-side.
+    // Phase AH: when DTLS is on, the master socket must be UNCONNECTED. It
+    // multiplexes DTLS associations to THREE server ports -- 3808 (handoff),
+    // 3806 (sector-plane keepalive) and the per-sector port 3501+N (in-game
+    // C->S forward) -- and the handshake replies from 3806/3501+N arrive from a
+    // different peer port than 3808. A connect()'d socket filters recv() to a
+    // single peer and would drop them. In opted-out plaintext mode the master
+    // socket stays connected to 3808, preserving the exact legacy behaviour
+    // (only 3808 traffic is accepted; a stray 3806 datagram is kernel-dropped).
     UDPClient udp_to_master(UDP_MASTER_SERVER_PORT,
                             CLIENT_TYPE_FIXED_PORT,
-                            ip_address_internal);
+                            ip_address_internal,
+                            !g_DtlsPlaintext /*unconnected when DTLS on*/);
 
     server_mgr.SetUDPConnections(&udp_to_master, &udp_to_master);
 

@@ -90,6 +90,7 @@
 #include "UDPClient.h"
 #include <net7/Opcodes.h>
 #include <net7/PacketStructures.h>
+#include <net7/DtlsTransport.h>
 #include "PacketMethods.h"
 #include "ServerManager.h"
 #include "Connection.h"
@@ -247,6 +248,13 @@ bool UDPClient::OpenFixedPort(short port, long ip_addr)
                    m_Unconnected ? "unconnected default" : "connected");
     }
 
+    // Phase AH: build this socket's client-role DTLS transport (or leave it
+    // nullptr in opted-out plaintext mode) and proactively start the handshake
+    // to the default peer (3808 master / 3810 global) so the association is
+    // established before the first request rides over it.
+    InitDtls();
+    DtlsKickHandshake(0);
+
     return true;
 }
 
@@ -292,6 +300,7 @@ UDPClient::UDPClient(short port, short connection_type, long ip_addr,
     m_KeepaliveSeq         = 0;
     m_Listen_Socket        = INVALID_SOCKET;
     m_recv_thread_running  = false;
+    m_Dtls                 = nullptr;
 
     memset(&m_Server_handoff, 0, sizeof(m_Server_handoff));
     memset(m_RecvBuffer, 0, sizeof(m_RecvBuffer));
@@ -330,12 +339,21 @@ UDPClient::~UDPClient()
         ::close(m_Listen_Socket);
         m_Listen_Socket = INVALID_SOCKET;
     }
+    delete m_Dtls;
+    m_Dtls = nullptr;
 }
 
 // ---------------------------------------------------------------------------
 // Minimal RecvThread — only the opcodes Phase K's MasterJoin path needs.
 // Other opcodes are logged and dropped (no client-side launcher behaviour
 // on Linux).
+//
+// Phase AH: when DTLS is active every inbound datagram is a DTLS record. We
+// recvfrom() the raw bytes, route them through the per-peer transport (which
+// advances the handshake and/or decrypts), put any handshake bytes it produces
+// back on the wire to that same peer, and dispatch each decrypted application
+// record through DispatchServerDatagram. In opted-out plaintext mode m_Dtls is
+// nullptr and the raw datagram is dispatched directly, exactly as before.
 // ---------------------------------------------------------------------------
 void UDPClient::RecvThread()
 {
@@ -343,8 +361,10 @@ void UDPClient::RecvThread()
 
     while (!g_ServerShutdown && m_recv_thread_running)
     {
+        long           src_addr = 0;
+        unsigned short src_port = 0;
         int received = UDP_RecvFromServer((char *) m_RecvBuffer,
-                                          MAX_UDPC_BUFFER);
+                                          MAX_UDPC_BUFFER, src_addr, src_port);
         if (received <= 0)
         {
             // recv() returned -1 (with errno set by SIGINT / EINTR /
@@ -354,22 +374,68 @@ void UDPClient::RecvThread()
             continue;
         }
 
-        if ((size_t) received < sizeof(EnbUdpHeader)) continue;
-
-        EnbUdpHeader *header = (EnbUdpHeader *) m_RecvBuffer;
-        unsigned short bytes = header->size - sizeof(EnbUdpHeader);
-        short          opcode = header->opcode;
-        char          *msg   = (char *) (m_RecvBuffer + sizeof(EnbUdpHeader));
-
-        if (received != (int)(bytes + sizeof(EnbUdpHeader)))
+        if (m_Dtls)
         {
-            LogMessage("UDPClient(Linux): malformed packet opcode=0x%04x size=%d received=%d\n",
-                       opcode, bytes, received);
+            uint64_t peer = net7::DtlsPeerKey((uint32_t) src_addr, src_port);
+            net7::DtlsStep step = m_Dtls->Feed(peer, m_RecvBuffer,
+                                               (size_t) received);
+            if (!step.to_send.empty())
+            {
+                RawSendToServer(step.to_send.data(),
+                                (int) step.to_send.size(), src_addr, src_port);
+            }
+            if (step.fatal)
+            {
+                m_Dtls->ForgetPeer(peer);
+                continue;
+            }
+            for (const std::vector<uint8_t> &rec : step.app_data)
+            {
+                if (rec.size() < sizeof(EnbUdpHeader) ||
+                    rec.size() > sizeof(m_RecvBuffer))
+                {
+                    continue;
+                }
+                memcpy(m_RecvBuffer, rec.data(), rec.size());
+                DispatchServerDatagram((int) rec.size());
+            }
             continue;
         }
 
-        switch (opcode)
-        {
+        DispatchServerDatagram(received);
+    }
+
+    if (m_Listen_Socket != INVALID_SOCKET)
+    {
+        ::close(m_Listen_Socket);
+        m_Listen_Socket = INVALID_SOCKET;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DispatchServerDatagram — run one cleartext server->proxy datagram (sitting in
+// m_RecvBuffer, `received` bytes) through the opcode switch. This is the body
+// formerly inlined in RecvThread; factored out so both the DTLS-decrypt path
+// and the plaintext path feed it.
+// ---------------------------------------------------------------------------
+void UDPClient::DispatchServerDatagram(int received)
+{
+    if ((size_t) received < sizeof(EnbUdpHeader)) return;
+
+    EnbUdpHeader *header = (EnbUdpHeader *) m_RecvBuffer;
+    unsigned short bytes = header->size - sizeof(EnbUdpHeader);
+    short          opcode = header->opcode;
+    char          *msg   = (char *) (m_RecvBuffer + sizeof(EnbUdpHeader));
+
+    if (received != (int)(bytes + sizeof(EnbUdpHeader)))
+    {
+        LogMessage("UDPClient(Linux): malformed packet opcode=0x%04x size=%d received=%d\n",
+                   opcode, bytes, received);
+        return;
+    }
+
+    switch (opcode)
+    {
         // ----- Master plane -----
         case ENB_OPCODE_2009_MASTER_HANDOFF_CONFIRM:
             MasterLoginConfirm(msg, header);
@@ -440,27 +506,27 @@ void UDPClient::RecvThread()
             // ship the opcode out over the proxy↔client TCP socket.
             ProcessClientOpcode(msg, header);
             break;
-        }
-    }
-
-    if (m_Listen_Socket != INVALID_SOCKET)
-    {
-        ::close(m_Listen_Socket);
-        m_Listen_Socket = INVALID_SOCKET;
     }
 }
 
-int UDPClient::UDP_RecvFromServer(char *buffer, int size)
+// Phase AH: src_addr/src_port report the datagram's source so the caller can
+// key the DTLS association. For an unconnected socket recvfrom() fills them; for
+// a connected socket the only possible peer is the connect()'d default, so we
+// report m_SockAddr.
+int UDPClient::UDP_RecvFromServer(char *buffer, int size,
+                                  long &src_addr, unsigned short &src_port)
 {
     int rtn;
     if (m_Unconnected)
     {
-        // Unconnected SOCK_DGRAM (global plane). Use recvfrom so we can
-        // validate the source address — drop anything not from the game
-        // server IP. The peer port is intentionally unfiltered here:
-        // server->proxy in-game UDP arrives from MVASauth (3806) while
-        // global-control replies arrive from UDP_GLOBAL_SERVER_PORT (3810),
-        // and we want the same dispatcher to handle both.
+        // Unconnected SOCK_DGRAM (global plane, and the master plane when DTLS
+        // is on). Use recvfrom so we can validate the source address — drop
+        // anything not from the game server IP. The peer port is intentionally
+        // unfiltered here: server->proxy in-game UDP arrives from MVASauth
+        // (3806) while global-control replies arrive from UDP_GLOBAL_SERVER_PORT
+        // (3810) and DTLS handshake replies from the per-sector port (3501+N);
+        // the same dispatcher (and the same per-peer DTLS transport) handles
+        // all of them.
         struct sockaddr_in src;
         socklen_t          src_len = sizeof(src);
         rtn = ::recvfrom(m_Listen_Socket, buffer, size, 0,
@@ -474,11 +540,18 @@ int UDPClient::UDP_RecvFromServer(char *buffer, int size)
                            b[0], b[1], b[2], b[3], ntohs(src.sin_port));
                 return 0;  // dispatcher treats <=0 as "no packet"
             }
+            src_addr = (long) src.sin_addr.s_addr;
+            src_port = ntohs(src.sin_port);
         }
     }
     else
     {
         rtn = ::recv(m_Listen_Socket, buffer, size, 0);
+        if (rtn > 0)
+        {
+            src_addr = m_IPAddr;
+            src_port = ntohs(m_SockAddr.sin_port);
+        }
     }
     if (rtn < 0)
     {
@@ -544,6 +617,39 @@ void UDPClient::UDP_Send(short port, const char *buffer, int bufferLen)
 {
     if (m_Listen_Socket == INVALID_SOCKET) return;
 
+    // Phase AH: when DTLS is active, every application datagram is encrypted
+    // into the association for its destination server port and only the
+    // resulting DTLS record(s) go on the wire. SendApp also bootstraps the
+    // handshake on first contact (queuing this datagram until it completes); we
+    // proactively kick the handshake earlier (OpenFixedPort / SetClientPort) so
+    // in practice the association is already established here and this datagram
+    // becomes its own record. Never fall through to a cleartext sendto while
+    // DTLS is on -- that would leak gameplay in the clear.
+    if (m_Dtls)
+    {
+        short dest_port = (port == 0)
+                        ? (short) ntohs(m_SockAddr.sin_port) : port;
+        uint64_t peer = net7::DtlsPeerKey((uint32_t) m_IPAddr,
+                                          (uint16_t) dest_port);
+        net7::DtlsStep step = m_Dtls->SendApp(peer,
+                                              (const uint8_t *) buffer,
+                                              (size_t) bufferLen);
+        if (step.fatal)
+        {
+            m_Dtls->ForgetPeer(peer);
+            LogMessage("UDPClient(Linux): DTLS send to port %d failed (%s); "
+                       "datagram dropped\n", (int) dest_port,
+                       m_Dtls->LastError().c_str());
+            return;
+        }
+        if (!step.to_send.empty())
+        {
+            RawSendToServer(step.to_send.data(), (int) step.to_send.size(),
+                            m_IPAddr, (unsigned short) dest_port);
+        }
+        return;
+    }
+
     ssize_t sent;
     if (port == 0)
     {
@@ -580,6 +686,114 @@ void UDPClient::UDP_Send(short port, const char *buffer, int bufferLen)
                    port == 0 ? "send" : "sendto", port, sent, bufferLen,
                    strerror(errno));
     }
+}
+
+// ===========================================================================
+// Phase AH: proxy<->server DTLS plumbing
+// ===========================================================================
+
+// RawSendToServer — put bytes on the wire to (ip, port) WITHOUT going through
+// DTLS. Used only for DTLS handshake records the transport produced; gameplay
+// always rides SendApp. Mirrors UDP_Send's explicit-port sendto branch.
+void UDPClient::RawSendToServer(const unsigned char *buffer, int bufferLen,
+                                long ip, unsigned short port)
+{
+    if (m_Listen_Socket == INVALID_SOCKET || bufferLen <= 0) return;
+
+    struct sockaddr_in dst;
+    memset(&dst, 0, sizeof(dst));
+    dst.sin_family      = AF_INET;
+    dst.sin_addr.s_addr = (in_addr_t) ip;
+    dst.sin_port        = htons(port);
+
+    ssize_t sent = ::sendto(m_Listen_Socket, buffer, bufferLen, 0,
+                            (struct sockaddr *) &dst, sizeof(dst));
+    if (sent != bufferLen)
+    {
+        LogMessage("UDPClient(Linux): DTLS raw sendto port %d failed: %zd/%d (%s)\n",
+                   (int) port, sent, bufferLen, strerror(errno));
+    }
+}
+
+// InitDtls — build this socket's client-role DTLS transport from the resolved
+// proxy policy. nullptr in opted-out plaintext mode; fail-closed exit on a
+// misconfiguration the startup probe in InitProxyDtlsPolicy did not already
+// catch (e.g. allocation failure).
+void UDPClient::InitDtls()
+{
+    if (g_DtlsPlaintext)
+    {
+        m_Dtls = nullptr;
+        return;
+    }
+
+    m_Dtls = new net7::DtlsTransport(net7::DtlsRole::Client);
+    m_Dtls->SetVerifyHostname(g_DtlsVerifyDomain);
+    if (g_DtlsCaFile[0])
+    {
+        if (!m_Dtls->SetVerifyCaFile(g_DtlsCaFile))
+        {
+            LogMessage("FATAL: UDPClient DTLS: cannot load CA '%s': %s\n",
+                       g_DtlsCaFile, m_Dtls->LastError().c_str());
+            exit(EXIT_FAILURE);
+        }
+    }
+    if (!m_Dtls->Ok())
+    {
+        LogMessage("FATAL: UDPClient DTLS: client transport not configured: %s\n",
+                   m_Dtls->LastError().c_str());
+        exit(EXIT_FAILURE);
+    }
+}
+
+// ServerPeerKey — DTLS association key for (m_IPAddr, dest_port_host). A
+// dest_port_host of 0 resolves to this socket's default peer port (the port
+// captured in m_SockAddr by CreateFrom). The IP is host-stored in network byte
+// order (m_IPAddr is an s_addr) and the recv path keys from the same s_addr, so
+// Feed and SendApp agree on the key for a given peer.
+uint64_t UDPClient::ServerPeerKey(short dest_port_host) const
+{
+    short p = (dest_port_host == 0)
+            ? (short) ntohs(m_SockAddr.sin_port) : dest_port_host;
+    return net7::DtlsPeerKey((uint32_t) m_IPAddr, (uint16_t) p);
+}
+
+// DtlsKickHandshake — proactively start the DTLS handshake to a server port so
+// the association is Established before the first application datagram, avoiding
+// pre-handshake record concatenation (SendApp queues all pre-handshake bytes
+// into one record). No-op in plaintext mode or once the association is up.
+void UDPClient::DtlsKickHandshake(short dest_port_host)
+{
+    if (!m_Dtls) return;
+
+    short dp = (dest_port_host == 0)
+             ? (short) ntohs(m_SockAddr.sin_port) : dest_port_host;
+    uint64_t peer = ServerPeerKey(dp);
+    if (m_Dtls->Established(peer)) return;
+
+    net7::DtlsStep step = m_Dtls->ClientHandshake(peer);
+    if (step.fatal)
+    {
+        m_Dtls->ForgetPeer(peer);
+        LogMessage("UDPClient(Linux): DTLS handshake kick to port %d failed: %s\n",
+                   (int) dp, m_Dtls->LastError().c_str());
+        return;
+    }
+    if (!step.to_send.empty())
+    {
+        RawSendToServer(step.to_send.data(), (int) step.to_send.size(),
+                        m_IPAddr, (unsigned short) dp);
+    }
+}
+
+// SetClientPort — record the per-sector UDP port (3501+N) the master-handoff
+// reply named, and (Phase AH) proactively start the DTLS handshake to it so the
+// in-game C->S forward path (ForwardClientOpcode) rides an established
+// association from its first packet.
+void UDPClient::SetClientPort(short port)
+{
+    m_ClientPort = port;
+    DtlsKickHandshake(port);
 }
 
 // ---------------------------------------------------------------------------

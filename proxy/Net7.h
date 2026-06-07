@@ -184,6 +184,12 @@ extern char g_DomainName[MAX_PATH];
 extern char g_UpstreamHost[MAX_PATH];
 extern int g_DASE;
 
+// Phase AH: proxy<->server DTLS policy, resolved at startup (Net7.cpp
+// InitProxyDtlsPolicy) and consumed per-socket by UDPClient::InitDtls.
+extern bool g_DtlsPlaintext;             // true ONLY when explicitly opted out
+extern char g_DtlsVerifyDomain[MAX_PATH]; // server cert hostname to verify
+extern char g_DtlsCaFile[MAX_PATH];       // CA file ("" = system trust store)
+
 extern char g_Galaxy_Name[MAX_PATH];
 extern long g_AddrStore;
 
