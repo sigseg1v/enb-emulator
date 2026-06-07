@@ -202,9 +202,9 @@ namespace LaunchNet7Avalonia
             // launched, restore the exact server they used -- even if it isn't a
             // predefined <host> entry (the box is free-text). This is what
             // play-online relies on: it pre-writes LastEmulatorName=Net7MP +
-            // LastServerName=<cloud host>, and Net7MP ships no predefined host,
-            // so a "must be a known host" match would fall back to blank.
-            // Otherwise (a fresh emulator switch) default to its first real host.
+            // LastServerName=<cloud host>. Otherwise (a fresh emulator switch, or
+            // no saved server at all) default to the emulator's first real host
+            // -- Net7MP ships enb.sigsegv.land, so multiplayer autofills there.
             string def;
             if (string.Equals(emu.Name, _user.LastEmulatorName, StringComparison.OrdinalIgnoreCase)
                 && !string.IsNullOrWhiteSpace(_user.LastServerName))
@@ -216,10 +216,19 @@ namespace LaunchNet7Avalonia
                 def = hostnames.Count > 0 ? hostnames[0] : "";
             }
 
-            // Setting .Text fires OnServerTextChanged (clears the stale status);
-            // we then kick a fresh probe for the new default.
+            // Push the default into the editable box. A bare .Text assignment
+            // made mid-fill is swallowed by AutoCompleteBox before its template
+            // settles -- that left the Server box blank even when play-online had
+            // written LastServerName. Re-post it on the next UI tick so it sticks,
+            // and kick the status probe from inside the post so it sees the final
+            // text. (Setting .Text fires OnServerTextChanged, which clears the
+            // stale status; the probe below re-establishes it.)
             c_ComboBox_Servers.Text = def;
-            UpdateForSelectedHost();
+            Dispatcher.UIThread.Post(() =>
+            {
+                c_ComboBox_Servers.Text = def;
+                UpdateForSelectedHost();
+            });
         }
 
         void FillClientPath()

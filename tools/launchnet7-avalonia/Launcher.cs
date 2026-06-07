@@ -3,7 +3,11 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
+using System.Net.Security;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography.X509Certificates;
+using System.Text;
 using LaunchNet7Avalonia.Config;
 using LaunchNet7Avalonia.Network;
 using LaunchNet7Avalonia.Patching;
@@ -189,6 +193,15 @@ namespace LaunchNet7Avalonia
             // hold even for the single-file self-extracting package build).
             var dir = Path.Combine(AppContext.BaseDirectory, "bin");
             var exe = Path.Combine(dir, "Net7Proxy.exe");
+
+            // Hand the proxy its DTLS config BEFORE spawning it. The proxy<->
+            // server UDP leg is DTLS, fail-closed (Phase AH): the proxy refuses
+            // to start unless it knows the cert hostname to verify, and -- under
+            // WINE, where its OpenSSL has no system CA bundle -- a trust anchor
+            // to verify against. We pass /ADDRESS as the dialled IP but the cert
+            // is verified by NAME, so both must be supplied.
+            ConfigureProxyDtlsEnv(_setting.Hostname, _setting.AuthenticationPort, dir);
+
             var info = WinExe(dir, exe, $"/ADDRESS:{addrs[0]}");
 
             try { Process.Start(info); }
@@ -217,6 +230,98 @@ namespace LaunchNet7Avalonia
             {
                 throw new ApplicationException("Could not launch Net7 Server. Details: " + e.Message, e);
             }
+        }
+
+        // ---- proxy DTLS provisioning ----
+
+        // Set the environment the spawned Net7Proxy reads for its proxy<->server
+        // DTLS policy. Inherited by the child (and by WINE, which forwards host
+        // env to the Win32 process). See proxy/Net7.cpp::InitProxyDtlsPolicy.
+        void ConfigureProxyDtlsEnv(string hostname, int authPort, string proxyDir)
+        {
+            // The proxy connects to the server by IP but VERIFIES the cert by
+            // name -- give it the upstream hostname (NET7_UPSTREAM_HOST ->
+            // g_UpstreamHost -> the DTLS verify domain). Without this the proxy
+            // FATALs at startup with "no server cert hostname is configured".
+            Environment.SetEnvironmentVariable("NET7_UPSTREAM_HOST", hostname);
+
+            // The loopback dev stack speaks cleartext UDP (its compose opts out
+            // of DTLS), so a local proxy pointed at it must match -- and there is
+            // no public cert to fetch. Online play uses real PKI; fetch + pin it.
+            if (IsLoopbackHost(hostname))
+            {
+                Environment.SetEnvironmentVariable(
+                    "NET7_DTLS_ALLOW_PLAINTEXT", "i-accept-unencrypted-udp");
+                Environment.SetEnvironmentVariable("NET7_DTLS_CA", null);
+                return;
+            }
+
+            Environment.SetEnvironmentVariable("NET7_DTLS_ALLOW_PLAINTEXT", null);
+
+            // The proxy's MinGW/WINE OpenSSL has no system CA bundle in the
+            // prefix, so it can't verify a public cert against the trust store.
+            // Fetch the server's cert chain over TLS on Play and pin it as the
+            // proxy's trust anchor. The login :443 endpoint presents the SAME
+            // ${DOMAIN} cert the DTLS game server does (deploy mounts one cert
+            // into both), so harvesting it here is correct.
+            try
+            {
+                string pem = FetchServerCertChainPem(
+                    hostname, authPort, TimeSpan.FromSeconds(10));
+                string caPath = Path.Combine(proxyDir, "server-dtls-ca.pem");
+                File.WriteAllText(caPath, pem);
+                // The proxy runs with WorkingDirectory = proxyDir; pass the bare
+                // file name so the Win32/WINE fopen resolves it via CWD and we
+                // avoid Unix->Windows path translation inside the prefix.
+                Environment.SetEnvironmentVariable("NET7_DTLS_CA", "server-dtls-ca.pem");
+                _warn($"Pinned server DTLS cert from {hostname}:{authPort} -> {caPath}");
+            }
+            catch (Exception e)
+            {
+                // Don't pin a cert we couldn't verify. The proxy will then fall
+                // back to the (empty-under-WINE) system store and DTLS will fail
+                // -- surface why rather than letting it look like a proxy crash.
+                Environment.SetEnvironmentVariable("NET7_DTLS_CA", null);
+                _warn($"WARNING: could not fetch server cert from {hostname}:{authPort} " +
+                      $"({e.Message}). DTLS verification will have no trust anchor.");
+            }
+        }
+
+        static bool IsLoopbackHost(string host)
+        {
+            if (string.IsNullOrWhiteSpace(host)) return false;
+            if (host.Equals("localhost", StringComparison.OrdinalIgnoreCase)) return true;
+            return IPAddress.TryParse(host, out var ip) && IPAddress.IsLoopback(ip);
+        }
+
+        // Open a TLS connection to host:port, validate the presented cert against
+        // the launcher's (real) system trust store, and return the server's cert
+        // chain as concatenated PEM. Throws if the cert doesn't validate -- we
+        // refuse to pin an untrusted cert.
+        static string FetchServerCertChainPem(string host, int port, TimeSpan timeout)
+        {
+            using var tcp = new TcpClient();
+            if (!tcp.ConnectAsync(host, port).Wait(timeout))
+                throw new TimeoutException($"connect to {host}:{port} timed out");
+
+            var pems = new List<string>();
+            using var ssl = new SslStream(tcp.GetStream(), leaveInnerStreamOpen: false,
+                userCertificateValidationCallback: (sender, cert, chain, errors) =>
+                {
+                    if (chain != null)
+                        foreach (var el in chain.ChainElements)
+                            pems.Add(el.Certificate.ExportCertificatePem());
+                    else if (cert is X509Certificate2 c2)
+                        pems.Add(c2.ExportCertificatePem());
+                    // Only accept a cert that validates against the launcher's
+                    // trust store (name + chain). AuthenticateAsClient throws if
+                    // we return false here.
+                    return errors == SslPolicyErrors.None;
+                });
+            ssl.AuthenticateAsClient(host);
+            if (pems.Count == 0)
+                throw new InvalidOperationException("server presented no certificate");
+            return string.Join("\n", pems) + "\n";
         }
 
         // ---- patching ----
