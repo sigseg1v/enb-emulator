@@ -25,21 +25,28 @@ direct re-read before fixing) and **LIVE** (compiles on the Linux build) or
 
 ## CRITICAL -- confirmed, open
 
-- [ ] **AJ-1. Game server never validates the ticket suffix.** CONFIRMED / LIVE.
+- [x] **AJ-1. Game server never validates the ticket suffix.** CONFIRMED / LIVE.
+  FIXED 2026-06-07 (AH-9 keystone, commit 2c5d9876, task #89).
   `server/src/UDP_Global.cpp` `ProcessTicketInfo` (114-176): splits the ticket on
   `-` via `strtok_s`, takes the username, checks account exists / not banned /
-  not in use, then `SendAvatarList`. The random suffix is compared against
+  not in use, then `SendAvatarList`. The random suffix was compared against
   **nothing**. The Win32 ticket store check (`GetUsernameFromTicket`,
-  `AccountManager.cpp` ~874-905) is commented out. Consequence: any host that can
-  reach the global UDP port can present `victim_username-anything` and be served
+  `AccountManager.cpp` ~874-905) was commented out. Consequence: any host that can
+  reach the global UDP port could present `victim_username-anything` and be served
   that account (subject only to the account-in-use check) -- no password, no
-  sniffing, no shared NAT. This is the headline hole. Fix = bind the issued/
-  presented token to the account and verify it (see AH-9 stateless-signed-token
-  option to avoid a cross-process store). This is a **tightening** (restores the
-  dropped Win32 validation) -- always-welcome under the server-integrity rules.
+  sniffing, no shared NAT. This was the headline hole. **Fixed** by restoring the
+  dropped RegisterSectorServer handoff through the shared `net7_user.login_ticket`
+  table: both issuers UPSERT on mint, `ProcessTicketInfo` ->
+  `AccountManager::ValidateTicketSuffix` (parameterized SELECT + constant-time
+  `sodium_memcmp` + expiry) rejects with G_ERROR_TICKET_INVALID on miss/expiry/
+  mismatch. Tests: GlobalConnectTests accept + forged-suffix reject. Real-client
+  check: plans/29 CV-14. A **tightening** (restores the dropped Win32 validation).
 
-- [~] **AJ-2. `HandleSkillAction` out-of-bounds array index.** CONFIRMED / LIVE.
-  CODE FIX LANDED (CLI OOB-rejection test pending). `server/src/PlayerSkills.cpp`:
+- [x] **AJ-2. `HandleSkillAction` out-of-bounds array index.** CONFIRMED / LIVE.
+  FIXED + TESTED 2026-06-07 (task #94: CLI OOB-rejection test
+  `SectorSkillUpTests.SkillUp_OutOfBoundsSkillId_IsDropped_ConnectionSurvives`
+  sends SkillID=20000 and proves the sector thread survives -- pre-fix it
+  faulted and health-restarted). `server/src/PlayerSkills.cpp`:
   `SkillAction.SkillID` (a wire-controlled `short`,
   `common/include/net7/PacketStructures.h:1001`) indexed
   `RPGInfo.Skills.Skill[Action->SkillID]` with NO bounds check before first use,
@@ -52,10 +59,8 @@ direct re-read before fixing) and **LIVE** (compiles on the Linux build) or
   overwrite. **Fixed:** reject `SkillID < 0 || SkillID >= 64` with a LogDebug +
   return at the top of `HandleSkillAction`. Pure tightening (the real client only
   sends 0..63; retail never had to serve an OOB index). Primary source: the fixed
-  `AuxSkill Skill[64]` declaration + the `i<64` Init loop. STILL TODO: add a CLI
-  integration test that sends an out-of-range SkillID on 0x57 and asserts no
-  crash / no skill-state change (0x57 is already CLI-parsed, task #72), then flip
-  to `[x]`.
+  `AuxSkill Skill[64]` declaration + the `i<64` Init loop. CLI OOB-rejection test
+  landed (`SectorSkillUpTests.SkillUp_OutOfBoundsSkillId_IsDropped_ConnectionSurvives`).
 
 ## HIGH / CRITICAL -- reported, need direct re-read before fixing
 
@@ -93,9 +98,12 @@ direct re-read before fixing) and **LIVE** (compiles on the Linux build) or
 
 ## MEDIUM / LOW -- reported
 
-- [ ] **AJ-6. No ticket-expiry enforcement on the game server.** REPORTED / LIVE.
-  `ProcessTicketInfo` never checks expiry; the Win32 expiry check is commented
-  out. Fold into AJ-1 (validate token + expiry together).
+- [x] **AJ-6. No ticket-expiry enforcement on the game server.** FIXED 2026-06-07
+  (folded into AJ-1 / AH-9, commit 2c5d9876). `ProcessTicketInfo` never checked
+  expiry; the Win32 expiry check was commented out. `ValidateTicketSuffix` now
+  rejects when `expires_at < now` (wall-clock ms, matching the issuer's
+  `time(NULL)*1000 + TICKET_EXPIRE_TIME`), so an expired ticket is refused on the
+  global-port login path alongside the suffix check.
 - [ ] **AJ-7. Account-in-use check is a racy list scan.** REPORTED / LIVE.
   `PlayerManager::CheckAccountInUse` -- check-then-act gap between the scan and
   `SetupPlayer` insertion; also force-logs-out the existing session, which is a

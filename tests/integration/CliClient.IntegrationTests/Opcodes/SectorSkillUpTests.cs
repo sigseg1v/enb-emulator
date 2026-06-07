@@ -297,4 +297,106 @@ public sealed class SectorSkillUpTests : SectorIntegrationTest
             $"REQUEST_TIME without seeing 0x0034 CLIENT_SET_TIME -- the SkillUpCodec " +
             $"wire shape was not accepted/dispatched by the server.");
     }
+
+    /// <summary>
+    /// AJ-2 negative test: a 0x0057 SKILL_UP whose SkillID is OUT OF BOUNDS
+    /// (>= 64) must be DROPPED by the server with no crash and no state
+    /// change -- the connection survives and a follow-up 0x0044 REQUEST_TIME
+    /// still round-trips.
+    ///
+    /// <para>
+    /// <c>Player::HandleSkillAction</c> (<c>server/src/PlayerSkills.cpp:97</c>)
+    /// indexes <c>RPGInfo.Skills.Skill[Action-&gt;SkillID]</c> where
+    /// <c>Skill</c> is the wrapper <c>AuxSkill Skill[64]</c>
+    /// (<c>server/src/AuxClasses/AuxSkills.h:86</c>; only 0..63 are
+    /// <c>Init</c>'d). Before AJ-2 there was NO bounds check: a wire SkillID
+    /// of e.g. 20000 dereferenced ~20000 entries past the array end into
+    /// Player-object memory, read a garbage <c>Data</c> pointer, and faulted
+    /// the sector thread on <c>GetAvailability()</c> -- an OOB read followed,
+    /// on the train path, by an OOB <c>SetLevel</c> WRITE (memory corruption,
+    /// potential RCE / cross-object overwrite). The docker compose health
+    /// check would then restart the crashed server. (See
+    /// plans/99-decisions-log.md 2026-05-25 for the SkillID=169 crash that
+    /// first surfaced this array.)
+    /// </para>
+    ///
+    /// <para>
+    /// AJ-2 fix: reject <c>SkillID &lt; 0 || SkillID &gt;= 64</c> with a
+    /// LogDebug + early return at the top of <c>HandleSkillAction</c>
+    /// (PlayerSkills.cpp:108). Pure tightening -- the retail Win32 client
+    /// only ever sends a valid 0..63 skill id, so an OOB index is malformed
+    /// input the real server never had to serve. This test sends SkillID=20000
+    /// (>= 64, still a positive 16-bit value so the server's <c>short</c> read
+    /// yields 20000) and proves the drop: the sector thread lives and the
+    /// REQUEST_TIME probe still answers. If the bounds check were removed the
+    /// sector thread would fault on the OOB dereference and this probe would
+    /// hang until the test's CTS fired.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity POSITIVE: rejects an input the real client never
+    /// produces; no widened acceptance, no fabricated reply (the retail
+    /// server emits nothing on a dropped skill action either). Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SkillUp_OutOfBoundsSkillId_IsDropped_ConnectionSurvives()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        var session = Track(await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Skillz", shipName: "SkillzShip", cts.Token));
+
+        // SkillAction 10B wire layout; SkillID = 20000 (>= 64 -> OOB index
+        // into AuxSkill Skill[64]). Positive 16-bit so the server's `short`
+        // read is exactly 20000 and trips the AJ-2 `SkillID >= 64` reject.
+        byte[] payload = new byte[10];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), session.GameId);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), 0);
+        BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(8, 2), 20000);
+
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.SkillUp.Value, payload), cts.Token);
+
+        // Survival probe: if the server faulted on the OOB index the sector
+        // thread is dead and this never answers (CTS fires the test).
+        int clientTick = unchecked((int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF));
+        byte[] reqTimePayload = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(reqTimePayload, clientTick);
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.RequestTime.Value, reqTimePayload), cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
+        {
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
+            if (reply!.Header.Opcode != OpcodeId.Known.ClientSetTime.Value)
+                continue;
+
+            var span = reply.Payload.Span;
+            Assert.Equal(12, span.Length);
+            Assert.Equal(clientTick, BinaryPrimitives.ReadInt32LittleEndian(span[..4]));
+            return;
+        }
+
+        throw new Xunit.Sdk.XunitException(
+            "drained 400 frames after a 0x0057 SKILL_UP with an OUT-OF-BOUNDS " +
+            "SkillID (20000) + 0x0044 REQUEST_TIME without seeing 0x0034 " +
+            "CLIENT_SET_TIME. The AJ-2 bounds check at " +
+            "server/src/PlayerSkills.cpp HandleSkillAction has likely been " +
+            "removed -- the server faulted on the OOB AuxSkill index. Restore " +
+            "the `SkillID < 0 || SkillID >= 64` reject before reverting this test.");
+    }
 }
