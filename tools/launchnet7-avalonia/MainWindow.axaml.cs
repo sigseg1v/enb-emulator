@@ -191,14 +191,30 @@ namespace LaunchNet7Avalonia
                 return;
             }
 
-            var hostnames = emu.Hosts.Select(h => h.Hostname).ToList();
+            // Drop blank placeholder hosts (some emulators ship a single empty
+            // <host/> as a "type your own" stub) so the dropdown never offers an
+            // empty row.
+            var hostnames = emu.Hosts.Select(h => h.Hostname)
+                .Where(h => !string.IsNullOrWhiteSpace(h)).ToList();
             c_ComboBox_Servers.ItemsSource = hostnames;
 
-            // Default the editable box: prefer the user's last server if it's one
-            // of this emulator's known hosts, else the first configured host.
-            string def = emu.Hosts.FirstOrDefault(h =>
-                string.Equals(h.Hostname, _user.LastServerName, StringComparison.OrdinalIgnoreCase))?.Hostname
-                ?? (emu.Hosts.Count > 0 ? emu.Hosts[0].Hostname : "");
+            // Default the editable box. When this is the emulator the user last
+            // launched, restore the exact server they used -- even if it isn't a
+            // predefined <host> entry (the box is free-text). This is what
+            // play-online relies on: it pre-writes LastEmulatorName=Net7MP +
+            // LastServerName=<cloud host>, and Net7MP ships no predefined host,
+            // so a "must be a known host" match would fall back to blank.
+            // Otherwise (a fresh emulator switch) default to its first real host.
+            string def;
+            if (string.Equals(emu.Name, _user.LastEmulatorName, StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(_user.LastServerName))
+            {
+                def = _user.LastServerName;
+            }
+            else
+            {
+                def = hostnames.Count > 0 ? hostnames[0] : "";
+            }
 
             // Setting .Text fires OnServerTextChanged (clears the stale status);
             // we then kick a fresh probe for the new default.

@@ -64,31 +64,50 @@ namespace LaunchNet7Avalonia
             StartLocalAuthRelay();
             try
             {
+                var launch = (_setting.LaunchName ?? "").ToUpperInvariant();
+
+                // Where the CLIENT dials for the game servers (master/global/
+                // sector/chat/...). When we spawn a local Net7Proxy (SP and MP
+                // online play), that is ALWAYS loopback: the proxy listens on
+                // 127.0.0.1 for the client's TCP and bridges it to the real
+                // server over UDP. Pointing the client straight at the public
+                // host fails -- only the server's UDP game ports are reachable
+                // there, not the client-facing TCP listeners (3801/3805/3500),
+                // which exist solely on the local proxy. When no local proxy is
+                // spawned (the Net7Local docker dev stack) the client dials
+                // Hostname directly, which is the docker-published proxy.
+                //
+                // The proxy's UPSTREAM and the auth relay/registration host stay
+                // _setting.Hostname (the real server) -- see LaunchNet7Proxy /
+                // StartLocalAuthRelay / EffectiveRegistrationHostname.
+                bool spawnsLocalProxy = launch == "NET7SP" || launch == "NET7MP";
+                string gameHost = spawnsLocalProxy ? "127.0.0.1" : _setting.Hostname;
+
                 PatchAuthLoginFile();
                 PatchRegDataFileNames();
                 PatchRegDataFile();
                 PatchAuthIniFile();
-                PatchNetworkIniFile();
+                PatchNetworkIniFile(gameHost);
                 PatchRegistry();
 
-                switch ((_setting.LaunchName ?? "").ToUpperInvariant())
+                switch (launch)
                 {
                     case "NET7SP":
                         LaunchNet7Server();
                         System.Threading.Thread.Sleep(25000);
                         LaunchNet7Proxy();
                         System.Threading.Thread.Sleep(2000);
-                        LaunchClient();
+                        LaunchClient(gameHost);
                         break;
 
                     case "NET7MP":
                         LaunchNet7Proxy();
                         System.Threading.Thread.Sleep(2000);
-                        LaunchClient();
+                        LaunchClient(gameHost);
                         break;
 
                     default:
-                        LaunchClient();
+                        LaunchClient(gameHost);
                         break;
                 }
             }
@@ -138,11 +157,11 @@ namespace LaunchNet7Avalonia
             }
         }
 
-        void LaunchClient()
+        void LaunchClient(string gameHost)
         {
-            var addrs = Dns.GetHostAddresses(_setting.Hostname);
+            var addrs = Dns.GetHostAddresses(gameHost);
             if (addrs.Length == 0)
-                throw new InvalidOperationException($"Could not resolve hostname '{_setting.Hostname}'.");
+                throw new InvalidOperationException($"Could not resolve hostname '{gameHost}'.");
 
             var dir = Path.GetDirectoryName(_setting.ClientPath);
             var info = WinExe(dir, _setting.ClientPath,
@@ -202,14 +221,13 @@ namespace LaunchNet7Avalonia
 
         // ---- patching ----
 
-        void PatchNetworkIniFile()
+        void PatchNetworkIniFile(string host)
         {
             var file       = Path.Combine(_setting.CommonDirectoryName, "network.ini");
             var backup     = Path.Combine(_setting.CommonDirectoryName, "network.ini.orig");
 
             if (!File.Exists(file) && File.Exists(backup)) File.Copy(backup, file);
 
-            var host = _setting.Hostname;
             string[] sections =
             {
                 "MasterServer","RegisterServer","ReporterServer",
