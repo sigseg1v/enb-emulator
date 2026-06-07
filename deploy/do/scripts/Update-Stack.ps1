@@ -33,6 +33,17 @@ try {
     Copy-Item (Join-Path $script:ComposeDir 'docker-compose.prod.yml') (Join-Path $stage 'docker-compose.prod.yml')
 
     # Net7Config.cfg with __DOMAIN__ / __INTERNAL_IP__ filled in.
+    #   __DOMAIN__       <- DOMAIN_NAME (the server resolves it via the
+    #                       extra_hosts 127.0.0.1 mapping in the compose file)
+    #   __INTERNAL_IP__  <- the reserved IP (advertised to clients on handoff;
+    #                       see README "Remote addressing" -- UNVERIFIED vs the
+    #                       real Win32 client).
+    # WARNING: Net7Config.cfg must contain NO comment lines. The server's
+    # config parser (server/src/Net7.cpp ProcessConfig, strtok on '='/'\n') has
+    # no comment support: a '#' line before/between keys gets glued onto the
+    # adjacent key and that key silently fails to parse. A comment above
+    # 'domain=' is exactly what left g_DomainName empty and crash-looped the
+    # server. Keep this file pure key=value.
     $cfg = Get-Content (Join-Path $script:ComposeDir 'Net7Config.cfg') -Raw
     $cfg = $cfg.Replace('__DOMAIN__', $domain).Replace('__INTERNAL_IP__', $ip)
     Set-Content -Path (Join-Path $stage 'Net7Config.cfg') -Value $cfg -NoNewline

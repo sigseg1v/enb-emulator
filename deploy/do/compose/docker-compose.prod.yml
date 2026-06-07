@@ -159,8 +159,13 @@ services:
       DB_PASS: "net7"
       DB_NAME: "net7_user"
     volumes:
-      - ./certs/${DOMAIN}.cer:/app/${DOMAIN}.cer:ro
-      - ./certs/${DOMAIN}.pem:/app/${DOMAIN}.pem:ro
+      # net7ssl hard-codes g_DomainName="localhost" (login-server/Net7SSL/
+      # Net7SSL.cpp:39) and never reads Net7Config.cfg, so SSL_Listener always
+      # looks for "localhost.cer"/"localhost.pem" regardless of DOMAIN. Present
+      # the real (CN=${DOMAIN}) cert under that fixed name -- the filename is
+      # arbitrary; the client validates the cert's CN against the host it dialed.
+      - ./certs/${DOMAIN}.cer:/app/localhost.cer:ro
+      - ./certs/${DOMAIN}.pem:/app/localhost.pem:ro
       - net7-ipc:/run/net7-ipc
     entrypoint:
       - /bin/sh
