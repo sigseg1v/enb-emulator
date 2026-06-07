@@ -81,6 +81,61 @@ write_files:
       [Install]
       WantedBy=timers.target
 %{ endif ~}
+  - path: /opt/enb/reserved-ip-snat.sh
+    permissions: "0700"
+    content: |
+      #!/usr/bin/env bash
+      # DigitalOcean reserved (floating) IP egress fix.
+      #
+      # The reserved IP is delivered to the droplet via a private anchor IP on
+      # eth0; the droplet ALSO has its own primary public IP, which is the
+      # default route source. Inbound game UDP arrives on the reserved IP and is
+      # DNAT'd into the server container, so conntrack-tracked REPLIES egress
+      # correctly as the reserved IP. But packets the server INITIATES to a
+      # client (the in-sector login-stage / MVAS position feed) have no inbound
+      # conntrack entry, so docker's MASQUERADE sources them from the PRIMARY
+      # public IP instead. The client is talking to the reserved IP, sees a
+      # reply from a different address, and drops it -- the player then times out
+      # at "login stage 3" and can never enter a sector.
+      #
+      # Fix: SNAT the compose bridge's public egress to the reserved-IP anchor,
+      # inserted ahead of docker's MASQUERADE rule, so EVERY server->client
+      # packet (initiated or reply) leaves as the reserved IP. Idempotent;
+      # re-applied by a timer because docker rewrites POSTROUTING on restart and
+      # the reserved IP may be assigned after first boot.
+      set -euo pipefail
+      ANCHOR="$(curl -s --max-time 4 http://169.254.169.254/metadata/v1/interfaces/public/0/anchor_ipv4/address || true)"
+      if [ -z "$ANCHOR" ]; then echo "no anchor IP (reserved IP not assigned yet); skipping"; exit 0; fi
+      # Discover the compose bridge subnet dynamically (br-* for the enb network);
+      # fall back to docker's default-ish 172.18.0.0/16 if it cannot be found.
+      SUBNET="$(docker network inspect $(docker network ls --filter name=enb -q) 2>/dev/null \
+        | grep -oE '"Subnet": *"[0-9./]+"' | grep -oE '[0-9.]+/[0-9]+' | head -1)"
+      SUBNET="$${SUBNET:-172.18.0.0/16}"
+      if ! iptables -t nat -C POSTROUTING -s "$SUBNET" -o eth0 -j SNAT --to-source "$ANCHOR" 2>/dev/null; then
+        iptables -t nat -I POSTROUTING 1 -s "$SUBNET" -o eth0 -j SNAT --to-source "$ANCHOR"
+        echo "applied reserved-IP SNAT: $SUBNET -o eth0 -> $ANCHOR"
+      else
+        echo "reserved-IP SNAT already present: $SUBNET -> $ANCHOR"
+      fi
+  - path: /etc/systemd/system/enb-reserved-ip-snat.service
+    content: |
+      [Unit]
+      Description=Source server->client UDP from the DO reserved IP (floating-IP egress fix)
+      Wants=network-online.target docker.service
+      After=network-online.target docker.service
+      [Service]
+      Type=oneshot
+      ExecStart=/opt/enb/reserved-ip-snat.sh
+  - path: /etc/systemd/system/enb-reserved-ip-snat.timer
+    content: |
+      [Unit]
+      Description=Re-assert the reserved-IP SNAT rule (heals docker POSTROUTING rewrites)
+      [Timer]
+      OnBootSec=30
+      OnUnitActiveSec=2min
+      Persistent=true
+      [Install]
+      WantedBy=timers.target
   - path: /opt/enb/db-backup.sh
     permissions: "0700"
     content: |
@@ -151,6 +206,7 @@ runcmd:
   - systemctl enable --now docker
   - systemctl daemon-reload
   - systemctl enable --now enb-db-backup.timer
+  - systemctl enable --now enb-reserved-ip-snat.timer
 %{ if manage_cert ~}
   - systemctl enable --now enb-cert-renew.timer
 %{ endif ~}
