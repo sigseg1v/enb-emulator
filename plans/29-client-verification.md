@@ -688,3 +688,55 @@ format & byte order", Trap 2).
 - **Setup**: REQUIRES redeploy of the login binary (the code fix) AND the
   remote `<domain>.cer` being the fullchain. If after redeploy s_client still
   shows 1 cert, the deployed `.cer` is leaf-only -- regenerate it as fullchain.
+
+### [x] CV-20 -- Online sector entry no longer kicks back to login (proxy advertises loopback in ServerRedirect)
+
+> **VERIFIED 2026-06-07** against `enb.sigsegv.land` with the real Win32 client.
+> Proxy console showed the previously-absent `accept on port 3500 from 127.0.0.1`
+> -> `<client> SectorServer LOGIN -- connection active` -> `START_ACK -> server`
+> (player griever, sector 10151). Sector entry succeeds; no +15s kick.
+
+- **Change**: the launcher (`tools/launchnet7-avalonia/Launcher.cs::LaunchNet7Proxy`)
+  now spawns Net7Proxy with `/ADDRESS:127.0.0.1` for ALL upstreams, instead of
+  `/ADDRESS:{resolved-upstream-IP}`. `/ADDRESS` sets the proxy's local
+  listen/advertise identity (`g_internal_addr` -> `ServerManager::m_IpAddress`),
+  which is the only thing `Connection::SendServerRedirect` (sector handoff,
+  opcode 0x0036) stamps as the IP the client must reconnect to for the sector.
+  The dialled upstream is conveyed separately via `NET7_UPSTREAM_HOST` ->
+  `NET7_GAME_SERVER_HOST` (the proxy's own UDP resolver), so /ADDRESS never
+  needed the server IP.
+- **Primary source (root cause)**: live `just play-online` proxy log (two runs,
+  15:36 and 15:58) -- after `MasterJoin ToSectorID=10151` ->
+  `MasterLoginConfirm udp_port=3501` -> `Master Login received - UDP sector
+  port: 3501` -> `DTLS association ESTABLISHED to <droplet>:3501`, the client
+  goes SILENT for exactly ~15s, then `TCP 3801 closed` and the client falls back
+  to `accept on port 3805` (login). There is NO `SectorServer LOGIN -- connection
+  active` and NO `accept on port 3500` -- i.e. the client never reconnected to
+  the local proxy's sector TCP port. Cross-checked against a droplet
+  `udp portrange 3501-3820` tcpdump: the sector leg's DTLS handshake completes
+  but ZERO app-data ever flows, because the proxy only forwards sector app-data
+  after the client sends `0x0002 LOGIN` over the local 3500 TCP, which it never
+  did. Code trace: `SendServerRedirect` (ClientToMasterServer.cpp:191) emits
+  `ntohl(m_ServerMgr.m_IpAddress)`; `m_IpAddress = inet_addr(g_internal_addr)`
+  (Net7.cpp:271,287-292) and the launcher fed `g_internal_addr` the resolved
+  droplet IP -- so the client was told to open its sector TCP to
+  `<droplet>:3500` (the remote server, which has no proxy TCP listener there)
+  instead of `127.0.0.1:3500` (the co-located proxy). It thus never connected,
+  timed out at the client's ~15s sector-handshake deadline, and got kicked.
+- **Why play-local was unaffected**: there `_setting.Hostname` already resolves
+  to `127.0.0.1`, so the launcher happened to pass `/ADDRESS:127.0.0.1` -- the
+  correct value -- and the loopback `ntohl(inet_addr("127.0.0.1"))` redirect on
+  this exact path is therefore already proven good by every working local run.
+- **Why the CLI/integration suite cannot validate it**: the CLI connects to the
+  server directly and never goes through the proxy's client-facing sector
+  ServerRedirect (0x0036) at all -- only the real Win32 client reconnects on the
+  address this packet advertises.
+- **What to look for (real client)**: `just play-online` against `enb.sigsegv.land`,
+  log in to character select, enter a character into its sector. The load screen
+  must complete into the sector (station or space) instead of sitting ~15s and
+  bouncing to login. In the proxy console, confirm `<client> SectorServer LOGIN
+  -- connection active` appears (it was absent in the failing runs), followed by
+  the in-sector traffic. Then confirm a gate jump still works (CV-12 territory).
+- **Setup**: rebuild the launcher (`just play-online` build-if-stale picks it up);
+  no proxy/server binary change is required -- only the argument the launcher
+  passes changed.

@@ -181,10 +181,6 @@ namespace LaunchNet7Avalonia
 
         void LaunchNet7Proxy()
         {
-            var addrs = Dns.GetHostAddresses(_setting.Hostname);
-            if (addrs.Length == 0)
-                throw new InvalidOperationException($"Could not resolve hostname '{_setting.Hostname}'.");
-
             // Resolve relative to the launcher exe's own location, NOT the
             // process CWD. Double-clicking in Explorer happens to set CWD to
             // the exe folder, but launching from a shell elsewhere or via a
@@ -198,11 +194,23 @@ namespace LaunchNet7Avalonia
             // server UDP leg is DTLS, fail-closed (Phase AH): the proxy refuses
             // to start unless it knows the cert hostname to verify, and -- under
             // WINE, where its OpenSSL has no system CA bundle -- a trust anchor
-            // to verify against. We pass /ADDRESS as the dialled IP but the cert
-            // is verified by NAME, so both must be supplied.
+            // to verify against.
+            //
+            // The UPSTREAM (dialled) host is conveyed entirely via
+            // NET7_UPSTREAM_HOST (-> NET7_GAME_SERVER_HOST), which the proxy
+            // resolves itself; /ADDRESS is a SEPARATE thing -- the proxy's local
+            // listen/advertise identity, i.e. the address it stamps into the
+            // sector ServerRedirect (opcode 0x0036) telling the client where to
+            // reconnect for the sector. The proxy ALWAYS runs co-located with the
+            // client (here, under WINE on the player's own machine), so that
+            // address must be loopback, NEVER the dialled server IP. Feeding the
+            // dialled IP here pointed the client's sector TCP at the remote server
+            // instead of the local proxy, so it never connected, timed out at
+            // ~15s, and got kicked back to login. (play-local happened to work
+            // because its hostname already resolves to 127.0.0.1.)
             ConfigureProxyDtlsEnv(_setting.Hostname, _setting.AuthenticationPort, dir);
 
-            var info = WinExe(dir, exe, $"/ADDRESS:{addrs[0]}");
+            var info = WinExe(dir, exe, "/ADDRESS:127.0.0.1");
 
             try { Process.Start(info); }
             catch (Exception e)
