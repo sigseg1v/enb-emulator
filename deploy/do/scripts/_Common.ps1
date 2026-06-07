@@ -169,15 +169,37 @@ function Start-DocrGarbageCollection {
 }
 
 function Get-SshArgs {
-    return @('-i', (Resolve-Path $env:SSH_PRIVATE_KEY_PATH).Path, '-o', 'StrictHostKeyChecking=accept-new')
+    # The droplet is cattle: terraform REPLACES it (new host key) whenever the
+    # image/size/etc. changes, but it keeps the SAME reserved IP. Pinning the
+    # host key in the operator's ~/.ssh/known_hosts therefore breaks every
+    # rebuild with REMOTE HOST IDENTIFICATION HAS CHANGED, and "fixing" it by
+    # blindly running ssh-keygen -R is just manual trust-on-first-use anyway. So
+    # we keep host keys OUT of the global file (UserKnownHostsFile=/dev/null) and
+    # accept-new each connect. Trade-off: this drops MITM protection on the admin
+    # SSH channel; acceptable here because the box is ours and rebuilt often. If
+    # you want real verification, pin a terraform-generated host key instead (see
+    # README "SSH host keys").
+    return @(
+        '-i', (Resolve-Path $env:SSH_PRIVATE_KEY_PATH).Path,
+        '-o', 'UserKnownHostsFile=/dev/null',
+        '-o', 'StrictHostKeyChecking=accept-new',
+        '-o', 'LogLevel=ERROR'
+    )
 }
 
+# NOTE: ssh/scp are invoked DIRECTLY here, not via Invoke-Native. Invoke-Native's
+# `[string[]]$Args` collects @(Get-SshArgs) as one nested array and string-joins
+# it ("-i key -o StrictHostKeyChecking=..." as a single argv token), which made
+# scp read the whole thing as the identity-file path. An external `&` call
+# expands the array into separate argv elements correctly.
 function Invoke-RemoteShell([string]$ReservedIp, [string]$Command) {
-    Invoke-Native ssh @(Get-SshArgs) "root@$ReservedIp" $Command
+    & ssh @(Get-SshArgs) "root@$ReservedIp" $Command
+    if ($LASTEXITCODE -ne 0) { throw "ssh to $ReservedIp exited with code $LASTEXITCODE" }
 }
 
 function Copy-ToRemote([string]$ReservedIp, [string]$LocalPath, [string]$RemotePath) {
-    Invoke-Native scp @(Get-SshArgs) $LocalPath "root@${ReservedIp}:${RemotePath}"
+    & scp @(Get-SshArgs) $LocalPath "root@${ReservedIp}:${RemotePath}"
+    if ($LASTEXITCODE -ne 0) { throw "scp to $ReservedIp exited with code $LASTEXITCODE" }
 }
 
 function Invoke-RemotePsql {

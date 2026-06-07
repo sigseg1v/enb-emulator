@@ -11,10 +11,11 @@ default:
 bootstrap:
     ./scripts/Bootstrap-State.ps1
 
-# Bring up / converge infra: droplet, reserved IP, firewall, registry,
-# Route53 record, Let's Encrypt cert. Idempotent; also renews the cert.
-up:
-    ./scripts/Deploy-Infra.ps1
+# Converge infra: droplet, reserved IP, firewall, registry, Route53 record,
+# Let's Encrypt cert. Idempotent; also renews the cert. SAFE BY DEFAULT --
+# `just up` only PRINTS the plan; `just up -y` actually applies it.
+up *flags:
+    ./scripts/Deploy-Infra.ps1 {{flags}}
 
 # Build + push the 2 server-side images (server + login) to the DO registry.
 # The proxy is client-side and never deployed here. Optional tag.

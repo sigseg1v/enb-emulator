@@ -3,10 +3,25 @@
 # firewall, container registry, the Route53 A record, and the Let's Encrypt
 # cert. Idempotent -- safe to re-run; re-running also RENEWS the cert when it
 # is within ~30 days of expiry.
+#
+# SAFE BY DEFAULT: with no flag this only prints the terraform plan and applies
+# NOTHING -- so you always see what would change (e.g. a droplet REPLACEMENT,
+# which wipes the droplet-local DB) before it happens. Pass -y / -Apply to
+# actually converge the infrastructure.
+param([Alias('y')][switch]$Apply)
 . "$PSScriptRoot/_Common.ps1"
 Import-DeployEnv
 
 Initialize-TerraformBackend
+
+if (-not $Apply) {
+    Invoke-Terraform plan -input=false
+    Write-Host ""
+    Write-Host "DRY RUN -- nothing was applied. Review the plan above."
+    Write-Host "To apply it, run:  just up -y"
+    return
+}
+
 Invoke-Terraform apply -input=false -auto-approve
 
 Write-Host ""

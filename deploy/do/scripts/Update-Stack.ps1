@@ -42,8 +42,8 @@ try {
     # timer (cloud-init). Re-shipping the local copy would clobber a freshly
     # droplet-renewed cert with a stale one -- so only ship when the droplet
     # has no cert yet (first deploy).
-    $sshArgs   = Get-SshArgs
-    $certState = (& ssh @sshArgs "root@$ip" "test -f /opt/enb/certs/$domain.cer && echo EXISTS || echo MISSING")
+    $certState = (& ssh @(Get-SshArgs) "root@$ip" "test -f /opt/enb/certs/$domain.cer && echo EXISTS || echo MISSING")
+    if ($LASTEXITCODE -ne 0) { throw "cert probe ssh to $ip exited with code $LASTEXITCODE" }
     $certState = ("$certState").Trim()
     if ($certState -eq 'EXISTS') {
         Write-Host "Certs          : droplet already has $domain.cer -- leaving the droplet-renewed cert in place."

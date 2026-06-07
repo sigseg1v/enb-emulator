@@ -63,10 +63,15 @@ S3 bucket name, and your SSH key paths.
 
 ```powershell
 just bootstrap   # one-time: create the encrypted S3 state bucket
-just up          # infra: droplet, IP, firewall, registry, DNS record, TLS cert
+just up          # PLAN ONLY: prints what infra would change, applies nothing
+just up -y       # actually converge: droplet, IP, firewall, registry, DNS, TLS
 just push        # build + push enb:{server,login}-vN to the registry (+ -latest)
 just update      # ship config/certs/seed data, pull images, start the stack
 ```
+
+`just up` is a dry run by default -- it prints the terraform plan and applies
+nothing, so you always see a droplet REPLACEMENT (which wipes the droplet-local
+DB) before it happens. Add `-y` to apply.
 
 (No `just`? Call the scripts directly: `./scripts/Bootstrap-State.ps1`,
 `./scripts/Deploy-Infra.ps1`, etc.)
@@ -80,8 +85,9 @@ stable across droplet rebuilds, so you set DNS once.
 
 | Command | What it does |
 |---|---|
-| `just up` | Converge infra. Idempotent. Issues the bootstrap cert; the droplet auto-renews thereafter (see below). |
-| `just push [vN]` | Build + push the 3 services into repo `enb` as `*-vN` (default: auto-increment), re-point `*-latest`, prune to the newest 3 versions/service, GC. |
+| `just up` | DRY RUN -- print the terraform plan, apply nothing. |
+| `just up -y` | Converge infra. Idempotent. Issues the bootstrap cert; the droplet auto-renews thereafter (see below). |
+| `just push [vN]` | Build + push the 2 server-side services (server + login) into repo `enb` as `*-vN` (default: auto-increment), re-point `*-latest`, prune to the newest 3 versions/service, GC. |
 | `just update [tag]` | Pull images + recreate changed containers on the droplet. |
 | `just start` | Start an already-deployed stack (no pull). |
 | `just stop` | Stop containers; droplet, DB volume, and infra stay. |
@@ -90,6 +96,24 @@ stable across droplet rebuilds, so you set DNS once.
 Ship a new build: `just push` then `just update`. **Cert renewal is
 automatic** -- the droplet renews itself (see below); you do not need to run
 anything on a schedule.
+
+### SSH host keys
+
+Terraform treats the droplet as cattle: changing the image/size (or any
+droplet-forcing field) REPLACES it with a fresh box that has a new SSH host
+key, while the reserved IP stays the same. Pinning that key in your global
+`~/.ssh/known_hosts` would then break every rebuild with "REMOTE HOST
+IDENTIFICATION HAS CHANGED". So the deploy scripts deliberately pass
+`-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=accept-new` -- host
+keys are never written to your known_hosts and never conflict on a rebuild.
+
+Trade-off: this drops MITM protection on the admin SSH channel (which carries
+root + the DB password), trusting the network path to the reserved IP. That is
+acceptable for an own-the-box, frequently-rebuilt droplet. If you want real
+verification, generate the droplet's SSH host key in terraform (a `tls_private_key`
+written to `/etc/ssh/ssh_host_ed25519_key` via cloud-init) and pin its public
+half in a deploy-local known_hosts file -- then the key is stable across rebuilds
+and verifiable. Not wired up yet; ask if you want it.
 
 ## Admin (over SSH)
 
