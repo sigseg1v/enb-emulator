@@ -15,8 +15,15 @@ in Phase X. The column now stores Argon2id PHC strings (libsodium's
 `crypto_pwhash_str` output, ~96 chars) instead of `UPPER(MD5(plaintext))`.
 This change is **destructive** -- existing MD5 hashes are NOT preserved;
 they are dropped at migration time, and every account either rotates via
-the normal `ChangePassword` path or is re-provisioned. The dev admin
-row in `seed.sql` carries the Argon2id PHC for the plaintext `'devadmin'`.
+the normal `ChangePassword` path or is re-provisioned.
+
+`seed.sql` ships **no** account row. A built-in account with a committed
+(hence publicly known) password is a standing superadmin backdoor on
+every deploy, so accounts are provisioned at runtime instead: run
+`tools/seed-dev-account/seed-dev-account.sh <user> <pass>` for a dev
+account (status=100), or use the normal registration / `ChangePassword`
+path. The integration suite provisions its own throwaway rows
+(`tests/.../TestAccounts.cs`), so nothing depends on a pre-seeded row.
 
 ## How to apply
 
