@@ -35,10 +35,12 @@ your machine (it holds the LE private key).
 - Docker with `buildx` (to build the linux/amd64 images)
 - OpenSSH `ssh` + `scp` (ship the stack to the droplet)
 - AWS CLI (only for the one-time state-bucket bootstrap)
-- A DigitalOcean API token, AWS creds with Route53 access on your zone **plus
-  IAM user management** (Terraform creates a scoped renewal user -- needs
-  `iam:CreateUser` / `CreateAccessKey` / `PutUserPolicy` and the matching
-  `Delete*` for teardown), and an SSH keypair.
+- A DigitalOcean API token, a configured **AWS CLI v2 profile** (set
+  `AWS_PROFILE` in `.env` -- no standing keys live in the file) with Route53
+  access on your zone **plus IAM user management** (Terraform creates a scoped
+  renewal user -- needs `iam:CreateUser` / `CreateAccessKey` / `PutUserPolicy`
+  and the matching `Delete*` for teardown; drop the IAM perms only if you run
+  `MANAGE_CERT=false` and supply the cert yourself), and an SSH keypair.
 
 ## Setup
 
@@ -47,9 +49,9 @@ cd deploy/do
 cp .env.example .env        # then edit .env -- every value is documented inline
 ```
 
-`.env` is gitignored. Fill in the DO token, AWS creds + Route53 zone id, your
-domain (`enb.sigsegv.land`), a globally-unique registry name and S3 bucket name,
-and your SSH key paths.
+`.env` is gitignored. Fill in the DO token, your `AWS_PROFILE` name + Route53
+zone id, your domain (`enb.sigsegv.land`), a globally-unique registry name and
+S3 bucket name, and your SSH key paths.
 
 ## Deploy (first time)
 
