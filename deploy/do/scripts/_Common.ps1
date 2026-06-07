@@ -131,8 +131,21 @@ function Get-DocrTags([string]$Repository) {
             -SkipHttpErrorCheck -StatusCodeVariable sc
         if ($sc -eq 404) { return @() }
         if ($sc -ge 400) { throw "DOCR list-tags returned HTTP $sc for repository '$Repository'." }
-        if ($resp.tags) { $tags += ($resp.tags | ForEach-Object { $_.tag }) }
-        $url = $resp.links.pages.next
+        if ($resp.PSObject.Properties['tags'] -and $resp.tags) {
+            $tags += ($resp.tags | ForEach-Object { $_.tag })
+        }
+        # `links` is present only when there is a next page; under StrictMode a
+        # bare `$resp.links` would throw on the single-page response. Walk the
+        # chain defensively, treating any missing hop as "no more pages".
+        $url = $null
+        $links = $resp.PSObject.Properties['links']
+        if ($links) {
+            $pages = $links.Value.PSObject.Properties['pages']
+            if ($pages) {
+                $next = $pages.Value.PSObject.Properties['next']
+                if ($next) { $url = $next.Value }
+            }
+        }
     }
     return $tags
 }
