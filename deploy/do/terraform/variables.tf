@@ -43,9 +43,9 @@ variable "droplet_size" {
 }
 
 variable "droplet_image" {
-  description = "Droplet base image. The DO Marketplace Docker image ships docker + compose."
+  description = "Droplet base image (a plain Ubuntu LTS slug). cloud-init installs docker + the compose plugin, so no Marketplace Docker image is needed."
   type        = string
-  default     = "docker-20-04"
+  default     = "ubuntu-24-04-x64"
 }
 
 variable "ssh_public_key" {

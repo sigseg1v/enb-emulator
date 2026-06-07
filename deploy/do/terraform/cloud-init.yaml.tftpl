@@ -1,7 +1,8 @@
 #cloud-config
-# Droplet bootstrap. The DO Marketplace Docker image already ships docker +
-# the compose plugin; this just (a) installs the private-registry pull
-# credentials, (b) prepares the /opt/enb deploy directory, and (c) -- when
+# Droplet bootstrap on a plain Ubuntu LTS base. runcmd installs docker + the
+# compose plugin (the base image does NOT ship them); this also (a) installs
+# the private-registry pull credentials, (b) prepares the /opt/enb deploy
+# directory, and (c) -- when
 # MANAGE_CERT is on -- installs an autonomous Let's Encrypt renewal timer so
 # the cert does NOT depend on a workstation re-running terraform. The actual
 # stack is shipped + started by scripts/Update-Stack.ps1.
@@ -133,8 +134,8 @@ write_files:
 
 runcmd:
   - mkdir -p /opt/enb/certs /opt/enb/db /opt/enb/server-data /opt/enb/backups
-  # Belt-and-suspenders: install docker + compose plugin if the base image
-  # lacks them (so a plain Ubuntu image also works).
+  # Install docker + compose plugin. The plain Ubuntu base ships neither; the
+  # `command -v` guard makes this a no-op if a Docker-preloaded image is used.
   - bash -c 'command -v docker >/dev/null 2>&1 || curl -fsSL https://get.docker.com | sh'
   - bash -c 'docker compose version >/dev/null 2>&1 || (apt-get update && apt-get install -y docker-compose-plugin)'
   - systemctl enable --now docker
