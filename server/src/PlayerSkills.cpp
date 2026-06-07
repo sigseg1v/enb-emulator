@@ -97,6 +97,21 @@ static char* SkillNames[64] = {"SKILL_AFTERBURN",
 void Player::HandleSkillAction(unsigned char *data)
 {
     SkillAction *Action = (SkillAction *) data;
+
+    // SkillID is a wire-controlled short used directly as an index into the
+    // fixed AuxSkill Skill[64] array (AuxSkills.h:86; only 0..63 are Init'd).
+    // The real client only ever sends a valid skill id, so an out-of-range
+    // value is malformed input the retail server never had to serve -- reject
+    // it before it becomes an OOB read (GetAvailability/GetLevel) and, worse,
+    // an OOB write (SetLevel at line ~127). Pure tightening: drops input that
+    // cannot occur from a legitimate client.
+    if (Action->SkillID < 0 || Action->SkillID >= 64)
+    {
+        LogDebug("%s sent out-of-range SkillID %d in HandleSkillAction; dropping\n",
+                 Name(), Action->SkillID);
+        return;
+    }
+
     int SkillPoints = m_PlayerIndex.RPGInfo.GetSkillPoints();
     int SkillPointsNeeded = m_PlayerIndex.RPGInfo.Skills.Skill[Action->SkillID].GetAvailability()[3];
     int SkillLevel = m_PlayerIndex.RPGInfo.Skills.Skill[Action->SkillID].GetLevel();

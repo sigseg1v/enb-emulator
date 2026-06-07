@@ -38,16 +38,24 @@ direct re-read before fixing) and **LIVE** (compiles on the Linux build) or
   option to avoid a cross-process store). This is a **tightening** (restores the
   dropped Win32 validation) -- always-welcome under the server-integrity rules.
 
-- [ ] **AJ-2. `HandleSkillAction` out-of-bounds array index.** CONFIRMED / LIVE.
-  `server/src/PlayerSkills.cpp:97-138`: `SkillAction.SkillID` (a wire-controlled
-  `short`, `common/include/net7/PacketStructures.h:1001`) indexes
-  `RPGInfo.Skills.Skill[Action->SkillID]` with NO bounds check before first use
-  (line 101), and is then used to SetLevel/SaveNewSkillLevel. The array is
-  `_Skill Skill[170]` (`server/src/AuxClasses/AuxSkills.h:25`). A `SkillID` of e.g.
-  20000 reads/writes far out of bounds -> memory corruption, potential RCE or
-  cross-object overwrite (skill points, adjacent player state). Fix: reject
-  `SkillID < 0 || SkillID >= 170` (and ideally `>= 64`, the count of real skills)
-  with a single rate-limited warn + return. Pure tightening.
+- [~] **AJ-2. `HandleSkillAction` out-of-bounds array index.** CONFIRMED / LIVE.
+  CODE FIX LANDED (CLI OOB-rejection test pending). `server/src/PlayerSkills.cpp`:
+  `SkillAction.SkillID` (a wire-controlled `short`,
+  `common/include/net7/PacketStructures.h:1001`) indexed
+  `RPGInfo.Skills.Skill[Action->SkillID]` with NO bounds check before first use,
+  then SetLevel/SaveNewSkillLevel. The indexed array is the public wrapper
+  `AuxSkill Skill[64]` (`server/src/AuxClasses/AuxSkills.h:86`), of which only
+  0..63 are ever `Init`'d (the `_Skills::Skill[170]` raw-data array at :25 is a
+  red herring -- the access path resolves to the [64] wrapper). So the real
+  valid range is `[0,64)`, NOT 170 as first recorded. A `SkillID` of e.g. 20000
+  read/wrote far out of bounds -> memory corruption, potential RCE or cross-object
+  overwrite. **Fixed:** reject `SkillID < 0 || SkillID >= 64` with a LogDebug +
+  return at the top of `HandleSkillAction`. Pure tightening (the real client only
+  sends 0..63; retail never had to serve an OOB index). Primary source: the fixed
+  `AuxSkill Skill[64]` declaration + the `i<64` Init loop. STILL TODO: add a CLI
+  integration test that sends an out-of-range SkillID on 0x57 and asserts no
+  crash / no skill-state change (0x57 is already CLI-parsed, task #72), then flip
+  to `[x]`.
 
 ## HIGH / CRITICAL -- reported, need direct re-read before fixing
 

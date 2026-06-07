@@ -87,19 +87,51 @@ shape as TLS:
   Phase E/O). DTLS is `DTLS_method()` (DTLS 1.2, RFC 6347) or DTLS 1.3 (RFC 9147)
   instead of `TLS_method()`, plus the datagram BIO wiring. No new third-party dep.
 
-### Cert strategy: self-signed + pinned, NOT Let's Encrypt
+### Cert strategy: the real axis is "pin the key" vs "CA + hostname"
 
-Both ends of this leg are **our own code** (we ship Net7Proxy). That is the
-WebRTC situation: when you control both halves you do NOT need a public CA.
-Generate ONE self-signed cert, hard-pin its fingerprint (SPKI hash) in the proxy,
-and verify against that pin instead of the system trust store.
+There is NO technical blocker to reusing the existing Let's Encrypt cert (the one
+already serving the auth/web endpoint) for DTLS. OpenSSL DTLS uses the identical
+`SSL_CTX` cert/key plumbing as TLS; an LE cert validates against the system trust
+store with no custom callback. So "reuse LE" is the *simpler* option and is the
+right call under one condition. The decision is NOT "LE vs self-signed" -- it is
+**validate-by-CA+hostname vs pin-the-key**, and it hinges on how the proxy
+addresses the server:
 
-- **Stronger than CA validation here** -- a pinned self-signed cert cannot be
-  spoofed by any CA mis-issuance, and there is no public trust dependency.
-- **No renewal treadmill** -- a long-lived self-signed cert avoids the 90-day
-  Let's Encrypt automation entirely.
-- **Server auth only is enough** (proxy verifies the server's pinned cert).
-  Mutual DTLS (server also demands a proxy client cert) does NOT solve the
+- **DECIDING FACTOR -- name vs IP.** The redirect/handoff flow traffics in IP
+  addresses (`ServerRedirect.m_IpAddress`, `inet_addr`), not hostnames. If the
+  proxy dials the DTLS endpoint **by IP**, standard LE hostname validation FAILS
+  (the cert is bound to the DNS name, and LE will not SAN an arbitrary/private
+  IP). If the leg can instead be **name-addressed** with the LE-covered hostname,
+  LE + trust-store validation is clean and is the preferred choice -- no pin
+  machinery, no self-signed cert.
+
+- **Pinning is strictly stronger but the threat is thin.** A pin defeats CA
+  mis-issuance (any of ~150 roots can otherwise issue for our name); since we
+  control both ends that CA flexibility is pure downside. But CA mis-issuance is a
+  thin threat for a hobby preservation server, so "pinning is stronger" is true,
+  not decisive.
+
+- **Do NOT combine LE + a pin.** LE rotates every 90 days and certbot generates a
+  fresh keypair per renewal by default, so a pinned SPKI breaks on every renewal
+  unless you force `--reuse-key` or pin the CA. It is either *LE + trust-store
+  validation (no pin)* or *self-signed + pin* -- never a mix.
+
+- **Key isolation, minor.** Reusing the LE cert loads the web/auth server's
+  production private key into the game-server DTLS context. Same host: fine.
+  Different host: it copies that key onto another box. A dedicated cert (self-
+  signed, or a separate LE name) keeps the web key isolated.
+
+**Recommendation:** if the DTLS leg can be name-addressed with the LE hostname,
+**reuse LE with standard CA validation** -- simplest, no renewal-vs-pin conflict.
+If the leg stays IP-addressed (what the current redirect flow implies), use a
+**long-lived self-signed cert + SPKI pin** (a self-signed cert sidesteps the
+90-day-renewal-breaks-the-pin problem). Decide this in AH-1 by first settling
+whether the proxy reaches the DTLS endpoint by name or by IP. Either way the cert
+layer is NOT what carries account auth -- the per-packet token is -- so optimize
+the cert choice for operational simplicity, not crypto purism.
+
+- **Server auth only is enough** (proxy verifies the server cert, pinned or via
+  CA). Mutual DTLS (server also demands a proxy client cert) does NOT solve the
   account-auth problem -- every player has the same proxy, so a client cert
   shared across the player base authenticates the *binary*, not the *account*.
   The per-packet token is what binds to the account; skip mutual DTLS for v1.
@@ -113,10 +145,14 @@ Do them in order; verify the integration suite stays green at every step.
   so the server's `strtok(ticket, "-")` still splits username from token. (Commit
   pending.)
 
-- [ ] **AH-1. Decide endpoints + key material.** Generate the self-signed server
-  cert/key (long validity, EC P-256). Compute its SPKI pin. Decide where the proxy
-  reads the pin from (compiled-in constant vs. config file shipped with the
-  package). Document in `docs/17-traffic-and-ports.md`.
+- [ ] **AH-1. Decide endpoints + cert strategy + key material.** FIRST settle
+  whether the proxy reaches the DTLS endpoint **by name or by IP** (see "Cert
+  strategy" above) -- that decides LE-reuse vs self-signed+pin. If name-addressed:
+  point the DTLS `SSL_CTX` at the existing LE cert/key, proxy validates via the
+  trust store, no pin. If IP-addressed: generate ONE long-lived self-signed server
+  cert/key (EC P-256), compute its SPKI pin, and decide where the proxy reads the
+  pin from (compiled-in constant vs. config shipped with the package). Document the
+  chosen path in `docs/17-traffic-and-ports.md`.
 
 - [ ] **AH-2. Server side: DTLS-wrap the externally-reachable UDP listeners.**
   The server binds multiple UDP ports (MVAS 3806, sector 3501-3800, master 3808,
