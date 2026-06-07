@@ -145,14 +145,23 @@ Do them in order; verify the integration suite stays green at every step.
   so the server's `strtok(ticket, "-")` still splits username from token. (Commit
   pending.)
 
-- [ ] **AH-1. Decide endpoints + cert strategy + key material.** FIRST settle
-  whether the proxy reaches the DTLS endpoint **by name or by IP** (see "Cert
-  strategy" above) -- that decides LE-reuse vs self-signed+pin. If name-addressed:
-  point the DTLS `SSL_CTX` at the existing LE cert/key, proxy validates via the
-  trust store, no pin. If IP-addressed: generate ONE long-lived self-signed server
-  cert/key (EC P-256), compute its SPKI pin, and decide where the proxy reads the
-  pin from (compiled-in constant vs. config shipped with the package). Document the
-  chosen path in `docs/17-traffic-and-ports.md`.
+- [~] **AH-1. Decide endpoints + cert strategy + key material. RESOLVED: reuse
+  Let's Encrypt, connect-by-IP/verify-by-name.** Investigation (2026-06-07): the
+  proxy connects the UDP game leg by **IP** (from the server redirect --
+  `SectorServerManager::LookupSectorServer` -> `ServerRedirect.m_IpAddress`,
+  `inet_addr`), but it already holds a domain name `g_DomainName` (used today to
+  resolve the auth/SSL leg, `ServerManager.cpp:423` `gethostbyname`). So we do NOT
+  need self-signed: connect the DTLS BIO to the redirect IP and call
+  `SSL_set1_host(ssl, g_DomainName)` so OpenSSL validates the server's LE cert
+  against the NAME it actually covers (connect-by-IP, authenticate-by-name -- the
+  CDN pattern). No pin, no renewal-vs-pin conflict, no new key material. **Valid
+  precondition:** every game-server UDP endpoint the proxy dials (auth, sector,
+  global, MVAS) must be covered by `g_DomainName`'s cert -- TRUE in the current
+  single-host docker deploy (all ports are `enb.sigsegv.land`). Server side just
+  points the DTLS `SSL_CTX` at the existing LE cert/key. Fall back to self-signed +
+  SPKI pin ONLY if sector servers are later split onto separate hosts/IPs outside
+  that one cert name (then a wildcard/multi-SAN LE cert is the other option).
+  Document the chosen path in `docs/17-traffic-and-ports.md`.
 
 - [ ] **AH-2. Server side: DTLS-wrap the externally-reachable UDP listeners.**
   The server binds multiple UDP ports (MVAS 3806, sector 3501-3800, master 3808,
