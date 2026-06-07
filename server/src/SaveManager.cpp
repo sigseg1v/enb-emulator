@@ -334,6 +334,20 @@ void SaveManager::HandleLogout(long player_id, short bytes, unsigned char *data)
 	account_query.AddParam(player_id);
 	account_query.run_query_params(
 		"UPDATE avatar_info SET last_logout_t = ? WHERE avatar_id = ?");
+
+	// Mirror the logout onto the OWNING ACCOUNT so status tooling sees the
+	// account go offline (online iff accounts.last_login > accounts.last_logout).
+	// avatar_info maintained both columns already, but accounts.last_logout was
+	// only ever set by the boot-time stale-session sweep -- so a logged-out
+	// account stayed "online" until the next server restart. This path runs for
+	// EVERY avatar removal: PlayerManager::DropPlayerFromGalaxy calls
+	// Player::SaveLogout on clean logout AND on drop/kick/timeout. Both tables
+	// live in net7_user, so the account_id subquery stays in this connection.
+	account_query.AddParam(timestr);
+	account_query.AddParam(player_id);
+	account_query.run_query_params(
+		"UPDATE accounts SET last_logout = ? "
+		"WHERE id = (SELECT account_id FROM avatar_info WHERE avatar_id = ?)");
 }
 
 void SaveManager::HandleNewRecipe(long player_id, short bytes, unsigned char *data)

@@ -90,6 +90,12 @@ public:
 
     void    BuildAvatarList(GlobalAvatarList * list, long account_id);
 
+    // Record the account's login time (accounts.last_login). Called by the
+    // legacy IssueTicket path and by the online ticket login (UDP_Global
+    // ProcessTicketInfo) so status tooling sees online accounts: an account is
+    // online iff accounts.last_login > accounts.last_logout.
+    void	UpdateLoginTime(long account_id);
+
 private:
     struct AccountTicket
     {
@@ -109,7 +115,6 @@ private:
 	bool	IsForbidden(char *name);
 
 	bool	UpdateTicket(int Index, char * Ticket);
-	void	UpdateLoginTime(long account_id);
 
 
 private:

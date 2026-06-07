@@ -197,7 +197,17 @@ bool UDP_Connection::ProcessTicketInfo(char *msg, EnbUdpHeader *hdr, const long 
 		return false;
 	}
 
-    SendAvatarList(g_AccountMgr->GetAccountID(account_name), source_addr, source_port);
+    // Record the account login time so status tooling (and the boot-time stale-
+    // session sweep) can tell this account is online: an account is online iff
+    // accounts.last_login > accounts.last_logout. The legacy username+password
+    // path sets this via IssueTicket->UpdateLoginTime, but the online ticket
+    // path validates a pre-issued login_ticket and never called it, so online
+    // logins never marked the account online (status always reported 0). This
+    // fires at character-select, which is exactly when the account is "online"
+    // per the status predicate (it counts char-select sessions, no avatar yet).
+    g_AccountMgr->UpdateLoginTime(account_id);
+
+    SendAvatarList(account_id, source_addr, source_port);
 
     return true;
 }
