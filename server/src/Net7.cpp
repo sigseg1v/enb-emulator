@@ -201,10 +201,26 @@ int main(int argc, char* argv[])
 			char *VarName;
             long size = fread(data, 1, file_size, f);
             data[size] = 0;
-			VarName = strtok_s(data, "=", &next_token);
-			Info = strtok_s(NULL, "\n", &next_token);
-			do
+			// Line-based parse: skip blank lines and '#' comments, split on the
+			// first '=', trim surrounding whitespace. The old strtok-on-'='
+			// parser had no comment support -- a comment line glued onto the next
+			// key and silently dropped it (a '#' header above domain= left
+			// g_DomainName empty and boot-looped the server).
+			for (char *line = strtok_s(data, "\r\n", &next_token);
+			     line != NULL;
+			     line = strtok_s(NULL, "\r\n", &next_token))
             {
+				while (*line == ' ' || *line == '\t') line++;
+				if (*line == '\0' || *line == '#') continue;
+				char *eq = strchr(line, '=');
+				if (eq == NULL) continue;
+				VarName = line;
+				Info = eq + 1;
+				*eq = '\0';
+				while (eq > VarName && (eq[-1] == ' ' || eq[-1] == '\t')) *--eq = '\0';
+				while (*Info == ' ' || *Info == '\t') Info++;
+				char *vend = Info + strlen(Info);
+				while (vend > Info && (vend[-1] == ' ' || vend[-1] == '\t')) *--vend = '\0';
 				if (!strcasecmp(VarName, "domain")) 
                 {
 					strcpy_s(g_DomainName, sizeof(g_DomainName), Info);
@@ -263,10 +279,7 @@ int main(int argc, char* argv[])
 				{
 					strcpy_s(g_Beta_Mode, sizeof(g_Beta_Mode), Info);
 				}
-				VarName = strtok_s(NULL, "=", &next_token);
-				Info = strtok_s(NULL, "\n", &next_token);
-			} 
-            while(Info != NULL);
+            }
 
             delete [] data;
         }

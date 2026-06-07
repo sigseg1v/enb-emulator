@@ -156,6 +156,13 @@ int main(int argc, char **argv)
     if (argc > 1) bind_addr = argv[1];
     if (const char *env = getenv("NET7SSL_BIND_ADDR")) bind_addr = env;
 
+    // SSL_Listener opens "<g_DomainName>.cer"/".pem"; g_DomainName defaults
+    // to "localhost" (suits the dev stack). A real deploy passes DOMAIN so
+    // the listener loads the domain-named cert instead of localhost.cer.
+    if (const char *dom = getenv("DOMAIN")) {
+        snprintf(g_DomainName, sizeof(g_DomainName), "%s", dom);
+    }
+
     unsigned long ip_address_internal = inet_addr(bind_addr);
     if (ip_address_internal == INADDR_NONE) {
         ip_address_internal = htonl(INADDR_ANY);
