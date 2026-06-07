@@ -1,0 +1,67 @@
+# docker-compose.cli-online.yml -- one CLI client + its own dedicated proxy,
+# pointed at a REMOTE (cloud) server instead of the local docker stack.
+#
+# This is the online twin of docker-compose.cli.yml. Same one-proxy-per-client
+# rule (see that file's header for the ServerManager-is-single-client rationale),
+# but the upstream is a public host reached over the internet, so there is NO
+# shared `stack` network here -- nothing local to attach to.
+#
+# TOPOLOGY (ENB_ONLINE_HOST = the cloud host, e.g. the droplet's domain)
+#   cli ──TCP──> proxy(cliproxy) ──UDP──> ENB_ONLINE_HOST  (global/master/sector)
+#   cli ──TLS──────────────────────────> ENB_ONLINE_HOST:443  (auth)
+#   cli ──UDP──────────────────────────> ENB_ONLINE_HOST:3806 (MVAS)
+# Both containers sit on one private per-unit bridge network: the CLI reaches
+# its proxy via the `cliproxy` alias, and both reach the public host through the
+# bridge's normal outbound NAT. Nothing is published to the host, so every unit
+# reuses the default proxy ports 3801/3805/3500 in its own namespace.
+#
+# The cloud firewall must allow the proxy's upstream game UDP (sector 3501-3800,
+# MVAS 3806, master 3808, global 3810) and the CLI's auth TLS (443). The cloud
+# presents a real (CA-signed) cert, so the CLI's TLS verify passes with no
+# self-signed exception.
+#
+# USAGE (see `just play-online-cli`)
+#   ENB_ONLINE_HOST=my.host docker compose -f docker-compose.cli-online.yml -p online1 run --rm cli
+# Inside the REPL:  connect cliproxy   then   login <user> <pass>
+#
+# The server force-kicks a duplicate login PER ACCOUNT -- use a distinct account
+# per concurrent client, exactly as with the local CLI.
+
+networks:
+  # Private to this unit (namespaced by -p project name). Carries the
+  # CLI<->proxy TCP planes and provides outbound NAT to the public host.
+  unit: {}
+
+services:
+  proxy:
+    build:
+      context: .
+      dockerfile: proxy/Dockerfile
+    networks:
+      unit:
+        # Stable name the CLI dials; lives only on the private net, so it
+        # always resolves to THIS unit's proxy.
+        aliases: [cliproxy]
+    environment:
+      # Upstream game server is the remote host (game UDP over the internet).
+      - NET7_GAME_SERVER_HOST=${ENB_ONLINE_HOST:?set ENB_ONLINE_HOST (or use `just play-online-cli`)}
+    restart: unless-stopped
+
+  cli:
+    build:
+      context: .
+      dockerfile: tools/cli-client/Dockerfile
+    depends_on:
+      - proxy
+    networks:
+      unit: {}
+    environment:
+      - N7_PROXY_HOST=cliproxy  # global/master/sector TCP -> THIS unit's proxy
+      - N7_AUTH_HOST=${ENB_ONLINE_HOST:?set ENB_ONLINE_HOST (or use `just play-online-cli`)}  # auth TLS -> cloud :443
+      - N7_AUTH_PORT=443
+      - N7_MVAS_HOST=${ENB_ONLINE_HOST:?set ENB_ONLINE_HOST (or use `just play-online-cli`)}  # MVAS UDP -> cloud :3806
+      - DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
+    # Interactive REPL: `docker compose run` gives a TTY so the line editor +
+    # colour turn on.
+    stdin_open: true
+    tty: true

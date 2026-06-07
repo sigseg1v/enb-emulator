@@ -591,6 +591,53 @@ play-online CLIENT_PATH='' HOST='':
     echo ">>> launching (WINEPREFIX=$WINEPREFIX) -- pick Multi-Player if not preselected, then click Play"
     dotnet run --no-build --project tools/launchnet7-avalonia
 
+# Drive the C# CLI client against the REMOTE (cloud) server -- the online twin
+# of `just play-cli`. No local docker stack: the CLI's own dedicated proxy
+# bridges TCP->UDP straight to the cloud host, and auth/MVAS go direct to the
+# cloud. Each invocation is one client + one proxy in an isolated compose
+# project (UNIT), so several can run at once against different accounts.
+#
+# Host defaults to the cloud deployment; override with ENB_ONLINE_HOST or arg 2:
+#   just play-online-cli                       # UNIT=online1, default host
+#   just play-online-cli online2               # a second concurrent unit
+#   ENB_ONLINE_HOST=my.host just play-online-cli
+#
+# Inside the REPL:  connect cliproxy   then   login <user> <pass>
+# (auth host + port 443 and the MVAS host come from env in the compose file.)
+# The cloud has NO seeded account -- create one first with
+# `just create-account` from deploy/do (the local seed ships none).
+play-online-cli UNIT='online1' HOST='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    host="{{HOST}}"
+    if [ -z "$host" ]; then host="${ENB_ONLINE_HOST:-enb.sigsegv.land}"; fi
+    export ENB_ONLINE_HOST="$host"
+    echo ">>> online CLI target: $host (proxy upstream + auth:443 + MVAS:3806); no local stack"
+    echo ">>> CLI unit '{{UNIT}}' (isolated compose project)"
+    echo ">>> inside the REPL:  connect cliproxy   then   login <user> <pass>"
+    # BUILD-IF-STALE for this unit's cli + dedicated proxy (layer cache skips an
+    # unchanged unit). ENB_NOREBUILD=1 reuses the existing images as-is.
+    if [ -n "${ENB_NOREBUILD:-}" ]; then
+        echo ">>> ENB_NOREBUILD=1 -- reusing existing cli/proxy images as-is (no build)"
+    else
+        echo ">>> build-if-stale for cli unit '{{UNIT}}'; set ENB_NOREBUILD=1 to skip"
+        docker compose -f docker-compose.cli-online.yml -p {{UNIT}} build
+    fi
+    just _image-status "-f docker-compose.cli-online.yml -p {{UNIT}}" "cli proxy" "just rebuild-cli-online {{UNIT}}"
+    # `run` (not `up`) gives an interactive TTY; --rm cleans up the ephemeral CLI
+    # container on exit. The dedicated proxy stays up for re-runs of this unit.
+    docker compose -f docker-compose.cli-online.yml -p {{UNIT}} run --rm cli
+
+# Rebuild a remote CLI unit's cli + dedicated-proxy images from current source.
+# Pair with `just play-online-cli <UNIT>`; defaults to the `online1` unit.
+rebuild-cli-online UNIT='online1':
+    docker compose -f docker-compose.cli-online.yml -p {{UNIT}} build
+
+# Tear down a remote CLI unit's dedicated proxy (and any leftover CLI
+# container). Pair with `just play-online-cli <UNIT>`; defaults to `online1`.
+stop-cli-online UNIT='online1':
+    docker compose -f docker-compose.cli-online.yml -p {{UNIT}} down
+
 # Same as `play-local`, but with three diagnostic knobs flipped on:
 #   1. WINEDEBUG=+seh,+module,err+module so wine prints the structured-
 #      exception backtrace (module + function names) to stderr on
