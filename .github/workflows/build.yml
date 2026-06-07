@@ -223,9 +223,15 @@ jobs:
         # context must be the repo root, not `proxy/` itself.
         run: docker build -t enb-proxy:ci -f proxy/Dockerfile .
       - name: Run proxy detached
+        # This job runs the proxy in isolation with NO server behind it, so the
+        # proxy<->server UDP leg has nothing to encrypt to. The Phase-AH DTLS
+        # default is fail-closed (the proxy FATAL-exits at startup unless it has
+        # a server cert hostname to verify), so opt this isolated proxy into
+        # plaintext UDP -- the same opt-out the dev docker-compose stack uses.
         run: |
           docker run -d --name net7proxy-ci \
             -p 3801:3801 -p 3805:3805 -p 3500:3500 \
+            -e NET7_DTLS_ALLOW_PLAINTEXT=i-accept-unencrypted-udp \
             enb-proxy:ci
       - name: Wait for proxy on tcp/3801
         run: |
