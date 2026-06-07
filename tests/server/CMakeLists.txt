@@ -39,6 +39,17 @@ add_executable(header_layout_test
 )
 target_link_libraries(header_layout_test PRIVATE GTest::gtest_main)
 
+# --- Protocol: per-packet auth wrapper accept/drop decision (Phase AH) ----
+# Drives the same net7::CheckAuthWrapper the server runtime calls
+# (server/src/AuthWrapper.h). Header-only, no sodium/openssl needed.
+add_executable(auth_wrapper_test
+    protocol/auth_wrapper_test.cpp
+)
+target_include_directories(auth_wrapper_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../server/src
+)
+target_link_libraries(auth_wrapper_test PRIVATE GTest::gtest_main)
+
 # --- DB: live Postgres smoke (env-gated) ---------------------------------
 # Built only if libpq is available; the test itself self-skips at runtime
 # when NET7_TEST_DB_DSN is unset, so it's safe to keep enabled by default.
@@ -240,3 +251,4 @@ endif()
 include(GoogleTest)
 gtest_discover_tests(smoke_test)
 gtest_discover_tests(header_layout_test)
+gtest_discover_tests(auth_wrapper_test)

@@ -54,6 +54,34 @@ struct EnbUdpHeader
     int32_t packet_sequence;
 } ATTRIB_PACKED;
 
+// Phase AH (AH-8): per-packet C->S auth wrapper for the proxy<->server UDP leg.
+//
+// When DTLS is active, the proxy prepends this fixed 17-byte wrapper to every
+// application datagram it sends to the server, INSIDE the encrypted channel.
+// The server strips it at the receive edge (UDP_Connection::RunRecvThread)
+// before any opcode dispatch, so the inner "unwrapped packet"
+// ([EnbUdpHeader][payload]) is byte-for-byte identical to the cleartext form --
+// nothing downstream (handlers, the proxy<->client leg, the CLI/integration
+// suite) sees the wrapper. It rides ONLY on the C->S direction; S->C datagrams
+// never carry it, and the plaintext (opted-out) path never carries it.
+//
+// `token` is the 16-byte binary form of the account's CSPRNG login-ticket
+// suffix (stored as 32 hex chars in net7_user.login_ticket). It binds each
+// datagram to a GameID: at character-select the server binds the account's
+// token to the Player, and every gameplay datagram (EnbUdpHeader.player_id !=
+// 0) is constant-time-compared against the bound token for that player_id. The
+// token is zero until the proxy learns the ticket at global connect; pre-auth
+// datagrams carry player_id == 0 and are gated by ticket validation, not by the
+// per-packet token, so the zero-token window is never enforced.
+#define NET7_UDP_AUTH_WRAPPER_VERSION 0x01
+#define NET7_UDP_AUTH_TOKEN_LEN       16
+
+struct EnbUdpAuthWrapper
+{
+    uint8_t version;                          // NET7_UDP_AUTH_WRAPPER_VERSION
+    uint8_t token[NET7_UDP_AUTH_TOKEN_LEN];   // binary login-ticket suffix
+} ATTRIB_PACKED;                              // 17 bytes, no padding
+
 /*
 
   Personality:

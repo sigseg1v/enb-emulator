@@ -640,9 +640,29 @@ void UDPClient::UDP_Send(short port, const char *buffer, int bufferLen)
                         ? (short) ntohs(m_SockAddr.sin_port) : port;
         uint64_t peer = net7::DtlsPeerKey((uint32_t) m_IPAddr,
                                           (uint16_t) dest_port);
-        net7::DtlsStep step = m_Dtls->SendApp(peer,
-                                              (const uint8_t *) buffer,
-                                              (size_t) bufferLen);
+
+        // Phase AH (AH-8): prepend the per-packet auth wrapper INSIDE the DTLS
+        // channel. Always 17 bytes (version + 16-byte token); the token is zero
+        // until learned at global connect, and the server only validates it on
+        // gameplay datagrams (player_id != 0). The server strips this wrapper at
+        // its recv edge, so the inner bytes are unchanged.
+        unsigned char wrapped[MAX_UDPC_BUFFER + sizeof(EnbUdpAuthWrapper)];
+        size_t wlen = sizeof(EnbUdpAuthWrapper) + (size_t) bufferLen;
+        if (bufferLen < 0 || wlen > sizeof(wrapped))
+        {
+            LogMessage("UDPClient(Linux): datagram too large to wrap (%d bytes); "
+                       "dropped\n", bufferLen);
+            return;
+        }
+        EnbUdpAuthWrapper *w = (EnbUdpAuthWrapper *) wrapped;
+        w->version = NET7_UDP_AUTH_WRAPPER_VERSION;
+        if (g_ServerMgr && g_ServerMgr->m_AuthTokenSet)
+            memcpy(w->token, g_ServerMgr->m_AuthToken, sizeof(w->token));
+        else
+            memset(w->token, 0, sizeof(w->token));
+        memcpy(wrapped + sizeof(EnbUdpAuthWrapper), buffer, (size_t) bufferLen);
+
+        net7::DtlsStep step = m_Dtls->SendApp(peer, wrapped, wlen);
         if (step.fatal)
         {
             m_Dtls->ForgetPeer(peer);

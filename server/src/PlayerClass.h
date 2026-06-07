@@ -190,6 +190,15 @@ public:
 
     long        CharacterID()                   { return (m_CharacterID); }
     void        SetCharacterID(long char_id);
+
+    // Phase AH (AH-9): per-packet auth token (16-byte binary login-ticket
+    // suffix) bound to this player at character-select. The DTLS recv edge
+    // compares every gameplay C->S datagram's wrapper token against this.
+    const unsigned char *AuthToken()            { return (m_AuthToken); }
+    bool        AuthTokenSet()                  { return (m_AuthTokenSet); }
+    void        SetAuthToken(const unsigned char *tok)
+                { memcpy(m_AuthToken, tok, sizeof(m_AuthToken)); m_AuthTokenSet = true; }
+    void        ClearAuthToken()                { m_AuthTokenSet = false; }
     long        CharacterSlot()                 { return (m_CharacterSlot); }
     void        SetCharacterSlot(long slot)     { m_CharacterSlot = slot; }
     AuxPlayerIndex  *PlayerIndex()              { return (&m_PlayerIndex); }
@@ -1094,6 +1103,8 @@ private:
     long m_CharacterID;    //this is the number used for account management (avatar_id)
     long m_CharacterSlot;  //this is the character's slot number in a user's account
 	char m_NameBuffer[20]; //use this to stop stress on the string manager
+	unsigned char m_AuthToken[16]; // Phase AH: 16-byte binary login-ticket suffix bound at char-select
+	bool          m_AuthTokenSet;  // false until SetAuthToken()
 
     Group           * m_Group;
 	bool              m_AcceptedGroupInvite;

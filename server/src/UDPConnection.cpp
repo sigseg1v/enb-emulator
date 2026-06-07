@@ -25,6 +25,7 @@
 #include "PlayerClass.h"
 #include <net7/Opcodes.h>
 #include <net7/DtlsTransport.h>
+#include "AuthWrapper.h"   // Phase AH: shared CheckAuthWrapper decision (also unit-tested)
 
 // Entry point handed to pthread_create.
 void * LaunchUDPRecvThread(void *arg)
@@ -184,6 +185,27 @@ void UDP_Connection::UDP_SetBroadcast(SOCKET socket)
 	}
 }
 
+// Phase AH (AH-9): rate-limited log for dropped C->S datagrams that failed the
+// per-packet auth wrapper check. A flood of these means a malformed/forged
+// client or a proxy<->server version skew; we log at most one summary line per
+// 5s so an attacker cannot spam the log. The token itself is NEVER logged.
+static void LogAuthWrapperDrop(const char *reason, long source_addr)
+{
+	static time_t       s_last       = 0;
+	static unsigned long s_suppressed = 0;
+	time_t now = time(NULL);
+	s_suppressed++;
+	if (now - s_last >= 5)
+	{
+		unsigned char *ip = (unsigned char *)&source_addr;
+		LogMessage("DTLS auth wrapper: dropped %lu C->S datagram(s) [%s] "
+			"(last from %u.%u.%u.%u)\n",
+			s_suppressed, reason, ip[0], ip[1], ip[2], ip[3]);
+		s_last = now;
+		s_suppressed = 0;
+	}
+}
+
 void UDP_Connection::RunRecvThread()
 {
 	long source_addr;
@@ -224,11 +246,39 @@ void UDP_Connection::RunRecvThread()
 					m_Dtls->ForgetPeer(key);
 				for (auto &rec : step.app_data)
 				{
-					if (rec.size() >= sizeof(EnbUdpHeader) && rec.size() < MAX_BUFFER)
+					// Phase AH (AH-8/AH-9): every DTLS app datagram on the C->S
+					// leg is wrapped with a 17-byte per-packet auth wrapper. The
+					// accept/drop decision lives in net7::CheckAuthWrapper
+					// (server/src/AuthWrapper.h) so the runtime and the unit test
+					// (tests/server/protocol/auth_wrapper_test.cpp) share one
+					// implementation. On Accept it hands back the inner
+					// [EnbUdpHeader][payload], byte-for-byte what the handlers
+					// (and the plaintext CLI path) already expect. The gameplay
+					// token check (player_id != 0) is keyed on the GameID's bound
+					// token; pre-auth datagrams (player_id == 0) skip it -- they
+					// precede ticket-learning and are gated by ticket validation.
+					const unsigned char *inner = nullptr;
+					int inner_len = 0;
+					net7::AuthWrapperVerdict verdict = net7::CheckAuthWrapper(
+						rec.data(), rec.size(), MAX_BUFFER,
+						[](int32_t player_id, unsigned char out[net7::kAuthTokenLen]) -> bool {
+							Player *p = g_ServerMgr->m_PlayerMgr.GetPlayer(player_id);
+							if (!p || !p->AuthTokenSet())
+								return false;
+							memcpy(out, p->AuthToken(), net7::kAuthTokenLen);
+							return true;
+						},
+						&inner, &inner_len);
+
+					if (verdict != net7::AuthWrapperVerdict::Accept)
 					{
-						memcpy(m_RecvBuffer, rec.data(), rec.size());
-						DispatchDatagram(m_RecvBuffer, (int)rec.size(), source_addr, source_port);
+						// Rate-limited; never logs the token (see AuthWrapperReason).
+						LogAuthWrapperDrop(net7::AuthWrapperReason(verdict), source_addr);
+						continue;
 					}
+
+					memcpy(m_RecvBuffer, inner, inner_len);
+					DispatchDatagram(m_RecvBuffer, inner_len, source_addr, source_port);
 				}
 			}
 			else

@@ -66,6 +66,12 @@ public:
     // row exists, has not expired, and the token matches.
     bool    ValidateTicketSuffix(const char *username, const char *token);
 
+    // Phase AH (AH-9): fetch the account's current login-ticket suffix as 16
+    // binary bytes (the DB column is 32 lowercase hex chars). Used to bind the
+    // per-packet auth token to a Player at character-select. Returns false if
+    // there is no unexpired row or the stored token is not 32 valid hex chars.
+    bool    GetLoginTokenBinary(const char *username, unsigned char out[16]);
+
     bool	GetEmailAddress(char *username, char *buffer, int buflen);
 	long	GetAccountID(char *username);
 	long	GetAvatarID(char *username, int slot);

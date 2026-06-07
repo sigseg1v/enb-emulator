@@ -117,6 +117,30 @@ void Connection::ProcessGlobalServerOpcode(short opcode, short bytes)
 // UDPClient connect()'d to UDP_GLOBAL_SERVER_PORT (3810) -- see
 // proxy/Net7.cpp main() and proxy/UDPClient_linux.cpp.
 
+// Phase AH (AH-8): decode `len` hex chars into `out` (len/2 bytes). Returns
+// false unless the input is exactly the expected hex length with no stray
+// characters. The proxy does not link libsodium, so this is a small local
+// decoder for the 32-hex login-ticket suffix.
+static bool ProxyHexToBin(const char *hex, unsigned char *out, size_t out_len)
+{
+    if (!hex) return false;
+    for (size_t i = 0; i < out_len; ++i)
+    {
+        int hi = -1, lo = -1;
+        char ch = hex[i * 2], cl = hex[i * 2 + 1];
+        if (ch >= '0' && ch <= '9') hi = ch - '0';
+        else if (ch >= 'a' && ch <= 'f') hi = ch - 'a' + 10;
+        else if (ch >= 'A' && ch <= 'F') hi = ch - 'A' + 10;
+        if (cl >= '0' && cl <= '9') lo = cl - '0';
+        else if (cl >= 'a' && cl <= 'f') lo = cl - 'a' + 10;
+        else if (cl >= 'A' && cl <= 'F') lo = cl - 'A' + 10;
+        if (hi < 0 || lo < 0) return false;
+        out[i] = (unsigned char)((hi << 4) | lo);
+    }
+    // require the suffix to end right after the hex (NUL terminator)
+    return hex[out_len * 2] == '\0';
+}
+
 void Connection::HandleGlobalConnect()
 {
     // Frame payload layout (matches Win32 ClientToGlobalServer.cpp:124):
@@ -124,6 +148,25 @@ void Connection::HandleGlobalConnect()
     // Tickets are issued by Net7SSL's VerifyAccountInfo path and look
     // like "USERNAME-EXTRABYTES"; the dash splits user from auth tail.
     char *ticket = (char *) &m_RecvBuffer[4];
+
+    // Phase AH (AH-8): learn the per-packet auth token from the ticket suffix
+    // ("USERNAME-<32 hex>") BEFORE SendTicket goes on the wire, so even the
+    // ticket datagram carries the wrapper. The strrchr/decode here does not
+    // mutate `ticket` (the later strrchr truncation does); the suffix is the
+    // 16-byte binary form of the CSPRNG login-ticket token. The server only
+    // enforces it on gameplay datagrams, so a malformed suffix here is non-fatal.
+    if (g_ServerMgr)
+    {
+        // The token is the trailing 32 hex chars; split on the LAST '-' so a
+        // username containing a dash still yields the correct suffix. (The
+        // issuer formats "USERNAME-<32hex>" and the token is pure hex, so it
+        // never contains a dash itself.) ProxyHexToBin requires exactly 32 hex
+        // followed by NUL, so a malformed suffix simply leaves the token unset.
+        const char *dash = strrchr(ticket, '-');
+        unsigned char tok[16];
+        if (dash && ProxyHexToBin(dash + 1, tok, sizeof(tok)))
+            g_ServerMgr->SetAuthToken(tok);
+    }
 
     UDPClient *gc = g_ServerMgr ? g_ServerMgr->m_UDPGlobalClient : nullptr;
     if (!gc) {
@@ -139,9 +182,16 @@ void Connection::HandleGlobalConnect()
         return;
     }
 
-    // strtok mutates ticket but ticket lives in m_RecvBuffer (TCP buf);
-    // safe since we won't touch the payload again on this code path.
-    m_AccountUsername = strtok(ticket, "-");
+    // Set the proxy-local account name to the FULL username: everything before
+    // the LAST '-' (the trailing hex token). A first-dash strtok truncated
+    // dashed usernames, and this name is forwarded to the server verbatim in
+    // create/delete-character requests (UDPClient::AddDataLS(m_AccountName)),
+    // so the dashed name must survive intact. Truncating ticket in place is
+    // safe -- it lives in m_RecvBuffer and we don't touch the payload again,
+    // and SendTicket already consumed the full ticket above.
+    char *last_dash = strrchr(ticket, '-');
+    if (last_dash) *last_dash = '\0';
+    m_AccountUsername = ticket;
     gc->SetAccountName(m_AccountUsername);
 
     memcpy(&m_Player_Avatar_List, avatar_list, sizeof(GlobalAvatarList));

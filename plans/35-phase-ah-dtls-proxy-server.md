@@ -427,19 +427,50 @@ After AH-3/AH-4 a Verification+TlsLogin slice showed 3 failures. Run to ground:
 
 ### Auth-token layer (the C->S per-packet token)
 
-- [ ] **AH-8. Token wire envelope.** Define in `common/include/net7/` a fixed-size
-  token prefix prepended to C->S datagrams *inside* the DTLS channel (so it is
-  never on the wire in cleartext). The token is the binary form of the CSPRNG
-  ticket suffix (16 bytes). S->C datagrams do NOT carry it. Add the struct to the
-  common header so server + proxy + CLI share one definition. Pin the bytes in a
-  CLI test.
+- [x] **AH-8. Token wire envelope.** DONE 2026-06-07. Defined
+  `struct EnbUdpAuthWrapper { uint8_t version; uint8_t token[16]; } ATTRIB_PACKED`
+  (17 bytes, `NET7_UDP_AUTH_WRAPPER_VERSION 0x01`, `NET7_UDP_AUTH_TOKEN_LEN 16`)
+  in `common/include/net7/PacketStructures.h` -- one definition shared by server +
+  proxy + CLI. Prepended to C->S datagrams INSIDE the DTLS channel only; S->C
+  never carries it. Byte-pinned three ways (the "three places in sync" rule):
+  server gtest `tests/server/protocol/header_layout_test.cpp`
+  (`EnbUdpAuthWrapperIs17Bytes` + field-offset + version-constant tests, all
+  green); C# model `tools/cli-client/.../Net/AuthWrappedPacket.cs` (`UnwrappedPacket`
+  = inner datagram, `AuthWrappedPacket` = {version, 16-byte token, inner}); C#
+  byte-pin `tools/cli-client/tests/CliClient.UnitTests/Net/AuthWrappedPacketTests.cs`
+  (6 tests green: constants, exact layout, wrap/unwrap round-trip preserves inner
+  bytes verbatim, zero-token pre-auth form, too-short reject, wrong-len reject).
+  The CLI remains plaintext-only so it never emits a wrapper on the wire -- the
+  model exists purely to lock the format and keep the three codebases in sync.
 
-- [~] **AH-9. Server binds + validates the token.** At ticket login
-  (`ProcessTicketInfo`) the server stores the presented token against the
-  resolved player (closing the dropped-handoff hole at the same time). Then every
-  C->S datagram on the affected listeners is checked: strip the token prefix,
-  constant-time compare against the bound token for that `GameID`; on mismatch
-  drop the packet and log a single rate-limited warning (do NOT log the token).
+- [x] **AH-9. Server binds + validates the token.** DONE 2026-06-07 (both halves:
+  the always-on ticket-suffix validation landed earlier as AJ-1/#89; the
+  DTLS-gated per-packet bind/validate landed now). **Bind:** at character-select
+  (`HandleGlobalTicketRequest`, NOT `ProcessTicketInfo` -- the player node is
+  resolved there) the server fetches the token fresh from the DB
+  (`AccountManager::GetLoginTokenBinary` -- parameterized SELECT + `sodium_hex2bin`
+  to 16 bytes + expiry check) and binds it to the player
+  (`Player::SetAuthToken`); `Player::ResetPlayer` clears it on node reuse.
+  **Keyed by `header->player_id` (GameID), NOT (ip,port)** -- per owner steer, so
+  multiple players behind one NAT work. **Validate:** the DTLS recv edge
+  (`server/src/UDPConnection.cpp`) strips the 17-byte wrapper, checks the version,
+  and -- ONLY when `player_id != 0` (gameplay) -- constant-time compares
+  (`sodium_memcmp`) the wrapper token against `GetPlayer(player_id)->AuthToken()`,
+  dropping on mismatch with a rate-limited (5s) warning that never logs the token
+  (`LogAuthWrapperDrop`). Pre-auth datagrams (`player_id == 0`: master handshake,
+  ticket, char-select) skip the token check -- they precede ticket-learning and
+  are gated by ticket validation instead. **Always-wrap, conditional-validate**
+  resolves the sequencing problem (the proxy sends master-plane packets before it
+  has learned the ticket). Functionally a no-op on the plaintext opt-out path (the
+  `if (m_Dtls)` branch is the only one touched), so the integration suite -- which
+  is plaintext -- is unregressed (10/10 GlobalConnect + SectorInventoryMove green).
+  **Dash-in-username fix (2026-06-07):** the ticket is `USERNAME-<32hex>` and a
+  username may legitimately contain a dash, so the suffix parse must split on the
+  LAST dash, not the first. Fixed three first-dash sites to `strrchr`:
+  `UDP_Global.cpp::ProcessTicketInfo` (server account-name/suffix split -- a dashed
+  name was truncated, locking the account out), and two in the proxy
+  (`ClientToServer_linux_stubs.cpp`: the token learn + `m_AccountUsername` that is
+  forwarded to the server in create/delete-character requests).
 
   **STATUS 2026-06-07: the always-on DB ticket-suffix-validation half (the AJ-1
   keystone, task #89) is DONE and landed as one unit; the DTLS-gated per-packet
@@ -498,13 +529,17 @@ After AH-3/AH-4 a Verification+TlsLogin slice showed 3 failures. Run to ground:
   forged-suffix CLI rejection test as ONE unit (the table is never an orphan).
   Add the `plans/29` CV entry for the real-client login path.
 
-- [ ] **AH-10. Proxy prepends the token on C->S after DTLS is up.** The proxy
-  already holds the ticket (it presents it at global login). After the DTLS
-  handshake completes, the proxy prepends the token to every C->S datagram. The
-  ordering constraint -- token only sent post-DTLS -- is automatically satisfied
-  because the token only exists inside the established DTLS channel. Mirror in the
-  CLI for the gated/cleartext test path only if AH-4 keeps tests cleartext (then
-  the CLI sends no token and the server, with enforcement off, requires none).
+- [x] **AH-10. Proxy prepends the token on C->S after DTLS is up.** DONE
+  2026-06-07. The proxy learns the token from the ticket suffix at global connect
+  (`ClientToServer_linux_stubs.cpp::HandleGlobalConnect`, `strrchr` last-dash +
+  `ProxyHexToBin` -> `ServerManager::SetAuthToken`, stored in `m_AuthToken[16]`).
+  On the C->S send path (`UDPClient_linux.cpp::UDP_Send`, inside the `if (m_Dtls)`
+  branch ONLY) it builds `[EnbUdpAuthWrapper][datagram]` -- version byte + token
+  (or 16 zero bytes until the ticket is learned) + the unchanged datagram -- and
+  hands the wrapped buffer to `SendApp`. Always-wrap (zero token pre-auth) means
+  no ordering special-case: the wrapper exists from the first DTLS app datagram,
+  the server only enforces it once `player_id != 0`. The plaintext path is
+  untouched, so the CLI (plaintext) sends no wrapper and the server requires none.
 
 ## Hard rules that still bind
 

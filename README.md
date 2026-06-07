@@ -8,6 +8,8 @@
 - switched database to Postgres and parameterized queries
 - tooling ported from WinForms to cross-platform Avalonia
 - upgraded OpenSSL
+- DTLS encryption between the server and the client proxy for UDP
+- auth token prefix on UDP packets (binds each datagram to an authenticated account)
 - sector servers spin up/down as needed when players gate/enter (cuts memory footprint 70%)
 - added full integration test suite
 - added CLI that can fully parse all network packet fields and can stimulate a client via REPL (you can log in and play the game through the CLI)

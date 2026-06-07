@@ -590,3 +590,44 @@ format & byte order", Trap 2).
   for a crafted/hacked client). No item loss, no dupe, no stuck slot.
 - **Setup**: any deploy; a character with items in cargo, equip, vault, and a
   docked vendor to exercise all five inventory types.
+
+### [ ] CV-17 -- End-to-end DTLS + per-packet auth token with the real client (AH-8/AH-9/AH-10)
+
+- **What changed**: the proxy<->server UDP leg now runs DTLS, and every C->S app
+  datagram inside that channel carries a 17-byte auth wrapper
+  (`EnbUdpAuthWrapper`: 1 version byte + 16-byte token =
+  `common/include/net7/PacketStructures.h`). The proxy learns the token from the
+  ticket suffix at global connect (`proxy/ClientToServer_linux_stubs.cpp`),
+  prepends it on every C->S send (`proxy/UDPClient_linux.cpp UDP_Send`, `m_Dtls`
+  branch), and the server strips + validates it at the recv edge
+  (`server/src/UDPConnection.cpp` -> `net7::CheckAuthWrapper` in
+  `server/src/AuthWrapper.h`). The token is bound to the player at
+  character-select (`UDP_Global.cpp HandleGlobalTicketRequest` ->
+  `AccountManager::GetLoginTokenBinary` -> `Player::SetAuthToken`) and enforced
+  only on gameplay datagrams (inner header `player_id != 0`); pre-auth datagrams
+  (player_id 0) carry a zero token and skip the check.
+- **Primary source (format)**: the wrapper is a NEW field on the proxy<->server
+  leg ONLY -- the real client never sees this leg (the proxy terminates the
+  client's encrypted TCP and re-frames). The inner [EnbUdpHeader][payload] is
+  byte-for-byte identical to the cleartext form, pinned three ways: server gtest
+  `tests/server/protocol/header_layout_test.cpp` (`EnbUdpAuthWrapperIs17Bytes`),
+  C# `tools/cli-client/.../Net/AuthWrappedPacket.cs` +
+  `.../CliClient.UnitTests/Net/AuthWrappedPacketTests.cs`, and the accept/drop
+  decision gtest `tests/server/protocol/auth_wrapper_test.cpp`.
+- **Why the CLI/integration suite cannot fully validate it**: the CLI has no DTLS
+  client, so the integration suite runs the plaintext opt-out path and never
+  exercises the wrapper on the wire. The unit tests prove the decision logic
+  (correct token accepted; wrong-but-well-formed token dropped as "token
+  mismatch"; no-bound-token dropped; pre-auth skipped; bad version / short /
+  oversize dropped) and the byte layout, but ONLY the real client driving the
+  real proxy with DTLS on proves a full game session survives the wrapper on
+  every C->S datagram.
+- **What to look for (real client)**: with DTLS ON (the public default, NOT the
+  `NET7_DTLS_ALLOW_PLAINTEXT=i-accept-unencrypted-udp` opt-out), log in and play:
+  movement, chat, combat, inventory, gating, docking, vendor -- all C->S actions
+  must work normally. The server log shows NO "DTLS auth wrapper: dropped N C->S
+  datagram(s)" line during legitimate play (that line should appear only for a
+  forged/skewed client). Confirm a dashed username (if one can be created) also
+  logs in and plays -- the ticket suffix parse now splits on the last dash.
+- **Setup**: a deploy with DTLS enabled (no plaintext opt-out), valid server
+  cert/key, and the proxy built with the DTLS client path. A normal character.

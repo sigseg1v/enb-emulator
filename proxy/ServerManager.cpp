@@ -30,6 +30,8 @@ ServerManager::ServerManager(bool is_master_server, unsigned long ip_address, sh
     m_UDPConnection = (0);
     m_UDPClient = (0);
     m_UDPGlobalClient = (0);
+    memset(m_AuthToken, 0, sizeof(m_AuthToken));
+    m_AuthTokenSet = false;
 }
 
 // Destructor

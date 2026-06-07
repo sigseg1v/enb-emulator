@@ -29,6 +29,18 @@ struct EnbUdpHeader {
     int32_t  packet_sequence;
 };
 
+// Mirror of common/include/net7/PacketStructures.h::EnbUdpAuthWrapper. Phase AH
+// (AH-8): the per-packet C->S auth token prepended INSIDE the DTLS channel to
+// every gameplay datagram. Keep in lock-step with the C header AND with the C#
+// model (tools/cli-client .../Net/AuthWrappedPacket.cs) -- the three places
+// that touch this format must agree byte-for-byte.
+constexpr uint8_t kAuthWrapperVersion = 0x01;   // NET7_UDP_AUTH_WRAPPER_VERSION
+constexpr int     kAuthTokenLen       = 16;     // NET7_UDP_AUTH_TOKEN_LEN
+struct EnbUdpAuthWrapper {
+    uint8_t version;
+    uint8_t token[kAuthTokenLen];
+} __attribute__((packed));
+
 }  // namespace
 
 TEST(WireFormat, EnbTcpHeaderIs4Bytes) {
@@ -61,4 +73,21 @@ TEST(WireFormat, EnbUdpHeaderFieldOffsets) {
     EXPECT_EQ(offsetof(EnbUdpHeader, opcode), 2u);
     EXPECT_EQ(offsetof(EnbUdpHeader, player_id), 4u);
     EXPECT_EQ(offsetof(EnbUdpHeader, packet_sequence), 8u);
+}
+
+TEST(WireFormat, EnbUdpAuthWrapperIs17Bytes) {
+    // version(1) + token(16) = 17, no padding. The server strips exactly this
+    // many bytes off the front of every DTLS C->S datagram before dispatch.
+    EXPECT_EQ(sizeof(EnbUdpAuthWrapper), 17u);
+}
+
+TEST(WireFormat, EnbUdpAuthWrapperFieldOffsets) {
+    EXPECT_EQ(offsetof(EnbUdpAuthWrapper, version), 0u);
+    EXPECT_EQ(offsetof(EnbUdpAuthWrapper, token), 1u);
+}
+
+TEST(WireFormat, EnbUdpAuthWrapperVersionConstant) {
+    // Must match NET7_UDP_AUTH_WRAPPER_VERSION and the C# WrapperVersion pin.
+    EXPECT_EQ(kAuthWrapperVersion, 0x01);
+    EXPECT_EQ(kAuthTokenLen, 16);
 }

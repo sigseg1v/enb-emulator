@@ -57,6 +57,7 @@ void Player::ResetPlayer()
 {
 	ResetCommon();
 	SetLastAccessTime(0);
+    m_AuthTokenSet = false;   // Phase AH: cleared on node reuse, rebound at char-select
     m_GroupID = -1;
 	m_GuildID = -1;
 	m_AcceptedGroupInvite = false;

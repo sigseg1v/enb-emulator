@@ -3,6 +3,7 @@
 #ifndef _SERVER_MANAGER_H_INCLUDED_
 #define _SERVER_MANAGER_H_INCLUDED_
 
+#include <cstring>
 #include "ConnectionManager.h"
 #include "SectorServerManager.h"
 
@@ -25,6 +26,14 @@ public:
 	void	SetUDPConnections(UDPClient *connection, UDPClient *send);
 	void	SetGlobalUDPClient(UDPClient *global) { m_UDPGlobalClient = global; }
     void    SetPlayerMgrGlobalMemoryHandler();
+
+    // Phase AH (AH-8): the account's per-packet auth token (16-byte binary
+    // login-ticket suffix), learned at global connect and prepended by
+    // UDPClient::UDP_Send to every C->S DTLS datagram. The proxy is a
+    // single-client bridge, so one token per process. Zero/unset until the
+    // ticket is seen; the server only enforces it on gameplay datagrams.
+    void    SetAuthToken(const unsigned char *tok)
+            { memcpy(m_AuthToken, tok, sizeof(m_AuthToken)); m_AuthTokenSet = true; }
 
     void    ResetChatFileTimer();
     void    ResetLogFileTimer();
@@ -68,6 +77,10 @@ public:
     FILE              * m_ChatFile;
 	bool				m_AllowCreate;
 	bool				m_DumpXML;
+
+	// Phase AH (AH-8): per-packet auth token state (see SetAuthToken above).
+	unsigned char		m_AuthToken[16];
+	bool				m_AuthTokenSet;
 
     StringManager     * m_StringMgr;
 

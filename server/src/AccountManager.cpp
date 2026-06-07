@@ -183,6 +183,43 @@ void AccountManager::SetupTickets()
         return sodium_memcmp(stored_token, token, sn) == 0;
     }
 
+    bool AccountManager::GetLoginTokenBinary(const char *username, unsigned char out[16])
+    {
+        if (!username || !*username) return false;
+        if (!EnsureAccountSodiumReady()) return false;
+
+        sql_query_c q(&m_SQL_Conn);
+        sql_result_c result;
+        sql_row_c row;
+
+        q.AddParam(username);
+        if (!q.run_query_params(
+                "SELECT `token`, `expires_at` FROM `login_ticket` WHERE `username` = ?")
+            || q.n_rows() == 0)
+        {
+            return false;
+        }
+
+        q.store(&result);
+        result.fetch_row(&row);
+
+        const char *stored_token = (const char *)row[0];
+        long expires_at = row[1];
+        if (!stored_token || !*stored_token) return false;
+
+        long now_ms = (long)time(NULL) * 1000L;
+        if (expires_at < now_ms) return false;          // ticket expired
+
+        // token column is 32 lowercase hex chars -> 16 binary bytes
+        size_t bin_len = 0;
+        if (sodium_hex2bin(out, 16, stored_token, strlen(stored_token),
+                           NULL, &bin_len, NULL) != 0 || bin_len != 16)
+        {
+            return false;
+        }
+        return true;
+    }
+
     void AccountManager::UpdateLoginTime(long account_id)
     {
 	    sql_query_c TimeUpdate(&m_SQL_Conn);

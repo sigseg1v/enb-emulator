@@ -115,11 +115,20 @@ bool UDP_Connection::ProcessTicketInfo(char *msg, EnbUdpHeader *hdr, const long 
 {
     //ok, we have a new ticket, lets validate the ticket and send the avatarlist
     char *ticket = (char *) &msg[0];
-	char *next_token = NULL;
 
-    //This is a pointer assign since GetUsernameFromTicket() uses the string manager
-    //char *account_name = g_ServerMgr->m_AccountMgr->GetUsernameFromTicket(ticket);
-	char *account_name = strtok_s(ticket, "-", &next_token);
+    // Split "USERNAME-<32hex>" on the LAST '-'. The token suffix is pure hex and
+    // never contains a dash, but a username legitimately can, so a first-dash
+    // split (the old strtok_s) misparsed dashed usernames -- account_name was
+    // truncated and the account lookup / ValidateTicketSuffix failed, locking
+    // those accounts out. Mirror the proxy's strrchr-based parse in
+    // ClientToServer_linux_stubs.cpp::HandleGlobalConnect so both sides agree.
+    char *suffix = strrchr(ticket, '-');
+    char *account_name = (*ticket) ? ticket : NULL;
+    if (suffix)
+    {
+        *suffix = '\0';     // terminate the username portion
+        suffix++;           // suffix now points at the hex token
+    }
 
     fprintf(stderr,"We got accountname back from UDP: %s\n", account_name);
 
@@ -138,7 +147,7 @@ bool UDP_Connection::ProcessTicketInfo(char *msg, EnbUdpHeader *hdr, const long 
     // issuer (login-server BuildTicketLocked, or this server's BuildTicket)
     // now persists the suffix in net7_user.login_ticket; reject if the
     // presented suffix has no matching, unexpired row. Do NOT log the token.
-    if (!g_AccountMgr->ValidateTicketSuffix(account_name, next_token ? next_token : ""))
+    if (!g_AccountMgr->ValidateTicketSuffix(account_name, suffix ? suffix : ""))
     {
         unsigned char *ip = (unsigned char *)&source_addr;
         LogMessage("ProcessTicketInfo: rejected invalid/expired ticket for "
@@ -249,6 +258,20 @@ void UDP_Connection::HandleGlobalTicketRequest(char *msg, EnbUdpHeader *hdr, con
 		player->SetGameID(player->CharacterID() | PLAYER_TAG);
 
 		player->SetPlayerPortIP(source_port, source_addr);
+
+        // Phase AH (AH-9): bind the account's per-packet auth token (the
+        // 16-byte binary login-ticket suffix) to this player. Over DTLS, every
+        // gameplay C->S datagram (player_id != 0) must carry a matching token
+        // or it is dropped at the recv edge (UDP_Connection::RunRecvThread).
+        // Functionally a no-op when DTLS is opted out -- the plaintext path
+        // never checks the token. Fail-closed: if the token cannot be bound,
+        // DTLS gameplay for this player is dropped rather than trusted.
+        unsigned char auth_tok[16];
+        if (g_AccountMgr->GetLoginTokenBinary(username, auth_tok))
+            player->SetAuthToken(auth_tok);
+        else
+            LogMessage("HandleGlobalTicketRequest: no login token to bind for '%s' "
+                       "(DTLS gameplay will be rejected)\n", username);
 
         //Read the character database
         g_AccountMgr->ReadDatabase(player->Database(), avatar_id);
