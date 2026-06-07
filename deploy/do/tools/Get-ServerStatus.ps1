@@ -53,7 +53,7 @@ if ($rows.Count -gt 0) {
     # joined in-memory; no value is concatenated into SQL).
     $nameById = @{}
     $sectorRows = @(Invoke-RemotePsql -ReservedIp $ip -Database 'net7' -PsqlFlags @('-tA') `
-        -Sql 'SELECT id, name FROM sectors;' | Where-Object { $_ -and $_.Trim() -ne '' })
+        -Sql 'SELECT sector_id, name FROM sectors;' | Where-Object { $_ -and $_.Trim() -ne '' })
     foreach ($sr in $sectorRows) {
         $i = $sr.IndexOf('|')
         if ($i -ge 0) { $nameById[$sr.Substring(0, $i)] = $sr.Substring($i + 1) }
