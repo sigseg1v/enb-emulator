@@ -28,6 +28,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <map>
+#include <mutex>
 #include <vector>
 #include <string>
 
@@ -119,7 +120,7 @@ public:
     void ForgetPeer(uint64_t peer);
 
     // Number of live associations (for diagnostics / the half-open cap).
-    size_t PeerCount() const { return m_peers.size(); }
+    size_t PeerCount() const { std::lock_guard<std::mutex> lock(m_mu); return m_peers.size(); }
 
     // Cap on simultaneous associations; a Feed that would exceed it on a NEW
     // peer is dropped (interim anti-amplification guard until AH-2a cookies).
@@ -147,6 +148,11 @@ private:
     std::string                  m_last_error;
     size_t                       m_max_peers = 4096;
     std::map<uint64_t, Peer>     m_peers;
+    // Guards m_peers and every per-peer SSL op. The server's recv thread (Feed/
+    // SSL_read) and its sender threads (SendApp/SSL_write) hit the same SSL
+    // concurrently, which OpenSSL does not allow on one SSL object. One
+    // transport-level lock is correct and the DTLS op rate on this leg is low.
+    mutable std::mutex           m_mu;
 };
 
 } // namespace net7

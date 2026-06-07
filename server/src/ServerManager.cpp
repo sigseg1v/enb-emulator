@@ -30,6 +30,9 @@
 #include "MailslotManager.h"
 #include "ObjectManager.h"
 #include <net7/Opcodes.h>
+#include <net7/DtlsTransport.h>
+
+extern char g_DomainName[];
 
 // Phase AI Stage 2: idle sector teardown tuning. Defaults below; both are
 // overridable at runtime via the NET7_SECTOR_IDLE_POLL_MS /
@@ -55,6 +58,82 @@ static u32 ReadIdleMsEnv(const char *name, u32 fallback)
 		return fallback;
 	}
 	return (u32)parsed;
+}
+
+// Phase AH: settle the proxy<->server UDP encryption policy exactly once, before
+// any externally-reachable listener serves a packet. DTLS is REQUIRED by default;
+// the ONLY way to run cleartext is the explicit, unmistakable opt-out sentinel.
+// Fail-closed: if DTLS is required but the cert/key will not load, exit -- never
+// silently fall back to plaintext.
+void ServerManager::InitDtlsServerPolicy()
+{
+	if (net7::DtlsPlaintextOptedOut())
+	{
+		// Opted out -- run cleartext, but make it impossible to miss.
+		m_DtlsRequired = false;
+		LogMessage("\n");
+		LogMessage("==================================================================\n");
+		LogMessage("  WARNING: UDP ENCRYPTION DISABLED (%s=%s)\n",
+			net7::kDtlsOptOutEnv, net7::kDtlsOptOutSentinel);
+		LogMessage("  The proxy<->server UDP leg is running in PLAINTEXT. Every\n");
+		LogMessage("  gameplay packet is readable and forgeable by anyone on the\n");
+		LogMessage("  network path. This is ONLY acceptable on a trusted loopback /\n");
+		LogMessage("  private-bridge test topology. NEVER set this on a public deploy.\n");
+		LogMessage("==================================================================\n");
+		LogMessage("\n");
+		return;
+	}
+
+	// DTLS required. Resolve the cert/key. Default to the same naming convention
+	// the SSL login listener uses (<domain>.cer / <domain>.pem), overridable so a
+	// deploy can point at the LE fullchain explicitly.
+	const char *cert_env = getenv("NET7_DTLS_CERT");
+	const char *key_env  = getenv("NET7_DTLS_KEY");
+	if (cert_env && *cert_env)
+		m_DtlsCertPath = cert_env;
+	else
+		m_DtlsCertPath = std::string(g_DomainName) + ".cer";
+	if (key_env && *key_env)
+		m_DtlsKeyPath = key_env;
+	else
+		m_DtlsKeyPath = std::string(g_DomainName) + ".pem";
+
+	// Probe that a server transport actually loads the cert/key NOW, so a
+	// misconfiguration fails at startup rather than when the first proxy connects.
+	net7::DtlsTransport probe(net7::DtlsRole::Server);
+	if (!probe.LoadServerCert(m_DtlsCertPath.c_str(), m_DtlsKeyPath.c_str()) || !probe.Ok())
+	{
+		LogMessage("FATAL: DTLS is required but the server certificate/key could not "
+			"be loaded (cert='%s' key='%s'): %s\n",
+			m_DtlsCertPath.c_str(), m_DtlsKeyPath.c_str(), probe.LastError().c_str());
+		LogMessage("FATAL: refusing to start in plaintext. Provision the cert/key, or "
+			"-- ONLY on a trusted private bridge -- set %s=%s to opt out explicitly.\n",
+			net7::kDtlsOptOutEnv, net7::kDtlsOptOutSentinel);
+		exit(EXIT_FAILURE);
+	}
+
+	m_DtlsRequired = true;
+	LogMessage("Phase AH: proxy<->server UDP DTLS REQUIRED (cert='%s').\n",
+		m_DtlsCertPath.c_str());
+}
+
+net7::DtlsTransport *ServerManager::MakeServerDtlsTransport()
+{
+	if (!m_DtlsRequired)
+		return nullptr;
+
+	net7::DtlsTransport *t = new net7::DtlsTransport(net7::DtlsRole::Server);
+	if (!t->LoadServerCert(m_DtlsCertPath.c_str(), m_DtlsKeyPath.c_str()) || !t->Ok())
+	{
+		// InitDtlsServerPolicy already proved these files load; a failure here is
+		// a hard environment fault (file removed mid-run, FD exhaustion). Fail
+		// closed rather than serve a listener with no encryption.
+		LogMessage("FATAL: DTLS required but listener transport failed to init: %s\n",
+			t->LastError().c_str());
+		delete t;
+		exit(EXIT_FAILURE);
+	}
+	return t;
 }
 
 // Constructor
@@ -168,6 +247,11 @@ void ServerManager::RunServer()
 
 void ServerManager::RunMasterServer()
 {
+	// Phase AH: settle the UDP encryption policy BEFORE any listener is
+	// constructed -- fail-closed if DTLS is required and the cert won't load, or
+	// print the LOUD plaintext warning if explicitly opted out.
+	InitDtlsServerPolicy();
+
 	//UDP_Connection udp_global_server_listener(UDP_GLOBAL_SERVER_PORT, this, CONNECTION_TYPE_GLOBAL_SERVER_TO_PROXY);
 
 	// Instantiate the SSL Listener object
@@ -382,6 +466,12 @@ long ServerManager::GetNextEffectID()
 // This runs a single sector server on a single port
 void ServerManager::RunSectorServer()
 {
+	// Phase AH: a dedicated sector-server process still binds externally-reachable
+	// UDP listeners, so it must settle the DTLS policy too -- otherwise this path
+	// would default m_DtlsRequired=false and serve plaintext (fail-OPEN). Run the
+	// same fail-closed init the master path uses BEFORE any StartListener().
+	InitDtlsServerPolicy();
+
     SectorContentParser parser;
     if (!parser.LoadSectorContent())
     {

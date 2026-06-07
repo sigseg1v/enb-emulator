@@ -24,6 +24,7 @@
 #include <net7/PacketStructures.h>
 #include "PlayerClass.h"
 #include <net7/Opcodes.h>
+#include <net7/DtlsTransport.h>
 
 // Entry point handed to pthread_create.
 void * LaunchUDPRecvThread(void *arg)
@@ -46,6 +47,7 @@ UDP_Connection::UDP_Connection(unsigned short port, ServerManager *server_mgr, i
 	m_Socket_Reset_Required = false;
 	m_SSLIPAddr = 0;
 	m_SSLPort = 0;
+	m_Dtls = nullptr;   // attached in StartReceiver(), after the DTLS policy is set
 
 	if(m_Socket == INVALID_SOCKET)
 	{
@@ -77,6 +79,14 @@ void UDP_Connection::StartReceiver()
 		return;
 	}
 
+	// Phase AH: attach the per-listener DTLS transport here (not in the ctor) so
+	// it is created AFTER ServerManager::InitDtlsServerPolicy has run, regardless
+	// of when this connection object was constructed (the MVAS listener is built
+	// before RunServer). Returns nullptr when plaintext is explicitly opted out,
+	// in which case the recv/send paths run cleartext exactly as before.
+	if (m_ServerMgr && !m_Dtls)
+		m_Dtls = m_ServerMgr->MakeServerDtlsTransport();
+
 	pthread_create(&m_Thread, NULL, &LaunchUDPRecvThread, (void *) this);
 }
 
@@ -97,6 +107,9 @@ UDP_Connection::~UDP_Connection()
 		usleep(1 * 1000);
 		timeout++;
 	}
+
+	delete m_Dtls;   // Phase AH: tears down all per-peer SSL associations
+	m_Dtls = nullptr;
 }
 
 unsigned long GetLocalAddr()
@@ -176,8 +189,6 @@ void UDP_Connection::RunRecvThread()
 	long source_addr;
 	unsigned short source_port;
 	int received;
-	EnbUdpHeader *header;
-	bool fail = false;
 
 	if (m_Port <= 0)
 		LogMessage("UDP_Connection: RunRecvThread - Port not set\n");
@@ -198,39 +209,31 @@ void UDP_Connection::RunRecvThread()
 
 		if (received != -1)
 		{
-			header = (EnbUdpHeader*)m_RecvBuffer;
-
-			unsigned short bytes = header->size - sizeof(EnbUdpHeader);
-			short opcode = header->opcode;
-			long player_id = header->player_id;
-			char *msg = (char*)(m_RecvBuffer + sizeof(EnbUdpHeader));
-			m_RecvBuffer[header->size] = 0;
-
-			// Make sure CRC & Bytes match
-			if (received == (int)(bytes + sizeof(EnbUdpHeader)) )
+			if (m_Dtls)
 			{
-				switch (m_ServerType)
+				// Phase AH: the datagram is a DTLS record (handshake or encrypted
+				// app data). Feed it to the per-peer association; emit any
+				// handshake bytes it produced, then dispatch each decrypted app
+				// datagram exactly as the cleartext path would.
+				uint64_t key = net7::DtlsPeerKey((uint32_t)source_addr, source_port);
+				net7::DtlsStep step = m_Dtls->Feed(key, m_RecvBuffer, received);
+				if (!step.to_send.empty())
+					RawSendTo((const char*)step.to_send.data(), (int)step.to_send.size(),
+						source_addr, source_port);
+				if (step.fatal)
+					m_Dtls->ForgetPeer(key);
+				for (auto &rec : step.app_data)
 				{
-				case CONNECTION_TYPE_MVAS_TO_PROXY:
-					HandleMVASOpcode(msg, header, source_addr, source_port);
-					break;
-
-				case CONNECTION_TYPE_GLOBAL_SERVER_TO_PROXY:
-					HandleGlobalOpcode(msg, header, source_addr, source_port);
-					break;
-
-				case CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY:
-					HandleClientOpcode(msg, header, source_addr, source_port);
-					break;
-
-				case CONNECTION_TYPE_MASTER_SERVER_TO_PROXY:
-					HandleMasterOpcode(msg, header, source_addr, source_port);
-					break;
-
-				default:
-					LogMessage("Unknown reception opcode, port %d\n", m_Port);
-					break;
+					if (rec.size() >= sizeof(EnbUdpHeader) && rec.size() < MAX_BUFFER)
+					{
+						memcpy(m_RecvBuffer, rec.data(), rec.size());
+						DispatchDatagram(m_RecvBuffer, (int)rec.size(), source_addr, source_port);
+					}
 				}
+			}
+			else
+			{
+				DispatchDatagram(m_RecvBuffer, received, source_addr, source_port);
 			}
 		}
 
@@ -250,6 +253,63 @@ void UDP_Connection::RunRecvThread()
 	}
 
 	m_ThreadRunning = false;
+}
+
+// Dispatch one cleartext datagram (plaintext mode, or a DTLS-decrypted app
+// record) through the per-server-type opcode handlers. This is the body that
+// used to live inline in RunRecvThread; extracted so DTLS can call it once per
+// decrypted record.
+void UDP_Connection::DispatchDatagram(unsigned char *buf, int received, long source_addr, unsigned short source_port)
+{
+	EnbUdpHeader *header = (EnbUdpHeader*)buf;
+
+	unsigned short bytes = header->size - sizeof(EnbUdpHeader);
+	char *msg = (char*)(buf + sizeof(EnbUdpHeader));
+	buf[header->size] = 0;
+
+	// Make sure CRC & Bytes match
+	if (received != (int)(bytes + sizeof(EnbUdpHeader)))
+		return;
+
+	switch (m_ServerType)
+	{
+	case CONNECTION_TYPE_MVAS_TO_PROXY:
+		HandleMVASOpcode(msg, header, source_addr, source_port);
+		break;
+
+	case CONNECTION_TYPE_GLOBAL_SERVER_TO_PROXY:
+		HandleGlobalOpcode(msg, header, source_addr, source_port);
+		break;
+
+	case CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY:
+		HandleClientOpcode(msg, header, source_addr, source_port);
+		break;
+
+	case CONNECTION_TYPE_MASTER_SERVER_TO_PROXY:
+		HandleMasterOpcode(msg, header, source_addr, source_port);
+		break;
+
+	default:
+		LogMessage("Unknown reception opcode, port %d\n", m_Port);
+		break;
+	}
+}
+
+// Raw sendto that bypasses DTLS -- used only to put DTLS handshake bytes the
+// transport produced (ServerHello/Finished/etc.) back on the wire. App traffic
+// goes through UDP_Send, which encrypts when DTLS is active.
+void UDP_Connection::RawSendTo(const char *buffer, int bufferLen, long IPaddr, short port)
+{
+	sockaddr_in lSockAddr;
+	memset(&lSockAddr, 0, sizeof(lSockAddr));
+	lSockAddr.sin_family = AF_INET;
+	lSockAddr.sin_addr.s_addr = IPaddr;
+	lSockAddr.sin_port = htons(port);
+
+	if (sendto(m_Socket, buffer, bufferLen, 0, (sockaddr *) &lSockAddr, sizeof(lSockAddr)) != bufferLen)
+	{
+		LogMessage("DTLS raw send failed.\n");
+	}
 }
 
 void UDP_Connection::Reset_Socket()
@@ -287,8 +347,28 @@ void UDP_Connection::UDP_Send(const char *buffer, int bufferLen, long IPaddr, sh
 
 	LogDebug("Sending signal to %d (%d.%d.%d.%d)\n",IPaddr, ip[0], ip[1], ip[2], ip[3]);
 
+	if (m_Dtls)
+	{
+		// Phase AH: encrypt under the per-peer DTLS association. If the proxy has
+		// not completed a handshake for this peer yet, SendApp has no association
+		// and the datagram is dropped -- we never emit gameplay in cleartext when
+		// DTLS is active. (The server never initiates a handshake; the proxy
+		// always connects first, so an established peer is the normal case.)
+		uint64_t key = net7::DtlsPeerKey((uint32_t)IPaddr, (uint16_t)port);
+		net7::DtlsStep step = m_Dtls->SendApp(key, (const uint8_t*)buffer, bufferLen);
+		if (step.fatal)
+		{
+			m_Dtls->ForgetPeer(key);
+			LogDebug("DTLS send: no association for peer; dropped %d bytes\n", bufferLen);
+			return;
+		}
+		if (!step.to_send.empty())
+			RawSendTo((const char*)step.to_send.data(), (int)step.to_send.size(), IPaddr, port);
+		return;
+	}
+
 	// Write out the whole buffer as a single message.
-	if (sendto(m_Socket, buffer, bufferLen, 0, (sockaddr *) &lSockAddr, sizeof(lSockAddr)) != bufferLen) 
+	if (sendto(m_Socket, buffer, bufferLen, 0, (sockaddr *) &lSockAddr, sizeof(lSockAddr)) != bufferLen)
 	{
 		LogMessage("Send failed.\n");
 	}

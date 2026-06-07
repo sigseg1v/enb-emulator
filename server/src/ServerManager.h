@@ -21,6 +21,7 @@
 #define _SERVER_MANAGER_H_INCLUDED_
 
 #include <mutex>
+#include <string>
 
 #include "AccountManager.h"
 #include "SectorServerManager.h"
@@ -45,6 +46,7 @@ class SaveManager;
 class CircularBuffer;
 class SectorManager;
 class ObjectManager;
+namespace net7 { class DtlsTransport; }
 
 typedef map<int, SectorManager *> mapSectors;
 typedef map<int, ObjectManager *> mapObjectMan;
@@ -107,6 +109,19 @@ public:
 
 	bool	HalloweenActive()							{ return m_Halloween; }
 	void	SetHalloween(bool setting)					{ m_Halloween = setting; }
+
+	// Phase AH: decide the proxy<->server UDP encryption policy ONCE at startup.
+	// DTLS is REQUIRED by default; the only way to run cleartext is the explicit
+	// NET7_DTLS_ALLOW_PLAINTEXT=i-accept-unencrypted-udp sentinel (LOUD warning).
+	// If DTLS is required but the cert/key cannot be loaded, this LogFatals and
+	// exits the process (fail-closed -- never a silent plaintext fallback). Call
+	// before any externally-reachable UDP listener begins serving.
+	void	InitDtlsServerPolicy();
+	bool	DtlsRequired() const						{ return m_DtlsRequired; }
+	// Build a fresh server-role DtlsTransport with the loaded cert/key, or return
+	// nullptr when plaintext is opted out. Each externally-reachable UDP listener
+	// owns one (a listener = one socket = one peer map). Caller owns the result.
+	net7::DtlsTransport *MakeServerDtlsTransport();
 
 	void	AddJob(long category)							{ m_JobCatCount[category]++; }
 	u32		JobCount(long category)							{ return m_JobCatCount[category]; }
@@ -187,6 +202,11 @@ public:
 	FILE			  * m_SQLLogFile;
 	bool				m_AllowCreate;
 	bool				m_DumpXML;
+
+	// Phase AH DTLS policy (set by InitDtlsServerPolicy).
+	bool				m_DtlsRequired = false;   // true => wrap listeners; false => opted-out cleartext
+	std::string			m_DtlsCertPath;           // PEM cert chain (fullchain)
+	std::string			m_DtlsKeyPath;            // PEM private key
 
 private:
 	mapSectors			m_SectorMap;

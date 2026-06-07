@@ -67,6 +67,8 @@ list(FILTER NET7_SRC EXCLUDE REGEX "/src/Equipable\\.cpp$")
 # compat shim layer is being dismantled — net7ipc moved to common/.
 set(NET7_COMPAT_SRC
     "${CMAKE_CURRENT_SOURCE_DIR}/../common/PosixIpc.cpp"
+    # Phase AH: shared per-peer DTLS transport for the proxy<->server UDP leg.
+    "${CMAKE_CURRENT_SOURCE_DIR}/../common/DtlsTransport.cpp"
 )
 
 message(STATUS "net7: ${CMAKE_CURRENT_SOURCE_DIR}")

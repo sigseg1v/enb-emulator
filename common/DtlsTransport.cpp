@@ -241,6 +241,7 @@ void DtlsTransport::Fail(DtlsStep& out, const char* what)
 
 DtlsStep DtlsTransport::ClientHandshake(uint64_t peer)
 {
+    std::lock_guard<std::mutex> lock(m_mu);
     DtlsStep out;
     if (m_role != DtlsRole::Client) { out.fatal = true; m_last_error = "ClientHandshake on server transport"; return out; }
     if (!Ok()) { out.fatal = true; m_last_error = "client CTX not ready"; return out; }
@@ -258,6 +259,7 @@ DtlsStep DtlsTransport::ClientHandshake(uint64_t peer)
 
 DtlsStep DtlsTransport::Feed(uint64_t peer, const uint8_t* data, size_t len)
 {
+    std::lock_guard<std::mutex> lock(m_mu);
     DtlsStep out;
     if (!Ok()) { out.fatal = true; m_last_error = "CTX not ready"; return out; }
     // A server creates the association on first contact; a client must already
@@ -287,6 +289,7 @@ DtlsStep DtlsTransport::Feed(uint64_t peer, const uint8_t* data, size_t len)
 
 DtlsStep DtlsTransport::SendApp(uint64_t peer, const uint8_t* data, size_t len)
 {
+    std::lock_guard<std::mutex> lock(m_mu);
     DtlsStep out;
     if (!Ok()) { out.fatal = true; m_last_error = "CTX not ready"; return out; }
     Peer* p = GetOrCreate(peer, /*allow_new=*/(m_role == DtlsRole::Client));
@@ -314,12 +317,14 @@ DtlsStep DtlsTransport::SendApp(uint64_t peer, const uint8_t* data, size_t len)
 
 bool DtlsTransport::Established(uint64_t peer) const
 {
+    std::lock_guard<std::mutex> lock(m_mu);
     auto it = m_peers.find(peer);
     return it != m_peers.end() && it->second.done;
 }
 
 void DtlsTransport::ForgetPeer(uint64_t peer)
 {
+    std::lock_guard<std::mutex> lock(m_mu);
     auto it = m_peers.find(peer);
     if (it == m_peers.end()) return;
     if (it->second.ssl) SSL_free(it->second.ssl); // frees rbio/wbio too

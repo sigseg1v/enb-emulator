@@ -29,6 +29,7 @@
 
 class Player;
 class Object;
+namespace net7 { class DtlsTransport; }
 
 enum Connection_Type
 {
@@ -89,6 +90,12 @@ public:
 
 private:
 	unsigned long		checksum(char *buffer, int size);
+	// Phase AH: dispatch one cleartext datagram (the post-DTLS-decrypt or the
+	// plaintext-mode path) through the per-server-type opcode handlers.
+	void				DispatchDatagram(unsigned char *buf, int received, long source_addr, unsigned short source_port);
+	// Phase AH: raw sendto bypassing DTLS -- used to emit handshake bytes the
+	// transport produced while servicing an inbound datagram.
+	void				RawSendTo(const char *buffer, int bufferLen, long IPaddr, short port);
 	bool				UDP_BindPort(short port, SOCKET socket);
 	void				UDP_SetBroadcast(SOCKET socket);
 	int					UDP_Recv(char *buffer, int length);
@@ -150,6 +157,11 @@ private:
 	short				m_SSLPort;
 	long				m_SSLIPAddr;
 	bool				m_Error;
+
+	// Phase AH: per-listener DTLS transport (server role). nullptr in plaintext
+	// (opted-out) mode -- then the recv/send paths behave exactly as before.
+	// Owned by this connection; one socket == one transport == one peer map.
+	net7::DtlsTransport *m_Dtls;
 
 
 	Mutex			    m_Mutex;
