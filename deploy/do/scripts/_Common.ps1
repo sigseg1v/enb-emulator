@@ -22,7 +22,18 @@ function Import-DeployEnv {
         $eq = $t.IndexOf('=')
         if ($eq -lt 1) { continue }
         $key = $t.Substring(0, $eq).Trim()
-        $val = $t.Substring($eq + 1).Trim().Trim('"')
+        $val = $t.Substring($eq + 1).Trim()
+        if ($val.StartsWith('"') -or $val.StartsWith("'")) {
+            # Quoted value: the quotes delimit it; take up to the closing quote
+            # so a '#' inside the quotes is preserved verbatim.
+            $q   = $val[0]
+            $end = $val.IndexOf($q, 1)
+            $val = if ($end -gt 0) { $val.Substring(1, $end - 1) } else { $val.Substring(1) }
+        } else {
+            # Unquoted value: an inline comment starts at the first whitespace +
+            # '#'. A '#' with no leading whitespace (e.g. inside a URL) is kept.
+            $val = ([regex]::Replace($val, '\s+#.*$', '')).Trim()
+        }
         Set-Item -Path "Env:$key" -Value $val
     }
 
