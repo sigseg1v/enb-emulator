@@ -64,18 +64,23 @@ direct re-read before fixing) and **LIVE** (compiles on the Linux build) or
 
 ## HIGH / CRITICAL -- reported, need direct re-read before fixing
 
-- [ ] **AJ-3. `HandleInventoryMove` slot indices unbounded.** CONFIRMED / LIVE
-  (direct read 2026-06-07, task #90). `server/src/PlayerConnection.cpp`
-  HandleInventoryMove (2474-3100, opcode 0x0027): `InvMo.FromSlot`/`ToSlot` are
-  `ntohl()` of the wire fields (PlayerConnection.cpp:2494-2495) and index
-  `ShipIndex()->Inventory.CargoInv.Item[InvMo.FromSlot]` at line 2510 (first use)
-  with NO bounds check, then again across the FromInv/ToInv branches into
-  CargoInv / AmmoInv / `m_Equip` / SecureInv (vault) / TradeInv, on both GetData()
-  reads and SetData() writes. Real OOB read+write -> heap corruption / item dupe /
-  cross-player corruption. Fix: per-container bounds checks using the REAL slot
-  constants read from the Aux*Inventory headers (do NOT hardcode the audit's
-  guessed 40/20/9/40/6 -- verify each against the actual array declarations).
-  Pure tightening. CLI OOB test on 0x0027 (already parsed, #68/#69) + plans/29 CV.
+- [x] **AJ-3. `HandleInventoryMove` slot indices unbounded.** CONFIRMED / LIVE.
+  FIXED 2026-06-07 (task #90, CV-16). `server/src/PlayerConnection.cpp`
+  HandleInventoryMove (opcode 0x0027): `InvMo.FromSlot`/`ToSlot` were `ntohl()` of
+  the wire fields and indexed `ShipIndex()->Inventory.CargoInv.Item[InvMo.FromSlot]`
+  and the AmmoInv / `m_Equip` / SecureInv (vault) / TradeInv arrays with NO bounds
+  check, on both GetData() reads and SetData() writes -- real OOB read+write ->
+  heap corruption / item dupe / cross-player corruption. Fix: new static
+  `InventorySlotCount(inv_type, as_destination)` helper returning the REAL slot
+  counts read from the Aux headers (Cargo 40, Equip/Ammo/m_Equip 20, Vault 96,
+  Vendor 128 source-only, Trade 6 -- the audit's guessed 40/20/9/40/6 were WRONG:
+  vault is 96 not 40, equip is 20 not 9), with a range check on FromSlot and
+  ToSlot before the dispatch switch; the `-1` auto-select sentinel is allowed only
+  for the cargo<->vault and manu-override->cargo branches that actually resolve it.
+  Out-of-range -> LogDebug + early return. Pure tightening (retail client only ever
+  sends a concrete in-range slot). CLI OOB test landed
+  (`SectorInventoryMoveTests.InventoryMove_OutOfBoundsFromSlot_IsDropped_ConnectionSurvives`),
+  all 5 inventory tests green (no legit-move regression). plans/29 CV-16.
 
 - [x] **AJ-4. Chat sender GameID spoofing.** CONFIRMED / LIVE. FIXED 2026-06-07
   (task #91, CV-15). `server/src/PlayerConnection.cpp HandleClientChat` (opcode

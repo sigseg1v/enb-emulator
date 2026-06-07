@@ -2467,8 +2467,30 @@ void Player::CreateTractorComponent(float *position, float decay, float tractor_
 
 	SendComponentPositionalUpdate(
 		article_id,
-		&pos_info, 
-		timestamp);	
+		&pos_info,
+		timestamp);
+}
+
+// AJ-3: slot count for each player-side inventory the InvMove handler can
+// index by a wire-controlled slot. 0 means the type does not index a player
+// inventory by that slot in that direction. Sizes verified against the
+// Aux*Inventory headers: CargoInv _Inventory40 (40), AmmoInv _Inventory20 /
+// EquipInv EquipItem[20] / m_Equip[20] (20), SecureInv Item[96] (96),
+// TradeInv _Inventory6 (6), VendorInv Item[128] (128). Vendor is a SOURCE
+// only (FromInv == 4 buys vendor stock); as a destination (ToInv == 4) the
+// move SELLS the source item and never indexes by ToSlot, hence 0 when
+// as_destination.
+static long InventorySlotCount(long inv_type, bool as_destination)
+{
+	switch (inv_type)
+	{
+	case 1:  return 40;   // CargoInv
+	case 2:  return 20;   // EquipInv / m_Equip / AmmoInv
+	case 3:  return 96;   // SecureInv (station vault)
+	case 4:  return as_destination ? 0 : 128;  // VendorInv: source-only
+	case 16: return 6;    // TradeInv
+	default: return 0;    // 6/18 loot/mine (object-checked), 11/-1 destroy, 12/14 manu
+	}
 }
 
 void Player::HandleInventoryMove(unsigned char *data)
@@ -2500,8 +2522,50 @@ void Player::HandleInventoryMove(unsigned char *data)
 	LogDebug("Inventory Move - GameID: %ld From %ld Slot: %ld To: %ld Slot %ld Number: %ld\n", InvMo.GameID,InvMo.FromInv,
 		InvMo.FromSlot, InvMo.ToInv, InvMo.ToSlot, InvMo.Num);
 
+	// AJ-3: FromSlot/ToSlot are ntohl()'d straight off the wire and were used
+	// below to index the fixed player-inventory arrays -- CargoInv[40],
+	// EquipInv/m_Equip/AmmoInv[20], SecureInv[96], TradeInv[6], VendorInv[128]
+	// (sizes verified against the Aux*Inventory headers) -- with NO bounds
+	// check, an OOB read+write (heap corruption / item dupe / cross-object
+	// overwrite). The valid slot count is a function of the inventory-type
+	// code; ToSlot == -1 is the "auto-select a free destination slot" sentinel
+	// and is only ever RESOLVED (never indexed) by the cargo<->vault and
+	// manu-override->cargo branches. The loot/mine source codes (6/18) index
+	// the targeted object's loot bin, which Husk/Resource::GetItem +
+	// CheckLootConditions already bound to MAX_ITEMS_PER_RESOURCE; the destroy
+	// (11/-1) and manufacturing-fixed-slot (12/14) codes do not index a player
+	// array by the wire slot. Pure tightening: the retail client only ever
+	// sends a concrete in-range slot here.
+	long src_slots = InventorySlotCount(InvMo.FromInv, false);
+	if (src_slots > 0 && (InvMo.FromSlot < 0 || InvMo.FromSlot >= src_slots))
+	{
+		LogDebug("Rejected InventoryMove: FromSlot %ld out of range [0,%ld) for FromInv %ld\n",
+			InvMo.FromSlot, src_slots, InvMo.FromInv);
+		return;
+	}
+
+	// ToSlot == -1 is the auto-select sentinel, valid only for the branches
+	// that resolve it before indexing: cargo->vault (1->3), vault->cargo
+	// (3->1) and manu-override->cargo (14->1). Every other branch indexes the
+	// destination slot directly, so -1 (and any other out-of-range value) is
+	// rejected there.
+	bool auto_select_dest =
+		(InvMo.ToSlot == -1) &&
+		((InvMo.FromInv == 1 && InvMo.ToInv == 3) ||
+		 (InvMo.FromInv == 3 && InvMo.ToInv == 1) ||
+		 (InvMo.FromInv == 14 && InvMo.ToInv == 1));
+
+	long dst_slots = InventorySlotCount(InvMo.ToInv, true);
+	if (dst_slots > 0 && !auto_select_dest &&
+		(InvMo.ToSlot < 0 || InvMo.ToSlot >= dst_slots))
+	{
+		LogDebug("Rejected InventoryMove: ToSlot %ld out of range [0,%ld) for ToInv %ld\n",
+			InvMo.ToSlot, dst_slots, InvMo.ToInv);
+		return;
+	}
+
 	//you can only move certain items from certain places (cannot equip from vault, ect)
-	
+
 	switch(InvMo.FromInv)
 	{
 		// From Cargo Inventory

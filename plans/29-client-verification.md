@@ -549,3 +549,44 @@ format & byte order", Trap 2).
   deliver and are attributed to the real speaker.
 - **Setup**: two real clients in one sector (`just play-cli` per client, distinct
   accounts/avatars). Any deploy.
+
+### [ ] CV-16 -- Real client inventory moves still work with slot-bounds validation ON (AJ-3)
+
+- **What changed**: `server/src/PlayerConnection.cpp HandleInventoryMove` (0x0027)
+  now bounds-checks the wire-controlled `FromSlot`/`ToSlot` against the real
+  per-inventory slot counts (CargoInv 40, EquipInv/m_Equip/AmmoInv 20, SecureInv
+  96, TradeInv 6, VendorInv 128) via a new `InventorySlotCount(type, asDest)`
+  helper, rejecting out-of-range indices (the `-1` auto-select sentinel excepted
+  for the cargo<->vault and manu-override->cargo branches that resolve it) with a
+  LogDebug + early return before the dispatch switch. Pure tightening: the retail
+  client only ever sends a concrete in-range slot.
+- **Primary source (format)**: no wire-format change. The inbound 0x0027 InvMove
+  layout is unchanged (`common/include/net7/PacketStructures.h:243`, 24 bytes,
+  all fields ntohl'd); only the server's slot-range acceptance tightened. The
+  slot counts are read directly from the array declarations:
+  `server/src/AuxClasses/AuxInventory40.h:25` (Cargo), `AuxInventory20.h:25`
+  (Ammo), `AuxEquipInventory.h:25` (EquipItem[20]), `PlayerClass.h:1320`
+  (m_Equip[20]), `AuxSecureInventory.h:25` (Item[96]), `AuxInventory6.h:25`
+  (Trade), `AuxVendorInventory.h:25` (Item[128]).
+- **Why the CLI/integration suite cannot fully validate it**: the suite proves
+  the server drops an OOB move (FromSlot=20000) without crashing and that legit
+  moves (cargo split, vault transfer, vendor) still round-trip
+  (`tests/integration/.../Opcodes/SectorInventoryMoveTests.cs` --
+  `InventoryMove_OutOfBoundsFromSlot_IsDropped_ConnectionSurvives` + the four
+  existing move tests, all green). What it cannot exhaustively cover is the full
+  matrix of real-client move operations against a populated inventory: equipping
+  weapons/devices into specific equip slots, loading ammo, multi-slot vault
+  deposits with the `-1` auto-select sentinel, manufacturing input/output box
+  moves, and trade-window moves -- each indexes a different array at a
+  client-chosen slot, and only the real client exercises the slots the way the
+  game UI generates them. A miscount in the helper (e.g. if equip were really
+  some count other than 20) could wrongly reject a legitimate high equip slot.
+- **What to look for (real client)**: with a non-empty inventory, all normal item
+  operations work: drag cargo<->cargo, equip/unequip every weapon and device
+  slot, load/swap ammo, deposit/withdraw vault items (including the "drop on the
+  vault, auto-pick a slot" path), sell/buy at a vendor, jettison, and any
+  manufacturing moves. The server log shows NO "Rejected InventoryMove: ...
+  out of range" line during legitimate play (that line should only ever appear
+  for a crafted/hacked client). No item loss, no dupe, no stuck slot.
+- **Setup**: any deploy; a character with items in cargo, equip, vault, and a
+  docked vendor to exercise all five inventory types.

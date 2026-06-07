@@ -637,4 +637,117 @@ public sealed class SectorInventoryMoveTests : SectorIntegrationTest
             $"Same drain-loop budget as Wave 27's sibling test; the failure modes are " +
             $"identical.");
     }
+
+    /// <summary>
+    /// AJ-3 OOB-rejection pin: a 0x0027 INVENTORY_MOVE whose FromSlot is wildly
+    /// out of range (20000, well past CargoInv's 40 slots) must be dropped, and
+    /// the sector connection must survive.
+    ///
+    /// <para>
+    /// <c>Player::HandleInventoryMove</c>
+    /// (<c>server/src/PlayerConnection.cpp:2474</c>) <c>ntohl()</c>'d
+    /// FromSlot/ToSlot straight off the wire and used them to index the fixed
+    /// player-inventory arrays -- <c>CargoInv.Item[40]</c>,
+    /// <c>AmmoInv/EquipInv/m_Equip[20]</c>, <c>SecureInv.Item[96]</c>,
+    /// <c>TradeInv.Item[6]</c>, <c>VendorInv.Item[128]</c> -- with NO bounds
+    /// check. A FromSlot of 20000 read (case 1, line 2510:
+    /// <c>CargoInv.Item[InvMo.FromSlot].GetData()</c>) ~20000 <c>_Item</c>
+    /// entries past the array end into Player-object / heap memory, dereferenced
+    /// a garbage <c>Data</c> pointer, and -- on the swap path -- wrote back out
+    /// of bounds (heap corruption / item dupe / cross-object overwrite). The
+    /// docker compose health check would then restart the crashed server.
+    /// </para>
+    ///
+    /// <para>
+    /// AJ-3 fix: a slot-count guard keyed on the inventory-type code rejects
+    /// FromSlot/ToSlot outside <c>[0, count)</c> (ToSlot's <c>-1</c> auto-select
+    /// sentinel excepted for the cargo&lt;-&gt;vault / manu-override-&gt;cargo
+    /// branches that resolve it) with a LogDebug + early return before the
+    /// dispatch switch. Pure tightening -- the retail Win32 client only ever
+    /// sends a concrete in-range slot. This test sends a cargo-&gt;cargo move
+    /// with FromSlot=20000 and proves the drop: nothing is replied for the bad
+    /// move, then a follow-up FromInv=99 probe still draws the deterministic
+    /// "UNRECOGNISED INVENTORY MOVE" reply, proving the sector thread lived. If
+    /// the bounds guard were removed the OOB dereference would fault the sector
+    /// thread and the probe would hang until the CTS fired.
+    /// </para>
+    ///
+    /// <para>
+    /// Server-integrity POSITIVE: rejects an input the real client never
+    /// produces; no widened acceptance, no fabricated reply (the retail server
+    /// emits nothing on a dropped malformed move either). Budget: 90s.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task InventoryMove_OutOfBoundsFromSlot_IsDropped_ConnectionSurvives()
+    {
+        var account = TestAccounts.New(_server);
+        const int slot = 0;
+        const int sectorId = 10151;  // Terran Warrior start: Luna Station
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var login = await _client.AuthLogin.LoginAsync(
+            new AuthLoginRequest(account.Username, account.Password), cts.Token);
+        Assert.True(login.Valid, $"login: {login.RawBody.TrimEnd()}");
+        Assert.False(string.IsNullOrEmpty(login.Ticket));
+
+        var session = Track(await SectorHandshake.EstablishAsync(
+            _server, login.Ticket!, account.Username, slot, sectorId,
+            firstName: "Oobmover", shipName: "OobShip", cts.Token));
+
+        int gameId = session.GameId;
+
+        // Cargo(1) slot 20000 -> Cargo(1) slot 0. FromSlot=20000 is ~20000
+        // _Item entries past CargoInv[40] -- the OOB read/write the AJ-3 guard
+        // now rejects. Sent through the production codec (big-endian, ntohl on
+        // the server) so the server reads exactly 20000.
+        byte[] oobPayload = new InventoryMoveCodec().EncodeOutbound(
+            new InventoryMoveMessage(
+                gameId, InventoryContainer.Cargo, 20000,
+                InventoryContainer.Cargo, 0, 1));
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.InventoryMove.Value, oobPayload),
+            cts.Token);
+
+        // Survival probe: a FromInv=99 move reaches the dispatch switch's
+        // default branch (src/dst slot counts are 0, so the AJ-3 guard does not
+        // fire) and draws the deterministic UNRECOGNISED reply. If the server
+        // faulted on the OOB index above, the sector thread is dead and this
+        // never answers (the CTS fires the test).
+        byte[] probePayload = new InventoryMoveCodec().EncodeOutbound(
+            new InventoryMoveMessage(gameId, 99, 0, 0, 0, 0));
+        await session.Sector.SendAsync(
+            Packet.ForOpcode(OpcodeId.Known.InventoryMove.Value, probePayload),
+            cts.Token);
+
+        int framesSeen = 0;
+        const int maxFrames = 400;
+        while (framesSeen++ < maxFrames)
+        {
+            var reply = await session.Sector.ReceiveAsync(cts.Token);
+            Assert.NotNull(reply);
+            if (reply!.Header.Opcode != OpcodeId.Known.MessageString.Value)
+                continue;
+
+            var span = reply.Payload.Span;
+            if (span.Length < 4) continue;
+            int nulIdx = span[3..].IndexOf((byte)0);
+            if (nulIdx < 0) continue;
+            string body = Encoding.ASCII.GetString(span.Slice(3, nulIdx));
+            if (!body.Contains("UNRECOGNISED INVENTORY MOVE", StringComparison.Ordinal))
+                continue;
+
+            Assert.Contains("UNRECOGNISED INVENTORY MOVE", body);
+            return;
+        }
+
+        throw new Xunit.Sdk.XunitException(
+            "drained 400 frames after a 0x0027 INVENTORY_MOVE with an OUT-OF-BOUNDS " +
+            "FromSlot (20000) + a FromInv=99 probe without the probe's UNRECOGNISED " +
+            "reply. The AJ-3 slot-bounds guard at server/src/PlayerConnection.cpp " +
+            "HandleInventoryMove has likely been removed -- the server faulted on the " +
+            "OOB CargoInv index. Restore the InventorySlotCount range check before " +
+            "reverting this test.");
+    }
 }
