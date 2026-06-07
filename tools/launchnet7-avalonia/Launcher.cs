@@ -360,23 +360,37 @@ namespace LaunchNet7Avalonia
             var backup = Path.Combine(_setting.IniDirectoryName, "auth.ini.orig");
             if (!File.Exists(file) && File.Exists(backup)) File.Copy(backup, file);
 
-            var regHost = _setting.EffectiveRegistrationHostname;
-            var url = new UriBuilder
+            // AAIUrl is the HOST authlogin.dll dials for /AuthLogin. The dll is
+            // patched (PatchAuthLoginFile) to clear HTTPS and use port 4180, so it
+            // builds "http://<AAIUrl>:4180/AuthLogin". For the relay to catch that
+            // call, AAIUrl MUST be loopback -- ALWAYS, local and online alike. The
+            // relay (StartLocalAuthRelay) is the only thing that knows the real
+            // upstream and re-wraps the call as TLS to it. Writing the upstream host
+            // here (the old behaviour) bypassed the relay: online the dll dialed
+            // http://<upstream>:4180 -- plaintext on a port the server doesn't serve
+            // -- and WinINet failed with 12029. See docs/17: the client only ever
+            // talks to loopback; only the relay's upstream moves for a remote deploy.
+            const string authHost = "localhost";
+
+            // LKeyUrl (touchsession.jsp) is a full https:// URL the client calls
+            // DIRECTLY (not via authlogin.dll, not via the relay), so it points at
+            // the real registration host over real TLS.
+            var lkeyUrl = new UriBuilder
             {
                 Scheme = "https",
-                Host   = regHost,
+                Host   = _setting.EffectiveRegistrationHostname,
                 Path   = "misc/touchsession.jsp",
                 Query  = "lkey=%s",
             }.ToString();
 
             bool needPatch =
-                !string.Equals(IniFile.GetValue(file, "General", "AAIUrl"),  regHost, StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(IniFile.GetValue(file, "General", "LKeyUrl"), url,     StringComparison.OrdinalIgnoreCase);
+                !string.Equals(IniFile.GetValue(file, "General", "AAIUrl"),  authHost, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(IniFile.GetValue(file, "General", "LKeyUrl"), lkeyUrl,  StringComparison.OrdinalIgnoreCase);
 
             if (!needPatch) return;
             if (File.Exists(file)) File.Copy(file, backup, true);
-            IniFile.SetValue(file, "General", "AAIUrl",  regHost);
-            IniFile.SetValue(file, "General", "LKeyUrl", url);
+            IniFile.SetValue(file, "General", "AAIUrl",  authHost);
+            IniFile.SetValue(file, "General", "LKeyUrl", lkeyUrl);
         }
 
         void PatchRegDataFile()
@@ -499,8 +513,22 @@ namespace LaunchNet7Avalonia
 
         static void WineRegAdd(string key, string value, string type, string data)
         {
-            // `wine reg add KEY /v VALUE /t TYPE /d DATA /f`. /f suppresses
-            // the overwrite prompt. UseShellExecute=false so we inherit
+            // The EnB client is a 32-bit process, so when it reads HKLM\Software\
+            // <key> it is WOW64-redirected to HKLM\Software\Wow6432Node\<key>. A
+            // plain `wine reg add` writes the 64-bit view, which the client never
+            // reads -- leaving the stale retail value (e.g. AuthLoginServer =
+            // "www.ea.com") in the 32-bit view. The client then dials www.ea.com
+            // instead of the local relay and authlogin fails with WinINet 12029.
+            // Write BOTH views (/reg:32 and /reg:64) so the value is correct no
+            // matter which bitness reads it.
+            foreach (var view in new[] { "32", "64" })
+                WineRegAddView(key, value, type, data, view);
+        }
+
+        static void WineRegAddView(string key, string value, string type, string data, string view)
+        {
+            // `wine reg add KEY /v VALUE /t TYPE /d DATA /f /reg:32|64`. /f
+            // suppresses the overwrite prompt. UseShellExecute=false so we inherit
             // WINEPREFIX from the launching process (set by `just play-local`).
             var psi = new ProcessStartInfo
             {
@@ -517,6 +545,7 @@ namespace LaunchNet7Avalonia
             psi.ArgumentList.Add("/t"); psi.ArgumentList.Add(type);
             psi.ArgumentList.Add("/d"); psi.ArgumentList.Add(data);
             psi.ArgumentList.Add("/f");
+            psi.ArgumentList.Add($"/reg:{view}");
 
             using var p = Process.Start(psi) ?? throw new InvalidOperationException("wine reg add did not start");
             if (!p.WaitForExit(10000))
@@ -525,7 +554,7 @@ namespace LaunchNet7Avalonia
                 throw new TimeoutException("wine reg add timed out");
             }
             if (p.ExitCode != 0)
-                throw new InvalidOperationException($"wine reg add exited {p.ExitCode}: {p.StandardError.ReadToEnd().Trim()}");
+                throw new InvalidOperationException($"wine reg add (/reg:{view}) exited {p.ExitCode}: {p.StandardError.ReadToEnd().Trim()}");
         }
     }
 }

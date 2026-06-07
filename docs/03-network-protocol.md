@@ -324,16 +324,28 @@ to make an HTTP URL the client sees are:
 1. `Launcher.PatchAuthLoginFile` -- hardcoded `Port=4180, UseHttps=false`
    (the const + literal pair, with no setting feeding either value).
 2. `Launcher.PatchAuthIniFile` -- `Auth.ini` URLs (`AAIUrl`, `LKeyUrl`).
-   Scheme is hardcoded `https` in the source; host is the *registration*
-   hostname, which the launcher writes to `_setting.Hostname` or
-   `_setting.RegistrationHostname` (default `localhost` in `play-local`).
+   `AAIUrl` is the HOST `authlogin.dll` dials for `/AuthLogin`; the dll is
+   patched to `http` + port 4180 (see (1)), so the effective request is
+   `http://<AAIUrl>:4180/AuthLogin`. `AAIUrl` is therefore hardcoded to
+   loopback (`localhost`) ALWAYS -- local and online alike -- so the call
+   lands on `LocalAuthRelay`, which is the only component that knows the
+   real upstream and re-wraps the call as TLS to it. (Pointing `AAIUrl` at
+   the upstream host bypasses the relay: the dll would dial plaintext
+   `http://<upstream>:4180`, a port the server does not serve, and WinINet
+   fails with `12029`.) `LKeyUrl` (touchsession.jsp) is different -- it is a
+   full `https://` URL the client calls DIRECTLY, so its host is the real
+   *registration* hostname (`_setting.EffectiveRegistrationHostname`) over
+   real TLS, never the relay.
 3. `Launcher.PatchRegDataFile` -- `rg_regdata.ini`'s `regserverurl`.
-   Same hardcoded `https` and same registration hostname as (2).
+   Hardcoded `https`, host = the registration hostname -- a direct TLS
+   call, same shape as `LKeyUrl` in (2).
 
 Of these, (1) is the only HTTP-bound endpoint, and its target is
 *literally* `127.0.0.1:4180` -- a constant in the source tree, not a
-setting. (2) and (3) are hardcoded `https://`, period; the launcher
-has no code path that ever writes `http://` to those keys.
+setting. The `LKeyUrl`/`regserverurl` URLs in (2) and (3) are hardcoded
+`https://`, period; the launcher has no code path that ever writes
+`http://` to those keys. `AAIUrl` in (2) is loopback-only (the dll adds
+the `http`+4180), so its plaintext leg never leaves the box either.
 
 There is **no config option, no env var, no command-line flag, and
 no settings.json key** that points authlogin.dll, `AAIUrl`, `LKeyUrl`,
