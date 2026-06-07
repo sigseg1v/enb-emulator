@@ -74,6 +74,12 @@ public sealed class SessionContext : IAsyncDisposable
 
     public string? Username { get; set; }
 
+    /// <summary>
+    /// How <c>login</c> reads a password not given on the command line.
+    /// Defaults to the console (asterisk-masked on a TTY); overridable for tests.
+    /// </summary>
+    public IPasswordPrompt PasswordPrompt { get; set; } = new ConsolePasswordPrompt();
+
     /// <summary>20-byte auth ticket from /AuthLogin. Null until <c>login</c>.</summary>
     public string? Ticket { get; set; }
 

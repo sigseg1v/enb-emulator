@@ -53,6 +53,16 @@ public interface ICommandHandler
     /// </summary>
     int Priority => 0;
 
+    /// <summary>
+    /// Live completion values for this command's FIRST argument slot -- e.g.
+    /// the account's character names for <c>enter</c>. Re-read on each
+    /// keystroke so it tracks session state (after <c>login</c> populates the
+    /// avatar list, <c>enter</c>'s candidates appear). Null when the argument
+    /// has no enumerable set, in which case the static <see cref="Placeholder"/>
+    /// drives completion instead.
+    /// </summary>
+    IReadOnlyList<string>? ArgCandidates => null;
+
     /// <summary>Execute the command. Returns an exit-style int (see interface remarks).</summary>
     Task<int> ExecuteAsync(
         IReadOnlyList<string> args,

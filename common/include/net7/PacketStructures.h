@@ -40,6 +40,18 @@ struct VersionRequest
     int32_t Minor;
 } ATTRIB_PACKED;
 
+// Phase AH: proxy -> CLI status reply (opcode 0x300A), answering the CLI's
+// 0x3009 status request. Proxy-internal telemetry; never sent to the real
+// client and never forwarded to the server. Fixed-size, all u8 so there is no
+// byte-order concern. See common/include/net7/Opcodes.h (0x3009/0x300A).
+struct ProxyStatusReply
+{
+    uint8_t dtls_required;     // 1 = proxy<->server DTLS enforced; 0 = plaintext opt-out
+    uint8_t dtls_live_assocs;  // live proxy<->server DTLS associations (0 when plaintext)
+    uint8_t connected;         // 1 = proxy has an active server-side UDP link
+    uint8_t reserved;          // pad to 4 bytes; keep zero
+} ATTRIB_PACKED;
+
 //New header for use with UDP comms.
 //If we have the player_id it makes things a lot simpler
 struct EnbUdpHeader

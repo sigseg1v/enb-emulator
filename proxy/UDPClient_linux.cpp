@@ -775,6 +775,13 @@ void UDPClient::InitDtls()
     }
 }
 
+// Phase AH: established (handshake-complete) DTLS associations on this socket,
+// for the CLI status reply. 0 in plaintext mode (m_Dtls null).
+size_t UDPClient::EstablishedDtls() const
+{
+    return m_Dtls ? m_Dtls->EstablishedPeerCount() : 0;
+}
+
 // ServerPeerKey — DTLS association key for (m_IPAddr, dest_port_host). A
 // dest_port_host of 0 resolves to this socket's default peer port (the port
 // captured in m_SockAddr by CreateFrom). The IP is host-stored in network byte

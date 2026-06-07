@@ -31,7 +31,22 @@ public sealed class EnterCommand : ICommandHandler
     // Available once logged in with a character list to pick from; a primary
     // next step alongside `create`.
     public bool Available => _ctx.Global is not null && _ctx.AvatarList is not null;
-    public int Priority => 100;
+
+    // The named characters on the account, for first-arg Tab completion.
+    public IReadOnlyList<string>? ArgCandidates =>
+        _ctx.AvatarList?.Avatars
+            .Where(a => !string.IsNullOrEmpty(a.Data.FirstName))
+            .Select(a => a.Data.FirstName)
+            .ToArray();
+
+    // When the account already has characters, entering one is the obvious next
+    // step, so `enter` leads the suggestions; `create` leads when there are none
+    // (see CreateCommand). Ties resolve via these priorities, not the alphabet.
+    public int Priority => HasCharacters ? 110 : 90;
+
+    private bool HasCharacters =>
+        _ctx.AvatarList is not null &&
+        _ctx.AvatarList.Avatars.Any(a => !string.IsNullOrEmpty(a.Data.FirstName));
 
     public async Task<int> ExecuteAsync(
         IReadOnlyList<string> args, TextWriter output, CancellationToken ct)

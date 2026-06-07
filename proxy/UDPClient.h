@@ -105,6 +105,12 @@ public:
 	u8    * GetQueueBuffer()						{ return m_QueueBuffer; }
 	void	ValidAccount(unsigned char *msg, short len);
 	void	ProcessAvatarList(unsigned char *msg, short len);
+    // Phase AH: this socket's DTLS state for the CLI status reply. DtlsEnabled()
+    // is the enforced policy (false only in the plaintext opt-out); EstablishedDtls()
+    // counts associations whose handshake has completed. Both are 0/false when
+    // m_Dtls is null (plaintext mode).
+    bool    DtlsEnabled() const { return m_Dtls != nullptr; }
+    size_t  EstablishedDtls() const;
 
 private:
     int     UDP_RecvFromServer(char *buffer, int size,

@@ -32,10 +32,16 @@ public sealed class CreateCommand : ICommandHandler
         "  example: create character JE Griever";
     public string? Placeholder => "<class> <firstname>";
 
-    // Available once logged in; the primary next step after login (it leads
-    // `enter` in the suggestions by the alphabetical tiebreak).
+    // Available once logged in. When the account has NO characters yet, creating
+    // one is the obvious next step so `create` leads the suggestions; once there
+    // are characters, `enter` leads and `create` drops behind it. The mirror of
+    // EnterCommand's priority -- the two never tie.
     public bool Available => _ctx.Global is not null && _ctx.AvatarList is not null;
-    public int Priority => 100;
+    public int Priority => HasCharacters ? 90 : 110;
+
+    private bool HasCharacters =>
+        _ctx.AvatarList is not null &&
+        _ctx.AvatarList.Avatars.Any(a => !string.IsNullOrEmpty(a.Data.FirstName));
 
     public async Task<int> ExecuteAsync(
         IReadOnlyList<string> args, TextWriter output, CancellationToken ct)

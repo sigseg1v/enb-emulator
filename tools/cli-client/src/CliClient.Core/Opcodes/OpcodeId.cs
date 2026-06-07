@@ -141,5 +141,10 @@ public readonly record struct OpcodeId(ushort Value)
         public static readonly OpcodeId LoginStageAck          = new(0x2021);
         public static readonly OpcodeId PlayerShipSent         = new(0x3004);
         public static readonly OpcodeId StarbaseLoginComplete  = new(0x3008);
+        // Phase AH: CLI<->proxy introspection (proxy-internal; never reaches the
+        // server or the real client). The CLI asks the proxy for its own
+        // proxy<->server link state; the proxy replies with a ProxyStatusReply.
+        public static readonly OpcodeId CliStatusRequest       = new(0x3009);
+        public static readonly OpcodeId CliStatusReply         = new(0x300A);
     }
 }

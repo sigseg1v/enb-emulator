@@ -10,7 +10,9 @@ namespace N7.CliClient.Repl;
 /// hint for its arguments, and a flow-ordering priority (higher = offered
 /// first; ties break alphabetically).
 /// </summary>
-public sealed record CommandSpec(string Name, bool Available, string? Placeholder, int Priority = 0);
+public sealed record CommandSpec(
+    string Name, bool Available, string? Placeholder, int Priority = 0,
+    IReadOnlyList<string>? ArgCandidates = null);
 
 /// <summary>
 /// Pure completion logic for the REPL line editor -- candidate filtering
@@ -91,10 +93,34 @@ public static class Completion
         string cmd = FirstToken(buffer);
         var spec = specs.FirstOrDefault(
             s => string.Equals(s.Name, cmd, StringComparison.OrdinalIgnoreCase));
-        if (spec is null || !spec.Available || spec.Placeholder is null) return string.Empty;
+        if (spec is null || !spec.Available) return string.Empty;
 
-        // Only show the placeholder while no argument has been typed yet.
+        // Args typed so far (after the command word). TrimStart drops the
+        // separator space; what remains is the in-progress first argument until
+        // the user types a second space.
         string afterCmd = buffer.TrimStart()[Math.Min(cmd.Length, buffer.TrimStart().Length)..].TrimStart();
+
+        // Dynamic first-arg candidates (e.g. character names for `enter`) take
+        // precedence over the static placeholder while still on the first arg.
+        if (spec.ArgCandidates is { Count: > 0 } argCands && !afterCmd.Contains(' '))
+        {
+            if (afterCmd.Length == 0)
+                return string.Join("  ", argCands);
+            var matches = argCands
+                .Where(c => c.StartsWith(afterCmd, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            if (matches.Length > 0)
+            {
+                string first = matches[0];
+                string remainder = first.Length >= afterCmd.Length ? first[afterCmd.Length..] : string.Empty;
+                if (matches.Length > 1) remainder += $"  (+{matches.Length - 1})";
+                return remainder;
+            }
+            // No candidate matches what's typed -- fall back to the placeholder.
+        }
+
+        if (spec.Placeholder is null) return string.Empty;
+        // Only show the placeholder while no argument has been typed yet.
         return afterCmd.Length == 0 ? spec.Placeholder : string.Empty;
     }
 
@@ -117,7 +143,7 @@ public static class Completion
         string cmd = FirstToken(buffer);
         var spec = specs.FirstOrDefault(
             s => s.Available && string.Equals(s.Name, cmd, StringComparison.OrdinalIgnoreCase));
-        if (spec?.Placeholder is null) return null;
+        if (spec is null) return null;
 
         // Args after the command word; preserve a trailing space (it means
         // "starting a fresh argument", not "editing the last one").
@@ -129,6 +155,28 @@ public static class Completion
         int argIndex = onNewArg ? parts.Length : parts.Length - 1;
         string partial = onNewArg ? string.Empty : parts[^1];
 
+        // First-arg dynamic candidates (e.g. character names for `enter`):
+        // fill the first one that the partial is a prefix of, before consulting
+        // the static placeholder slots.
+        if (argIndex == 0 && spec.ArgCandidates is { Count: > 0 } cands)
+        {
+            string? match = cands.FirstOrDefault(
+                c => c.StartsWith(partial, StringComparison.OrdinalIgnoreCase));
+            if (match is not null)
+            {
+                string filled = cmd + " " + match;
+                if (filled != buffer) return filled;
+                // Already equals the first match -- try the next candidate so a
+                // repeated Tab cycles through same-prefix names.
+                string? nextMatch = cands
+                    .SkipWhile(c => !string.Equals(c, match, StringComparison.OrdinalIgnoreCase))
+                    .Skip(1)
+                    .FirstOrDefault(c => c.StartsWith(partial, StringComparison.OrdinalIgnoreCase));
+                return nextMatch is null ? null : cmd + " " + nextMatch;
+            }
+        }
+
+        if (spec.Placeholder is null) return null;
         string[] slots = spec.Placeholder.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (argIndex < 0 || argIndex >= slots.Length) return null;
 

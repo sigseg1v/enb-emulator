@@ -177,6 +177,57 @@ public sealed class CompletionTests
         Assert.Null(Completion.CompleteArgument("login alice ", ArgSpecs));
     }
 
+    // ---- Dynamic first-arg candidates (e.g. character names for `enter`) ----
+
+    private static readonly IReadOnlyList<CommandSpec> CandSpecs = new[]
+    {
+        new CommandSpec("enter", true, "<character>", 110,
+            new[] { "Griever", "Grizzle", "Zix" }),
+    };
+
+    [Fact]
+    public void Ghost_FreshArg_ListsCandidates()
+    {
+        // No arg typed yet -> show all candidate names, not the placeholder.
+        string ghost = Completion.Ghost("enter ", CandSpecs);
+        Assert.Contains("Griever", ghost);
+        Assert.Contains("Grizzle", ghost);
+        Assert.Contains("Zix", ghost);
+    }
+
+    [Fact]
+    public void Ghost_PartialArg_CompletesBestCandidateWithCountTail()
+    {
+        // "Gri" matches Griever (first) and Grizzle -> remainder + (+1).
+        string ghost = Completion.Ghost("enter Gri", CandSpecs);
+        Assert.Equal("ever  (+1)", ghost);
+    }
+
+    [Fact]
+    public void Ghost_PartialArg_SingleMatch_NoCountTail()
+    {
+        Assert.Equal("ix", Completion.Ghost("enter Z", CandSpecs));
+    }
+
+    [Fact]
+    public void Ghost_PartialArg_NoCandidateMatch_FallsBackToPlaceholderHidden()
+    {
+        // "Q" matches no candidate and an arg is in progress -> no ghost.
+        Assert.Equal("", Completion.Ghost("enter Q", CandSpecs));
+    }
+
+    [Fact]
+    public void CompleteArgument_FillsBestCandidate()
+    {
+        Assert.Equal("enter Zix", Completion.CompleteArgument("enter Z", CandSpecs));
+    }
+
+    [Fact]
+    public void CompleteArgument_FreshArg_FillsFirstCandidate()
+    {
+        Assert.Equal("enter Griever", Completion.CompleteArgument("enter ", CandSpecs));
+    }
+
     // ---- AvailableNames priority ordering ----
 
     [Fact]

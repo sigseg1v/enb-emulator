@@ -247,6 +247,17 @@
 #define ENB_OPCODE_3006_PLAYER_LOGIN_FAILED_CONFIRM     0x3007
 #define ENB_OPCODE_3008_STARBASE_LOGIN_COMPLETE         0x3008
 
+// Phase AH: CLI<->proxy introspection. The CLI (a tooling consumer, never the
+// real Win32 client) sends 0x3009 on the global plane to ask the proxy for its
+// own proxy<->server link state; the proxy answers 0x300A with a ProxyStatusReply
+// (common/include/net7/PacketStructures.h). Proxy-internal only -- the request is
+// consumed by the proxy and NEVER forwarded to the server, and the real client
+// never emits it. This is read-only telemetry: it changes no server behaviour and
+// is the ground-truth source for "is the proxy<->server DTLS leg encrypted?",
+// because the proxy is the component that actually negotiates that leg.
+#define ENB_OPCODE_3009_CLI_STATUS_REQUEST              0x3009
+#define ENB_OPCODE_300A_CLI_STATUS_REPLY                0x300A
+
 //Net7 SSL UDP opcodes
 #define ENB_OPCODE_4000_SSL_REGISTER_SSL_S				0x4000
 #define ENB_OPCODE_4001_SSL_REGISTER_S_SSL				0x4001

@@ -122,6 +122,17 @@ public:
     // Number of live associations (for diagnostics / the half-open cap).
     size_t PeerCount() const { std::lock_guard<std::mutex> lock(m_mu); return m_peers.size(); }
 
+    // Number of associations whose handshake has completed (a subset of
+    // PeerCount; excludes peers still mid-handshake). Used by the proxy's CLI
+    // status reply so it reports genuinely-encrypted links, not pending ones.
+    size_t EstablishedPeerCount() const
+    {
+        std::lock_guard<std::mutex> lock(m_mu);
+        size_t n = 0;
+        for (const auto& kv : m_peers) if (kv.second.done) ++n;
+        return n;
+    }
+
     // Cap on simultaneous associations; a Feed that would exceed it on a NEW
     // peer is dropped (interim anti-amplification guard until AH-2a cookies).
     void SetMaxPeers(size_t n) { m_max_peers = n; }

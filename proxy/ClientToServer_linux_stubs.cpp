@@ -71,6 +71,33 @@ void HandleVersionRequest_Linux(Connection *conn, unsigned char *recv_buf)
                        (unsigned char *) &status, sizeof(status));
 }
 
+// Phase AH: answer the CLI's 0x3009 status request with the proxy's own view
+// of the proxy<->server link. This is read-only telemetry consumed entirely by
+// the proxy -- nothing is forwarded to the server, and the reply touches no
+// game state. The proxy is the only component that negotiates the proxy<->server
+// DTLS, so it is the ground-truth source for whether that leg is encrypted.
+void HandleCliStatusRequest_Linux(Connection *conn, ServerManager &mgr)
+{
+    ProxyStatusReply reply;
+    memset(&reply, 0, sizeof(reply));
+
+    // Policy: DTLS is enforced unless the operator opted out into plaintext.
+    reply.dtls_required = g_DtlsPlaintext ? 0 : 1;
+
+    // Live (handshake-complete) associations across both server-facing legs:
+    // the master/sector send socket and the global control-plane socket.
+    size_t established = 0;
+    if (mgr.m_UDPConnection)   established += mgr.m_UDPConnection->EstablishedDtls();
+    if (mgr.m_UDPGlobalClient) established += mgr.m_UDPGlobalClient->EstablishedDtls();
+    reply.dtls_live_assocs = established > 255 ? 255 : (uint8_t) established;
+
+    // The proxy has an active server-side UDP link once the master socket exists.
+    reply.connected = mgr.m_UDPConnection ? 1 : 0;
+
+    conn->SendResponse(ENB_OPCODE_300A_CLI_STATUS_REPLY,
+                       (unsigned char *) &reply, sizeof(reply));
+}
+
 } // namespace
 
 void Connection::ProcessGlobalServerOpcode(short opcode, short bytes)
@@ -100,6 +127,11 @@ void Connection::ProcessGlobalServerOpcode(short opcode, short bytes)
 
     case ENB_OPCODE_0072_GLOBAL_CREATE_CHARACTER:
         HandleCreateCharacter();
+        break;
+
+    case ENB_OPCODE_3009_CLI_STATUS_REQUEST:
+        // CLI-only introspection; consumed here, never forwarded to the server.
+        HandleCliStatusRequest_Linux(this, m_ServerMgr);
         break;
 
     default:

@@ -397,6 +397,40 @@ proof). Proxy-only wins on risk; the server is slated for rewrite anyway.
   confirmed against the actual Win32 client before this is DONE. Add a CV-NN
   entry.
 
+- [ ] **AH-11. Server cert hot-reload on renewal (latent expired-cert window).**
+  **Defect, latent, ~60-day fuse.** The server reads its DTLS cert/key ONCE at
+  boot (`SSL_Listener.cpp` loads `g_DomainName + ".cer"/.pem` into the in-memory
+  SSL_CTX) and never re-reads them while running. The droplet's autonomous
+  renewal (`deploy/do/terraform/cloud-init.yaml.tftpl` -> `renew.sh`) installs
+  the freshly-renewed pair 999:999 and then bounces ONLY the `login` container
+  (`up -d --force-recreate login`) to avoid kicking players. The server is
+  deliberately NOT bounced, so it keeps serving its boot-time cert. Consequence:
+  once the LetsEncrypt cert renews (lego renews inside 30 days of expiry, so on
+  roughly a 60-day cadence), the running server presents the OLD cert on every
+  NEW proxy<->server DTLS handshake. A player-side proxy validates by name
+  against the system trust store (AH-1) and, once the old cert is actually past
+  `notAfter`, will reject the handshake -- DTLS is fail-closed, so new sessions
+  cannot establish until someone manually restarts the server. Already-connected
+  players are unaffected (DTLS session stays up); the break is new connects after
+  expiry. This is NOT hit today (cert was freshly issued at deploy), but it WILL
+  fire unattended unless fixed.
+  Remediation options (pick one; both ship with a CV check for the real client):
+    1. **Bounce the server too on renewal.** One-line change to `renew.sh`
+       (`--force-recreate login server`). Simple and robust, but kicks every
+       in-sector player at renewal time. Acceptable only with a maintenance
+       window / low-pop window, or paired with a drain.
+    2. **Hot cert-reload in the server (preferred).** Teach `SSL_Listener` to
+       re-read the cert/key into a fresh `SSL_CTX` (or `SSL_CTX_use_*` on the
+       live ctx) without dropping the listener -- e.g. on SIGHUP, or a watch on
+       the cert mtime -- and have `renew.sh` signal it instead of recreating it.
+       No player kick, no expired-cert window. More work; needs care that
+       in-flight handshakes are not torn (swap the ctx, let existing SSL objects
+       drain).
+  Until AH-11 lands, the operational mitigation is: after any cert renewal,
+  manually restart the server (`docker compose ... up -d --force-recreate
+  server` on the droplet) during a quiet window. Track the real-client confirm
+  of whichever remediation ships as a CV-NN entry in plans/29.
+
 ### Post-AH-4 test triage (2026-06-07) -- 3 reds, root-caused, NOT a DTLS regression
 
 After AH-3/AH-4 a Verification+TlsLogin slice showed 3 failures. Run to ground:
@@ -540,6 +574,31 @@ After AH-3/AH-4 a Verification+TlsLogin slice showed 3 failures. Run to ground:
   no ordering special-case: the wrapper exists from the first DTLS app datagram,
   the server only enforces it once `player_id != 0`. The plaintext path is
   untouched, so the CLI (plaintext) sends no wrapper and the server requires none.
+
+- [x] **AH-12. CLI-visible DTLS posture readout (0x3009/0x300A status probe).** DONE
+  2026-06-07. So an operator can SEE whether the proxy<->server leg is encrypted
+  (the user's ask: "when we connect to a real server we can see it was on and when
+  we connect via play-local-cli we can see its disabled"). New CLI<->proxy-only
+  control opcodes `ENB_OPCODE_3009_CLI_STATUS_REQUEST` / `..._300A_CLI_STATUS_REPLY`
+  (Opcodes.h). The proxy answers from its OWN link state and NEVER forwards to the
+  server, so it touches no server security surface and the real Win32 client never
+  emits it (only `0x01..0xFE` reach the client anyway). Wire reply is the 4-byte
+  `ProxyStatusReply` (PacketStructures.h): `dtls_required` (= `!g_DtlsPlaintext`),
+  `dtls_live_assocs` (handshake-complete associations, summed over
+  `m_UDPConnection`+`m_UDPGlobalClient` via `UDPClient::EstablishedDtls()` ->
+  `DtlsTransport::EstablishedPeerCount()`), `connected`, `reserved`. Proxy handler
+  `HandleCliStatusRequest_Linux` dispatched from `ProcessGlobalServerOpcode`; reply
+  RC4-encrypted on the global plane like any other client-facing frame. CLI half:
+  `ProxyStatus.QueryAsync` (2s timeout -> null = "unknown" so an older proxy never
+  hangs login), parsed by `ProxyStatus.Parse`, rendered by `ProxyStatus.DtlsLine`
+  (`dtls-encryption=on` green only when an association is actually live; `DISABLED`
+  red caps on plaintext opt-out; `PENDING` yellow when enforced-but-no-handshake;
+  `unknown` when no reply). Surfaced at `login` and via a new `status` command.
+  Tests: 8 unit (`ProxyStatusTests`) + 6 completer + 1 live integration
+  (`ProxyStatusRequestTests` -- real global-plane round-trip, asserts Connected +
+  plaintext DISABLED on the dev stack). NOT a server wire change (proxy + CLI only);
+  no CV entry required (opcode never reaches the real client). Three-places rule
+  satisfied: server N/A (never emits/parses it), proxy emits, CLI pins.
 
 ## Hard rules that still bind
 
