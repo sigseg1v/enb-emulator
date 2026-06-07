@@ -556,6 +556,18 @@ play-online CLIENT_PATH='' HOST='':
     if [ -z "$host" ]; then host="${ENB_ONLINE_HOST:-enb.sigsegv.land}"; fi
     echo ">>> online target: $host:443 (no local docker stack)"
 
+    # A local docker stack (from `just play-local`) binds the same client-facing
+    # TCP ports this online proxy needs -- 3500 (PROXY_LOCAL_TCP_PORT), 3801
+    # (MASTER_SERVER_PORT), 3805 (GLOBAL_SERVER_PORT). If it's still up, the WINE
+    # Net7Proxy.exe can't bind them (EADDRINUSE) and the client silently talks to
+    # the LOCAL stack instead of $host -- which surfaces as a ~30s hang then
+    # "EA.com temporarily unavailable (INV-300)" at login. Tear it down first.
+    echo ">>> taking down any local docker stack (frees 3500/3801/3805)"
+    docker compose down --remove-orphans >/dev/null 2>&1 || true
+    # Kill stale WINE proxies from prior runs that may still hold those ports.
+    # Pattern excludes the .exe suffix match against this recipe's own argv.
+    pkill -f 'Net7Proxy\.exe' >/dev/null 2>&1 || true
+
     # The launcher spawns <launcher-dir>/bin/Net7Proxy.exe under WINE. Build the
     # Win32 proxy and stage it where LaunchNet7Proxy() looks (AppContext.BaseDirectory/bin).
     echo ">>> building Win32 Net7Proxy.exe (idempotent; layer-cached)"
