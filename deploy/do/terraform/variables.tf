@@ -125,3 +125,39 @@ variable "patcher_rate_limit" {
   type        = number
   default     = 20
 }
+
+# ---------------------------------------------------------------------------
+# Phase AP: rolling Postgres -> private S3 backups (bucket + scoped IAM token).
+# Entirely OPT-IN: with manage_db_backup=false (the default) NONE of the backup
+# resources are created. The operator opts in by setting ENB_DB_BACKUP_S3_BUCKET
+# in .env. See backup.tf and the deploy README.
+# ---------------------------------------------------------------------------
+variable "manage_db_backup" {
+  description = "If true, Terraform creates the DB-backup infra (private S3 bucket + a bucket-scoped IAM user/token). Default false = no backup resources."
+  type        = bool
+  default     = false
+}
+
+variable "db_backup_s3_bucket" {
+  description = "Globally-unique name for the PRIVATE S3 bucket that holds the Postgres dumps. Required when manage_db_backup=true."
+  type        = string
+  default     = ""
+}
+
+variable "db_backup_s3_prefix" {
+  description = "Key prefix under which dumps are stored (hourly/ and six-hourly/ live beneath it). Must match the sidecar's BACKUP_S3_PREFIX."
+  type        = string
+  default     = "pg"
+}
+
+variable "db_backup_hourly_expire_days" {
+  description = "S3 lifecycle expiry (days) for the hourly tier -- defense-in-depth behind the sidecar's count-based prune. 1 = 24h."
+  type        = number
+  default     = 1
+}
+
+variable "db_backup_six_hourly_expire_days" {
+  description = "S3 lifecycle expiry (days) for the six-hourly tier. 8 = the 24h hourly window plus 7 days."
+  type        = number
+  default     = 8
+}

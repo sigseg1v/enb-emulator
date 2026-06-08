@@ -13,8 +13,8 @@
 # Tagging model -- one shared, monotonic version counter across both services
 # (they always bump together):
 #
-#   enb:server-vN  enb:login-vN  enb:status-notifier-vN   <- just produced
-#   enb:{server,login,status-notifier}-latest             <- re-pointed at vN,
+#   enb:server-vN enb:login-vN enb:status-notifier-vN enb:db-backup-vN  <- produced
+#   enb:{server,login,status-notifier,db-backup}-latest   <- re-pointed at vN,
 #                                                 but only AFTER every versioned
 #                                                 push succeeds
 #
@@ -37,7 +37,8 @@ $reg  = Get-RegistryEndpoint
 $services = @(
     @{ Svc = 'server';          Dockerfile = 'server/Dockerfile';          Context = '.' },
     @{ Svc = 'login';           Dockerfile = 'login-server/Dockerfile';    Context = '.' },
-    @{ Svc = 'status-notifier'; Dockerfile = 'status-notifier/Dockerfile'; Context = 'status-notifier' }
+    @{ Svc = 'status-notifier'; Dockerfile = 'status-notifier/Dockerfile'; Context = 'status-notifier' },
+    @{ Svc = 'db-backup';       Dockerfile = 'db-backup/Dockerfile';       Context = 'db-backup' }
 )
 
 # ---- determine the version label ----
@@ -47,7 +48,7 @@ if ($Tag) {
 } else {
     $maxN = 0
     foreach ($t in $existingTags) {
-        if ($t -match '^(server|login|status-notifier)-v(\d+)$') {
+        if ($t -match '^(server|login|status-notifier|db-backup)-v(\d+)$') {
             $n = [int]$Matches[2]
             if ($n -gt $maxN) { $maxN = $n }
         }
@@ -115,5 +116,5 @@ foreach ($s in $services) {
 if ($deletedAny) { Start-DocrGarbageCollection }
 
 Write-Host ""
-Write-Host "Pushed enb:{server,login,status-notifier}-$version (+ -latest)."
+Write-Host "Pushed enb:{server,login,status-notifier,db-backup}-$version (+ -latest)."
 Write-Host "Next: just update $version   (or: just update latest)"

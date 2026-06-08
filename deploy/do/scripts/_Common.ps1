@@ -74,6 +74,13 @@ function Import-DeployEnv {
     $env:TF_VAR_patcher_dl_domain = (Get-EnvOr 'PATCHER_DL_DOMAIN' '')
     $env:TF_VAR_patcher_rate_limit = (Get-EnvOr 'PATCHER_RATE_LIMIT' '20')
 
+    # Phase AP rolling DB backups (opt-in). manage_db_backup is derived: naming a
+    # bucket turns it on, so a deploy that never set the field stays untouched.
+    $backupBucket = (Get-EnvOr 'ENB_DB_BACKUP_S3_BUCKET' '')
+    $env:TF_VAR_manage_db_backup    = if ($backupBucket) { 'true' } else { 'false' }
+    $env:TF_VAR_db_backup_s3_bucket = $backupBucket
+    $env:TF_VAR_db_backup_s3_prefix = (Get-EnvOr 'ENB_DB_BACKUP_S3_PREFIX' 'pg')
+
     # aws provider/acme expect AWS_DEFAULT_REGION too.
     if (-not (Test-Path 'Env:AWS_DEFAULT_REGION')) { $env:AWS_DEFAULT_REGION = $env:TF_VAR_aws_region }
 }

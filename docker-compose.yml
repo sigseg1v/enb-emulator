@@ -549,6 +549,40 @@ services:
       DISCORD_GUILD_ID: "${DISCORD_GUILD_ID:-}"
     restart: unless-stopped
 
+  # --------------------------------------------------------------
+  # db-backup -- Phase AP rolling Postgres -> private S3 backup sidecar.
+  #
+  # Dumps net7 + net7_user hourly with `pg_dump -Fc`, keeps the newest 24 hourly
+  # dumps plus 7 days of 6-hourly promotions in a PRIVATE S3 bucket, prunes by
+  # count. Read-only DB consumer; talks only to Postgres + one S3 bucket.
+  #
+  # Default-OFF: BACKUP_S3_BUCKET is empty unless the host env sets it, and the
+  # script idles (never crash-loops) when empty -- so it is harmless to leave
+  # declared in the dev stack. To exercise it locally, point BACKUP_S3_* at a
+  # MinIO/test bucket (set BACKUP_S3_ENDPOINT) and supply BACKUP_AWS_* creds.
+  # --------------------------------------------------------------
+  db-backup:
+    build:
+      context: ./db-backup
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Same DB_* contract the other sidecars use.
+      DB_HOST: "postgres:5432"
+      DB_USER: "net7"
+      DB_PASS: "net7"
+      BACKUP_DATABASES: "net7 net7_user"
+      # Empty bucket => the sidecar idles. SECRETS (AWS_*) are never committed.
+      BACKUP_S3_BUCKET: "${BACKUP_S3_BUCKET:-}"
+      BACKUP_S3_PREFIX: "${BACKUP_S3_PREFIX:-pg}"
+      BACKUP_S3_ENDPOINT: "${BACKUP_S3_ENDPOINT:-}"
+      AWS_ACCESS_KEY_ID: "${BACKUP_AWS_ACCESS_KEY_ID:-}"
+      AWS_SECRET_ACCESS_KEY: "${BACKUP_AWS_SECRET_ACCESS_KEY:-}"
+      AWS_DEFAULT_REGION: "${BACKUP_AWS_REGION:-us-east-1}"
+    restart: unless-stopped
+
   pgadmin:
     profiles: ["dev-tools-postgres"]
     image: dpage/pgadmin4:latest
