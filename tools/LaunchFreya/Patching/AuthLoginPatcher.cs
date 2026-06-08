@@ -1,7 +1,7 @@
 using System;
 using System.IO;
 
-namespace LaunchNet7Avalonia.Patching
+namespace LaunchFreya.Patching
 {
     // Verbatim port of LaunchNet7/Patching/AuthLoginPatcher.cs. The byte
     // offsets are fixed in the EnB client's authlogin.dll; the binary

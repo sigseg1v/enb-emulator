@@ -47,8 +47,8 @@
   <Folder Name="/dataimport-avalonia/">
     <Project Path="dataimport-avalonia/DataImportAvalonia.csproj" />
   </Folder>
-  <Folder Name="/launchnet7-avalonia/">
-    <Project Path="launchnet7-avalonia/LaunchNet7Avalonia.csproj" />
+  <Folder Name="/LaunchFreya/">
+    <Project Path="LaunchFreya/LaunchFreya.csproj" />
   </Folder>
   <Folder Name="/faction-editor-avalonia/">
     <Project Path="faction-editor-avalonia/FactionEditorAvalonia.csproj" />

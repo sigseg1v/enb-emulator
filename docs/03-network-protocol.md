@@ -365,7 +365,7 @@ inside the kernel's loopback path. An off-host attacker would need to
 already own the loopback interface (i.e. be root on the box) to MITM.
 
 **Hop 2 -- relay ↔ upstream Net7SSL (TLS, always).**
-`LocalAuthRelay.HandleClient` (in `tools/launchnet7-avalonia/Network/LocalAuthRelay.cs`)
+`LocalAuthRelay.HandleClient` (in `tools/LaunchFreya/Network/LocalAuthRelay.cs`)
 opens a TCP connection to the user-configured upstream host/port and
 wraps it in `SslStream` with `EnabledSslProtocols = Tls12 | Tls13`.
 Cert validation policy splits by upstream, **decided syntactically

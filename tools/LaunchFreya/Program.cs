@@ -2,7 +2,7 @@ using System;
 using Avalonia;
 using Avalonia.Headless;
 
-namespace LaunchNet7Avalonia
+namespace LaunchFreya
 {
     internal class Program
     {

@@ -1,4 +1,4 @@
-# launchnet7-avalonia
+# LaunchFreya
 
 Avalonia port of `tools/launchnet7/LaunchNet7/` -- the client-side launcher
 that picks a server, patches the EnB client's ini files + `authlogin.dll`,
@@ -13,7 +13,7 @@ dead ones.
 ## Build
 
 ```sh
-dotnet build tools/launchnet7-avalonia/LaunchNet7Avalonia.csproj
+dotnet build tools/LaunchFreya/LaunchFreya.csproj
 ```
 
 Targets `net10.0` (no `-windows` suffix). Runs natively on Linux/macOS;
@@ -23,13 +23,13 @@ prefixes `wine` when on non-Windows -- see [`Launcher.cs`](Launcher.cs)).
 ## Run
 
 ```sh
-dotnet tools/launchnet7-avalonia/bin/Debug/net10.0/FreyaLauncher.dll
+dotnet tools/LaunchFreya/bin/Debug/net10.0/FreyaLauncher.dll
 ```
 
 ### Headless smoke test
 
 ```sh
-dotnet tools/launchnet7-avalonia/bin/Debug/net10.0/FreyaLauncher.dll --smoke
+dotnet tools/LaunchFreya/bin/Debug/net10.0/FreyaLauncher.dll --smoke
 ```
 
 Exits 0 on success. CI should call this on every push.

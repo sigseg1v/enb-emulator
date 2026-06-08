@@ -10,7 +10,7 @@
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
-    <RootNamespace>LaunchNet7Avalonia</RootNamespace>
+    <RootNamespace>LaunchFreya</RootNamespace>
     <AssemblyName>FreyaLauncher</AssemblyName>
   </PropertyGroup>
 
@@ -26,6 +26,21 @@
        (Single hyphens only in here: XML comments reject a double hyphen.) -->
   <PropertyGroup Condition="$(RuntimeIdentifier.StartsWith('win'))">
     <DefineConstants>$(DefineConstants);WINDOWS_BUILD</DefineConstants>
+  </PropertyGroup>
+
+  <!-- Phase AN self-updater gate. The shipped Windows package (built with
+       -r win-x64 via `just package-client-windows`) checks for updates; a local
+       `just play-local` / `dotnet run` build does NOT (no auth host to phone,
+       and the dev exe layout has no bin/FreyaProxy.exe to hash). Default follows
+       the win RID but is overridable, so the updater can be exercised locally
+       against a stub: `dotnet run -p:CheckForUpdates=true`. (Single hyphens only
+       in this comment: XML rejects a double hyphen.) -->
+  <PropertyGroup>
+    <CheckForUpdates Condition="'$(CheckForUpdates)' == '' and $(RuntimeIdentifier.StartsWith('win'))">true</CheckForUpdates>
+    <CheckForUpdates Condition="'$(CheckForUpdates)' == ''">false</CheckForUpdates>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(CheckForUpdates)' == 'true'">
+    <DefineConstants>$(DefineConstants);CHECK_FOR_UPDATES</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <AvaloniaResource Include="Assets\**" />

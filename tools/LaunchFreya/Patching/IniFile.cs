@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 
-namespace LaunchNet7Avalonia.Patching
+namespace LaunchFreya.Patching
 {
     // Cross-platform replacement for the original IniUtility.cs which
     // P/Invoked kernel32's GetPrivateProfileString / WritePrivateProfileString.

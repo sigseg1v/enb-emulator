@@ -53,7 +53,7 @@ namespace ToolsLauncherAvalonia
 
         // Launches the game client the SAME way `just play-local` does:
         // through that recipe, in a terminal. This is deliberate -- a bare
-        // `dotnet run` of launchnet7-avalonia only spawns client.exe under
+        // `dotnet run` of LaunchFreya only spawns client.exe under
         // WINE; it skips bringing up the docker stack (postgres + server +
         // login + proxy) AND skips play-local's build-if-stale guard. The
         // client then connects to a stale or absent proxy/server and crashes
@@ -69,7 +69,7 @@ namespace ToolsLauncherAvalonia
             if (!string.IsNullOrWhiteSpace(settings.LaunchNet7Path))
             {
                 // User pointed at an explicit binary directory (standalone deploy).
-                string exe = Path.Combine(settings.LaunchNet7Path, "LaunchNet7Avalonia");
+                string exe = Path.Combine(settings.LaunchNet7Path, "FreyaLauncher");
                 if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) exe += ".exe";
                 if (File.Exists(exe))
                 {
@@ -85,7 +85,7 @@ namespace ToolsLauncherAvalonia
                 // No repo / justfile -- can't bring up the dev stack. Fall
                 // back to the in-tree launcher, but make clear the stack must
                 // already be current or the client will hit a stale proxy.
-                var (ok, detail) = Launch("launchnet7-avalonia", settings);
+                var (ok, detail) = Launch("LaunchFreya", settings);
                 return ok
                     ? (true, $"{detail} (no justfile found -- stack NOT rebuilt; run `just play-local` if the client crashes)")
                     : (ok, detail);
@@ -158,7 +158,7 @@ namespace ToolsLauncherAvalonia
         }
 
         // Repo root == directory containing the justfile. Walk up from the
-        // tools root (which holds launchnet7-avalonia) and then from the
+        // tools root (which holds LaunchFreya) and then from the
         // launcher binary as a fallback.
         static string ResolveRepoRoot(Settings settings)
         {
@@ -210,11 +210,11 @@ namespace ToolsLauncherAvalonia
                 return settings.EditorsCheckoutRoot;
             }
             // Walk up from the entry-assembly directory until we find a
-            // sibling launchnet7-avalonia (canary).
+            // sibling LaunchFreya (canary).
             string dir = Path.GetDirectoryName(Assembly.GetEntryAssembly()?.Location ?? "");
             for (int i = 0; i < 8 && dir != null; i++)
             {
-                if (Directory.Exists(Path.Combine(dir, "launchnet7-avalonia")))
+                if (Directory.Exists(Path.Combine(dir, "LaunchFreya")))
                     return dir;
                 dir = Path.GetDirectoryName(dir);
             }

@@ -197,7 +197,7 @@ int main(int argc, char* argv[])
         else if (strncmp(argv[i], "/CLIENT:", 8) == 0)
         {
             // Legacy launcher arg — accepted for backward compatibility.
-            // The launcher (tools/launchnet7-avalonia) now owns client
+            // The launcher (tools/LaunchFreya) now owns client
             // spawning, so the proxy ignores this.
         }
         else if (strncmp(argv[i], "/L", 2) == 0

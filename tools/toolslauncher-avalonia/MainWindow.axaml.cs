@@ -26,7 +26,7 @@ namespace ToolsLauncherAvalonia
     //  - **Updater** (Updateing/Updater.cs + FormUpdate.cs +
     //    ExeUpdater.exe resource) — pointed at toolspatch.net-7.org,
     //    which is the sibling of the dead patch.net-7.org we already
-    //    dropped from launchnet7-avalonia (Tier 5). Same vintage,
+    //    dropped from LaunchFreya (Tier 5). Same vintage,
     //    same fate.
     //
     //  - **System tray icon** — Avalonia has TrayIcon support but it

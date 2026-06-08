@@ -7,7 +7,7 @@ using System.Security.Authentication;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace LaunchNet7Avalonia.Network
+namespace LaunchFreya.Network
 {
     // Plaintext-on-loopback -> TLS-to-upstream relay.
     //

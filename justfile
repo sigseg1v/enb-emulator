@@ -73,7 +73,7 @@ package-pcap-inventory:
 # spawns this under WINE next to the EnB client — see plans/23-phase-w-proxy-win32-crossbuild.md.
 # Builds OpenSSL 3 statically into proxy/third_party/openssl-mingw64 the
 # first time (idempotent), then cmake-configures + builds, then stages
-# FreyaProxy.exe to ./bin/ where launchnet7-avalonia looks for it.
+# FreyaProxy.exe to ./bin/ where LaunchFreya looks for it.
 build-proxy-win64:
     @echo ">>> building static OpenSSL 3 for MinGW (idempotent — skip if already built)"
     ./proxy/scripts/build-openssl-mingw.sh
@@ -100,19 +100,19 @@ build-proxy-win64:
 # cfg untouched.
 package-client-windows: build-proxy-win64
     @echo ">>> publishing self-contained win-x64 launcher (single-file)"
-    dotnet publish tools/launchnet7-avalonia/LaunchNet7Avalonia.csproj -c Release -r win-x64 \
+    dotnet publish tools/LaunchFreya/LaunchFreya.csproj -c Release -r win-x64 \
         --self-contained true \
         -p:PublishSingleFile=true \
         -p:IncludeNativeLibrariesForSelfExtract=true \
         -p:EnableCompressionInSingleFile=true \
         -p:DebugType=none \
-        -o tools/launchnet7-avalonia/bin/win-x64-publish
+        -o tools/LaunchFreya/bin/win-x64-publish
     @echo ">>> assembling dist/enb-client-windows/"
     @rm -rf dist/enb-client-windows
     @mkdir -p dist/enb-client-windows/bin
-    @cp tools/launchnet7-avalonia/bin/win-x64-publish/FreyaLauncher.exe dist/enb-client-windows/FreyaLauncher.exe
+    @cp tools/LaunchFreya/bin/win-x64-publish/FreyaLauncher.exe dist/enb-client-windows/FreyaLauncher.exe
     @cp bin/FreyaProxy.exe dist/enb-client-windows/bin/FreyaProxy.exe
-    @cp tools/launchnet7-avalonia/FreyaLauncher.windows-package.cfg dist/enb-client-windows/FreyaLauncher.cfg
+    @cp tools/LaunchFreya/FreyaLauncher.windows-package.cfg dist/enb-client-windows/FreyaLauncher.cfg
     @echo ">>> done. dist/enb-client-windows/  --  zip it and ship."
     @echo "    Contents: FreyaLauncher.exe + bin/FreyaProxy.exe + FreyaLauncher.cfg"
     @echo "    User extracts the folder on Windows and runs FreyaLauncher.exe."
@@ -152,7 +152,7 @@ launch:
 
 # Game client launcher (Freya).
 launch-net7:
-    dotnet run --project tools/launchnet7-avalonia
+    dotnet run --project tools/LaunchFreya
 
 # Effect / particle / stat editor (DB).
 launch-effect-editor:
@@ -484,9 +484,9 @@ play-local CLIENT_PATH='':
     just _image-status "" "proxy server login" "just rebuild"
 
     echo ">>> building launcher (so its output dir exists for settings.json)"
-    dotnet build tools/launchnet7-avalonia >/dev/null
+    dotnet build tools/LaunchFreya >/dev/null
 
-    SETTINGS_DIR=tools/launchnet7-avalonia/bin/Debug/net10.0
+    SETTINGS_DIR=tools/LaunchFreya/bin/Debug/net10.0
     mkdir -p "$SETTINGS_DIR"
     cp_json=$(printf '%s' "$cp" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
     cat > "$SETTINGS_DIR/FreyaLauncher.settings.json" <<JSON
@@ -512,7 +512,7 @@ play-local CLIENT_PATH='':
     # tracing on a crash, use `just debug-local` instead (it sets
     # WINEDEBUG=+seh,+module,err+module and then calls this recipe).
     echo ">>> launching (WINEPREFIX=$WINEPREFIX WINEDEBUG=${WINEDEBUG:-<unset>}) -- click Play in the GUI"
-    dotnet run --no-build --project tools/launchnet7-avalonia
+    dotnet run --no-build --project tools/LaunchFreya
 
 # Connect to the REMOTE cloud server -- no local docker stack at all.
 #
@@ -574,9 +574,9 @@ play-online CLIENT_PATH='' HOST='':
     just build-proxy-win64
 
     echo ">>> building launcher"
-    dotnet build tools/launchnet7-avalonia >/dev/null
+    dotnet build tools/LaunchFreya >/dev/null
 
-    SETTINGS_DIR=tools/launchnet7-avalonia/bin/Debug/net10.0
+    SETTINGS_DIR=tools/LaunchFreya/bin/Debug/net10.0
     mkdir -p "$SETTINGS_DIR/bin"
     cp bin/FreyaProxy.exe "$SETTINGS_DIR/bin/FreyaProxy.exe"
     echo ">>> staged $SETTINGS_DIR/bin/FreyaProxy.exe"
@@ -601,7 +601,7 @@ play-online CLIENT_PATH='' HOST='':
     : "${WINEPREFIX:=$HOME/.wine-enb}"
     export WINEPREFIX
     echo ">>> launching (WINEPREFIX=$WINEPREFIX) -- pick Multi-Player if not preselected, then click Play"
-    dotnet run --no-build --project tools/launchnet7-avalonia
+    dotnet run --no-build --project tools/LaunchFreya
 
 # Drive the C# CLI client against the REMOTE (cloud) server -- the online twin
 # of `just play-cli`. No local docker stack: the CLI's own dedicated proxy

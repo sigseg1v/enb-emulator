@@ -2,7 +2,7 @@ using System;
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace LaunchNet7Avalonia
+namespace LaunchFreya
 {
     // Original LauncherUtility.GetShortPathName called the kernel32
     // GetShortPathNameW Win32 API. On Windows we keep that behaviour

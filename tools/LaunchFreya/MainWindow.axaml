@@ -3,7 +3,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
-        x:Class="LaunchNet7Avalonia.MainWindow"
+        x:Class="LaunchFreya.MainWindow"
         Width="1280" Height="680"
         Title="LaunchFreya"
         Background="{DynamicResource SystemRegionBrush}"
@@ -63,9 +63,13 @@
       </Grid>
     </Border>
 
-    <!-- Row 3: Status line -->
-    <TextBlock Grid.Row="3" Name="c_Status" Margin="0,12,0,4"
-               Text="Please select a server and hit Play." />
+    <!-- Row 3: Status line + (Phase AN) indeterminate update/download spinner -->
+    <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="10" Margin="0,12,0,4">
+      <TextBlock Name="c_Status" VerticalAlignment="Center"
+                 Text="Please select a server and hit Play." />
+      <ProgressBar Name="c_UpdateSpinner" Width="160" IsIndeterminate="True"
+                   IsVisible="False" VerticalAlignment="Center" />
+    </StackPanel>
 
     <!-- Row 4: filler so the button row hugs the bottom -->
     <Border Grid.Row="4" />

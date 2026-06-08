@@ -1,0 +1,246 @@
+using System;
+using System.IO;
+using System.Net.Http;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace LaunchFreya.Update
+{
+    // Thrown for any recoverable update failure (bad path, hash mismatch,
+    // download/transport error). The launcher surfaces the message and does NOT
+    // apply a partial update -- it leaves the install untouched and lets the
+    // next launch try again (the documented push/update race is absorbed here).
+    public sealed class UpdateException : Exception
+    {
+        public UpdateException(string message, Exception inner = null) : base(message, inner) { }
+    }
+
+    // Orchestrates the launcher self-update: compute local hashes, ask the login
+    // server, download to a staging dir, verify every hash, then atomically
+    // replace -- including the running launcher (Windows rename-self) -- and
+    // relaunch. Network + filesystem live here; the pure helpers are in
+    // UpdateLogic so they stay unit-testable.
+    public sealed class Updater
+    {
+        public const string LauncherFileName = "FreyaLauncher.exe";
+        public const string ProxyRelativePath = "bin/FreyaProxy.exe";
+        public const string StagingDirName = "updates";
+        public const string BackupSuffix = ".old";
+
+        readonly HttpClient _http;
+        readonly string _baseDir;
+        readonly string _selfExePath;
+        readonly Action<string> _log;
+
+        public Updater(string baseDir, string selfExePath, Action<string> log, HttpClient http = null)
+        {
+            _baseDir = baseDir ?? throw new ArgumentNullException(nameof(baseDir));
+            _selfExePath = selfExePath;
+            _log = log ?? (_ => { });
+            _http = http ?? new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        }
+
+        // True if the running launcher's self-exe was replaced and the caller
+        // should relaunch + exit.
+        public bool SelfReplaced { get; private set; }
+
+        // Hash the two local binaries the server decides on. A missing file
+        // yields null -> the request sends an empty hash -> the server reports a
+        // mismatch and ships that file, which is the correct recovery for a
+        // partially-broken install.
+        public (string launcherHash, string proxyHash) ComputeLocalHashes()
+        {
+            string launcher = HashOrNull(_selfExePath ?? Path.Combine(_baseDir, LauncherFileName));
+            string proxy = HashOrNull(Path.Combine(_baseDir, "bin", "FreyaProxy.exe"));
+            return (launcher, proxy);
+        }
+
+        string HashOrNull(string path)
+        {
+            try
+            {
+                if (path != null && File.Exists(path)) return UpdateLogic.ComputeSha512(path);
+            }
+            catch (Exception ex)
+            {
+                _log($"update: could not hash {path}: {ex.Message}");
+            }
+            return null;
+        }
+
+        // POST the local hashes to /updateCheck. Returns the parsed reply, or
+        // null on any transport/parse failure (caller treats null as
+        // "server not ready" -> fail-closed, Play stays disabled).
+        public async Task<UpdateCheckResponse> CheckAsync(string updateCheckUrl, CancellationToken ct = default)
+        {
+            var (launcher, proxy) = ComputeLocalHashes();
+            string body = UpdateLogic.BuildRequestJson(launcher ?? "", proxy ?? "");
+            try
+            {
+                using var content = new StringContent(body, Encoding.UTF8, "application/json");
+                using var resp = await _http.PostAsync(updateCheckUrl, content, ct).ConfigureAwait(false);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    _log($"update: /updateCheck returned HTTP {(int)resp.StatusCode}");
+                    return null;
+                }
+                string json = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                var parsed = UpdateLogic.ParseResponse(json);
+                if (parsed == null) _log("update: could not parse /updateCheck response");
+                return parsed;
+            }
+            catch (Exception ex)
+            {
+                _log($"update: /updateCheck request failed: {ex.Message}");
+                return null;
+            }
+        }
+
+        // Download every file in the response to the staging dir, verify all
+        // hashes, then apply. Throws UpdateException on the FIRST problem and
+        // leaves the install untouched (nothing is applied until every download
+        // is present and verified).
+        public async Task DownloadAndApplyAsync(UpdateCheckResponse resp, Action<string> progress = null,
+            CancellationToken ct = default)
+        {
+            progress ??= _log;
+            if (resp?.Files == null || resp.Files.Count == 0)
+                throw new UpdateException("Update response listed no files.");
+
+            // 1. Resolve + path-guard every destination BEFORE touching disk.
+            var planned = new (UpdateFile file, string dest, string staged)[resp.Files.Count];
+            string staging = Path.Combine(_baseDir, StagingDirName);
+            for (int i = 0; i < resp.Files.Count; i++)
+            {
+                var f = resp.Files[i];
+                if (!UpdateLogic.TryResolveWithinBase(_baseDir, f.RelativePath, out string dest))
+                    throw new UpdateException(
+                        $"Refusing update: '{f.RelativePath}' resolves outside the install directory.");
+                string staged = Path.Combine(staging, Path.GetFileName(dest));
+                planned[i] = (f, dest, staged);
+            }
+
+            // 2. Fresh staging dir.
+            try
+            {
+                if (Directory.Exists(staging)) Directory.Delete(staging, recursive: true);
+                Directory.CreateDirectory(staging);
+            }
+            catch (Exception ex)
+            {
+                throw new UpdateException($"Could not prepare staging directory: {ex.Message}", ex);
+            }
+
+            // 3. Download all.
+            foreach (var (file, _, staged) in planned)
+            {
+                progress($"Downloading {Path.GetFileName(staged)}...");
+                await DownloadFileAsync(file.Url, staged, ct).ConfigureAwait(false);
+            }
+
+            // 4. Verify all hashes before applying anything.
+            foreach (var (file, _, staged) in planned)
+            {
+                string actual = UpdateLogic.ComputeSha512(staged);
+                if (!UpdateLogic.HashesEqual(actual, file.Hash))
+                    throw new UpdateException(
+                        $"Hash mismatch for {Path.GetFileName(staged)} -- update aborted, nothing changed.");
+            }
+
+            // 5. Apply. Non-self files first; the running launcher last (so a
+            // failure before the self-swap never leaves a half-launched state).
+            (UpdateFile file, string dest, string staged) self = default;
+            bool haveSelf = false;
+            foreach (var entry in planned)
+            {
+                if (IsSelf(entry.dest)) { self = entry; haveSelf = true; continue; }
+                ApplyNonSelf(entry.staged, entry.dest);
+                progress($"Updated {entry.file.RelativePath}");
+            }
+
+            if (haveSelf)
+            {
+                ApplySelf(self.staged, self.dest);
+                SelfReplaced = true;
+                progress($"Updated {self.file.RelativePath}");
+            }
+        }
+
+        async Task DownloadFileAsync(string url, string destPath, CancellationToken ct)
+        {
+            try
+            {
+                using var resp = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct)
+                    .ConfigureAwait(false);
+                resp.EnsureSuccessStatusCode();
+                Directory.CreateDirectory(Path.GetDirectoryName(destPath));
+                await using var fs = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None);
+                await resp.Content.CopyToAsync(fs, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not UpdateException)
+            {
+                throw new UpdateException($"Download failed for {url}: {ex.Message}", ex);
+            }
+        }
+
+        void ApplyNonSelf(string staged, string dest)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(dest));
+                File.Move(staged, dest, overwrite: true);
+            }
+            catch (Exception ex)
+            {
+                throw new UpdateException($"Could not replace {dest}: {ex.Message}", ex);
+            }
+        }
+
+        // Windows can rename (but not overwrite/delete) a running image. Rename
+        // the live launcher aside to *.old, move the new one into place, and let
+        // the freshly-started instance delete the *.old on its next launch.
+        void ApplySelf(string staged, string dest)
+        {
+            try
+            {
+                string backup = dest + BackupSuffix;
+                if (File.Exists(backup)) File.Delete(backup);
+                if (File.Exists(dest)) File.Move(dest, backup);
+                File.Move(staged, dest);
+            }
+            catch (Exception ex)
+            {
+                throw new UpdateException($"Could not replace the launcher: {ex.Message}", ex);
+            }
+        }
+
+        bool IsSelf(string resolvedDest)
+        {
+            if (string.IsNullOrEmpty(_selfExePath)) return false;
+            var cmp = OperatingSystem.IsWindows()
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal;
+            return string.Equals(
+                Path.GetFullPath(resolvedDest), Path.GetFullPath(_selfExePath), cmp);
+        }
+
+        // Remove leftovers from a previous self-replace: the *.old backup next to
+        // the launcher and a stale staging dir. Best-effort; never throws.
+        public void CleanupStaleArtifacts()
+        {
+            try
+            {
+                string backup = (_selfExePath ?? Path.Combine(_baseDir, LauncherFileName)) + BackupSuffix;
+                if (File.Exists(backup)) File.Delete(backup);
+            }
+            catch (Exception ex) { _log($"update: could not remove stale backup: {ex.Message}"); }
+            try
+            {
+                string staging = Path.Combine(_baseDir, StagingDirName);
+                if (Directory.Exists(staging)) Directory.Delete(staging, recursive: true);
+            }
+            catch (Exception ex) { _log($"update: could not remove stale staging dir: {ex.Message}"); }
+        }
+    }
+}

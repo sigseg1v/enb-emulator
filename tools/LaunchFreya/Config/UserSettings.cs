@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Text.Json;
 
-namespace LaunchNet7Avalonia.Config
+namespace LaunchFreya.Config
 {
     // Cross-platform replacement for the original
     // Properties.Settings.Default (which depends on

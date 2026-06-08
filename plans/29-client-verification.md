@@ -703,7 +703,7 @@ format & byte order", Trap 2).
 > -> `<client> SectorServer LOGIN -- connection active` -> `START_ACK -> server`
 > (player griever, sector 10151). Sector entry succeeds; no +15s kick.
 
-- **Change**: the launcher (`tools/launchnet7-avalonia/Launcher.cs::LaunchNet7Proxy`)
+- **Change**: the launcher (`tools/LaunchFreya/Launcher.cs::LaunchNet7Proxy`)
   now spawns Net7Proxy with `/ADDRESS:127.0.0.1` for ALL upstreams, instead of
   `/ADDRESS:{resolved-upstream-IP}`. `/ADDRESS` sets the proxy's local
   listen/advertise identity (`g_internal_addr` -> `ServerManager::m_IpAddress`),

@@ -8,11 +8,11 @@ using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
-using LaunchNet7Avalonia.Config;
-using LaunchNet7Avalonia.Network;
-using LaunchNet7Avalonia.Patching;
+using LaunchFreya.Config;
+using LaunchFreya.Network;
+using LaunchFreya.Patching;
 
-namespace LaunchNet7Avalonia
+namespace LaunchFreya
 {
     public sealed class LaunchSetting
     {

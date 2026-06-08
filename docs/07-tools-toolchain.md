@@ -128,7 +128,7 @@ Notes: `tools/item-editor-avalonia/` is the Avalonia port and runs
 natively on Linux; `tools/itemeditor/` is the original WinForms project,
 kept for reference and Windows / WINE use.
 
-### `launchnet7-avalonia/` -- Freya (game client launcher)
+### `LaunchFreya/` -- Freya (game client launcher)
 
 Type: Avalonia.
 Purpose: bootstraps the EnB client (the original Win32 binary under

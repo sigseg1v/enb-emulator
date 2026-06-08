@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace LaunchNet7Avalonia.Config
+namespace LaunchFreya.Config
 {
     public sealed class ServerConfig
     {

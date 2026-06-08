@@ -14,7 +14,7 @@
     </StackPanel>
 
     <StackPanel Spacing="8">
-      <TextBlock Text="LaunchNet7 directory (optional — leave blank to use the in-tree launchnet7-avalonia project):" />
+      <TextBlock Text="LaunchNet7 directory (optional — leave blank to use the in-tree LaunchFreya project):" />
       <Grid ColumnDefinitions="*,6,Auto">
         <TextBox  Grid.Column="0" x:Name="c_LaunchNet7Txt" />
         <Button   Grid.Column="2" x:Name="c_BrowseN7Btn" Content="Browse..." Click="OnBrowseLaunchNet7" />

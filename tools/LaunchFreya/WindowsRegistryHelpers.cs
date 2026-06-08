@@ -3,7 +3,7 @@ using System.Runtime.Versioning;
 using Microsoft.Win32;
 #endif
 
-namespace LaunchNet7Avalonia
+namespace LaunchFreya
 {
     // Wrapper around the Westwood\Earth and Beyond\Registration HKLM
     // key. Compiled out on non-Windows builds. On a stock .NET 10

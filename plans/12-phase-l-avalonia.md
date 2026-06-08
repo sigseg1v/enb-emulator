@@ -229,7 +229,7 @@ The existing WinForms targets stay in the tree. They still build via `dotnet bui
 
 ### Tier 4 — client-side launcher port (complete)
 
-- [x] **launchnet7-avalonia** — full Avalonia port of
+- [x] **LaunchFreya** — full Avalonia port of
       `tools/launchnet7/LaunchNet7/`. Self-contained — does NOT depend
       on commontools-avalonia (the launcher has its own config story,
       no MySQL, no DB Search dialog).
@@ -273,7 +273,7 @@ The existing WinForms targets stay in the tree. They still build via `dotnet bui
         `wine "<exe>"` (`WinExe()` helper checks
         `RuntimeInformation.IsOSPlatform(OSPlatform.Windows)`).
 
-      Dropped (documented in `tools/launchnet7-avalonia/README.md`):
+      Dropped (documented in `tools/LaunchFreya/README.md`):
       - `Updateing/Updater.cs` + `FormUpdate.cs` — upstream patch host
         (patch.net-7.org) is offline; resurrecting it is its own task.
       - `ExeUpdater` (self-update subproject) — only meaningful on
@@ -299,14 +299,14 @@ The existing WinForms targets stay in the tree. They still build via `dotnet bui
       test sees the same XML the production deployment will.
 
       Registered in `tools/Net7Tools.slnx` under
-      `/launchnet7-avalonia/`. Whole solution still builds.
-      Touches: new `tools/launchnet7-avalonia/` (13 files +
+      `/LaunchFreya/`. Whole solution still builds.
+      Touches: new `tools/LaunchFreya/` (13 files +
       `LaunchNet7.cfg` copy + slnx entry).
       Status: complete
 
       **7/14 tools have Linux-native paths now.**
 
-- [x] **launchnet7-avalonia in-process auth relay** — 2026-05-28.
+- [x] **LaunchFreya in-process auth relay** — 2026-05-28.
       Root cause for the WINE-side `INV-300` / `wininet 12029` login
       failures was schannel cert validation flakiness against the dev
       self-signed cert (the cert was installed in the WINE prefix's
@@ -345,7 +345,7 @@ The existing WinForms targets stay in the tree. They still build via `dotnet bui
         malicious DNS answer can't trick the relay into skipping verify.
 
       Touches:
-      - new `tools/launchnet7-avalonia/Network/LocalAuthRelay.cs`
+      - new `tools/LaunchFreya/Network/LocalAuthRelay.cs`
         (132 LOC; `TcpListener` on `IPAddress.Loopback`, `SslStream`
         upstream with TLS 1.2|1.3, bidirectional `CopyToAsync`).
       - `Launcher.cs`: added `AuthRelay` property +
@@ -381,7 +381,7 @@ The existing WinForms targets stay in the tree. They still build via `dotnet bui
       Non-loopback upstream flips the log to `verify=full` (verified
       with `192.168.1.1:4443`).
 
-      Build: `dotnet build tools/launchnet7-avalonia` clean
+      Build: `dotnet build tools/LaunchFreya` clean
       (0 warn / 0 err).
 
       Status: code complete; live GUI test (Click Play with WINE
@@ -587,7 +587,7 @@ The existing WinForms targets stay in the tree. They still build via `dotnet bui
       Status: complete
 
       **Subsystems dropped** (all pointed at dead infrastructure — the
-      `launchnet7-avalonia` Tier 5 precedent established that dead-endpoint
+      `LaunchFreya` Tier 5 precedent established that dead-endpoint
       subsystems get dropped, not ported to no useful target):
       - `GUI/IRCMessenger.cs` + `GUI/PrivateMessage.cs` + `GUI/Login.cs`
         (IRC auth) + `Meebey.SmartIrc4Net` dep — hardcoded
@@ -600,7 +600,7 @@ The existing WinForms targets stay in the tree. They still build via `dotnet bui
       - `Updateing/*` + `GUI/FormUpdate.cs` + `Resources/ExeUpdater.exe`
         + `Cryptography/Crc32*.cs` — pointed at `toolspatch.net-7.org`,
         sibling of the dead `patch.net-7.org` already dropped from
-        launchnet7-avalonia.
+        LaunchFreya.
       - `Helpers.cs SQLData` + `Properties/Settings.{settings,Designer.cs}`
         — only used by Login/Updater; replaced by JSON `Settings.cs`.
       - `AssemblyFileInfo.cs`, `WebPath.cs` — only used by Updater.
@@ -614,7 +614,7 @@ The existing WinForms targets stay in the tree. They still build via `dotnet bui
         `dotnet run --project <csproj>`**, not `Process.Start("<editor>.exe")`.
         `EditorLauncher.cs` resolves the editor's `.csproj` relative to
         the launcher binary (walks up 8 dirs looking for sibling
-        `launchnet7-avalonia/` as canary) or uses the configured
+        `LaunchFreya/` as canary) or uses the configured
         `EditorsCheckoutRoot`. More portable than the original; works
         on Linux without WINE.
       - **`Ported` flag per editor.** `_editors` list in `MainWindow`

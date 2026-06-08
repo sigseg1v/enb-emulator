@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Xml;
 
-namespace LaunchNet7Avalonia.Config
+namespace LaunchFreya.Config
 {
     // Replaces the original .NET-Framework System.Configuration
     // ConfigurationSection layer. FreyaLauncher.cfg is a normal XML doc

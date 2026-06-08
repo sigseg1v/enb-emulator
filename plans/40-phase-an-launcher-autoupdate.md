@@ -38,7 +38,7 @@ Windows artifacts, overwrites them in S3, and invalidates CloudFront.
 
 | # | Component | Where | Builds locally? |
 |---|---|---|---|
-| C1 | Launcher updater (hash, prompt, download, verify, self-replace, relaunch) | `tools/launchnet7-avalonia/` | yes |
+| C1 | Launcher updater (hash, prompt, download, verify, self-replace, relaunch) | `tools/LaunchFreya/` | yes |
 | C2 | Login `/updateCheck` HTTPS endpoint + startup hash cache | `login-server/Net7SSL/` | yes |
 | C3 | Delivery infra: private S3 + CloudFront + ACM + WAF + Route53 `dl.` record | `deploy/do/terraform/` | no (cloud) |
 | C4 | `just push` pipeline: build Win artifacts -> S3 overwrite -> CF invalidation | `deploy/do/scripts/Build-And-Push.ps1` (+ a Win-artifact build) | partial |
@@ -107,7 +107,7 @@ post-download integrity, not for the update decision.
 
 ## 5. Component detail + task list
 
-### C1 -- Launcher updater  `tools/launchnet7-avalonia/`
+### C1 -- Launcher updater  `tools/LaunchFreya/`
 
 Hook point: the existing status-probe flow in `MainWindow.axaml.cs` (the
 `c_ServerStatus` label + `_statusProbeGen` monotonic token, ~lines 275-305) and
@@ -166,7 +166,12 @@ the Play button enable/disable.
       small `manifest.json` over CloudFront (OPEN-Q1 RESOLVED -- manifest GET, no
       S3 HEAD, no AWS creds). **No TTL** -- the cache is refreshed by restarting
       the login server, which `just update` does (OPEN-Q2 RESOLVED). Thread-safe
-      read on the request path.
+      read on the request path. **Fetch mechanism:** the login server links
+      OpenSSL but NOT libcurl today; add **libcurl** (Dockerfile
+      `libcurl4-openssl-dev` build + `libcurl4` runtime; CMake link `CURL::libcurl`)
+      and GET `NET7_PATCHER_MANIFEST_URL`. libcurl also reads `file://` URLs, so
+      the **local-stub test (step 1) points the env at a manifest on disk** -- no
+      TLS, no cloud. manifest.json schema: `{ "files": [{ "relativePath", "sha512" }, ...] }`.
 - [ ] AN-C2-3 Compare client `launcherHash` + `proxyHash` to cache. Both match
       -> `UP_TO_DATE`. Else -> `UPDATE_NEEDED` with a **conditional** `files`
       list: launcher mismatch adds `FreyaLauncher.exe` + `FreyaLauncher.cfg`

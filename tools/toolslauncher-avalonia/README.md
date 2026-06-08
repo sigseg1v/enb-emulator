@@ -10,8 +10,8 @@ A small (260×380) window with one button per editor and a "Launch Net7" button 
 
 A Settings dialog (File → Settings...) configures:
 
-- `LaunchNet7Path` -- explicit directory containing a published `FreyaLauncher[.exe]`. Leave blank to fall back to `dotnet run --project ../launchnet7-avalonia/`.
-- `EditorsCheckoutRoot` -- the `tools/` directory. Leave blank to auto-resolve (walks up from the launcher's binary looking for a sibling `launchnet7-avalonia/`).
+- `LaunchNet7Path` -- explicit directory containing a published `FreyaLauncher[.exe]`. Leave blank to fall back to `dotnet run --project ../LaunchFreya/`.
+- `EditorsCheckoutRoot` -- the `tools/` directory. Leave blank to auto-resolve (walks up from the launcher's binary looking for a sibling `LaunchFreya/`).
 
 Settings persist to `~/.config/FreyaTools/toolslauncher-avalonia.json` on Linux and `%APPDATA%\FreyaTools\toolslauncher-avalonia.json` on Windows (via `Environment.SpecialFolder.ApplicationData`).
 
@@ -27,13 +27,13 @@ Settings persist to `~/.config/FreyaTools/toolslauncher-avalonia.json` on Linux 
 
 ## What this port drops
 
-These subsystems all depend on infrastructure that has been dead for years. Per the launchnet7-avalonia precedent (Tier 5), they are dropped rather than ported to no useful endpoint.
+These subsystems all depend on infrastructure that has been dead for years. Per the LaunchFreya precedent (Tier 5), they are dropped rather than ported to no useful endpoint.
 
 | Dropped | Why |
 |---|---|
 | `GUI/IRCMessenger.cs`, `GUI/PrivateMessage.cs`, `GUI/Login.cs` (IRC), `Meebey.SmartIrc4Net` dep | Hardcoded IRC server `eservices.dyndns.org:6667` channel `#test`. dyndns.org's free service shut down in 2014, and the placeholder channel name betrays this was never production. |
 | `GUI/FtpWindow.cs`, `Struct Data/FtpAddy.cs` | Used `System.Windows.Forms.WebBrowser` (IE-based, no Avalonia analogue) against hardcoded credentials for `net-7.org` FTP, which is dead. |
-| `Updateing/*` (Updater, UpdateItem, UpdateCheckResult, UpdateCheckStatus, UpdateItemCollection, VersionCompareMode), `GUI/FormUpdate.cs`, `Resources/ExeUpdater.exe` | Pointed at `toolspatch.net-7.org` — sibling of the dead `patch.net-7.org` already dropped from launchnet7-avalonia. |
+| `Updateing/*` (Updater, UpdateItem, UpdateCheckResult, UpdateCheckStatus, UpdateItemCollection, VersionCompareMode), `GUI/FormUpdate.cs`, `Resources/ExeUpdater.exe` | Pointed at `toolspatch.net-7.org` — sibling of the dead `patch.net-7.org` already dropped from LaunchFreya. |
 | `Cryptography/Crc32*.cs` | Only used by Updater. |
 | `Helpers.cs` `SQLData` static | Only used by the IRC Login. |
 | `Properties/Settings.settings` / `Properties/Settings.Designer.cs` | WinForms `user.config` flow; replaced by JSON in `Settings.cs`. |

@@ -9,12 +9,16 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
-using LaunchNet7Avalonia.Config;
+using LaunchFreya.Config;
+#if CHECK_FOR_UPDATES
+using System.Diagnostics;
+using LaunchFreya.Update;
+#endif
 using MsBox.Avalonia;
 using MsBox.Avalonia.Enums;
 using MsBoxIcon = MsBox.Avalonia.Enums.Icon;
 
-namespace LaunchNet7Avalonia
+namespace LaunchFreya
 {
     // Avalonia port of LaunchNet7/FormMain.cs. Trimmed for the launcher's
     // core job:
