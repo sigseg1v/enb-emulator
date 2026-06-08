@@ -99,16 +99,21 @@ try {
         $patcherManifestUrl = "https://$dlDomain/manifest.json"
     }
 
-    # Phase AP rolling DB backups (default-off). The bucket + prefix come from the
-    # operator .env; the AWS_* below are the BUCKET-SCOPED IAM token terraform
-    # emitted (db_backup_access_key_id / db_backup_secret_access_key) which the
-    # operator pasted back into .env. All blank => the db-backup sidecar idles.
-    # These creds are SECRETS and live only in the gitignored operator .env.
+    # Phase AP rolling DB backups (default-off). Only the bucket NAME is an
+    # operator choice (.env opt-in toggle). The BUCKET-SCOPED IAM token is NOT a
+    # secret the operator handles: backup.tf mints it with the operator's AWS
+    # profile and terraform stores it in the tfstate we already have, so we read
+    # the key/secret STRAIGHT FROM THE TF OUTPUTS here -- no secret ever round-
+    # trips through the operator .env. Blank bucket => no tf outputs to read and
+    # the sidecar idles.
     $backupBucket    = Get-EnvOr 'ENB_DB_BACKUP_S3_BUCKET' ''
-    $backupPrefix    = Get-EnvOr 'ENB_DB_BACKUP_S3_PREFIX' 'pg'
-    $backupAwsKey    = Get-EnvOr 'ENB_DB_BACKUP_AWS_ACCESS_KEY_ID' ''
-    $backupAwsSecret = Get-EnvOr 'ENB_DB_BACKUP_AWS_SECRET_ACCESS_KEY' ''
+    $backupAwsKey    = ''
+    $backupAwsSecret = ''
     $backupAwsRegion = Get-EnvOr 'AWS_REGION' 'us-east-1'
+    if ($backupBucket) {
+        $backupAwsKey    = Get-TfOutput 'db_backup_access_key_id'
+        $backupAwsSecret = Get-TfOutput 'db_backup_secret_access_key'
+    }
 
     $envText = @(
         "COMPOSE_PROJECT_NAME=$project"
@@ -123,7 +128,6 @@ try {
         "NET7_PATCHER_MANIFEST_URL=$patcherManifestUrl"
         "NET7_PATCHER_DL_BASE=$patcherDlBase"
         "BACKUP_S3_BUCKET=$backupBucket"
-        "BACKUP_S3_PREFIX=$backupPrefix"
         "BACKUP_AWS_ACCESS_KEY_ID=$backupAwsKey"
         "BACKUP_AWS_SECRET_ACCESS_KEY=$backupAwsSecret"
         "BACKUP_AWS_REGION=$backupAwsRegion"

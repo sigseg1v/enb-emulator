@@ -12,25 +12,36 @@ Every hour, for each database (`net7` content + `net7_user` save-state):
 
 1. `pg_dump -Fc` -- the PostgreSQL **custom** format, which is zlib-compressed
    and restorable with `pg_restore`.
-2. Upload to `s3://<bucket>/<prefix>/hourly/<db>/<UTC-timestamp>.dump`.
-3. At every 6th hour (00, 06, 12, 18 UTC) **promote** that same object into
-   `<prefix>/six-hourly/<db>/` with a server-side S3 copy (no second dump).
+2. Upload to `s3://<bucket>/hourly/<db>/<UTC-timestamp>.dump`.
+3. Once a day (00:00 UTC) **promote** that same object into `daily/<db>/` with a
+   server-side S3 copy (no second dump).
 4. Prune each tier to its retention count.
 
 Retention (per database, per tier):
 
-| Tier         | Key prefix              | Keep (default)            | Window      |
-|--------------|-------------------------|---------------------------|-------------|
-| hourly       | `<prefix>/hourly/`      | `HOURLY_RETENTION` = 24   | last 24h    |
-| six-hourly   | `<prefix>/six-hourly/`  | `SIXHOURLY_RETENTION` = 28| 7 days x 4  |
+| Tier   | Key prefix     | Keep (default)         | Window        |
+|--------|----------------|------------------------|---------------|
+| hourly | `hourly/<db>/` | `HOURLY_RETENTION` = 24| last 24h      |
+| daily  | `daily/<db>/`  | `DAILY_RETENTION` = 14 | last 14 days  |
 
-So you always have the last 24 hourly snapshots plus 7 days of 6-hourly
-snapshots beyond that, rolling. Timestamps sort lexicographically, so "newest N"
-is just the last N keys in sorted order.
+So you always have the last 24 hourly snapshots plus the last 14 daily
+snapshots, rolling. Timestamps sort lexicographically, so "newest N" is just the
+last N keys in sorted order.
 
-The bucket also carries an S3 **lifecycle** rule (set by terraform) that expires
-hourly objects after 1 day and six-hourly after 8 days -- defense in depth, so
-the bucket cannot grow without bound even if the sidecar's prune ever stalls.
+### Retention is count-based, NOT time-based (and why)
+
+There is deliberately **no S3 lifecycle / expiry policy** on the bucket. The
+count cap (24 hourly / 14 daily) is enforced entirely by this sidecar's prune,
+which deletes an old dump **only when a fresh one has replaced it**.
+
+This is a safety decision, not an oversight. S3 lifecycle rules can only expire
+objects by **age**, never by count -- and an age-based rule is dangerous for
+backups: if the sidecar ever stops producing dumps (crash, bad creds, DB down),
+a time rule would keep deleting the survivors until **zero** backups remain,
+during exactly the outage when you need them most. Count-based pruning instead
+**freezes** the set when uploads stop: no new upload -> no delete. The trade-off
+is that a wedged sidecar can leave slightly more than the nominal count around;
+that is the correct direction to fail for a backup system.
 
 ## Default-OFF
 
@@ -48,10 +59,9 @@ are supplied.
 | `DB_PASS`               | `net7`             | Postgres password (-> `PGPASSWORD`)                |
 | `BACKUP_DATABASES`      | `net7 net7_user`   | space-separated db list                            |
 | `BACKUP_S3_BUCKET`      | (empty = idle)     | target bucket                                      |
-| `BACKUP_S3_PREFIX`      | `pg`               | key prefix; must match terraform `db_backup_s3_prefix` |
 | `BACKUP_S3_ENDPOINT`    | (empty = real AWS) | S3-compatible endpoint (MinIO, R2) for local tests |
 | `HOURLY_RETENTION`      | `24`               | hourly objects to keep                             |
-| `SIXHOURLY_RETENTION`   | `28`               | six-hourly objects to keep                         |
+| `DAILY_RETENTION`       | `14`               | daily objects to keep                              |
 | `AWS_ACCESS_KEY_ID`     | --                 | bucket-scoped token id (SECRET)                    |
 | `AWS_SECRET_ACCESS_KEY` | --                 | bucket-scoped token secret (SECRET)                |
 | `AWS_DEFAULT_REGION`    | --                 | bucket region                                      |
@@ -74,24 +84,24 @@ never served to the internet.
 
 ## Deploy (DigitalOcean stack)
 
-Entirely opt-in. In `deploy/do/.env`:
+Entirely opt-in, and the scoped token never passes through your hands. In
+`deploy/do/.env` set **only** the bucket name:
 
 ```
 ENB_DB_BACKUP_S3_BUCKET=your-unique-enb-backups
-ENB_DB_BACKUP_S3_PREFIX=pg
 ```
 
-1. `just up` -- terraform creates the private bucket + the scoped IAM token.
-2. Copy the emitted token into `.env`:
-   ```
-   terraform output -raw db_backup_access_key_id     -> ENB_DB_BACKUP_AWS_ACCESS_KEY_ID
-   terraform output -raw db_backup_secret_access_key -> ENB_DB_BACKUP_AWS_SECRET_ACCESS_KEY
-   ```
-3. `just update` -- threads bucket + token into the droplet `.env`; the
-   `db-backup` container starts dumping on the next top-of-hour.
+1. `just up` -- terraform (using your AWS profile) creates the private bucket +
+   the bucket-scoped IAM user, and stores the access key in the tfstate.
+2. `just update` -- reads the scoped token **straight from the terraform
+   outputs** (`db_backup_access_key_id` / `db_backup_secret_access_key`) and
+   threads bucket + token into the droplet `.env`. The `db-backup` container
+   starts dumping on the next top-of-hour.
 
-Leaving `ENB_DB_BACKUP_S3_BUCKET` blank makes terraform create nothing and the
-sidecar idle -- an existing deploy is untouched.
+There is no copy-paste of secrets and no access-key/secret field in `.env`: the
+token lives only in the tfstate terraform already manages. Leaving
+`ENB_DB_BACKUP_S3_BUCKET` blank makes terraform create nothing and the sidecar
+idle -- an existing deploy is untouched.
 
 ## Local test against MinIO
 
@@ -107,6 +117,6 @@ docker compose run --rm db-backup
 ## Restore
 
 ```
-aws s3 cp s3://<bucket>/pg/hourly/net7/<ts>.dump /tmp/net7.dump
+aws s3 cp s3://<bucket>/hourly/net7/<ts>.dump /tmp/net7.dump
 pg_restore --clean --if-exists -h <host> -U net7 -d net7 /tmp/net7.dump
 ```

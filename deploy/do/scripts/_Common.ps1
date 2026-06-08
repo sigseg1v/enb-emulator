@@ -79,7 +79,6 @@ function Import-DeployEnv {
     $backupBucket = (Get-EnvOr 'ENB_DB_BACKUP_S3_BUCKET' '')
     $env:TF_VAR_manage_db_backup    = if ($backupBucket) { 'true' } else { 'false' }
     $env:TF_VAR_db_backup_s3_bucket = $backupBucket
-    $env:TF_VAR_db_backup_s3_prefix = (Get-EnvOr 'ENB_DB_BACKUP_S3_PREFIX' 'pg')
 
     # aws provider/acme expect AWS_DEFAULT_REGION too.
     if (-not (Test-Path 'Env:AWS_DEFAULT_REGION')) { $env:AWS_DEFAULT_REGION = $env:TF_VAR_aws_region }

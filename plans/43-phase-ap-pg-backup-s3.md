@@ -20,21 +20,28 @@ read-only consumer of the databases: Postgres (read) + one S3 bucket
 no game-state mutation -- so the wire-fidelity gate (CLI byte-pin + plans/29 CV)
 does NOT apply, and it does not touch the server's security posture.
 
-### Retention model (matches the request)
+### Retention model (owner spec, revised 2026-06-08)
 
-| Tier        | Cadence            | Keep                  | Window          |
-|-------------|--------------------|-----------------------|-----------------|
-| hourly      | top of every hour  | newest 24             | last 24h        |
-| six-hourly  | 00/06/12/18 UTC    | newest 28             | 7 days x 4/day  |
+Flat `hourly/<db>/` and `daily/<db>/` prefixes at the bucket root:
 
-The six-hourly tier is a **server-side S3 copy promotion** of the hourly dump
-already taken that hour -- no second `pg_dump`. Dumps use `pg_dump -Fc` (the
-PostgreSQL custom format, zlib-compressed). Keys embed a UTC timestamp and sort
-lexicographically, so "newest N" is the last N keys in sorted order.
+| Tier   | Cadence           | Keep      | Window        |
+|--------|-------------------|-----------|---------------|
+| hourly | top of every hour | newest 24 | last 24h      |
+| daily  | 00:00 UTC         | newest 14 | last 14 days  |
 
-A defense-in-depth S3 lifecycle rule (terraform) also expires hourly objects
-after 1 day and six-hourly after 8 days, so the bucket cannot grow without bound
-even if the sidecar's count-prune ever stalls.
+The daily tier is a **server-side S3 copy promotion** of the 00:00 hourly dump
+-- no second `pg_dump`. Dumps use `pg_dump -Fc` (the PostgreSQL custom format,
+zlib-compressed). Keys embed a UTC timestamp and sort lexicographically, so
+"newest N" is the last N keys in sorted order.
+
+**Retention is count-based, NOT time-based (owner directive 2026-06-08).** There
+is deliberately NO S3 lifecycle/expiry rule. S3 lifecycle can only expire by age,
+and an age rule would keep deleting old dumps after the sidecar stops producing
+new ones -- draining the backups to zero during exactly the outage when they
+matter. The count cap (24/14) lives only in the sidecar prune, which deletes an
+old dump ONLY when a fresh one replaces it; a stalled sidecar freezes the set
+instead of emptying it. The price is that a wedged sidecar may leave slightly
+more than the nominal count -- the correct direction to fail for backups.
 
 ## The bucket-scoped token
 
@@ -45,6 +52,13 @@ bucket, no other AWS API. That is the "special s3 bucket scoped token." The
 bucket blocks all public access and is SSE-S3 encrypted; unlike the patcher
 bucket there is no CloudFront in front of it -- it is never served to the net.
 
+The token never passes through the operator's `.env`. terraform (running under
+the operator's AWS profile) mints the user and key and stores them in the
+tfstate we already have; `Update-Stack.ps1` reads `db_backup_access_key_id` /
+`db_backup_secret_access_key` straight from the tf outputs and writes them into
+the droplet `.env`. There are no access-key/secret fields in `.env.example` --
+the only operator input is the bucket name.
+
 ## Files
 
 - `db-backup/backup.sh` -- the rolling loop (bash; pg_dump + aws s3). Logs to
@@ -54,9 +68,11 @@ bucket there is no CloudFront in front of it -- it is never served to the net.
   DB major) + `aws-cli` + `bash`.
 - `db-backup/README.md` -- config, the scoped-token rationale, deploy + restore.
 - `deploy/do/terraform/backup.tf` -- private bucket + public-access-block + SSE +
-  lifecycle + bucket-scoped IAM user/policy/key + outputs. All
-  `count = var.manage_db_backup ? 1 : 0`.
-- `deploy/do/terraform/variables.tf` -- 5 new opt-in vars (default-OFF).
+  bucket-scoped IAM user/policy/key + outputs. All
+  `count = var.manage_db_backup ? 1 : 0`. Deliberately NO lifecycle/expiry rule
+  (retention is count-based in the sidecar -- see the retention model above).
+- `deploy/do/terraform/variables.tf` -- 2 opt-in vars (`manage_db_backup`,
+  `db_backup_s3_bucket`), default-OFF.
 - `deploy/do/scripts/_Common.ps1` -- derives `manage_db_backup` from the bucket
   name; threads `TF_VAR_db_backup_*`.
 - `deploy/do/scripts/Update-Stack.ps1` -- threads bucket + scoped token into the
@@ -69,18 +85,18 @@ bucket there is no CloudFront in front of it -- it is never served to the net.
 
 ## Checklist
 
-- [x] AP-1 backup.sh (dump+upload, six-hourly promote, count-prune, idle-OFF) --
+- [x] AP-1 backup.sh (dump+upload, daily promote, count-prune, idle-OFF) --
       shellcheck CLEAN, `bash -n` OK, idle path smoke-tested in-container.
 - [x] AP-2 Dockerfile (`postgres:16-alpine` + aws-cli + bash) -- `docker build`
       green; runs and idles with no bucket.
-- [x] AP-3 terraform backup.tf + 5 variables (all opt-in, count-gated).
+- [x] AP-3 terraform backup.tf + 2 variables (all opt-in, count-gated).
 - [x] AP-4 PowerShell wiring (_Common TF_VAR derive; Update-Stack droplet .env;
       Build-And-Push image list).
 - [x] AP-5 compose services (dev + prod), default-OFF.
 - [x] AP-6 .env.example + db-backup/README.md.
 - [ ] AP-7 OWNER deploy step (opt-in): set `ENB_DB_BACKUP_S3_BUCKET`, `just up`,
-      copy the emitted token into `.env`, `just update`. Left to the owner --
-      this phase deploys NOTHING.
+      `just update`. No token paste -- `just update` reads the scoped key from
+      the tf outputs. Left to the owner -- this phase deploys NOTHING.
 
 ## Notes
 

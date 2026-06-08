@@ -4,16 +4,25 @@
 #
 # Dumps every configured database once an hour with `pg_dump -Fc` (the custom
 # format is zlib-compressed), uploads each dump to a PRIVATE S3 bucket under an
-# "hourly/" prefix, and at every 6th hour PROMOTES that same dump (server-side
-# S3 copy, no re-dump) into a "six-hourly/" prefix. Retention is by object
-# count, per database, per tier:
+# "hourly/" prefix, and once a day (00:00 UTC) PROMOTES that same dump
+# (server-side S3 copy, no re-dump) into a "daily/" prefix. Retention is by
+# object count, per database, per tier:
 #
-#   hourly/<db>/      keep newest HOURLY_RETENTION    (default 24  = 24h)
-#   six-hourly/<db>/  keep newest SIXHOURLY_RETENTION (default 28  = 7d x 4/day)
+#   hourly/<db>/   keep newest HOURLY_RETENTION  (default 24 = last 24h)
+#   daily/<db>/    keep newest DAILY_RETENTION   (default 14 = last 14 days)
 #
-# So you always have the last 24 hourly snapshots plus 7 days of 6-hourly
-# snapshots beyond that, rolling. Keys embed a UTC timestamp and sort
-# lexicographically, so "newest N" == the last N keys in sorted order.
+# So you always have the last 24 hourly snapshots plus the last 14 daily
+# snapshots, rolling. Keys embed a UTC timestamp and sort lexicographically, so
+# "newest N" == the last N keys in sorted order.
+#
+# Retention is COUNT-based and lives ONLY here, by design. There is deliberately
+# NO S3 lifecycle / time-based expiry on the bucket. S3 lifecycle can only expire
+# objects by AGE, never by count -- and an age rule is dangerous for backups: if
+# this sidecar ever stops producing dumps (crash, bad creds, DB down), a time
+# rule would keep deleting the survivors until ZERO remain, during exactly the
+# outage when you need them. The prune below instead deletes an old dump ONLY
+# when a fresh one has replaced it, so a stalled sidecar FREEZES the set rather
+# than draining it -- the correct direction to fail.
 #
 # Talks ONLY to Postgres (read) and S3 (write/list/delete on ONE bucket via a
 # bucket-scoped token). No EnB protocol, no inbound port. It is a read-only
@@ -36,12 +45,11 @@ export PGPASSWORD="${DB_PASS:-net7}"
 DATABASES="${BACKUP_DATABASES:-net7 net7_user}"
 
 S3_BUCKET="${BACKUP_S3_BUCKET:-}"
-S3_PREFIX="${BACKUP_S3_PREFIX:-pg}"
 # Optional: S3-compatible endpoint (MinIO, R2, ...). Empty => real AWS S3.
 S3_ENDPOINT="${BACKUP_S3_ENDPOINT:-}"
 
 HOURLY_RETENTION="${HOURLY_RETENTION:-24}"
-SIXHOURLY_RETENTION="${SIXHOURLY_RETENTION:-28}"
+DAILY_RETENTION="${DAILY_RETENTION:-14}"
 
 # Cadence. Default: wake at the top of every hour. Override with an explicit
 # interval (seconds) for testing. RUN_ONCE=1 runs a single cycle then exits
@@ -66,7 +74,7 @@ log() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) db-backup: $*" >&2; }
 dump_and_upload() {
   local db="$1" ts="$2"
   local file="/tmp/${db}-${ts}.dump"
-  local key="${S3_PREFIX}/hourly/${db}/${ts}.dump"
+  local key="hourly/${db}/${ts}.dump"
 
   if ! pg_dump -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$db" \
         -Fc -f "$file" 2>/tmp/pg_dump.err; then
@@ -88,16 +96,16 @@ dump_and_upload() {
   return 0
 }
 
-# ---- promote an hourly key into the six-hourly tier (server-side copy) -----
-promote_to_six_hourly() {
+# ---- promote an hourly key into the daily tier (server-side copy) ----------
+promote_to_daily() {
   local db="$1" ts="$2" src_key="$3"
-  local dst_key="${S3_PREFIX}/six-hourly/${db}/${ts}.dump"
+  local dst_key="daily/${db}/${ts}.dump"
   if aws "${AWS_ENDPOINT_ARGS[@]}" s3 cp \
         "s3://${S3_BUCKET}/${src_key}" "s3://${S3_BUCKET}/${dst_key}" \
         --only-show-errors; then
     log "promoted -> s3://${S3_BUCKET}/${dst_key}"
   else
-    log "ERROR six-hourly promote failed for '$db' -> $dst_key"
+    log "ERROR daily promote failed for '$db' -> $dst_key"
   fi
 }
 
@@ -135,16 +143,16 @@ run_cycle() {
   hour="$(date -u +%H)"
   # strip a leading zero so 06/08 are not parsed as octal
   hour=$((10#$hour))
-  local is_six_hourly=0
-  [ $((hour % 6)) -eq 0 ] && is_six_hourly=1
+  local is_daily=0
+  [ "$hour" -eq 0 ] && is_daily=1
 
   for db in $DATABASES; do
     local src_key
     if src_key="$(dump_and_upload "$db" "$ts")"; then
-      [ "$is_six_hourly" -eq 1 ] && promote_to_six_hourly "$db" "$ts" "$src_key"
+      [ "$is_daily" -eq 1 ] && promote_to_daily "$db" "$ts" "$src_key"
     fi
-    prune_prefix "${S3_PREFIX}/hourly/${db}/"     "$HOURLY_RETENTION"
-    prune_prefix "${S3_PREFIX}/six-hourly/${db}/" "$SIXHOURLY_RETENTION"
+    prune_prefix "hourly/${db}/" "$HOURLY_RETENTION"
+    prune_prefix "daily/${db}/"  "$DAILY_RETENTION"
   done
 }
 
@@ -164,8 +172,8 @@ if [ -z "$S3_BUCKET" ]; then
   while true; do sleep 3600; done
 fi
 
-log "starting: dbs='${DATABASES}' bucket='${S3_BUCKET}' prefix='${S3_PREFIX}'" \
-    "hourly_keep=${HOURLY_RETENTION} six_hourly_keep=${SIXHOURLY_RETENTION}" \
+log "starting: dbs='${DATABASES}' bucket='${S3_BUCKET}'" \
+    "hourly_keep=${HOURLY_RETENTION} daily_keep=${DAILY_RETENTION}" \
     "endpoint='${S3_ENDPOINT:-aws}'"
 
 if [ "$RUN_ONCE" = "1" ]; then

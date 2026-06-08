@@ -2,9 +2,9 @@
 # Phase AP -- rolling Postgres backups to a PRIVATE S3 bucket.
 #
 # The db-backup sidecar (db-backup/) dumps net7 + net7_user once an hour with
-# `pg_dump -Fc`, uploads to s3://<bucket>/pg/hourly/<db>/<ts>.dump, promotes
-# every 6th hour into pg/six-hourly/<db>/, and prunes by count. This file
-# stands up the bucket and a BUCKET-SCOPED IAM token the sidecar uses.
+# `pg_dump -Fc`, uploads to s3://<bucket>/hourly/<db>/<ts>.dump, promotes once a
+# day into daily/<db>/, and prunes BY COUNT (keep newest 24 hourly / 14 daily).
+# This file stands up the bucket and a BUCKET-SCOPED IAM token the sidecar uses.
 #
 #   db-backup sidecar --(scoped IAM token, write/list/delete)--> private S3 bucket
 #
@@ -12,11 +12,21 @@
 # internet -- unlike the patcher bucket there is no CloudFront in front of it.
 # Only the IAM user created here can touch it, and only this one bucket.
 #
+# NO S3 lifecycle / time-based expiry policy is set, deliberately. S3 lifecycle
+# can ONLY expire objects by age, not by count -- and an age-based rule would
+# keep deleting old dumps even after the sidecar stops producing new ones, i.e.
+# it would drain the backups to ZERO during exactly the outage when you need
+# them most. Retention is therefore COUNT-based and lives only in the sidecar's
+# prune, which deletes an old dump only when a fresh one has replaced it. A
+# stalled sidecar freezes the set instead of emptying it.
+#
 # ENTIRELY OPT-IN: every resource is `count = var.manage_db_backup ? 1 : 0`, so
 # with the default manage_db_backup=false this whole file is inert and an
-# existing deploy is unaffected. The operator opts in by setting
-# ENB_DB_BACKUP_S3_BUCKET in .env (see .env.example) and re-running `just up`,
-# then copies the emitted access key/secret into the droplet env.
+# existing deploy is unaffected. The operator opts in by setting just
+# ENB_DB_BACKUP_S3_BUCKET in .env (see .env.example) and re-running `just up`.
+# The emitted access key/secret are NOT pasted anywhere: they live in the
+# tfstate, and Update-Stack.ps1 reads them straight from the tf outputs
+# (db_backup_access_key_id / db_backup_secret_access_key) into the droplet env.
 # ---------------------------------------------------------------------------
 
 locals {
@@ -52,36 +62,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "db_backup" {
   }
 }
 
-# Redundant defense-in-depth retention alongside the sidecar's count-based
-# prune: expire hourly objects after 1 day and six-hourly objects after 8 days
-# (24h + 7d). If the sidecar ever stops pruning (crash, S3 list throttle) the
-# bucket still cannot grow without bound. Matches the sidecar key layout.
-resource "aws_s3_bucket_lifecycle_configuration" "db_backup" {
-  count  = local.db_backup_enabled ? 1 : 0
-  bucket = aws_s3_bucket.db_backup[0].id
-
-  rule {
-    id     = "expire-hourly"
-    status = "Enabled"
-    filter {
-      prefix = "${var.db_backup_s3_prefix}/hourly/"
-    }
-    expiration {
-      days = var.db_backup_hourly_expire_days
-    }
-  }
-
-  rule {
-    id     = "expire-six-hourly"
-    status = "Enabled"
-    filter {
-      prefix = "${var.db_backup_s3_prefix}/six-hourly/"
-    }
-    expiration {
-      days = var.db_backup_six_hourly_expire_days
-    }
-  }
-}
+# (No aws_s3_bucket_lifecycle_configuration here, on purpose -- see the file
+# header. Retention is count-based in the sidecar, never time-based in S3.)
 
 # ---- bucket-scoped IAM token ----------------------------------------------
 # A dedicated IAM user whose ONLY permission is read/write/list/delete on THIS

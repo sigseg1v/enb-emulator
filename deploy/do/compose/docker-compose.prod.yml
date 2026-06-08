@@ -262,7 +262,6 @@ services:
       # Empty bucket => the sidecar idles. AWS_* are the bucket-scoped IAM token
       # (SECRET) from the droplet .env, never committed.
       BACKUP_S3_BUCKET: "${BACKUP_S3_BUCKET:-}"
-      BACKUP_S3_PREFIX: "${BACKUP_S3_PREFIX:-pg}"
       BACKUP_S3_ENDPOINT: "${BACKUP_S3_ENDPOINT:-}"
       AWS_ACCESS_KEY_ID: "${BACKUP_AWS_ACCESS_KEY_ID:-}"
       AWS_SECRET_ACCESS_KEY: "${BACKUP_AWS_SECRET_ACCESS_KEY:-}"

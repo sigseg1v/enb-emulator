@@ -144,20 +144,9 @@ variable "db_backup_s3_bucket" {
   default     = ""
 }
 
-variable "db_backup_s3_prefix" {
-  description = "Key prefix under which dumps are stored (hourly/ and six-hourly/ live beneath it). Must match the sidecar's BACKUP_S3_PREFIX."
-  type        = string
-  default     = "pg"
-}
-
-variable "db_backup_hourly_expire_days" {
-  description = "S3 lifecycle expiry (days) for the hourly tier -- defense-in-depth behind the sidecar's count-based prune. 1 = 24h."
-  type        = number
-  default     = 1
-}
-
-variable "db_backup_six_hourly_expire_days" {
-  description = "S3 lifecycle expiry (days) for the six-hourly tier. 8 = the 24h hourly window plus 7 days."
-  type        = number
-  default     = 8
-}
+# NOTE: there is deliberately NO S3 lifecycle / expiry variable here. Retention
+# is count-based and enforced by the sidecar (keep newest 24 hourly / 14 daily),
+# never by a time-based S3 rule -- an age rule would keep deleting old dumps
+# after the sidecar stops producing new ones and drain the backups to zero. See
+# backup.tf for the full rationale. Dumps live under flat hourly/ and daily/
+# prefixes; the sidecar's HOURLY_RETENTION / DAILY_RETENTION set the counts.
