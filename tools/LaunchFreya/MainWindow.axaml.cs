@@ -49,6 +49,17 @@ namespace LaunchFreya
         // leave the label showing the wrong server's status.
         int _statusProbeGen;
 
+        // Periodic liveness re-probe. The status label is otherwise a one-shot:
+        // once a probe writes ONLINE/OFFLINE nothing re-checks, so a server that
+        // goes down (or comes back) after the initial check leaves the label
+        // frozen at a stale value. This timer re-runs the probe for the current
+        // multiplayer selection on a fixed cadence. Auto re-probes never open the
+        // update dialog (only a user-initiated Check / selection does) so it
+        // cannot nag, and they skip while the client is running.
+        DispatcherTimer _statusTimer;
+        bool _clientRunning;
+        static readonly TimeSpan StatusRefreshInterval = TimeSpan.FromSeconds(10);
+
         public MainWindow()
         {
             InitializeComponent();
@@ -142,14 +153,34 @@ namespace LaunchFreya
             FillEmulators();
             FillClientPath();
             c_Status.Text = "Please select a server and hit Play.";
+
+            _statusTimer = new DispatcherTimer { Interval = StatusRefreshInterval };
+            _statusTimer.Tick += OnStatusTimerTick;
+            _statusTimer.Start();
         }
 
         void OnClosing(object sender, EventArgs e)
         {
+            _statusTimer?.Stop();
             _user.FormMainPositionX = Position.X;
             _user.FormMainPositionY = Position.Y;
             _user.Save();
             _activeLauncher?.AuthRelay?.Dispose();
+        }
+
+        // Re-probe the currently-selected multiplayer server so its status stays
+        // fresh. No-ops for single-player (never updates) and while the client is
+        // running (status is pinned to "Client running"). Silent: no CHECKING
+        // flicker and no update prompt -- it only refreshes the liveness label and
+        // the Play gate.
+        void OnStatusTimerTick(object sender, EventArgs e)
+        {
+            if (_clientRunning) return;
+            var emu = CurrentEmulator;
+            if (emu == null || emu.IsSinglePlayer) return;
+            if (!TryGetSelectedHost(out _, out var host)) return;
+            int gen = ++_statusProbeGen;
+            _ = KickServerProbe(NormalizeHost(host.Hostname), GetProbePort(host), gen, auto: true);
         }
 
         static string ResolveConfigPath()
@@ -392,10 +423,13 @@ namespace LaunchFreya
         // /updateCheck POST IS the probe (a reachable login server answers it)
         // and also gates Play on version match; on the Linux dev build it's a
         // plain TCP connect to the auth port.
-        Task KickServerProbe(string host, int port, int gen)
+        // `auto` marks a periodic background refresh (the status timer): it still
+        // updates the liveness label + Play gate but never opens the update
+        // dialog, so the timer can't nag. User-initiated probes pass auto:false.
+        Task KickServerProbe(string host, int port, int gen, bool auto = false)
         {
 #if CHECK_FOR_UPDATES
-            return RunUpdateProbeAsync(host, port, gen);
+            return RunUpdateProbeAsync(host, port, gen, auto);
 #else
             return CheckServerStatusAsync(host, port, gen);
 #endif
@@ -416,7 +450,7 @@ namespace LaunchFreya
         // Multiplayer probe + version gate. Mirrors CheckServerStatusAsync's
         // stale-token discipline: every UI write is guarded by `gen` so a probe
         // whose selection has since changed never stomps the current one.
-        async Task RunUpdateProbeAsync(string host, int port, int gen)
+        async Task RunUpdateProbeAsync(string host, int port, int gen, bool auto = false)
         {
             void WriteStatus(string text)
                 => Dispatcher.UIThread.Post(() => { if (gen == _statusProbeGen) c_ServerStatus.Text = text; });
@@ -447,7 +481,12 @@ namespace LaunchFreya
             if (string.Equals(resp.Status, UpdateStatus.UpdateNeeded, StringComparison.OrdinalIgnoreCase))
             {
                 WriteStatus("UPDATE");
-                await PromptAndApplyUpdateAsync(updater, resp, gen);
+                SetPlay(false);
+                // A background refresh reports the available update but does not
+                // pop the dialog every tick; the user applies it via Check or by
+                // re-selecting the server.
+                if (!auto)
+                    await PromptAndApplyUpdateAsync(updater, resp, gen);
                 return;
             }
             AppendLog($"update probe: unexpected status '{resp.Status}'");
@@ -587,6 +626,7 @@ namespace LaunchFreya
                 var launcher = new Launcher(_setting, AppendLog);
                 launcher.Launch();
                 _activeLauncher = launcher;
+                _clientRunning  = true;   // pause the periodic status re-probe
                 c_Status.Text       = "Client running. Hit Quit when you're done to tear everything down.";
                 c_Button_Play.IsEnabled = false;
             }
