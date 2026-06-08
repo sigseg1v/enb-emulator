@@ -168,3 +168,7 @@ deploy/certs/*.crt
 # Python bytecode (import tooling under tools/dataimport-jsonl/ etc.)
 __pycache__/
 *.pyc
+
+# Go build artifact for the status-notifier sidecar (rebuilt by `go build` /
+# the Dockerfile). Source-only in git; never commit the compiled binary.
+/status-notifier/status-notifier

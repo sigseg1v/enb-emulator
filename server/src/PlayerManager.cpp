@@ -29,6 +29,7 @@
 #include "PlayerClass.h"
 #include "ServerManager.h"
 #include "StaticData.h"
+#include "SaveManager.h"   // Phase AM: EmitExternalStatusEvent
 
 // Entry point handed to pthread_create for the per-player login loop.
 // (RunMovementThread is a per-tick helper called from elsewhere, not a
@@ -133,6 +134,17 @@ void PlayerManager::DropPlayerFromGalaxy(Player *p)
 	if (p->Name())
 	{
 		LogMessage("Player '%s' Removed from Galaxy.\n", p->Name());
+		// Phase AM: announce the logout as an external-status event.
+		// ReleasePlayerNode above has already freed this node, so
+		// GetPlayerCount() now excludes this player -- the tally reflects the
+		// post-logout count. This is the one choke point for clean logout AND
+		// drop/kick/timeout. No-op unless enabled.
+		{
+			char line[256];
+			snprintf(line, sizeof(line), "Player %s logged out. (%ld online)",
+				p->Name(), m_GlobMemMgr->GetPlayerCount());
+			EmitExternalStatusEvent(EXT_STATUS_LOGOUT, line);
+		}
 		SendGlobalChatEvent(CHEV_LOGGED_OUT,p);
 	}
 	UnSetIndex(p, m_GlobalPlayerList);
@@ -729,6 +741,16 @@ void PlayerManager::BroadcastChat(long GameID, char *message, bool copy_to_origi
         if (!s)
         {
             return;
+        }
+
+        // Phase AM: mirror the broadcast as an external-status event once (not
+        // per recipient), now that we have the authenticated sender. No-op
+        // unless enabled.
+        {
+            char line[1024];
+            snprintf(line, sizeof(line), "Server broadcast: [%s] %s",
+                s->Name() ? s->Name() : "?", message);
+            EmitExternalStatusEvent(EXT_STATUS_BROADCAST, line);
         }
 
         if (s && s->GetSectorPlayerList())

@@ -747,3 +747,65 @@ format & byte order", Trap 2).
 - **Setup**: rebuild the launcher (`just play-online` build-if-stale picks it up);
   no proxy/server binary change is required -- only the argument the launcher
   passes changed.
+
+### [ ] CV-AM-1 -- External status events render correctly for the 4 player-driven kinds (Phase AM)
+
+- **Change**: Phase AM emits 5 server status events as fully-rendered lines into
+  the `external_status_events` outbox (net7_user) via `EmitExternalStatusEvent`
+  (`server/src/SaveManager.cpp`), which the `status-notifier` Go sidecar relays to
+  a webhook. **Emit-only** -- alters no EnB client wire byte, so this is NOT a
+  wire-fidelity CV. The reason it is here anyway: the four player-driven lines are
+  RENDERED from live server state (name, class abbrev, the three level fields, the
+  `(N online)` count, the broadcast sender+text) and that rendering has only been
+  exercised by code inspection, never by a real client session.
+- **What is ALREADY proven (no client needed)**: the sidecar end-to-end
+  (NOTIFY -> drain -> POST `{"content":...}` -> sent_at) against the real dev
+  Postgres, the startup catch-up drain, and the server's own emit path -- a live
+  server brought up with `NET7_EXTERNAL_STATUS_ENABLED=1` wrote a real
+  `server_start` row, proving SaveManager queue -> parameterized INSERT works.
+- **What to look for (real client)**: with the flag on and a real
+  `STATUS_WEBHOOK_URL` set, log a character in and confirm the channel shows
+  `Player <name> (level: Cx/Ty/Ez, class: XX) logged in. (N online)` with the
+  RIGHT class abbreviation (`ClassIndex() = Race()*3 + Profession()` ->
+  `{TE,TT,TS,JD,JS,JE,PW,PP,PS}`), the right C/T/E levels, and an N that matches
+  the actual online count. Then: level up a skill (`Player <name> leveled up
+  {Combat|Trade|Explore} to ##!`), send a sector broadcast (`Server broadcast:
+  [<sender>] <message>`), and log out (`Player <name> logged out. (N online)`).
+- **Why the CLI/integration suite does NOT close this**: the four lines depend on
+  full in-game state transitions (character load with race/profession/levels, the
+  AwardXP skill-point branch, BroadcastChat, the clean-logout drop path) that the
+  headless CLI does not drive end-to-end in this env. The class-abbrev mapping in
+  particular (the `Net7.h` Profession enum ordering) is the most likely thing to
+  be subtly wrong and only a real character of a known class confirms it.
+- **Setup**: `export NET7_EXTERNAL_STATUS_ENABLED=1` and a test
+  `STATUS_WEBHOOK_URL`, `just play-local`, log in / level / broadcast / log out,
+  watch the channel. See `docs/18-external-status-events.md`.
+
+### [ ] CV-AM-2 -- `/status` Discord bot answers correctly (Phase AM-8)
+
+- **Change**: AM-8 adds a read-only `/status` Discord bot inside the same
+  `status-notifier` sidecar (`status-notifier/bot.go`, `discordgo`). It connects
+  OUTBOUND to Discord's gateway (no inbound port) and answers `/status` with an
+  embed: up/down + uptime + in-memory player/warm-sector counts (from the
+  `server_status` heartbeat the game server UPSERTs), plus a per-player table
+  (name, class name+code, floored C/E/T levels, sector name). **Read-only** -- all
+  `SELECT`s, no path into the game server -- so this is NOT a wire-fidelity CV; it
+  is here only because the discordgo gateway/slash-command handshake cannot be
+  exercised without a real bot token, which only the owner can create.
+- **What is ALREADY proven (no bot token needed)**: the `server_status` heartbeat
+  writes + refreshes every ~30s against the real dev Postgres (verified live, no DB
+  errors); both bot queries (the `accounts`-join player list and the net7 `sectors`
+  name lookup) run cleanly against the live dev schema; and the render logic
+  (class name/code incl. JD!=JW, C/E/T levels, sector formatting, uptime,
+  char-select rows) is covered by `bot_test.go`.
+- **Setup (owner)**: create a Discord application + bot, invite it to the server
+  with the `applications.commands` scope, put the token in the droplet/dev `.env`
+  as `DISCORD_BOT_TOKEN` (and optionally `DISCORD_GUILD_ID` for instant command
+  registration), and bring the stack up with `NET7_EXTERNAL_STATUS_ENABLED=1`.
+- **What to look for**: run `/status` in Discord. Confirm the embed shows the right
+  up/down state, a plausible uptime, the in-memory player + warm-sector counts, and
+  -- with a character logged in -- that player's name, class (e.g. `Explorer JE`,
+  NOT `JW`), C/E/T levels, and the sector NAME (not a bare id). Log everyone out and
+  confirm it shows "nobody online". Stop the server and confirm `/status` flips to
+  the offline/stale-heartbeat state within ~2 min. See
+  `docs/18-external-status-events.md`.

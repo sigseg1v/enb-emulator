@@ -1,9 +1,10 @@
 #!/usr/bin/env pwsh
-# Build the two server-side images for linux/amd64 and push them to the private
+# Build the server-side images for linux/amd64 and push them to the private
 # DigitalOcean Container Registry as a SINGLE repository ("enb") with
 # per-service version tags, so the whole stack fits DOCR's free Starter tier
-# (1 repository, 500 MiB). Build context is the repo root (the server/login
-# Dockerfiles COPY common/ as well as their own tree).
+# (1 repository, 500 MiB). Build context per service (see $services): server and
+# login use the repo root (their Dockerfiles COPY common/ as well as their own
+# tree); status-notifier is self-contained and builds from its own dir.
 #
 # The proxy is deliberately NOT pushed: it is a per-client, single-connection
 # bridge that runs on each player's own (Windows) machine, not server-side. It
@@ -12,10 +13,10 @@
 # Tagging model -- one shared, monotonic version counter across both services
 # (they always bump together):
 #
-#   enb:server-vN   enb:login-vN              <- the build just produced
-#   enb:server-latest / login-latest          <- re-pointed at vN, but only
-#                                                 AFTER every versioned push
-#                                                 succeeds
+#   enb:server-vN  enb:login-vN  enb:status-notifier-vN   <- just produced
+#   enb:{server,login,status-notifier}-latest             <- re-pointed at vN,
+#                                                 but only AFTER every versioned
+#                                                 push succeeds
 #
 # Retention: the newest 3 versions PER SERVICE are kept; older version tags are
 # deleted AFTER the new push succeeds, then a registry garbage-collection runs
@@ -30,9 +31,13 @@ Import-DeployEnv
 
 $repo = 'enb'
 $reg  = Get-RegistryEndpoint
+# Context is the docker build context, relative to the repo root. server/login
+# need the repo root (their Dockerfiles COPY common/ as well as their own tree);
+# status-notifier is self-contained, so its context is just its own dir.
 $services = @(
-    @{ Svc = 'server'; Dockerfile = 'server/Dockerfile' },
-    @{ Svc = 'login';  Dockerfile = 'login-server/Dockerfile' }
+    @{ Svc = 'server';          Dockerfile = 'server/Dockerfile';          Context = '.' },
+    @{ Svc = 'login';           Dockerfile = 'login-server/Dockerfile';    Context = '.' },
+    @{ Svc = 'status-notifier'; Dockerfile = 'status-notifier/Dockerfile'; Context = 'status-notifier' }
 )
 
 # ---- determine the version label ----
@@ -42,7 +47,7 @@ if ($Tag) {
 } else {
     $maxN = 0
     foreach ($t in $existingTags) {
-        if ($t -match '^(server|login)-v(\d+)$') {
+        if ($t -match '^(server|login|status-notifier)-v(\d+)$') {
             $n = [int]$Matches[2]
             if ($n -gt $maxN) { $maxN = $n }
         }
@@ -62,12 +67,13 @@ foreach ($s in $services) {
     $tagRef = "$reg/${repo}:$($s.Svc)-$version"
     Write-Host ""
     Write-Host "==> building $($s.Svc) -> $tagRef"
+    $ctx = Join-Path $script:RepoRoot $s.Context
     Invoke-Native docker buildx build `
         --platform linux/amd64 `
         --push `
         -f (Join-Path $script:RepoRoot $s.Dockerfile) `
         -t $tagRef `
-        $script:RepoRoot
+        $ctx
 }
 
 # ---- only after ALL versioned pushes succeed: re-point the -latest tags ----
@@ -109,5 +115,5 @@ foreach ($s in $services) {
 if ($deletedAny) { Start-DocrGarbageCollection }
 
 Write-Host ""
-Write-Host "Pushed enb:{server,login}-$version (+ -latest)."
+Write-Host "Pushed enb:{server,login,status-notifier}-$version (+ -latest)."
 Write-Host "Next: just update $version   (or: just update latest)"

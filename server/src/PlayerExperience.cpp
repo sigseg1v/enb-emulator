@@ -23,6 +23,7 @@
 #include <net7/Opcodes.h>
 #include "PacketMethods.h"
 #include "StaticData.h"
+#include "SaveManager.h"   // Phase AM: EmitExternalStatusEvent
 #include <math.h>
 
 #define BOOST_XP 1
@@ -532,6 +533,21 @@ float Player::AwardXP(experience_type xp_type, char *prefix, long xp_gain, long 
         UpdateSkills();       
         SendAuxShip();
 		SaveAdvanceLevel(xp_type, level);
+
+        // Phase AM: announce the level-up as an external-status event. We are
+        // inside the skill-points-earned branch, so a discipline level was
+        // genuinely crossed; `level` is the new level and `xp_type` the
+        // discipline. No-op unless NET7_EXTERNAL_STATUS_ENABLED.
+        {
+            const char *disc = (xp_type == XP_COMBAT)  ? "Combat"
+                             : (xp_type == XP_EXPLORE) ? "Explore"
+                             : (xp_type == XP_TRADE)   ? "Trade"
+                             :                           "?";
+            char dline[256];
+            snprintf(dline, sizeof(dline), "Player %s leveled up %s to %d!",
+                Name() ? Name() : "?", disc, (int) level);
+            EmitExternalStatusEvent(EXT_STATUS_LEVELUP, dline);
+        }
     }
 
 	SaveXPBarLevel(xp_type, xp_bar);

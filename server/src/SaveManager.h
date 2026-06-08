@@ -41,6 +41,13 @@ public:
 	void	RunSaveThread(void);
 	void	AddSaveMessage(short save_code, long player_id, short bytes, unsigned char *data);
 
+	// Phase AM (AM-8): periodically UPSERT the singleton server_status row
+	// (boot_time / players_online / sectors_online) so the status-notifier
+	// sidecar can answer a read-only `/status` without any inbound path into the
+	// game process. Runs on the SaveManager thread (shares m_SQL_Conn, like every
+	// Handle*). No-op unless NET7_EXTERNAL_STATUS_ENABLED. Throttled internally.
+	void	WriteServerStatusHeartbeat(void);
+
 private:
 	void	HandleSaveCode(short save_code, long player_id, short bytes, unsigned char *data);
 	void	HandleNewRecipe(long player_id, short bytes, unsigned char *data);
@@ -84,6 +91,7 @@ private:
 	void	HandleGuildInfo(long guild_id, short bytes, unsigned char *data);
 	void 	HandleDeleteGuild(long guild_id);
 	void	HandleChangeFieldRespawn(short bytes, unsigned char *data);
+	void	HandleExternalStatusEvent(long player_id, short bytes, unsigned char *data);
 
 private:
 	MessageQueue    * m_SaveQueue;
@@ -94,7 +102,17 @@ private:
 	CircularBuffer  * m_SaveBuffer;
 	bool m_ThreadRunning;
 	pthread_t m_Thread;
+	unsigned long	  m_LastHeartbeatTick;   // AM-8: last server_status UPSERT (GetNet7TickCount ms)
 };
+
+// Enqueue an external-status event (relayed out-of-process by the
+// status-notifier sidecar, e.g. to a Discord channel). No-op unless
+// NET7_EXTERNAL_STATUS_ENABLED is set (cached once) and the SaveManager is up.
+// Best-effort: a delivery failure must never stall or fail a
+// login/logout/level-up/chat. Callable from any gameplay thread (it only
+// touches the lock-free save queue, exactly like SaveLogout). `content` is the
+// final message line; it is truncated to fit the save slot.
+void EmitExternalStatusEvent(unsigned char kind, const char *content);
 
 struct EnbSaveHeader
 {
@@ -144,6 +162,19 @@ struct EnbSaveHeader
 #define SAVE_CODE_GUILD_INFO						0x002D
 #define SAVE_CODE_DELETE_GUILD						0x002E
 #define SAVE_CODE_FIELD_RESPAWN_TIME				0x002F
+// Phase AM. Not a save at all -- reuses the SaveManager queue purely because it
+// owns the single serialized net7_user connection. The payload is [u8 kind]
+// followed by the already-rendered UTF-8 message line; HandleExternalStatusEvent
+// INSERTs it into external_status_events + NOTIFYs the consumer. player_id unused.
+#define SAVE_CODE_EXT_STATUS_EVENT					0x0030
+
+// external_status_events.kind bytes (wire-packed at data[0]; mapped to the kind
+// text stored in the row). Keep in sync with HandleExternalStatusEvent + docs.
+#define EXT_STATUS_LOGIN							1
+#define EXT_STATUS_LOGOUT							2
+#define EXT_STATUS_LEVELUP							3
+#define EXT_STATUS_BROADCAST						4
+#define EXT_STATUS_SERVER_START						5
 
 #define	PLAYER_VAULT								0x0001
 #define PLAYER_INVENTORY							0x0002

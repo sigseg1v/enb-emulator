@@ -397,6 +397,15 @@ void ServerManager::RunMasterServer()
 		// while IsSectorAssignmentsComplete() is still false.
 		m_SectorAssignmentsComplete = true;
 
+		// Phase AM: the server is now up and ready to route handoffs. g_SaveMgr
+		// (and its net7_user connection + queue thread) was constructed far
+		// earlier in Startup, so the outbox enqueue is safe here. No-op unless
+		// NET7_EXTERNAL_STATUS_ENABLED.
+		// AM-8: stamp the uptime base here (server ready), so the status heartbeat
+		// reports uptime from "ready to play", not from process exec.
+		g_ServerBootTime = time(NULL);
+		EmitExternalStatusEvent(EXT_STATUS_SERVER_START, "Server started.");
+
 		// Safe to begin dispatching master-plane MASTER_HANDOFF (0x2008): the
 		// handler starts the target sector on demand and only then reports its
 		// port.

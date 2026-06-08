@@ -25,6 +25,7 @@
 #include "PacketMethods.h"
 #include "PlayerClass.h"
 #include "MemoryHandler.h"
+#include "SaveManager.h"   // Phase AM: EmitExternalStatusEvent
 
 #define G_ERROR_BANNED_ACCOUNT		0
 #define G_ERROR_NICKNAME_USED		1
@@ -293,6 +294,26 @@ void UDP_Connection::HandleGlobalTicketRequest(char *msg, EnbUdpHeader *hdr, con
         // Linux x86_64 trailed 4 bytes of garbage into the UDP frame.
         int32_t avatar_id_wire = (int32_t) avatar_id;
         SendOpcode(ENB_OPCODE_2005_AVATARLOGIN_CONFIRM, player, (unsigned char *) &avatar_id_wire, sizeof(avatar_id_wire), source_addr, source_port);
+
+        // Phase AM: announce the login as an external-status event. The player
+        // node is fully populated here (name, class, levels read from the
+        // just-loaded database), and GetPlayerCount() already counts this node,
+        // so the online tally reflects this login. No-op unless
+        // NET7_EXTERNAL_STATUS_ENABLED.
+        {
+            // Indexed by ClassIndex() == Race*3 + Profession (Net7.h).
+            static const char *kClassAbbrev[9] =
+                { "TE", "TT", "TS", "JD", "JS", "JE", "PW", "PP", "PS" };
+            long ci = player->ClassIndex();
+            const char *cls = (ci >= 0 && ci < 9) ? kClassAbbrev[ci] : "??";
+            char line[256];
+            snprintf(line, sizeof(line),
+                "Player %s (level: C%ld/T%ld/E%ld, class: %s) logged in. (%ld online)",
+                player->Name(), player->CombatLevel(), player->TradeLevel(),
+                player->ExploreLevel(), cls,
+                g_ServerMgr->m_GlobMemMgr->GetPlayerCount());
+            EmitExternalStatusEvent(EXT_STATUS_LOGIN, line);
+        }
     }
     else
     {

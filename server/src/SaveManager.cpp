@@ -25,6 +25,10 @@
 #include <net7/PacketStructures.h>
 #include "PacketMethods.h"
 #include "Guilds.h"
+// AM-8 status heartbeat reads live player/sector counts -- needs the full class
+// defs (Net7.h only forward-declares these).
+#include "MemoryHandler.h"
+#include "ServerManager.h"
 #include <float.h>
 #include <string>
 
@@ -42,6 +46,7 @@ SaveManager::SaveManager()
 	m_SaveQueue = new MessageQueue("Save", m_SaveBuffer, SAVE_SLOTS, true); //check queue for any overlap corruption
 	m_SQL_Conn.connect("net7_user", g_DB_Host, g_DB_User, g_DB_Pass);
 	m_ThreadRunning = false;
+	m_LastHeartbeatTick = 0;   // AM-8: forces the first heartbeat on the first eligible tick
 	if (pthread_create(&m_Thread, NULL, &LaunchSaveThread, this) != 0)
 		LogMessage("SaveManager: pthread_create failed (%s)\n", strerror(errno));
 }
@@ -82,8 +87,60 @@ void SaveManager::RunSaveThread()
 	{
 		usleep(10 * 1000);
 		CheckSaves();
+		WriteServerStatusHeartbeat();   // AM-8: throttled internally to ~30s
 	}
 	m_ThreadRunning = false;
+}
+
+// Phase AM (AM-8). UPSERT the singleton server_status row so the status-notifier
+// sidecar can answer `/status` (authoritative player count, sectors started in
+// memory, and the boot time for uptime) without any inbound query path into the
+// game process. Emit-only, like external_status_events: same NET7_EXTERNAL_STATUS
+// _ENABLED gate, same serialized m_SQL_Conn on the SaveManager thread. Throttled
+// to once every ~30s -- a /status reader does not need second-level freshness,
+// and the per-row UPDATE must not contend with real saves.
+void SaveManager::WriteServerStatusHeartbeat()
+{
+	// Same feature flag as EmitExternalStatusEvent: default OFF, so dev/test/CI
+	// stacks (which do not set it) write nothing.
+	static int s_enabled = -1;
+	if (s_enabled < 0)
+	{
+		const char *v = getenv("NET7_EXTERNAL_STATUS_ENABLED");
+		s_enabled = (v && (*v == '1' || *v == 't' || *v == 'T' || *v == 'y' || *v == 'Y')) ? 1 : 0;
+	}
+	if (!s_enabled)
+		return;
+
+	// The boot time is stamped when the server becomes ready (ServerManager).
+	// Until then there is nothing meaningful to report -- skip.
+	if (g_ServerBootTime == 0 || !g_ServerMgr)
+		return;
+
+	unsigned long now = GetNet7TickCount();
+	if (m_LastHeartbeatTick != 0 && (now - m_LastHeartbeatTick) < 30000)
+		return;
+	m_LastHeartbeatTick = now;
+
+	long players = g_GlobMemMgr ? g_GlobMemMgr->GetPlayerCount() : 0;
+	long sectors = g_ServerMgr->GetSectorCount();
+
+	// boot_time is bound as epoch seconds and rebuilt server-side via
+	// to_timestamp(); rewritten every heartbeat with THIS process's boot time, so
+	// a restart refreshes it. Singleton row (id pinned to 1 by a CHECK). All
+	// values bound -- never concatenated.
+	sql_query_c q(&m_SQL_Conn);
+	q.AddParam((long) g_ServerBootTime);
+	q.AddParam(players);
+	q.AddParam(sectors);
+	q.run_query_params(
+		"INSERT INTO server_status (id, boot_time, players_online, sectors_online, updated_at) "
+		"VALUES (1, to_timestamp(?), ?, ?, now()) "
+		"ON CONFLICT (id) DO UPDATE SET "
+		"boot_time = EXCLUDED.boot_time, "
+		"players_online = EXCLUDED.players_online, "
+		"sectors_online = EXCLUDED.sectors_online, "
+		"updated_at = now()");
 }
 
 void SaveManager::AddSaveMessage(short save_code, long player_id, short length, unsigned char *data)
@@ -247,6 +304,9 @@ void SaveManager::HandleSaveCode(short save_code, long player_id, short bytes, u
 	case SAVE_CODE_FIELD_RESPAWN_TIME:
 		HandleChangeFieldRespawn(bytes, data);
 		break;
+	case SAVE_CODE_EXT_STATUS_EVENT:
+		HandleExternalStatusEvent(player_id, bytes, data);
+		break;
 	default:
 		LogMessage( "Bad save code : %d for player %x\n", save_code, (player_id&0x00FFFFFF) );
 		break;
@@ -348,6 +408,72 @@ void SaveManager::HandleLogout(long player_id, short bytes, unsigned char *data)
 	account_query.run_query_params(
 		"UPDATE accounts SET last_logout = ? "
 		"WHERE id = (SELECT account_id FROM avatar_info WHERE avatar_id = ?)");
+}
+
+// Phase AM. Persist one external-status event and wake the consumer. Runs on the
+// SaveManager thread, so it shares the single serialized net7_user connection
+// (m_SQL_Conn) with every other Handle* -- no cross-thread DB access. The bytes
+// are [u8 kind][rendered UTF-8 message]; we map the kind byte to the text the
+// row stores and bind both as parameters (the message carries a
+// player-controlled name / chat string -- never concatenate it into the SQL).
+void SaveManager::HandleExternalStatusEvent(long /*player_id*/, short bytes, unsigned char *data)
+{
+	if (bytes < 1)
+		return;
+
+	const char *kindstr;
+	switch (data[0])
+	{
+	case EXT_STATUS_LOGIN:        kindstr = "login";        break;
+	case EXT_STATUS_LOGOUT:       kindstr = "logout";       break;
+	case EXT_STATUS_LEVELUP:      kindstr = "levelup";      break;
+	case EXT_STATUS_BROADCAST:    kindstr = "broadcast";    break;
+	case EXT_STATUS_SERVER_START: kindstr = "server_start"; break;
+	default:                      kindstr = "unknown";      break;
+	}
+
+	std::string content((const char *) (data + 1), (size_t) (bytes - 1));
+
+	sql_query_c insert_query (&m_SQL_Conn);
+	insert_query.AddParam(kindstr);
+	insert_query.AddParam(content.c_str());
+	insert_query.run_query_params("INSERT INTO external_status_events (kind, content) VALUES (?, ?)");
+
+	// Wake the LISTENer. A NOTIFY channel name cannot be a bind parameter, but it
+	// is a fixed compile-time literal here (no value is interpolated), so this is
+	// not an injection surface. Payload-less: the sidecar drains by the unsent
+	// partial index, so it does not need the row id on the wire.
+	char notify_sql[] = "NOTIFY external_status_event";
+	sql_query_c notify_query (&m_SQL_Conn);
+	notify_query.run_query(notify_sql);
+}
+
+// Free helper -- the call site lives on a gameplay thread; this only enqueues to
+// the lock-free save queue (the actual DB write happens later on the SaveManager
+// thread in HandleExternalStatusEvent), exactly like Player::SaveLogout.
+void EmitExternalStatusEvent(unsigned char kind, const char *content)
+{
+	// Cache the feature flag once. Default OFF, so dev/test/CI stacks (which do
+	// not set it) write nothing and incur no outbox rows.
+	static int s_enabled = -1;
+	if (s_enabled < 0)
+	{
+		const char *v = getenv("NET7_EXTERNAL_STATUS_ENABLED");
+		s_enabled = (v && (*v == '1' || *v == 't' || *v == 'T' || *v == 'y' || *v == 'Y')) ? 1 : 0;
+	}
+	if (!s_enabled || !g_SaveMgr || !content)
+		return;
+
+	size_t len = strlen(content);
+	// Save slots hold SAVE_MESSAGE_MAX_LENGTH incl. the EnbSaveHeader; cap the
+	// rendered line well under that (a runaway broadcast is truncated, not lost).
+	if (len > 1200)
+		len = 1200;
+
+	unsigned char buf[1 + 1200];
+	buf[0] = kind;
+	memcpy(buf + 1, content, len);
+	g_SaveMgr->AddSaveMessage(SAVE_CODE_EXT_STATUS_EVENT, 0, (short) (len + 1), buf);
 }
 
 void SaveManager::HandleNewRecipe(long player_id, short bytes, unsigned char *data)
