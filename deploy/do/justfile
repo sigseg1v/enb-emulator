@@ -17,21 +17,32 @@ bootstrap:
 up *flags:
     ./scripts/Deploy-Infra.ps1 {{flags}}
 
-# Build + push the 2 server-side images (server + login) to the DO registry.
-# The proxy is client-side and never deployed here. Optional tag.
-push tag="":
+# The proxy is client-side and never deployed here.
+# Build + push the server-side images only (server/login/status-notifier/db-backup). Optional tag.
+push-server tag="":
     ./scripts/Build-And-Push.ps1 -Tag "{{tag}}"
 
-# Ship config/certs/data + pull images + (re)start the stack. Optional tag.
-update tag="":
-    ./scripts/Update-Stack.ps1 -Tag "{{tag}}"
-
-# (Phase AN, opt-in) Build the Windows launcher bundle, write manifest.json,
-# upload it all to the patcher S3 bucket, and invalidate CloudFront. Errors out
-# unless the patcher is configured (ENB_PATCHER_PRIVATE_S3_BUCKET set + infra up).
-# Run `just update` afterward so login re-reads the new manifest.
+# Errors out unless the patcher is configured (ENB_PATCHER_PRIVATE_S3_BUCKET set
+# + infra up). Run `just apply-update` afterward so login re-reads the manifest.
+# (Phase AN, opt-in) Build + push the Windows client patch to the patcher bucket.
 push-client:
     ./scripts/Push-ClientPatch.ps1
+
+# The client step runs only when the patcher is configured; otherwise it is
+# skipped with a notice (no bucket to push to). Does NOT ship to the droplet.
+# Build + push BOTH the server images and the Windows client patch. Optional tag.
+push tag="": (push-server tag)
+    . ./scripts/_Common.ps1; Import-DeployEnv; if (Get-EnvOr 'ENB_PATCHER_PRIVATE_S3_BUCKET' '') { ./scripts/Push-ClientPatch.ps1 } else { Write-Host 'push: patcher not configured (ENB_PATCHER_PRIVATE_S3_BUCKET unset) -- skipping client patch. Run ''just push-client'' after enabling it.' }
+
+# Does NOT build or push -- run after a `just push`, or use `just update` for the
+# full build -> push -> ship in one shot.
+# Ship config/certs/data + pull images + (re)start the stack on the droplet. Optional tag.
+apply-update tag="":
+    ./scripts/Update-Stack.ps1 -Tag "{{tag}}"
+
+# Runs `just push` (server + client) then `just apply-update`.
+# FULL end-to-end deploy of a new build -- THE one command to ship a build. Optional tag.
+update tag="": (push tag) (apply-update tag)
 
 # Start an already-deployed stack (no image pull).
 start:

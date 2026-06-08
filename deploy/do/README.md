@@ -9,18 +9,20 @@ This lives under `deploy/do/` and is completely separate from the dev files in
 `deploy/` (`Net7Config.cfg`, `certs/`), which the repo-root `docker-compose.yml`
 uses for local development. Nothing here touches those.
 
-## Quick update of server
+## Quick update -- the one command
 
-After landing server/login changes, ship them to the live droplet with (run
-from `deploy/do/`):
+To deploy a new build, run this from `deploy/do/`:
 
 ```
-just push && just update
+just update
 ```
 
-`push` builds + pushes the server + login images to the DO registry; `update`
-pulls them on the droplet and recreates the changed containers. See
-[Day-to-day](#day-to-day) for the rest.
+That is the whole thing. `just update` is end-to-end: it builds + pushes the
+server-side images (and, when the patcher is configured, the Windows client
+patch), then ships everything to the droplet and recreates the changed
+containers. The lower-level steps it chains (`push-server`, `push-client`,
+`push`, `apply-update`) are listed in [Day-to-day](#day-to-day) for when you
+want just one of them.
 
 ## What it builds
 
@@ -78,8 +80,7 @@ S3 bucket name, and your SSH key paths.
 just bootstrap   # one-time: create the encrypted S3 state bucket
 just up          # PLAN ONLY: prints what infra would change, applies nothing
 just up -y       # actually converge: droplet, IP, firewall, registry, DNS, TLS
-just push        # build + push enb:{server,login}-vN to the registry (+ -latest)
-just update      # ship config/certs/seed data, pull images, start the stack
+just update      # build + push images, then ship config/certs/seed data + start the stack
 ```
 
 `just up` is a dry run by default -- it prints the terraform plan and applies
@@ -100,16 +101,18 @@ stable across droplet rebuilds, so you set DNS once.
 |---|---|
 | `just up` | DRY RUN -- print the terraform plan, apply nothing. |
 | `just up -y` | Converge infra. Idempotent. Issues the bootstrap cert; the droplet auto-renews thereafter (see below). |
-| `just push [vN]` | Build + push the 2 server-side services (server + login) into repo `enb` as `*-vN` (default: auto-increment), re-point `*-latest`, prune to the newest 3 versions/service, GC. |
-| `just update [tag]` | Pull images + recreate changed containers on the droplet. |
-| `just push-client` | (Phase AN, opt-in) Build the Windows launcher bundle, write `manifest.json`, upload all of it to the patcher S3 bucket, and invalidate CloudFront. No-op target unless the patcher is configured (see "Launcher self-update"). |
+| `just update [tag]` | **THE full deploy.** Chains `just push` (build + push server images, and the client patch when configured) then `just apply-update` (ship + restart). This is all you normally run. |
+| `just push-server [vN]` | Build + push the server-side services (server + login + status-notifier + db-backup) into repo `enb` as `*-vN` (default: auto-increment), re-point `*-latest`, prune to the newest 3 versions/service, GC. |
+| `just push-client` | (Phase AN, opt-in) Build the Windows launcher bundle, write `manifest.json`, upload all of it to the patcher S3 bucket, and invalidate CloudFront. Errors out unless the patcher is configured (see "Launcher self-update"). |
+| `just push [tag]` | `push-server` + (when the patcher is configured) `push-client`. Build + push everything, but does NOT ship to the droplet. |
+| `just apply-update [tag]` | Pull images + recreate changed containers on the droplet. The ship half of `update`; does NOT build or push. |
 | `just start` | Start an already-deployed stack (no pull). |
 | `just stop` | Stop containers; droplet, DB volume, and infra stay. |
 | `just destroy` | Tear down ALL infra incl. the droplet + its DB volume. Asks to confirm. |
 
-Ship a new build: `just push` then `just update`. **Cert renewal is
-automatic** -- the droplet renews itself (see below); you do not need to run
-anything on a schedule.
+Ship a new build: just `just update`. **Cert renewal is automatic** -- the
+droplet renews itself (see below); you do not need to run anything on a
+schedule.
 
 ### SSH host keys
 
@@ -170,7 +173,10 @@ server-side. The server-side stack is ~50 MiB of dedup'd, compressed layers --
 nowhere near the 500 MiB cap, so storage was never the constraint; the repo
 count was.
 
-`just push` (`Build-And-Push.ps1`):
+`just push-server` (`Build-And-Push.ps1`) builds + pushes only the server-side
+images. (`just push` is `push-server` plus the client patch when the patcher is
+configured; `just update` chains `push` then `apply-update` -- see "Day to day"
+above.) The server-side push:
 
 1. Reads existing tags, finds the highest `vN`, builds `v(N+1)` (or the `-Tag`
    you pass). All services share one monotonic counter -- they bump together.
@@ -182,9 +188,9 @@ count was.
    via the DO registry API, then triggers a **garbage-collection** to reclaim
    the now-untagged blobs (deletion alone only untags; GC frees the bytes).
 
-`just update [vN|latest]` runs whichever tag suffix you name (default `latest`);
-the compose file resolves `enb:server-<tag>` / `enb:login-<tag>` /
-`enb:status-notifier-<tag>`.
+`just apply-update [vN|latest]` (and the `apply-update` leg of `just update`)
+ships whichever tag suffix you name (default `latest`); the compose file resolves
+`enb:server-<tag>` / `enb:login-<tag>` / `enb:status-notifier-<tag>`.
 
 ## HTTPS / the certificate
 
@@ -350,13 +356,20 @@ To turn it on:
 2. `just up -y` -- stands up the bucket + CloudFront + cert + WAF + DNS. (The ACM
    cert validates via the same Route53 zone as the main cert; first CloudFront
    propagation can take ~15 min.)
-3. `just update` -- threads `NET7_PATCHER_MANIFEST_URL` / `NET7_PATCHER_DL_BASE`
-   (derived from the patcher outputs) into the droplet `.env` and restarts login,
-   which now loads the manifest at boot.
-4. `just push-client` -- builds the Windows launcher bundle
-   (`package-client-windows`), writes `manifest.json` over the three artifacts,
-   uploads all four to the bucket, and invalidates CloudFront. Re-run it for every
-   new launcher/proxy build; then `just update` so login re-reads the manifest.
+3. `just update` -- now that the patcher is configured, the `push` leg also runs
+   `push-client` (builds the Windows launcher bundle via `package-client-windows`,
+   writes `manifest.json` over the three artifacts, uploads all four to the bucket,
+   invalidates CloudFront), and the `apply-update` leg threads
+   `NET7_PATCHER_MANIFEST_URL` / `NET7_PATCHER_DL_BASE` (derived from the patcher
+   outputs) into the droplet `.env` and restarts login -- which then loads the
+   freshly-uploaded manifest at boot. The combined order (push, then ship) is why
+   one `just update` is sufficient: artifacts + manifest land before login
+   re-reads them.
+
+For every later launcher/proxy build, `just update` again re-pushes the client
+patch and restarts login. To push only the client patch without touching the
+server stack, run `just push-client` on its own, then `just apply-update` so login
+re-reads the manifest.
 
 **Update race.** The bucket is unversioned and `just push-client` overwrites in
 place. A launcher mid-download during an overwrite is covered by the launcher's
@@ -364,10 +377,12 @@ post-download hash verify: a mismatched/partial file is rejected and retried on
 the next launch, so an inconsistent set is never applied. The cost is one wasted
 launch, not a broken client.
 
-**Order matters:** `push-client` first (artifacts + manifest in the bucket), then
-`update` (login re-reads the manifest). If you `update` before `push-client` on a
-fresh bucket, the manifest GET 404s and `/updateCheck` reports DOWN until the
-artifacts land -- no breakage, just no self-update in that window.
+**Order matters:** artifacts + manifest must be in the bucket before login
+re-reads them. `just update` gets this right by construction (its `push` leg runs
+before its `apply-update` leg). Only if you drive the legs by hand does ordering
+bite: run `push-client` (or `push`) before `apply-update`. An `apply-update`
+against a fresh, empty bucket 404s the manifest GET and `/updateCheck` reports
+DOWN until the artifacts land -- no breakage, just no self-update in that window.
 
 ## tfstate storage
 
