@@ -227,6 +227,32 @@ not yet captured", not "client crashes".
   covers. Genuine unblock: a DECRYPTED client<->proxy capture during a real
   tractor/loot, OR owner real-client iteration. Until then #49 stays blocked --
   this is the safely-implementable ceiling of the parity program.
+  **Owner intent (2026-06-07) for #49:** the user-visible goal is that mined
+  ore/loot **tractors IN to the ship** (the article spawns in-world and is
+  beam-pulled to the player) instead of teleporting straight into inventory.
+  That IS the 0x2013/0x2014 OUTPUT-chain fabrication above -- the 0x04 CREATE +
+  0x46 positional-interp that animates the pull-in. So "fix the ore not pulling
+  in" and "ship the tractor/loot fabrication" are the same task; it remains
+  CV-gated on the encrypted-leg capture / real-client iteration, not a separate
+  fix.
+
+- [ ] **AD-7 (NEW, 2026-06-07, do NOT fix yet -- tackle when AD-2/AD-3 / #49
+  is worked): post-prospect movement desync.** Owner report: after you prospect
+  something, the player's position appears **locked server-side** (likely in the
+  MVAS / sector position state) -- the client can still move locally, but the
+  server no longer accepts/echoes the new position, so the two desync. It stays
+  desynced until the next **warp**, at which point the client **rubberbands**
+  back to the server's stale position. Hypothesis to investigate when we open
+  this area: the prospect/mine action puts the player into a server-side
+  "locked"/"busy" or stationary-beam state (the real client holds you still
+  while the beam runs) that is never cleared on our server after the beam ends,
+  so subsequent MVAS position updates are rejected/ignored until a warp forces a
+  full position re-sync. Check the server's prospect/mine handler
+  (`PlayerSkills.cpp` ActivateProspectBeam path + whatever sets a player
+  movement/lock flag) for an un-cleared lock, and the MVAS receiver for dropped
+  position updates while that flag is set. Needs the live capture / real-client
+  loop from #49 to confirm the exact state transition. Not blocking; bundle the
+  fix with the tractor/loot work.
 
 - [x] **AD-1 (DONE): structured-decode `GLOBAL_ERROR 0x75`.** `GlobalErrorRecord`
   decodes the `[u32 Length LE][u32 Code BE = ntohl(index+7)][Length msg bytes,
