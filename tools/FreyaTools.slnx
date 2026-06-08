@@ -49,6 +49,7 @@
   </Folder>
   <Folder Name="/LaunchFreya/">
     <Project Path="LaunchFreya/LaunchFreya.csproj" />
+    <Project Path="LaunchFreya.Tests/LaunchFreya.Tests.csproj" />
   </Folder>
   <Folder Name="/faction-editor-avalonia/">
     <Project Path="faction-editor-avalonia/FactionEditorAvalonia.csproj" />

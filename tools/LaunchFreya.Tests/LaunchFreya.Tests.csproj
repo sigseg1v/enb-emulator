@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>LaunchFreya.Tests</RootNamespace>
+    <AssemblyName>LaunchFreya.Tests</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <GenerateProgramFile>true</GenerateProgramFile>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+  <!-- The launcher is a WinExe, but the Update/* logic under test has no
+       Avalonia/UI dependency and is compiled unconditionally (not behind
+       CHECK_FOR_UPDATES). Referencing the project gives the test the
+       LaunchFreya.Update types directly. -->
+  <ItemGroup>
+    <ProjectReference Include="..\LaunchFreya\LaunchFreya.csproj" />
+  </ItemGroup>
+</Project>

@@ -108,6 +108,13 @@ namespace LaunchFreya
             Title = "LaunchFreya";
             c_Status.Text = "Loading configuration...";
 
+#if CHECK_FOR_UPDATES
+            // Clear any *.old / staging leftovers from a prior self-replace
+            // before this run does anything else (best-effort, never throws).
+            try { new Updater(AppContext.BaseDirectory, Environment.ProcessPath, AppendLog).CleanupStaleArtifacts(); }
+            catch (Exception ex) { AppendLog($"update: cleanup skipped: {ex.Message}"); }
+#endif
+
             // Locate FreyaLauncher.cfg: prefer next to the .dll (deployed
             // alongside) and fall back to the legacy LaunchNet7 source
             // tree so a dev `dotnet run` works.
@@ -286,11 +293,13 @@ namespace LaunchFreya
             {
                 c_ServerStatus.Text = "READY";
                 c_Button_Check.IsEnabled = false;
+                GatePlay(true);         // single-player never updates
             }
             else
             {
                 c_ServerStatus.Text = "";
                 c_Button_Check.IsEnabled = true;
+                GatePlay(false);        // re-gate until the next probe confirms
             }
         }
 
@@ -308,6 +317,7 @@ namespace LaunchFreya
             {
                 _statusProbeGen++;
                 c_ServerStatus.Text = "";
+                GatePlay(false);
                 return;
             }
 
@@ -318,13 +328,15 @@ namespace LaunchFreya
                 _statusProbeGen++;
                 c_ServerStatus.Text = "READY";
                 c_Button_Check.IsEnabled = false;
+                GatePlay(true);
             }
             else
             {
                 int gen = ++_statusProbeGen;
                 c_ServerStatus.Text = "CHECKING";
                 c_Button_Check.IsEnabled = true;
-                _ = CheckServerStatusAsync(NormalizeHost(host.Hostname), GetProbePort(host), gen);
+                GatePlay(false);
+                _ = KickServerProbe(NormalizeHost(host.Hostname), GetProbePort(host), gen);
             }
             _lastSelectedHost = host;
         }
@@ -376,12 +388,142 @@ namespace LaunchFreya
             }
         }
 
+        // Dispatch the multiplayer liveness probe. On the self-updater build the
+        // /updateCheck POST IS the probe (a reachable login server answers it)
+        // and also gates Play on version match; on the Linux dev build it's a
+        // plain TCP connect to the auth port.
+        Task KickServerProbe(string host, int port, int gen)
+        {
+#if CHECK_FOR_UPDATES
+            return RunUpdateProbeAsync(host, port, gen);
+#else
+            return CheckServerStatusAsync(host, port, gen);
+#endif
+        }
+
+        // Enable/disable Play. Only meaningful on the self-updater build, where
+        // Play stays gated until a probe confirms an up-to-date multiplayer
+        // server (or single-player, which never updates). On the dev build this
+        // is a deliberate no-op so Play is always available.
+        void GatePlay(bool enabled)
+        {
+#if CHECK_FOR_UPDATES
+            c_Button_Play.IsEnabled = enabled;
+#endif
+        }
+
+#if CHECK_FOR_UPDATES
+        // Multiplayer probe + version gate. Mirrors CheckServerStatusAsync's
+        // stale-token discipline: every UI write is guarded by `gen` so a probe
+        // whose selection has since changed never stomps the current one.
+        async Task RunUpdateProbeAsync(string host, int port, int gen)
+        {
+            void WriteStatus(string text)
+                => Dispatcher.UIThread.Post(() => { if (gen == _statusProbeGen) c_ServerStatus.Text = text; });
+            void SetPlay(bool enabled)
+                => Dispatcher.UIThread.Post(() => { if (gen == _statusProbeGen) c_Button_Play.IsEnabled = enabled; });
+
+            SetPlay(false);   // gated until we confirm up-to-date
+            string url = $"https://{host}:{port}/updateCheck";
+            var updater = new Updater(AppContext.BaseDirectory, Environment.ProcessPath, AppendLog);
+
+            UpdateCheckResponse resp = await updater.CheckAsync(url);
+            if (gen != _statusProbeGen) return;   // selection changed; drop result
+
+            // Fail closed: an unreachable / not-ready server, an unparseable
+            // reply, or any unexpected status leaves Play disabled.
+            if (resp == null)
+            {
+                WriteStatus("OFFLINE");
+                SetPlay(false);
+                return;
+            }
+            if (string.Equals(resp.Status, UpdateStatus.UpToDate, StringComparison.OrdinalIgnoreCase))
+            {
+                WriteStatus("ONLINE");
+                SetPlay(true);
+                return;
+            }
+            if (string.Equals(resp.Status, UpdateStatus.UpdateNeeded, StringComparison.OrdinalIgnoreCase))
+            {
+                WriteStatus("UPDATE");
+                await PromptAndApplyUpdateAsync(updater, resp, gen);
+                return;
+            }
+            AppendLog($"update probe: unexpected status '{resp.Status}'");
+            WriteStatus("OFFLINE");
+            SetPlay(false);
+        }
+
+        // Prompt to apply a needed update. Decline keeps Play gated (a stale
+        // build cannot connect). Accept downloads + verifies everything before
+        // touching the install; on a self-replace the new image is relaunched
+        // and this one exits.
+        async Task PromptAndApplyUpdateAsync(Updater updater, UpdateCheckResponse resp, int gen)
+        {
+            int n = resp.Files?.Count ?? 0;
+            var choice = await MessageBoxManager.GetMessageBoxStandard(
+                "Freya - Update available",
+                $"An update is available ({n} file(s)). Download and apply now?",
+                ButtonEnum.OkCancel, MsBoxIcon.Question).ShowWindowDialogAsync(this);
+            if (choice != ButtonResult.Ok)
+            {
+                if (gen == _statusProbeGen)
+                {
+                    c_ServerStatus.Text = "UPDATE REQUIRED";
+                    c_Button_Play.IsEnabled = false;
+                }
+                return;
+            }
+
+            c_UpdateSpinner.IsVisible = true;
+            c_Button_Play.IsEnabled = false;
+            c_Button_Check.IsEnabled = false;
+            try
+            {
+                await updater.DownloadAndApplyAsync(resp,
+                    msg => Dispatcher.UIThread.Post(() => c_Status.Text = msg));
+            }
+            catch (UpdateException ex)
+            {
+                c_UpdateSpinner.IsVisible = false;
+                c_Button_Check.IsEnabled = true;
+                AppendLog($"update failed: {ex.Message}");
+                await Err($"Update failed: {ex.Message}\nThe install was left unchanged; try again.");
+                return;
+            }
+            c_UpdateSpinner.IsVisible = false;
+
+            if (updater.SelfReplaced)
+            {
+                // The running launcher was renamed aside (Windows rename-self):
+                // relaunch the freshly-installed image and exit so the user lands
+                // on the updated build, which deletes the *.old on startup.
+                try
+                {
+                    string exe = Environment.ProcessPath;
+                    if (!string.IsNullOrEmpty(exe))
+                        Process.Start(new ProcessStartInfo { FileName = exe, UseShellExecute = false });
+                }
+                catch (Exception ex) { AppendLog($"relaunch failed: {ex.Message}"); }
+                Close();
+                return;
+            }
+
+            // Only non-self files changed (e.g. just FreyaProxy.exe). No relaunch
+            // needed -- re-probe to confirm we're now up to date and re-gate Play.
+            c_Status.Text = "Update applied.";
+            UpdateForSelectedHost();
+        }
+#endif
+
         void OnCheckClick(object sender, RoutedEventArgs e)
         {
             if (!TryGetSelectedHost(out _, out var host)) return;
             int gen = ++_statusProbeGen;
             c_ServerStatus.Text = "CHECKING";
-            _ = CheckServerStatusAsync(NormalizeHost(host.Hostname), GetProbePort(host), gen);
+            GatePlay(false);
+            _ = KickServerProbe(NormalizeHost(host.Hostname), GetProbePort(host), gen);
         }
 
         async void OnBrowseClient(object sender, RoutedEventArgs e)
