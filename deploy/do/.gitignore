@@ -18,3 +18,5 @@ override.tf.json
 
 # Deploy bundle scratch
 *.tgz
+
+backup/
