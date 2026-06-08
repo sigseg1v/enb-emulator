@@ -8,8 +8,8 @@ namespace N7.CliClient.Repl.Commands;
 
 /// <summary>
 /// <c>create &lt;class&gt; &lt;name&gt;</c> -- send GlobalCreateCharacter
-/// on the first empty avatar slot. Class is a two-letter code
-/// (race + profession): TW TT TE JW JT JE PW PT PE.
+/// on the first empty avatar slot. Class is one of the nine real EnB
+/// class codes: TE TT TS / JD JS JE / PW PP PS.
 /// </summary>
 public sealed class CreateCommand : ICommandHandler
 {
@@ -25,9 +25,10 @@ public sealed class CreateCommand : ICommandHandler
     public string Summary => "create a character in the first empty slot";
     public string Usage   =>
         "create [character] <class> <firstname>\n" +
-        "  class: 2-letter race+profession code\n" +
-        "    races:        T=Terran  J=Jenquai  P=Progen\n" +
-        "    professions:  W=Warrior T=Trader   E=Explorer\n" +
+        "  class: 2-letter EnB class code\n" +
+        "    Terran:   TE=Enforcer  TT=Trader   TS=Scout\n" +
+        "    Jenquai:  JD=Defender  JS=Seeker   JE=Explorer\n" +
+        "    Progen:   PW=Warrior   PP=Privateer PS=Sentinel\n" +
         "  example: create JE Griever\n" +
         "  example: create character JE Griever";
     public string? Placeholder => "<class> <firstname>";
@@ -69,7 +70,7 @@ public sealed class CreateCommand : ICommandHandler
         if (!CharacterClass.TryParseCode(args[idx], out int race, out int profession))
         {
             await output.WriteLineAsync(
-                AnsiPalette.Err($"bad class code '{args[idx]}' (try JE, TW, PT, ...)")).ConfigureAwait(false);
+                AnsiPalette.Err($"bad class code '{args[idx]}' (try JE, TE, PW, ...)")).ConfigureAwait(false);
             return 1;
         }
 
@@ -108,7 +109,7 @@ public sealed class CreateCommand : ICommandHandler
         await output.WriteLineAsync(
             AnsiPalette.Muted("create: ") +
             AnsiPalette.Muted($"slot={slot} ") +
-            AnsiPalette.Info($"{CharacterClass.RaceName(race)} {CharacterClass.ProfessionName(profession)}") + " " +
+            AnsiPalette.Info($"{CharacterClass.RaceName(race)} {CharacterClass.ClassName(race, profession)} ({CharacterClass.ClassCode(race, profession)})") + " " +
             AnsiPalette.Muted("name=") + AnsiPalette.Accent($"'{firstName}'") + " " +
             AnsiPalette.Muted($"ship='{shipName}'"))
             .ConfigureAwait(false);

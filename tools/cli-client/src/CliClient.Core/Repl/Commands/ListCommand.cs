@@ -69,12 +69,13 @@ public sealed class ListCommand : ICommandHandler
             }
             filled++;
             string race = CharacterClass.RaceName(slot.Data.Race);
-            string prof = CharacterClass.ProfessionName(slot.Data.Profession);
+            string cls = CharacterClass.ClassName(slot.Data.Race, slot.Data.Profession);
+            string code = CharacterClass.ClassCode(slot.Data.Race, slot.Data.Profession);
             string loc = string.IsNullOrEmpty(slot.Info.Location) ? "?" : slot.Info.Location;
             await output.WriteLineAsync(
                 "  " + AnsiPalette.Muted($"[{i}]") + " " +
                 AnsiPalette.Accent($"{slot.Data.FirstName,-20}") + " " +
-                AnsiPalette.Info($"{race}/{prof}") + "  " +
+                AnsiPalette.Info($"{race} {cls} ({code})") + "  " +
                 AnsiPalette.Muted($"sector={slot.Info.SectorId} loc={loc} ") +
                 AnsiPalette.Value(
                     $"levels(C/E/T)={slot.Info.CombatLevel}/{slot.Info.ExploreLevel}/{slot.Info.TradeLevel}"))

@@ -44,39 +44,56 @@ public static class CharacterClass
         _ => $"Race({race})",
     };
 
-    public static string ProfessionName(int profession) => profession switch
+    // The nine EnB classes. ClassIndex = race*3 + profession (server Net7.h).
+    // The profession SLOT is an archetype (0=warrior/tank, 1=trader,
+    // 2=explorer/scout) but the human-facing class NAME is race-specific, so
+    // the code's second letter is the actual class initial, NOT the archetype.
+    // These are the real in-game class names and the real two-letter codes the
+    // server emits (server/src/UDP_Global.cpp kClassAbbrev) -- there is no "TW"
+    // or "JW": Terran warrior = Enforcer = TE, Jenquai warrior = Defender = JD.
+    private static readonly (string Name, string Code)[] ClassTable =
     {
-        0 => "Warrior",
-        1 => "Trader",
-        2 => "Explorer",
-        _ => $"Prof({profession})",
+        // Terran                  Jenquai                  Progen
+        ("Enforcer",  "TE"), ("Trader",  "TT"), ("Scout",     "TS"),
+        ("Defender",  "JD"), ("Seeker",  "JS"), ("Explorer",  "JE"),
+        ("Warrior",   "PW"), ("Privateer","PP"), ("Sentinel", "PS"),
     };
 
+    /// <summary>The race-specific class name, e.g. (Jenquai, warrior slot) =&gt; "Defender".</summary>
+    public static string ClassName(int race, int profession)
+    {
+        int index = race * 3 + profession;
+        if (index < 0 || index >= ClassTable.Length) return $"Class({race},{profession})";
+        return ClassTable[index].Name;
+    }
+
+    /// <summary>The two-letter class code, e.g. (Jenquai, warrior slot) =&gt; "JD".</summary>
+    public static string ClassCode(int race, int profession)
+    {
+        int index = race * 3 + profession;
+        if (index < 0 || index >= ClassTable.Length) return "??";
+        return ClassTable[index].Code;
+    }
+
     /// <summary>
-    /// Parse a two-letter class code (e.g. "JE" = Jenquai Explorer).
-    /// First char is race (T/J/P), second is profession (W/T/E).
+    /// Parse one of the nine real class codes (TE TT TS / JD JS JE / PW PP PS)
+    /// into its race and profession slot. Case-insensitive.
     /// </summary>
     public static bool TryParseCode(string code, out int race, out int profession)
     {
         race = -1;
         profession = -1;
         if (string.IsNullOrEmpty(code) || code.Length != 2) return false;
-        char r = char.ToUpperInvariant(code[0]);
-        char p = char.ToUpperInvariant(code[1]);
-        race = r switch
+        string upper = code.ToUpperInvariant();
+        for (int i = 0; i < ClassTable.Length; i++)
         {
-            'T' => RaceTerran,
-            'J' => RaceJenquai,
-            'P' => RaceProgen,
-            _ => -1,
-        };
-        profession = p switch
-        {
-            'W' => ProfWarrior,
-            'T' => ProfTrader,
-            'E' => ProfExplorer,
-            _ => -1,
-        };
-        return race >= 0 && profession >= 0;
+            if (ClassTable[i].Code == upper)
+            {
+                race = i / 3;
+                profession = i % 3;
+                return true;
+            }
+        }
+        return false;
     }
 }
