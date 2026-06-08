@@ -1466,7 +1466,14 @@ void Player::SaveCreditLevel()
 	unsigned char data[32];
 	int index = 0;
 
-	AddData(data, credits, index);
+	// credits is a u64 save field. On Linux `u64` == `unsigned long`, which
+	// binds the 4-byte AddData(unsigned long) overload -- truncating to 32
+	// bits and leaving data[4..7] as uninitialized stack. HandleCreditChange
+	// then reads 8 bytes (u64), so the high dword became random stack garbage:
+	// credits inflated to billions and changed every save/login. Route through
+	// the explicit 8-byte emitter so writer (8B) and reader (8B) agree on both
+	// platforms. See PacketMethods.h AddData64 note.
+	AddData64(data, credits, index);
 
 	g_SaveMgr->AddSaveMessage(SAVE_CODE_CREDIT_LEVEL, m_CharacterID, index, data);
 }

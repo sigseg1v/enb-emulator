@@ -39,6 +39,18 @@ add_executable(header_layout_test
 )
 target_link_libraries(header_layout_test PRIVATE GTest::gtest_main)
 
+# --- Protocol: credits u64 save-field width (regression guard) -----------
+# Pins the producer/consumer width agreement for SAVE_CODE_CREDIT_LEVEL so the
+# 4-byte-write / 8-byte-read credits-corruption bug cannot return. Header-only.
+add_executable(credit_save_width_test
+    protocol/credit_save_width_test.cpp
+)
+target_include_directories(credit_save_width_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../server/src
+)
+target_compile_options(credit_save_width_test PRIVATE -Wno-unused-function)
+target_link_libraries(credit_save_width_test PRIVATE GTest::gtest_main)
+
 # --- Protocol: per-packet auth wrapper accept/drop decision (Phase AH) ----
 # Drives the same net7::CheckAuthWrapper the server runtime calls
 # (server/src/AuthWrapper.h). Header-only, no sodium/openssl needed.

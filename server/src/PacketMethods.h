@@ -48,6 +48,20 @@ inline void AddData<unsigned long>(unsigned char *packet, unsigned long mydata, 
 	index += 4;
 }
 
+/* Genuine 8-byte (u64) save/wire fields -- Credits, Price, costs, TradeMoney.
+** On Linux `u64` == `unsigned long`, so a bare AddData(buf, credits, index)
+** binds the AddData<unsigned long> specialization ABOVE and truncates to 4
+** bytes, leaving the high dword as uninitialized buffer/stack. A consumer that
+** reads 8 bytes back then sees random garbage in the high dword. Route real
+** u64 fields through this explicit 8-byte emitter so writer and reader agree
+** on both Win32 (u64 == __int64) and Linux (u64 == unsigned long). Mirrors
+** AuxBase::AddData64. */
+static void AddData64(unsigned char *packet, uint64_t mydata, int &index)
+{
+	*((uint64_t *) &packet[index]) = mydata;
+	index += 8;
+}
+
 /* Adds the string only */
 static void AddDataS(unsigned char *packet, char *mydata, int &index)
 {
