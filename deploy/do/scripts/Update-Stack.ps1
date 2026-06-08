@@ -85,6 +85,20 @@ try {
     $retention  = Get-EnvOr 'STATUS_RETENTION_DAYS' '7'
     $botToken   = Get-EnvOr 'DISCORD_BOT_TOKEN' ''
     $guildId    = Get-EnvOr 'DISCORD_GUILD_ID' ''
+
+    # Phase AN: the login server's /updateCheck reads the launcher manifest from
+    # CloudFront. Derive the two NET7_PATCHER_* env vars from the patcher fields;
+    # leave them blank when the patcher is not configured (login then reports the
+    # server DOWN to the launcher, fail-closed -- harmless until the infra is up).
+    $patcherBucket = Get-EnvOr 'ENB_PATCHER_PRIVATE_S3_BUCKET' ''
+    $patcherManifestUrl = ''
+    $patcherDlBase      = ''
+    if ($patcherBucket) {
+        $dlDomain = Get-EnvOr 'PATCHER_DL_DOMAIN' "dl.$domain"
+        $patcherDlBase      = "https://$dlDomain"
+        $patcherManifestUrl = "https://$dlDomain/manifest.json"
+    }
+
     $envText = @(
         "COMPOSE_PROJECT_NAME=$project"
         "REGISTRY=$reg"
@@ -95,6 +109,8 @@ try {
         "STATUS_RETENTION_DAYS=$retention"
         "DISCORD_BOT_TOKEN=$botToken"
         "DISCORD_GUILD_ID=$guildId"
+        "NET7_PATCHER_MANIFEST_URL=$patcherManifestUrl"
+        "NET7_PATCHER_DL_BASE=$patcherDlBase"
     ) -join "`n"
     Set-Content -Path (Join-Path $stage '.env') -Value $envText
 

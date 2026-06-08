@@ -102,6 +102,7 @@ stable across droplet rebuilds, so you set DNS once.
 | `just up -y` | Converge infra. Idempotent. Issues the bootstrap cert; the droplet auto-renews thereafter (see below). |
 | `just push [vN]` | Build + push the 2 server-side services (server + login) into repo `enb` as `*-vN` (default: auto-increment), re-point `*-latest`, prune to the newest 3 versions/service, GC. |
 | `just update [tag]` | Pull images + recreate changed containers on the droplet. |
+| `just push-client` | (Phase AN, opt-in) Build the Windows launcher bundle, write `manifest.json`, upload all of it to the patcher S3 bucket, and invalidate CloudFront. No-op target unless the patcher is configured (see "Launcher self-update"). |
 | `just start` | Start an already-deployed stack (no pull). |
 | `just stop` | Stop containers; droplet, DB volume, and infra stay. |
 | `just destroy` | Tear down ALL infra incl. the droplet + its DB volume. Asks to confirm. |
@@ -317,6 +318,56 @@ planes above, which are the only inbound game ports the cloud exposes.
   pgdata volume / accidental wipes, but NOT droplet loss (same disk). For
   droplet-loss durability, copy the dumps off-box (Spaces/S3) or enable DO
   droplet backups.
+
+## Launcher self-update (Phase AN, opt-in)
+
+The Windows **FreyaLauncher** can keep itself and the bundled **FreyaProxy.exe**
+current without the player re-running the installer. At startup it SHA-512s its
+own `FreyaLauncher.exe` and `bin/FreyaProxy.exe` and POSTs both hashes to the
+login server's `/updateCheck`. The login server compares them against a
+`manifest.json` it fetched at boot and replies `UP_TO_DATE` or a list of changed
+files + a base URL. The launcher downloads each changed file from that URL,
+verifies its hash, and self-replaces (rename-self-then-relaunch). `FreyaLauncher.cfg`
+has no independent hash -- it rides along whenever the launcher EXE changes.
+
+Delivery is a **private S3 bucket fronted by CloudFront** (Origin Access Control,
+so nothing is world-readable from S3 directly), with an ACM cert + Route53
+`dl.<domain>` alias and a single per-source-IP WAF rate rule to cap abuse. The
+login server reads `manifest.json` credential-free over that same CloudFront host.
+
+**Entirely opt-in and OFF by default.** With `ENB_PATCHER_PRIVATE_S3_BUCKET`
+blank (the default), `TF_VAR_manage_patcher=false`: terraform creates none of the
+S3/CloudFront/ACM/WAF resources, the login container gets empty
+`NET7_PATCHER_*` env, its manifest never loads, and `/updateCheck` fail-closes
+(reports the server DOWN to the launcher -- harmless, the launcher just doesn't
+self-update). An existing deploy is untouched until you opt in.
+
+To turn it on:
+
+1. Set `ENB_PATCHER_PRIVATE_S3_BUCKET` (a globally-unique bucket name) in `.env`,
+   optionally `PATCHER_DL_DOMAIN` (defaults to `dl.<DOMAIN_NAME>`) and
+   `PATCHER_RATE_LIMIT` (default 20). See `.env.example`.
+2. `just up -y` -- stands up the bucket + CloudFront + cert + WAF + DNS. (The ACM
+   cert validates via the same Route53 zone as the main cert; first CloudFront
+   propagation can take ~15 min.)
+3. `just update` -- threads `NET7_PATCHER_MANIFEST_URL` / `NET7_PATCHER_DL_BASE`
+   (derived from the patcher outputs) into the droplet `.env` and restarts login,
+   which now loads the manifest at boot.
+4. `just push-client` -- builds the Windows launcher bundle
+   (`package-client-windows`), writes `manifest.json` over the three artifacts,
+   uploads all four to the bucket, and invalidates CloudFront. Re-run it for every
+   new launcher/proxy build; then `just update` so login re-reads the manifest.
+
+**Update race.** The bucket is unversioned and `just push-client` overwrites in
+place. A launcher mid-download during an overwrite is covered by the launcher's
+post-download hash verify: a mismatched/partial file is rejected and retried on
+the next launch, so an inconsistent set is never applied. The cost is one wasted
+launch, not a broken client.
+
+**Order matters:** `push-client` first (artifacts + manifest in the bucket), then
+`update` (login re-reads the manifest). If you `update` before `push-client` on a
+fresh bucket, the manifest GET 404s and `/updateCheck` reports DOWN until the
+artifacts land -- no breakage, just no self-update in that window.
 
 ## tfstate storage
 

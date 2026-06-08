@@ -1,13 +1,17 @@
 # Phase AN -- FreyaLauncher auto-update (patcher) + login `/updateCheck` + S3/CloudFront delivery
 
-Status: **C1 + C2 IMPLEMENTED (code only). C3-C5 still owner-gated -- NO cloud
-resources created.** The launcher updater (C1) and login `/updateCheck` endpoint
-+ startup manifest hash cache (C2) are built, unit-tested, and verified
-end-to-end against a local `file://` manifest stub (no cloud). The delivery
-infra (C3 terraform: S3 + CloudFront + ACM + WAF + Route53), the push pipeline
-(C4), and the installer switch (C5) remain owner-gated and unexecuted.
-Owner directive 2026-06-07: "Plan this all out carefully into a planning doc
-before executing it. Don't create any resources until I tell you to."
+Status: **C1-C5 CODE COMPLETE (no cloud resources created). Deploy is
+owner-gated.** The launcher updater (C1), login `/updateCheck` + startup manifest
+cache (C2), delivery infra (C3 terraform: S3 + CloudFront + ACM + WAF + Route53,
+all OPT-IN behind `manage_patcher`), the push pipeline (C4
+`scripts/Push-ClientPatch.ps1` + `just push-client` + `package-client-windows`
+manifest/zip), and the Windows install path (C5: zip bundle + self-update, no
+installer program) are all authored and committed. **Nothing is deployed:** no
+`terraform apply`, no S3/CloudFront/ACM/WAF created, no artifacts pushed. The
+patcher infra stays inert until the operator sets `ENB_PATCHER_PRIVATE_S3_BUCKET`
+in `.env` and runs `just up` / `just push-client` / `just update`.
+Owner directive 2026-06-07: "make all scripts and code, just wait for me to
+deploy ... short of deploying."
 
 > **HARD GATE:** Do not run `just up` (deploy/do), `terraform apply`, create any
 > S3 bucket / CloudFront distribution / ACM cert / WAF, or push artifacts to S3
@@ -47,7 +51,7 @@ Windows artifacts, overwrites them in S3, and invalidates CloudFront.
 | C2 | Login `/updateCheck` HTTPS endpoint + startup hash cache | `login-server/Net7SSL/` | yes |
 | C3 | Delivery infra: private S3 + CloudFront + ACM + WAF + Route53 `dl.` record | `deploy/do/terraform/` | no (cloud) |
 | C4 | `just push` pipeline: build Win artifacts -> S3 overwrite -> CF invalidation | `deploy/do/scripts/Build-And-Push.ps1` (+ a Win-artifact build) | partial |
-| C5 | linux-installer: stop pulling the upstream Net-7 patcher; use FreyaLauncher | `client/linux-installer/` | n/a |
+| C5 | Windows install path: zip bundle + self-update, no installer program (NOT the Linux installer -- see C5 detail) | `justfile` `package-client-windows`, `docs/07` | yes |
 
 ---
 
@@ -209,18 +213,18 @@ Existing infra already uses the `aws` provider for Route53 + the `acme` provider
 (Let's Encrypt) for the **game** cert. CloudFront needs an **ACM** cert in
 **us-east-1** specifically (CloudFront requirement, regardless of droplet region).
 
-- [ ] AN-C3-1 New env vars in `deploy/do/.env.example`:
+- [x] AN-C3-1 New env vars in `deploy/do/.env.example`:
       `ENB_PATCHER_PRIVATE_S3_BUCKET` (globally-unique private bucket name),
       and a derived `dl.<DOMAIN_NAME>` (or an explicit `PATCHER_DL_DOMAIN`).
-- [ ] AN-C3-2 Private S3 bucket (block all public access). Versioning optional
+- [x] AN-C3-2 Private S3 bucket (block all public access). Versioning optional
       (owner said don't worry about keeping old versions -- default off, but
       note in README the push/update race in section 6).
-- [ ] AN-C3-3 CloudFront distribution serving the **private** bucket via **OAC**
+- [x] AN-C3-3 CloudFront distribution serving the **private** bucket via **OAC**
       (Origin Access Control; bucket policy grants only the distribution).
-- [ ] AN-C3-4 ACM cert for `dl.<domain>` in **us-east-1** (new `aws` provider
+- [x] AN-C3-4 ACM cert for `dl.<domain>` in **us-east-1** (new `aws` provider
       alias `aws.us_east_1`), DNS-validated via the existing Route53 zone.
-- [ ] AN-C3-5 Route53 record `dl.<domain>` -> the CloudFront distribution.
-- [ ] AN-C3-6 WAF (WAFv2, scope=CLOUDFRONT, us-east-1) attached to the
+- [x] AN-C3-5 Route53 record `dl.<domain>` -> the CloudFront distribution.
+- [x] AN-C3-6 WAF (WAFv2, scope=CLOUDFRONT, us-east-1) attached to the
       distribution -- **one per-IP rate-based rule** (OPEN-Q6 RESOLVED, owner
       2026-06-07). Aggregate by **source IP**, limit ~**20 requests / 5 min**
       (the WAF floor is 10; 20 leaves headroom for a legit 3-file update + a few
@@ -230,7 +234,7 @@ Existing infra already uses the `aws` provider for Route53 + the `acme` provider
       cache, not S3) achieves it simply. (Residual: a distributed many-IP flood
       defeats any per-IP rule; a global-constant second rate rule could be added
       later if ever needed, not day one.)
-- [ ] AN-C3-7 Wire all of the above behind the SAME idempotent `terraform apply`
+- [x] AN-C3-7 Wire all of the above behind the SAME idempotent `terraform apply`
       that `deploy/do` `just up` runs (Deploy-Infra.ps1). **CONFIRMED (owner
       2026-06-07):** "run init again" = `deploy/do` `just up` (root `just init`
       is dev-only); fold the S3/CF/ACM/WAF/Route53 resources into that same apply
@@ -239,39 +243,59 @@ Existing infra already uses the `aws` provider for Route53 + the `acme` provider
 
 ### C4 -- `just push` pipeline  `deploy/do/scripts/Build-And-Push.ps1` (+ Win build)
 
-- [ ] AN-C4-1 Build the Windows artifacts: `FreyaLauncher.exe`
+- [x] AN-C4-1 Build the Windows artifacts: `FreyaLauncher.exe`
       (`dotnet publish` win-x64, `CheckForUpdates=true`), `FreyaProxy.exe`
       (MinGW Win32 cross-build, `proxy/cmake/mingw-w64-x86_64.toolchain.cmake`),
       and the packaged `FreyaLauncher.cfg`. Likely a repo-root
       `just package-client-windows` (task #76) that Build-And-Push calls.
-- [ ] AN-C4-2 Compute SHA-512 of all three; write a `manifest.json`
+- [x] AN-C4-2 Compute SHA-512 of all three; write a `manifest.json`
       (relativePath + sha512 for the 3 files) -- this is the single hash source
       the login server GETs over CloudFront (OPEN-Q1 RESOLVED; no S3 HEAD, no
       object metadata path).
-- [ ] AN-C4-3 Upload (overwrite) the 3 files + `manifest.json` to
+- [x] AN-C4-3 Upload (overwrite) the 3 files + `manifest.json` to
       `s3://$ENB_PATCHER_PRIVATE_S3_BUCKET/`.
-- [ ] AN-C4-4 Trigger CloudFront invalidation `/*` after upload.
-- [ ] AN-C4-5 **Push -> update ordering (OPEN-Q2 RESOLVED).** The login server
+- [x] AN-C4-4 Trigger CloudFront invalidation `/*` after upload.
+- [x] AN-C4-5 **Push -> update ordering (OPEN-Q2 RESOLVED).** The login server
       reads the manifest only at startup (no TTL), so a `just push` does NOT take
       effect until the login server restarts. Operator runs `just push` (build +
       S3 overwrite + CF invalidation) **then `just update`** (Update-Stack.ps1
       restarts the login container -> re-fetches the manifest). Document this
       two-step in the deploy README and ideally have `just push` print the
       reminder (or chain `just update`) at the end.
-- [ ] AN-C4-6 Document that the **server-side** `just push` (server/login images)
+- [x] AN-C4-6 Document that the **server-side** `just push` (server/login images)
       and this **client-artifact** push are distinct concerns; keep the proxy a
       client artifact (it is never deployed to the droplet -- main.tf already
       says so).
 
-### C5 -- linux-installer  `client/linux-installer/`
+### C5 -- Windows client install path  (NOT the Linux installer)
 
-- [ ] AN-C5-1 The installer currently downloads/patches the upstream Net-7
-      `LaunchNet7.exe` patcher (referenced in docs as "stays"). That changes:
-      point the installer at **our** `FreyaLauncher` (from CloudFront / the
-      package) instead of the upstream patcher. Coordinate with Phase U
-      (21-phase-u-linux-installer-fixes.md). Preserve the GPLv3 header/license.
-- [ ] AN-C5-2 Update docs (docs/07, the installer README) to describe Freya's
-      own updater replacing the upstream patcher flow.
+**Retarget (owner, 2026-06-07).** The original C5 wording aimed at
+`client/linux-installer/`, but that was wrong on two counts:
+
+1. **Wrong OS.** The self-updater is a **Windows** feature (FreyaLauncher +
+   FreyaProxy run under WINE/Windows). The Windows install path is the
+   `just package-client-windows` bundle, which runs its **own** bundled
+   `FreyaProxy.exe`.
+2. **The Linux installer's "patcher" is load-bearing for game data.** That
+   installer's `LaunchNet7.exe` does double duty -- launcher self-update **and**
+   EnB **game-client data delivery** from `patch.net-7.org`. FreyaLauncher's
+   updater replaces ONLY the launcher+proxy, never game data, so ripping
+   LaunchNet7 out of the *Linux* installer would break client patching with no
+   replacement. The Linux installer therefore stays as-is (still the EnB
+   client-data delivery on Linux); Phase U continues to own it.
+
+Owner decision (2026-06-07): **no installer program** (no Inno/NSIS/WiX). The
+zip bundle IS the Windows install.
+
+- [x] AN-C5-1 `just package-client-windows` now emits `dist/enb-client-windows/`
+      **and `dist/enb-client-windows.zip`**. The bundle ships FreyaLauncher.exe +
+      bin/FreyaProxy.exe + a package-only FreyaLauncher.cfg, with no upstream
+      Net-7 patcher present to remove. The player extracts the zip and runs
+      FreyaLauncher.exe, which self-updates via /updateCheck + CloudFront (C1).
+- [x] AN-C5-2 docs/07 documents the Windows-package distribution + that the
+      Freya updater delivers only launcher+proxy (game client is a separate
+      pre-existing install), and that the Linux installer is unrelated and keeps
+      the upstream WINE client-data flow. No `client/linux-installer/` change.
 
 ---
 

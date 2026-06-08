@@ -26,6 +26,13 @@ push tag="":
 update tag="":
     ./scripts/Update-Stack.ps1 -Tag "{{tag}}"
 
+# (Phase AN, opt-in) Build the Windows launcher bundle, write manifest.json,
+# upload it all to the patcher S3 bucket, and invalidate CloudFront. Errors out
+# unless the patcher is configured (ENB_PATCHER_PRIVATE_S3_BUCKET set + infra up).
+# Run `just update` afterward so login re-reads the new manifest.
+push-client:
+    ./scripts/Push-ClientPatch.ps1
+
 # Start an already-deployed stack (no image pull).
 start:
     ./scripts/Start-Stack.ps1

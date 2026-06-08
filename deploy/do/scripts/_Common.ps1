@@ -65,6 +65,15 @@ function Import-DeployEnv {
     $env:TF_VAR_acme_email       = (Get-EnvOr 'ACME_EMAIL' '')
     $env:TF_VAR_acme_server_url  = (Get-EnvOr 'ACME_SERVER_URL' 'https://acme-v02.api.letsencrypt.org/directory')
 
+    # Phase AN launcher-update delivery (opt-in). manage_patcher is derived: it
+    # turns on only when the operator names a bucket, so an existing deploy with
+    # no patcher fields stays untouched.
+    $patcherBucket = (Get-EnvOr 'ENB_PATCHER_PRIVATE_S3_BUCKET' '')
+    $env:TF_VAR_manage_patcher    = if ($patcherBucket) { 'true' } else { 'false' }
+    $env:TF_VAR_patcher_s3_bucket = $patcherBucket
+    $env:TF_VAR_patcher_dl_domain = (Get-EnvOr 'PATCHER_DL_DOMAIN' '')
+    $env:TF_VAR_patcher_rate_limit = (Get-EnvOr 'PATCHER_RATE_LIMIT' '20')
+
     # aws provider/acme expect AWS_DEFAULT_REGION too.
     if (-not (Test-Path 'Env:AWS_DEFAULT_REGION')) { $env:AWS_DEFAULT_REGION = $env:TF_VAR_aws_region }
 }

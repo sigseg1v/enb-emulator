@@ -95,3 +95,33 @@ variable "acme_server_url" {
   # Staging (avoids rate limits while testing):
   # https://acme-staging-v02.api.letsencrypt.org/directory
 }
+
+# ---------------------------------------------------------------------------
+# Phase AN: FreyaLauncher self-update delivery (private S3 + CloudFront + WAF).
+# Entirely OPT-IN: with manage_patcher=false (the default) NONE of the patcher
+# resources are created, so an existing deploy is untouched until the operator
+# fills the new .env fields. See patcher.tf and the deploy README.
+# ---------------------------------------------------------------------------
+variable "manage_patcher" {
+  description = "If true, Terraform creates the launcher-update delivery infra (private S3 bucket + CloudFront via OAC + ACM cert in us-east-1 + WAF rate rule + Route53 record). Default false = no patcher resources."
+  type        = bool
+  default     = false
+}
+
+variable "patcher_s3_bucket" {
+  description = "Globally-unique name for the PRIVATE S3 bucket that holds the launcher artifacts + manifest.json. Required when manage_patcher=true."
+  type        = string
+  default     = ""
+}
+
+variable "patcher_dl_domain" {
+  description = "Hostname CloudFront serves the artifacts on, e.g. dl.enb.sigsegv.land. Empty -> derived as dl.<domain_name>. Must live in the same Route53 zone."
+  type        = string
+  default     = ""
+}
+
+variable "patcher_rate_limit" {
+  description = "WAFv2 per-source-IP request cap over a 5-minute window (floor 10). ~20 leaves headroom for a 3-file update + retries while still tripping a spam loop."
+  type        = number
+  default     = 20
+}

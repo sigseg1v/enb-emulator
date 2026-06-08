@@ -102,6 +102,7 @@ package-client-windows: build-proxy-win64
     @echo ">>> publishing self-contained win-x64 launcher (single-file)"
     dotnet publish tools/LaunchFreya/LaunchFreya.csproj -c Release -r win-x64 \
         --self-contained true \
+        -p:CheckForUpdates=true \
         -p:PublishSingleFile=true \
         -p:IncludeNativeLibrariesForSelfExtract=true \
         -p:EnableCompressionInSingleFile=true \
@@ -113,9 +114,13 @@ package-client-windows: build-proxy-win64
     @cp tools/LaunchFreya/bin/win-x64-publish/FreyaLauncher.exe dist/enb-client-windows/FreyaLauncher.exe
     @cp bin/FreyaProxy.exe dist/enb-client-windows/bin/FreyaProxy.exe
     @cp tools/LaunchFreya/FreyaLauncher.windows-package.cfg dist/enb-client-windows/FreyaLauncher.cfg
-    @echo ">>> done. dist/enb-client-windows/  --  zip it and ship."
+    @echo ">>> zipping dist/enb-client-windows.zip"
+    @rm -f dist/enb-client-windows.zip
+    @cd dist && zip -qr enb-client-windows.zip enb-client-windows
+    @echo ">>> done. dist/enb-client-windows/ (+ enb-client-windows.zip)"
     @echo "    Contents: FreyaLauncher.exe + bin/FreyaProxy.exe + FreyaLauncher.cfg"
-    @echo "    User extracts the folder on Windows and runs FreyaLauncher.exe."
+    @echo "    User extracts the zip on Windows and runs FreyaLauncher.exe;"
+    @echo "    FreyaLauncher self-updates itself + FreyaProxy from the server thereafter."
 
 # Smoke-run FreyaProxy.exe under WINE (no game client, just the proxy).
 # Confirms WSAStartup + binds TCP 3801/3805 + opens both UDP planes.

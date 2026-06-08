@@ -142,6 +142,19 @@ upstream `ExeUpdater`/`FileListCreator` helpers) has been removed; the
 Avalonia launcher is the only one. An even older C++ launcher survives
 under `launchnet7-old/` as historical reference only -- it is not built.
 
+Windows distribution: `just package-client-windows` produces
+`dist/enb-client-windows/` (and a `.zip`) holding the self-contained
+`FreyaLauncher.exe` + `bin/FreyaProxy.exe` + a package-only
+`FreyaLauncher.cfg`. That folder IS the install -- there is no installer
+program (no Inno/NSIS) and no upstream Net-7 patcher: the player extracts
+the zip and runs `FreyaLauncher.exe`, which from then on keeps itself and
+the bundled `FreyaProxy.exe` current via the `/updateCheck` + CloudFront
+self-updater described above (Phase AN). The EnB game client itself is a
+separate, pre-existing install the launcher points at via `ClientPath`;
+the Freya updater delivers only the launcher + proxy, never game data.
+The Linux path (`client/linux-installer/`) is unrelated and still uses the
+upstream WINE installer, which remains the EnB client-data delivery there.
+
 ### `missioneditor/` + `missioneditor-avalonia/` -- Mission Editor
 
 Type: Avalonia (recommended) / WinForms (legacy).

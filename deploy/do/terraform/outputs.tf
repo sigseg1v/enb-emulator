@@ -24,3 +24,25 @@ output "ssh_target" {
 output "dns_status" {
   value = var.manage_dns ? "Terraform manages A ${var.domain_name} -> ${digitalocean_reserved_ip.enb.ip_address}" : "MANUAL: create A record ${var.domain_name} -> ${digitalocean_reserved_ip.enb.ip_address}"
 }
+
+# ---- Phase AN launcher-update delivery (only when manage_patcher=true) -----
+
+output "patcher_s3_bucket" {
+  description = "Private S3 bucket holding the launcher artifacts + manifest.json (empty when manage_patcher=false)."
+  value       = var.manage_patcher ? aws_s3_bucket.patcher[0].bucket : ""
+}
+
+output "patcher_cloudfront_id" {
+  description = "CloudFront distribution id (for `aws cloudfront create-invalidation`)."
+  value       = var.manage_patcher ? aws_cloudfront_distribution.patcher[0].id : ""
+}
+
+output "patcher_dl_base" {
+  description = "Base URL the launcher + login server use for artifacts/manifest, e.g. https://dl.<domain>."
+  value       = var.manage_patcher ? "https://${local.patcher_dl_domain}" : ""
+}
+
+output "patcher_manifest_url" {
+  description = "The manifest.json URL the login server GETs at startup (NET7_PATCHER_MANIFEST_URL)."
+  value       = var.manage_patcher ? "https://${local.patcher_dl_domain}/manifest.json" : ""
+}

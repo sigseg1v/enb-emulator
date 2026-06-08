@@ -181,6 +181,14 @@ services:
       DB_USER: "net7"
       DB_PASS: "net7"
       DB_NAME: "net7_user"
+      # Phase AN launcher self-update. /updateCheck answers from a manifest.json
+      # the login server GETs from CloudFront at startup; the launcher downloads
+      # changed files from NET7_PATCHER_DL_BASE. Both are blank unless the patcher
+      # infra is configured (ENB_PATCHER_PRIVATE_S3_BUCKET set) -- with them empty
+      # the manifest never loads and /updateCheck fail-closes (reports DOWN), which
+      # is harmless until the delivery path exists. See deploy README.
+      NET7_PATCHER_MANIFEST_URL: "${NET7_PATCHER_MANIFEST_URL:-}"
+      NET7_PATCHER_DL_BASE: "${NET7_PATCHER_DL_BASE:-}"
     volumes:
       # net7ssl hard-codes g_DomainName="localhost" (login-server/Net7SSL/
       # Net7SSL.cpp:39) and never reads Net7Config.cfg, so SSL_Listener always
