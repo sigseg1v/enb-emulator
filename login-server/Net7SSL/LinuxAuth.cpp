@@ -61,11 +61,13 @@
 
 #include "Net7SSL.h"
 #include "SSL_Connection.h"   // For *_TAG macros (USERNAME_TAG etc.)
+#include "PatcherManifest.h"  // Phase AN launcher self-update hash cache
 #include <net7/Mutex.h>
 
 #include <pqxx/pqxx>
 #include <sodium.h>
 
+#include <cctype>
 #include <ctime>
 #include <cstdio>
 #include <cstdlib>
@@ -567,6 +569,115 @@ char *HandleCertificate(size_t *out_len)
     return HttpResult(out_len, body);
 }
 
+// --------------------------------------------------------------------------
+// Phase AN: /updateCheck launcher self-update gate.
+// --------------------------------------------------------------------------
+
+// Case-insensitive hex equality for SHA-512 strings. Empty never matches (a
+// missing local hash from the client must read as a mismatch, not a match).
+bool HashEq(const std::string &a, const std::string &b)
+{
+    if (a.empty() || b.empty() || a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i)
+        if (tolower((unsigned char)a[i]) != tolower((unsigned char)b[i]))
+            return false;
+    return true;
+}
+
+// Extract a JSON string field from the POST body. The launcher sends a fixed,
+// self-describing contract {"launcherHash":"...","proxyHash":"..."}; a full
+// JSON parser is unwarranted, but bounds are checked so a malformed body yields
+// "" (-> a mismatch -> UPDATE_NEEDED) rather than a crash. The extracted value
+// is ONLY ever compared, never reflected into the response.
+std::string JsonField(const char *text, const char *field)
+{
+    std::string needle = std::string("\"") + field + "\"";
+    const char *p = strstr(text, needle.c_str());
+    if (!p) return "";
+    p = strchr(p + needle.size(), ':');
+    if (!p) return "";
+    ++p;
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') ++p;
+    if (*p != '"') return "";
+    ++p;
+    const char *end = strchr(p, '"');
+    if (!end) return "";
+    return std::string(p, (size_t)(end - p));
+}
+
+char *MakeServiceUnavailable(size_t *out_len)
+{
+    static const char *kErr503 =
+        "HTTP/1.1 503 Service Unavailable\r\n"
+        "Server: AuthServer/2.5\r\n"
+        "Content-Length: 0\r\n"
+        "Connection: Keep-Alive\r\n"
+        "\r\n";
+    size_t n = strlen(kErr503);
+    char *r = new char[n + 1];
+    memcpy(r, kErr503, n + 1);
+    *out_len = n;
+    return r;
+}
+
+// POST /updateCheck  body: {"launcherHash","proxyHash"}
+// Compares the client's two local hashes to the manifest cache and replies:
+//   - UP_TO_DATE when both match;
+//   - UPDATE_NEEDED with a conditional file list otherwise -- a launcher
+//     mismatch ships FreyaLauncher.exe + FreyaLauncher.cfg (the cfg always
+//     rides with the launcher and has no independent hash check), a proxy
+//     mismatch ships bin/FreyaProxy.exe; both -> all three.
+// Cache miss (manifest not loaded) -> 503, which the launcher reads as the
+// server being DOWN (fail-closed: no update decision on an empty cache).
+char *HandleUpdateCheck(size_t *out_len, char *recv_buffer)
+{
+    PatcherManifest &mf = PatcherManifest::Instance();
+    if (mf.Empty())
+        return MakeServiceUnavailable(out_len);
+
+    const char *body = strstr(recv_buffer, "\r\n\r\n");
+    body = body ? body + 4 : "";
+
+    std::string clientLauncher = JsonField(body, "launcherHash");
+    std::string clientProxy    = JsonField(body, "proxyHash");
+
+    bool launcherOk = HashEq(clientLauncher, mf.LauncherExeHash());
+    bool proxyOk    = HashEq(clientProxy, mf.ProxyExeHash());
+
+    std::string json;
+    if (launcherOk && proxyOk)
+    {
+        json = "{\"status\":\"UP_TO_DATE\"}";
+    }
+    else
+    {
+        const std::string base = mf.DlBase();
+        std::string files;
+        auto add = [&](const char *rel, const std::string &url, const std::string &hash) {
+            if (!files.empty()) files += ",";
+            files += "{\"relativePath\":\"";
+            files += rel;
+            files += "\",\"url\":\"";
+            files += url;
+            files += "\",\"hash\":\"";
+            files += hash;
+            files += "\"}";
+        };
+        if (!launcherOk)
+        {
+            add("FreyaLauncher.exe", base + "/FreyaLauncher.exe", mf.LauncherExeHash());
+            add("FreyaLauncher.cfg", base + "/FreyaLauncher.cfg", mf.LauncherCfgHash());
+        }
+        if (!proxyOk)
+        {
+            add("bin/FreyaProxy.exe", base + "/FreyaProxy.exe", mf.ProxyExeHash());
+        }
+        json = "{\"status\":\"UPDATE_NEEDED\",\"files\":[" + files + "]}";
+    }
+
+    return HttpResult(out_len, json.c_str(), "application/json");
+}
+
 } // namespace
 
 // --------------------------------------------------------------------------
@@ -597,6 +708,9 @@ char *HandleHttpsRequest(char *recv_buffer, size_t *out_len,
     }
     if (strstr(recv_buffer, "certificate.html")) {
         return HandleCertificate(out_len);
+    }
+    if (strstr(recv_buffer, "/updateCheck")) {
+        return HandleUpdateCheck(out_len, recv_buffer);
     }
     if (strstr(recv_buffer, "/who.cgi")) {
         // Linux no-op by design: the upstream Win32 implementation also

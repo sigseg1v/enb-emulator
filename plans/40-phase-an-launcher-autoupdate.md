@@ -1,6 +1,11 @@
 # Phase AN -- FreyaLauncher auto-update (patcher) + login `/updateCheck` + S3/CloudFront delivery
 
-Status: **PLANNING ONLY -- nothing executed, NO cloud resources created.**
+Status: **C1 + C2 IMPLEMENTED (code only). C3-C5 still owner-gated -- NO cloud
+resources created.** The launcher updater (C1) and login `/updateCheck` endpoint
++ startup manifest hash cache (C2) are built, unit-tested, and verified
+end-to-end against a local `file://` manifest stub (no cloud). The delivery
+infra (C3 terraform: S3 + CloudFront + ACM + WAF + Route53), the push pipeline
+(C4), and the installer switch (C5) remain owner-gated and unexecuted.
 Owner directive 2026-06-07: "Plan this all out carefully into a planning doc
 before executing it. Don't create any resources until I tell you to."
 
@@ -113,36 +118,36 @@ Hook point: the existing status-probe flow in `MainWindow.axaml.cs` (the
 `c_ServerStatus` label + `_statusProbeGen` monotonic token, ~lines 275-305) and
 the Play button enable/disable.
 
-- [ ] AN-C1-1 Compile-time flag `checkForUpdates`. Add an MSBuild property
+- [x] AN-C1-1 Compile-time flag `checkForUpdates`. Add an MSBuild property
       (e.g. `<CheckForUpdates>false</CheckForUpdates>` default) -> `DefineConstants`
       `CHECK_FOR_UPDATES`. `just play-local` / Debug = off; the Windows package
       build (task #76 `package-client-windows`) = on. When off, the whole
       updater path is `#if`'d out and status goes straight to the existing
       server-up probe.
-- [ ] AN-C1-2 SHA-512 of local `FreyaLauncher.exe` + `FreyaProxy.exe`
+- [x] AN-C1-2 SHA-512 of local `FreyaLauncher.exe` + `FreyaProxy.exe`
       (resolve next to the running launcher; proxy path = same dir `bin/` per
       `Launcher.cs`). Use `System.Security.Cryptography.SHA512`, lowercase hex.
-- [ ] AN-C1-3 POST to `https://<auth-host>/updateCheck`. Reuse the configured
+- [x] AN-C1-3 POST to `https://<auth-host>/updateCheck`. Reuse the configured
       auth host/port the launcher already uses for the status probe. Short
       timeout; on transport failure show a clear non-fatal error and DO NOT
       enable Play (fail-closed: can't confirm currency -> can't play). (Decide
       with owner if a hard network failure should block or warn-and-allow;
       default here = block, matches "can't click play until this is done".)
-- [ ] AN-C1-4 Status-label state machine: `Checking...` while the request is in
+- [x] AN-C1-4 Status-label state machine: `Checking...` while the request is in
       flight -> `Online` on UP_TO_DATE -> `Update Needed` on UPDATE_NEEDED
       (while prompting/downloading). Gate Play on reaching `Online`.
-- [ ] AN-C1-5 Prompt on UPDATE_NEEDED: "An update is available. Would you like
+- [x] AN-C1-5 Prompt on UPDATE_NEEDED: "An update is available. Would you like
       to download? [OK] [Cancel]". Cancel -> exit the launcher. OK -> download.
-- [ ] AN-C1-6 **Path-traversal guard (SECURITY, mandatory).** For every
+- [x] AN-C1-6 **Path-traversal guard (SECURITY, mandatory).** For every
       `relativePath`: reject absolute paths, drive letters, and any path whose
       `Path.GetFullPath(Combine(baseDir, relativePath))` does not start with
       `baseDir + separator`. Reject `..` segments. baseDir = launcher install
       dir. A failing entry aborts the whole update (no partial application).
-- [ ] AN-C1-7 Download: delete `<baseDir>/updates/` if present, recreate it,
+- [x] AN-C1-7 Download: delete `<baseDir>/updates/` if present, recreate it,
       fetch each file to `updates/<filename>`. Show a downloading spinner.
-- [ ] AN-C1-8 Verify: SHA-512 each downloaded file, compare to the response
+- [x] AN-C1-8 Verify: SHA-512 each downloaded file, compare to the response
       `hash`. If ANY mismatch -> abort, do not replace anything, surface error.
-- [ ] AN-C1-9 Atomic replace, **including the running launcher**. Windows can
+- [x] AN-C1-9 Atomic replace, **including the running launcher**. Windows can
       rename (MoveFile) a running image but not overwrite/delete it. Plan:
       - For non-running files (`FreyaProxy.exe`, `FreyaLauncher.cfg`): the proxy
         is not running at launch time, so move-replace directly.
@@ -150,18 +155,21 @@ the Play button enable/disable.
         move `updates/FreyaLauncher.exe` -> `FreyaLauncher.exe`, start the new
         exe, exit. The freshly-started new launcher deletes any `*.old` on
         startup. No external helper exe (OPEN-Q4 RESOLVED).
-- [ ] AN-C1-10 Auto-relaunch the new launcher after replace; old process exits.
-- [ ] AN-C1-11 Startup cleanup: delete leftover `FreyaLauncher.exe.old` and a
+- [x] AN-C1-10 Auto-relaunch the new launcher after replace; old process exits.
+- [x] AN-C1-11 Startup cleanup: delete leftover `FreyaLauncher.exe.old` and a
       stale `updates/` dir.
-- [ ] AN-C1-12 Unit-test the pure logic: path-traversal guard (reject `..`,
+- [x] AN-C1-12 Unit-test the pure logic: path-traversal guard (reject `..`,
       absolute, sibling-escape), hash compare, response JSON parse.
 
 ### C2 -- Login `/updateCheck` endpoint + hash cache  `login-server/Net7SSL/`
 
-- [ ] AN-C2-1 Route `/updateCheck` in `SSL_Connection.cpp` next to `/AuthLogin`
-      (the `strstr(recv_buffer, "/AuthLogin")` branch at line 261). Parse the
-      POST JSON body (two hex hashes). Reject oversized/malformed bodies cheaply.
-- [ ] AN-C2-2 In-memory hash cache: the authoritative SHA-512 of the 3 published
+- [x] AN-C2-1 Route `/updateCheck` next to `/AuthLogin`. NOTE: the real Linux
+      request handler is `HandleHttpsRequest()` in `LinuxAuth.cpp`, not
+      `SSL_Connection.cpp` -- that whole TU is `#ifdef WIN32`-walled and compiles
+      to nothing on Linux. The route + `HandleUpdateCheck()` live in LinuxAuth's
+      anonymous namespace; the POST body's two hex hashes are extracted with a
+      bounds-checked `JsonField` (malformed -> "" -> mismatch, never a crash).
+- [x] AN-C2-2 In-memory hash cache: the authoritative SHA-512 of the 3 published
       files. Populated **once at login-server startup** by a plain HTTPS GET of a
       small `manifest.json` over CloudFront (OPEN-Q1 RESOLVED -- manifest GET, no
       S3 HEAD, no AWS creds). **No TTL** -- the cache is refreshed by restarting
@@ -172,7 +180,7 @@ the Play button enable/disable.
       and GET `NET7_PATCHER_MANIFEST_URL`. libcurl also reads `file://` URLs, so
       the **local-stub test (step 1) points the env at a manifest on disk** -- no
       TLS, no cloud. manifest.json schema: `{ "files": [{ "relativePath", "sha512" }, ...] }`.
-- [ ] AN-C2-3 Compare client `launcherHash` + `proxyHash` to cache. Both match
+- [x] AN-C2-3 Compare client `launcherHash` + `proxyHash` to cache. Both match
       -> `UP_TO_DATE`. Else -> `UPDATE_NEEDED` with a **conditional** `files`
       list: launcher mismatch adds `FreyaLauncher.exe` + `FreyaLauncher.cfg`
       (cfg always rides with the launcher -- it has no own hash check); proxy
@@ -180,10 +188,10 @@ the Play button enable/disable.
       cached hashes (the cfg hash comes from the same manifest, used only for
       the launcher's post-download integrity check, not the decision). Keep the
       compare simple and allocation-light.
-- [ ] AN-C2-4 Config: CF base URL (`dl.<domain>`) and the manifest URL come from
+- [x] AN-C2-4 Config: CF base URL (`dl.<domain>`) and the manifest URL come from
       env/config (NET7_ prefix per house style, e.g. `NET7_PATCHER_DL_BASE`,
       `NET7_PATCHER_MANIFEST_URL`). No secrets. No TTL knob (startup-only fetch).
-- [ ] AN-C2-5 Cache-miss = server DOWN (OPEN-Q5 RESOLVED, owner 2026-06-07). If
+- [x] AN-C2-5 Cache-miss = server DOWN (OPEN-Q5 RESOLVED, owner 2026-06-07). If
       the hash cache is not yet populated (first boot before the manifest GET
       completes, or the GET failed), the login server reports the **server status
       as DOWN** -- the launcher shows the server offline and Play stays disabled.
@@ -192,7 +200,7 @@ the Play button enable/disable.
       fetch. (Implication: the manifest fetch must succeed for the server to read
       as UP -- treat a persistent manifest-GET failure as a deploy error, not a
       silent degrade.)
-- [ ] AN-C2-6 Never read arbitrary local files; never reflect client input into
+- [x] AN-C2-6 Never read arbitrary local files; never reflect client input into
       a path or shell. The endpoint only ever returns the 3 fixed entries.
 
 ### C3 -- Delivery infra (terraform, `deploy/do/terraform/`)  **owner-gated**

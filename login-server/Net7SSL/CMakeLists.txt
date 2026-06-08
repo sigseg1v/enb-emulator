@@ -68,6 +68,12 @@ message(STATUS "net7ssl: libpqxx ${LIBPQXX_VERSION} -- ${LIBPQXX_LINK_LIBRARIES}
 pkg_check_modules(LIBSODIUM REQUIRED IMPORTED_TARGET libsodium)
 message(STATUS "net7ssl: libsodium ${LIBSODIUM_VERSION} -- ${LIBSODIUM_LINK_LIBRARIES}")
 
+# Phase AN: libcurl for the launcher self-update manifest fetch
+# (PatcherManifest.cpp -- HTTPS GET of manifest.json at startup; also reads
+# file:// for the local-stub test).
+find_package(CURL REQUIRED)
+message(STATUS "net7ssl: libcurl ${CURL_VERSION_STRING}")
+
 # --------------------------------------------------------------------------
 # Target
 # --------------------------------------------------------------------------
@@ -113,6 +119,7 @@ target_link_libraries(net7ssl PRIVATE
 
 target_link_libraries(net7ssl PRIVATE PkgConfig::LIBPQXX PostgreSQL::PostgreSQL)
 target_link_libraries(net7ssl PRIVATE PkgConfig::LIBSODIUM)
+target_link_libraries(net7ssl PRIVATE CURL::libcurl)
 
 # --------------------------------------------------------------------------
 # Install

@@ -29,6 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libsodium-dev \
         libpq-dev \
         libpqxx-dev \
+        libcurl4-openssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -51,6 +52,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libssl3 \
         libsodium23 \
         libpqxx-7.8t64 \
+        libcurl4 \
         iproute2 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system net7 \

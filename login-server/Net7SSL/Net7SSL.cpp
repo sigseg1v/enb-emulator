@@ -12,6 +12,7 @@
 #include "Net7SSL.h"
 #include "SSL_Listener.h"
 #include "MailslotManager.h"
+#include "PatcherManifest.h"   // Phase AN launcher self-update hash cache
 #include <net7/SingleInstance.h>
 
 #include <cstdio>
@@ -184,6 +185,13 @@ int main(int argc, char **argv)
     // thread on Linux (see SSL_Listener.cpp).
     SSL_Listener *listener = new SSL_Listener(ip_address_internal, SSL_PORT);
     (void)listener;
+
+    // Phase AN: populate the launcher self-update hash cache once at startup
+    // (HTTPS GET of manifest.json). Failure is non-fatal -- /updateCheck then
+    // reports the server DOWN (HTTP 503) so the launcher fails closed; the
+    // login/auth path is unaffected. Refreshed by restarting (`just update`).
+    if (!PatcherManifest::Instance().Load())
+        LogMessage("Net7SSL: patcher manifest not loaded; /updateCheck will report DOWN\n");
 
     // Mailslot IPC peer (server <-> login keepalive). Same wiring as Win32
     // main_prog(): every ~10s send "Ping" to the server's recv socket; if
