@@ -842,3 +842,26 @@ format & byte order", Trap 2).
   actually moving (change-gated; quiet when stationary), matching the live capture
   cadence. If position still diverges, the engine read offsets are wrong -- the
   wire half is already byte-pinned, so debug `ReadEngineShipState`, not the proxy.
+
+### [ ] CV-CAP-1 -- `/capitalize` flips the class-suffix case and persists (Phase AO)
+
+- **Change**: new non-retail player command `/capitalize` toggles the case of the
+  trailing 2-letter class suffix (TE TS TT JE JS JD PW PS PP) on the caller's own
+  avatar name and persists it through the server-authoritative full-DB save
+  (`Player::SaveDatabase()` -> `SAVE_CODE_DATABASE`). `server/src/PlayerConnection.cpp`
+  case 'c'.
+- **Why the CLI/integration suite does NOT close this**: the command alters no
+  retail wire packet (it is a server-internal name edit on the caller's own
+  `m_Database` routed through an existing save opcode), so there is no byte to pin.
+  The remaining unknown is purely cosmetic-client: whether the rendered nameplate
+  actually reflects the new case after relog, and whether the change survives a
+  full session + logout/login round-trip.
+- **Setup (owner)**: log in a character whose name ends in a class code (e.g.
+  `BobTE`). Type `/capitalize`.
+- **What to look for**:
+  1. Server replies "Class suffix toggled: your name is now `Bobte`. Log out and
+     back in to see it update everywhere." (lower-case the second time -> `BobTE`).
+  2. Log out and back in. The nameplate / character-select shows the toggled case.
+  3. Run it on a name that does NOT end in a class code -> "Your name must end in a
+     class suffix (...)" and the name is unchanged.
+  4. Confirm it does not affect any other player's name and cannot be aimed at one.

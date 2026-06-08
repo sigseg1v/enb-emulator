@@ -5724,6 +5724,69 @@ void Player::HandleSlashCommands(char *Msg)
 			break;
 		case 'c':
 			{
+				// /capitalize -- toggle the case of the trailing 2-letter class
+				// suffix on the CALLER'S OWN avatar name (TE TS TT JE JS JD PW PS
+				// PP). If both suffix letters are already upper-case, lower them;
+				// otherwise upper them. Operates only on this player's own
+				// m_Database (no other-avatar access), then persists through the
+				// existing server-authoritative full-DB save (SAVE_CODE_DATABASE).
+				// Non-retail additive command; does not change any retail wire
+				// packet parsing. The client's rendered nameplate refreshes on
+				// relog (it caches the name from login); chat/ship-owner update
+				// live here.
+				if (strcmp(pch, "capitalize") == 0)
+				{
+					char *nm = Database()->avatar.avatar_first_name;
+					size_t len = strlen(nm);
+					bool toggled = false;
+					if (len >= 2)
+					{
+						char c0 = nm[len - 2];
+						char c1 = nm[len - 1];
+						char u0 = (char) toupper((unsigned char) c0);
+						char u1 = (char) toupper((unsigned char) c1);
+						static const char * const kClassCodes[] = {
+							"TE", "TS", "TT", "JE", "JS", "JD", "PW", "PS", "PP"
+						};
+						bool is_code = false;
+						for (size_t i = 0; i < sizeof(kClassCodes) / sizeof(kClassCodes[0]); i++)
+						{
+							if (u0 == kClassCodes[i][0] && u1 == kClassCodes[i][1])
+							{
+								is_code = true;
+								break;
+							}
+						}
+						if (is_code)
+						{
+							bool both_upper = (c0 == u0) && (c1 == u1);
+							if (both_upper)
+							{
+								nm[len - 2] = (char) tolower((unsigned char) c0);
+								nm[len - 1] = (char) tolower((unsigned char) c1);
+							}
+							else
+							{
+								nm[len - 2] = u0;
+								nm[len - 1] = u1;
+							}
+							SetName(nm);
+							ShipIndex()->SetName(nm);
+							ShipIndex()->SetOwner(nm);
+							SaveDatabase();
+							SendVaMessage("Class suffix toggled: your name is now `%s`. "
+								"Log out and back in to see it update everywhere.", nm);
+							toggled = true;
+						}
+					}
+					if (!toggled)
+					{
+						SendVaMessage("Your name must end in a class suffix "
+							"(TE TS TT JE JS JD PW PS PP) to use /capitalize.");
+					}
+					msg_sent = true;
+					success = true;
+				}
 				if (MatchOptWithParam("chjoin", pch, param, msg_sent))
 				{
 					success = false;
