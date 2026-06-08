@@ -396,6 +396,43 @@ every other client's view -- the "my ship disappeared after sitting idle" bug.
 - [ ] CV-04 -- real-client (play-local) confirmation: undock, idle 3+ min, ship
       must not vanish.
 
+## 3b-2. MVAS position feed (0x1004, proxy->server) -- SCAFFOLDED (PB-2)
+
+The keepalive (3b) keeps an idle avatar alive; this is the moving-avatar half.
+The same missing `UDPProxyMVAS.cpp` subsystem also streamed the client's ship
+position to the server as `0x1004` so the server's authoritative position
+tracked the rendered one. Without it the server only sees the coordinate-less
+`0x0014 MOVE` thrust impulse and dead-reckons a diverging path -- the PB-2
+normal-thrust desync (client moves, server disagrees, spacebar/autopilot/warp
+snap back).
+
+- **Why it was never working**: the proxy-side position source
+  (`engine_read_process`, `proxy/Net7.cpp:288`) was a `return false` stub; the
+  only real cross-process scrape lived in the old `launcher/SocketTest.cpp`
+  (separate binary, not how players run). So even before `UDPProxyMVAS.cpp` was
+  deleted in `4dc71638`, the proxy fed no position. This is a NEW source, not a
+  port-back.
+- **Primary source**: live Net7Proxy capture
+  `proxy/local-debug/Combat-...-20260604-072157.pcapng` -- `0x1004` to udp/3806
+  x196 during thruster movement; 40-byte datagram = 12B EnbUdpHeader + 6 floats
+  (pos xyz, heading xyz) + a trailing int32 the server ignores.
+- [x] **In-client producer** (`client/detours/ClientPositionFeed.{h,cpp}`):
+      publishes engine ship state into named shared memory
+      (`proxy/ClientPositionShared.h`, seqlock). Engine read is an OWNER SEAM
+      (`ReadEngineShipState`, returns false until filled -> feed inert). Wired
+      into `ClientDetours.cpp` DllMain attach/detach; added to the `.dsp`.
+- [x] **Proxy consumer** (`UDPClient::SendPositionIfChanged`,
+      `proxy/UDPClient_linux.cpp`): polled at 200ms on the MVAS keepalive thread,
+      reads shared memory (Win32/WINE only; no-op on the Linux docker proxy),
+      change-gates on pos+heading, emits the 24-byte server-consumed payload to
+      `MVAS_LOGIN_PORT`. Both build targets (Linux-native + Win32 mingw) green.
+- [x] **CLI byte-pin**: `CaptureReplayTests.MvasPosition_1004_RealCaptureBytes_*`
+      (fixture `live_mvas_position_1004.hex`) pins the capture; documents the two
+      server-irrelevant divergences from our emitter (size 36 vs 40; trailing
+      int32 not fabricated -- its source is unknown, not the sequence).
+- [ ] CV-MVAS-POS -- owner wires `ReadEngineShipState` + confirms against the
+      real client that thruster flight stays in sync (plans/29).
+
 ## 3c. CLI full-parse opcode coverage (ongoing -- this session)
 
 Closing gaps where a server-emitted opcode fell through to `GenericRecord`

@@ -55,8 +55,15 @@ public:
     void    SendServerKeepalive();
     // Start the 0x3005 keepalive thread on THIS UDPClient (guarded so a re-login
     // does not stack threads -- the surviving thread picks up the latest
-    // m_PlayerID on its next tick).
+    // m_PlayerID on its next tick). The same thread also drives the 0x1004
+    // position feed (SendPositionIfChanged), polled at a fast cadence.
     void    StartMVASKeepalive();
+    // MVAS position feed (PB-2). When the in-client position hook is publishing
+    // (Win32/WINE only -- see ClientPositionShared.h), read the latest ship
+    // position/orientation and, if it moved since the last send, stream it to
+    // the server as opcode 0x1004 on MVAS_LOGIN_PORT. No-op when there is no
+    // live feed (always the case for the Linux-native docker proxy).
+    void    SendPositionIfChanged();
     bool    VerifyConnection();
 
 	unsigned long checksum(char *buffer, int size);		// checksum
@@ -91,7 +98,6 @@ public:
     bool    ConnectionActive()                      { return m_ConnectionActive; }
     long    GetClientIP()                           { return m_IPAddr; }
     long    GetSectorID()                           { return m_SectorID; }
-    void    SendPositionIfChanged();
 
     void    StartLoginTimer();
     void    KillTCPConnection();
@@ -241,6 +247,26 @@ private:
     // player_id -- but the real proxy increments it, so we mirror that).
     bool    m_KeepaliveStarted;
     int32_t m_KeepaliveSeq;
+
+    // MVAS position feed (PB-2). Last position/orientation actually streamed to
+    // the server, so SendPositionIfChanged only sends on real movement (the
+    // real Net7Proxy is change-gated too -- a stationary ship stops feeding).
+    // m_PosFeedSeq fills the EnbUdpHeader sequence field. The Win32 hook handle
+    // (m_PosShmHandle/View) is lazily opened on first poll and only ever exists
+    // on the WINE client-side build; the Linux build leaves it null forever.
+    float   m_LastFedPos[3];
+    float   m_LastFedHeading[3];
+    bool    m_HaveFedOnce;
+    int32_t m_PosFeedSeq;
+    // Read the latest published ship position/orientation from the in-client
+    // hook (Win32/WINE shared memory); false when no live feed (always so on
+    // the Linux-native docker proxy). Drives SendPositionIfChanged.
+    bool    ReadClientShipPosition(float pos[3], float heading[3]);
+#ifdef _WIN32
+    void   *m_PosShmHandle;   // HANDLE from OpenFileMapping (void* to avoid
+    const void *m_PosShmView; // dragging windows.h into this header)
+    bool    m_PosShmTried;    // we already attempted (and may have failed) open
+#endif
 
     PacketList m_Packets;
     short m_PacketTimeout;

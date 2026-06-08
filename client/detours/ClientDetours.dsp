@@ -66,10 +66,22 @@ PostBuild_Cmds=copy         Release\ClientDetours.dll         ..\bin\
 
 SOURCE=.\ClientDetours.cpp
 # End Source File
+# Begin Source File
+
+SOURCE=.\ClientPositionFeed.cpp
+# End Source File
 # End Group
 # Begin Group "Header Files"
 
 # PROP Default_Filter "h;hpp;hxx;hm;inl"
+# Begin Source File
+
+SOURCE=.\ClientPositionFeed.h
+# End Source File
+# Begin Source File
+
+SOURCE=..\..\proxy\ClientPositionShared.h
+# End Source File
 # End Group
 # Begin Group "Resource Files"
 

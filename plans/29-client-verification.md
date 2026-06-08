@@ -809,3 +809,36 @@ format & byte order", Trap 2).
   confirm it shows "nobody online". Stop the server and confirm `/status` flips to
   the offline/stale-heartbeat state within ~2 min. See
   `docs/18-external-status-events.md`.
+
+### [ ] CV-MVAS-POS -- Normal-thruster flight stays in sync (PB-2 position feed)
+
+- **Change**: PB-2 restores the client->server position feed the real Net7Proxy
+  provided. An in-client Detours hook (`client/detours/ClientPositionFeed.{h,cpp}`)
+  reads the engine ship position/orientation in-process and publishes it into named
+  shared memory (`proxy/ClientPositionShared.h`); the proxy consumer
+  (`UDPClient::SendPositionIfChanged`, `proxy/UDPClient_linux.cpp`) reads it and
+  streams opcode `0x1004` to the server's MVAS port (3806), change-gated, so the
+  server's authoritative position tracks what the client renders instead of
+  dead-reckoning a diverging path from the coordinate-less `0x0014 MOVE` impulse.
+- **Why the CLI/integration suite does NOT close this**: the CLI proves the
+  `0x1004` wire FORMAT (`CaptureReplayTests.MvasPosition_1004_*`, fixture
+  `live_mvas_position_1004.hex`, against the live Combat capture) and that the
+  server accepts a direct feed (task #65). It does NOT prove the in-client engine
+  read is correct -- there is no headless engine to read from. The engine read
+  (`ReadEngineShipState` in `ClientPositionFeed.cpp`) is an OWNER SEAM that returns
+  false until the owner wires it for the client build in use; until then the feed
+  is inert and server behaviour is unchanged.
+- **Setup (owner)**:
+  1. Fill `ReadEngineShipState()` for the client build (read ship world position
+     x/y/z + orientation x/y/z + current sector id from the engine; return true
+     only for a live in-space sample). Keep build-specific addresses out of git.
+  2. Rebuild `ClientDetours.dll` (the `.dsp` now includes `ClientPositionFeed.cpp`)
+     and the Win32 proxy (`just build-proxy-win64`). `just play-local`.
+  3. Undock and fly with normal thrusters only (no autopilot/warp).
+- **What to look for**: with thrusters you should now travel and STAY where the
+  client shows you -- pressing spacebar/stop, or starting autopilot/warp, must NOT
+  snap you back to a stale position. Confirm you can move off a planet/station and
+  warp normally. Sanity-check the proxy emits `0x1004` to udp/3806 only while
+  actually moving (change-gated; quiet when stationary), matching the live capture
+  cadence. If position still diverges, the engine read offsets are wrong -- the
+  wire half is already byte-pinned, so debug `ReadEngineShipState`, not the proxy.

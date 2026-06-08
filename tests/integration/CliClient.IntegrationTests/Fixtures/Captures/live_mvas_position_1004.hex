@@ -1,0 +1,29 @@
+# MVAS_SEND_POSITION (opcode 0x1004) -- proxy -> server on udp/3806.
+#
+# Primary source: live Net7Proxy capture
+#   proxy/local-debug/Combat-enbproxy-net7proxy-pid1644-20260604-072157.pcapng
+# first 0x1004 datagram (udp src 61495 -> dst 3806), captured while the real
+# client thrust through space. This is the canonical wire shape PB-2's proxy
+# feed (proxy/UDPClient_linux.cpp SendPositionIfChanged) reproduces.
+#
+# 40-byte datagram = 12-byte EnbUdpHeader + 6 float32 + trailing int32:
+#   size            = 0x0028 = 40
+#   opcode          = 0x1004  (ENB_OPCODE_1004_MVAS_SEND_POSITION_C_S)
+#   player_id       = 0x4003992a   (avatar GameID; server keys the update on it)
+#   packet_sequence = 1
+#   position  xyz   = 59725.73046875, -5170.1552734375, -743.9715576171875
+#   heading   xyz   = -0.2580232322, 0.9613425136, 0.0961538032 (unit vector)
+#   trailing  int32 = 14    <-- server IGNORES this (UDP_MVAS.cpp reads only the
+#                              6 floats; its heading read is gated on size>28 and
+#                              it never reads past byte 24). Our feed emits the
+#                              24-byte server-consumed payload and does NOT
+#                              fabricate this tail (its source is unknown).
+#
+# header            opcode  player_id    sequence
+28 00               04 10   2a 99 03 40  01 00 00 00
+# position x        y           z
+bb 4d 69 47         3e 91 a1 c5 2e fe 39 c4
+# heading x         y           z
+9f 1b 84 be         8b 1a 76 3f 49 ec c4 3d
+# trailing int32 (server-ignored)
+0e 00 00 00

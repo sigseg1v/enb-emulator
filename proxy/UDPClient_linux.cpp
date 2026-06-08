@@ -88,6 +88,7 @@
 
 #include "Net7.h"
 #include "UDPClient.h"
+#include "ClientPositionShared.h"   // PB-2: in-client position-hook IPC contract
 #include <net7/Opcodes.h>
 #include <net7/PacketStructures.h>
 #include <net7/DtlsTransport.h>
@@ -298,6 +299,15 @@ UDPClient::UDPClient(short port, short connection_type, long ip_addr,
     m_PacketResendTimer    = 0;
     m_KeepaliveStarted     = false;
     m_KeepaliveSeq         = 0;
+    memset(m_LastFedPos, 0, sizeof(m_LastFedPos));
+    memset(m_LastFedHeading, 0, sizeof(m_LastFedHeading));
+    m_HaveFedOnce          = false;
+    m_PosFeedSeq           = 0;
+#ifdef _WIN32
+    m_PosShmHandle         = NULL;
+    m_PosShmView           = NULL;
+    m_PosShmTried          = false;
+#endif
     m_Listen_Socket        = INVALID_SOCKET;
     m_recv_thread_running  = false;
     m_Dtls                 = nullptr;
@@ -1026,18 +1036,131 @@ void UDPClient::SendServerKeepalive()
 
 void UDPClient::MVASKeepaliveThread()
 {
-    const int KEEPALIVE_PERIOD_SEC = 30;   // capture cadence: 30.0/30.1/30.1s
+    // Two cadences ride this one thread:
+    //  * the 0x1004 position feed (PB-2) is polled fast and only emits on actual
+    //    movement (change-gated), matching the live Net7Proxy which streamed
+    //    position densely while thrusting and went quiet when stationary;
+    //  * the movement-independent 0x3005 keepalive still fires every ~30s
+    //    (capture cadence 30.0/30.1/30.1s) so an idle in-space avatar refreshes
+    //    LastAccessTime and never trips the server's 2-minute reaper.
+    const int POLL_MS             = 200;
+    const int KEEPALIVE_PERIOD_MS = 30 * 1000;
+    int       since_keepalive_ms  = 0;     // first keepalive at ~30s, as captured
 
     while (!g_ServerShutdown && m_recv_thread_running)
     {
-        // Sleep the period in 1s slices so shutdown is noticed promptly.
-        for (int i = 0; i < KEEPALIVE_PERIOD_SEC &&
-                        !g_ServerShutdown && m_recv_thread_running; ++i)
+        usleep(POLL_MS * 1000);
+        since_keepalive_ms += POLL_MS;
+
+        // No-op until the in-client position hook is publishing (Win32/WINE);
+        // inert on the Linux-native docker proxy.
+        SendPositionIfChanged();
+
+        if (since_keepalive_ms >= KEEPALIVE_PERIOD_MS)
         {
-            usleep(1000 * 1000);
+            SendServerKeepalive();
+            since_keepalive_ms = 0;
         }
-        SendServerKeepalive();
     }
+}
+
+// ---------------------------------------------------------------------------
+// ReadClientShipPosition (PB-2) -- pull the latest ship position/orientation
+// the in-client hook published into shared memory (ClientPositionShared.h).
+//
+// Win32/WINE only: lazily open the named mapping the client-side position hook
+// creates, then seqlock-read a tear-free sample. Returns false (no live feed)
+// on the Linux-native docker proxy -- there is no client process behind it, so
+// the feed is inert there and the server's own dead-reckoning stands.
+// ---------------------------------------------------------------------------
+bool UDPClient::ReadClientShipPosition(float pos[3], float heading[3])
+{
+#ifdef _WIN32
+    if (!m_PosShmView)
+    {
+        if (m_PosShmTried) return false;   // already failed once; don't hammer
+        m_PosShmTried = true;
+        HANDLE h = OpenFileMappingA(FILE_MAP_READ, FALSE,
+                                    NET7_CLIENT_POS_SHM_NAME);
+        if (!h) return false;              // client hook not running (yet)
+        const void *view = MapViewOfFile(h, FILE_MAP_READ, 0, 0,
+                                         sizeof(Net7ClientShipPosition));
+        if (!view) { CloseHandle(h); return false; }
+        m_PosShmHandle = h;
+        m_PosShmView   = view;
+    }
+
+    Net7ClientShipPosition snap;
+    if (!Net7ClientPos_Read((const Net7ClientShipPosition *) m_PosShmView, &snap))
+        return false;
+
+    pos[0] = snap.position[0];
+    pos[1] = snap.position[1];
+    pos[2] = snap.position[2];
+    heading[0] = snap.heading[0];
+    heading[1] = snap.heading[1];
+    heading[2] = snap.heading[2];
+    return true;
+#else
+    (void) pos;
+    (void) heading;
+    return false;
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// SendPositionIfChanged (PB-2) -- the proxy half of the MVAS position feed.
+//
+// When the avatar is in space and has moved since the last sample, stream its
+// position+orientation to the server as opcode 0x1004 on MVAS_LOGIN_PORT (3806).
+// The server (UDP_MVAS.cpp HandleMVASPosReturn) keys the update on the header
+// player_id and applies it via UpdatePositionFromMVAS -> SetPosition, snapping
+// the server's authoritative position to what the client actually renders.
+// Without it the server only sees thrust-impulse 0x0014 MOVE (no coordinates),
+// dead-reckons a diverging path, and the client "moves" while the server
+// disagrees -- PB-2.
+//
+// Primary source for the wire shape: live Net7Proxy capture
+// proxy/local-debug Combat-*.pcapng -- 0x1004 to udp/3806, a 40-byte datagram =
+// 12-byte EnbUdpHeader + 6 floats (position xyz, heading xyz) + a trailing
+// int32. The server reads ONLY the 6 floats (it ignores everything past byte 24
+// -- see HandleMVASPosReturn's `size > 28` heading gate), so we emit the
+// 24-byte server-consumed payload -- byte-identical to the verified headless
+// feed (tools/cli-client MvasClient) -- and do not fabricate the
+// server-ignored tail.
+// ---------------------------------------------------------------------------
+void UDPClient::SendPositionIfChanged()
+{
+    if (!m_ConnectionActive || m_PlayerID == 0) return;
+    if (m_SectorID >= 9999) return;        // not in a real sector
+
+    float pos[3], heading[3];
+    if (!ReadClientShipPosition(pos, heading)) return;   // no live feed
+
+    // Engine reports (0,0,0) before the first valid frame -- never feed it.
+    if (pos[0] == 0.0f && pos[1] == 0.0f && pos[2] == 0.0f) return;
+
+    // Change-gate: only stream on real movement (position OR orientation).
+    if (m_HaveFedOnce &&
+        memcmp(pos, m_LastFedPos, sizeof(pos)) == 0 &&
+        memcmp(heading, m_LastFedHeading, sizeof(heading)) == 0)
+        return;
+
+    // Build inline (like SendServerKeepalive) so player_id and the sequence are
+    // set explicitly; UDP_Send applies DTLS + the per-packet auth wrapper.
+    unsigned char buf[sizeof(EnbUdpHeader) + 24];
+    EnbUdpHeader *h    = (EnbUdpHeader *) buf;
+    h->size            = (short) sizeof(buf);
+    h->opcode          = ENB_OPCODE_1004_MVAS_SEND_POSITION_C_S;
+    h->player_id       = m_PlayerID;
+    h->packet_sequence = ++m_PosFeedSeq;   // server-ignored; real proxy increments
+    memcpy(buf + sizeof(EnbUdpHeader),      pos,     12);
+    memcpy(buf + sizeof(EnbUdpHeader) + 12, heading, 12);
+    UDP_Send(MVAS_LOGIN_PORT, (const char *) buf, (int) sizeof(buf));
+
+    memcpy(m_LastFedPos, pos, sizeof(pos));
+    memcpy(m_LastFedHeading, heading, sizeof(heading));
+    m_HaveFedOnce = true;
 }
 
 // ---------------------------------------------------------------------------

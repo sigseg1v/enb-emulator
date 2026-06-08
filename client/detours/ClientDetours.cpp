@@ -11,6 +11,7 @@
 #include <windows.h>
 #include <process.h>
 #include "detours.h"
+#include "ClientPositionFeed.h"   // PB-2: in-client MVAS position publisher
 
 #pragma comment(lib, "wsock32")
 #pragma comment(lib, "detours")
@@ -1170,9 +1171,15 @@ BOOL APIENTRY DllMain( HANDLE hModule,
             //DetourFunctionWithEmptyTrampoline((PBYTE) CRC32Trampoline,
             //                                  (PBYTE) CRC32Target,
             //                                  (PBYTE) CRC32Detour);
+
+            // PB-2: start the in-client position publisher. Inert until its
+            // engine read (ClientPositionFeed.cpp ReadEngineShipState, the
+            // owner seam) is wired, so this is a no-op for the stock build.
+            Net7ClientPosFeed_Start();
             break;
 
 		case DLL_PROCESS_DETACH:
+            Net7ClientPosFeed_Stop();   // PB-2: stop the position publisher
             /*
             DetourRemove((PBYTE) socketTrampoline,
                          (PBYTE) socketDetour);
