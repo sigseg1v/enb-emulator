@@ -99,13 +99,14 @@ stable across droplet rebuilds, so you set DNS once.
 
 | Command | What it does |
 |---|---|
-| `just up` | DRY RUN -- print the terraform plan, apply nothing. |
-| `just up -y` | Converge infra. Idempotent. Issues the bootstrap cert; the droplet auto-renews thereafter (see below). |
+| `just take-backup` | `pg_dumpall` both DBs from the live droplet into the gitignored `backup/enb-backup-<UTC-ts>.sql`. Runs automatically before `up` and `apply-update`; skips cleanly if no droplet is deployed yet. |
+| `just up` | DRY RUN -- print the terraform plan, apply nothing. (Backs up the DB first.) |
+| `just up -y` | Converge infra. Idempotent. Issues the bootstrap cert; the droplet auto-renews thereafter (see below). (Backs up the DB first -- a droplet REPLACE wipes the local pgdata volume.) |
 | `just update [tag]` | **THE full deploy.** Chains `just push` (build + push server images, and the client patch when configured) then `just apply-update` (ship + restart). This is all you normally run. |
 | `just push-server [vN]` | Build + push the server-side services (server + login + status-notifier + db-backup) into repo `enb` as `*-vN` (default: auto-increment), re-point `*-latest`, prune to the newest 3 versions/service, GC. |
 | `just push-client` | (Phase AN, opt-in) Build the Windows launcher bundle, write `manifest.json`, upload all of it to the patcher S3 bucket, and invalidate CloudFront. Errors out unless the patcher is configured (see "Launcher self-update"). |
 | `just push [tag]` | `push-server` + (when the patcher is configured) `push-client`. Build + push everything, but does NOT ship to the droplet. |
-| `just apply-update [tag]` | Pull images + recreate changed containers on the droplet. The ship half of `update`; does NOT build or push. |
+| `just apply-update [tag]` | Pull images + recreate changed containers on the droplet. The ship half of `update`; does NOT build or push. (Backs up the DB first.) |
 | `just start` | Start an already-deployed stack (no pull). |
 | `just stop` | Stop containers; droplet, DB volume, and infra stay. |
 | `just destroy` | Tear down ALL infra incl. the droplet + its DB volume. Asks to confirm. |

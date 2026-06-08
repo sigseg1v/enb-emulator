@@ -11,10 +11,18 @@ default:
 bootstrap:
     ./scripts/Bootstrap-State.ps1
 
+# Runs automatically before `up` and `apply-update`. Skips cleanly when no
+# droplet is deployed yet; a dump failure against an EXISTING droplet is fatal so
+# a risky op cannot proceed blind.
+# pg_dumpall both DBs from the live droplet into backup/enb-backup-<UTC-ts>.sql.
+take-backup:
+    ./tools/Take-Backup.ps1
+
 # Converge infra: droplet, reserved IP, firewall, registry, Route53 record,
-# Let's Encrypt cert. Idempotent; also renews the cert. SAFE BY DEFAULT --
+# Let's Encrypt cert. Idempotent; renews the cert. Backs up the DB first (a
+# droplet REPLACE wipes the local pgdata volume). SAFE BY DEFAULT --
 # `just up` only PRINTS the plan; `just up -y` actually applies it.
-up *flags:
+up *flags: take-backup
     ./scripts/Deploy-Infra.ps1 {{flags}}
 
 # The proxy is client-side and never deployed here.
@@ -35,9 +43,9 @@ push tag="": (push-server tag)
     . ./scripts/_Common.ps1; Import-DeployEnv; if (Get-EnvOr 'ENB_PATCHER_PRIVATE_S3_BUCKET' '') { ./scripts/Push-ClientPatch.ps1 } else { Write-Host 'push: patcher not configured (ENB_PATCHER_PRIVATE_S3_BUCKET unset) -- skipping client patch. Run ''just push-client'' after enabling it.' }
 
 # Does NOT build or push -- run after a `just push`, or use `just update` for the
-# full build -> push -> ship in one shot.
+# full build -> push -> ship in one shot. Backs up the DB first (take-backup).
 # Ship config/certs/data + pull images + (re)start the stack on the droplet. Optional tag.
-apply-update tag="":
+apply-update tag="": take-backup
     ./scripts/Update-Stack.ps1 -Tag "{{tag}}"
 
 # Runs `just push` (server + client) then `just apply-update`.
