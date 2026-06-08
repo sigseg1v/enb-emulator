@@ -17,7 +17,7 @@ if (-not $Tag) { $Tag = (Get-EnvOr 'IMAGE_TAG' 'latest') }
 $ip       = Get-TfOutput 'reserved_ip'
 $reg      = Get-RegistryEndpoint
 $domain   = $env:DOMAIN_NAME
-$project  = (Get-EnvOr 'PROJECT_NAME' 'enb-emulator')
+$project  = (Get-EnvOr 'PROJECT_NAME' 'freya')
 
 Write-Host "Target droplet : root@$ip"
 Write-Host "Registry/tag   : $reg @ $Tag"
@@ -73,12 +73,28 @@ try {
     Copy-Item (Join-Path $script:RepoRoot 'db/postgres/*') (Join-Path $stage 'db') -Recurse
     Copy-Item (Join-Path $script:RepoRoot 'server/data/*') (Join-Path $stage 'server-data') -Recurse
 
-    # compose env-file consumed on the droplet.
+    # compose env-file consumed on the droplet. This file is REWRITTEN on every
+    # deploy, so anything the prod compose needs must be threaded through here --
+    # editing /opt/enb/.env by hand on the droplet would be clobbered next update.
+    # The Phase AM status-notifier feature is default-off: leave these blank in
+    # the operator .env and the sidecar idles. STATUS_WEBHOOK_URL and
+    # DISCORD_BOT_TOKEN are SECRETS; they live only in the gitignored operator
+    # .env, like DO_TOKEN.
+    $extStatus  = Get-EnvOr 'NET7_EXTERNAL_STATUS_ENABLED' ''
+    $webhook    = Get-EnvOr 'STATUS_WEBHOOK_URL' ''
+    $retention  = Get-EnvOr 'STATUS_RETENTION_DAYS' '7'
+    $botToken   = Get-EnvOr 'DISCORD_BOT_TOKEN' ''
+    $guildId    = Get-EnvOr 'DISCORD_GUILD_ID' ''
     $envText = @(
         "COMPOSE_PROJECT_NAME=$project"
         "REGISTRY=$reg"
         "IMAGE_TAG=$Tag"
         "DOMAIN=$domain"
+        "NET7_EXTERNAL_STATUS_ENABLED=$extStatus"
+        "STATUS_WEBHOOK_URL=$webhook"
+        "STATUS_RETENTION_DAYS=$retention"
+        "DISCORD_BOT_TOKEN=$botToken"
+        "DISCORD_GUILD_ID=$guildId"
     ) -join "`n"
     Set-Content -Path (Join-Path $stage '.env') -Value $envText
 

@@ -7,12 +7,12 @@ projects:
 - **`<tool>-avalonia/`** -- ports targeting `net10.0` + **Avalonia 11**.
   Run **natively on Linux** (no WINE). These are the recommended
   binaries. The central solution that pulls them in is
-  `tools/Net7Tools.slnx` (SDK-style XML solution); each port also has its
+  `tools/FreyaTools.slnx` (SDK-style XML solution); each port also has its
   own `.csproj` and most can be launched directly.
 - **`<tool>/`** -- the original 2008-era WinForms code, modernized to
   SDK-style projects targeting `net10.0-windows` with
   `<UseWindowsForms>true</UseWindowsForms>`. These cross-compile
-  (`dotnet build tools/Net7Tools.slnx`) but their runtime is Windows /
+  (`dotnet build tools/FreyaTools.slnx`) but their runtime is Windows /
   WINE only. Kept for reference and diffing.
 
 Every user-facing editor has an Avalonia port, including the Item Editor
@@ -46,7 +46,7 @@ just launch-item-editor
 just launch-station-tools
 just launch-talktree-editor
 just launch-dataimport
-just launch-net7             # game client launcher (LaunchNet7)
+just launch-net7             # game client launcher (Freya)
 just launch-enbpatcher       # client patcher
 just launch-toolspatcher     # patcher for the editor binaries
 ```
@@ -79,7 +79,7 @@ dialog is Avalonia XAML. The DB layer talks to Postgres via Npgsql.
 Type: console (Visual C++ 6 `.dsp`).
 Purpose: dumps the chunk-type tree of a Westwood 3D (`.w3d`) file to text,
 for offline asset inspection.
-Status: legacy C++ utility; not in `Net7Tools.slnx`. Windows-only.
+Status: legacy C++ utility; not in `FreyaTools.slnx`. Windows-only.
 
 ### `dataimport/` + `dataimport-avalonia/` -- DataImport
 
@@ -128,18 +128,19 @@ Notes: `tools/item-editor-avalonia/` is the Avalonia port and runs
 natively on Linux; `tools/itemeditor/` is the original WinForms project,
 kept for reference and Windows / WINE use.
 
-### `launchnet7/` + `launchnet7-avalonia/` -- LaunchNet7 (game client launcher)
+### `launchnet7-avalonia/` -- Freya (game client launcher)
 
-Type: Avalonia (recommended) / WinForms (legacy).
+Type: Avalonia.
 Purpose: bootstraps the EnB client (the original Win32 binary under
-WINE), checks for updates against a manifest, swaps EXEs in place via
-the `ExeUpdater` helper.
+WINE). On the Windows build it self-updates: it hashes its own
+`FreyaLauncher.exe` + `FreyaProxy.exe`, asks the login server's
+`/updateCheck` endpoint whether they are current, and swaps the EXEs in
+place when a newer release is published.
 Launch: `just launch-net7`.
-Notes: the legacy folder also contains `ExeUpdater/` (console, swaps the
-running EXE after target exit) and `FileListCreator/` (console, walks a
-directory and computes CRC32 to publish a `Files.txt` manifest). The
-launcher itself has an Avalonia port; the helper consoles run as-is on
-`dotnet`.
+Notes: the superseded WinForms launcher (`launchnet7/`, with its
+upstream `ExeUpdater`/`FileListCreator` helpers) has been removed; the
+Avalonia launcher is the only one. An even older C++ launcher survives
+under `launchnet7-old/` as historical reference only -- it is not built.
 
 ### `missioneditor/` + `missioneditor-avalonia/` -- Mission Editor
 
@@ -269,7 +270,7 @@ Linux. Every C# project that had a `.csproj` is SDK-style and builds on a
 modern dotnet SDK; per-tool diff status lives in `tools/BUILD_STATUS.md`.
 
 The matrix below is the runtime story (not the build story -- every C#
-project below builds via `dotnet build tools/Net7Tools.slnx`):
+project below builds via `dotnet build tools/FreyaTools.slnx`):
 
 | Tool | Avalonia? | Linux runtime |
 |---|:-:|:-:|
@@ -311,9 +312,8 @@ For the legacy WinForms editors (`tools/<name>/` without `-avalonia`):
   ASP.NET runtime).
 - Same Postgres connectivity as above.
 
-For console tools (`enb-ini-parser`, `FileListCreator`, `ExeUpdater`):
-.NET 10 runtime. Some reference `System.Windows.Forms` and remain
-Windows-only as written.
+For console tools (`enb-ini-parser`): .NET 10 runtime. Some reference
+`System.Windows.Forms` and remain Windows-only as written.
 
 For the legacy C++ utilities: a Win32 toolchain (MSYS2 + MinGW or
 Visual Studio Build Tools). Trivially portable in principle, not

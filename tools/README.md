@@ -40,7 +40,7 @@ just launch-talktree-editor
 just launch-station-tools
 just launch-effect-editor
 just launch-dataimport
-just launch-net7              # game client launcher (LaunchNet7)
+just launch-net7              # game client launcher (Freya)
 just launch-enbpatcher        # client patcher
 just launch-toolspatcher      # patcher for the editors themselves
 ```
@@ -101,8 +101,8 @@ just build-tools
 
 The `tools/<name>/` projects (without `-avalonia`) were the Phase D
 attempt to retarget the 2008-era WinForms code to `net10.0-windows`.
-They build cross-platform (`dotnet build tools/Net7Tools.slnx`) but
-their runtime story on Linux is "WINE + .NET runtime" — varying UI
+They build cross-platform (`dotnet build tools/FreyaTools.slnx`) but
+their runtime story on Linux is "WINE + .NET runtime" -- varying UI
 fidelity, no real integration. Phase L superseded them with the
 Avalonia ports above. See `BUILD_STATUS.md` for the Phase D status
 table.

@@ -15,7 +15,7 @@ For a remote deployment, neither the client nor authlogin.dll changes -- only th
 | ---------------- | --------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | `client.exe`     | Windows native or Linux via WINE                    | `client/mods/release/`                            | The game client. Speaks Westwood RC4 framing to whatever it's pointed at.                  |
 | `authlogin.dll`  | Loaded in-process by `client.exe`                   | `client/mods/release/`                            | The client's auth plugin. Performs the HTTPS `/AuthLogin` call to get a session ticket.    |
-| `LaunchNet7.exe` | Same host as the client (Win/WINE)                  | `tools/launchnet7/LaunchNet7/`                    | Patches client config / `authlogin.dll` offsets, runs `mkcert`, spawns the proxy + client. |
+| `FreyaLauncher.exe` | Same host as the client (Win/WINE)                  | `tools/launchnet7-avalonia/`                    | Patches client config / `authlogin.dll` offsets, runs `mkcert`, spawns the proxy + client. |
 | `net7proxy`      | Linux container (`docker-compose` service `server` colocates it; production: same box as game server) | `proxy/`                                          | Server-side terminator for the client's Westwood RC4 TCP connection (`PROXY_LOCAL_TCP_PORT` 3500). Bridges into the colocated game server's UDP planes and the auth server's TLS endpoint. Build is Linux-only (`proxy/CMakeLists.txt`); there is no Win32 build target in this repo. |
 | `Net7SSL` (login) | Linux container (`docker-compose` service `login`) | `login-server/Net7SSL/`                           | Terminates TLS for `/AuthLogin`, validates credentials, issues 20-byte session tickets.    |
 | `Net7` (server)  | Linux container (`docker-compose` service `server`) | `server/`                                         | The game world. Sector / global / master control planes, UDP fan-out, world simulation.    |
@@ -52,7 +52,7 @@ For a remote deployment, neither the client nor authlogin.dll changes -- only th
 
 **Where each box runs.** In this codebase the proxy is server-native Linux. The dev topology is one Linux host running `net7proxy`, `Net7SSL`, and `Net7`, with the client (Win/WINE) connecting in over RC4 on port 3500 and the launcher (also on the same host) running the auth relay. For a public deployment, only the *upstream targets* of the relay and proxy change -- the client itself never learns about a non-loopback host.
 
-There is no "client-side local proxy that forwards to a remote game server" flow in the current build. The launcher's `LaunchNet7Proxy()` step is vestigial in that sense: this repo's `proxy/CMakeLists.txt` is Linux-only, so the `bin/Net7Proxy.exe` it tries to spawn does not come from this source tree.
+There is no "client-side local proxy that forwards to a remote game server" flow in the current build. The launcher's `LaunchFreyaProxy()` step is vestigial in that sense: this repo's `proxy/CMakeLists.txt` is Linux-only, so the `bin/FreyaProxy.exe` it tries to spawn does not come from this source tree.
 
 ## Ports
 
@@ -140,7 +140,7 @@ This section exists because the auth path has a plaintext HTTP hop, and somebody
 
 | Vector | Why it can't escape loopback |
 |---|---|
-| User edits `LaunchNet7.settings.json` and sets `"AuthenticationPort": 80` | Doesn't matter for hop 1. `Launcher.PatchAuthLoginFile` writes `Port=LocalAuthRelay.ListenPort, UseHttps=false` unconditionally; the only auth-port setting in the launcher is the *upstream* port the relay dials on hop 2. There is no UI control or setting that toggles HTTPS off on hop 1 -- the relay is always plaintext-on-loopback by design. |
+| User edits `FreyaLauncher.settings.json` and sets `"AuthenticationPort": 80` | Doesn't matter for hop 1. `Launcher.PatchAuthLoginFile` writes `Port=LocalAuthRelay.ListenPort, UseHttps=false` unconditionally; the only auth-port setting in the launcher is the *upstream* port the relay dials on hop 2. There is no UI control or setting that toggles HTTPS off on hop 1 -- the relay is always plaintext-on-loopback by design. |
 | User edits the WINE registry by hand, sets `HKLM\Software\EACom\AuthAuth\AuthLoginServer` to `evil.example.com` | Doesn't matter. `Launcher.PatchRegistry` rewrites it to `localhost` at every launch. Same on Windows via `WindowsRegistryHelpers.EnsureRegistered`. |
 | User sets `NET7_UPSTREAM_HOST=remote.example.com` and starts the launcher | Affects only the *upstream* the relay (and proxy) dial. `authlogin.dll` still sees `127.0.0.1:4180` plaintext. The relay's outbound connection is TLS regardless. |
 | User points the launcher at a remote server in the UI | Same as above. The remote hostname becomes the relay's upstream and the proxy's `NET7_GAME_SERVER_HOST`. authlogin.dll's target is still hardcoded loopback. |

@@ -11,7 +11,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <RootNamespace>LaunchNet7Avalonia</RootNamespace>
-    <AssemblyName>LaunchNet7Avalonia</AssemblyName>
+    <AssemblyName>FreyaLauncher</AssemblyName>
   </PropertyGroup>
 
   <!-- When building/publishing for a Windows RID (the standalone package via
@@ -29,7 +29,7 @@
   </PropertyGroup>
   <ItemGroup>
     <AvaloniaResource Include="Assets\**" />
-    <None Include="LaunchNet7.cfg" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="FreyaLauncher.cfg" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.2.3" />

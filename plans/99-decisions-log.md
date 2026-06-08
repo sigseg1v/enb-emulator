@@ -7874,3 +7874,42 @@ reject (both green); TlsLoginTests + SectorActionTests confirm genuine end-to-en
 logins still validate (login_ticket rows written, zero false rejects in logs).
 Real-client check: plans/29 CV-14. The DTLS-gated per-packet token-bind half of
 AH-9 remains open under AH-8/AH-10.
+
+## 2026-06-07 -- Net7 -> Freya user-facing rebrand (launcher / proxy / tool suite)
+
+Decision (owner request): rename the user-facing artifacts from Net7* to Freya*
+so users understand this build has diverged significantly from upstream Net-7.
+Renamed:
+- Launcher exe: AssemblyName LaunchNet7Avalonia -> FreyaLauncher (FreyaLauncher.exe).
+  Window titlebar "LaunchFreya"; new italic "Freya" heading at top of MainWindow.
+  Message-box titles "Freya - Information/Warning/Error".
+- Launcher cfg: LaunchNet7.cfg -> FreyaLauncher.cfg (+ .windows-package.cfg);
+  settings json LaunchNet7.settings.json -> FreyaLauncher.settings.json.
+- Proxy exe: CMake WIN32 OUTPUT_NAME Net7Proxy -> FreyaProxy (FreyaProxy.exe);
+  Launcher.cs spawns FreyaProxy.exe; LaunchNet7Proxy() -> LaunchFreyaProxy().
+- Tool solution: tools/Net7Tools.slnx -> tools/FreyaTools.slnx (justfile, CI,
+  docs). toolslauncher settings folder %APPDATA%/Net7Tools -> /FreyaTools.
+- Docker project: COMPOSE_PROJECT_NAME default enb-emulator -> freya (local +
+  prod compose + Update-Stack.ps1).
+- README "major changes" note added verbatim.
+
+KEPT deliberately (owner instruction + correctness):
+- DB names net7 / net7_user and ALL table names; NET7_* env vars.
+- Internal identifiers: namespace LaunchNet7Avalonia, csproj filename
+  LaunchNet7Avalonia.csproj, lowercase CMake target net7proxy + Linux docker
+  binary /app/net7proxy (OUTPUT_NAME only changes the WIN32 exe), Net7.h/.cpp,
+  server's own Net7Config.cfg, server component name "Net7"/"Net7SSL".
+- Internal IPC plumbing: /run/net7-ipc, net7-ipc volume, net7.sock, unix user
+  net7:net7.
+- Historical provenance: kyp/Net7Tools source-attribution comments, upstream
+  LaunchNet7.exe references in client/linux-installer (that is the REAL retail
+  Net-7 patcher the installer downloads/patches, not our launcher), legacy
+  tools/launchnet7/ + tools/launchnet7-old/ dirs, license/attribution headers.
+
+CAVEAT (flagged to owner): there was never a literal container named "net7" --
+COMPOSE_PROJECT_NAME already defaulted to enb-emulator. Changing the default to
+"freya" renames the Docker volumes (pgdata, etc.); a local dev `up` after this
+starts a FRESH empty DB volume named freya_pgdata. Prod sets PROJECT_NAME
+explicitly so set it to the prior value to keep the existing volume, or migrate.
+Verified: launcher builds clean (0 warn), smoke test reports title="LaunchFreya",
+FreyaTools.slnx restores.

@@ -135,7 +135,7 @@ just --list                 # shows every launch-* recipe
 ```
 
 The legacy WinForms projects under `tools/<name>/` (without `-avalonia`)
-still build cross-platform via `dotnet build tools/Net7Tools.slnx`, but
+still build cross-platform via `dotnet build tools/FreyaTools.slnx`, but
 their runtime is Windows / WINE only. They are kept for diff reference;
 the Item Editor's WinForms original lives at `tools/itemeditor/` and has
 been superseded by `tools/item-editor-avalonia/`.

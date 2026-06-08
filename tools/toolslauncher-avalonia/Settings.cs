@@ -15,7 +15,7 @@ namespace ToolsLauncherAvalonia
 
         public static string FilePath => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "Net7Tools",
+            "FreyaTools",
             "toolslauncher-avalonia.json");
 
         public static Settings Load()

@@ -101,10 +101,10 @@ namespace LaunchNet7Avalonia
 
         void OnOpened(object sender, EventArgs e)
         {
-            Title = "LaunchNet7";
+            Title = "LaunchFreya";
             c_Status.Text = "Loading configuration...";
 
-            // Locate LaunchNet7.cfg: prefer next to the .dll (deployed
+            // Locate FreyaLauncher.cfg: prefer next to the .dll (deployed
             // alongside) and fall back to the legacy LaunchNet7 source
             // tree so a dev `dotnet run` works.
             var cfgPath = ResolveConfigPath();
@@ -144,11 +144,11 @@ namespace LaunchNet7Avalonia
         static string ResolveConfigPath()
         {
             // 1) Next to the assembly (production deployment).
-            var beside = Path.Combine(AppContext.BaseDirectory, "LaunchNet7.cfg");
+            var beside = Path.Combine(AppContext.BaseDirectory, "FreyaLauncher.cfg");
             if (File.Exists(beside)) return beside;
 
             // 2) Sibling project (dev workflow). Walk up to the repo
-            // root and look at tools/launchnet7/LaunchNet7/LaunchNet7.cfg.
+            // root and look at the legacy tools/launchnet7/LaunchNet7/LaunchNet7.cfg.
             var dir = AppContext.BaseDirectory;
             for (int i = 0; i < 8 && !string.IsNullOrEmpty(dir); i++)
             {
@@ -462,7 +462,7 @@ namespace LaunchNet7Avalonia
 
             var dlg = new Window
             {
-                Title  = "Advanced — launcher log",
+                Title  = "Advanced -- launcher log",
                 Width  = 720,
                 Height = 480,
                 Content = new TextBox
@@ -496,13 +496,13 @@ namespace LaunchNet7Avalonia
         }
 
         Task Info(string m) =>
-            MessageBoxManager.GetMessageBoxStandard("LaunchNet7 - Information", m, ButtonEnum.Ok, MsBoxIcon.Info)
+            MessageBoxManager.GetMessageBoxStandard("Freya - Information", m, ButtonEnum.Ok, MsBoxIcon.Info)
                              .ShowWindowDialogAsync(this);
         Task Warn(string m) =>
-            MessageBoxManager.GetMessageBoxStandard("LaunchNet7 - Warning", m, ButtonEnum.Ok, MsBoxIcon.Warning)
+            MessageBoxManager.GetMessageBoxStandard("Freya - Warning", m, ButtonEnum.Ok, MsBoxIcon.Warning)
                              .ShowWindowDialogAsync(this);
         Task Err(string m) =>
-            MessageBoxManager.GetMessageBoxStandard("LaunchNet7 - Error", m, ButtonEnum.Ok, MsBoxIcon.Error)
+            MessageBoxManager.GetMessageBoxStandard("Freya - Error", m, ButtonEnum.Ok, MsBoxIcon.Error)
                              .ShowWindowDialogAsync(this);
     }
 }

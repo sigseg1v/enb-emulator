@@ -3,7 +3,7 @@
 This document covers building the four components of the project:
 
 1. The C++ server / proxy / login-server (Linux primary, Windows secondary).
-2. The C# tool suite (`tools/Net7Tools.slnx`) -- Avalonia ports run native
+2. The C# tool suite (`tools/FreyaTools.slnx`) -- Avalonia ports run native
    on Linux; legacy WinForms ports build cross-platform but only run on
    Windows / WINE.
 3. The Linux client installer (`client/linux-installer/install-enb-linux.sh`).
@@ -108,7 +108,7 @@ targeting `net10.0` (no `-windows`) so it runs natively on Linux. Build
 everything:
 
 ```sh
-dotnet build tools/Net7Tools.slnx
+dotnet build tools/FreyaTools.slnx
 ```
 
 Run the central Avalonia launcher (recommended entry point):
@@ -193,7 +193,7 @@ The dev environment interface:
 just init                # bring up Postgres 16 + apply the schema (schema-init)
 just dev                 # = just run-stack-bg: server + proxy + login in the background
 just build               # cmake build the server
-just build-tools         # dotnet build tools/Net7Tools.slnx
+just build-tools         # dotnet build tools/FreyaTools.slnx
 just test                # ctest + dotnet test
 just launch              # central Avalonia tool launcher (recommended)
 just launch-mob-editor   # per-tool recipes -- see `just --list`
@@ -210,7 +210,7 @@ just shell server        # exec into the running server container
   `net7` (content) and `net7_user` (accounts) databases. Host port 5434
   maps to container 5432.
 - `server`: the C++ sector/world server, built from `server/Dockerfile`.
-- `proxy`: Net7Proxy, built from `proxy/Dockerfile`.
+- `proxy`: FreyaProxy, built from `proxy/Dockerfile`.
 - `login`: the login server, built from `login-server/Dockerfile`. Reads
   the `net7_user` database on Postgres for auth.
 - `mysql` (profile `mysql-legacy`, opt-in): MySQL 8.0 loading the

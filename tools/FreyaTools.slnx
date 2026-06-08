@@ -14,11 +14,6 @@
   <Folder Name="/faction-editor/">
     <Project Path="faction-editor/Net7 Faction Editor.csproj" />
   </Folder>
-  <Folder Name="/launchnet7/">
-    <Project Path="launchnet7/ExeUpdater/ExeUpdater.csproj" />
-    <Project Path="launchnet7/FileListCreator/FileListCreator.csproj" />
-    <Project Path="launchnet7/LaunchNet7/LaunchNet7.csproj" />
-  </Folder>
   <Folder Name="/missioneditor/">
     <Project Path="missioneditor/MissionEditor.csproj" />
   </Folder>

@@ -151,13 +151,17 @@ exists; there is no server-side character creation path.
 
 DOCR's free **Starter** tier allows exactly **one repository** (and 500 MiB).
 A naive deploy wants a separate image name per service = a repo per service =
-paid Basic tier. To stay free, the two server-side services live in a **single
+paid Basic tier. To stay free, all server-side services live in a **single
 repository** named `enb`, distinguished by tag prefix:
 
 ```
-enb:server-vN   enb:login-vN          <- the immutable versioned build
-enb:server-latest / login-latest      <- moving alias, re-pointed at vN
+enb:server-vN  enb:login-vN  enb:status-notifier-vN      <- immutable versioned
+enb:{server,login,status-notifier}-latest                <- alias, re-pointed at vN
 ```
+
+`status-notifier` is the Phase AM sidecar that relays the external-status outbox
+to a webhook (see `docs/18-external-status-events.md`); it is default-off and
+only delivers when `STATUS_WEBHOOK_URL` is set in the droplet `.env`.
 
 The proxy is **not** in the registry at all -- it is a per-client bridge that
 runs on each player's Windows machine and ships with the client package, never
@@ -168,7 +172,7 @@ count was.
 `just push` (`Build-And-Push.ps1`):
 
 1. Reads existing tags, finds the highest `vN`, builds `v(N+1)` (or the `-Tag`
-   you pass). Both services share one monotonic counter -- they bump together.
+   you pass). All services share one monotonic counter -- they bump together.
 2. Builds + pushes each `enb:<svc>-v(N+1)` for `linux/amd64`.
 3. **Only after every versioned push succeeds**, re-points `enb:<svc>-latest`
    at the new version with `docker buildx imagetools create` (an alias of the
@@ -178,7 +182,8 @@ count was.
    the now-untagged blobs (deletion alone only untags; GC frees the bytes).
 
 `just update [vN|latest]` runs whichever tag suffix you name (default `latest`);
-the compose file resolves `enb:server-<tag>` / `enb:login-<tag>`.
+the compose file resolves `enb:server-<tag>` / `enb:login-<tag>` /
+`enb:status-notifier-<tag>`.
 
 ## HTTPS / the certificate
 

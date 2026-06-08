@@ -10,7 +10,7 @@ Two parallel sets of projects live under `tools/`:
   Build status below.
 
 Run `dotnet build <project>` from the repo root, or
-`dotnet build tools/Net7Tools.slnx` for the full solution.
+`dotnet build tools/FreyaTools.slnx` for the full solution.
 
 ## Phase D — legacy WinForms (still build clean)
 

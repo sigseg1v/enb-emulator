@@ -1,8 +1,8 @@
 # launchnet7-avalonia
 
-Avalonia port of `tools/launchnet7/LaunchNet7/` — the client-side launcher
+Avalonia port of `tools/launchnet7/LaunchNet7/` -- the client-side launcher
 that picks a server, patches the EnB client's ini files + `authlogin.dll`,
-then starts `client.exe` (or `Net7Proxy.exe`).
+then starts `client.exe` (or `FreyaProxy.exe`).
 
 The WinForms original is 30+ source files split across `FormMain`,
 `AdvancedSettings`, `FormUpdate`, `Updateing/`, `Configuration/`,
@@ -18,18 +18,18 @@ dotnet build tools/launchnet7-avalonia/LaunchNet7Avalonia.csproj
 
 Targets `net10.0` (no `-windows` suffix). Runs natively on Linux/macOS;
 the launched `client.exe` itself still needs WINE (the launcher just
-prefixes `wine` when on non-Windows — see [`Launcher.cs`](Launcher.cs)).
+prefixes `wine` when on non-Windows -- see [`Launcher.cs`](Launcher.cs)).
 
 ## Run
 
 ```sh
-dotnet tools/launchnet7-avalonia/bin/Debug/net10.0/LaunchNet7Avalonia.dll
+dotnet tools/launchnet7-avalonia/bin/Debug/net10.0/FreyaLauncher.dll
 ```
 
 ### Headless smoke test
 
 ```sh
-dotnet tools/launchnet7-avalonia/bin/Debug/net10.0/LaunchNet7Avalonia.dll --smoke
+dotnet tools/launchnet7-avalonia/bin/Debug/net10.0/FreyaLauncher.dll --smoke
 ```
 
 Exits 0 on success. CI should call this on every push.
@@ -58,16 +58,16 @@ Exits 0 on success. CI should call this on every push.
   `rg_regdata.ini` URL → `Auth.ini` URLs → `Network.ini` host across the
   11 known sections → `authlogin.dll` flags → registry (no-op on Linux).
 - The `LaunchName` dispatch:
-  - `NET7SP` → starts `Net7.exe`, sleeps 25 s, then `Net7Proxy.exe`.
-  - `NET7MP` → starts `Net7Proxy.exe`.
+  - `NET7SP` → starts `Net7.exe`, sleeps 25 s, then `FreyaProxy.exe`.
+  - `NET7MP` → starts `FreyaProxy.exe`.
   - default → starts `client.exe` directly with `-SERVER_ADDR <ip> -PROTOCOL TCP`.
-- The `/L` (Local) and `/LC` (Local Cert) `Net7Proxy.exe` flags.
+- The `/L` (Local) and `/LC` (Local Cert) `FreyaProxy.exe` flags.
 - The TCP probe of `host:3809` for the "ONLINE / OFFLINE" badge.
 
 ## What runs where
 
 - The launcher UI itself is **native** on Linux (Avalonia/Skia, no WINE).
-- The processes it spawns (`client.exe`, `Net7Proxy.exe`, `Net7.exe`,
+- The processes it spawns (`client.exe`, `FreyaProxy.exe`, `Net7.exe`,
   `Detours.exe`) are Win32 binaries. On non-Windows hosts the launcher
   prefixes `wine "<exe>"`; on Windows it runs them directly.
 - The registry patch (`HKLM\Software\Westwood Studios\Earth and Beyond\Registration`)

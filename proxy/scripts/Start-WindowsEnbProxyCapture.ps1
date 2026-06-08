@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Capture the Net7Proxy's network traffic on Windows, by process, to a
+    Capture the FreyaProxy's network traffic on Windows, by process, to a
     timestamped pcapng under .\captures\ -- the Windows counterpart to the
     Linux `nsenter -t <PID> -n tcpdump -i any -s0 -w ...` flow.
 
@@ -21,7 +21,7 @@
     Does NOT require WSL or MinGW.
 
 .PARAMETER ProcessName
-    Process image name to find (without .exe). Default: Net7Proxy.
+    Process image name to find (without .exe). Default: FreyaProxy.
 
 .PARAMETER ProcessId
     Capture this exact PID instead of searching by name. Overrides ProcessName.
@@ -55,7 +55,7 @@
     standard Wireshark install dirs.
 
 .EXAMPLE
-    # Capture Net7Proxy until Ctrl+C (run from an elevated PowerShell):
+    # Capture FreyaProxy until Ctrl+C (run from an elevated PowerShell):
     .\Start-WindowsEnbProxyCapture.ps1
 
 .EXAMPLE
@@ -84,7 +84,7 @@
 
 [CmdletBinding()]
 param(
-    [string]   $ProcessName     = 'Net7Proxy',
+    [string]   $ProcessName     = 'FreyaProxy',
     [int]      $ProcessId       = 0,
     [string]   $Prefix          = '',
     [string]   $OutputDir       = '.\captures',

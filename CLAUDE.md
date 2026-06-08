@@ -47,7 +47,7 @@ The source of truth for "what's done / what's next" across invocations is the `p
 │   ├── CMakeLists.txt modern CMake
 │   └── Makefile.legacy tada-o's original Makefile, kept for reference
 ├── login-server/      Net7Mysql + Net7SSL — auth/login flow
-├── proxy/             Net7Proxy
+├── proxy/             FreyaProxy
 ├── launcher/          MVASlaunch
 ├── client/
 │   ├── linux-installer/   GPLv3 WINE installer (verbatim from upstream)
@@ -168,7 +168,7 @@ delete the log line. A log line that says "Error" but doesn't mean
 
 ## The proxy is NOT a dumb relay (READ before using ANY capture or dump)
 
-Net7Proxy sits between the EnB client and the server, and it is an active
+FreyaProxy sits between the EnB client and the server, and it is an active
 protocol participant -- not a passthrough. Treating a server-side packet
 capture as if it were the byte stream the client receives (or vice-versa)
 is wrong and will waste your time. Concretely, on the server<->client path

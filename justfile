@@ -20,13 +20,13 @@ export ENB_DB_PASS := env_var_or_default("ENB_DB_PASS", "net7")
 
 # Per-worktree docker compose project name, derived from the current git
 # branch so parallel worktrees don't fight over the same container set.
-# main/master/detached-HEAD collapse to plain `enb-emulator`. Already-prefixed
-# branches (enb-emulator-foo) are used as-is. Override with the env var.
+# main/master/detached-HEAD collapse to plain `freya`. Already-prefixed
+# branches (freya-foo) are used as-is. Override with the env var.
 #
 # Note: only the container/network/volume *names* are namespaced. Host
 # port bindings in docker-compose.yml are still fixed at the conventional
 # defaults, so only one worktree at a time can run its stack.
-export COMPOSE_PROJECT_NAME := env_var_or_default("COMPOSE_PROJECT_NAME", `b=$(git branch --show-current 2>/dev/null); if [ -z "$b" ] || [ "$b" = main ] || [ "$b" = master ]; then echo enb-emulator; else s=$(printf '%s' "$b" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9_-' '-' | tr -s '-' | sed 's/^-//;s/-$//'); case "$s" in enb-emulator-*) echo "$s";; *) echo "enb-emulator-$s";; esac; fi`)
+export COMPOSE_PROJECT_NAME := env_var_or_default("COMPOSE_PROJECT_NAME", `b=$(git branch --show-current 2>/dev/null); if [ -z "$b" ] || [ "$b" = main ] || [ "$b" = master ]; then echo freya; else s=$(printf '%s' "$b" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9_-' '-' | tr -s '-' | sed 's/^-//;s/-$//'); case "$s" in freya-*) echo "$s";; *) echo "freya-$s";; esac; fi`)
 
 # Default: list targets.
 default:
@@ -41,9 +41,9 @@ build:
     cmake -S server -B build/server -G Ninja
     cmake --build build/server -j"$(nproc)"
 
-# Build the C# tool suite (Net7Tools.slnx, .NET 10).
+# Build the C# tool suite (FreyaTools.slnx, .NET 10).
 build-tools:
-    dotnet build tools/Net7Tools.slnx
+    dotnet build tools/FreyaTools.slnx
 
 # Decode a proxy<->server sector capture into a nav/mob/resource inventory.
 # Output lands next to the input as <input>.inventory.txt (gitignored).
@@ -69,11 +69,11 @@ package-pcap-inventory:
     @cp tools/pcap-inventory/bin/win-x64-publish/pcap-inventory.exe bin/pcap-inventory.exe
     @echo ">>> done. bin/pcap-inventory.exe -- drag a .pcapng onto it on Windows."
 
-# Cross-compile Net7Proxy as a Win32 PE binary (MinGW-w64). The launcher
+# Cross-compile FreyaProxy as a Win32 PE binary (MinGW-w64). The launcher
 # spawns this under WINE next to the EnB client — see plans/23-phase-w-proxy-win32-crossbuild.md.
 # Builds OpenSSL 3 statically into proxy/third_party/openssl-mingw64 the
 # first time (idempotent), then cmake-configures + builds, then stages
-# Net7Proxy.exe to ./bin/ where launchnet7-avalonia looks for it.
+# FreyaProxy.exe to ./bin/ where launchnet7-avalonia looks for it.
 build-proxy-win64:
     @echo ">>> building static OpenSSL 3 for MinGW (idempotent — skip if already built)"
     ./proxy/scripts/build-openssl-mingw.sh
@@ -83,16 +83,16 @@ build-proxy-win64:
         -DCMAKE_BUILD_TYPE=Release
     @echo ">>> cmake build"
     cmake --build proxy/build-win64 -j"$(nproc)"
-    @echo ">>> staging Net7Proxy.exe → bin/"
+    @echo ">>> staging FreyaProxy.exe → bin/"
     @mkdir -p bin
-    @cp proxy/build-win64/Net7Proxy.exe bin/Net7Proxy.exe
-    @echo ">>> done. bin/Net7Proxy.exe is what 'just launch-net7' will spawn under WINE."
+    @cp proxy/build-win64/FreyaProxy.exe bin/FreyaProxy.exe
+    @echo ">>> done. bin/FreyaProxy.exe is what 'just launch-net7' will spawn under WINE."
 
 # Standalone Windows client package. Produces dist/enb-client-windows/ holding a
-# self-contained launcher (LaunchNet7.exe -- no .NET runtime needed) + the Win32
-# proxy (bin/Net7Proxy.exe) + a package-only LaunchNet7.cfg that defaults to the
+# self-contained launcher (FreyaLauncher.exe -- no .NET runtime needed) + the Win32
+# proxy (bin/FreyaProxy.exe) + a package-only FreyaLauncher.cfg that defaults to the
 # public server. The end user extracts the folder on Windows and runs
-# LaunchNet7.exe: no docker, no dev environment, nothing to install beyond Earth
+# FreyaLauncher.exe: no docker, no dev environment, nothing to install beyond Earth
 # & Beyond itself. The launcher connects to a remote upstream (default
 # enb.sigsegv.land; the Server box is editable so they can point it anywhere).
 # Note: this packaging-only cfg is what flips the defaults to Multi-Player +
@@ -110,20 +110,20 @@ package-client-windows: build-proxy-win64
     @echo ">>> assembling dist/enb-client-windows/"
     @rm -rf dist/enb-client-windows
     @mkdir -p dist/enb-client-windows/bin
-    @cp tools/launchnet7-avalonia/bin/win-x64-publish/LaunchNet7Avalonia.exe dist/enb-client-windows/LaunchNet7.exe
-    @cp bin/Net7Proxy.exe dist/enb-client-windows/bin/Net7Proxy.exe
-    @cp tools/launchnet7-avalonia/LaunchNet7.windows-package.cfg dist/enb-client-windows/LaunchNet7.cfg
+    @cp tools/launchnet7-avalonia/bin/win-x64-publish/FreyaLauncher.exe dist/enb-client-windows/FreyaLauncher.exe
+    @cp bin/FreyaProxy.exe dist/enb-client-windows/bin/FreyaProxy.exe
+    @cp tools/launchnet7-avalonia/FreyaLauncher.windows-package.cfg dist/enb-client-windows/FreyaLauncher.cfg
     @echo ">>> done. dist/enb-client-windows/  --  zip it and ship."
-    @echo "    Contents: LaunchNet7.exe + bin/Net7Proxy.exe + LaunchNet7.cfg"
-    @echo "    User extracts the folder on Windows and runs LaunchNet7.exe."
+    @echo "    Contents: FreyaLauncher.exe + bin/FreyaProxy.exe + FreyaLauncher.cfg"
+    @echo "    User extracts the folder on Windows and runs FreyaLauncher.exe."
 
-# Smoke-run Net7Proxy.exe under WINE (no game client, just the proxy).
+# Smoke-run FreyaProxy.exe under WINE (no game client, just the proxy).
 # Confirms WSAStartup + binds TCP 3801/3805 + opens both UDP planes.
 # Set NET7_UPSTREAM_HOST=<host> in the env to point the proxy at a non-local
 # game server. Ctrl-C to stop.
 run-proxy-wine:
-    @if [ ! -x bin/Net7Proxy.exe ]; then echo "bin/Net7Proxy.exe missing — run 'just build-proxy-win64' first" >&2; exit 1; fi
-    wine bin/Net7Proxy.exe
+    @if [ ! -x bin/FreyaProxy.exe ]; then echo "bin/FreyaProxy.exe missing — run 'just build-proxy-win64' first" >&2; exit 1; fi
+    wine bin/FreyaProxy.exe
 
 # Stop the docker proxy container if it's running. The WINE proxy spawned
 # by `just launch-net7` binds the same host port 3801 — they can't both
@@ -150,7 +150,7 @@ stop-docker-proxy:
 launch:
     dotnet run --project tools/toolslauncher-avalonia
 
-# Game client launcher (LaunchNet7 port).
+# Game client launcher (Freya).
 launch-net7:
     dotnet run --project tools/launchnet7-avalonia
 
@@ -344,7 +344,7 @@ _image-status COMPOSE_ARGS SERVICES REBUILD_CMD:
 # Bring up an interactive CLI client in its own container, paired with its own
 # dedicated proxy, against the running shared stack.
 #
-# Why a dedicated proxy: the Net7Proxy is a SINGLE-client bridge (one global
+# Why a dedicated proxy: the FreyaProxy is a SINGLE-client bridge (one global
 # ServerManager + g_LoggedIn + singular m_{Sector,Global,Master}Connection in
 # proxy/ServerManager.h). A second client through the same proxy clobbers those
 # pointers -- that's the "cli client and client.exe steal each other's ports"
@@ -373,7 +373,7 @@ play-cli UNIT='cli1':
     docker compose up -d --no-recreate server login proxy
     # The CLI unit attaches to the shared stack network by name. It's derived
     # from COMPOSE_PROJECT_NAME (per-worktree), so pass it through rather than
-    # hardcoding `enb-emulator_default`.
+    # hardcoding `freya_default`.
     export STACK_NETWORK="${COMPOSE_PROJECT_NAME}_default"
     echo ">>> CLI unit '{{UNIT}}' -> stack network '$STACK_NETWORK'"
     echo ">>> inside the REPL:  connect cliproxy   then   login <user> <pass>"
@@ -416,7 +416,7 @@ stop-cli UNIT='cli1':
 # Architecture (2026-05-29 rewrite):
 #   The recipe brings up the FULL docker-compose stack (postgres + server +
 #   login + PROXY) and then launches the launcher, which only spawns
-#   client.exe under WINE. There is NO WINE-side Net7Proxy.exe.
+#   client.exe under WINE. There is NO WINE-side FreyaProxy.exe.
 #
 #   The client connects TCP to the docker proxy on localhost:3801 / :3805 /
 #   :3500 (port-published). The docker proxy speaks UDP to the docker
@@ -433,16 +433,16 @@ stop-cli UNIT='cli1':
 #
 # Steps the recipe performs:
 #   1. `just run-stack-bg`           -- postgres + server + login + proxy.
-#   2. Pre-writes LaunchNet7.settings.json so the launcher opens with
+#   2. Pre-writes FreyaLauncher.settings.json so the launcher opens with
 #      Emulator=Net7Local, Host=localhost, port 4443 (the dev stack's
 #      host-side mapping of the login container's 443). The launcher's
 #      in-process LocalAuthRelay terminates the client's plaintext-HTTP
 #      auth call on 127.0.0.1 and re-wraps it as TLS to the upstream --
 #      so we don't need the WINE prefix to trust the dev cert (verify
 #      is skipped only because upstream is loopback).
-#   3. Runs the launcher. Net7Local in LaunchNet7.cfg deliberately has
+#   3. Runs the launcher. Net7Local in FreyaLauncher.cfg deliberately has
 #      no launchName attribute, so Launcher.cs's switch falls to its
-#      default case = LaunchClient() only (skip LaunchNet7Proxy).
+#      default case = LaunchClient() only (skip LaunchFreyaProxy).
 #
 # Click Play in the GUI; the client should connect to the local server.
 play-local CLIENT_PATH='':
@@ -489,7 +489,7 @@ play-local CLIENT_PATH='':
     SETTINGS_DIR=tools/launchnet7-avalonia/bin/Debug/net10.0
     mkdir -p "$SETTINGS_DIR"
     cp_json=$(printf '%s' "$cp" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
-    cat > "$SETTINGS_DIR/LaunchNet7.settings.json" <<JSON
+    cat > "$SETTINGS_DIR/FreyaLauncher.settings.json" <<JSON
     {
       "ClientPath": $cp_json,
       "LastEmulatorName": "Net7Local",
@@ -502,7 +502,7 @@ play-local CLIENT_PATH='':
       "FormMainPositionY": -1
     }
     JSON
-    echo ">>> wrote $SETTINGS_DIR/LaunchNet7.settings.json"
+    echo ">>> wrote $SETTINGS_DIR/FreyaLauncher.settings.json"
 
     : "${WINEPREFIX:=$HOME/.wine-enb}"
     export WINEPREFIX
@@ -519,9 +519,9 @@ play-local CLIENT_PATH='':
 # Unlike `play-local` (which boots postgres + server + login + proxy in docker
 # and points the client at localhost), this brings up NOTHING locally except the
 # two per-client Win32 processes the launcher itself spawns under WINE:
-#   1. Net7Proxy.exe -- the single-client bridge, dialed at the cloud's resolved
+#   1. FreyaProxy.exe -- the single-client bridge, dialed at the cloud's resolved
 #      IP (/ADDRESS:<ip>). It speaks the cleartext game UDP planes + login to the
-#      remote box. The Net7Proxy IS the local half of the topology; there is no
+#      remote box. The FreyaProxy IS the local half of the topology; there is no
 #      such thing as "connect with nothing running locally" -- the proxy must run
 #      on the player's machine (see CLAUDE.md "proxy is single-client"). The
 #      launcher just spawns it for you.
@@ -559,18 +559,18 @@ play-online CLIENT_PATH='' HOST='':
     # A local docker stack (from `just play-local`) binds the same client-facing
     # TCP ports this online proxy needs -- 3500 (PROXY_LOCAL_TCP_PORT), 3801
     # (MASTER_SERVER_PORT), 3805 (GLOBAL_SERVER_PORT). If it's still up, the WINE
-    # Net7Proxy.exe can't bind them (EADDRINUSE) and the client silently talks to
+    # FreyaProxy.exe can't bind them (EADDRINUSE) and the client silently talks to
     # the LOCAL stack instead of $host -- which surfaces as a ~30s hang then
     # "EA.com temporarily unavailable (INV-300)" at login. Tear it down first.
     echo ">>> taking down any local docker stack (frees 3500/3801/3805)"
     docker compose down --remove-orphans >/dev/null 2>&1 || true
     # Kill stale WINE proxies from prior runs that may still hold those ports.
     # Pattern excludes the .exe suffix match against this recipe's own argv.
-    pkill -f 'Net7Proxy\.exe' >/dev/null 2>&1 || true
+    pkill -f 'FreyaProxy\.exe' >/dev/null 2>&1 || true
 
-    # The launcher spawns <launcher-dir>/bin/Net7Proxy.exe under WINE. Build the
-    # Win32 proxy and stage it where LaunchNet7Proxy() looks (AppContext.BaseDirectory/bin).
-    echo ">>> building Win32 Net7Proxy.exe (idempotent; layer-cached)"
+    # The launcher spawns <launcher-dir>/bin/FreyaProxy.exe under WINE. Build the
+    # Win32 proxy and stage it where LaunchFreyaProxy() looks (AppContext.BaseDirectory/bin).
+    echo ">>> building Win32 FreyaProxy.exe (idempotent; layer-cached)"
     just build-proxy-win64
 
     echo ">>> building launcher"
@@ -578,12 +578,12 @@ play-online CLIENT_PATH='' HOST='':
 
     SETTINGS_DIR=tools/launchnet7-avalonia/bin/Debug/net10.0
     mkdir -p "$SETTINGS_DIR/bin"
-    cp bin/Net7Proxy.exe "$SETTINGS_DIR/bin/Net7Proxy.exe"
-    echo ">>> staged $SETTINGS_DIR/bin/Net7Proxy.exe"
+    cp bin/FreyaProxy.exe "$SETTINGS_DIR/bin/FreyaProxy.exe"
+    echo ">>> staged $SETTINGS_DIR/bin/FreyaProxy.exe"
 
     cp_json=$(printf '%s' "$cp"   | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
     host_json=$(printf '%s' "$host" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
-    cat > "$SETTINGS_DIR/LaunchNet7.settings.json" <<JSON
+    cat > "$SETTINGS_DIR/FreyaLauncher.settings.json" <<JSON
     {
       "ClientPath": $cp_json,
       "LastEmulatorName": "Net7MP",
@@ -596,7 +596,7 @@ play-online CLIENT_PATH='' HOST='':
       "FormMainPositionY": -1
     }
     JSON
-    echo ">>> wrote $SETTINGS_DIR/LaunchNet7.settings.json (Net7MP -> $host:443)"
+    echo ">>> wrote $SETTINGS_DIR/FreyaLauncher.settings.json (Net7MP -> $host:443)"
 
     : "${WINEPREFIX:=$HOME/.wine-enb}"
     export WINEPREFIX
@@ -946,9 +946,9 @@ pgadmin:
 # Run the gtest harness + (best-effort) dotnet test.
 test:
     ctest --test-dir build/tests --output-on-failure
-    -dotnet test tools/Net7Tools.slnx --nologo
+    -dotnet test tools/FreyaTools.slnx --nologo
 
-# Live handshake + replay over TCP against the Net7Proxy. Reuses a
+# Live handshake + replay over TCP against the FreyaProxy. Reuses a
 # proxy already listening on 127.0.0.1:3801 if one exists (e.g. you ran
 # `just dev`); otherwise spins up a standalone one. Skips mysql + server
 # boot — the proxy handshake path doesn't touch the DB so this stays fast.

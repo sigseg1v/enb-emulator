@@ -13,6 +13,7 @@
 - sector servers spin up/down as needed when players gate/enter (cuts memory footprint 70%)
 - added full integration test suite
 - added CLI that can fully parse all network packet fields and can stimulate a client via REPL (you can log in and play the game through the CLI)
+- to avoid confusion for users, the launcher/etc for this project is called Freya to indicate that it has undergone significant changes from Net7
 
 ## Quick Start
 
@@ -21,7 +22,7 @@ just play-local
 just seed-account testclient testpw
 ```
 
-Then click **Play** in LaunchNet7 and log in with username `testclient` / password `testpw`.
+Then click **Play** in the Freya launcher and log in with username `testclient` / password `testpw`.
 
 ## What this is
 
@@ -66,7 +67,7 @@ just package      # build OCI image of the server
 ### C# content tools
 
 ```
-dotnet build tools/Net7Tools.slnx
+dotnet build tools/FreyaTools.slnx
 just launch                   # central Avalonia tool launcher (recommended)
 just launch-sector-editor     # or jump straight to a specific editor
 ```
@@ -144,13 +145,13 @@ See `docs/15-cli-client.md` for the full REPL command reference.
 Or if you want to manually dump network traffic to compare:
 
 ```bash
-ps aux | grep -i Net7Proxy # or whatever else you want to capture
+ps aux | grep -i FreyaProxy # or whatever else you want to capture
 sudo nsenter -t <PID> -n tcpdump -i any -nn -s0 -w network-capture.pcap
 ```
 
 Dumping the proxy is a good idea as it's unencrypted. You can convert to hex with hexdump -C
 
-> **Net7Proxy is not a dumb relay.** It is an active protocol participant:
+> **FreyaProxy is not a dumb relay.** It is an active protocol participant:
 > on the server->client leg it strips the UDP outer header, consumes a
 > whole band of control opcodes the client never sees (galaxy-map cache,
 > prospect/loot, object create, the `0x2025`-`0x202e` gate-cache band, MVAS
@@ -200,7 +201,7 @@ auth traffic and launcher opcodes are automatically skipped.
 
 The `just launch-cli` REPL above dials the host-published proxy on `127.0.0.1`,
 so it shares that proxy with the WINE `client.exe` started by `just play-local`.
-The Net7Proxy is a **single-client bridge** (one connection set, one logged-in
+The FreyaProxy is a **single-client bridge** (one connection set, one logged-in
 state), so two clients through the same proxy clobber each other -- one
 disconnects the other. To run several clients at once, give each its **own
 proxy** in a container.

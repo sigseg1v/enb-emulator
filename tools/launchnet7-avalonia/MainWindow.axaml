@@ -5,10 +5,18 @@
         mc:Ignorable="d"
         x:Class="LaunchNet7Avalonia.MainWindow"
         Width="1280" Height="680"
-        Title="LaunchNet7"
+        Title="LaunchFreya"
         Background="{DynamicResource SystemRegionBrush}"
         CanResize="True">
-  <Grid Margin="12" RowDefinitions="Auto,Auto,Auto,Auto,*,Auto">
+  <DockPanel Margin="12">
+
+    <!-- Project heading. "Freya" is the rebranded name for this preservation
+         project's launcher/proxy (see README "major changes"). -->
+    <TextBlock DockPanel.Dock="Top" Text="Freya"
+               FontSize="44" FontStyle="Italic" FontWeight="Bold"
+               HorizontalAlignment="Center" Margin="0,0,0,10" />
+
+  <Grid RowDefinitions="Auto,Auto,Auto,Auto,*,Auto">
 
     <!-- Row 0: Server picker (emulator/host) -->
     <Border Grid.Row="0" BorderBrush="Gray" BorderThickness="1" Padding="8" CornerRadius="4">
@@ -74,4 +82,5 @@
     </Grid>
 
   </Grid>
+  </DockPanel>
 </Window>

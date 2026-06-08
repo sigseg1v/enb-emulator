@@ -1,6 +1,6 @@
 # toolslauncher-avalonia
 
-Cross-platform Avalonia port of `tools/toolslauncher/ToolsLauncher/` — the Net-7 "launch pad" that gives one-click access to all the editors plus the LaunchNet7 client launcher.
+Cross-platform Avalonia port of `tools/toolslauncher/ToolsLauncher/` -- the "launch pad" that gives one-click access to all the editors plus the Freya client launcher.
 
 Built on **.NET 10** + **Avalonia 11.2.3**. Targets `net10.0` (no `-windows` suffix), so it runs on Linux without WINE.
 
@@ -10,10 +10,10 @@ A small (260×380) window with one button per editor and a "Launch Net7" button 
 
 A Settings dialog (File → Settings...) configures:
 
-- `LaunchNet7Path` — explicit directory containing a published `LaunchNet7Avalonia[.exe]`. Leave blank to fall back to `dotnet run --project ../launchnet7-avalonia/`.
-- `EditorsCheckoutRoot` — the `tools/` directory. Leave blank to auto-resolve (walks up from the launcher's binary looking for a sibling `launchnet7-avalonia/`).
+- `LaunchNet7Path` -- explicit directory containing a published `FreyaLauncher[.exe]`. Leave blank to fall back to `dotnet run --project ../launchnet7-avalonia/`.
+- `EditorsCheckoutRoot` -- the `tools/` directory. Leave blank to auto-resolve (walks up from the launcher's binary looking for a sibling `launchnet7-avalonia/`).
 
-Settings persist to `~/.config/Net7Tools/toolslauncher-avalonia.json` on Linux and `%APPDATA%\Net7Tools\toolslauncher-avalonia.json` on Windows (via `Environment.SpecialFolder.ApplicationData`).
+Settings persist to `~/.config/FreyaTools/toolslauncher-avalonia.json` on Linux and `%APPDATA%\FreyaTools\toolslauncher-avalonia.json` on Windows (via `Environment.SpecialFolder.ApplicationData`).
 
 ## Mapping from the original
 

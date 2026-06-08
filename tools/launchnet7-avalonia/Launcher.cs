@@ -82,7 +82,7 @@ namespace LaunchNet7Avalonia
                 // Hostname directly, which is the docker-published proxy.
                 //
                 // The proxy's UPSTREAM and the auth relay/registration host stay
-                // _setting.Hostname (the real server) -- see LaunchNet7Proxy /
+                // _setting.Hostname (the real server) -- see LaunchFreyaProxy /
                 // StartLocalAuthRelay / EffectiveRegistrationHostname.
                 bool spawnsLocalProxy = launch == "NET7SP" || launch == "NET7MP";
                 string gameHost = spawnsLocalProxy ? "127.0.0.1" : _setting.Hostname;
@@ -99,13 +99,13 @@ namespace LaunchNet7Avalonia
                     case "NET7SP":
                         LaunchNet7Server();
                         System.Threading.Thread.Sleep(25000);
-                        LaunchNet7Proxy();
+                        LaunchFreyaProxy();
                         System.Threading.Thread.Sleep(2000);
                         LaunchClient(gameHost);
                         break;
 
                     case "NET7MP":
-                        LaunchNet7Proxy();
+                        LaunchFreyaProxy();
                         System.Threading.Thread.Sleep(2000);
                         LaunchClient(gameHost);
                         break;
@@ -179,7 +179,7 @@ namespace LaunchNet7Avalonia
             }
         }
 
-        void LaunchNet7Proxy()
+        void LaunchFreyaProxy()
         {
             // Resolve relative to the launcher exe's own location, NOT the
             // process CWD. Double-clicking in Explorer happens to set CWD to
@@ -188,7 +188,7 @@ namespace LaunchNet7Avalonia
             // spawn. AppContext.BaseDirectory is the exe's folder (verified to
             // hold even for the single-file self-extracting package build).
             var dir = Path.Combine(AppContext.BaseDirectory, "bin");
-            var exe = Path.Combine(dir, "Net7Proxy.exe");
+            var exe = Path.Combine(dir, "FreyaProxy.exe");
 
             // Hand the proxy its DTLS config BEFORE spawning it. The proxy<->
             // server UDP leg is DTLS, fail-closed (Phase AH): the proxy refuses
@@ -228,7 +228,7 @@ namespace LaunchNet7Avalonia
             // launcher path therefore only fires on Windows / WINE where
             // someone genuinely wants the SP loopback flow.
             // Resolve relative to the launcher exe's own location (see the
-            // note in LaunchNet7Proxy) rather than the process CWD.
+            // note in LaunchFreyaProxy) rather than the process CWD.
             var dir = Path.Combine(AppContext.BaseDirectory, "bin");
             var exe = Path.Combine(dir, "Net7.exe");
             var info = WinExe(dir, exe, null);

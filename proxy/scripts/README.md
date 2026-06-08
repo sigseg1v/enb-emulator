@@ -10,13 +10,13 @@ against. See the script header.
 
 ## `Start-WindowsEnbProxyCapture.ps1`
 
-Windows packet capture of the Net7Proxy, by process, to a timestamped
+Windows packet capture of the FreyaProxy, by process, to a timestamped
 pcap/pcapng under `.\captures\`. The Windows counterpart to the Linux capture
 flow:
 
 ```sh
 # Linux (server side / WINE host): enter the proxy's net namespace and capture.
-ps aux | grep -i Net7Proxy
+ps aux | grep -i FreyaProxy
 sudo nsenter -t <PID> -n tcpdump -i any -nn -s0 -w network-capture.pcap
 ```
 

@@ -21,7 +21,7 @@ profiles. The default topology:
 | Service | Image | Purpose | Host port |
 |---|---|---|---|
 | `postgres` | `postgres:16` | The runtime database. Holds the `net7` (content) and `net7_user` (accounts) databases. The `schema-init` one-shot applies `db/postgres/schema.sql` and the seed scripts on first start. | 5434 -> 5432 |
-| `proxy` | built from `proxy/Dockerfile` | Net7Proxy. Binds `MASTER_SERVER_PORT` (3801), `GLOBAL_SERVER_PORT` (3805), and `SECTOR_SERVER_PORT` (3500) for the Westwood RSA + RC4 client handshake and downstream dispatch. | 3801, 3805, 3500 |
+| `proxy` | built from `proxy/Dockerfile` | FreyaProxy. Binds `MASTER_SERVER_PORT` (3801), `GLOBAL_SERVER_PORT` (3805), and `SECTOR_SERVER_PORT` (3500) for the Westwood RSA + RC4 client handshake and downstream dispatch. | 3801, 3805, 3500 |
 | `login` | built from `login-server/Dockerfile` | Net7SSL. Binds `SSL_PORT` (443 internally, remapped to host **4443** so rootless docker accepts publishing it). Reads the `net7_user` database on Postgres for auth. | 4443 -> 443 |
 | `server` | built from `server/Dockerfile` | The C++ Net-7 game server. Owns the dynamic sector-server TCP range (3501-3550 published) plus 3808/UDP (master to proxy). | 3501-3550, 3808/udp |
 

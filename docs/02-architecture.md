@@ -36,7 +36,7 @@ A running deployment has between three and five distinct processes:
 
 ```
 +----------------------+    UDP +----------------------+
-|     Net7Proxy        | (DTLS) |     server (Net7)    |
+|     FreyaProxy        | (DTLS) |     server (Net7)    |
 | (per-client bridge;  |<------>| Master/Global/Sector |
 |  receives encrypted  |        | runtime; Postgres    |
 |  TCP from the EnB    |        | client (libpqxx)     |
@@ -400,7 +400,7 @@ them (`Connection.cpp`, `ConnectionManager.cpp`, `ClientTo*Server.cpp`,
 `TcpListener.h`, `SSL_Listener.cpp`, `SSL_Connection.cpp`) is not present
 in `server/src/`. The constants remain in the enum because the proxy <->
 server UDP framing reuses them as type tags. Types 6-10 are the
-UDP-via-Net7Proxy types and are dispatched in
+UDP-via-FreyaProxy types and are dispatched in
 `UDP_Connection::RunRecvThread` (`server/src/UDPConnection.cpp:214`).
 
 ### Port assignments
@@ -418,7 +418,7 @@ port assignments shared by the server, proxy, and login-server.
 | 3806 | `MVAS_LOGIN_PORT` | UDP | Net7 (MVAS = MVASlaunch, the launcher) |
 | 3807 | `SSL_LOCALCERT_LOGIN_PORT` | TCP for local-cert dev mode | Net7SSL |
 | 3808 | `UDP_MASTER_SERVER_PORT` | UDP master dispatch | Net7 |
-| 3809 | `PROXY_SERVER_PORT` | Net7Proxy local | Proxy |
+| 3809 | `PROXY_SERVER_PORT` | FreyaProxy local | Proxy |
 
 ### Auth flow at the protocol layer
 
@@ -427,7 +427,7 @@ port assignments shared by the server, proxy, and login-server.
 ```mermaid
 sequenceDiagram
     participant Client as EnB client
-    participant Proxy as Net7Proxy
+    participant Proxy as FreyaProxy
     participant SSL as Net7SSL
     participant Net7 as Net7 (Global)
     participant Sector as Net7 (Sector)
@@ -523,7 +523,7 @@ is unusual but consistent with the "everything is UDP now" rewrite.
 
 Login flow on this channel (one client login):
 
-1. SSL receives an HTTPS request from Net7Proxy with username +
+1. SSL receives an HTTPS request from FreyaProxy with username +
    password.
 2. SSL validates against the ticket DB.
 3. SSL sends `0x4003 SSL_AVATARLOGIN_SSL_S` over UDP to Net7 with
@@ -536,7 +536,7 @@ Login flow on this channel (one client login):
 5. From that point on the player is logged in and the actual game
    traffic goes Client <-> Proxy <-> Net7.
 
-### 4.3. UDP over the network (Net7 <-> Net7Proxy <-> client)
+### 4.3. UDP over the network (Net7 <-> FreyaProxy <-> client)
 
 All gameplay traffic uses UDP. `UDP_Connection` is documented in
 detail in `docs/03-network-protocol.md`. The dispatch by server type
@@ -799,7 +799,7 @@ ServerManager
 4. **Player handoff**: when a player jumps to a new sector, the Master
    server (`ProcessHandoff` at `server/src/UDP_Master.cpp:46`) looks
    up the IP and port of the target sector via
-   `SectorServerManager::LookupSectorServer` and replies to Net7Proxy
+   `SectorServerManager::LookupSectorServer` and replies to FreyaProxy
    with `0x2009 MASTER_HANDOFF_CONFIRM` containing the ip/port.
 5. **Sector shutdown**: on server shutdown each SectorManager is
    destroyed in `ServerManager::~ServerManager`
@@ -809,7 +809,7 @@ In standalone mode all sectors share the same IP and port; the
 "redirect" still happens but stays in-process.
 
 In distributed mode (a separate Net7 process per sector), the redirect
-crosses the network and the client's Net7Proxy reconnects to the
+crosses the network and the client's FreyaProxy reconnects to the
 sector process.
 
 ### MAX_SECTORS
@@ -837,7 +837,7 @@ it onto the source, the following are the gotchas:
   the same process in tada-o.
 - **TCP is mostly dead**. The doc describes the protocol as TCP. The
   code path still exists but everything that actually goes anywhere
-  is UDP via Net7Proxy.
+  is UDP via FreyaProxy.
 - **No load balancer or galaxy-of-galaxies layer**. The doc mentions
   a GlobalServer brokering across multiple Master Servers (one per
   galaxy). In tada-o the Master Server *is* the Global Server in the

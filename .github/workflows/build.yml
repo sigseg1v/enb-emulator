@@ -160,7 +160,7 @@ jobs:
         with:
           dotnet-version: '10.0.x'
       - name: Build tool suite
-        run: dotnet build tools/Net7Tools.slnx
+        run: dotnet build tools/FreyaTools.slnx
 
   ctest:
     name: ctest (gtest harness)
@@ -218,7 +218,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             g++ cmake ninja-build pkg-config libssl-dev
-      - name: Build Net7Proxy docker image
+      - name: Build FreyaProxy docker image
         # Dockerfile COPYs from `proxy/` and `common/`, so the build
         # context must be the repo root, not `proxy/` itself.
         run: docker build -t enb-proxy:ci -f proxy/Dockerfile .

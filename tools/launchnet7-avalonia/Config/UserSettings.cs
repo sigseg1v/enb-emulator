@@ -18,7 +18,7 @@ namespace LaunchNet7Avalonia.Config
         public int FormMainPositionY { get; set; } = -1;
 
         static readonly string SettingsPath =
-            Path.Combine(AppContext.BaseDirectory, "LaunchNet7.settings.json");
+            Path.Combine(AppContext.BaseDirectory, "FreyaLauncher.settings.json");
 
         public static UserSettings Load()
         {

@@ -41,7 +41,7 @@ namespace ToolsLauncherAvalonia
     //    `dotnet run --project ../<name>-avalonia/` (EditorLauncher.cs)
     //    instead of launching Windows .exe files in the working dir.
     //  - Settings persisted as JSON in
-    //    %APPDATA%/Net7Tools/toolslauncher-avalonia.json instead of
+    //    %APPDATA%/FreyaTools/toolslauncher-avalonia.json instead of
     //    the WinForms user.config file.
     public partial class MainWindow : Window
     {

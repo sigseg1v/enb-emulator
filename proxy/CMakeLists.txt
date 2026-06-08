@@ -150,7 +150,7 @@ endif()
 
 # Strip the .exe suffix from being doubled if someone sets it explicitly.
 if(WIN32)
-    set_target_properties(net7proxy PROPERTIES OUTPUT_NAME "Net7Proxy")
+    set_target_properties(net7proxy PROPERTIES OUTPUT_NAME "FreyaProxy")
 endif()
 
 # --------------------------------------------------------------------------

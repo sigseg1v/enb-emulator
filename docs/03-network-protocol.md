@@ -37,8 +37,8 @@ There are six distinct transports in the code base:
 |---|---|---|---|
 | **HTTP (plaintext)** | **127.0.0.1:4180 (loopback only)** | **EnB client (authlogin.dll) <-> LocalAuthRelay (in-launcher)** | **Active** |
 | HTTPS (TLS over TCP) | port 443 | LocalAuthRelay <-> Net7SSL (loopback or remote) | Active |
-| TCP (Westwood RSA+RC4) | port 3500 (Net7Proxy local) | EnB client <-> Net7Proxy | Active (handshake terminates here) |
-| UDP (DTLS 1.2 + per-packet auth token) | ports 3806, 3808, 3810, sector dynamic | Net7Proxy <-> server | Active (game; encrypted, see §3.2) |
+| TCP (Westwood RSA+RC4) | port 3500 (FreyaProxy local) | EnB client <-> FreyaProxy | Active (handshake terminates here) |
+| UDP (DTLS 1.2 + per-packet auth token) | ports 3806, 3808, 3810, sector dynamic | FreyaProxy <-> server | Active (game; encrypted, see §3.2) |
 | UDP loopback | between server and login | server <-> login | Active (auth handoff) |
 | AF_UNIX SOCK_DGRAM | `/run/net7-ipc/` | server <-> login | Active (liveness pings) |
 
@@ -54,7 +54,7 @@ network interfaces:
 - **LocalAuthRelay** terminates the client's HTTPS-auth call on
   loopback (as plaintext HTTP) and re-wraps it as TLS to the upstream
   auth server. See §3.3 and §5.1.
-- **Net7Proxy** terminates the client's plaintext-TCP game connection
+- **FreyaProxy** terminates the client's plaintext-TCP game connection
   on loopback (Westwood RSA+RC4 on that local TCP leg), and translates
   to UDP toward the server. That proxy->server UDP leg is wrapped in
   **DTLS 1.2** (encrypted + server-cert-authenticated), and each
@@ -67,7 +67,7 @@ Net-traffic invariant -- read this carefully:
 > UDP game traffic ever leaves the local machine.** The two loopback
 > middlemen above are the only things on the box that *can* speak to a
 > remote host, and both always encrypt outbound: LocalAuthRelay speaks
-> TLS, and Net7Proxy speaks DTLS 1.2 (its client-facing Westwood RC4
+> TLS, and FreyaProxy speaks DTLS 1.2 (its client-facing Westwood RC4
 > TCP leg never leaves loopback). There is no config flag, env var,
 > settings file, registry key, or CLI argument that can move the client
 > off loopback or downgrade either middleman's outbound transport to
@@ -75,9 +75,9 @@ Net-traffic invariant -- read this carefully:
 > operator sentinel (§3.2), not anything the client can reach. See §3.3
 > for the proof on the auth path.
 
-### Net7Proxy is not a dumb relay (captures are NOT directly client-applicable)
+### FreyaProxy is not a dumb relay (captures are NOT directly client-applicable)
 
-Net7Proxy is an active protocol participant, not a passthrough, and this
+FreyaProxy is an active protocol participant, not a passthrough, and this
 matters every time you touch a capture, a dump, a fixture, or a
 reconstruction. On the server->client leg the proxy:
 
@@ -452,15 +452,15 @@ The wire-load-bearing port assignments live in
 |---|---|---|---|
 | **4180** | **`LocalAuthRelay.ListenPort`** | **TCP/HTTP plaintext, loopback-only** | **EnB client (authlogin.dll) <-> LocalAuthRelay** |
 | 443 | `SSL_PORT` | TCP/TLS | LocalAuthRelay <-> Net7SSL (upstream) |
-| 3500 | `PROXY_LOCAL_TCP_PORT` | TCP (Westwood RSA+RC4) | EnB client <-> Net7Proxy (local) |
+| 3500 | `PROXY_LOCAL_TCP_PORT` | TCP (Westwood RSA+RC4) | EnB client <-> FreyaProxy (local) |
 | 3501 | `SECTOR_SERVER_PORT` | TCP (legacy, unused) | base port; sectors add an offset |
 | 3801 | `MASTER_SERVER_PORT` | TCP (legacy, unused) | client <-> master |
 | 3805 | `GLOBAL_SERVER_PORT` | TCP (legacy, unused) | client <-> global |
-| 3806 | `MVAS_LOGIN_PORT` | UDP (DTLS 1.2) | Net7Proxy / Net7SSL -> Net7 (MVAS / login handoff) |
+| 3806 | `MVAS_LOGIN_PORT` | UDP (DTLS 1.2) | FreyaProxy / Net7SSL -> Net7 (MVAS / login handoff) |
 | 3807 | `SSL_LOCALCERT_LOGIN_PORT` | TCP/TLS (legacy) | out-of-band local-cert login |
-| 3808 | `UDP_MASTER_SERVER_PORT` | UDP (DTLS 1.2) | Net7Proxy -> Net7 (master handoff) |
-| 3809 | `PROXY_SERVER_PORT` | UDP | Net7Proxy local |
-| 3810 | `UDP_GLOBAL_SERVER_PORT` | UDP (DTLS 1.2) | Net7Proxy -> Net7 (global control plane) |
+| 3808 | `UDP_MASTER_SERVER_PORT` | UDP (DTLS 1.2) | FreyaProxy -> Net7 (master handoff) |
+| 3809 | `PROXY_SERVER_PORT` | UDP | FreyaProxy local |
+| 3810 | `UDP_GLOBAL_SERVER_PORT` | UDP (DTLS 1.2) | FreyaProxy -> Net7 (global control plane) |
 
 The TCP ports marked "legacy, unused" are the ports the original direct
 client-to-server TCP link used. That link no longer exists in the
@@ -471,7 +471,7 @@ runs over the UDP ports 3806 / 3808 / 3810 plus the per-sector UDP
 listeners.
 
 There is no SRV or DNS record convention; the server's hostname and
-ports are baked into the client through Net7Proxy and through the
+ports are baked into the client through FreyaProxy and through the
 launcher configuration.
 
 A typical firewall rule for a production server only needs:
@@ -498,7 +498,7 @@ to the exact handler in source.
 sequenceDiagram
     participant Client as EnB.exe (authlogin.dll)
     participant Relay as LocalAuthRelay (in-launcher)
-    participant Proxy as Net7Proxy
+    participant Proxy as FreyaProxy
     participant SSL as Net7SSL
     participant Net7 as Net7
 
@@ -534,7 +534,7 @@ Once authenticated, the client gets its character list and picks one:
 ```mermaid
 sequenceDiagram
     participant Client
-    participant Proxy as Net7Proxy
+    participant Proxy as FreyaProxy
     participant Net7
 
     Client->>Proxy: pick character (slot 0-4)
@@ -576,7 +576,7 @@ Sectors are separate listeners. The Master dispatch step:
 ```mermaid
 sequenceDiagram
     participant Client
-    participant Proxy as Net7Proxy
+    participant Proxy as FreyaProxy
     participant Master as Net7 (master UDP :3808)
     participant Sector as Net7 (sector UDP)
 
@@ -602,7 +602,7 @@ Handlers:
   `Player::HandlePacketOptRequest("lac")` (a launcher hint to enable
   the proxy's packet-opt feature).
 - If the player can't be found, sends `0x100A MVAS_TERMINATE_S_C` to
-  tell Net7Proxy to drop the client. See line 88.
+  tell FreyaProxy to drop the client. See line 88.
 
 ### 5.4. In-sector gameplay
 
@@ -623,9 +623,9 @@ the source.
 | Range | Used for | Dispatch site | Reference |
 |---|---|---|---|
 | `0x0000`-`0x00FF` | Client gameplay opcodes | Sector server | `Connection::HandleClientOpcode` (`Connection.cpp`), `UDP_Connection::HandleClientOpcode` |
-| `0x1000`-`0x100B` | MVAS (movement assist / launcher) | Net7Proxy <-> Net7 | `UDP_Connection::HandleMVASOpcode` (`UDP_MVAS.cpp`) |
+| `0x1000`-`0x100B` | MVAS (movement assist / launcher) | FreyaProxy <-> Net7 | `UDP_Connection::HandleMVASOpcode` (`UDP_MVAS.cpp`) |
 | `0x2000`-`0x2021` | Proxy <-> Server control plane | dispatched by server type | `UDP_Global.cpp`, `UDP_Master.cpp`, `UDP_Client.cpp` |
-| `0x3000`-`0x3008` | Net7Proxy TCP-link lifecycle | Net7Proxy local | `Connection::ProxyClientOpcode` |
+| `0x3000`-`0x3008` | FreyaProxy TCP-link lifecycle | FreyaProxy local | `Connection::ProxyClientOpcode` |
 | `0x4000`-`0x4004` | Net7 <-> Net7SSL | UDP loopback | `UDP_SSLcomms.cpp` |
 | `0x5000`-`0x5001` | Tracking feed | external | `UDP_Connection::HandlePlayerCountRQ` |
 | `0x7801`-`0x7905` | Server-to-server (master <-> sector) | TCP between server processes | `Connection::ProcessMasterServerToSectorServerOpcode` |
@@ -758,10 +758,10 @@ Note the two `0x2010` and two `0x2011` definitions: the codebase has
 overlapping macros that get differentiated by context (which server
 is being talked to). This is a known wart.
 
-### 6.4. Net7Proxy TCP-link opcodes (range 0x30xx)
+### 6.4. FreyaProxy TCP-link opcodes (range 0x30xx)
 
 `common/include/net7/Opcodes.h:240-248`. These coordinate the legacy TCP login
-link that Net7Proxy still maintains in parallel with the UDP path.
+link that FreyaProxy still maintains in parallel with the UDP path.
 
 | Opcode | Name | Notes |
 |---|---|---|
@@ -956,7 +956,7 @@ recoverable from code reading alone:
   field-level description of the key derivation would need the
   original Net-7 protocol notes, which were not part of the source
   dump.
-- **Net7Proxy's translation rules.** Net7Proxy lives in `proxy/`; it
+- **FreyaProxy's translation rules.** FreyaProxy lives in `proxy/`; it
   is the one piece that knows how to take a TCP `EnbTcpHeader` from
   the client and re-emit it as `EnbUdpHeader` plus envelope opcodes
   to Net7. The translation table is in the proxy source, not here.
@@ -968,7 +968,7 @@ recoverable from code reading alone:
 - **Galaxy map and patch download protocol.** The `0x0097`
   GALAXY_MAP / `0x0098` GALAXY_MAP_REQUEST opcodes are part of a
   patcher-served data flow delegated to the EnB patcher (Westwood's
-  update tool) and Net7Proxy. The galaxy map is stored locally on the
+  update tool) and FreyaProxy. The galaxy map is stored locally on the
   client and updated via the patcher; the server side just
   acknowledges the request, and the actual data is served by the
   patcher (HTTPS / static file).

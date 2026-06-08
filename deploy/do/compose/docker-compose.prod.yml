@@ -10,17 +10,17 @@
 #
 # The proxy is NOT here: it is a per-client, single-connection bridge that runs
 # on each player's own (Windows) machine, so it is never deployed server-side.
-# The two server-side services live in ONE registry repository ("enb") as
-# per-service tags -- enb:server-<v>, enb:login-<v> -- so the stack fits DOCR's
-# free Starter tier (1 repository). IMAGE_TAG is the version SUFFIX: 'latest'
-# (default) or a pinned 'vN' (e.g. v7); the two are always built and bumped
-# together, so a single 'vN' pins a coherent release across both.
+# The server-side services live in ONE registry repository ("enb") as per-service
+# tags -- enb:server-<v>, enb:login-<v>, enb:status-notifier-<v> -- so the stack
+# fits DOCR's free Starter tier (1 repository). IMAGE_TAG is the version SUFFIX:
+# 'latest' (default) or a pinned 'vN' (e.g. v7); all are always built and bumped
+# together, so a single 'vN' pins a coherent release across the whole stack.
 #
 # It is driven from /opt/enb on the droplet with an .env that defines
 # REGISTRY, IMAGE_TAG, DOMAIN and COMPOSE_PROJECT_NAME (written by
 # Update-Stack.ps1). Run as:
 #   docker compose --env-file .env -f docker-compose.prod.yml up -d
-name: ${COMPOSE_PROJECT_NAME:-enb-emulator}
+name: ${COMPOSE_PROJECT_NAME:-freya}
 
 services:
   postgres:
@@ -118,6 +118,16 @@ services:
         # login (G_ERROR_TICKET_INVALID). See db/postgres/login_ticket.sql.
         echo "schema-init: applying /db/login_ticket.sql -> net7_user"
         psql -h postgres -U net7 -d net7_user -v ON_ERROR_STOP=1 -f /db/login_ticket.sql
+        # Phase AM external-status outbox table (net7_user). UNCONDITIONAL, same
+        # rationale as login_ticket: new table, must land on pre-existing prod
+        # volumes too. See db/postgres/external_status_events.sql.
+        echo "schema-init: applying /db/external_status_events.sql -> net7_user"
+        psql -h postgres -U net7 -d net7_user -v ON_ERROR_STOP=1 -f /db/external_status_events.sql
+        # Phase AM-8 server_status heartbeat singleton (net7_user). UNCONDITIONAL,
+        # same rationale: new table, must land on pre-existing prod volumes too.
+        # See db/postgres/server_status.sql.
+        echo "schema-init: applying /db/server_status.sql -> net7_user"
+        psql -h postgres -U net7 -d net7_user -v ON_ERROR_STOP=1 -f /db/server_status.sql
         echo "schema-init: syncing identity sequences -> net7"
         psql -h postgres -U net7 -d net7 -v ON_ERROR_STOP=1 -f /db/sync_sequences.sql
         echo "schema-init: done"
@@ -134,6 +144,11 @@ services:
         condition: service_started
     environment:
       TZ: UTC
+      # Phase AM external-status events. Set NET7_EXTERNAL_STATUS_ENABLED=1 in the
+      # droplet .env to enqueue login/logout/level-up/broadcast/server-start
+      # events for the status-notifier sidecar. Default empty = off (the server's
+      # EmitExternalStatusEvent no-ops and writes nothing). See deploy README.
+      NET7_EXTERNAL_STATUS_ENABLED: "${NET7_EXTERNAL_STATUS_ENABLED:-}"
     # Resolve our own domain to loopback inside the container, mirroring the
     # dev stack's local.net-7.org remap. See the README "remote addressing"
     # caveat -- this is the load-bearing UNVERIFIED bit for remote play.
@@ -185,6 +200,38 @@ services:
     # Rootful docker on the droplet binds the protocol-correct 443 directly.
     ports:
       - "443:443/tcp"
+    restart: unless-stopped
+
+  # Phase AM status-notifier sidecar. Relays the external_status_events outbox to
+  # a webhook (Discord). Talks ONLY to Postgres (net7_user) + outbound HTTPS -- no
+  # game ports, no inbound trust. Like server/login, the image is PULLED from the
+  # registry (the droplet has no source tree); the build/push pipeline tags it
+  # enb:status-notifier-<v> in the same "enb" repo. Default-off: with an empty
+  # STATUS_WEBHOOK_URL the sidecar idles. Set it (a SECRET) in the droplet .env to
+  # enable delivery, alongside NET7_EXTERNAL_STATUS_ENABLED=1 on the server.
+  status-notifier:
+    image: ${REGISTRY}/enb:status-notifier-${IMAGE_TAG:-latest}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      schema-init:
+        condition: service_completed_successfully
+    environment:
+      DB_HOST: "postgres:5432"
+      DB_USER: "net7"
+      DB_PASS: "net7"
+      DB_NAME: "net7_user"
+      # SECRET -- comes from the droplet .env, never committed. Empty => the
+      # webhook relay idles.
+      STATUS_WEBHOOK_URL: "${STATUS_WEBHOOK_URL:-}"
+      STATUS_RETENTION_DAYS: "${STATUS_RETENTION_DAYS:-7}"
+      # AM-8 read-only `/status` Discord bot. SECRET token from the droplet .env,
+      # never committed. Empty => the bot does not start. DISCORD_GUILD_ID is
+      # optional (registers the command to one guild for instant availability;
+      # empty registers globally). Needs NET7_EXTERNAL_STATUS_ENABLED=1 on the
+      # server for the heartbeat that powers uptime/sector counts.
+      DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN:-}"
+      DISCORD_GUILD_ID: "${DISCORD_GUILD_ID:-}"
     restart: unless-stopped
 
 volumes:

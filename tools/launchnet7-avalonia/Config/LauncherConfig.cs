@@ -6,7 +6,7 @@ using System.Xml;
 namespace LaunchNet7Avalonia.Config
 {
     // Replaces the original .NET-Framework System.Configuration
-    // ConfigurationSection layer. LaunchNet7.cfg is a normal XML doc
+    // ConfigurationSection layer. FreyaLauncher.cfg is a normal XML doc
     // (we drop the <configuration><configSections> wrapper convention)
     // wrapped in a <launchNet7> root that exposes <servers> and
     // <autoUpdate>. We parse it with XmlDocument so we don't need the
@@ -75,10 +75,10 @@ namespace LaunchNet7Avalonia.Config
 
                         // The launcher always speaks TLS to the upstream auth
                         // server. `secureAuthenticationPort` is the historical
-                        // attribute name in shipped LaunchNet7.cfg files; we
+                        // attribute name in shipped FreyaLauncher.cfg files; we
                         // accept it for compatibility but it is just *the*
                         // auth port now. `authenticationPort` (the plain-HTTP
-                        // variant) is ignored — there is no plaintext upstream.
+                        // variant) is ignored -- there is no plaintext upstream.
                         var host = new HostConfig
                         {
                             Hostname           = h.Attributes?["hostname"]?.Value ?? "",
