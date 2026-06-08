@@ -25,7 +25,7 @@
 #include <net7/PacketStructures.h>
 
 #define MAX_ACCOUNTS	1024
-#define TICKET_EXPIRE_TIME  300000  //5 minutes (in milliseconds)
+#define TICKET_EXPIRE_TIME  1800000  //30 minutes (ms). Must cover a human creating their first character at the char screen before sector entry binds the DTLS token; keep in sync with login-server LinuxAuth.cpp kTicketExpireMs.
 
 #define G_ERROR_BANNED_ACCOUNT		0
 #define G_ERROR_NICKNAME_USED		1

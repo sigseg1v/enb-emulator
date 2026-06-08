@@ -81,7 +81,17 @@
 // --------------------------------------------------------------------------
 namespace {
 
-constexpr unsigned long kTicketExpireMs = 300000; // 5 minutes — matches AccountManager.h TICKET_EXPIRE_TIME.
+// 30 minutes. The ticket is issued at AuthLogin (account auth), but the
+// per-packet DTLS auth token is not bound until the player reaches sector
+// entry (game server HandleGlobalTicketRequest -> GetLoginTokenBinary). A
+// first-time player creating their first character (race/class/appearance/
+// name) routinely spends well over the old 5-minute window AT THE CHARACTER
+// SCREEN with no packets in flight, so the row expired before sector entry,
+// the token could not bind, and DTLS dropped every gameplay datagram -- the
+// player hung zoning in until they alt-F4'd and relogged (fresh ticket). The
+// real server did not boot players for slow character creation. Must stay in
+// sync with AccountManager.h TICKET_EXPIRE_TIME (both servers share the row).
+constexpr unsigned long kTicketExpireMs = 1800000; // 30 minutes
 
 struct LinuxTicket {
     char username[64];
