@@ -73,6 +73,7 @@ bool m_ShuttingDown = false;
 bool g_Debug = false;
 bool g_ServerShutdown = false; // Terminated the global Server
 bool g_ResetContent = false;
+time_t g_ServerBootTime = 0;    // AM-8: set when the server becomes ready; uptime base for the status heartbeat
 
 #ifdef WIN32
 PROCESS_INFORMATION sslpi = {NULL};
@@ -292,7 +293,7 @@ int main(int argc, char* argv[])
 		strcpy_s(g_DomainName, sizeof(g_DomainName), "local.net-7.org");
 		g_DomainName[sizeof(g_DomainName)-1] = '\0';
 		strcpy_s(filedata, sizeof(filedata), "domain=local.net-7.org\nmysql_user=YOURUSERNAME\nmysql_pass=YOURPASS\nmysql_host="
-			"localhost:3307\nmysql_db=net7\ngalaxy_name=Andromeda");
+			"localhost:3307\nmysql_db=net7\ngalaxy_name=Nexion 218");
 		fopen_s(&f, CONFIG_FILE, "w");
 		fwrite(filedata,1,strlen(filedata),f);
 		fclose(f);
@@ -301,7 +302,7 @@ int main(int argc, char* argv[])
 	// if no galaxy name set one!
 	if (g_Galaxy_Name[0] == 0)
 	{
-		strcpy_s(g_Galaxy_Name, sizeof(g_Galaxy_Name), "Andromeda");
+		strcpy_s(g_Galaxy_Name, sizeof(g_Galaxy_Name), "Nexion 218");
 		g_Galaxy_Name[sizeof(g_Galaxy_Name)-1] = '\0';
 	}
 

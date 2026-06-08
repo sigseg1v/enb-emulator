@@ -412,5 +412,6 @@ extern bool g_Debug;
 extern bool g_ServerShutdown;
 extern bool m_ShuttingDown;
 extern bool g_ResetContent;
+extern time_t g_ServerBootTime;   // AM-8: server-ready timestamp; uptime base for the status heartbeat
 
 #endif // _NET_7_H_INCLUDED_
