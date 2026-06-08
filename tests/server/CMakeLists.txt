@@ -96,7 +96,7 @@ if(LIBPQXX_FOUND)
     add_executable(sqlplus_wrapper_test
         db/sqlplus_wrapper_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/../../server/src/db/sqlplus.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../server/src/Mutex.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../common/Mutex.cpp
         db/wrapper_test_stubs.cpp
     )
     target_include_directories(sqlplus_wrapper_test PRIVATE
