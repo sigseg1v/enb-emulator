@@ -37,6 +37,12 @@ target_link_libraries(smoke_test PRIVATE GTest::gtest_main)
 add_executable(header_layout_test
     protocol/header_layout_test.cpp
 )
+# Pin the layout against the REAL shared wire structs, not a hand-copied mirror,
+# so a future repack/reorder of common/include/net7/PacketStructures.h fails this
+# test instead of silently diverging from it.
+target_include_directories(header_layout_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../common/include
+)
 target_link_libraries(header_layout_test PRIVATE GTest::gtest_main)
 
 # --- Protocol: credits u64 save-field width (regression guard) -----------

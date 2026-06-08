@@ -1,47 +1,23 @@
-// tests/protocol/header_layout_test.cpp
+// tests/server/protocol/header_layout_test.cpp
 //
-// Phase G scaffold. This is the first protocol test — it pins down the
-// wire layout of EnbTcpHeader / EnbUdpHeader from server/src/PacketStructures.h
-// so a future refactor that reorders or repacks them fails fast.
+// Phase G scaffold. The first protocol test -- it pins the wire layout of
+// EnbTcpHeader / EnbUdpHeader / EnbUdpAuthWrapper so a future refactor that
+// reorders or repacks them fails fast.
 //
-// Why not include PacketStructures.h directly? It transitively pulls in
-// most of Net7.h, which depends on Win32 typedefs and ServerManager forward
-// decls. The headers don't isolate cleanly yet. Phase G continuation: split
-// the wire structs into their own header so tests can include them without
-// dragging the whole runtime.
+// These structs come straight from common/include/net7/PacketStructures.h --
+// the single shared definition the server, proxy and login-server all compile
+// from. The test includes that header DIRECTLY rather than mirroring the structs
+// locally: a copy would pin the copy, not the real layout, so the real header
+// could silently diverge while this test stayed green. (The original scaffold
+// note about PacketStructures.h dragging in Net7.h/Win32 is stale -- Phase R
+// Wave 2 split the wire structs into this stand-alone header, whose only
+// dependency is net7/Packing.h for ATTRIB_PACKED + the fixed-width int types.)
 
 #include <gtest/gtest.h>
 #include <cstdint>
 #include <cstring>
 
-namespace {
-
-// Mirror of server/src/PacketStructures.h::EnbTcpHeader. Keep in lock-step.
-struct EnbTcpHeader {
-    int16_t size;
-    int16_t opcode;
-} __attribute__((packed));
-
-struct EnbUdpHeader {
-    int16_t  size;
-    int16_t  opcode;
-    int32_t  player_id;
-    int32_t  packet_sequence;
-};
-
-// Mirror of common/include/net7/PacketStructures.h::EnbUdpAuthWrapper. Phase AH
-// (AH-8): the per-packet C->S auth token prepended INSIDE the DTLS channel to
-// every gameplay datagram. Keep in lock-step with the C header AND with the C#
-// model (tools/cli-client .../Net/AuthWrappedPacket.cs) -- the three places
-// that touch this format must agree byte-for-byte.
-constexpr uint8_t kAuthWrapperVersion = 0x01;   // NET7_UDP_AUTH_WRAPPER_VERSION
-constexpr int     kAuthTokenLen       = 16;     // NET7_UDP_AUTH_TOKEN_LEN
-struct EnbUdpAuthWrapper {
-    uint8_t version;
-    uint8_t token[kAuthTokenLen];
-} __attribute__((packed));
-
-}  // namespace
+#include <net7/PacketStructures.h>
 
 TEST(WireFormat, EnbTcpHeaderIs4Bytes) {
     // The wire-format expects exactly two big-endian shorts back-to-back.
@@ -87,7 +63,9 @@ TEST(WireFormat, EnbUdpAuthWrapperFieldOffsets) {
 }
 
 TEST(WireFormat, EnbUdpAuthWrapperVersionConstant) {
-    // Must match NET7_UDP_AUTH_WRAPPER_VERSION and the C# WrapperVersion pin.
-    EXPECT_EQ(kAuthWrapperVersion, 0x01);
-    EXPECT_EQ(kAuthTokenLen, 16);
+    // Pin the shared header's macros against the values the proxy producer and
+    // the C# model (tools/cli-client .../Net/AuthWrappedPacket.cs WrapperVersion)
+    // also hard-code -- the three places that touch this format must agree.
+    EXPECT_EQ(NET7_UDP_AUTH_WRAPPER_VERSION, 0x01);
+    EXPECT_EQ(NET7_UDP_AUTH_TOKEN_LEN, 16);
 }
