@@ -36,8 +36,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -112,7 +114,14 @@ func main() {
 		} else {
 			logf("STATUS_WEBHOOK_URL is empty -- webhook relay disabled; bot only.")
 		}
-		select {} // block forever; the bot goroutine (if any) does the work.
+		// Block until terminated. A bare `select {}` panics here when no bot
+		// goroutine exists ("all goroutines are asleep - deadlock!"), crash-
+		// looping the container; waiting on a signal gives the runtime a real
+		// wakeup source AND lets SIGTERM stop us cleanly.
+		sig := make(chan os.Signal, 1)
+		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+		<-sig
+		return
 	}
 
 	retentionDays := 7
