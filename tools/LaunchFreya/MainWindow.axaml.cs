@@ -614,6 +614,7 @@ namespace LaunchFreya
             // so the raw DNS/TCP paths in Launcher resolve it.
             _setting.Hostname           = NormalizeHost(host.Hostname);
             _setting.LaunchName         = emu.GetLaunchName();
+            _setting.EnablePositionFeed = _user.UsePositionFeed;   // PB-2
 
             // Persist (keep the raw typed value so the box redisplays it verbatim)
             _user.AuthenticationPort = c_TextBox_Port.Text;

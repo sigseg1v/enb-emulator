@@ -4,73 +4,67 @@
 //
 // ClientPositionShared.h
 // ----------------------
-// Shared-memory IPC contract between TWO of our own processes on the Win32
-// (WINE) client host:
+// IPC contract between TWO of our own processes for the MVAS position feed
+// (PB-2): the in-client position hook and the proxy.
 //
 //   * PRODUCER -- the in-client position hook (client/detours). It runs inside
 //     client.exe, reads the rendered ship position/orientation from the game
-//     engine, and publishes it here every frame.
+//     engine, and sends it to the proxy as a single fixed-size UDP datagram on
+//     the loopback intake port below, ~10x/sec.
 //   * CONSUMER -- the proxy's MVAS position feed (proxy/UDPClient_linux.cpp,
-//     UDPClient::ReadClientShipPosition). It reads the latest published value
-//     and streams it to the server as opcode 0x1004 on MVAS_LOGIN_PORT.
+//     UDPClient::ReadClientShipPosition). It binds the intake port, drains the
+//     latest datagram, and streams it to the server as opcode 0x1004 on
+//     MVAS_LOGIN_PORT over its already-authenticated DTLS channel.
 //
-// Why this exists: the real Net7Proxy sourced ship position by scraping the
-// client process's memory directly. We instead read it IN-PROCESS (the client
-// hook owns the value) and hand it across a named shared-memory mapping, which
-// avoids cross-process memory scraping at a hardcoded, build-specific virtual
-// address. The wire result on MVAS_LOGIN_PORT is identical either way -- proven
-// by the live Net7Proxy capture (proxy/local-debug Combat capture: 0x1004 x196
-// to udp/3806 during thruster movement).
+// Why a loopback DATAGRAM and not shared memory: the proxy and the client do
+// NOT always share an OS object namespace. In `just play-local` the proxy is a
+// Linux binary in docker while the client runs under WINE -- a Win32 named
+// shared-memory mapping created by the client is invisible to that Linux
+// process. A loopback UDP datagram crosses that boundary (it is exactly how the
+// client's own TCP game link reaches the docker proxy), so ONE transport works
+// for all three run modes: play-local (WINE client -> docker proxy), play-online
+// / NET7MP (WINE client -> WINE proxy), and native Win32. The wire result on
+// MVAS_LOGIN_PORT is identical to the real Net7Proxy's -- proven by the live
+// capture (proxy/local-debug Combat capture: 0x1004 x196 to udp/3806 during
+// thruster movement).
 //
-// This header carries NO client memory layout -- only the proxy<->hook
-// exchange format. The producer keeps engine offsets to itself.
-//
-// IMPORTANT: this feed is Win32/WINE-only. The Linux-native (docker) proxy has
-// no client process behind it, so the consumer compiles to a no-op there and
-// never opens the mapping.
+// This header carries NO client memory layout -- only the proxy<->hook exchange
+// format. The producer keeps engine offsets to itself (ClientEngineOffsets.local.h).
 #ifndef _NET7_CLIENT_POSITION_SHARED_H_
 #define _NET7_CLIENT_POSITION_SHARED_H_
 
 #include <cstdint>
 
-// Named mapping. The producer creates it (CreateFileMapping); the consumer
-// opens it read-only (OpenFileMapping). Session-local Win32 namespace -- the
-// proxy and the client run in the same WINE session / Windows logon.
-#define NET7_CLIENT_POS_SHM_NAME "Net7ClientShipPosition"
+// Loopback intake port the proxy binds and the hook sends to. UDP. The proxy
+// binds 127.0.0.1 on the Win32/WINE build (co-located proxy) and INADDR_ANY on
+// the Linux-native docker build, where docker publishes it back to host
+// loopback only (127.0.0.1:NET7_CLIENT_POS_PORT) -- never network-reachable.
+#define NET7_CLIENT_POS_PORT 3807
 
-// Bumped if the struct layout below ever changes; consumer ignores a mapping
-// whose magic does not match so a stale producer can never feed garbage.
-#define NET7_CLIENT_POS_SHM_MAGIC 0x4E37504Fu  // 'N7PO'
+// Stamped in every datagram; the consumer drops any datagram whose magic does
+// not match, so unrelated loopback traffic can never feed garbage positions.
+#define NET7_CLIENT_POS_MAGIC 0x4E37504Fu  // 'N7PO'
 
-// Published ship state. Read with the seqlock protocol below so the consumer
-// never observes a half-written sample (the producer writes ~every frame).
-struct Net7ClientShipPosition
+// One position sample, sent verbatim as the UDP payload. All fields are 4-byte
+// aligned and the total is a multiple of 4, so the struct is naturally packed
+// and identical on every x86/x86-64 little-endian target (client and proxy are
+// both LE) -- no #pragma pack needed. Datagrams are atomic at the socket layer,
+// so there is no torn-read concern and no seqlock: the consumer simply keeps the
+// most recent valid datagram it has drained.
+struct Net7ClientPosDatagram
 {
-    uint32_t magic;        // == NET7_CLIENT_POS_SHM_MAGIC once initialised
-    volatile uint32_t seq; // seqlock: odd while a write is in progress
-    float    position[3];  // engine ship position  x, y, z
+    uint32_t magic;        // == NET7_CLIENT_POS_MAGIC
+    uint32_t seq;          // producer-monotonic; consumer keeps the latest seq
+    float    position[3];  // engine ship position    x, y, z
     float    heading[3];   // engine ship orientation x, y, z
     uint32_t sector_id;    // current sector id (0 = unknown / not in space)
-    uint32_t valid;        // 1 once the producer has a live, in-space sample
+    uint32_t valid;        // 1 = live, in-space sample (else the producer is
+                           //     loading/docked/at char-select; consumer skips)
 };
 
-// Seqlock reader: returns true and fills *out with a tear-free snapshot, or
-// false if a consistent read could not be taken within a few tries (producer
-// mid-write storm -- the caller just skips this tick). Header-only so both the
-// proxy and the client hook share one implementation.
-static inline bool Net7ClientPos_Read(const Net7ClientShipPosition *shm,
-                                      Net7ClientShipPosition *out)
-{
-    if (!shm || shm->magic != NET7_CLIENT_POS_SHM_MAGIC) return false;
-    for (int tries = 0; tries < 4; ++tries)
-    {
-        uint32_t s1 = shm->seq;
-        if (s1 & 1u) continue;            // write in progress
-        *out = *shm;
-        uint32_t s2 = shm->seq;
-        if (s1 == s2) return out->valid != 0;
-    }
-    return false;
-}
+#ifdef __cplusplus
+static_assert(sizeof(Net7ClientPosDatagram) == 40,
+              "Net7ClientPosDatagram must stay a fixed 40-byte wire struct");
+#endif
 
 #endif // _NET7_CLIENT_POSITION_SHARED_H_

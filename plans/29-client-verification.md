@@ -819,13 +819,26 @@ format & byte order", Trap 2).
 ### [ ] CV-MVAS-POS -- Normal-thruster flight stays in sync (PB-2 position feed)
 
 - **Change**: PB-2 restores the client->server position feed the real Net7Proxy
-  provided. An in-client Detours hook (`client/detours/ClientPositionFeed.{h,cpp}`)
-  reads the engine ship position/orientation in-process and publishes it into named
-  shared memory (`proxy/ClientPositionShared.h`); the proxy consumer
-  (`UDPClient::SendPositionIfChanged`, `proxy/UDPClient_linux.cpp`) reads it and
-  streams opcode `0x1004` to the server's MVAS port (3806), change-gated, so the
-  server's authoritative position tracks what the client renders instead of
-  dead-reckoning a diverging path from the coordinate-less `0x0014 MOVE` impulse.
+  provided. A minimal in-client DLL (`client/detours/ClientPositionFeed.{h,cpp}` +
+  `PosFeedDllMain.cpp`, built as `bin/Net7PosFeed.dll`, injected via a launch-time
+  remote-thread inject -- `bin/Net7Inject.exe`, NOT `AppInit_DLLs` which WINE does
+  not implement)
+  reads the engine ship position/orientation in-process and sends it to the proxy
+  as a fixed 40-byte UDP datagram on loopback port `NET7_CLIENT_POS_PORT`=3807
+  (`proxy/ClientPositionShared.h`); the proxy consumer
+  (`UDPClient::ReadClientShipPosition` -> `SendPositionIfChanged`,
+  `proxy/UDPClient_linux.cpp`) binds 3807, drains the latest sample, and streams
+  opcode `0x1004` to the server's MVAS port (3806), change-gated, so the server's
+  authoritative position tracks what the client renders instead of dead-reckoning a
+  diverging path from the coordinate-less `0x0014 MOVE` impulse.
+- **Transport note (2026-06-08)**: the proxy<->hook transport is a loopback
+  datagram, NOT shared memory. Shared memory could not reach `just play-local` --
+  the proxy there is a Linux docker process and the WINE client's Win32 named
+  mapping is invisible to it. A loopback datagram works in ALL three run modes:
+  play-local (docker proxy, port published `127.0.0.1:3807:3807/udp` loopback-only),
+  play-online/NET7MP (WINE proxy), native Win32. No server change and no `0x1004`
+  wire change; the proxy attributes the position to its own session `m_PlayerID`,
+  so a loopback feed only moves the feeder's own avatar.
 - **Why the CLI/integration suite does NOT close this**: the CLI proves the
   `0x1004` wire FORMAT (`CaptureReplayTests.MvasPosition_1004_*`, fixture
   `live_mvas_position_1004.hex`, against the live Combat capture) and that the
@@ -835,12 +848,36 @@ format & byte order", Trap 2).
   false until the owner wires it for the client build in use; until then the feed
   is inert and server behaviour is unchanged.
 - **Setup (owner)**:
-  1. Fill `ReadEngineShipState()` for the client build (read ship world position
-     x/y/z + orientation x/y/z + current sector id from the engine; return true
-     only for a live in-space sample). Keep build-specific addresses out of git.
-  2. Rebuild `ClientDetours.dll` (the `.dsp` now includes `ClientPositionFeed.cpp`)
-     and the Win32 proxy (`just build-proxy-win64`). `just play-local`.
-  3. Undock and fly with normal thrusters only (no autopilot/warp).
+  1. Copy `client/detours/ClientEngineOffsets.local.h.example` to
+     `ClientEngineOffsets.local.h` (gitignored) and fill
+     `Net7ReadEngineShipState_Local()` for the client build (read ship world
+     position x/y/z + orientation x/y/z + current sector id from the engine
+     in-process; return true only for a live in-space sample). The seam in
+     `ClientPositionFeed.cpp` includes it automatically via `__has_include`.
+     Build-specific addresses stay in that local-only file -- never committed.
+  2. Build the feed DLL: `just build-posfeed-dll` -> `bin/Net7PosFeed.dll`. This
+     needs the **i686** MinGW toolchain (`sudo apt install gcc-mingw-w64-i686-posix
+     g++-mingw-w64-i686-posix`) because `client.exe` is PE32/i386 and the injected
+     DLL must match its bitness; the 64-bit MinGW used for the proxy cannot emit
+     it. The DLL is a minimal standalone unit (`PosFeedDllMain.cpp` +
+     `ClientPositionFeed.cpp`) -- NOT the legacy `ClientDetours.dll` (which links
+     MSVC `detours.lib` and hooks hardcoded client offsets). `play-local` builds it
+     for you as a required step.
+  3. Launch. Injection + transport are wired -- nothing to hand-run:
+     - `just play-local`: builds the DLL + injector, sets `EnablePositionFeed=true`,
+       and the launcher spawns `Net7Inject.exe` which starts `client.exe` suspended,
+       remote-LoadLibrary's `Net7PosFeed.dll` into it, and resumes it (WINE has no
+       `AppInit_DLLs`); the docker proxy already binds 3807 (published
+       loopback-only). On attach the DLL emits an `OutputDebugStringA`
+       `[Net7PosFeed] attached to client.exe` marker, so you can confirm injection
+       even before the engine read is filled (the feed sends nothing until then).
+       The definitive load check is `WINEDEBUG=+loaddll just play-local 2>&1 | grep
+       -i net7posfeed` -- it logs the DLL map regardless of OutputDebugString.
+     - play-online / native Win32: rebuild the Win32 proxy
+       (`just build-proxy-win64`) so the WINE/native proxy carries the consumer,
+       and set `EnablePositionFeed=true`. Native-Windows injection (Detours withdll)
+       is NOT wired -- the remote-thread injector path is WINE-only.
+  4. Undock and fly with normal thrusters only (no autopilot/warp).
 - **What to look for**: with thrusters you should now travel and STAY where the
   client shows you -- pressing spacebar/stop, or starting autopilot/warp, must NOT
   snap you back to a stale position. Confirm you can move off a planet/station and

@@ -2,72 +2,99 @@
 // ClientPositionFeed.cpp
 //
 // In-client producer for the MVAS position feed (PB-2). See ClientPositionFeed.h
-// for the design. This file owns the shared-memory publishing and the polling
+// for the design. This file owns the loopback-datagram send and the polling
 // thread; the actual engine read is isolated in ReadEngineShipState() so that
 // no build-specific client internals live in version control.
+//
+// Transport: a fixed 40-byte UDP datagram to NET7_CLIENT_POS_PORT on loopback,
+// ~10x/sec. The proxy binds that port and streams the latest sample to the
+// server as 0x1004. A loopback datagram is the one transport that works in all
+// three run modes -- crucially play-local, where the proxy is a Linux docker
+// process the client cannot share a Win32 named mapping with.
 //==============================================================================
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
 #include <process.h>
 #include <cstring>
 
-// The proxy<->hook shared-memory contract. Kept in the proxy tree because the
-// proxy owns the consumer; included here by relative path so both ends compile
-// against ONE definition. (Build systems add proxy/ to the include path; the
-// relative include keeps this self-evident.)
+#pragma comment(lib, "ws2_32.lib")
+
+// The proxy<->hook IPC contract. Kept in the proxy tree because the proxy owns
+// the consumer; included here by relative path so both ends compile against ONE
+// definition. (Build systems add proxy/ to the include path; the relative
+// include keeps this self-evident.)
 #include "../../proxy/ClientPositionShared.h"
 
 //------------------------------------------------------------------------------
 // ReadEngineShipState -- OWNER SEAM.
 //
-// Fill this in for the client build in use: read the ship's current world
-// position (x,y,z) and orientation (x,y,z) from the running engine and write
-// them into the out params, returning true once a live in-space sample exists.
-// Return false whenever there is no valid position yet (loading, docked, char
-// select), so the publisher skips that frame.
+// Reads the ship's current world position (x,y,z) and orientation (x,y,z) from
+// the running engine, returning true once a live in-space sample exists and
+// false whenever there is no valid position yet (loading, docked, char select),
+// so the publisher skips that frame.
 //
-// It is left returning false on purpose: until it is filled the feed publishes
-// nothing, the proxy reads nothing, and server behaviour is unchanged. Keep any
-// build-specific addresses/offsets out of version control -- supply them here in
-// the local build only. Confirm against the real client before relying on it
+// The build-specific engine read is NOT baked in here -- it lives in a local,
+// gitignored header so no client addresses or memory layout ever enter version
+// control (CLAUDE.md). Copy ClientEngineOffsets.local.h.example to
+// ClientEngineOffsets.local.h and fill Net7ReadEngineShipState_Local() for the
+// client build in use; this seam picks it up automatically. With no local header
+// present the feed publishes nothing, the proxy reads nothing, and server
+// behaviour is unchanged. Confirm against the real client before relying on it
 // (plans/29 CV-MVAS-POS).
 //------------------------------------------------------------------------------
+#ifdef __has_include
+#  if __has_include("ClientEngineOffsets.local.h")
+#    include "ClientEngineOffsets.local.h"
+#    define NET7_HAVE_LOCAL_ENGINE_OFFSETS 1
+#  endif
+#endif
+
 static bool ReadEngineShipState(float pos[3], float heading[3], unsigned int *sector)
 {
+#ifdef NET7_HAVE_LOCAL_ENGINE_OFFSETS
+    return Net7ReadEngineShipState_Local(pos, heading, sector);
+#else
     (void) pos;
     (void) heading;
     (void) sector;
-    return false; // OWNER SEAM: not wired -> feed inert (see header)
+    return false; // OWNER SEAM: no local header -> feed inert (see header)
+#endif
 }
 
 //------------------------------------------------------------------------------
-// Publishing internals.
+// Sending internals.
 //------------------------------------------------------------------------------
-static HANDLE                  g_MapHandle  = NULL;
-static Net7ClientShipPosition *g_Shm        = NULL;
-static volatile bool           g_Run        = false;
-static HANDLE                  g_Thread     = NULL;
+static volatile bool g_Run     = false;
+static HANDLE        g_Thread   = NULL;
+static SOCKET        g_Sock     = INVALID_SOCKET;
+static sockaddr_in   g_ProxyAddr;
+static unsigned int  g_Seq      = 0;
 
-// Publish one sample under the seqlock: bump seq odd, write, bump seq even. The
-// proxy-side reader (Net7ClientPos_Read) retries while seq is odd, so it never
-// observes a half-written sample.
-static void Publish(const float pos[3], const float heading[3], unsigned int sector)
+// Send one sample as a single loopback datagram. UDP is connectionless and
+// lossy-tolerant -- exactly right for a latest-wins position feed: a dropped
+// frame just means the proxy keeps the previous one for another ~100ms.
+static void SendSample(const float pos[3], const float heading[3], unsigned int sector)
 {
-    if (!g_Shm) return;
-    g_Shm->seq++;                       // -> odd: write in progress
-    _ReadWriteBarrier();
-    memcpy((void *) g_Shm->position, pos, sizeof(float) * 3);
-    memcpy((void *) g_Shm->heading, heading, sizeof(float) * 3);
-    g_Shm->sector_id = sector;
-    g_Shm->valid     = 1;
-    _ReadWriteBarrier();
-    g_Shm->seq++;                       // -> even: sample complete
+    if (g_Sock == INVALID_SOCKET) return;
+
+    Net7ClientPosDatagram dg;
+    dg.magic       = NET7_CLIENT_POS_MAGIC;
+    dg.seq         = ++g_Seq;
+    memcpy(dg.position, pos, sizeof(float) * 3);
+    memcpy(dg.heading, heading, sizeof(float) * 3);
+    dg.sector_id   = sector;
+    dg.valid       = 1;
+
+    sendto(g_Sock, (const char *) &dg, (int) sizeof(dg), 0,
+           (const sockaddr *) &g_ProxyAddr, (int) sizeof(g_ProxyAddr));
 }
 
 static unsigned __stdcall FeedThread(void *)
 {
-    // Poll a touch faster than the proxy (which samples at ~200ms) so a fresh
+    // Poll a touch faster than the proxy (which drains at ~200ms) so a fresh
     // value is always waiting. Change-gating is the proxy's job -- we just keep
-    // the published sample current.
+    // the latest sample flowing.
     const DWORD POLL_MS = 100;
     while (g_Run)
     {
@@ -75,7 +102,7 @@ static unsigned __stdcall FeedThread(void *)
         float heading[3] = {0, 0, 0};
         unsigned int sector = 0;
         if (ReadEngineShipState(pos, heading, &sector))
-            Publish(pos, heading, sector);
+            SendSample(pos, heading, sector);
         Sleep(POLL_MS);
     }
     return 0;
@@ -85,26 +112,28 @@ void Net7ClientPosFeed_Start()
 {
     if (g_Run) return;
 
-    g_MapHandle = CreateFileMappingA(
-        INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0,
-        (DWORD) sizeof(Net7ClientShipPosition), NET7_CLIENT_POS_SHM_NAME);
-    if (!g_MapHandle) return;
+    // WSAStartup is refcounted; the client already initialised Winsock, but a
+    // DLL must not assume that, and a paired Start/Stop keeps the count balanced.
+    WSADATA wsa;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return;
 
-    g_Shm = (Net7ClientShipPosition *) MapViewOfFile(
-        g_MapHandle, FILE_MAP_WRITE, 0, 0, sizeof(Net7ClientShipPosition));
-    if (!g_Shm)
-    {
-        CloseHandle(g_MapHandle);
-        g_MapHandle = NULL;
-        return;
-    }
+    g_Sock = ::socket(AF_INET, SOCK_DGRAM, 0);
+    if (g_Sock == INVALID_SOCKET) { WSACleanup(); return; }
 
-    memset(g_Shm, 0, sizeof(*g_Shm));
-    g_Shm->magic = NET7_CLIENT_POS_SHM_MAGIC;
+    memset(&g_ProxyAddr, 0, sizeof(g_ProxyAddr));
+    g_ProxyAddr.sin_family      = AF_INET;
+    g_ProxyAddr.sin_port        = htons(NET7_CLIENT_POS_PORT);
+    g_ProxyAddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);  // 127.0.0.1
 
     g_Run = true;
     g_Thread = (HANDLE) _beginthreadex(NULL, 0, FeedThread, NULL, 0, NULL);
-    if (!g_Thread) g_Run = false;       // mapping stays; reader just sees !valid
+    if (!g_Thread)
+    {
+        g_Run = false;
+        closesocket(g_Sock);
+        g_Sock = INVALID_SOCKET;
+        WSACleanup();
+    }
 }
 
 void Net7ClientPosFeed_Stop()
@@ -116,6 +145,10 @@ void Net7ClientPosFeed_Stop()
         CloseHandle(g_Thread);
         g_Thread = NULL;
     }
-    if (g_Shm)      { UnmapViewOfFile(g_Shm); g_Shm = NULL; }
-    if (g_MapHandle){ CloseHandle(g_MapHandle); g_MapHandle = NULL; }
+    if (g_Sock != INVALID_SOCKET)
+    {
+        closesocket(g_Sock);
+        g_Sock = INVALID_SOCKET;
+        WSACleanup();
+    }
 }

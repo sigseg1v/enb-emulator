@@ -303,11 +303,12 @@ UDPClient::UDPClient(short port, short connection_type, long ip_addr,
     memset(m_LastFedHeading, 0, sizeof(m_LastFedHeading));
     m_HaveFedOnce          = false;
     m_PosFeedSeq           = 0;
-#ifdef _WIN32
-    m_PosShmHandle         = NULL;
-    m_PosShmView           = NULL;
-    m_PosShmTried          = false;
-#endif
+    m_PosIntakeSock        = INVALID_SOCKET;
+    m_PosIntakeTried       = false;
+    m_HavePosSample        = false;
+    memset(m_PosSample, 0, sizeof(m_PosSample));
+    memset(m_HeadingSample, 0, sizeof(m_HeadingSample));
+    m_PosSampleTick        = 0;
     m_Listen_Socket        = INVALID_SOCKET;
     m_recv_thread_running  = false;
     m_Dtls                 = nullptr;
@@ -348,6 +349,11 @@ UDPClient::~UDPClient()
     {
         ::close(m_Listen_Socket);
         m_Listen_Socket = INVALID_SOCKET;
+    }
+    if (m_PosIntakeSock != INVALID_SOCKET)
+    {
+        closesocket(m_PosIntakeSock);
+        m_PosIntakeSock = INVALID_SOCKET;
     }
     delete m_Dtls;
     m_Dtls = nullptr;
@@ -1065,47 +1071,96 @@ void UDPClient::MVASKeepaliveThread()
 }
 
 // ---------------------------------------------------------------------------
-// ReadClientShipPosition (PB-2) -- pull the latest ship position/orientation
-// the in-client hook published into shared memory (ClientPositionShared.h).
+// ReadClientShipPosition (PB-2) -- pull the latest ship position/orientation the
+// in-client hook sent us over the loopback intake socket (ClientPositionShared.h).
 //
-// Win32/WINE only: lazily open the named mapping the client-side position hook
-// creates, then seqlock-read a tear-free sample. Returns false (no live feed)
-// on the Linux-native docker proxy -- there is no client process behind it, so
-// the feed is inert there and the server's own dead-reckoning stands.
+// One transport for all three run modes (play-local / play-online / native
+// Win32): the hook sends fixed 40-byte datagrams to NET7_CLIENT_POS_PORT on
+// loopback, this drains them and keeps the most recent valid one. Returns false
+// when no hook is feeding (no datagram bound/received) or the last sample has
+// gone stale (hook stopped, client closed), so the server's dead-reckoning
+// stands undisturbed exactly as before. Datagrams are atomic, so there is no
+// torn-read concern -- we just keep the newest.
 // ---------------------------------------------------------------------------
 bool UDPClient::ReadClientShipPosition(float pos[3], float heading[3])
 {
-#ifdef _WIN32
-    if (!m_PosShmView)
+    // Lazily bind the intake socket on first poll. A failed bind (e.g. the port
+    // is already taken by another proxy instance) is latched so we never hammer.
+    if (m_PosIntakeSock == INVALID_SOCKET)
     {
-        if (m_PosShmTried) return false;   // already failed once; don't hammer
-        m_PosShmTried = true;
-        HANDLE h = OpenFileMappingA(FILE_MAP_READ, FALSE,
-                                    NET7_CLIENT_POS_SHM_NAME);
-        if (!h) return false;              // client hook not running (yet)
-        const void *view = MapViewOfFile(h, FILE_MAP_READ, 0, 0,
-                                         sizeof(Net7ClientShipPosition));
-        if (!view) { CloseHandle(h); return false; }
-        m_PosShmHandle = h;
-        m_PosShmView   = view;
+        if (m_PosIntakeTried) return false;
+        m_PosIntakeTried = true;
+
+        SOCKET s = ::socket(AF_INET, SOCK_DGRAM, 0);
+        if (s == INVALID_SOCKET) return false;
+
+        struct sockaddr_in addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sin_family = AF_INET;
+        addr.sin_port   = htons(NET7_CLIENT_POS_PORT);
+        // Win32/WINE proxy: co-located with the client, bind loopback so the
+        // intake is never network-reachable. Linux docker proxy: bind ANY so the
+        // published-port forward delivers; compose restricts the host publish to
+        // 127.0.0.1, so it is loopback-only there too.
+#ifdef _WIN32
+        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+#else
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+#endif
+        if (::bind(s, (struct sockaddr *) &addr, sizeof(addr)) != 0)
+        {
+            closesocket(s);
+            return false;
+        }
+
+        // Non-blocking so the per-tick drain never stalls the feed thread.
+#ifdef _WIN32
+        u_long nb = 1;
+        ioctlsocket(s, FIONBIO, &nb);
+#else
+        int fl = fcntl(s, F_GETFL, 0);
+        fcntl(s, F_SETFL, fl | O_NONBLOCK);
+#endif
+        m_PosIntakeSock = s;
     }
 
-    Net7ClientShipPosition snap;
-    if (!Net7ClientPos_Read((const Net7ClientShipPosition *) m_PosShmView, &snap))
+    // Drain everything queued; keep the newest valid datagram (latest-wins).
+    Net7ClientPosDatagram dg;
+    bool got = false;
+    for (;;)
+    {
+        ssize_t n = ::recvfrom(m_PosIntakeSock, (char *) &dg, sizeof(dg), 0,
+                               NULL, NULL);
+        if (n != (ssize_t) sizeof(dg))
+            break;                                  // EWOULDBLOCK / short / done
+        if (dg.magic != NET7_CLIENT_POS_MAGIC || dg.valid == 0)
+            continue;                               // garbage or not-in-space
+        m_PosSample[0]     = dg.position[0];
+        m_PosSample[1]     = dg.position[1];
+        m_PosSample[2]     = dg.position[2];
+        m_HeadingSample[0] = dg.heading[0];
+        m_HeadingSample[1] = dg.heading[1];
+        m_HeadingSample[2] = dg.heading[2];
+        m_PosSampleTick    = GetNet7TickCount();
+        m_HavePosSample    = true;
+        got                = true;
+    }
+
+    if (!m_HavePosSample) return false;
+
+    // Staleness: if the hook has gone quiet (client closed, undocked->loading,
+    // crash) stop feeding so the server is not fed a frozen position. The hook
+    // sends ~10x/sec; 1.5s with nothing means the feed is dead.
+    if (!got && (GetNet7TickCount() - m_PosSampleTick) > 1500)
         return false;
 
-    pos[0] = snap.position[0];
-    pos[1] = snap.position[1];
-    pos[2] = snap.position[2];
-    heading[0] = snap.heading[0];
-    heading[1] = snap.heading[1];
-    heading[2] = snap.heading[2];
+    pos[0] = m_PosSample[0];
+    pos[1] = m_PosSample[1];
+    pos[2] = m_PosSample[2];
+    heading[0] = m_HeadingSample[0];
+    heading[1] = m_HeadingSample[1];
+    heading[2] = m_HeadingSample[2];
     return true;
-#else
-    (void) pos;
-    (void) heading;
-    return false;
-#endif
 }
 
 // ---------------------------------------------------------------------------

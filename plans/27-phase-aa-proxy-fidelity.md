@@ -417,15 +417,28 @@ snap back).
   x196 during thruster movement; 40-byte datagram = 12B EnbUdpHeader + 6 floats
   (pos xyz, heading xyz) + a trailing int32 the server ignores.
 - [x] **In-client producer** (`client/detours/ClientPositionFeed.{h,cpp}`):
-      publishes engine ship state into named shared memory
-      (`proxy/ClientPositionShared.h`, seqlock). Engine read is an OWNER SEAM
-      (`ReadEngineShipState`, returns false until filled -> feed inert). Wired
-      into `ClientDetours.cpp` DllMain attach/detach; added to the `.dsp`.
-- [x] **Proxy consumer** (`UDPClient::SendPositionIfChanged`,
-      `proxy/UDPClient_linux.cpp`): polled at 200ms on the MVAS keepalive thread,
-      reads shared memory (Win32/WINE only; no-op on the Linux docker proxy),
+      sends engine ship state to the proxy as a fixed 40-byte loopback UDP
+      datagram on `NET7_CLIENT_POS_PORT`=3807 (`proxy/ClientPositionShared.h`),
+      ~10x/sec. Engine read is an OWNER SEAM (`ReadEngineShipState`, returns false
+      until filled -> feed inert). Ships as a minimal standalone 32-bit DLL
+      `bin/Net7PosFeed.dll` (`PosFeedDllMain.cpp` guarded DllMain, only inside
+      client.exe; `just build-posfeed-dll`, needs i686 MinGW), injected under WINE
+      via a launch-time remote-thread inject (`bin/Net7Inject.exe`:
+      CreateProcess-suspended + remote LoadLibrary), NOT `AppInit_DLLs` -- WINE
+      does not implement that loader hook. Driven by the launcher
+      (`EnablePositionFeed` setting; play-local builds + enables it). NOT the legacy
+      `ClientDetours.dll`. (Transport was
+      shared memory; changed to a loopback datagram
+      2026-06-08 because SHM could not reach `just play-local` -- the proxy there is
+      a Linux docker process invisible to the WINE client's Win32 named mapping. A
+      datagram works in all three run modes.)
+- [x] **Proxy consumer** (`UDPClient::ReadClientShipPosition` ->
+      `SendPositionIfChanged`, `proxy/UDPClient_linux.cpp`): polled at 200ms on the
+      MVAS keepalive thread, binds 3807 and drains the latest datagram (latest-wins,
+      1.5s staleness gate) on BOTH the Linux docker proxy and the Win32/WINE proxy,
       change-gates on pos+heading, emits the 24-byte server-consumed payload to
-      `MVAS_LOGIN_PORT`. Both build targets (Linux-native + Win32 mingw) green.
+      `MVAS_LOGIN_PORT`. Both build targets (Linux-native + Win32 mingw) green;
+      docker publishes the intake `127.0.0.1:3807:3807/udp` (loopback-only).
 - [x] **CLI byte-pin**: `CaptureReplayTests.MvasPosition_1004_RealCaptureBytes_*`
       (fixture `live_mvas_position_1004.hex`) pins the capture; documents the two
       server-irrelevant divergences from our emitter (size 36 vs 40; trailing

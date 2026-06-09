@@ -98,6 +98,40 @@ build-proxy-win64:
     @cp proxy/build-win64/FreyaProxy.exe bin/FreyaProxy.exe
     @echo ">>> done. bin/FreyaProxy.exe is what 'just launch-net7' will spawn under WINE."
 
+# Cross-compile the standalone MVAS position-feed DLL (PB-2) as a 32-bit Win32
+# PE. It MUST be 32-bit: client.exe is a PE32/i386 process and a DLL loaded into
+# it (via AppInit_DLLs under WINE -- see tools/LaunchFreya) has to match its
+# bitness. This is the ONLY 32-bit artifact in the tree, hence the separate i686
+# toolchain (the proxy/launcher are 64-bit). It is a minimal DLL: just
+# PosFeedDllMain.cpp + ClientPositionFeed.cpp, no Detours, no client offsets.
+#
+# Requires the i686 MinGW toolchain, which is NOT the same package as the x86-64
+# one used for the proxy:
+#   sudo apt install gcc-mingw-w64-i686-posix g++-mingw-w64-i686-posix
+build-posfeed-dll:
+    @if ! command -v i686-w64-mingw32-g++-posix >/dev/null 2>&1 && ! command -v i686-w64-mingw32-g++ >/dev/null 2>&1; then \
+        echo "ERROR: 32-bit MinGW not found. client.exe is PE32/i386, so the feed DLL must be 32-bit." >&2; \
+        echo "  install it:  sudo apt install gcc-mingw-w64-i686-posix g++-mingw-w64-i686-posix" >&2; \
+        exit 1; \
+    fi
+    @cxx="$(command -v i686-w64-mingw32-g++-posix || command -v i686-w64-mingw32-g++)"; \
+    echo ">>> building 32-bit Net7PosFeed.dll with $cxx"; \
+    mkdir -p bin; \
+    "$cxx" -shared -O2 -static -static-libgcc -static-libstdc++ \
+        -Wall -Wextra \
+        -o bin/Net7PosFeed.dll \
+        client/detours/PosFeedDllMain.cpp client/detours/ClientPositionFeed.cpp \
+        -Iclient/detours \
+        -lws2_32 \
+        -Wl,--no-insert-timestamp; \
+    echo ">>> building 32-bit Net7Inject.exe with $cxx"; \
+    "$cxx" -O2 -static -static-libgcc -static-libstdc++ \
+        -Wall -Wextra \
+        -o bin/Net7Inject.exe \
+        client/detours/Net7Inject.cpp \
+        -Wl,--no-insert-timestamp
+    @echo ">>> done. bin/Net7PosFeed.dll + bin/Net7Inject.exe (32-bit). The launcher injects the DLL into client.exe at launch via Net7Inject.exe (WINE has no AppInit_DLLs)."
+
 # Standalone Windows client package. Produces dist/enb-client-windows/ holding a
 # self-contained launcher (FreyaLauncher.exe -- no .NET runtime needed) + the Win32
 # proxy (bin/FreyaProxy.exe) + a package-only FreyaLauncher.cfg that defaults to the
@@ -501,6 +535,15 @@ play-local CLIENT_PATH='':
     echo ">>> building launcher (so its output dir exists for settings.json)"
     dotnet build tools/LaunchFreya >/dev/null
 
+    # PB-2: build the in-client position-feed DLL so the launcher can inject it
+    # (UsePositionFeed=true below). REQUIRED -- if the 32-bit MinGW toolchain is
+    # missing this FAILS the launch (with the apt install line) rather than
+    # silently running a client with no feed. The feed is still inert until the
+    # owner fills ClientEngineOffsets.local.h, but the injection wiring itself is
+    # exercised every play-local.
+    echo ">>> building position-feed DLL (required)"
+    just build-posfeed-dll
+
     SETTINGS_DIR=tools/LaunchFreya/bin/Debug/net10.0
     mkdir -p "$SETTINGS_DIR"
     cp_json=$(printf '%s' "$cp" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
@@ -509,7 +552,7 @@ play-local CLIENT_PATH='':
       "ClientPath": $cp_json,
       "LastEmulatorName": "Net7Local",
       "LastServerName": "localhost",
-      "UseClientDetours": false,
+      "UsePositionFeed": true,
       "UseLocalCert": false,
       "UseSecureAuthentication": true,
       "AuthenticationPort": "4443",
@@ -603,7 +646,7 @@ play-online CLIENT_PATH='' HOST='':
       "ClientPath": $cp_json,
       "LastEmulatorName": "Net7MP",
       "LastServerName": $host_json,
-      "UseClientDetours": false,
+      "UsePositionFeed": false,
       "UseLocalCert": false,
       "UseSecureAuthentication": true,
       "AuthenticationPort": "443",

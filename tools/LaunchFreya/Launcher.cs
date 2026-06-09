@@ -43,6 +43,9 @@ namespace LaunchFreya
         public string RegistrationHostname     { get; set; }
         public string LaunchName               { get; set; }
 
+        // PB-2: inject the in-client MVAS position-feed DLL into client.exe.
+        public bool   EnablePositionFeed       { get; set; }
+
         public string EffectiveRegistrationHostname
             => string.IsNullOrEmpty(RegistrationHostname) ? Hostname : RegistrationHostname;
     }
@@ -51,6 +54,14 @@ namespace LaunchFreya
     {
         readonly LaunchSetting _setting;
         readonly Action<string> _warn;
+
+        // PB-2 injection plan, prepared by ConfigurePositionFeedInjection and
+        // consumed by LaunchClient. WINE has no AppInit_DLLs, so the feed DLL is
+        // injected at launch via Net7Inject.exe (CreateProcess-suspended +
+        // remote-LoadLibrary). Both null/empty unless the feed is enabled AND its
+        // artifacts were located -- LaunchClient falls back to a plain launch then.
+        string _posFeedInjectorExe;   // unix path to bin/Net7Inject.exe (wine runs it)
+        string _posFeedDllDos;        // DOS path the injector hands to the client's LoadLibraryA
 
         public Launcher(LaunchSetting setting, Action<string> warn = null)
         {
@@ -93,6 +104,7 @@ namespace LaunchFreya
                 PatchAuthIniFile();
                 PatchNetworkIniFile(gameHost);
                 PatchRegistry();
+                ConfigurePositionFeedInjection();
 
                 switch (launch)
                 {
@@ -168,8 +180,31 @@ namespace LaunchFreya
                 throw new InvalidOperationException($"Could not resolve hostname '{gameHost}'.");
 
             var dir = Path.GetDirectoryName(_setting.ClientPath);
-            var info = WinExe(dir, _setting.ClientPath,
-                $"-SERVER_ADDR {addrs[0]} -PROTOCOL TCP");
+            var clientArgs = $"-SERVER_ADDR {addrs[0]} -PROTOCOL TCP";
+
+            ProcessStartInfo info;
+            if (_posFeedInjectorExe != null && _posFeedDllDos != null && !OnWindows)
+            {
+                // PB-2 position feed: don't launch client.exe directly. Spawn
+                // Net7Inject.exe (under WINE), which starts client.exe suspended,
+                // remote-LoadLibrary's Net7PosFeed.dll into it, and resumes it.
+                // The injector forwards everything after the DLL path as the
+                // client's own argv -- so the client still sees -SERVER_ADDR / etc.
+                // We pass the client's DOS path (the injector calls CreateProcessA),
+                // and the DLL's DOS path (the client's loader resolves it).
+                var clientDos = WinePathToDos(_setting.ClientPath) ?? _setting.ClientPath;
+                info = new ProcessStartInfo
+                {
+                    WorkingDirectory = dir,
+                    FileName         = "wine",
+                    Arguments        = $"\"{_posFeedInjectorExe}\" \"{clientDos}\" \"{_posFeedDllDos}\" {clientArgs}",
+                    UseShellExecute  = false,
+                };
+            }
+            else
+            {
+                info = WinExe(dir, _setting.ClientPath, clientArgs);
+            }
 
             try { Process.Start(info); }
             catch (Exception e)
@@ -517,6 +552,151 @@ namespace LaunchFreya
                     _warn($"WINE registry write failed for {e.key}\\{e.value}: {ex.Message}");
                 }
             }
+        }
+
+        // ---- PB-2: in-client position-feed DLL injection ----
+
+        // Prepare the PB-2 position-feed injection. WINE (tested wine-11.8) does
+        // NOT implement the Windows AppInit_DLLs loader hook -- registering the DLL
+        // there loads it into nothing. So instead of a registry hook we inject at
+        // launch: LaunchClient spawns Net7Inject.exe, which starts client.exe
+        // suspended, remote-LoadLibrary's the DLL, and resumes it. This method only
+        // stages the artifacts and records the plan in _posFeedInjectorExe /
+        // _posFeedDllDos; the actual injection happens in LaunchClient. Nothing
+        // persists in the prefix, so there is no teardown step when the feed is off.
+        void ConfigurePositionFeedInjection()
+        {
+            // Start from a clean plan every call: a disabled feed, a missing
+            // artifact, or the Windows path all leave the fields null and
+            // LaunchClient does a plain launch.
+            _posFeedInjectorExe = null;
+            _posFeedDllDos      = null;
+
+            if (!_setting.EnablePositionFeed)
+                return;
+
+            // Native-Windows injection (Detours withdll) is a separate mechanism and
+            // is not wired here -- this path is the WINE prefix only.
+            if (OnWindows)
+            {
+                _warn("Position feed: in-client injection on native Windows is not wired " +
+                      "in this launcher; only the WINE (Linux) path is. Skipping.");
+                return;
+            }
+
+            var dllSrc = LocatePositionFeedDll();
+            var injector = LocateInjectorExe();
+            if (dllSrc == null || injector == null)
+            {
+                _warn("Position feed enabled but its artifacts were not found " +
+                      $"(dll={dllSrc ?? "<missing>"}, injector={injector ?? "<missing>"}). " +
+                      "Build them with `just build-posfeed-dll`. Continuing without the feed.");
+                return;
+            }
+
+            // Stage the 32-bit DLL where the 32-bit client resolves it. WOW64 file
+            // redirection sends a 32-bit process opening C:\windows\system32\X to
+            // C:\windows\syswow64\X, so a copy that lands ONLY in system32 is
+            // invisible to client.exe. Stage into BOTH: syswow64 (the load-bearing
+            // copy on a win64 prefix) and system32 (a win32-only prefix has no
+            // syswow64 and resolves there). The injector hands the client the
+            // C:\windows\system32\... path; redirection points it at the right file.
+            string dllInPrefix;
+            try
+            {
+                var prefix = Environment.GetEnvironmentVariable("WINEPREFIX");
+                if (string.IsNullOrEmpty(prefix))
+                    prefix = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".wine");
+                var windir   = Path.Combine(prefix, "drive_c", "windows");
+                var system32 = Path.Combine(windir, "system32");
+                var syswow64 = Path.Combine(windir, "syswow64");
+
+                int staged = 0;
+                Directory.CreateDirectory(system32);
+                dllInPrefix = Path.Combine(system32, "Net7PosFeed.dll");
+                File.Copy(dllSrc, dllInPrefix, overwrite: true);
+                staged++;
+
+                if (Directory.Exists(syswow64))
+                {
+                    File.Copy(dllSrc, Path.Combine(syswow64, "Net7PosFeed.dll"), overwrite: true);
+                    staged++;
+                }
+
+                if (staged == 0) throw new IOException("no system DLL directory was writable");
+            }
+            catch (Exception ex)
+            {
+                _warn($"Position feed: could not stage Net7PosFeed.dll: {ex.Message}. Continuing without the feed.");
+                return;
+            }
+
+            var dosPath = WinePathToDos(dllInPrefix);
+            if (string.IsNullOrEmpty(dosPath))
+            {
+                _warn("Position feed: could not resolve the DLL's DOS path. Continuing without the feed.");
+                return;
+            }
+
+            _posFeedInjectorExe = injector;
+            _posFeedDllDos      = dosPath;
+            _warn($"Position feed: will inject {dosPath} into client.exe via Net7Inject.exe.");
+        }
+
+        // Find the built injector across dev (play-local, CWD=repo root) and
+        // packaged (next to the launcher exe / its bin/) layouts.
+        static string LocateInjectorExe()
+        {
+            var candidates = new[]
+            {
+                Path.Combine(AppContext.BaseDirectory, "bin", "Net7Inject.exe"),
+                Path.Combine(AppContext.BaseDirectory, "Net7Inject.exe"),
+                Path.Combine(Directory.GetCurrentDirectory(), "bin", "Net7Inject.exe"),
+            };
+            foreach (var c in candidates)
+                if (File.Exists(c)) return c;
+            return null;
+        }
+
+        // Find the built feed DLL across dev (play-local, CWD=repo root) and
+        // packaged (next to the launcher exe / its bin/) layouts.
+        static string LocatePositionFeedDll()
+        {
+            var candidates = new[]
+            {
+                Path.Combine(AppContext.BaseDirectory, "bin", "Net7PosFeed.dll"),
+                Path.Combine(AppContext.BaseDirectory, "Net7PosFeed.dll"),
+                Path.Combine(Directory.GetCurrentDirectory(), "bin", "Net7PosFeed.dll"),
+            };
+            foreach (var c in candidates)
+                if (File.Exists(c)) return c;
+            return null;
+        }
+
+        // `winepath -w <unix>` -> the DOS path WINE uses to open the file.
+        static string WinePathToDos(string unixPath)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName               = "wine",
+                    UseShellExecute        = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError  = true,
+                    CreateNoWindow         = true,
+                };
+                psi.ArgumentList.Add("winepath");
+                psi.ArgumentList.Add("-w");
+                psi.ArgumentList.Add(unixPath);
+
+                using var p = Process.Start(psi);
+                if (p == null) return null;
+                string outp = p.StandardOutput.ReadToEnd().Trim();
+                if (!p.WaitForExit(10000)) { try { p.Kill(); } catch { } return null; }
+                return p.ExitCode == 0 && outp.Length > 0 ? outp : null;
+            }
+            catch { return null; }
         }
 
         static void WineRegAdd(string key, string value, string type, string data)

@@ -251,22 +251,24 @@ private:
     // MVAS position feed (PB-2). Last position/orientation actually streamed to
     // the server, so SendPositionIfChanged only sends on real movement (the
     // real Net7Proxy is change-gated too -- a stationary ship stops feeding).
-    // m_PosFeedSeq fills the EnbUdpHeader sequence field. The Win32 hook handle
-    // (m_PosShmHandle/View) is lazily opened on first poll and only ever exists
-    // on the WINE client-side build; the Linux build leaves it null forever.
+    // m_PosFeedSeq fills the EnbUdpHeader sequence field.
     float   m_LastFedPos[3];
     float   m_LastFedHeading[3];
     bool    m_HaveFedOnce;
     int32_t m_PosFeedSeq;
-    // Read the latest published ship position/orientation from the in-client
-    // hook (Win32/WINE shared memory); false when no live feed (always so on
-    // the Linux-native docker proxy). Drives SendPositionIfChanged.
+    // Read the latest ship position/orientation the in-client hook sent us over
+    // the loopback intake socket (proxy/ClientPositionShared.h); false when no
+    // live feed (no hook running, or its last sample has gone stale). Drives
+    // SendPositionIfChanged. Works on BOTH the Linux docker proxy and the
+    // Win32/WINE proxy -- the transport is a loopback UDP datagram, not a
+    // namespace-bound shared mapping. Lazily binds the intake port on first call.
     bool    ReadClientShipPosition(float pos[3], float heading[3]);
-#ifdef _WIN32
-    void   *m_PosShmHandle;   // HANDLE from OpenFileMapping (void* to avoid
-    const void *m_PosShmView; // dragging windows.h into this header)
-    bool    m_PosShmTried;    // we already attempted (and may have failed) open
-#endif
+    SOCKET  m_PosIntakeSock;     // loopback UDP intake (INVALID_SOCKET until bound)
+    bool    m_PosIntakeTried;    // bind attempted once (success or fail) -- no retry
+    bool    m_HavePosSample;     // >=1 valid datagram received this session
+    float   m_PosSample[3];      // most recent drained position
+    float   m_HeadingSample[3];  // most recent drained orientation
+    unsigned long m_PosSampleTick; // GetNet7TickCount() at last valid datagram
 
     PacketList m_Packets;
     short m_PacketTimeout;

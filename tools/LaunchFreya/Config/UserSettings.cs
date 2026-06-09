@@ -11,6 +11,12 @@ namespace LaunchFreya.Config
     public sealed class UserSettings
     {
         public string ClientPath { get; set; } = "";
+        // PB-2: inject the in-client MVAS position-feed DLL (Net7PosFeed.dll) into
+        // client.exe so thruster flight stays in sync with the server. Off by
+        // default; the feed itself is inert until the owner fills its engine read
+        // (client/detours/ClientEngineOffsets.local.h). This is a NEW mechanism --
+        // not the historical ClientDetours debug DLL -- hence its own name.
+        public bool UsePositionFeed { get; set; } = false;
         public string LastEmulatorName { get; set; } = "";
         public string LastServerName { get; set; } = "";
         public string AuthenticationPort { get; set; } = "";

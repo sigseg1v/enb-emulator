@@ -79,6 +79,10 @@ Thumbs.db
 *.local
 .direnv/
 
+# PB-2 MVAS feed: build-specific client engine offsets live local-only
+# (the .example template stays tracked; the filled copy must never be committed).
+client/detours/ClientEngineOffsets.local.h
+
 # Postgres dev data dir from docker-compose
 pgdata/
 
