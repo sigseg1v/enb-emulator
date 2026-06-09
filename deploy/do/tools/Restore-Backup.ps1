@@ -36,7 +36,7 @@ $ip = Get-TfOutput 'reserved_ip'
 
 Write-Host ""
 Write-Host "  RESTORE (DESTRUCTIVE)" -ForegroundColor Yellow
-Write-Host "  dump : $local ({0:N2} MiB)" -f ($size / 1MB)
+Write-Host ("  dump : {0} ({1:N2} MiB)" -f $local, ($size / 1MB))
 Write-Host "  into : root@$ip  (DROPS + recreates net7 and net7_user)"
 Write-Host ""
 if (-not $Force) {
