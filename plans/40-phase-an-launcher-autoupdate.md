@@ -394,3 +394,27 @@ All resolved 2026-06-07.
 
 > Reminder: steps 3-4 create billable AWS resources (S3, CloudFront, ACM, WAF,
 > Route53) and must wait for the explicit owner go-ahead.
+
+---
+
+## 11. Reproducible-build fix (2026-06-08) -- proxy hash churn
+
+**Symptom:** every `just push` produced a different `FreyaProxy.exe` hash even
+when nothing in the proxy source changed, so the launcher's self-update forced
+ALL clients to re-download the proxy on every release.
+
+**Root cause:** GNU `ld` (MinGW PE target) writes the current wall-clock time
+into the PE COFF `TimeDateStamp` by default. Confirmed: a freshly built
+`FreyaProxy.exe` carried `TimeDateStamp=0x6a26e36d` (2026-06-08T15:44:45Z).
+
+**Fix:** add `-Wl,--no-insert-timestamp` to `CMAKE_EXE_LINKER_FLAGS_INIT` in
+`proxy/cmake/mingw-w64-x86_64.toolchain.cmake`. Verified: two forced relinks of
+identical source now produce byte-identical output (`TimeDateStamp=0x00000000`,
+same sha256). The `build-proxy-win64` justfile recipe also drops a pre-flag
+`build-win64/` cache once, because `CMAKE_EXE_LINKER_FLAGS_INIT` only seeds a
+fresh cache -- an old build dir would otherwise keep stamping timestamps.
+
+**Note:** the `.NET` launcher build was checked too and is ALREADY
+deterministic -- two same-machine `dotnet publish -r win-x64` runs of
+`FreyaLauncher.exe` produced identical bytes. The launcher hash only changes
+on a genuine source/SDK change; only the proxy had the spurious churn.

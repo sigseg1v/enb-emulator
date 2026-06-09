@@ -78,6 +78,16 @@ build-proxy-win64:
     @echo ">>> building static OpenSSL 3 for MinGW (idempotent — skip if already built)"
     ./proxy/scripts/build-openssl-mingw.sh
     @echo ">>> cmake configure (Win32 cross)"
+    # CMAKE_EXE_LINKER_FLAGS_INIT (in the toolchain) only seeds a FRESH cache.
+    # A build-win64/ left over from before the --no-insert-timestamp flag would
+    # keep its old cached linker flags and resume stamping a live PE timestamp,
+    # making every rebuild a different hash. Drop a pre-flag cache once so the
+    # reproducible-build flag actually takes (openssl is built separately, so
+    # this only recompiles the proxy objects).
+    @if [ -f proxy/build-win64/CMakeCache.txt ] && ! grep -q 'no-insert-timestamp' proxy/build-win64/CMakeCache.txt; then \
+        echo ">>> stale build-win64 cache predates the reproducible-build flag — reconfiguring clean"; \
+        rm -rf proxy/build-win64; \
+    fi
     cmake -S proxy -B proxy/build-win64 \
         -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-x86_64.toolchain.cmake \
         -DCMAKE_BUILD_TYPE=Release

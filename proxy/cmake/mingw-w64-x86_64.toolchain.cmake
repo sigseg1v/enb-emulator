@@ -41,5 +41,12 @@ set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
 
 # Static-link libgcc/libstdc++/winpthreads so the resulting .exe doesn't
 # need MinGW DLLs alongside it under WINE.
+#
+# --no-insert-timestamp: GNU ld defaults to writing the current wall-clock
+# time into the PE COFF TimeDateStamp, so an otherwise byte-identical rebuild
+# produces a different hash every time. That churn defeats the launcher's
+# self-update hash check -- every `just push` would force ALL clients to
+# re-download FreyaProxy.exe even when nothing in it changed. Zeroing the
+# stamp makes the build reproducible: same source -> same bytes -> same hash.
 set(CMAKE_EXE_LINKER_FLAGS_INIT
-    "-static -static-libgcc -static-libstdc++")
+    "-static -static-libgcc -static-libstdc++ -Wl,--no-insert-timestamp")
