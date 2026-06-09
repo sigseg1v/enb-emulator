@@ -80,6 +80,7 @@ The source of truth for "what's done / what's next" across invocations is the `p
 
 ## Coding rules
 
+- **Naming new code "Freya", not "Net7"**: the inherited upstream code carries the `Net7` brand (Net-7 / tada-o) -- leave those existing names alone (renaming live symbols/files churns the merge and breaks cross-refs). But anything **new** -- a new system, subsystem, tool, DLL, rewrite, or replacement for an old Net7 component -- gets the **Freya** name (`FreyaProxy`, `FreyaPosFeed.dll`, `FreyaInject.exe`, `tools/LaunchFreya`, ...). Rule of thumb: if you're writing it fresh or rewriting an old piece, it's Freya; if you're editing inherited code in place, keep its Net7 name.
 - **C++**: target Linux first, Windows second. New code must compile on g++ 13+ with `-Wall -Wextra`. Don't reintroduce Win32 APIs in new code; use shims in `server/compat/` or POSIX directly.
 - **"Runs on Linux" scope** — this means the *server* runs **natively** on Linux (no WINE). The Win32 cleanup applies to **server-native code only**: `server/src/`, `login-server/Net7Mysql/`, `login-server/Net7SSL/`, `proxy/`. It does **NOT** apply to:
   - **`client/**`** — the EnB client is a Win32 binary that runs under WINE (or on Windows). It's allowed and expected to use Win32 APIs. `client/detours/`, `client/mods/`, the linux-installer's WINE prefix — all stay Win32. Document this in any client-touching plan.

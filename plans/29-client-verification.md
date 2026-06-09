@@ -816,12 +816,19 @@ format & byte order", Trap 2).
   logouts no longer post while logins still do, and that re-enabling does NOT flush a
   backlog of the suppressed events. Confirm a non-admin cannot see/use `/notify`.
 
-### [ ] CV-MVAS-POS -- Normal-thruster flight stays in sync (PB-2 position feed)
+### [x] CV-MVAS-POS -- Normal-thruster flight stays in sync (PB-2 position feed)
+
+- **OWNER-CONFIRMED WORKING (2026-06-09)**: with the engine read wired and the
+  two-plane feed-socket bug fixed (see "ROOT CAUSE FOUND + FIXED" below), the owner
+  flew under normal thrusters with the in-client DLL feed active and confirmed
+  chat, target selection, and warp ALL keep working -- position stays in sync, no
+  S->C black-hole. Temp diagnostics removed. CV-MVAS-POS closed.
+
 
 - **Change**: PB-2 restores the client->server position feed the real Net7Proxy
   provided. A minimal in-client DLL (`client/detours/ClientPositionFeed.{h,cpp}` +
-  `PosFeedDllMain.cpp`, built as `bin/Net7PosFeed.dll`, injected via a launch-time
-  remote-thread inject -- `bin/Net7Inject.exe`, NOT `AppInit_DLLs` which WINE does
+  `PosFeedDllMain.cpp`, built as `bin/FreyaPosFeed.dll`, injected via a launch-time
+  remote-thread inject -- `bin/FreyaInject.exe`, NOT `AppInit_DLLs` which WINE does
   not implement)
   reads the engine ship position/orientation in-process and sends it to the proxy
   as a fixed 40-byte UDP datagram on loopback port `NET7_CLIENT_POS_PORT`=3807
@@ -855,7 +862,7 @@ format & byte order", Trap 2).
      in-process; return true only for a live in-space sample). The seam in
      `ClientPositionFeed.cpp` includes it automatically via `__has_include`.
      Build-specific addresses stay in that local-only file -- never committed.
-  2. Build the feed DLL: `just build-posfeed-dll` -> `bin/Net7PosFeed.dll`. This
+  2. Build the feed DLL: `just build-posfeed-dll` -> `bin/FreyaPosFeed.dll`. This
      needs the **i686** MinGW toolchain (`sudo apt install gcc-mingw-w64-i686-posix
      g++-mingw-w64-i686-posix`) because `client.exe` is PE32/i386 and the injected
      DLL must match its bitness; the 64-bit MinGW used for the proxy cannot emit
@@ -865,11 +872,11 @@ format & byte order", Trap 2).
      for you as a required step.
   3. Launch. Injection + transport are wired -- nothing to hand-run:
      - `just play-local`: builds the DLL + injector, sets `EnablePositionFeed=true`,
-       and the launcher spawns `Net7Inject.exe` which starts `client.exe` suspended,
-       remote-LoadLibrary's `Net7PosFeed.dll` into it, and resumes it (WINE has no
+       and the launcher spawns `FreyaInject.exe` which starts `client.exe` suspended,
+       remote-LoadLibrary's `FreyaPosFeed.dll` into it, and resumes it (WINE has no
        `AppInit_DLLs`); the docker proxy already binds 3807 (published
        loopback-only). On attach the DLL emits an `OutputDebugStringA`
-       `[Net7PosFeed] attached to client.exe` marker, so you can confirm injection
+       `[FreyaPosFeed] attached to client.exe` marker, so you can confirm injection
        even before the engine read is filled (the feed sends nothing until then).
        The definitive load check is `WINEDEBUG=+loaddll just play-local 2>&1 | grep
        -i net7posfeed` -- it logs the DLL map regardless of OutputDebugString.
@@ -878,6 +885,68 @@ format & byte order", Trap 2).
        and set `EnablePositionFeed=true`. Native-Windows injection (Detours withdll)
        is NOT wired -- the remote-thread injector path is WINE-only.
   4. Undock and fly with normal thrusters only (no autopilot/warp).
+- **Regression diagnosed + fixed (2026-06-09)**: when the feed first reached the
+  server, targeting/warp/chat all broke. Root cause was the proxy's MVAS emit
+  socket, NOT the wire format. The server's `HandleMVASPosReturn` /
+  `HandleKeepCommsAlive` call `SetPlayerPortIP(source)` (server/src/UDP_MVAS.cpp:103,149)
+  on every `0x1004`/`0x3005`, which repoints `m_Player_IPAddr`/`m_Player_Port` --
+  the SINGLE address the server sends ALL server->client sector data to
+  (PlayerConnection.cpp:246,804) -- at the source socket of that MVAS datagram.
+  A short-lived "dedicated MVAS socket" experiment sent the feed+keepalive from a
+  separate ephemeral socket, so the server then black-holed every S->C sector
+  reply (chat/nav-select/target) to a socket the proxy never drains. Retail ran
+  the whole server bridge on ONE socket (`SetUDPConnections(&udp_to_master,
+  &udp_to_master)` -> `m_UDPClient == m_UDPConnection`), making `SetPlayerPortIP`
+  inherently safe. Fix: feed+keepalive emit via `UDP_Send(MVAS_LOGIN_PORT)` on
+  `m_Listen_Socket` -- the same single socket the proxy receives S->C on -- and
+  position-only (<=28 bytes) so the server applies no phantom velocity. No server
+  or wire change; the proxy emit socket is the only thing that moved.
+  **Owner: retest -- with the engine read wired, confirm chat/nav-select/target/
+  warp ALL keep working while flying under thrusters.**
+- **Single-socket fix was NECESSARY but NOT SUFFICIENT (2026-06-09, second pass)**:
+  after the single-socket revert the owner still reported chat/target/warp broken
+  with the in-client DLL feed active. Instrumented run (proxy `PB-2: feed ...`
+  + server `MVAS feed ...` diagnostics) proved the wire+server half is CORRECT:
+  feed fires with SANE engine coordinates and the server applies them with
+  `jump 0.00` (fed-pos == server-pos). So position-value, EISCONN, and a total
+  S->C stall are all ruled out by measurement (S->C kept arriving at the proxy,
+  ~12 datagrams/2s, after the feed started). Decisive code finding that exonerates
+  the SERVER: the feed path ends in `SendLocationAndSpeed(false)` ->
+  `SendToVisibilityList(include_player=false)` (PlayerClass.cpp:2095,3112), which
+  sends position only to OTHER players' range lists and skips `p == this` -- so the
+  server emits ZERO server->client traffic to the MOVING client in response to the
+  feed. The server therefore cannot be the cause of the moving client's
+  chat/target/warp breaking. Remaining suspects: (a) a proxy socket mismatch
+  (feed source port != the socket whose RecvThread relays S->C), or (b) the
+  injected client DLL itself (memory read / loopback send) destabilizing
+  client.exe. Added per-socket proxy diagnostics (feed source bind-port + per-
+  instance S->C rx bind-port) to settle (a) empirically on the next run.
+  (Those temp diagnostics have since been removed -- see the OWNER-CONFIRMED
+  note at the top of this entry.)
+- **ROOT CAUSE FOUND + FIXED (2026-06-09, third pass)**: per-socket bind-port
+  diagnostics proved a two-plane tug-of-war over the server's single S->C delivery
+  address. Sector S->C arrives from server:3806 on the proxy's GLOBAL plane socket
+  (`m_UDPGlobalClient`, unconnected, e.g. bind-port 60786) -- that is the only
+  socket whose RecvThread relays sector data to the TCP client, and the server
+  pins delivery there because `m_Player_Port` is captured from the avatar-login
+  source on the global plane (UDP_Global.cpp). BUT `FixedClientComm()`
+  (UDPClient_linux.cpp) ALSO started the feed/keepalive on the SECTOR/master plane
+  socket (`m_UDPClient`, connect()'d to UDP_MASTER_SERVER_PORT 3808, e.g. bind-port
+  41155). Each `0x1004`/`0x3005` the server receives calls `SetPlayerPortIP(source)`
+  (UDP_MVAS.cpp:103,149), so the 200ms position feed emitted from 41155 repeatedly
+  STOLE the S->C delivery mapping from 60786 to 41155 -- a socket connect()'d to
+  3808 that kernel-drops the server's 3806 stream AND whose RecvThread does not
+  relay to the client. Result: all S->C (chat/target/warp, position-independent
+  included) black-holed seconds after the feed started. The latent bug predates
+  PB-2 (sector-plane 30s keepalive vs global 30s keepalive = slow, mostly-benign
+  tug-of-war); the 200ms feed amplified it into constant breakage. Empirical proof:
+  `PB-2: feed 0x1004 ... FROM my-bind-port=41155 (connected-peer)` vs
+  `PB-2: S->C rx 17/2s on MY-bind-port=60786 (unconnected) last src_port=3806`.
+  Fix: remove `StartMVASKeepalive()` from `FixedClientComm()` so the feed/keepalive
+  runs ONLY on `m_UDPGlobalClient` (started at the sector LOGIN handler,
+  ClientToServer_linux_stubs.cpp:509) -- the socket that owns S->C delivery. No
+  server or wire change. **Owner: retest -- chat/target/warp should now all keep
+  working while flying under thrusters with the feed active.**
 - **What to look for**: with thrusters you should now travel and STAY where the
   client shows you -- pressing spacebar/stop, or starting autopilot/warp, must NOT
   snap you back to a stale position. Confirm you can move off a planet/station and

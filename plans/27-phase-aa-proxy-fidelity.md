@@ -421,9 +421,9 @@ snap back).
       datagram on `NET7_CLIENT_POS_PORT`=3807 (`proxy/ClientPositionShared.h`),
       ~10x/sec. Engine read is an OWNER SEAM (`ReadEngineShipState`, returns false
       until filled -> feed inert). Ships as a minimal standalone 32-bit DLL
-      `bin/Net7PosFeed.dll` (`PosFeedDllMain.cpp` guarded DllMain, only inside
+      `bin/FreyaPosFeed.dll` (`PosFeedDllMain.cpp` guarded DllMain, only inside
       client.exe; `just build-posfeed-dll`, needs i686 MinGW), injected under WINE
-      via a launch-time remote-thread inject (`bin/Net7Inject.exe`:
+      via a launch-time remote-thread inject (`bin/FreyaInject.exe`:
       CreateProcess-suspended + remote LoadLibrary), NOT `AppInit_DLLs` -- WINE
       does not implement that loader hook. Driven by the launcher
       (`EnablePositionFeed` setting; play-local builds + enables it). NOT the legacy

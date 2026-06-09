@@ -953,12 +953,24 @@ void UDPClient::FixedClientComm()
 {
     SendResponse((short) 0, ENB_OPCODE_200F_COMM_PORT, NULL, 0);
 
-    // Once the avatar is in-game (FixedClientComm runs on the sector-plane
-    // m_UDPClient, which is connect()'d to MVAS_LOGIN_PORT and has had its
-    // m_PlayerID set by the avatar-login confirm), start the MVAS idle
-    // keepalive so a stationary in-space avatar refreshes LastAccessTime and
-    // never trips the server's 2-minute reaper.
-    StartMVASKeepalive();
+    // Do NOT start the MVAS feed/keepalive here. This runs on the sector-plane
+    // m_UDPClient, which is connect()'d to UDP_MASTER_SERVER_PORT (3808) -- NOT
+    // the socket the server delivers in-game sector S->C on. The server sends
+    // ALL sector S->C from its MVASauth socket (3806) to (m_Player_IPAddr,
+    // m_Player_Port), and that port is captured from the avatar-login source on
+    // the GLOBAL plane (UDP_Global.cpp) -- i.e. the proxy's m_UDPGlobalClient
+    // (unconnected), which is also the socket whose RecvThread relays S->C to the
+    // TCP client. Every 0x1004/0x3005/0x200F the server receives calls
+    // SetPlayerPortIP(source) (UDP_MVAS.cpp:103,149), repointing that single
+    // delivery address at the SOURCE socket. So if the feed/keepalive rode this
+    // sector socket, SetPlayerPortIP would steal S->C delivery away from the
+    // global socket to a socket that (a) is connect()'d to 3808 and kernel-drops
+    // the server's 3806 stream, and (b) nothing relays to the client -- silently
+    // black-holing chat/target/warp. The feed/keepalive is therefore started
+    // ONLY on m_UDPGlobalClient (ClientToServer_linux_stubs.cpp, the sector LOGIN
+    // handler), which owns the S->C delivery mapping. Proven by per-socket bind-
+    // port diagnostics: feed-from 41155 (connected-3808) vs S->C-rx on 60786
+    // (unconnected, src_port=3806). See plans/29 CV-MVAS-POS.
 }
 
 // ---------------------------------------------------------------------------
@@ -1025,19 +1037,21 @@ void UDPClient::SendServerKeepalive()
     h->player_id       = m_PlayerID;
     h->packet_sequence = ++m_KeepaliveSeq;
 
-    // MUST target MVAS_LOGIN_PORT (3806) explicitly, NOT port 0. This
-    // UDPClient (g_ServerMgr->m_UDPClient / udp_to_master) is connect()'d to
-    // UDP_MASTER_SERVER_PORT (3808) -- a port-0 send() would route the
-    // keepalive to the master plane, where there is no comms-alive handler,
-    // so LastAccessTime would never refresh and the reaper would still fire.
-    // UDP_Send(port != 0, ...) uses sendto() to (m_IPAddr, port) = server:3806,
-    // which is where UDP_MVAS.cpp HandleKeepCommsAlive lives. (Linux permits
-    // sendto() to a port other than the connected peer on a SOCK_DGRAM, and
-    // the success path emits no reply, so the connected socket's recv filter
-    // dropping a hypothetical 3806-sourced reply is harmless.) UDP_Send only
-    // touches m_Listen_Socket + a local sockaddr, never m_SendBuffer, so this
-    // is race-free with the RecvThread handlers that do use m_SendBuffer.
-    UDP_Send(MVAS_LOGIN_PORT, (const char *) buf, sizeof(EnbUdpHeader));
+    // 0x3005 COMMS_ALIVE is an MVAS-plane packet -- it goes to the server's
+    // MVAS handler (UDP_MVAS.cpp HandleKeepCommsAlive, port MVAS_LOGIN_PORT/3806,
+    // which refreshes LastAccessTime so the 2-minute idle reaper never drops the
+    // avatar). The server's HandleKeepCommsAlive calls SetPlayerPortIP(source) --
+    // it repoints EVERY server->client sector datagram for this avatar at the
+    // source socket of the keepalive. That source MUST therefore be the socket
+    // whose RecvThread drains S->C and relays it to the TCP client, or
+    // chat/target/warp replies are sent to a socket nothing reads and silently
+    // vanish. The keepalive (and the position feed) is therefore started ONLY on
+    // m_UDPGlobalClient -- the global/unconnected plane that owns S->C delivery
+    // (m_Player_Port is captured from the avatar-login source there, UDP_Global.cpp)
+    // -- never on the sector-plane m_UDPClient (connect()'d to 3808, which cannot
+    // even receive the server's 3806 stream). See FixedClientComm + plans/29
+    // CV-MVAS-POS. UDP_Send sends from this client's m_Listen_Socket.
+    UDP_Send(MVAS_LOGIN_PORT, (char *) buf, sizeof(EnbUdpHeader));
 }
 
 void UDPClient::MVASKeepaliveThread()
@@ -1195,26 +1209,48 @@ void UDPClient::SendPositionIfChanged()
     // Engine reports (0,0,0) before the first valid frame -- never feed it.
     if (pos[0] == 0.0f && pos[1] == 0.0f && pos[2] == 0.0f) return;
 
-    // Change-gate: only stream on real movement (position OR orientation).
-    if (m_HaveFedOnce &&
-        memcmp(pos, m_LastFedPos, sizeof(pos)) == 0 &&
-        memcmp(heading, m_LastFedHeading, sizeof(heading)) == 0)
+    // Change-gate: only stream on real positional movement.
+    if (m_HaveFedOnce && memcmp(pos, m_LastFedPos, sizeof(pos)) == 0)
         return;
 
-    // Build inline (like SendServerKeepalive) so player_id and the sequence are
-    // set explicitly; UDP_Send applies DTLS + the per-packet auth wrapper.
-    unsigned char buf[sizeof(EnbUdpHeader) + 24];
+    // POSITION-ONLY feed. We deliberately do NOT send the orientation block.
+    // The server's HandleMVASPosReturn applies the orientation triple as a raw
+    // VELOCITY (Player::UpdatePositionFromMVAS -> SetVelocityVector) whenever the
+    // packet is > 28 bytes. Our engine read supplies the ship's orientation
+    // X-axis basis there -- a unit vector that is non-zero even at a dead stop --
+    // so feeding it pins a permanent phantom velocity on the server: the avatar
+    // is never "stopped", which blocks warp engagement and destabilizes target
+    // locks. Orientation/velocity already arrive via the client's normal 0x0014
+    // MOVE path; the MVAS feed only needs to correct ABSOLUTE POSITION (the PB-2
+    // divergence). So we emit the 12-byte position payload only (total 24 bytes,
+    // <= 28), which keeps HandleMVASPosReturn on its position-only branch -- a
+    // protocol-legal 0x1004 variant the server's `size > 28` gate exists to
+    // support. (The one live capture we have -- live_mvas_position_1004.hex -- is
+    // 40 bytes incl. heading; we have NO primary source that the retail "heading"
+    // triple is the orientation basis our engine read yields rather than a true
+    // velocity vector, so until that is captured we feed position only and let the
+    // 0x0014 MOVE path carry motion. CV-MVAS-POS tracks the real-client check.)
+    unsigned char buf[sizeof(EnbUdpHeader) + 12];
     EnbUdpHeader *h    = (EnbUdpHeader *) buf;
     h->size            = (short) sizeof(buf);
     h->opcode          = ENB_OPCODE_1004_MVAS_SEND_POSITION_C_S;
     h->player_id       = m_PlayerID;
     h->packet_sequence = ++m_PosFeedSeq;   // server-ignored; real proxy increments
-    memcpy(buf + sizeof(EnbUdpHeader),      pos,     12);
-    memcpy(buf + sizeof(EnbUdpHeader) + 12, heading, 12);
-    UDP_Send(MVAS_LOGIN_PORT, (const char *) buf, (int) sizeof(buf));
+    memcpy(buf + sizeof(EnbUdpHeader), pos, 12);
+
+    // Emit on THIS UDPClient's m_Listen_Socket (UDP_Send). The feed/keepalive is
+    // started ONLY on m_UDPGlobalClient (the global/unconnected plane) -- the
+    // socket the server delivers in-game sector S->C to and whose RecvThread
+    // relays it to the TCP client. The server's HandleMVASPosReturn calls
+    // SetPlayerPortIP(source), repointing ALL server->client sector traffic for
+    // this avatar at the 0x1004 source socket; that source MUST be the S->C relay
+    // socket, or chat/target/warp replies go to an unread socket and vanish. It is
+    // exactly why FixedClientComm (sector plane) must NOT start this -- see the
+    // FixedClientComm comment and plans/29 CV-MVAS-POS. Position-only keeps the
+    // server on its <=28-byte branch, so no phantom velocity is applied.
+    UDP_Send(MVAS_LOGIN_PORT, (char *) buf, (int) sizeof(buf));
 
     memcpy(m_LastFedPos, pos, sizeof(pos));
-    memcpy(m_LastFedHeading, heading, sizeof(heading));
     m_HaveFedOnce = true;
 }
 

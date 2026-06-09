@@ -57,10 +57,10 @@ namespace LaunchFreya
 
         // PB-2 injection plan, prepared by ConfigurePositionFeedInjection and
         // consumed by LaunchClient. WINE has no AppInit_DLLs, so the feed DLL is
-        // injected at launch via Net7Inject.exe (CreateProcess-suspended +
+        // injected at launch via FreyaInject.exe (CreateProcess-suspended +
         // remote-LoadLibrary). Both null/empty unless the feed is enabled AND its
         // artifacts were located -- LaunchClient falls back to a plain launch then.
-        string _posFeedInjectorExe;   // unix path to bin/Net7Inject.exe (wine runs it)
+        string _posFeedInjectorExe;   // unix path to bin/FreyaInject.exe (wine runs it)
         string _posFeedDllDos;        // DOS path the injector hands to the client's LoadLibraryA
 
         public Launcher(LaunchSetting setting, Action<string> warn = null)
@@ -186,8 +186,8 @@ namespace LaunchFreya
             if (_posFeedInjectorExe != null && _posFeedDllDos != null && !OnWindows)
             {
                 // PB-2 position feed: don't launch client.exe directly. Spawn
-                // Net7Inject.exe (under WINE), which starts client.exe suspended,
-                // remote-LoadLibrary's Net7PosFeed.dll into it, and resumes it.
+                // FreyaInject.exe (under WINE), which starts client.exe suspended,
+                // remote-LoadLibrary's FreyaPosFeed.dll into it, and resumes it.
                 // The injector forwards everything after the DLL path as the
                 // client's own argv -- so the client still sees -SERVER_ADDR / etc.
                 // We pass the client's DOS path (the injector calls CreateProcessA),
@@ -559,7 +559,7 @@ namespace LaunchFreya
         // Prepare the PB-2 position-feed injection. WINE (tested wine-11.8) does
         // NOT implement the Windows AppInit_DLLs loader hook -- registering the DLL
         // there loads it into nothing. So instead of a registry hook we inject at
-        // launch: LaunchClient spawns Net7Inject.exe, which starts client.exe
+        // launch: LaunchClient spawns FreyaInject.exe, which starts client.exe
         // suspended, remote-LoadLibrary's the DLL, and resumes it. This method only
         // stages the artifacts and records the plan in _posFeedInjectorExe /
         // _posFeedDllDos; the actual injection happens in LaunchClient. Nothing
@@ -606,12 +606,12 @@ namespace LaunchFreya
                 var clientDir = Path.GetDirectoryName(_setting.ClientPath);
                 if (string.IsNullOrEmpty(clientDir) || !Directory.Exists(clientDir))
                     throw new IOException($"client folder not found ('{clientDir}')");
-                dllStaged = Path.Combine(clientDir, "Net7PosFeed.dll");
+                dllStaged = Path.Combine(clientDir, "FreyaPosFeed.dll");
                 File.Copy(dllSrc, dllStaged, overwrite: true);
             }
             catch (Exception ex)
             {
-                _warn($"Position feed: could not stage Net7PosFeed.dll: {ex.Message}. Continuing without the feed.");
+                _warn($"Position feed: could not stage FreyaPosFeed.dll: {ex.Message}. Continuing without the feed.");
                 return;
             }
 
@@ -624,7 +624,7 @@ namespace LaunchFreya
 
             _posFeedInjectorExe = injector;
             _posFeedDllDos      = dosPath;
-            _warn($"Position feed: will inject {dosPath} into client.exe via Net7Inject.exe.");
+            _warn($"Position feed: will inject {dosPath} into client.exe via FreyaInject.exe.");
         }
 
         // Find the built injector across dev (play-local, CWD=repo root) and
@@ -633,9 +633,9 @@ namespace LaunchFreya
         {
             var candidates = new[]
             {
-                Path.Combine(AppContext.BaseDirectory, "bin", "Net7Inject.exe"),
-                Path.Combine(AppContext.BaseDirectory, "Net7Inject.exe"),
-                Path.Combine(Directory.GetCurrentDirectory(), "bin", "Net7Inject.exe"),
+                Path.Combine(AppContext.BaseDirectory, "bin", "FreyaInject.exe"),
+                Path.Combine(AppContext.BaseDirectory, "FreyaInject.exe"),
+                Path.Combine(Directory.GetCurrentDirectory(), "bin", "FreyaInject.exe"),
             };
             foreach (var c in candidates)
                 if (File.Exists(c)) return c;
@@ -648,9 +648,9 @@ namespace LaunchFreya
         {
             var candidates = new[]
             {
-                Path.Combine(AppContext.BaseDirectory, "bin", "Net7PosFeed.dll"),
-                Path.Combine(AppContext.BaseDirectory, "Net7PosFeed.dll"),
-                Path.Combine(Directory.GetCurrentDirectory(), "bin", "Net7PosFeed.dll"),
+                Path.Combine(AppContext.BaseDirectory, "bin", "FreyaPosFeed.dll"),
+                Path.Combine(AppContext.BaseDirectory, "FreyaPosFeed.dll"),
+                Path.Combine(Directory.GetCurrentDirectory(), "bin", "FreyaPosFeed.dll"),
             };
             foreach (var c in candidates)
                 if (File.Exists(c)) return c;

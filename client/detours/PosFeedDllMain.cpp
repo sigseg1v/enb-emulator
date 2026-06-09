@@ -57,7 +57,7 @@ BOOL APIENTRY DllMain(HANDLE hModule, DWORD ul_reason_for_call, LPVOID lpReserve
                 // Loader-lock-safe confirmation that injection actually landed in
                 // client.exe -- visible in the WINE console / a debugger even
                 // before the engine read is filled (when the feed sends nothing).
-                OutputDebugStringA("[Net7PosFeed] attached to client.exe; starting MVAS position feed\n");
+                OutputDebugStringA("[FreyaPosFeed] attached to client.exe; starting MVAS position feed\n");
                 Net7ClientPosFeed_Start();   // inert until the owner seam is filled
             }
             break;

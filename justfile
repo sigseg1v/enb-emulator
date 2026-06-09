@@ -115,22 +115,22 @@ build-posfeed-dll:
         exit 1; \
     fi
     @cxx="$(command -v i686-w64-mingw32-g++-posix || command -v i686-w64-mingw32-g++)"; \
-    echo ">>> building 32-bit Net7PosFeed.dll with $cxx"; \
+    echo ">>> building 32-bit FreyaPosFeed.dll with $cxx"; \
     mkdir -p bin; \
     "$cxx" -shared -O2 -static -static-libgcc -static-libstdc++ \
         -Wall -Wextra \
-        -o bin/Net7PosFeed.dll \
+        -o bin/FreyaPosFeed.dll \
         client/detours/PosFeedDllMain.cpp client/detours/ClientPositionFeed.cpp \
         -Iclient/detours \
         -lws2_32 \
         -Wl,--no-insert-timestamp; \
-    echo ">>> building 32-bit Net7Inject.exe with $cxx"; \
+    echo ">>> building 32-bit FreyaInject.exe with $cxx"; \
     "$cxx" -O2 -static -static-libgcc -static-libstdc++ \
         -Wall -Wextra \
-        -o bin/Net7Inject.exe \
-        client/detours/Net7Inject.cpp \
+        -o bin/FreyaInject.exe \
+        client/detours/FreyaInject.cpp \
         -Wl,--no-insert-timestamp
-    @echo ">>> done. bin/Net7PosFeed.dll + bin/Net7Inject.exe (32-bit). The launcher injects the DLL into client.exe at launch via Net7Inject.exe (WINE has no AppInit_DLLs)."
+    @echo ">>> done. bin/FreyaPosFeed.dll + bin/FreyaInject.exe (32-bit). The launcher injects the DLL into client.exe at launch via FreyaInject.exe (WINE has no AppInit_DLLs)."
 
 # Standalone Windows client package. Produces dist/enb-client-windows/ holding a
 # self-contained launcher (FreyaLauncher.exe -- no .NET runtime needed) + the Win32

@@ -1,5 +1,5 @@
 //==============================================================================
-// Net7Inject.cpp
+// FreyaInject.cpp
 //
 // Tiny 32-bit launch-time DLL injector for the PB-2 MVAS position feed.
 //
@@ -10,15 +10,15 @@
 // the classic CreateProcess(SUSPENDED) + remote-LoadLibrary technique, which
 // this binary performs. The launcher (tools/LaunchFreya) spawns
 //
-//     wine Net7Inject.exe <client.exe> <Net7PosFeed.dll> [client args...]
+//     wine FreyaInject.exe <client.exe> <FreyaPosFeed.dll> [client args...]
 //
 // instead of spawning client.exe directly, when the position feed is enabled.
 //
 // It is build-toolchain-agnostic: built with the same i686 MinGW used for
-// Net7PosFeed.dll (see `just build-posfeed-dll`); no Microsoft Detours / MSVC
+// FreyaPosFeed.dll (see `just build-posfeed-dll`); no Microsoft Detours / MSVC
 // lib dependency. client.exe is 32-bit, so this injector is 32-bit too.
 //
-// Usage:  Net7Inject.exe <target-exe> <dll-to-inject> [args to forward...]
+// Usage:  FreyaInject.exe <target-exe> <dll-to-inject> [args to forward...]
 // Exit:   0 success; non-zero on the first failing step (codes below). On any
 //         failure after the child is created, the child is terminated so a
 //         half-injected client never reaches the user.
@@ -38,7 +38,7 @@ int main(int argc, char **argv)
 {
     if (argc < 3)
     {
-        fprintf(stderr, "Net7Inject: usage: Net7Inject.exe <target-exe> <dll> [args...]\n");
+        fprintf(stderr, "FreyaInject: usage: FreyaInject.exe <target-exe> <dll> [args...]\n");
         return 2;
     }
 
@@ -66,7 +66,7 @@ int main(int argc, char **argv)
     if (!CreateProcessA(NULL, cmd, NULL, NULL, FALSE,
                         CREATE_SUSPENDED, NULL, NULL, &si, &pi))
     {
-        fprintf(stderr, "Net7Inject: CreateProcess failed (%lu): %s\n",
+        fprintf(stderr, "FreyaInject: CreateProcess failed (%lu): %s\n",
                 GetLastError(), cmd);
         return 3;
     }
@@ -81,27 +81,27 @@ int main(int argc, char **argv)
         SIZE_T n = strlen(dllPath) + 1;
         void *remote = VirtualAllocEx(pi.hProcess, NULL, n,
                                       MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-        if (!remote) { fprintf(stderr, "Net7Inject: VirtualAllocEx failed (%lu)\n", GetLastError()); rc = 4; break; }
+        if (!remote) { fprintf(stderr, "FreyaInject: VirtualAllocEx failed (%lu)\n", GetLastError()); rc = 4; break; }
 
         if (!WriteProcessMemory(pi.hProcess, remote, dllPath, n, NULL))
-        { fprintf(stderr, "Net7Inject: WriteProcessMemory failed (%lu)\n", GetLastError()); rc = 5; break; }
+        { fprintf(stderr, "FreyaInject: WriteProcessMemory failed (%lu)\n", GetLastError()); rc = 5; break; }
 
         HMODULE k32 = GetModuleHandleA("kernel32.dll");
         LPTHREAD_START_ROUTINE loadLib =
             (LPTHREAD_START_ROUTINE) GetProcAddress(k32, "LoadLibraryA");
-        if (!loadLib) { fprintf(stderr, "Net7Inject: no LoadLibraryA\n"); rc = 6; break; }
+        if (!loadLib) { fprintf(stderr, "FreyaInject: no LoadLibraryA\n"); rc = 6; break; }
 
         HANDLE th = CreateRemoteThread(pi.hProcess, NULL, 0, loadLib, remote, 0, NULL);
-        if (!th) { fprintf(stderr, "Net7Inject: CreateRemoteThread failed (%lu)\n", GetLastError()); rc = 6; break; }
+        if (!th) { fprintf(stderr, "FreyaInject: CreateRemoteThread failed (%lu)\n", GetLastError()); rc = 6; break; }
 
         WaitForSingleObject(th, 10000);
         DWORD mod = 0;
         GetExitCodeThread(th, &mod);   // low 32 bits of the loaded HMODULE; 0 == LoadLibrary failed
         CloseHandle(th);
         if (mod == 0)
-        { fprintf(stderr, "Net7Inject: remote LoadLibraryA returned NULL for %s\n", dllPath); rc = 7; break; }
+        { fprintf(stderr, "FreyaInject: remote LoadLibraryA returned NULL for %s\n", dllPath); rc = 7; break; }
 
-        fprintf(stderr, "Net7Inject: injected %s (HMODULE=0x%lx); resuming %s\n",
+        fprintf(stderr, "FreyaInject: injected %s (HMODULE=0x%lx); resuming %s\n",
                 dllPath, mod, targetExe);
     } while (0);
 

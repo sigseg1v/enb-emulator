@@ -11,10 +11,10 @@ below is unclear.
 
 ## Where we are
 
-- Producer DLL (`bin/Net7PosFeed.dll`) + injector (`bin/Net7Inject.exe`) build via
+- Producer DLL (`bin/FreyaPosFeed.dll`) + injector (`bin/FreyaInject.exe`) build via
   `just build-posfeed-dll`. Both 32-bit PE (client.exe is PE32/i386).
 - Injection is wired in the launcher: `play-local` stages the DLL into the WINE
-  prefix and spawns `Net7Inject.exe`, which starts `client.exe` suspended,
+  prefix and spawns `FreyaInject.exe`, which starts `client.exe` suspended,
   remote-LoadLibrary's the DLL, and resumes it. (WINE has no `AppInit_DLLs`; that
   was the dead end last session.)
 - Proxy consumer binds loopback `udp/3807`, drains the latest sample, and streams
@@ -31,12 +31,12 @@ This was never observed working. Prove it before spending time on offsets.
 WINEDEBUG=+loaddll just play-local 2>&1 | grep -i 'net7posfeed\|client.exe'
 ```
 
-Click Play. Expect BOTH lines: `client.exe` at `00400000` AND a `Net7PosFeed.dll`
+Click Play. Expect BOTH lines: `client.exe` at `00400000` AND a `FreyaPosFeed.dll`
 load. If only `client.exe` shows, the inject failed -- stop and debug the injector
-(`client/detours/Net7Inject.cpp`), do NOT proceed to offsets. Likely suspects if
+(`client/detours/FreyaInject.cpp`), do NOT proceed to offsets. Likely suspects if
 it fails: WOW64 staging path (DLL must be in BOTH `system32` and `syswow64`),
 32-vs-64-bit mismatch, or the injector's remote `LoadLibraryA` returning NULL
-(`Net7Inject.exe` prints `HMODULE=0x...` on success / a NULL-return line on
+(`FreyaInject.exe` prints `HMODULE=0x...` on success / a NULL-return line on
 failure -- run the injector leg with stderr visible).
 
 ## Step 1 -- the engine read is ALREADY FILLED (verify, don't author)

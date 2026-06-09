@@ -270,6 +270,22 @@ private:
     float   m_HeadingSample[3];  // most recent drained orientation
     unsigned long m_PosSampleTick; // GetNet7TickCount() at last valid datagram
 
+    // The 0x1004 position feed + 0x3005 keepalive MUST be started ONLY on the
+    // global plane (m_UDPGlobalClient -- the UNCONNECTED socket whose RecvThread
+    // relays sector S->C to the TCP client). There are TWO server-facing UDP
+    // planes: m_UDPClient (sector/master, connect()'d to UDP_MASTER_SERVER_PORT)
+    // and m_UDPGlobalClient (global, unconnected). The server runs a SINGLE S->C
+    // delivery socket (server_mgr m_UDPConnection bound to MVAS_LOGIN_PORT 3806),
+    // and every 0x1004/0x200F it receives calls SetPlayerPortIP(source) --
+    // repointing ALL of this avatar's sector S->C at the source socket of that
+    // datagram. The feed therefore has to emit from the SAME socket that drains
+    // S->C, i.e. the global plane. Starting it on the sector plane as well (the
+    // old FixedClientComm bug) makes the two planes fight over SetPlayerPortIP:
+    // the fast feed from m_UDPClient (a socket connect()'d to 3808, so the kernel
+    // drops the server's 3806 stream, AND not the relay socket) repeatedly steals
+    // the mapping and black-holes chat/target/warp. Start it on the global plane
+    // and nowhere else.
+
     PacketList m_Packets;
     short m_PacketTimeout;
 	short m_PacketDropThisSession;
