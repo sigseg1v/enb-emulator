@@ -14,7 +14,8 @@
          project's launcher/proxy (see README "major changes"). -->
     <TextBlock DockPanel.Dock="Top" Text="Freya"
                FontSize="44" FontStyle="Italic" FontWeight="Bold"
-               HorizontalAlignment="Center" Margin="0,0,0,10" />
+               HorizontalAlignment="Left" Margin="0,0,0,10"
+               Padding="0,0,12,0" ClipToBounds="False" />
 
   <Grid RowDefinitions="Auto,Auto,Auto,Auto,*,Auto">
 
