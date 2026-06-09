@@ -594,36 +594,20 @@ namespace LaunchFreya
                 return;
             }
 
-            // Stage the 32-bit DLL where the 32-bit client resolves it. WOW64 file
-            // redirection sends a 32-bit process opening C:\windows\system32\X to
-            // C:\windows\syswow64\X, so a copy that lands ONLY in system32 is
-            // invisible to client.exe. Stage into BOTH: syswow64 (the load-bearing
-            // copy on a win64 prefix) and system32 (a win32-only prefix has no
-            // syswow64 and resolves there). The injector hands the client the
-            // C:\windows\system32\... path; redirection points it at the right file.
-            string dllInPrefix;
+            // Stage the 32-bit DLL next to client.exe (the EnB release folder).
+            // We are NOT using AppInit_DLLs (which split on spaces and forced a
+            // no-space system32 path) -- the injector hands the full DOS path
+            // straight to the client's remote LoadLibraryA, which takes a path with
+            // spaces fine. So the DLL lives with the game, not in the Windows
+            // system dirs, and no WOW64 system32/syswow64 dance is needed.
+            string dllStaged;
             try
             {
-                var prefix = Environment.GetEnvironmentVariable("WINEPREFIX");
-                if (string.IsNullOrEmpty(prefix))
-                    prefix = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".wine");
-                var windir   = Path.Combine(prefix, "drive_c", "windows");
-                var system32 = Path.Combine(windir, "system32");
-                var syswow64 = Path.Combine(windir, "syswow64");
-
-                int staged = 0;
-                Directory.CreateDirectory(system32);
-                dllInPrefix = Path.Combine(system32, "Net7PosFeed.dll");
-                File.Copy(dllSrc, dllInPrefix, overwrite: true);
-                staged++;
-
-                if (Directory.Exists(syswow64))
-                {
-                    File.Copy(dllSrc, Path.Combine(syswow64, "Net7PosFeed.dll"), overwrite: true);
-                    staged++;
-                }
-
-                if (staged == 0) throw new IOException("no system DLL directory was writable");
+                var clientDir = Path.GetDirectoryName(_setting.ClientPath);
+                if (string.IsNullOrEmpty(clientDir) || !Directory.Exists(clientDir))
+                    throw new IOException($"client folder not found ('{clientDir}')");
+                dllStaged = Path.Combine(clientDir, "Net7PosFeed.dll");
+                File.Copy(dllSrc, dllStaged, overwrite: true);
             }
             catch (Exception ex)
             {
@@ -631,7 +615,7 @@ namespace LaunchFreya
                 return;
             }
 
-            var dosPath = WinePathToDos(dllInPrefix);
+            var dosPath = WinePathToDos(dllStaged);
             if (string.IsNullOrEmpty(dosPath))
             {
                 _warn("Position feed: could not resolve the DLL's DOS path. Continuing without the feed.");
