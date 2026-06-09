@@ -75,7 +75,7 @@ resource "aws_iam_user" "db_backup" {
   name  = "${var.project_name}-db-backup"
   tags = {
     project = var.project_name
-    purpose = "rolling postgres backups -> private S3 (Phase AP)"
+    purpose = "rolling postgres backups to private S3 - Phase AP"
   }
 }
 
