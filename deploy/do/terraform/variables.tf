@@ -144,6 +144,27 @@ variable "db_backup_s3_bucket" {
   default     = ""
 }
 
+# ---------------------------------------------------------------------------
+# Durable Postgres storage: a DigitalOcean block-storage volume that holds
+# pgdata, so a droplet REPLACE (which terraform does whenever user_data changes,
+# e.g. the registry docker credentials rotate) does NOT wipe the database. The
+# volume is created once, attached to the droplet, and re-attached to the
+# replacement droplet; cloud-init mounts it at /mnt/enb-data and the prod compose
+# binds the pgdata volume to /mnt/enb-data/pgdata. ON by default -- a stateful
+# game server should never keep its DB on an ephemeral droplet disk.
+# ---------------------------------------------------------------------------
+variable "manage_db_volume" {
+  description = "If true (default), Terraform creates + attaches a block-storage volume for pgdata so the DB survives droplet replacement. false = pgdata stays on the ephemeral droplet disk (lost on any droplet replace)."
+  type        = bool
+  default     = true
+}
+
+variable "db_volume_size_gb" {
+  description = "Size of the durable pgdata block-storage volume, in GiB. DO volumes can be grown in place later but not shrunk."
+  type        = number
+  default     = 10
+}
+
 # NOTE: there is deliberately NO S3 lifecycle / expiry variable here. Retention
 # is count-based and enforced by the sidecar (keep newest 24 hourly / 14 daily),
 # never by a time-based S3 rule -- an age rule would keep deleting old dumps

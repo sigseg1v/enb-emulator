@@ -31,6 +31,37 @@ resource "digitalocean_container_registry_docker_credentials" "enb" {
   write         = false
 }
 
+# ---------------------------------------------------------------------------
+# Durable Postgres storage. pgdata lives on THIS block volume, not the droplet's
+# ephemeral disk, so a droplet REPLACE (forced whenever user_data changes -- the
+# registry docker credentials rotate on their own) does NOT wipe the database.
+# The volume detaches from the old droplet and re-attaches to the replacement;
+# cloud-init mounts it at /mnt/enb-data WITHOUT reformatting (it only mkfs's a
+# blank device), and the prod compose binds the pgdata volume to
+# /mnt/enb-data/pgdata. initial_filesystem_type pre-formats it once at creation.
+#
+# prevent_destroy guards the DB: terraform will REFUSE to delete this volume
+# (so `just destroy` cannot silently take the database with it). Remove the
+# volume by hand in the DO console when you genuinely mean to discard the DB.
+resource "digitalocean_volume" "pgdata" {
+  count                   = var.manage_db_volume ? 1 : 0
+  region                  = var.droplet_region
+  name                    = "${var.project_name}-pgdata"
+  size                    = var.db_volume_size_gb
+  initial_filesystem_type = "ext4"
+  description             = "Durable Postgres pgdata for ${var.project_name} (survives droplet replacement)."
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "digitalocean_volume_attachment" "pgdata" {
+  count      = var.manage_db_volume ? 1 : 0
+  droplet_id = digitalocean_droplet.enb.id
+  volume_id  = digitalocean_volume.pgdata[0].id
+}
+
 resource "digitalocean_droplet" "enb" {
   name     = var.project_name
   region   = var.droplet_region
@@ -48,6 +79,8 @@ resource "digitalocean_droplet" "enb" {
     aws_region            = var.aws_region
     cert_renew_access_key = var.manage_cert ? aws_iam_access_key.cert_renew[0].id : ""
     cert_renew_secret_key = var.manage_cert ? aws_iam_access_key.cert_renew[0].secret : ""
+    # Empty string => no managed volume; cloud-init keeps pgdata on the root disk.
+    db_volume_name        = var.manage_db_volume ? "${var.project_name}-pgdata" : ""
   })
 
   # Re-provision the droplet if the registry creds rotate.

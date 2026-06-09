@@ -269,5 +269,18 @@ services:
     restart: unless-stopped
 
 volumes:
+  # pgdata is bound to a directory on the durable DigitalOcean block volume that
+  # cloud-init mounts at /mnt/enb-data, so the database survives droplet
+  # replacement (a replace wipes the droplet's own disk, not the attached
+  # volume). The block volume is created + attached by terraform
+  # (digitalocean_volume.pgdata, var.manage_db_volume); cloud-init's
+  # mount-data-volume.sh formats-once + mounts it and ensures the pgdata subdir.
+  # If you ever run WITHOUT a managed volume, /mnt/enb-data/pgdata simply lives
+  # on the root disk (cloud-init still mkdir's it) -- functional, not durable.
   pgdata:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/enb-data/pgdata
   net7-ipc:

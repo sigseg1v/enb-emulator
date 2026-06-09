@@ -18,6 +18,12 @@ bootstrap:
 take-backup:
     ./tools/Take-Backup.ps1
 
+# Asks for confirmation. Used to seed the durable volume during the pgdata
+# migration, or for disaster recovery.   just restore-backup backup/<file>.sql
+# DESTRUCTIVE: drop + recreate net7 and net7_user on the live droplet from a dump.
+restore-backup file:
+    ./tools/Restore-Backup.ps1 -File "{{file}}"
+
 # Converge infra: droplet, reserved IP, firewall, registry, Route53 record,
 # Let's Encrypt cert. Idempotent; renews the cert. Backs up the DB first (a
 # droplet REPLACE wipes the local pgdata volume). SAFE BY DEFAULT --

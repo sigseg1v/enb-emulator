@@ -16,6 +16,11 @@ output "droplet_id" {
   value = digitalocean_droplet.enb.id
 }
 
+output "db_volume" {
+  description = "Durable pgdata block-volume name (empty when manage_db_volume=false)."
+  value       = var.manage_db_volume ? digitalocean_volume.pgdata[0].name : ""
+}
+
 output "ssh_target" {
   description = "Where the deploy scripts SSH/scp the stack bundle."
   value       = "root@${digitalocean_reserved_ip.enb.ip_address}"

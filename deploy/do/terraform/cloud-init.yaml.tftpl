@@ -11,6 +11,51 @@ write_files:
     permissions: "0600"
     encoding: b64
     content: ${base64encode(docker_credentials)}
+  - path: /opt/enb/mount-data-volume.sh
+    permissions: "0700"
+    content: |
+      #!/usr/bin/env bash
+      # Mount the durable DB block volume at /mnt/enb-data and ensure
+      # /mnt/enb-data/pgdata exists, so the prod compose can bind pgdata onto
+      # persistent storage that survives droplet replacement.
+      #
+      # CRITICAL: this NEVER reformats a volume that already has a filesystem --
+      # it mkfs's ONLY a blank device (first use). On a droplet REPLACE the same
+      # volume re-attaches already populated; we mount it as-is and the DB is
+      # intact. db_volume_name empty => no managed volume => pgdata stays on the
+      # root disk (mkdir only), same as the pre-volume behaviour.
+      set -euo pipefail
+      NAME="${db_volume_name}"
+      MNT=/mnt/enb-data
+      mkdir -p "$MNT"
+      if [ -z "$NAME" ]; then
+        echo "no managed DB volume; pgdata stays on the root disk"
+        mkdir -p "$MNT/pgdata"
+        exit 0
+      fi
+      DEV="/dev/disk/by-id/scsi-0DO_Volume_$NAME"
+      # The volume attaches just after the droplet is created; wait for the
+      # device node to appear (up to ~2 min) before giving up.
+      for i in $(seq 1 60); do [ -e "$DEV" ] && break; sleep 2; done
+      if [ ! -e "$DEV" ]; then
+        echo "ERROR: DB volume device $DEV never appeared" >&2
+        exit 1
+      fi
+      # Format ONLY a blank device. blkid succeeds (prints a TYPE) when a
+      # filesystem is already present -- in that case we skip mkfs entirely so a
+      # populated DB volume is never wiped.
+      if ! blkid "$DEV" >/dev/null 2>&1; then
+        echo "no filesystem on $DEV -- creating ext4 (first use)"
+        mkfs.ext4 -L enb-pgdata "$DEV"
+      fi
+      UUID="$(blkid -s UUID -o value "$DEV")"
+      # Persist by UUID so every boot (incl. the replacement droplet) re-mounts
+      # it. nofail keeps a missing volume from blocking boot.
+      grep -q "$UUID" /etc/fstab || \
+        echo "UUID=$UUID $MNT ext4 defaults,nofail,x-systemd.device-timeout=120 0 2" >> /etc/fstab
+      mountpoint -q "$MNT" || mount "$MNT"
+      mkdir -p "$MNT/pgdata"
+      echo "DB volume mounted: $DEV -> $MNT (uuid=$UUID)"
 %{ if manage_cert ~}
   - path: /opt/enb/cert-renew/lego.env
     permissions: "0600"
@@ -204,6 +249,9 @@ runcmd:
   # before real multiplayer load (see droplet_size in variables.tf).
   - bash -c 'test -e /swapfile || (fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && (grep -q "^/swapfile" /etc/fstab || echo "/swapfile none swap sw 0 0" >> /etc/fstab))'
   - bash -c 'sysctl -w vm.swappiness=10 && (grep -q "^vm.swappiness" /etc/sysctl.conf || echo "vm.swappiness=10" >> /etc/sysctl.conf)'
+  # Mount the durable DB volume BEFORE anything can start postgres, so pgdata
+  # lands on persistent storage (never reformats an already-populated volume).
+  - /opt/enb/mount-data-volume.sh
   - mkdir -p /opt/enb/certs /opt/enb/db /opt/enb/server-data /opt/enb/backups
   # Install docker + compose plugin. The plain Ubuntu base ships neither; the
   # `command -v` guard makes this a no-op if a Docker-preloaded image is used.

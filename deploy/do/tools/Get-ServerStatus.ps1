@@ -30,6 +30,12 @@ Write-Host "-- containers --"
 Invoke-RemoteShell $ip "cd /opt/enb && docker compose --env-file .env -f docker-compose.prod.yml ps --format 'table {{.Service}}\t{{.Status}}'"
 Write-Host ""
 
+# ---- accounts registered (net7_user) ----
+$acctCount = (@(Invoke-RemotePsql -ReservedIp $ip -Database 'net7_user' -PsqlFlags @('-tA') `
+    -Sql 'SELECT count(*) FROM accounts;' | Where-Object { $_ -and $_.Trim() -ne '' }) | Select-Object -First 1)
+Write-Host "-- accounts registered: $($acctCount) --"
+Write-Host ""
+
 # ---- online players (net7_user; accounts + avatar_* are all in net7_user) ----
 # Account is online when a.last_login > a.last_logout. LEFT JOIN so an account
 # sitting in character-select (no entered avatar) still shows, as '(no char)'.

@@ -100,7 +100,7 @@ try {
     # ---- invalidate the edge cache so the new build is served at once ----
     Write-Host ""
     Write-Host "==> cloudfront create-invalidation /*"
-    Invoke-Native aws cloudfront create-invalidation --distribution-id $distId --paths '/*'
+    Invoke-Native aws cloudfront create-invalidation --distribution-id $distId --paths '/*' --no-cli-pager
 }
 finally {
     Remove-Item $manifestPath -Force -ErrorAction SilentlyContinue
@@ -108,4 +108,4 @@ finally {
 
 Write-Host ""
 Write-Host "Published manifest + 3 artifacts to $bucket and invalidated CloudFront."
-Write-Host "Next: just update   (restarts login so it re-reads the new manifest)."
+Write-Host "Restart login to re-read the manifest: just apply-update   (runs automatically next if you used 'just update')."

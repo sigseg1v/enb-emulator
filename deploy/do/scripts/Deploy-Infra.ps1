@@ -30,4 +30,4 @@ Write-Host ("  Reserved IP : {0}" -f (Get-TfOutput 'reserved_ip'))
 Write-Host ("  Registry    : {0}" -f (Get-TfOutput 'registry_endpoint'))
 Write-Host ("  DNS         : {0}" -f (Get-TfOutput 'dns_status'))
 Write-Host ""
-Write-Host "Next: just push   then   just update"
+Write-Host "Next: just update   (builds + pushes the images, then ships them to the droplet)"

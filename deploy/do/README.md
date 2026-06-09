@@ -100,6 +100,7 @@ stable across droplet rebuilds, so you set DNS once.
 | Command | What it does |
 |---|---|
 | `just take-backup` | `pg_dumpall` both DBs from the live droplet into the gitignored `backup/enb-backup-<UTC-ts>.sql`. Runs automatically before `up` and `apply-update`; skips cleanly if no droplet is deployed yet. |
+| `just restore-backup <file>` | **DESTRUCTIVE.** scp a local `take-backup` dump to the droplet, drop + recreate `net7` and `net7_user`, and reload them from the dump. Asks to confirm. Used to seed the durable volume during migration, or for disaster recovery. |
 | `just up` | DRY RUN -- print the terraform plan, apply nothing. (Backs up the DB first.) |
 | `just up -y` | Converge infra. Idempotent. Issues the bootstrap cert; the droplet auto-renews thereafter (see below). (Backs up the DB first -- a droplet REPLACE wipes the local pgdata volume.) |
 | `just update [tag]` | **THE full deploy.** Chains `just push` (build + push server images, and the client patch when configured) then `just apply-update` (ship + restart). This is all you normally run. |
@@ -256,6 +257,74 @@ from the launcher, the fix is a one-line server change to
 That is a server change governed by the repo's server-integrity rules; it is not
 applied automatically.
 
+## Durable database storage (block volume)
+
+`pgdata` does **not** live on the droplet's ephemeral disk. It lives on a
+separate **DigitalOcean block volume** (`<project>-pgdata`, default 10 GiB)
+that terraform creates and attaches. This is the whole point of the volume:
+terraform REPLACES the droplet whenever `user_data` changes -- and it changes on
+its own, because the registry docker credentials baked into cloud-init rotate
+every `apply`. A replace gives you a brand-new box with a blank disk. With
+`pgdata` on the droplet's disk that would silently wipe the database on a routine
+`just update`. On the block volume, the volume just detaches from the old box and
+re-attaches to the new one; the data is untouched.
+
+How it fits together:
+
+- **terraform** (`main.tf`): `digitalocean_volume.pgdata` (pre-formatted ext4,
+  `prevent_destroy = true` so `just destroy` cannot take the DB with it) +
+  `digitalocean_volume_attachment.pgdata`. Toggle with `var.manage_db_volume`
+  (default on); size with `var.db_volume_size_gb`.
+- **cloud-init** (`mount-data-volume.sh`): on every boot, waits for the attached
+  device, `mkfs.ext4` only if it is blank (never reformats existing data),
+  mounts it at `/mnt/enb-data` via a UUID fstab entry (`nofail`), and ensures
+  `/mnt/enb-data/pgdata` exists. With no managed volume it falls back to a
+  `pgdata` dir on the root disk and exits 0.
+- **docker compose** (`docker-compose.prod.yml`): the `pgdata` named volume is a
+  bind to `/mnt/enb-data/pgdata`, so Postgres writes straight onto the block
+  volume.
+
+The backup mechanisms are unaffected by the move: `take-backup`, the on-box
+`db-backup.sh` timer, and the S3 `db-backup` sidecar all dump over a TCP
+connection to the postgres container, so where `pgdata` physically sits is
+irrelevant to them.
+
+### Migrating the LIVE droplet onto the volume (one-time cutover)
+
+The droplet that predates this change still has its DB on the root disk. Moving
+it onto the volume means a droplet replace, so the database has to be carried
+across by hand via a dump/restore. The volume comes up empty; the first boot
+seeds the default content DB; then you restore your real data over that seed.
+Run these from `deploy/do/`, in order:
+
+```pwsh
+# 1. Snapshot the CURRENT live DB to a local file. (up/apply-update also do this
+#    automatically, but take it explicitly so you know the exact filename.)
+just take-backup
+#    -> writes backup/enb-backup-<UTC-ts>.sql ; note the filename.
+
+# 2. Apply infra. This CREATES the volume and REPLACES the droplet; cloud-init
+#    formats + mounts the (empty) volume at /mnt/enb-data. Review the plan first:
+just up          # dry run -- confirm it shows the volume being created
+just up -y       # apply
+
+# 3. Ship the stack onto the new droplet. The app comes up against the empty
+#    volume and schema-init SEEDS fresh default databases. This also pushes the
+#    new db-backup S3 sidecar image.
+just update
+
+# 4. Overwrite the seed with your real data from step 1.
+just restore-backup backup/enb-backup-<UTC-ts>.sql   # type 'restore' to confirm
+
+# 5. Sanity check.
+just get-server-status
+```
+
+After this, every later `just update` that replaces the droplet keeps the DB:
+the volume re-attaches, cloud-init mounts the existing filesystem (no reformat),
+and Postgres opens the existing `pgdata`. No restore needed again -- steps 1 and
+4 are the one-time migration, not part of routine deploys.
+
 ## Database backups
 
 The droplet runs a `pg_dump` of both databases (`net7` content + `net7_user`
@@ -278,12 +347,14 @@ gunzip -c /opt/enb/backups/net7_user-<ts>.sql.gz \
       psql -U net7 -d net7_user
 ```
 
-**Scope:** this is on-box logical backup -- it protects against bad migrations,
-a corrupt `pgdata` volume, and accidental data loss. It is on the droplet's own
-disk, so it does **not** survive losing the droplet (e.g. `just destroy`, or any
-Terraform change that replaces the droplet -- `user_data` edits do). For
-droplet-loss durability, sync `/opt/enb/backups` to DO Spaces / S3 or turn on DO
-droplet backups.
+**Scope:** this is on-box logical backup -- it protects against bad migrations
+and accidental data loss. It is on the droplet's own root disk, so the *dumps*
+themselves do **not** survive losing the droplet. Note this is now separate from
+DB durability: `pgdata` itself lives on a block volume that DOES survive droplet
+replacement (see "Durable database storage" above), so a routine `just update`
+no longer threatens the database. For off-box copies of the *dumps*, the S3
+`db-backup` sidecar rolls hourly `pg_dump -Fc` archives into a private bucket
+(default-off; set `BACKUP_S3_BUCKET`), or sync `/opt/enb/backups` to Spaces.
 
 ## Ports opened
 
@@ -320,11 +391,12 @@ planes above, which are the only inbound game ports the cloud exposes.
   `DROPLET_SIZE=s-2vcpu-4gb` (~$24/mo) before real player load. The registry is
   **free** (Starter tier -- single repo, ~50 MiB of images well under the 500
   MiB cap), plus a reserved IP (free while attached) + trivial S3.
-- **DB backups are on-box only.** The 6-hourly `pg_dump` (below) lands in
-  `/opt/enb/backups` on the droplet -- it survives bad migrations / a corrupt
-  pgdata volume / accidental wipes, but NOT droplet loss (same disk). For
-  droplet-loss durability, copy the dumps off-box (Spaces/S3) or enable DO
-  droplet backups.
+- **The database survives droplet replacement; the on-box dumps do not.**
+  `pgdata` lives on a durable block volume that re-attaches across replaces (see
+  "Durable database storage"), so `just update` no longer risks the DB. The
+  6-hourly on-box `pg_dump` into `/opt/enb/backups` is on the droplet's root disk
+  and is lost with the droplet -- for off-box dump copies, enable the S3
+  `db-backup` sidecar (`BACKUP_S3_BUCKET`) or sync the dir to Spaces.
 
 ## Launcher self-update (Phase AN, opt-in)
 

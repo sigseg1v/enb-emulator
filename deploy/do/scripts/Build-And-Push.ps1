@@ -117,4 +117,4 @@ if ($deletedAny) { Start-DocrGarbageCollection }
 
 Write-Host ""
 Write-Host "Pushed enb:{server,login,status-notifier,db-backup}-$version (+ -latest)."
-Write-Host "Next: just update $version   (or: just update latest)"
+Write-Host "Ship it with: just apply-update $version   (runs automatically next if you used 'just update')."
