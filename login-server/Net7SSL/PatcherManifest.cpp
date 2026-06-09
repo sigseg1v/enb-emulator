@@ -4,6 +4,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <functional>
 #include <mutex>
 
@@ -141,6 +142,14 @@ std::string TrimTrailingSlashes(std::string s)
 
 bool PatcherManifest::Load()
 {
+    // Record the attempt up front so RefreshIfStale() backs off for a full TTL
+    // whether this load succeeds OR fails -- a CloudFront outage must not turn
+    // every /updateCheck into an outbound fetch.
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_lastAttempt = time(nullptr);
+    }
+
     const char *url = getenv("NET7_PATCHER_MANIFEST_URL");
     if (!url || !*url)
     {
@@ -187,6 +196,24 @@ bool PatcherManifest::Load()
     LogMessage("PatcherManifest: loaded 3 file hashes from %s (dl base '%s')\n",
                url, dlBase.c_str());
     return true;
+}
+
+// ---------------------------------------------------------------- refresh
+
+void PatcherManifest::RefreshIfStale()
+{
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        // Attempted within the TTL -> serve whatever we have. This gates BOTH
+        // the warm-refresh case and the never-loaded retry case (a startup
+        // fetch failure must not turn every /updateCheck into a fetch).
+        if ((time(nullptr) - m_lastAttempt) < kRefreshTtlSeconds)
+            return;
+    }
+    // Stale (or never loaded). Load() re-stamps m_lastAttempt and only
+    // overwrites the cache on a fully successful fetch, so a failed refresh is
+    // transparent: the last good manifest keeps being served.
+    Load();
 }
 
 // ------------------------------------------------------------------ reads

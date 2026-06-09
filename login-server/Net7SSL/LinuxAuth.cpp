@@ -632,6 +632,10 @@ char *MakeServiceUnavailable(size_t *out_len)
 char *HandleUpdateCheck(size_t *out_len, char *recv_buffer)
 {
     PatcherManifest &mf = PatcherManifest::Instance();
+    // Lazily re-fetch (TTL-bounded) so a client-only patch -- which never
+    // changes the login image and so never triggers a login restart on deploy
+    // -- is still picked up here without a manual bounce.
+    mf.RefreshIfStale();
     if (mf.Empty())
         return MakeServiceUnavailable(out_len);
 

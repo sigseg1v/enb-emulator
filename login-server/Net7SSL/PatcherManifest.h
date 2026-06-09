@@ -7,8 +7,16 @@
 // file:// URLs, so the local-stub test points the env at an on-disk manifest --
 // no TLS, no cloud.
 //
-// No TTL: the cache is refreshed by restarting the login server, which
-// `just update` does. Reads on the /updateCheck request path are thread-safe.
+// Bounded TTL: the cache is loaded once at startup, then RefreshIfStale()
+// re-fetches it lazily on the /updateCheck path when it is older than
+// kRefreshTtlSeconds. This is what lets a CLIENT-ONLY patch take effect
+// without a login restart: a deploy only recreates login when its IMAGE
+// changes, so a launcher/proxy patch (which never touches the login image)
+// would otherwise leave login serving its stale startup cache forever. The
+// refresh is rate-limited to at most one outbound fetch per TTL (an attempt
+// timestamp gates it, success or failure), and a failed refresh keeps the
+// last good cache (Load() only overwrites state on a fully successful fetch).
+// Reads on the /updateCheck request path are thread-safe.
 //
 // Fail-closed: until a successful Load(), Empty() is true and /updateCheck
 // reports the server DOWN (HTTP 503). The endpoint NEVER reads a local file
@@ -17,6 +25,7 @@
 
 #pragma once
 
+#include <ctime>
 #include <string>
 #include <mutex>
 
@@ -27,10 +36,16 @@ public:
 
     // Fetch + parse NET7_PATCHER_MANIFEST_URL. Returns true only when all three
     // known files are present with non-empty hashes. A missing env var, a
-    // transport error, or a malformed manifest leaves the cache Empty() and
-    // returns false (logged by the caller as a deploy error). Safe to call once
-    // at startup; not intended for hot-path re-entry.
+    // transport error, or a malformed manifest leaves the PRIOR cache intact
+    // (state is overwritten only on a fully successful load) and returns false.
+    // Called once at startup and again by RefreshIfStale() on the request path.
     bool Load();
+
+    // Re-Load() the manifest if the cache is older than kRefreshTtlSeconds,
+    // rate-limited to one fetch attempt per TTL. Cheap no-op when fresh. Call
+    // this on the /updateCheck path before reading so a client-only patch is
+    // picked up without a login restart.
+    void RefreshIfStale();
 
     bool Empty() const;            // true until a successful Load()
 
@@ -46,8 +61,12 @@ public:
 private:
     PatcherManifest() = default;
 
+    // Re-fetch the manifest at most this often on the request path.
+    static constexpr long kRefreshTtlSeconds = 60;
+
     mutable std::mutex m_mutex;
     bool m_loaded = false;
+    time_t m_lastAttempt = 0;   // last Load() attempt (success or fail); gates refresh
     std::string m_launcherExe;
     std::string m_launcherCfg;
     std::string m_proxyExe;
