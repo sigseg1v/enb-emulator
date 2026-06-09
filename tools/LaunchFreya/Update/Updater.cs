@@ -76,26 +76,37 @@ namespace LaunchFreya.Update
         {
             var (launcher, proxy) = ComputeLocalHashes();
             string body = UpdateLogic.BuildRequestJson(launcher ?? "", proxy ?? "");
+            _log($"checkUpdates: POST {updateCheckUrl}");
+            _log($"checkUpdates: local hashes  launcher={ShortHash(launcher)}  proxy={ShortHash(proxy)}");
             try
             {
                 using var content = new StringContent(body, Encoding.UTF8, "application/json");
                 using var resp = await _http.PostAsync(updateCheckUrl, content, ct).ConfigureAwait(false);
                 if (!resp.IsSuccessStatusCode)
                 {
-                    _log($"update: /updateCheck returned HTTP {(int)resp.StatusCode}");
+                    _log($"checkUpdates: /updateCheck returned HTTP {(int)resp.StatusCode}");
                     return null;
                 }
                 string json = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
                 var parsed = UpdateLogic.ParseResponse(json);
-                if (parsed == null) _log("update: could not parse /updateCheck response");
+                if (parsed == null) { _log("checkUpdates: could not parse /updateCheck response"); return null; }
+                int n = parsed.Files?.Count ?? 0;
+                _log($"checkUpdates: server says status='{parsed.Status}'" +
+                     (n > 0 ? $" ({n} file(s) to update)" : " (nothing to update)"));
                 return parsed;
             }
             catch (Exception ex)
             {
-                _log($"update: /updateCheck request failed: {ex.Message}");
+                _log($"checkUpdates: /updateCheck request failed: {ex.Message}");
                 return null;
             }
         }
+
+        // First 12 hex chars of a SHA-512 (or "(none)" for a missing/unhashable
+        // file) -- enough to eyeball local-vs-server agreement in the log without
+        // dumping the full 128-char digest.
+        static string ShortHash(string hash)
+            => string.IsNullOrEmpty(hash) ? "(none)" : hash.Substring(0, Math.Min(12, hash.Length));
 
         // Download every file in the response to the staging dir, verify all
         // hashes, then apply. Throws UpdateException on the FIRST problem and
@@ -143,10 +154,14 @@ namespace LaunchFreya.Update
             foreach (var (file, _, staged) in planned)
             {
                 string actual = UpdateLogic.ComputeSha512(staged);
-                if (!UpdateLogic.HashesEqual(actual, file.Hash))
+                bool ok = UpdateLogic.HashesEqual(actual, file.Hash);
+                _log($"verify {Path.GetFileName(staged)}: expected={ShortHash(file.Hash)} " +
+                     $"got={ShortHash(actual)} -> {(ok ? "OK" : "MISMATCH")}");
+                if (!ok)
                     throw new UpdateException(
                         $"Hash mismatch for {Path.GetFileName(staged)} -- update aborted, nothing changed.");
             }
+            _log($"verify: all {planned.Length} file(s) validated; applying.");
 
             // 5. Apply. Non-self files first; the running launcher last (so a
             // failure before the self-swap never leaves a half-launched state).
