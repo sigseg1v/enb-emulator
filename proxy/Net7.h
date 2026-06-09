@@ -221,6 +221,7 @@ extern PlayerManager * g_PlayerMgr;
 extern ItemBaseManager * g_ItemBaseMgr;
 extern AccountManager * g_AccountMgr;
 extern bool g_LoggedIn;
+extern bool g_LogoffConfirmed;
 
 extern bool g_Debug;
 extern bool g_ServerShutdown;

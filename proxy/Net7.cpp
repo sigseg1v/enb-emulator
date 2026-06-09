@@ -40,6 +40,8 @@ AccountManager * g_AccountMgr = 0;
 bool g_OpcodeDebugging = false;
 
 bool g_LoggedIn = false;
+bool g_LogoffConfirmed = false; // set once the sector server confirms LOGOFF (0xBA);
+                                // arms the auto-shutdown once the client's TCP links close
 unsigned long g_StartTick;
 bool g_LocalCert = false;
 unsigned short ssl_port = SSL_PORT;

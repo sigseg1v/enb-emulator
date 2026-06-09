@@ -555,6 +555,13 @@ void UDPClient::IncommingOpcodePreProcessing(short opcode, char *msg, short byte
     {
     case ENB_OPCODE_00BA_LOGOFF_CONFIRMATION:
         LogMessage("UDPClient(Linux): ---> LogOff confirm\n");
+        // Arm the auto-shutdown: the player has logged off, so once the client
+        // tears down its TCP links to the master (3801) and sector (3500)
+        // listeners there is nothing left for this single-client proxy to do.
+        // ServerManager::ServerCheck() watches for those links to drop and then
+        // sets g_ServerShutdown so the process exits instead of leaving the
+        // console window open on Windows.
+        g_LogoffConfirmed = true;
         if (g_ServerMgr) {
             if (g_ServerMgr->m_UDPConnection) {
                 g_ServerMgr->m_UDPConnection->SetConnectionActive(false);

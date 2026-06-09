@@ -20,6 +20,11 @@ public:
 	void	CheckConnections();
 	void	CheckSslConnections();
 
+	// True while any active client-facing TCP link (the client's connection to
+	// the master 3801 or sector 3500 listener) is still up. Used by the
+	// post-logoff auto-shutdown to know when the client has fully disconnected.
+	bool	HasActiveClientLink();
+
 private:
 	// linked list for SSL Connection
 /*	struct SslConnectionEntry;

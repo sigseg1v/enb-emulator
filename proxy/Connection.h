@@ -82,6 +82,7 @@ public:
 	bool	CheckTCPShutdownCycle();
 
 	short	GetTCPPort()			{ return m_TcpPort; }
+	int		GetServerType()			{ return m_ServerType; }
 
 ///////////////////////
 //  Private Methods  //

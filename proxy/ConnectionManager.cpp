@@ -118,6 +118,21 @@ void ConnectionManager::CheckConnections()
 	}
 }
 
+bool ConnectionManager::HasActiveClientLink()
+{
+	for (ConnectionEntry *p = m_ConnectionList; p; p = p->next)
+	{
+		int type = p->connection->GetServerType();
+		if ((type == CONNECTION_TYPE_CLIENT_TO_MASTER_SERVER ||
+		     type == CONNECTION_TYPE_CLIENT_TO_SECTOR_SERVER) &&
+		    p->connection->IsActive())
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
 /*void ConnectionManager::CheckSslConnections()
 {
 	// Drop the dead SSL connections and destroy the objects

@@ -125,6 +125,18 @@ void ServerManager::ServerCheck()
 	m_ConnectionMgr.CheckConnections();
 	//m_ConnectionMgr.CheckSslConnections();
 
+	// Post-logoff auto-shutdown. Once the sector server has confirmed LOGOFF
+	// (g_LogoffConfirmed) and the client has torn down its TCP links to the
+	// master (3801) and sector (3500) listeners -- which CheckConnections()
+	// just reaped -- this single-client proxy has nothing left to do. Exit the
+	// MainLoop so the process terminates instead of leaving the console window
+	// open on Windows.
+	if (g_LogoffConfirmed && !m_ConnectionMgr.HasActiveClientLink())
+	{
+		LogMessage("Proxy: logoff confirmed and client TCP links closed -- shutting down.\n");
+		g_ServerShutdown = true;
+	}
+
     //===========================================
     // Check for messages in the Server Log queue
     //===========================================
