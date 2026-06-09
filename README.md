@@ -303,7 +303,8 @@ Precedence: per-file header > per-folder `LICENSE` > project default. See `LICEN
 - **kyp / therealkyp** - the 2014 GitHub snapshot that preserved the C# editor suite, packet captures, and architecture docs.
 - **Nimsy** - the original WINE-on-Linux guide whose steps became the basis of the installer.
 - **ciphersimian** - author of the `enb-linux-installer` script.
-- Westwood Studios - *Earth & Beyond* (2002, o7).
+- **Westwood Studios** - *Earth & Beyond* (2002, o7).
+- **Electronic Arts** - All original assets, art and other items that belong to Electronic Arts remain their sole property with all rights reserved to them allowed by law.
 
 ## Contributing
 
