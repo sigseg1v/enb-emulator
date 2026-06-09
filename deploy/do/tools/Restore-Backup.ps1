@@ -67,5 +67,9 @@ $remote = @(
 ) -join ' && '
 
 Write-Host "restore: dropping + reloading databases on the droplet ..."
-Invoke-RemoteShell $ip "bash -c '$remote'"
+# Pass $remote straight through: Invoke-RemoteShell hands it to ssh as a single
+# argv token and the droplet's login shell (bash) parses it. Do NOT wrap in
+# `bash -c '...'` -- the SQL's own single quotes ('net7','net7_user') cannot nest
+# inside that and get stripped, corrupting the query.
+Invoke-RemoteShell $ip $remote
 Write-Host "restore: done. Both databases reloaded from $File."
