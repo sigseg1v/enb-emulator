@@ -18,7 +18,8 @@
 -- ON CONFLICT DO NOTHING are both idempotent), so it lands on pre-existing
 -- volumes too -- same pattern as external_status_events / server_status.
 --
---   kind        one of login|logout|levelup|broadcast|server_start.
+--   kind        one of login|logout|levelup|broadcast|server_start|
+--               player_destroyed|jumpstarted.
 --   enabled     true => relay this kind; false => the sidecar drops it.
 --   updated_at  when the flag was last changed.
 --   updated_by  the Discord user id that last changed it (audit trail).
@@ -30,8 +31,9 @@ CREATE TABLE IF NOT EXISTS status_notification_settings (
     updated_by  TEXT
 );
 
--- Seed the five known kinds, all enabled, so behaviour is unchanged until an
--- admin toggles one. ON CONFLICT keeps an operator's existing choices on reboot.
+-- Seed the known kinds, all enabled, so behaviour is unchanged until an admin
+-- toggles one. ON CONFLICT keeps an operator's existing choices on reboot.
 INSERT INTO status_notification_settings (kind) VALUES
-    ('login'), ('logout'), ('levelup'), ('broadcast'), ('server_start')
+    ('login'), ('logout'), ('levelup'), ('broadcast'), ('server_start'),
+    ('player_destroyed'), ('jumpstarted')
 ON CONFLICT (kind) DO NOTHING;

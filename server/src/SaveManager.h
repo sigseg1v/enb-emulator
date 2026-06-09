@@ -175,6 +175,8 @@ struct EnbSaveHeader
 #define EXT_STATUS_LEVELUP							3
 #define EXT_STATUS_BROADCAST						4
 #define EXT_STATUS_SERVER_START						5
+#define EXT_STATUS_PLAYER_DESTROYED					6
+#define EXT_STATUS_JUMPSTARTED						7
 
 #define	PLAYER_VAULT								0x0001
 #define PLAYER_INVENTORY							0x0002

@@ -85,7 +85,7 @@ type serverStatus struct {
 
 // startBot opens the Discord gateway, registers the slash commands, and returns
 // the live session (nil on failure -- a bot failure must never take down the
-// relay). The session stays usable for REST sends (botSender) until ctx is
+// relay). The session stays usable for REST sends (botDeliverer) until ctx is
 // cancelled, at which point a watcher goroutine closes the gateway. userDSN is the
 // net7_user DSN; the net7 DSN is derived from it for sector-name lookups.
 func startBot(ctx context.Context, userDSN, token, guildID string) *discordgo.Session {
@@ -118,7 +118,7 @@ func startBot(ctx context.Context, userDSN, token, guildID string) *discordgo.Se
 	registerCommands(dg, guildID)
 
 	// Close the gateway when the process context ends. Until then the returned
-	// session is used by botSender for REST message posts.
+	// session is used by botDeliverer for REST message posts.
 	go func() {
 		<-ctx.Done()
 		logf("bot: shutting down")

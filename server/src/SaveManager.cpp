@@ -429,6 +429,8 @@ void SaveManager::HandleExternalStatusEvent(long /*player_id*/, short bytes, uns
 	case EXT_STATUS_LEVELUP:      kindstr = "levelup";      break;
 	case EXT_STATUS_BROADCAST:    kindstr = "broadcast";    break;
 	case EXT_STATUS_SERVER_START: kindstr = "server_start"; break;
+	case EXT_STATUS_PLAYER_DESTROYED: kindstr = "player_destroyed"; break;
+	case EXT_STATUS_JUMPSTARTED:  kindstr = "jumpstarted";  break;
 	default:                      kindstr = "unknown";      break;
 	}
 

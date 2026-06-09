@@ -343,6 +343,50 @@ drop the `avatar_level_info` join entirely (no other column from it was used).
 Render logic (highest-of-three as the headline level) unchanged. `go build`/`go
 test` clean. Sidecar must be rebuilt+redeployed for the fix to take effect.
 
+## AM-9: wreck + jumpstart events with in-place edit (2026-06-08)
+
+Two new emit-only event kinds plus the first sidecar event that EDITS a prior post.
+
+Server (emit-only, no EnB client wire byte changes -- same gate exemption as the
+rest of AM):
+- `SaveManager.h`: `EXT_STATUS_PLAYER_DESTROYED 6`, `EXT_STATUS_JUMPSTARTED 7`.
+- `SaveManager.cpp` HandleExternalStatusEvent: map them to `player_destroyed` /
+  `jumpstarted`.
+- `PlayerCombat.cpp`:
+  - `Player::RemoveHull` (the hull<=0 incapacitation branch): emit
+    `Player %s (C%ld) was destroyed by %s in %s.` -- name=`Name()`,
+    `CombatLevel()`, killer=`enemy->Name()` (NULL enemy -> "an unknown enemy"),
+    sector=`GetSectorManager()->GetSectorName()`. The `enemy` (CMob*) and `sm` are
+    already in scope at that point.
+  - `Player::JumpStart` (after `SetIsIncapacitated(false)`): emit
+    `Player %s was jumpstarted in %s.`
+- `db/postgres/status_notification_settings.sql`: seed the two kinds (TEXT PK, no
+  CHECK -- new kinds need no constraint change; readEnabledKinds fail-opens anyway).
+
+Sidecar (`status-notifier/`):
+- `deaths.go` (new): in-memory `deathTracker` (avatar name -> {messageID, content,
+  when}). 30-min window. NON-DURABLE by design (owner's call): a restart forgets
+  in-flight wrecks. `playerNameFromContent` pulls the name as `Fields()[1]` (EnB
+  names are single tokens, so this is robust, no delimiter parsing).
+- `main.go`: `sender` func -> `deliverer` interface (send returns the message id;
+  added edit). `botDeliverer` wraps discordgo ChannelMessageSend/Edit. New
+  `deliverEvent` routes: `player_destroyed` posts + records id; `jumpstarted` edits
+  the recorded wreck message (strike + " " + jumpstart line) if within window, else
+  consumed without posting; all other kinds plain-post. A failed edit keeps the
+  record so the retry still finds it.
+- `settings.go`: add both kinds to `notificationKinds` (so `/notify` can toggle).
+- `deaths_test.go` (new): 8 cases -- name parse, strikethrough, wreck->jumpstart
+  edit, outside-window drop, no-wreck drop, send-fail retry, edit-fail keeps record,
+  ordinary kind. `go build`/`vet`/`test` clean; server docker image builds.
+
+NOT yet proven: the rendered lines + the edit against a REAL in-game death and a
+real Jumpstart skill -- the CLI cannot drive mob-kill death or the Jumpstart
+ability. Tracked as CV-AM-3 below (owner verifies on the live server + real client).
+
+| AM-9 wreck/jumpstart server emit | code-built | docker server image compiles with both hooks |
+| AM-9 sidecar edit-on-jumpstart logic | YES (unit) | `deaths_test.go` 8 cases |
+| AM-9 live in-game wreck->Discord + jumpstart edit | NO | CV-AM-3: real death + Jumpstart skill on live server |
+
 ## Constraints carried in (do not relearn the hard way)
 
 - Discord secret = secret. Env only. Never committed (CLAUDE.md no-secrets rule).

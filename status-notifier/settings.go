@@ -25,7 +25,7 @@ import (
 // the kinds the server emits (HandleExternalStatusEvent) and the seed in
 // status_notification_settings.sql. The /notify command validates against this
 // set, so an unknown kind can never reach an UPDATE.
-var notificationKinds = []string{"login", "logout", "levelup", "broadcast", "server_start"}
+var notificationKinds = []string{"login", "logout", "levelup", "broadcast", "server_start", "player_destroyed", "jumpstarted"}
 
 func isKnownKind(kind string) bool {
 	for _, k := range notificationKinds {

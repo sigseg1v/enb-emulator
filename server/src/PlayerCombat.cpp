@@ -19,6 +19,7 @@
 
 #include <float.h>
 #include "PlayerClass.h"
+#include "SaveManager.h"   // Phase AM: EmitExternalStatusEvent (wreck / jumpstart relay)
 #include "ServerManager.h"
 #include "ObjectManager.h"
 #include <net7/Opcodes.h>
@@ -96,6 +97,20 @@ void Player::RemoveHull(float hull_dmg, CMob *enemy)
        	ShipIndex()->SetIsIncapacitated(true);
 
 		SectorManager *sm = GetSectorManager();
+
+		// Phase AM: relay the wreck to the external status feed (Discord). Emit-only,
+		// no-op unless NET7_EXTERNAL_STATUS_ENABLED. The sidecar keys an in-memory
+		// (player -> this message) map off the avatar name so a later jumpstart can
+		// strike this line through. enemy is NULL on environmental death.
+		{
+			const char *killer = (enemy && enemy->Name() && enemy->Name()[0]) ? enemy->Name() : "an unknown enemy";
+			const char *sname  = (sm && sm->GetSectorName()) ? sm->GetSectorName() : "an unknown sector";
+			char dline[512];
+			snprintf(dline, sizeof(dline), "Player %s (C%ld) was destroyed by %s in %s.",
+				Name(), CombatLevel(), killer, sname);
+			EmitExternalStatusEvent(EXT_STATUS_PLAYER_DESTROYED, dline);
+		}
+
         //damage any trade cargo in the player's cargo hold
         int count = DamageTradeCargo(0.5f);
         if (count > 0)
@@ -651,7 +666,18 @@ void Player::JumpStart(float hull_repair, float level)
 	ShipIndex()->SetHullPoints(hull_repair);		// Set hull points
 	RemobilisePlayer();								// Allow player to move
 	ShipIndex()->SetIsIncapacitated(false);			// Tell us that he is now alive
-	ShipIndex()->SetIsRescueBeaconActive(false);	// Turn off 
+	ShipIndex()->SetIsRescueBeaconActive(false);	// Turn off
+
+	// Phase AM: relay the in-sector revival. The sidecar strikes through the matching
+	// recent wreck line (if within its window) and appends this. Emit-only, no-op
+	// unless NET7_EXTERNAL_STATUS_ENABLED.
+	{
+		SectorManager *jsm = GetSectorManager();
+		const char *sname = (jsm && jsm->GetSectorName()) ? jsm->GetSectorName() : "an unknown sector";
+		char jline[256];
+		snprintf(jline, sizeof(jline), "Player %s was jumpstarted in %s.", Name(), sname);
+		EmitExternalStatusEvent(EXT_STATUS_JUMPSTARTED, jline);
+	}
 	RechargeReactor();								// Start regening
 	RechargeShield();								// Start regening
 	ResetCombatTrance();

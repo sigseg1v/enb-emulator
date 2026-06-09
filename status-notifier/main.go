@@ -101,11 +101,17 @@ type event struct {
 	content string
 }
 
-// sender delivers one rendered line to the Discord channel, returning true on
-// success and false on a failure that should leave the row unsent for the next
-// wake. drain() takes a sender so it stays decoupled from discordgo (and unit-
-// testable without a live gateway).
-type sender func(content string) bool
+// deliverer abstracts the Discord transport so drain() stays decoupled from
+// discordgo (and unit-testable without a live gateway).
+//
+//	send  posts a new message and returns its id (needed so a wreck line can be
+//	      edited later by a jumpstart). ok=false leaves the row unsent for retry.
+//	edit  replaces an existing message's content (used to strike through a wreck
+//	      line when the player is jumpstarted). ok=false leaves the row unsent.
+type deliverer interface {
+	send(content string) (messageID string, ok bool)
+	edit(messageID, content string) (ok bool)
+}
 
 func main() {
 	botToken := os.Getenv("DISCORD_BOT_TOKEN")
@@ -136,8 +142,13 @@ func main() {
 		idle()
 		return
 	}
-	send := botSender(botSession, channelID)
+	deliver := botDeliverer{s: botSession, channelID: channelID}
 	logf("relay: delivering via bot channel %s", channelID)
+
+	// Wreck->jumpstart correlation lives only in this process's memory (see
+	// deaths.go). Create it once so it survives DB reconnects; only a full restart
+	// forgets in-flight wrecks.
+	tracker := newDeathTracker()
 
 	retentionDays := 7
 	if v := os.Getenv("STATUS_RETENTION_DAYS"); v != "" {
@@ -149,7 +160,7 @@ func main() {
 	// Reconnect loop: a dropped DB connection (postgres restart, network blip)
 	// must not kill the sidecar -- back off and re-establish.
 	for {
-		if err := run(ctx, dsn, send, retentionDays); err != nil {
+		if err := run(ctx, dsn, deliver, tracker, retentionDays); err != nil {
 			logf("connection error: %v -- reconnecting in 5s", err)
 			time.Sleep(5 * time.Second)
 			continue
@@ -167,21 +178,36 @@ func idle() {
 	<-sig
 }
 
-// botSender posts each line to a channel through the bot session (REST: POST
-// /channels/{id}/messages, Authorization: Bot <token>). discordgo's internal
-// rate-limiter sleeps on a 429 before returning, so a transient 429 just surfaces
-// as a slower-but-successful send; a hard error leaves the row unsent.
-func botSender(s *discordgo.Session, channelID string) sender {
-	return func(content string) bool {
-		if len(content) > maxContentLen {
-			content = content[:maxContentLen]
-		}
-		if _, err := s.ChannelMessageSend(channelID, content); err != nil {
-			logf("bot: ChannelMessageSend failed: %v -- will retry", err)
-			return false
-		}
-		return true
+// botDeliverer posts and edits messages in a channel through the bot session
+// (REST: /channels/{id}/messages, Authorization: Bot <token>). discordgo's
+// internal rate-limiter sleeps on a 429 before returning, so a transient 429 just
+// surfaces as a slower-but-successful call; a hard error leaves the row unsent.
+type botDeliverer struct {
+	s         *discordgo.Session
+	channelID string
+}
+
+func (b botDeliverer) send(content string) (string, bool) {
+	if len(content) > maxContentLen {
+		content = content[:maxContentLen]
 	}
+	m, err := b.s.ChannelMessageSend(b.channelID, content)
+	if err != nil {
+		logf("bot: ChannelMessageSend failed: %v -- will retry", err)
+		return "", false
+	}
+	return m.ID, true
+}
+
+func (b botDeliverer) edit(messageID, content string) bool {
+	if len(content) > maxContentLen {
+		content = content[:maxContentLen]
+	}
+	if _, err := b.s.ChannelMessageEdit(b.channelID, messageID, content); err != nil {
+		logf("bot: ChannelMessageEdit failed: %v -- will retry", err)
+		return false
+	}
+	return true
 }
 
 // swapDBName returns dsn with its database-name path segment replaced by name,
@@ -201,7 +227,7 @@ func swapDBName(dsn, name string) string {
 // run holds one DB connection: LISTEN, an initial catch-up drain, then a loop of
 // (wait for NOTIFY | periodic retention/heartbeat) -> drain. Returns on any DB
 // error so main() can reconnect.
-func run(ctx context.Context, dsn string, send sender, retentionDays int) error {
+func run(ctx context.Context, dsn string, deliver deliverer, tracker *deathTracker, retentionDays int) error {
 	conn, err := pgx.Connect(ctx, dsn)
 	if err != nil {
 		return err
@@ -215,7 +241,7 @@ func run(ctx context.Context, dsn string, send sender, retentionDays int) error 
 
 	// Catch up on anything inserted while we were down, before waiting for the
 	// next NOTIFY.
-	if err := drain(ctx, conn, send); err != nil {
+	if err := drain(ctx, conn, deliver, tracker); err != nil {
 		return err
 	}
 	lastSweep := time.Time{}
@@ -230,7 +256,7 @@ func run(ctx context.Context, dsn string, send sender, retentionDays int) error 
 			return fmt.Errorf("WaitForNotification: %w", err)
 		}
 
-		if err := drain(ctx, conn, send); err != nil {
+		if err := drain(ctx, conn, deliver, tracker); err != nil {
 			return err
 		}
 
@@ -260,7 +286,7 @@ func nowFrom(ctx context.Context, conn *pgx.Conn) time.Time {
 // after a 2xx. It stops (without error) at the first row it could not deliver so
 // ordering is preserved and the next wake retries from there. A DB error is
 // returned so the caller reconnects.
-func drain(ctx context.Context, conn *pgx.Conn, send sender) error {
+func drain(ctx context.Context, conn *pgx.Conn, deliver deliverer, tracker *deathTracker) error {
 	rows, err := conn.Query(ctx,
 		"SELECT id, kind, content FROM external_status_events WHERE sent_at IS NULL ORDER BY id")
 	if err != nil {
@@ -296,7 +322,7 @@ func drain(ctx context.Context, conn *pgx.Conn, send sender) error {
 			logf("suppressed event %d (%s): kind disabled by admin", e.id, e.kind)
 			continue
 		}
-		if !send(e.content) {
+		if !deliverEvent(deliver, tracker, e, time.Now()) {
 			// Leave sent_at NULL; stop here to preserve order, retry next wake.
 			// (discordgo already slept through any 429 internally before failing.)
 			return nil
@@ -308,6 +334,49 @@ func drain(ctx context.Context, conn *pgx.Conn, send sender) error {
 		logf("delivered event %d (%s)", e.id, e.kind)
 	}
 	return nil
+}
+
+// deliverEvent routes one event to Discord and returns true when the row is
+// resolved (mark it sent) or false when delivery failed (leave it for retry).
+//
+//   - player_destroyed: post the wreck line, remember its message id keyed by the
+//     player so a jumpstart can edit it.
+//   - jumpstarted: if the player has a recent wreck on file, EDIT that message
+//     (strike the wreck line, append the jumpstart line) instead of posting a new
+//     one; the edit failing leaves the row for retry (the wreck record is kept).
+//     With no recent wreck (towed to station, or window elapsed, or sidecar
+//     restarted) the event is consumed without posting -- the annotation only
+//     makes sense attached to a wreck line.
+//   - everything else: a plain post.
+func deliverEvent(deliver deliverer, tracker *deathTracker, e event, now time.Time) bool {
+	switch e.kind {
+	case "player_destroyed":
+		msgID, ok := deliver.send(e.content)
+		if !ok {
+			return false
+		}
+		if name := playerNameFromContent(e.content); name != "" && msgID != "" {
+			tracker.recordDeath(name, msgID, e.content, now)
+		}
+		return true
+
+	case "jumpstarted":
+		name := playerNameFromContent(e.content)
+		rec, ok := tracker.recentDeath(name, now)
+		if !ok {
+			logf("jumpstart for %q has no recent wreck to annotate -- consumed without posting", name)
+			return true
+		}
+		if !deliver.edit(rec.messageID, strikethrough(rec.content)+" "+e.content) {
+			return false // keep the record; retry the edit next wake
+		}
+		tracker.clear(name)
+		return true
+
+	default:
+		_, ok := deliver.send(e.content)
+		return ok
+	}
 }
 
 // sweep deletes delivered rows older than the retention window so the table does
