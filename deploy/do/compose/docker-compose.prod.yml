@@ -128,6 +128,12 @@ services:
         # See db/postgres/server_status.sql.
         echo "schema-init: applying /db/server_status.sql -> net7_user"
         psql -h postgres -U net7 -d net7_user -v ON_ERROR_STOP=1 -f /db/server_status.sql
+        # Phase AM per-kind relay on/off switches (net7_user). UNCONDITIONAL, same
+        # rationale: new relation the sidecar reads at drain time and the /notify
+        # bot command writes. CREATE TABLE IF NOT EXISTS + seed ON CONFLICT DO
+        # NOTHING are idempotent. See db/postgres/status_notification_settings.sql.
+        echo "schema-init: applying /db/status_notification_settings.sql -> net7_user"
+        psql -h postgres -U net7 -d net7_user -v ON_ERROR_STOP=1 -f /db/status_notification_settings.sql
         echo "schema-init: syncing identity sequences -> net7"
         psql -h postgres -U net7 -d net7 -v ON_ERROR_STOP=1 -f /db/sync_sequences.sql
         echo "schema-init: done"
@@ -210,13 +216,15 @@ services:
       - "443:443/tcp"
     restart: unless-stopped
 
-  # Phase AM status-notifier sidecar. Relays the external_status_events outbox to
-  # a webhook (Discord). Talks ONLY to Postgres (net7_user) + outbound HTTPS -- no
-  # game ports, no inbound trust. Like server/login, the image is PULLED from the
-  # registry (the droplet has no source tree); the build/push pipeline tags it
-  # enb:status-notifier-<v> in the same "enb" repo. Default-off: with an empty
-  # STATUS_WEBHOOK_URL the sidecar idles. Set it (a SECRET) in the droplet .env to
-  # enable delivery, alongside NET7_EXTERNAL_STATUS_ENABLED=1 on the server.
+  # Phase AM status-notifier sidecar. Relays the external_status_events outbox
+  # into a Discord channel through the bot, and serves the `/status` + admin-only
+  # `/notify` slash commands. Talks ONLY to Postgres (net7_user) + outbound
+  # HTTPS/websocket -- no game ports, no inbound trust. Like server/login, the
+  # image is PULLED from the registry (the droplet has no source tree); the
+  # build/push pipeline tags it enb:status-notifier-<v> in the same "enb" repo.
+  # Default-off: with an empty DISCORD_BOT_TOKEN the sidecar idles. Set the token
+  # (a SECRET) + STATUS_CHANNEL_ID in the droplet .env to enable delivery,
+  # alongside NET7_EXTERNAL_STATUS_ENABLED=1 on the server.
   status-notifier:
     image: ${REGISTRY}/enb:status-notifier-${IMAGE_TAG:-latest}
     depends_on:
@@ -229,17 +237,18 @@ services:
       DB_USER: "net7"
       DB_PASS: "net7"
       DB_NAME: "net7_user"
-      # SECRET -- comes from the droplet .env, never committed. Empty => the
-      # webhook relay idles.
-      STATUS_WEBHOOK_URL: "${STATUS_WEBHOOK_URL:-}"
-      STATUS_RETENTION_DAYS: "${STATUS_RETENTION_DAYS:-7}"
-      # AM-8 read-only `/status` Discord bot. SECRET token from the droplet .env,
-      # never committed. Empty => the bot does not start. DISCORD_GUILD_ID is
-      # optional (registers the command to one guild for instant availability;
-      # empty registers globally). Needs NET7_EXTERNAL_STATUS_ENABLED=1 on the
-      # server for the heartbeat that powers uptime/sector counts.
+      # SECRET from the droplet .env, never committed. Empty => the whole sidecar
+      # idles (no bot, no relay). DISCORD_GUILD_ID is optional (registers the
+      # commands to one guild for instant availability; empty registers globally).
+      # Needs NET7_EXTERNAL_STATUS_ENABLED=1 on the server for the heartbeat that
+      # powers uptime/sector counts.
       DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN:-}"
       DISCORD_GUILD_ID: "${DISCORD_GUILD_ID:-}"
+      # The channel the relay posts each event line into. Empty => the bot still
+      # serves /status + /notify but the relay is idle (no target channel).
+      STATUS_CHANNEL_ID: "${STATUS_CHANNEL_ID:-}"
+      # Delivered outbox rows older than this many days are swept hourly (0 off).
+      STATUS_RETENTION_DAYS: "${STATUS_RETENTION_DAYS:-7}"
     restart: unless-stopped
 
   # Phase AP db-backup sidecar. Dumps net7 + net7_user hourly with `pg_dump -Fc`

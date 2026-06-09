@@ -7,8 +7,8 @@
 // Instead the server INSERTs a fully-rendered message line into the
 // external_status_events table (in net7_user) and fires `NOTIFY
 // external_status_event`. This sidecar LISTENs for that, drains the unsent rows,
-// and POSTs each one to a webhook (Discord today; the table and protocol are
-// consumer-agnostic).
+// and delivers each one to a Discord channel through the bot (the table and the
+// rendered content stay consumer-agnostic; only the transport is Discord-specific).
 //
 // Durability: a row stays with sent_at = NULL until this process confirms a 2xx,
 // so events survive a sidecar restart and nothing is silently dropped. On startup
@@ -17,9 +17,14 @@
 //
 // Config (all env; secret never committed):
 //
-//	STATUS_WEBHOOK_URL   the webhook to POST each event to (SECRET, required to
-//	                     actually deliver; if empty the sidecar idles -- it does
-//	                     not crash-loop, so a default-off compose stack is fine).
+//	DISCORD_BOT_TOKEN    the bot token (SECRET, required). Empty => the sidecar
+//	                     idles (it does not crash-loop), so a default-off compose
+//	                     stack is harmless.
+//	STATUS_CHANNEL_ID    the Discord channel the relay posts each event line into
+//	                     (POST /channels/{id}/messages). Empty => the bot still
+//	                     serves /status + /notify but the relay is idle.
+//	DISCORD_GUILD_ID     optional -- register the slash commands to one guild for
+//	                     instant availability; empty registers globally.
 //	DB_HOST              postgres host:port (default "postgres:5432"); same env
 //	DB_USER              the other services already use. DB_NAME defaults to
 //	DB_PASS              net7_user (where the outbox lives).
@@ -28,12 +33,17 @@
 //	                     pieces if set.
 //	STATUS_RETENTION_DAYS  delete delivered rows older than this many days
 //	                       (default 7; 0 disables the sweep).
+//
+// Delivery: a row stays with sent_at = NULL until the bot confirms the post, then
+// is marked sent. An admin can disable individual kinds at runtime via the bot's
+// /notify command; the drain loop reads status_notification_settings and drops a
+// disabled kind (marking it sent = suppressed) WITHOUT the game server ever seeing
+// that table.
 package main
 
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
@@ -42,18 +52,19 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/bwmarrin/discordgo"
 	"github.com/jackc/pgx/v5"
 )
 
 const (
 	notifyChannel = "external_status_event"
-	// Discord caps a webhook message at 2000 chars; truncate a runaway broadcast
-	// rather than have the POST rejected. Generic enough for other webhooks too.
+	// Discord caps a channel message at 2000 chars; truncate a runaway broadcast
+	// rather than have the post rejected.
 	maxContentLen = 2000
 )
 
-// logf writes a single line to stdout. We deliberately never log the webhook URL
-// or any secret -- only event ids, kinds, and HTTP status codes.
+// logf writes a single line to stdout. We deliberately never log the bot token or
+// any secret -- only event ids, kinds, and outcomes.
 func logf(format string, a ...any) {
 	fmt.Printf("status-notifier: "+format+"\n", a...)
 }
@@ -90,39 +101,43 @@ type event struct {
 	content string
 }
 
+// sender delivers one rendered line to the Discord channel, returning true on
+// success and false on a failure that should leave the row unsent for the next
+// wake. drain() takes a sender so it stays decoupled from discordgo (and unit-
+// testable without a live gateway).
+type sender func(content string) bool
+
 func main() {
-	webhook := os.Getenv("STATUS_WEBHOOK_URL")
 	botToken := os.Getenv("DISCORD_BOT_TOKEN")
+	channelID := os.Getenv("STATUS_CHANNEL_ID")
 	dsn := buildDSN()
 	ctx := context.Background()
 
-	// The sidecar carries two independent, both-optional features that share only
-	// the DB connection details: the outbound webhook RELAY (push) and the inbound
-	// `/status` BOT (pull). Each is enabled by its own secret env var; with neither
-	// set the process idles rather than crash-looping, so a default-off compose
-	// stack stays clean under `docker compose ps`.
-	if botToken != "" {
-		guildID := os.Getenv("DISCORD_GUILD_ID")
-		go startBot(ctx, buildDSN(), botToken, guildID)
-		logf("discord /status bot enabled")
-	}
-
-	if webhook == "" {
-		if botToken == "" {
-			logf("neither STATUS_WEBHOOK_URL nor DISCORD_BOT_TOKEN is set -- " +
-				"nothing to do; idling. Set either (a secret) to enable a feature.")
-		} else {
-			logf("STATUS_WEBHOOK_URL is empty -- webhook relay disabled; bot only.")
-		}
-		// Block until terminated. A bare `select {}` panics here when no bot
-		// goroutine exists ("all goroutines are asleep - deadlock!"), crash-
-		// looping the container; waiting on a signal gives the runtime a real
-		// wakeup source AND lets SIGTERM stop us cleanly.
-		sig := make(chan os.Signal, 1)
-		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-		<-sig
+	// The bot drives everything: the /status + /notify slash commands AND the relay
+	// (it posts each event line into STATUS_CHANNEL_ID). With no token there is
+	// nothing to do, so idle rather than crash-loop -- a default-off compose stack
+	// stays clean under `docker compose ps`.
+	if botToken == "" {
+		logf("DISCORD_BOT_TOKEN is empty -- nothing to do; idling. Set it (a secret) to enable the bot.")
+		idle()
 		return
 	}
+
+	guildID := os.Getenv("DISCORD_GUILD_ID")
+	botSession := startBot(ctx, dsn, botToken, guildID)
+	if botSession == nil {
+		logf("bot failed to start -- idling.")
+		idle()
+		return
+	}
+
+	if channelID == "" {
+		logf("STATUS_CHANNEL_ID is empty -- bot serves /status + /notify but the relay is idle (no target channel).")
+		idle()
+		return
+	}
+	send := botSender(botSession, channelID)
+	logf("relay: delivering via bot channel %s", channelID)
 
 	retentionDays := 7
 	if v := os.Getenv("STATUS_RETENTION_DAYS"); v != "" {
@@ -134,12 +149,38 @@ func main() {
 	// Reconnect loop: a dropped DB connection (postgres restart, network blip)
 	// must not kill the sidecar -- back off and re-establish.
 	for {
-		if err := run(ctx, dsn, webhook, retentionDays); err != nil {
+		if err := run(ctx, dsn, send, retentionDays); err != nil {
 			logf("connection error: %v -- reconnecting in 5s", err)
 			time.Sleep(5 * time.Second)
 			continue
 		}
 		return
+	}
+}
+
+// idle blocks until SIGINT/SIGTERM. A bare `select {}` would panic with a
+// deadlock when no other goroutine can wake us; waiting on a signal gives the
+// runtime a real wakeup source AND lets the container stop cleanly.
+func idle() {
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	<-sig
+}
+
+// botSender posts each line to a channel through the bot session (REST: POST
+// /channels/{id}/messages, Authorization: Bot <token>). discordgo's internal
+// rate-limiter sleeps on a 429 before returning, so a transient 429 just surfaces
+// as a slower-but-successful send; a hard error leaves the row unsent.
+func botSender(s *discordgo.Session, channelID string) sender {
+	return func(content string) bool {
+		if len(content) > maxContentLen {
+			content = content[:maxContentLen]
+		}
+		if _, err := s.ChannelMessageSend(channelID, content); err != nil {
+			logf("bot: ChannelMessageSend failed: %v -- will retry", err)
+			return false
+		}
+		return true
 	}
 }
 
@@ -160,7 +201,7 @@ func swapDBName(dsn, name string) string {
 // run holds one DB connection: LISTEN, an initial catch-up drain, then a loop of
 // (wait for NOTIFY | periodic retention/heartbeat) -> drain. Returns on any DB
 // error so main() can reconnect.
-func run(ctx context.Context, dsn, webhook string, retentionDays int) error {
+func run(ctx context.Context, dsn string, send sender, retentionDays int) error {
 	conn, err := pgx.Connect(ctx, dsn)
 	if err != nil {
 		return err
@@ -170,11 +211,11 @@ func run(ctx context.Context, dsn, webhook string, retentionDays int) error {
 	if _, err := conn.Exec(ctx, "LISTEN "+notifyChannel); err != nil {
 		return fmt.Errorf("LISTEN: %w", err)
 	}
-	logf("connected; LISTEN %s; webhook delivery enabled", notifyChannel)
+	logf("connected; LISTEN %s; relay delivery enabled", notifyChannel)
 
 	// Catch up on anything inserted while we were down, before waiting for the
 	// next NOTIFY.
-	if err := drain(ctx, conn, webhook); err != nil {
+	if err := drain(ctx, conn, send); err != nil {
 		return err
 	}
 	lastSweep := time.Time{}
@@ -189,7 +230,7 @@ func run(ctx context.Context, dsn, webhook string, retentionDays int) error {
 			return fmt.Errorf("WaitForNotification: %w", err)
 		}
 
-		if err := drain(ctx, conn, webhook); err != nil {
+		if err := drain(ctx, conn, send); err != nil {
 			return err
 		}
 
@@ -219,7 +260,7 @@ func nowFrom(ctx context.Context, conn *pgx.Conn) time.Time {
 // after a 2xx. It stops (without error) at the first row it could not deliver so
 // ordering is preserved and the next wake retries from there. A DB error is
 // returned so the caller reconnects.
-func drain(ctx context.Context, conn *pgx.Conn, webhook string) error {
+func drain(ctx context.Context, conn *pgx.Conn, send sender) error {
 	rows, err := conn.Query(ctx,
 		"SELECT id, kind, content FROM external_status_events WHERE sent_at IS NULL ORDER BY id")
 	if err != nil {
@@ -239,14 +280,25 @@ func drain(ctx context.Context, conn *pgx.Conn, webhook string) error {
 		return fmt.Errorf("rows: %w", err)
 	}
 
+	// Admin toggles: read the per-kind switches once per drain. A kind an admin
+	// disabled is consumed-and-dropped (marked sent = suppressed) rather than left
+	// queued, so it never piles up and re-enabling does not flush a stale backlog.
+	// An unknown kind (absent from the settings map) is delivered -- fail-open, a
+	// missing switch must not silently swallow a new event type.
+	enabled := readEnabledKinds(ctx, conn)
+
 	for _, e := range batch {
-		delivered, retryAfter := deliver(webhook, e.content)
-		if !delivered {
-			if retryAfter > 0 {
-				logf("rate-limited on event %d (%s); backing off %v", e.id, e.kind, retryAfter)
-				time.Sleep(retryAfter)
+		if on, present := enabled[e.kind]; present && !on {
+			if _, err := conn.Exec(ctx,
+				"UPDATE external_status_events SET sent_at = now() WHERE id = $1", e.id); err != nil {
+				return fmt.Errorf("mark suppressed %d: %w", e.id, err)
 			}
+			logf("suppressed event %d (%s): kind disabled by admin", e.id, e.kind)
+			continue
+		}
+		if !send(e.content) {
 			// Leave sent_at NULL; stop here to preserve order, retry next wake.
+			// (discordgo already slept through any 429 internally before failing.)
 			return nil
 		}
 		if _, err := conn.Exec(ctx,
@@ -256,79 +308,6 @@ func drain(ctx context.Context, conn *pgx.Conn, webhook string) error {
 		logf("delivered event %d (%s)", e.id, e.kind)
 	}
 	return nil
-}
-
-var httpClient = &http.Client{Timeout: 15 * time.Second}
-
-// deliver POSTs one rendered line to the webhook as a Discord-style
-// {"content": "..."} body. Returns (true, 0) on a 2xx. On HTTP 429 it returns
-// (false, retry-after) so the caller backs off; on any other failure it returns
-// (false, 0) and the row stays unsent for the next attempt.
-func deliver(webhook, content string) (bool, time.Duration) {
-	if len(content) > maxContentLen {
-		content = content[:maxContentLen]
-	}
-	// content is JSON-encoded via a minimal escaper rather than dragging in a
-	// struct: it is a single string field.
-	body := `{"content":` + jsonString(content) + `}`
-
-	req, err := http.NewRequest(http.MethodPost, webhook, strings.NewReader(body))
-	if err != nil {
-		logf("build request failed: %v", err)
-		return false, 0
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		logf("POST failed: %v", err)
-		return false, 0
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		return true, 0
-	}
-	if resp.StatusCode == http.StatusTooManyRequests {
-		if ra := resp.Header.Get("Retry-After"); ra != "" {
-			if secs, err := strconv.ParseFloat(ra, 64); err == nil {
-				return false, time.Duration(secs*1000) * time.Millisecond
-			}
-		}
-		return false, time.Second
-	}
-	logf("webhook returned HTTP %d -- will retry", resp.StatusCode)
-	return false, 0
-}
-
-// jsonString returns a JSON-quoted string literal for s (including the quotes),
-// escaping the characters JSON requires. Keeps the dependency surface minimal for
-// a one-field body.
-func jsonString(s string) string {
-	var b strings.Builder
-	b.WriteByte('"')
-	for _, r := range s {
-		switch r {
-		case '"':
-			b.WriteString(`\"`)
-		case '\\':
-			b.WriteString(`\\`)
-		case '\n':
-			b.WriteString(`\n`)
-		case '\r':
-			b.WriteString(`\r`)
-		case '\t':
-			b.WriteString(`\t`)
-		default:
-			if r < 0x20 {
-				fmt.Fprintf(&b, `\u%04x`, r)
-			} else {
-				b.WriteRune(r)
-			}
-		}
-	}
-	b.WriteByte('"')
-	return b.String()
 }
 
 // sweep deletes delivered rows older than the retention window so the table does

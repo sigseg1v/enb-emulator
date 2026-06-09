@@ -2,7 +2,7 @@
 
 Phase AM. The game server publishes a small set of live status events for an
 out-of-process consumer to relay to a chat channel or dashboard. The first
-consumer is a Discord webhook (`status-notifier/`), but nothing in the server or
+consumer is a Discord bot (`status-notifier/`), but nothing in the server or
 the database is Discord-specific -- the mechanism is consumer-agnostic.
 
 ## What it emits
@@ -23,13 +23,13 @@ abbreviation derived from `ClassIndex() = Race()*3 + Profession()`.
 ## Architecture
 
 ```
- game server (C++)                       net7_user DB                  status-notifier (Go)        webhook
+ game server (C++)                       net7_user DB                  status-notifier (Go)        Discord
  ----------------                        ------------                  --------------------        -------
  EmitExternalStatusEvent(kind, line)
    -> g_SaveMgr queue (SaveManager)
    -> HandleExternalStatusEvent:
         INSERT external_status_events  -->  [outbox row, sent_at=NULL]
-        NOTIFY external_status_event   -->  ............................ LISTEN -> drain -> POST --> Discord
+        NOTIFY external_status_event   -->  ............................ LISTEN -> drain -> bot post --> channel
                                             UPDATE sent_at = now()  <---  (only after a 2xx)
 ```
 
@@ -45,7 +45,7 @@ It does not alter a single byte the EnB client sends or receives, so the
 wire-fidelity gate (primary-source citation + CLI byte-pin + `plans/29` client
 verification) does not apply. It still must not weaken security -- and writing a
 row to our own DB adds no attack surface. There is **no inbound trust**: the
-sidecar only ever reads the outbox and POSTs out; nothing flows from the webhook
+sidecar only ever reads the outbox and posts out; nothing flows from Discord
 back into the game.
 
 ### Durability
@@ -73,7 +73,7 @@ is idempotent), so it lands on pre-existing volumes too -- the same pattern as
 
 ## Configuration
 
-Everything is env. **The webhook URL is a secret and is never committed** -- it
+Everything is env. **The bot token is a secret and is never committed** -- it
 lives in the deploy `.env` only, the same way the DB password does.
 
 ### Server (the emitter)
@@ -82,50 +82,45 @@ lives in the deploy `.env` only, the same way the DB password does.
 |---|---|---|
 | `NET7_EXTERNAL_STATUS_ENABLED` | empty (off) | When unset/empty, `EmitExternalStatusEvent` is a no-op and **no outbox rows are written**. Dev/test/CI stacks and the integration suite leave it off and are completely unaffected. Set to `1` to enable. |
 
-### status-notifier sidecar (the relay)
+### status-notifier sidecar (the Discord bot)
+
+The bot is the sidecar's single Discord touchpoint: it posts each event line into
+a channel AND serves the `/status` and `/notify` slash commands.
 
 | Var | Default | Meaning |
 |---|---|---|
-| `STATUS_WEBHOOK_URL` | empty | **Secret.** The webhook to POST each line to. Empty => the sidecar idles (it does not crash-loop), so a default-off stack is harmless. |
+| `DISCORD_BOT_TOKEN` | empty | **Secret.** Bot token. Empty => the whole sidecar idles (no bot, no relay; it does not crash-loop), so a default-off stack is harmless. |
+| `STATUS_CHANNEL_ID` | empty | The channel the relay posts each event line into (`POST /channels/{id}/messages`). Empty => the bot still serves `/status` + `/notify` but the relay is idle (no target channel). |
+| `DISCORD_GUILD_ID` | empty | Optional. Registers the slash commands to one guild for instant availability; empty registers globally (first propagation can take ~1h). |
 | `DB_HOST` / `DB_USER` / `DB_PASS` / `DB_NAME` | `postgres:5432` / `net7` / `net7` / `net7_user` | Postgres connection (same contract the login service uses). |
 | `DATABASE_URL` | unset | Optional full libpq URL; overrides the `DB_*` pieces. |
 | `STATUS_RETENTION_DAYS` | `7` | Delivered rows older than this are swept hourly. `0` disables the sweep. |
 
-The sidecar serializes POSTs, honors a `429 Retry-After`, caps a runaway line to
-2000 chars, and never logs the webhook URL or any secret.
-
-### `/status` Discord bot (AM-8, optional, independent of the relay)
-
-| Var | Default | Meaning |
-|---|---|---|
-| `DISCORD_BOT_TOKEN` | empty | **Secret.** Bot token. Empty => the bot does not start (the webhook relay still runs if its URL is set). |
-| `DISCORD_GUILD_ID` | empty | Optional. Registers `/status` to one guild for instant availability; empty registers globally (first propagation can take ~1h). |
-
-The webhook relay (push) and the bot (pull) are independent and both optional: set
-`STATUS_WEBHOOK_URL` for push, `DISCORD_BOT_TOKEN` for the bot, either/both/neither.
-With neither set the sidecar idles. See the **`/status` Discord bot** section below
-for what it reports and why it is safe.
+The relay posts each line through the bot over the durable outbox: a row stays
+unsent until the post returns 2xx, then is marked sent. The sidecar serializes
+posts, relies on discordgo's internal rate-limiter (it sleeps on a `429` before
+returning), caps a runaway line to 2000 chars, and never logs a secret.
 
 ## Running it
 
-Both feature flags are off by default, so the stack does nothing extra unless you
-opt in:
+The feature is off by default, so the stack does nothing extra unless you opt in:
 
 ```sh
-# dev: enable the server emit AND give the sidecar a real webhook
+# dev: enable the server emit AND give the sidecar a bot token + target channel
 export NET7_EXTERNAL_STATUS_ENABLED=1
-export STATUS_WEBHOOK_URL='https://discord.com/api/webhooks/...'   # secret; do not commit
+export DISCORD_BOT_TOKEN='...'        # secret; do not commit
+export STATUS_CHANNEL_ID='123456789'  # the channel the relay posts into
 docker compose up -d
 ```
 
-For production see `deploy/do/README.md` (the webhook URL goes in the droplet
+For production see `deploy/do/README.md` (the bot token goes in the droplet
 `.env`, and the image is pulled from the registry like server/login).
 
-## The `/status` Discord bot (AM-8, optional)
+## The `/status` Discord bot (AM-8)
 
-The push events above are one-way and a plain webhook handles them. AM-8 adds the
-*pull* direction: a read-only Discord bot, living in the SAME sidecar, that answers
-a `/status` slash command with a live snapshot:
+The relay events above are one-way (server -> channel). The same bot also serves
+the *pull* direction: a read-only `/status` slash command that answers with a live
+snapshot:
 
 - players online -- name, class (e.g. `Explorer JE`), C/E/T levels, and the sector
   they occupy;
@@ -156,19 +151,50 @@ list comes from the DB and survives a heartbeat gap.
 
 ### Why a bot is safe here (it was previously out of scope)
 
-A bot is the only way to *receive* from Discord (a webhook is outbound-only). The
-concern was never the bot -- it was giving Discord a path INTO the game server.
+The concern was never the bot -- it was giving Discord a path INTO the game server.
 This bot has none: it connects **outbound** to Discord's gateway (no inbound port
-is opened) and everything it reports is a plain `SELECT`. It cannot mutate game
-state, issue commands, or reach the game process. That keeps the "no inbound control
-path into the security-sensitive server" rule intact -- the bot is just another DB
-reader, like the editor tools.
+is opened) and everything `/status` reports is a plain `SELECT`. It cannot mutate
+game state, issue commands, or reach the game process. That keeps the "no inbound
+control path into the security-sensitive server" rule intact -- the bot is just
+another DB reader, like the editor tools.
+
+## Admin notification toggles (`/notify`)
+
+When the relay has a target channel (`DISCORD_BOT_TOKEN` + `STATUS_CHANNEL_ID`),
+the bot also serves an **admin-only** `/notify` slash command that turns individual
+notification kinds on or off at runtime, without a redeploy:
+
+- `/notify list` -- show each kind (`login`, `logout`, `levelup`, `broadcast`,
+  `server_start`) and whether it is currently relayed.
+- `/notify set <kind> <on|off>` -- flip one kind.
+
+Replies are ephemeral (visible only to the admin). The command is gated **two ways**:
+Discord's `DefaultMemberPermissions = Manage Server` hides and rejects it for
+non-admins, and the handler re-checks the caller's Manage Server bit as defense in
+depth. Kinds are validated against a fixed allowlist and every write binds
+parameters -- there is no string-built SQL.
+
+### Why this does NOT give Discord a path into the game server
+
+The toggle is a **sidecar-side delivery filter, not a server gate**. The flags live
+in `status_notification_settings` (`net7_user`, `db/postgres/status_notification_settings.sql`).
+The game server keeps emitting **every** kind into the outbox unconditionally (gated
+only on `NET7_EXTERNAL_STATUS_ENABLED`); it **never reads** the settings table. Only
+the sidecar's drain loop reads it, and a disabled kind is consumed-and-dropped
+(marked sent = suppressed, so it neither delivers nor piles up, and re-enabling does
+not flush a stale backlog). An unknown kind absent from the table is delivered
+(fail-open) so a future event type is never silently swallowed.
+
+That boundary is deliberate: if the server read a Discord-writable table, a Discord
+admin would have a control path INTO the security-sensitive game process, which
+CLAUDE.md forbids. Emit stays unconditional; the filter lives only in the sidecar.
 
 ## Scope notes
 
 - The sidecar talks **only** to Postgres (`net7_user` + read-only `net7` for sector
-  names) and outbound HTTPS/websocket (webhook POST + the optional bot gateway). It
-  binds no game port and speaks no EnB protocol (see `docs/02-architecture.md`).
-- The bot is **read-only**: `/status` runs `SELECT`s and nothing else. There is no
-  command that writes game state, and there is deliberately no inbound network path
-  to the game server.
+  names) and outbound HTTPS/websocket (the Discord bot gateway + REST). It binds no
+  game port and speaks no EnB protocol (see `docs/02-architecture.md`).
+- The bot is **read-only with respect to game state**: `/status` runs `SELECT`s, and
+  `/notify` writes only the sidecar's own `status_notification_settings` table. There
+  is no command that writes game state, and there is deliberately no inbound network
+  path to the game server.

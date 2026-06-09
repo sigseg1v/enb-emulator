@@ -753,18 +753,18 @@ format & byte order", Trap 2).
 - **Change**: Phase AM emits 5 server status events as fully-rendered lines into
   the `external_status_events` outbox (net7_user) via `EmitExternalStatusEvent`
   (`server/src/SaveManager.cpp`), which the `status-notifier` Go sidecar relays to
-  a webhook. **Emit-only** -- alters no EnB client wire byte, so this is NOT a
+  a Discord channel via the bot. **Emit-only** -- alters no EnB client wire byte, so this is NOT a
   wire-fidelity CV. The reason it is here anyway: the four player-driven lines are
   RENDERED from live server state (name, class abbrev, the three level fields, the
   `(N online)` count, the broadcast sender+text) and that rendering has only been
   exercised by code inspection, never by a real client session.
 - **What is ALREADY proven (no client needed)**: the sidecar end-to-end
-  (NOTIFY -> drain -> POST `{"content":...}` -> sent_at) against the real dev
+  (NOTIFY -> drain -> bot channel post -> sent_at) against the real dev
   Postgres, the startup catch-up drain, and the server's own emit path -- a live
   server brought up with `NET7_EXTERNAL_STATUS_ENABLED=1` wrote a real
   `server_start` row, proving SaveManager queue -> parameterized INSERT works.
-- **What to look for (real client)**: with the flag on and a real
-  `STATUS_WEBHOOK_URL` set, log a character in and confirm the channel shows
+- **What to look for (real client)**: with the flag on and `DISCORD_BOT_TOKEN` +
+  `STATUS_CHANNEL_ID` set, log a character in and confirm the channel shows
   `Player <name> (level: Cx/Ty/Ez, class: XX) logged in. (N online)` with the
   RIGHT class abbreviation (`ClassIndex() = Race()*3 + Profession()` ->
   `{TE,TT,TS,JD,JS,JE,PW,PP,PS}`), the right C/T/E levels, and an N that matches
@@ -777,8 +777,8 @@ format & byte order", Trap 2).
   headless CLI does not drive end-to-end in this env. The class-abbrev mapping in
   particular (the `Net7.h` Profession enum ordering) is the most likely thing to
   be subtly wrong and only a real character of a known class confirms it.
-- **Setup**: `export NET7_EXTERNAL_STATUS_ENABLED=1` and a test
-  `STATUS_WEBHOOK_URL`, `just play-local`, log in / level / broadcast / log out,
+- **Setup**: `export NET7_EXTERNAL_STATUS_ENABLED=1`, a `DISCORD_BOT_TOKEN`, and a
+  `STATUS_CHANNEL_ID`, `just play-local`, log in / level / broadcast / log out,
   watch the channel. See `docs/18-external-status-events.md`.
 
 ### [ ] CV-AM-2 -- `/status` Discord bot answers correctly (Phase AM-8)
@@ -809,6 +809,12 @@ format & byte order", Trap 2).
   confirm it shows "nobody online". Stop the server and confirm `/status` flips to
   the offline/stale-heartbeat state within ~2 min. See
   `docs/18-external-status-events.md`.
+- **Also verify (AM-9, same bot token)**: with `STATUS_CHANNEL_ID` set alongside the
+  bot token, confirm the relay posts login/logout/level-up lines INTO that channel.
+  As a Manage-Server admin, run `/notify list`
+  (shows the five kinds on/off) and `/notify set logout off`; confirm subsequent
+  logouts no longer post while logins still do, and that re-enabling does NOT flush a
+  backlog of the suppressed events. Confirm a non-admin cannot see/use `/notify`.
 
 ### [ ] CV-MVAS-POS -- Normal-thruster flight stays in sync (PB-2 position feed)
 

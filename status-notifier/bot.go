@@ -1,13 +1,12 @@
-// bot.go -- optional read-only Discord bot for the status-notifier sidecar
-// (Phase AM-8).
+// bot.go -- the Discord bot for the status-notifier sidecar (Phase AM-8 / AM-9).
 //
-// Separate from the webhook relay (main.go): the relay PUSHES rendered event
-// lines outbound; this bot answers a PULL `/status` slash command. Both are
-// optional and independent -- set STATUS_WEBHOOK_URL for push, DISCORD_BOT_TOKEN
-// for the bot, either/both/neither.
+// The bot is the sidecar's single Discord touchpoint: main.go's relay posts each
+// event line THROUGH this bot's session into STATUS_CHANNEL_ID, and the bot also
+// answers two slash commands -- `/status` (read-only snapshot) and `/notify`
+// (admin-only per-kind relay toggles).
 //
 // The bot connects to the Discord gateway (an OUTBOUND websocket -- no inbound
-// port is exposed) and registers one slash command, `/status`. On invocation it
+// port is exposed) and registers the slash commands. On a `/status` invocation it
 // runs READ-ONLY SQL against the databases the rest of the stack already owns
 // and replies with an embed:
 //
@@ -81,15 +80,16 @@ type serverStatus struct {
 	staleSecs     int64
 }
 
-// startBot runs the Discord bot until ctx is cancelled. It is its own goroutine
-// in main(); a failure here must not take down the webhook relay, so it logs and
-// returns rather than crashing the process. userDSN is the net7_user DSN; the
-// net7 DSN is derived from it for sector-name lookups.
-func startBot(ctx context.Context, userDSN, token, guildID string) {
+// startBot opens the Discord gateway, registers the slash commands, and returns
+// the live session (nil on failure -- a bot failure must never take down the
+// relay). The session stays usable for REST sends (botSender) until ctx is
+// cancelled, at which point a watcher goroutine closes the gateway. userDSN is the
+// net7_user DSN; the net7 DSN is derived from it for sector-name lookups.
+func startBot(ctx context.Context, userDSN, token, guildID string) *discordgo.Session {
 	dg, err := discordgo.New("Bot " + token)
 	if err != nil {
 		logf("bot: discordgo.New failed: %v -- bot disabled", err)
-		return
+		return nil
 	}
 	// We only need to receive interactions; no privileged message-content intent.
 	dg.Identify.Intents = discordgo.IntentsGuilds
@@ -98,34 +98,103 @@ func startBot(ctx context.Context, userDSN, token, guildID string) {
 		if ic.Type != discordgo.InteractionApplicationCommand {
 			return
 		}
-		if ic.ApplicationCommandData().Name != "status" {
-			return
+		switch ic.ApplicationCommandData().Name {
+		case "status":
+			handleStatusCommand(ctx, s, ic, userDSN)
+		case "notify":
+			handleNotifyCommand(ctx, s, ic, userDSN)
 		}
-		handleStatusCommand(ctx, s, ic, userDSN)
 	})
 
 	if err := dg.Open(); err != nil {
 		logf("bot: gateway open failed: %v -- bot disabled", err)
-		return
+		return nil
 	}
-	defer dg.Close()
 	logf("bot: connected to Discord gateway as %s", dg.State.User.String())
 
-	cmd := &discordgo.ApplicationCommand{
-		Name:        "status",
-		Description: "Show live server status: players online, sectors, uptime.",
-	}
-	if _, err := dg.ApplicationCommandCreate(dg.State.User.ID, guildID, cmd); err != nil {
-		logf("bot: registering /status failed: %v", err)
-		// Keep running -- a previously-registered command may still work.
-	} else if guildID != "" {
-		logf("bot: /status registered to guild %s", guildID)
-	} else {
-		logf("bot: /status registered globally (first propagation can take ~1h)")
-	}
+	registerCommands(dg, guildID)
 
-	<-ctx.Done()
-	logf("bot: shutting down")
+	// Close the gateway when the process context ends. Until then the returned
+	// session is used by botSender for REST message posts.
+	go func() {
+		<-ctx.Done()
+		logf("bot: shutting down")
+		dg.Close()
+	}()
+
+	return dg
+}
+
+// registerCommands (re)registers /status and the admin-gated /notify. A failure
+// to register one is logged but non-fatal -- a previously-registered copy may
+// still serve.
+func registerCommands(dg *discordgo.Session, guildID string) {
+	// /notify is admin-only: Discord hides it from, and rejects it for, members
+	// without Manage Server. This is the primary gate (handleNotifyCommand
+	// re-checks as defense in depth).
+	manageGuild := int64(discordgo.PermissionManageServer)
+	cmds := []*discordgo.ApplicationCommand{
+		{
+			Name:        "status",
+			Description: "Show live server status: players online, sectors, uptime.",
+		},
+		{
+			Name:                     "notify",
+			Description:              "Admin: toggle which status notifications the relay posts.",
+			DefaultMemberPermissions: &manageGuild,
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "list",
+					Description: "Show which notification kinds are on or off.",
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "set",
+					Description: "Turn a notification kind on or off.",
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Type:        discordgo.ApplicationCommandOptionString,
+							Name:        "kind",
+							Description: "Which notification kind.",
+							Required:    true,
+							Choices:     kindChoices(),
+						},
+						{
+							Type:        discordgo.ApplicationCommandOptionString,
+							Name:        "state",
+							Description: "Turn it on or off.",
+							Required:    true,
+							Choices: []*discordgo.ApplicationCommandOptionChoice{
+								{Name: "on", Value: "on"},
+								{Name: "off", Value: "off"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	for _, cmd := range cmds {
+		if _, err := dg.ApplicationCommandCreate(dg.State.User.ID, guildID, cmd); err != nil {
+			logf("bot: registering /%s failed: %v", cmd.Name, err)
+		}
+	}
+	if guildID != "" {
+		logf("bot: commands registered to guild %s", guildID)
+	} else {
+		logf("bot: commands registered globally (first propagation can take ~1h)")
+	}
+}
+
+// kindChoices renders the kind allowlist as slash-command choices so the picker
+// only ever offers a known kind.
+func kindChoices() []*discordgo.ApplicationCommandOptionChoice {
+	choices := make([]*discordgo.ApplicationCommandOptionChoice, 0, len(notificationKinds))
+	for _, k := range notificationKinds {
+		choices = append(choices, &discordgo.ApplicationCommandOptionChoice{Name: k, Value: k})
+	}
+	return choices
 }
 
 // handleStatusCommand answers one /status invocation. It defers the reply first
@@ -318,6 +387,115 @@ func readSectorNames(ctx context.Context, userDSN string) map[int64]string {
 		names[id] = name
 	}
 	return names
+}
+
+// handleNotifyCommand answers /notify list and /notify set. Discord already gates
+// this on Manage Server (DefaultMemberPermissions); we re-check here so a stale or
+// mis-scoped registration can never let a non-admin flip a switch. Replies are
+// ephemeral so the toggles do not spam the channel. All writes bind parameters and
+// validate the kind against the allowlist.
+func handleNotifyCommand(ctx context.Context, s *discordgo.Session, ic *discordgo.InteractionCreate, userDSN string) {
+	if !callerIsAdmin(ic) {
+		respondEphemeral(s, ic, "You need the Manage Server permission to use /notify.")
+		return
+	}
+	data := ic.ApplicationCommandData()
+	if len(data.Options) == 0 {
+		respondEphemeral(s, ic, "Usage: /notify list  |  /notify set <kind> <on|off>")
+		return
+	}
+	sub := data.Options[0]
+
+	conn, err := pgx.Connect(ctx, userDSN)
+	if err != nil {
+		logf("notify: connect failed: %v", err)
+		respondEphemeral(s, ic, "Could not reach the settings database.")
+		return
+	}
+	defer conn.Close(ctx)
+
+	switch sub.Name {
+	case "list":
+		enabled := readEnabledKinds(ctx, conn)
+		var b strings.Builder
+		b.WriteString("**Status relay -- per-kind state**\n")
+		for _, k := range notificationKinds {
+			state := "🔴 off"
+			if enabled[k] {
+				state = "🟢 on"
+			}
+			fmt.Fprintf(&b, "• `%s` -- %s\n", k, state)
+		}
+		respondEphemeral(s, ic, b.String())
+
+	case "set":
+		kind := optString(sub.Options, "kind")
+		state := optString(sub.Options, "state")
+		if !isKnownKind(kind) {
+			respondEphemeral(s, ic, fmt.Sprintf("Unknown notification kind %q.", kind))
+			return
+		}
+		if state != "on" && state != "off" {
+			respondEphemeral(s, ic, "State must be `on` or `off`.")
+			return
+		}
+		updatedBy := callerID(ic)
+		if err := setKindEnabled(ctx, conn, kind, state == "on", updatedBy); err != nil {
+			logf("notify: set %s=%s failed: %v", kind, state, err)
+			respondEphemeral(s, ic, "Failed to update the setting.")
+			return
+		}
+		logf("notify: %s set %s -> %s", updatedBy, kind, state)
+		respondEphemeral(s, ic, fmt.Sprintf("`%s` notifications are now **%s**.", kind, state))
+
+	default:
+		respondEphemeral(s, ic, "Unknown subcommand.")
+	}
+}
+
+// callerIsAdmin returns true only if the invoking guild member has Manage Server.
+// ic.Member.Permissions is Discord's computed permission set for the caller in the
+// invoking channel, so this needs no extra lookup. A DM invocation (no Member) is
+// rejected -- /notify is a guild operation.
+func callerIsAdmin(ic *discordgo.InteractionCreate) bool {
+	if ic.Member == nil {
+		return false
+	}
+	return ic.Member.Permissions&discordgo.PermissionManageServer != 0
+}
+
+// callerID returns the invoking user's Discord id for the audit trail.
+func callerID(ic *discordgo.InteractionCreate) string {
+	if ic.Member != nil && ic.Member.User != nil {
+		return ic.Member.User.ID
+	}
+	if ic.User != nil {
+		return ic.User.ID
+	}
+	return "unknown"
+}
+
+// optString pulls a named string option from an interaction option list.
+func optString(opts []*discordgo.ApplicationCommandInteractionDataOption, name string) string {
+	for _, o := range opts {
+		if o.Name == name {
+			return o.StringValue()
+		}
+	}
+	return ""
+}
+
+// respondEphemeral sends a one-shot ephemeral reply (visible only to the caller).
+func respondEphemeral(s *discordgo.Session, ic *discordgo.InteractionCreate, msg string) {
+	if err := s.InteractionRespond(ic.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: msg,
+			Flags:   discordgo.MessageFlagsEphemeral,
+		},
+	}); err != nil {
+		logf("notify: respond failed: %v", err)
+	}
 }
 
 // humanDuration renders a second count as a compact "Nd Nh Nm" string.

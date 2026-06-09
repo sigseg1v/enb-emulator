@@ -165,9 +165,11 @@ enb:server-vN  enb:login-vN  enb:status-notifier-vN      <- immutable versioned
 enb:{server,login,status-notifier}-latest                <- alias, re-pointed at vN
 ```
 
-`status-notifier` is the Phase AM sidecar that relays the external-status outbox
-to a webhook (see `docs/18-external-status-events.md`); it is default-off and
-only delivers when `STATUS_WEBHOOK_URL` is set in the droplet `.env`.
+`status-notifier` is the Phase AM sidecar: a Discord bot that posts the
+external-status outbox into a channel and serves the `/status` + `/notify` slash
+commands (see `docs/18-external-status-events.md`). It is default-off; the bot runs
+when `DISCORD_BOT_TOKEN` is set in the droplet `.env`, and the relay delivers when
+`STATUS_CHANNEL_ID` is also set (admins toggle individual kinds with `/notify`).
 
 The proxy is **not** in the registry at all -- it is a per-client bridge that
 runs on each player's Windows machine and ships with the client package, never

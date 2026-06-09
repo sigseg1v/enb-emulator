@@ -77,14 +77,13 @@ try {
     # deploy, so anything the prod compose needs must be threaded through here --
     # editing /opt/enb/.env by hand on the droplet would be clobbered next update.
     # The Phase AM status-notifier feature is default-off: leave these blank in
-    # the operator .env and the sidecar idles. STATUS_WEBHOOK_URL and
-    # DISCORD_BOT_TOKEN are SECRETS; they live only in the gitignored operator
-    # .env, like DO_TOKEN.
+    # the operator .env and the sidecar idles. DISCORD_BOT_TOKEN is a SECRET; it
+    # lives only in the gitignored operator .env, like DO_TOKEN.
     $extStatus  = Get-EnvOr 'NET7_EXTERNAL_STATUS_ENABLED' ''
-    $webhook    = Get-EnvOr 'STATUS_WEBHOOK_URL' ''
     $retention  = Get-EnvOr 'STATUS_RETENTION_DAYS' '7'
     $botToken   = Get-EnvOr 'DISCORD_BOT_TOKEN' ''
     $guildId    = Get-EnvOr 'DISCORD_GUILD_ID' ''
+    $channelId  = Get-EnvOr 'STATUS_CHANNEL_ID' ''
 
     # Phase AN: the login server's /updateCheck reads the launcher manifest from
     # CloudFront. Derive the two NET7_PATCHER_* env vars from the patcher fields;
@@ -121,10 +120,10 @@ try {
         "IMAGE_TAG=$Tag"
         "DOMAIN=$domain"
         "NET7_EXTERNAL_STATUS_ENABLED=$extStatus"
-        "STATUS_WEBHOOK_URL=$webhook"
         "STATUS_RETENTION_DAYS=$retention"
         "DISCORD_BOT_TOKEN=$botToken"
         "DISCORD_GUILD_ID=$guildId"
+        "STATUS_CHANNEL_ID=$channelId"
         "NET7_PATCHER_MANIFEST_URL=$patcherManifestUrl"
         "NET7_PATCHER_DL_BASE=$patcherDlBase"
         "BACKUP_S3_BUCKET=$backupBucket"

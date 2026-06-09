@@ -264,13 +264,59 @@ and answers `/status` with plain `SELECT`s.
       rendering + SQL are unit-tested and the SQL was run against the live dev schema;
       what is unverified is purely the discordgo gateway/slash-command handshake.
 
+## AM-9 -- admin notification toggles + bot-channel relay
+
+Lets a Discord admin turn individual notification kinds on/off at runtime, and adds
+a second relay transport (bot channel) so the toggles have a home channel.
+
+- [x] **AM-9a** `db/postgres/status_notification_settings.sql` -- per-kind
+      on/off table (`kind` PK, `enabled`, `updated_at`, `updated_by`), seeded with the
+      five known kinds (all on, `ON CONFLICT DO NOTHING`). Applied unconditionally by
+      schema-init in BOTH `docker-compose.yml` and the prod compose (idempotent
+      `CREATE TABLE IF NOT EXISTS`, lands on pre-existing volumes).
+- [x] **AM-9b** `status-notifier/settings.go` -- `notificationKinds` allowlist,
+      `isKnownKind`, `readEnabledKinds` (fail-open: unknown/absent kind => enabled, DB
+      error => all enabled), `setKindEnabled` (validated + parameterized UPSERT).
+- [x] **AM-9c** Relay delivery (`main.go`): `type sender`; `botSender`
+      (`ChannelMessageSend` = REST `POST /channels/{id}/messages`). The relay runs when
+      `DISCORD_BOT_TOKEN` + `STATUS_CHANNEL_ID` are set, else idles. `drain` now reads
+      the enabled set once per pass and CONSUMES-AND-DROPS a disabled kind (marks sent =
+      suppressed) so it neither delivers nor backlogs. The game server still emits every
+      kind and NEVER reads the settings table (sidecar-side filter only). (The original
+      AM-9c shipped a second `webhookSender` transport; removed in AM-9g below -- the bot
+      is now the sole Discord touchpoint.)
+- [x] **AM-9d** `/notify` slash command (`bot.go`): admin-gated via
+      `DefaultMemberPermissions = Manage Server` + a handler-side Manage Server recheck;
+      `list` and `set <kind choices> <on|off>`; ephemeral replies; `updated_by` = caller
+      id for audit. `startBot` now returns the live `*discordgo.Session` (non-blocking;
+      gateway closed by a ctx watcher) so the relay can post through it.
+- [x] **AM-9e** Config threaded through: `STATUS_CHANNEL_ID` in dev compose, prod
+      compose, `Update-Stack.ps1`, `.env`/`.env.example`; docs/18 + deploy README
+      updated. `go build`/`go vet`/`gofmt` clean.
+- [ ] **AM-9f** Live Discord round-trip for `/notify` + bot-channel delivery: needs an
+      owner bot token + a channel id. Folded into **CV-AM-2** (same gateway/slash-command
+      handshake as `/status`). SQL + filter logic are unit-coverable; the discordgo
+      interaction handshake is what is unverified.
+- [x] **AM-9g** Webhook transport removed (owner directive 2026-06-08: "remove webhook,
+      we only need bot now"). The bot is the sidecar's sole Discord touchpoint: it posts
+      each event line into the channel AND serves `/status` + `/notify`. Deleted
+      `webhookSender`, `deliver`, `jsonString`, the `httpClient`, the `net/http` import,
+      and the four `TestDeliver*`/`TestJSONString` unit tests; `sender` simplified from
+      `func(string)(bool,time.Duration)` to `func(string) bool` (discordgo's internal
+      limiter sleeps on a 429 before returning, so no manual Retry-After handling). Bot
+      token empty => whole sidecar idles. Stripped `STATUS_WEBHOOK_URL` from
+      `docker-compose.yml`, the prod compose, `Update-Stack.ps1`, `.env`/`.env.example`,
+      `docs/18`, and the deploy README. Added a plain `external_status_events (sent_at)`
+      index (alongside the existing `WHERE sent_at IS NULL` partial index) for the
+      retention sweep + admin ad-hoc queries. `go build`/`go vet`/`gofmt`/`go test` clean.
+
 ## Verification status (what is proven vs. pending)
 
 | Path | Proven? | How |
 |---|---|---|
-| Sidecar NOTIFY -> drain -> POST -> sent_at | YES | live vs dev Postgres + httptest |
+| Sidecar NOTIFY -> drain -> bot post -> sent_at | YES | live vs dev Postgres |
 | Sidecar startup catch-up drain (no NOTIFY) | YES | row pre-inserted, sidecar restarted |
-| Sidecar idle on empty webhook (no crash-loop) | YES | unit + manual |
+| Sidecar idle on empty bot token (no crash-loop) | YES | unit + manual |
 | Server emit path (queue->INSERT, no cross-DB) | YES | live `server_start` row in net7_user |
 | login/logout/levelup/broadcast rendered lines | NO | needs real-client login -> CV-AM-1 |
 | `NET7_EXTERNAL_STATUS_ENABLED` empty == no rows | YES | default-off restore verified |

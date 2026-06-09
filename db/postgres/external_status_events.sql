@@ -3,7 +3,7 @@
 -- Phase AM. The game server publishes live status events (player login / logout
 -- with the current online count, level-up, server broadcast, "server started")
 -- for an out-of-process consumer to relay to a chat channel or dashboard. The
--- first consumer is a Discord webhook sidecar (status-notifier/), but nothing
+-- first consumer is a Discord bot sidecar (status-notifier/), but nothing
 -- here is Discord-specific -- the server only writes a generic event row.
 --
 -- The server does NOT contact the external service directly: pulling an
@@ -40,7 +40,13 @@ CREATE TABLE IF NOT EXISTS external_status_events (
 );
 
 -- The sidecar's hot path is "give me every row not yet delivered, oldest
--- first". A partial index on the unsent rows keeps that scan cheap even as the
--- delivered backlog grows between retention sweeps.
+-- first". A partial (predicate) index on the unsent rows keeps that scan cheap
+-- even as the delivered backlog grows between retention sweeps.
 CREATE INDEX IF NOT EXISTS external_status_events_unsent
     ON external_status_events (id) WHERE sent_at IS NULL;
+
+-- A plain index on sent_at backs the hourly retention sweep
+-- (WHERE sent_at IS NOT NULL AND sent_at < now() - interval) and any ad-hoc admin
+-- query that filters or sorts delivered rows by their delivery time.
+CREATE INDEX IF NOT EXISTS external_status_events_sent_at
+    ON external_status_events (sent_at);
