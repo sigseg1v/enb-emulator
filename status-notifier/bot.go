@@ -14,7 +14,8 @@
 //     from net7_user (accounts + avatar_info + avatar_data + avatar_level_info);
 //   - authoritative player count, sectors STARTED in memory, and server uptime,
 //     from the server_status heartbeat row the game server UPSERTs (net7_user);
-//   - sector names resolved from the net7 content DB.
+//   - location names resolved from the net7 content DB (sectors for players in
+//     space, starbases for docked players).
 //
 // It NEVER mutates game state and has no path into the game process: everything
 // it reports is a plain SELECT. That keeps CLAUDE.md's "no inbound control path
@@ -39,23 +40,25 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// classNames maps ClassIndex (race*3 + prof) to the real EnB class name + the
-// two-letter class code. Mirrors the server (UDP_Global.cpp kClassAbbrev) and the
-// CLI (CharacterClass.cs ClassTable): the profession slot is an archetype but the
-// class NAME is race-specific -- Terran warrior = Enforcer (TE), Jenquai warrior =
-// Defender (JD), etc. There is no "TW"/"JW".
-var classNames = [9]struct{ Name, Code string }{
-	{"Enforcer", "TE"}, {"Trader", "TT"}, {"Scout", "TS"},
-	{"Defender", "JD"}, {"Seeker", "JS"}, {"Explorer", "JE"},
-	{"Warrior", "PW"}, {"Privateer", "PP"}, {"Sentinel", "PS"},
+// classCodes maps ClassIndex (race*3 + prof) to the two-letter class code.
+// Mirrors the server (UDP_Global.cpp kClassAbbrev) and the CLI (CharacterClass.cs
+// ClassTable): the profession slot is an archetype but the class identity is
+// race-specific. The full names (for reference) are, in order:
+//
+//	TE Enforcer, TT Trader, TS Scout, JD Defender, JS Seeker, JE Explorer,
+//	PW Warrior, PP Privateer, PS Sentinel. There is no "TW"/"JW".
+var classCodes = [9]string{
+	"TE", "TT", "TS",
+	"JD", "JS", "JE",
+	"PW", "PP", "PS",
 }
 
-func className(race, prof int) (string, string) {
+func classCode(race, prof int) string {
 	idx := race*3 + prof
-	if idx < 0 || idx >= len(classNames) {
-		return fmt.Sprintf("Class(%d,%d)", race, prof), "??"
+	if idx < 0 || idx >= len(classCodes) {
+		return "??"
 	}
-	return classNames[idx].Name, classNames[idx].Code
+	return classCodes[idx]
 }
 
 // onlinePlayer is one row of the /status player table.
@@ -235,7 +238,7 @@ func buildStatusEmbed(ctx context.Context, userDSN string) (*discordgo.MessageEm
 	if err != nil {
 		return nil, err
 	}
-	sectorNames := readSectorNames(ctx, userDSN) // best-effort; empty map on failure
+	locationNames := readLocationNames(ctx, userDSN) // best-effort; empty map on failure
 
 	embed := &discordgo.MessageEmbed{
 		Title: "Earth & Beyond -- Server Status",
@@ -268,7 +271,7 @@ func buildStatusEmbed(ctx context.Context, userDSN string) (*discordgo.MessageEm
 	} else {
 		var b strings.Builder
 		for _, p := range players {
-			b.WriteString(renderPlayerLine(p, sectorNames))
+			b.WriteString(renderPlayerLine(p, locationNames))
 			b.WriteByte('\n')
 		}
 		// Embed field values cap at 1024 chars; truncate gracefully.
@@ -286,22 +289,33 @@ func buildStatusEmbed(ctx context.Context, userDSN string) (*discordgo.MessageEm
 }
 
 // renderPlayerLine formats one player row. A player sitting in character-select
-// (no entered avatar) shows without a sector/levels.
-func renderPlayerLine(p onlinePlayer, sectorNames map[int64]string) string {
+// (no entered avatar) shows without a location/levels. locationNames maps the
+// avatar_info.sector value (a sector id in space, or a starbase interior id when
+// docked) to a human name; an unknown id falls back to the bare number.
+func renderPlayerLine(p onlinePlayer, locationNames map[int64]string) string {
 	if p.firstName == "" {
 		return fmt.Sprintf("• `%s` -- _in character select_", p.username)
 	}
-	clsName, clsCode := className(p.race, p.prof)
-	sector := "?"
+	clsCode := classCode(p.race, p.prof)
+	location := "?"
 	if p.sector > 0 {
-		if name, ok := sectorNames[p.sector]; ok && name != "" {
-			sector = fmt.Sprintf("%s (%d)", name, p.sector)
+		if name, ok := locationNames[p.sector]; ok && name != "" {
+			location = name
 		} else {
-			sector = fmt.Sprintf("%d", p.sector)
+			location = fmt.Sprintf("%d", p.sector)
 		}
 	}
-	return fmt.Sprintf("• **%s** -- %s %s, lvl %d/%d/%d (C/E/T) -- %s",
-		p.firstName, clsName, clsCode, p.combat, p.explore, p.trade, sector)
+	// Displayed character level is the highest of the three skill levels (EnB
+	// convention); the per-skill breakdown follows in parentheses.
+	level := p.combat
+	if p.explore > level {
+		level = p.explore
+	}
+	if p.trade > level {
+		level = p.trade
+	}
+	return fmt.Sprintf("• **%s** -- %s, lvl %d (C%d/E%d/T%d) -- %s",
+		p.firstName, clsCode, level, p.combat, p.explore, p.trade, location)
 }
 
 // readServerStatus reads the singleton heartbeat row. The second return is false
@@ -358,34 +372,50 @@ func readOnlinePlayers(ctx context.Context, conn *pgx.Conn) ([]onlinePlayer, err
 	return out, rows.Err()
 }
 
-// readSectorNames pulls sector_id -> name from the net7 CONTENT database (a
-// different DB than net7_user, so a separate connection -- a single connection
-// cannot cross-DB join in Postgres). Best-effort: on any failure we return an
-// empty map and the caller falls back to bare sector ids.
-func readSectorNames(ctx context.Context, userDSN string) map[int64]string {
+// readLocationNames maps the value stored in avatar_info.sector to a human name,
+// pulled from the net7 CONTENT database (a different DB than net7_user, so a
+// separate connection -- a single connection cannot cross-DB join in Postgres).
+//
+// That value is NOT always a sector id: when a player is docked the server stores
+// the starbase's interior id (starbases.starbase_sector_id, a distinct high-numbered
+// id space) instead of the parent sector_id. So we load BOTH tables into one map --
+// sectors.sector_id -> name for players in space, and starbases.starbase_sector_id
+// -> name for docked players. Sectors are loaded first; a starbase never overwrites
+// a real sector entry on the off chance the id spaces ever collide.
+//
+// Best-effort: on any failure we return whatever we have and the caller falls back
+// to the bare id.
+func readLocationNames(ctx context.Context, userDSN string) map[int64]string {
 	names := map[int64]string{}
 	contentDSN := swapDBName(userDSN, "net7")
 	conn, err := pgx.Connect(ctx, contentDSN)
 	if err != nil {
-		logf("bot: sector-name lookup connect failed: %v (showing ids only)", err)
+		logf("bot: location-name lookup connect failed: %v (showing ids only)", err)
 		return names
 	}
 	defer conn.Close(ctx)
 
-	rows, err := conn.Query(ctx, "SELECT sector_id, name FROM sectors")
-	if err != nil {
-		logf("bot: sector-name query failed: %v (showing ids only)", err)
-		return names
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var id int64
-		var name string
-		if err := rows.Scan(&id, &name); err != nil {
-			continue
+	load := func(query, label string) {
+		rows, err := conn.Query(ctx, query)
+		if err != nil {
+			logf("bot: %s query failed: %v (showing ids only)", label, err)
+			return
 		}
-		names[id] = name
+		defer rows.Close()
+		for rows.Next() {
+			var id int64
+			var name string
+			if err := rows.Scan(&id, &name); err != nil {
+				continue
+			}
+			if _, taken := names[id]; !taken && name != "" {
+				names[id] = name
+			}
+		}
 	}
+
+	load("SELECT sector_id, name FROM sectors", "sector-name")
+	load("SELECT starbase_sector_id, name FROM starbases WHERE starbase_sector_id IS NOT NULL", "starbase-name")
 	return names
 }
 

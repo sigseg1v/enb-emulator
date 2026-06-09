@@ -2,58 +2,66 @@ package main
 
 import "testing"
 
-func TestClassName(t *testing.T) {
+func TestClassCode(t *testing.T) {
 	cases := []struct {
-		race, prof     int
-		wantName, code string
+		race, prof int
+		code       string
 	}{
-		{0, 0, "Enforcer", "TE"}, // Terran warrior-slot
-		{0, 1, "Trader", "TT"},
-		{0, 2, "Scout", "TS"},
-		{1, 0, "Defender", "JD"}, // Jenquai warrior-slot -- NOT "JW"
-		{1, 1, "Seeker", "JS"},
-		{1, 2, "Explorer", "JE"},
-		{2, 0, "Warrior", "PW"},
-		{2, 1, "Privateer", "PP"},
-		{2, 2, "Sentinel", "PS"},
+		{0, 0, "TE"}, // Terran warrior-slot
+		{0, 1, "TT"},
+		{0, 2, "TS"},
+		{1, 0, "JD"}, // Jenquai warrior-slot -- NOT "JW"
+		{1, 1, "JS"},
+		{1, 2, "JE"},
+		{2, 0, "PW"},
+		{2, 1, "PP"},
+		{2, 2, "PS"},
 	}
 	for _, c := range cases {
-		name, code := className(c.race, c.prof)
-		if name != c.wantName || code != c.code {
-			t.Errorf("className(%d,%d) = (%q,%q); want (%q,%q)",
-				c.race, c.prof, name, code, c.wantName, c.code)
+		if code := classCode(c.race, c.prof); code != c.code {
+			t.Errorf("classCode(%d,%d) = %q; want %q", c.race, c.prof, code, c.code)
 		}
 	}
 }
 
-func TestClassNameOutOfRange(t *testing.T) {
-	if name, code := className(9, 9); code != "??" || name == "" {
-		t.Errorf("out-of-range className did not fall back: (%q,%q)", name, code)
+func TestClassCodeOutOfRange(t *testing.T) {
+	if code := classCode(9, 9); code != "??" {
+		t.Errorf("out-of-range classCode did not fall back: %q", code)
 	}
 }
 
 func TestRenderPlayerLine(t *testing.T) {
-	sectors := map[int64]string{42: "Earth"}
+	// The map mixes sector ids (in space) and starbase interior ids (docked) --
+	// renderPlayerLine treats both uniformly as id -> name.
+	locations := map[int64]string{42: "Earth", 10521: "Nishino Research Facility"}
 
-	// Entered avatar with a known sector.
+	// Entered avatar in a known sector (in space). Displayed level is the max of
+	// the three skill levels (12 here); the breakdown follows in parens.
 	p := onlinePlayer{username: "acct", firstName: "Veretjd", sector: 42,
 		race: 1, prof: 2, combat: 5, explore: 12, trade: 3}
-	got := renderPlayerLine(p, sectors)
-	want := "• **Veretjd** -- Explorer JE, lvl 5/12/3 (C/E/T) -- Earth (42)"
+	got := renderPlayerLine(p, locations)
+	want := "• **Veretjd** -- JE, lvl 12 (C5/E12/T3) -- Earth"
 	if got != want {
 		t.Errorf("entered player:\n got %q\nwant %q", got, want)
 	}
 
-	// Sector id with no name falls back to the bare id.
+	// Docked: avatar_info.sector holds a starbase interior id, resolved by name.
+	p.sector = 10521
+	got = renderPlayerLine(p, locations)
+	if want := "• **Veretjd** -- JE, lvl 12 (C5/E12/T3) -- Nishino Research Facility"; got != want {
+		t.Errorf("docked player:\n got %q\nwant %q", got, want)
+	}
+
+	// An id with no name falls back to the bare number.
 	p.sector = 99
-	got = renderPlayerLine(p, sectors)
-	if want := "• **Veretjd** -- Explorer JE, lvl 5/12/3 (C/E/T) -- 99"; got != want {
-		t.Errorf("unknown sector:\n got %q\nwant %q", got, want)
+	got = renderPlayerLine(p, locations)
+	if want := "• **Veretjd** -- JE, lvl 12 (C5/E12/T3) -- 99"; got != want {
+		t.Errorf("unknown location:\n got %q\nwant %q", got, want)
 	}
 
 	// A session still in character select (no entered avatar).
 	cs := onlinePlayer{username: "acct"}
-	got = renderPlayerLine(cs, sectors)
+	got = renderPlayerLine(cs, locations)
 	if want := "• `acct` -- _in character select_"; got != want {
 		t.Errorf("char-select:\n got %q\nwant %q", got, want)
 	}
