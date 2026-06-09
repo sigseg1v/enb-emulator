@@ -125,17 +125,26 @@ void ServerManager::ServerCheck()
 	m_ConnectionMgr.CheckConnections();
 	//m_ConnectionMgr.CheckSslConnections();
 
-	// Post-logoff auto-shutdown. Once the sector server has confirmed LOGOFF
-	// (g_LogoffConfirmed) and the client has torn down its TCP links to the
-	// master (3801) and sector (3500) listeners -- which CheckConnections()
-	// just reaped -- this single-client proxy has nothing left to do. Exit the
-	// MainLoop so the process terminates instead of leaving the console window
-	// open on Windows.
+#ifdef _WIN32
+	// Post-logoff auto-shutdown -- WINDOWS BUILD ONLY. Once the sector server
+	// has confirmed LOGOFF (g_LogoffConfirmed) and the client has torn down its
+	// TCP links to the master (3801) and sector (3500) listeners -- which
+	// CheckConnections() just reaped -- this single-client proxy has nothing
+	// left to do. Exit the MainLoop so the process terminates instead of leaving
+	// the console window open on Windows (where real players run the Win32 PE
+	// proxy under WINE, launched by FreyaLauncher).
+	//
+	// The LINUX build deliberately does NOT self-exit: the docker proxy is a
+	// long-lived `restart: unless-stopped` service shared across sessions (the
+	// dev stack and the CI integration suite both reuse one proxy for many
+	// sequential login/logoff cycles). Self-exiting there would bounce the
+	// container mid-suite and race the next session's connect.
 	if (g_LogoffConfirmed && !m_ConnectionMgr.HasActiveClientLink())
 	{
 		LogMessage("Proxy: logoff confirmed and client TCP links closed -- shutting down.\n");
 		g_ServerShutdown = true;
 	}
+#endif
 
     //===========================================
     // Check for messages in the Server Log queue
