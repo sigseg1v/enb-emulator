@@ -186,7 +186,8 @@ resource "aws_cloudfront_distribution" "patcher" {
 
     # AWS managed "CachingOptimized" policy. Repeat downloads serve from the
     # edge, not S3 -- this is what keeps egress cost down. `just push`
-    # invalidates /* so a new build is picked up despite the cache.
+    # invalidates the exact keys it just uploaded (manifest.json + the
+    # artifacts) so a new build is picked up despite the cache.
     cache_policy_id = "658327ea-f89d-4fab-a63d-7e88639e58f6"
   }
 

@@ -98,9 +98,16 @@ try {
     Invoke-Native aws s3 cp $manifestPath "s3://$bucket/manifest.json" --content-type 'application/json' --only-show-errors
 
     # ---- invalidate the edge cache so the new build is served at once ----
+    #      Invalidate the EXACT keys we just uploaded, never '/*': a literal
+    #      glob metacharacter can be re-expanded by a downstream shell (e.g. an
+    #      aws wrapper that forwards $@ unquoted) into the local filesystem's
+    #      root listing, so the wildcard silently invalidates nothing real.
+    #      Concrete object paths have no metacharacters and can't be mangled,
+    #      and they're exactly what changed.
+    $invalidationPaths = @('/manifest.json') + ($artifacts | ForEach-Object { "/$($_.Key)" })
     Write-Host ""
-    Write-Host "==> cloudfront create-invalidation /*"
-    Invoke-Native aws cloudfront create-invalidation --distribution-id $distId --paths '/*' --no-cli-pager
+    Write-Host "==> cloudfront create-invalidation $($invalidationPaths -join ' ')"
+    Invoke-Native aws cloudfront create-invalidation --distribution-id $distId --paths @invalidationPaths --no-cli-pager
 }
 finally {
     Remove-Item $manifestPath -Force -ErrorAction SilentlyContinue
