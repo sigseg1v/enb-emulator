@@ -107,12 +107,29 @@ try {
     $invalidationPaths = @('/manifest.json') + ($artifacts | ForEach-Object { "/$($_.Key)" })
     Write-Host ""
     Write-Host "==> cloudfront create-invalidation $($invalidationPaths -join ' ')"
-    Invoke-Native aws cloudfront create-invalidation --distribution-id $distId --paths @invalidationPaths --no-cli-pager
+    $invId = Invoke-Native aws cloudfront create-invalidation `
+        --distribution-id $distId --paths @invalidationPaths `
+        --query 'Invalidation.Id' --output text --no-cli-pager
+    $invId = "$invId".Trim()
+    if (-not $invId) { throw "create-invalidation did not return an Invalidation.Id" }
+
+    # ---- BLOCK until the invalidation has fully propagated to every edge ----
+    #      create-invalidation returns immediately with Status=InProgress; the old
+    #      manifest can still be served from the edge for ~1-5 min after that. The
+    #      caller (`just update`) restarts login right after this script, and login
+    #      fetches manifest.json FROM CloudFront at startup and caches the hashes
+    #      with no TTL -- so if we returned early, login could re-read the STALE
+    #      manifest and cache the old hashes again. Waiting here closes that race:
+    #      login only restarts once every edge serves the new manifest.
+    Write-Host "==> waiting for invalidation $invId to complete (CloudFront, ~1-5 min)..."
+    Invoke-Native aws cloudfront wait invalidation-completed `
+        --distribution-id $distId --id $invId --no-cli-pager
+    Write-Host "    invalidation $invId completed"
 }
 finally {
     Remove-Item $manifestPath -Force -ErrorAction SilentlyContinue
 }
 
 Write-Host ""
-Write-Host "Published manifest + 3 artifacts to $bucket and invalidated CloudFront."
+Write-Host "Published manifest + 3 artifacts to $bucket; CloudFront invalidation has fully propagated."
 Write-Host "Restart login to re-read the manifest: just apply-update   (runs automatically next if you used 'just update')."
