@@ -345,14 +345,13 @@ func readOnlinePlayers(ctx context.Context, conn *pgx.Conn) ([]onlinePlayer, err
 		        COALESCE(i.sector, 0),
 		        COALESCE(d.race, 0),
 		        COALESCE(d.prof, 0),
-		        COALESCE(floor(l.combat_bar_level)::int, 0),
-		        COALESCE(floor(l.explore_bar_level)::int, 0),
-		        COALESCE(floor(l.trade_bar_level)::int, 0)
+		        COALESCE(i.combat, 0)::int,
+		        COALESCE(i.explore, 0)::int,
+		        COALESCE(i.trade, 0)::int
 		   FROM accounts a
 		   LEFT JOIN avatar_info i
 		          ON i.account_id = a.id AND i.last_login > i.last_logout
 		   LEFT JOIN avatar_data d        ON d.avatar_id = i.avatar_id
-		   LEFT JOIN avatar_level_info l  ON l.avatar_id = i.avatar_id
 		  WHERE a.last_login > a.last_logout
 		  ORDER BY a.username`)
 	if err != nil {

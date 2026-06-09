@@ -321,9 +321,27 @@ a second relay transport (bot channel) so the toggles have a home channel.
 | login/logout/levelup/broadcast rendered lines | NO | needs real-client login -> CV-AM-1 |
 | `NET7_EXTERNAL_STATUS_ENABLED` empty == no rows | YES | default-off restore verified |
 | AM-8 server_status heartbeat UPSERT + 30s refresh | YES | live row, `updated_at` advanced; no DB errors |
-| AM-8 bot SQL (player list + sector names) valid | YES | both queries run against live dev schema |
+| AM-8 bot SQL (player list + sector names) valid | YES | both queries run against live dev schema; level-column bug fixed 2026-06-08 (see below) |
 | AM-8 bot render logic (class/levels/sector/uptime) | YES | `bot_test.go` unit tests pass |
 | AM-8 bot live Discord `/status` round-trip | NO | needs owner bot token -> CV-AM-2 |
+
+## AM-8 fix: bot reported lvl 0 for everyone (2026-06-08)
+
+Symptom: `/status` rendered every player as `lvl 0 (C0/E0/T0)` even after a real
+level-up (Veretjd leveled Explore to 13, still showed E0).
+
+Root cause: `readOnlinePlayers` read the level from
+`avatar_level_info.{combat,explore,trade}_bar_level`. Those float columns are the
+WITHIN-level XP progress bar (0.0-1.0), not the level number -- so
+`floor(...)::int` is 0 for anyone not exactly at a bar boundary. The actual integer
+levels live in `avatar_info.{combat,explore,trade}` (the server writes them there:
+`AccountManager.cpp` SaveAvatarInfo `AddData("combat", combat_level)`; the
+`*_bar_level` columns are only ever set by `SaveManager.cpp` to the fractional bar).
+
+Fix: read `i.combat/i.explore/i.trade` from the already-joined `avatar_info i` and
+drop the `avatar_level_info` join entirely (no other column from it was used).
+Render logic (highest-of-three as the headline level) unchanged. `go build`/`go
+test` clean. Sidecar must be rebuilt+redeployed for the fix to take effect.
 
 ## Constraints carried in (do not relearn the hard way)
 
