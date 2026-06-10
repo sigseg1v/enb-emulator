@@ -7,14 +7,19 @@ namespace LaunchFreya.Update
     // This is NOT the EnB game protocol -- it is a plain HTTPS/JSON side channel
     // only the launcher speaks. The real client never calls it.
 
-    // Request body the launcher POSTs: the two SHA-512 hex hashes it computed of
-    // its own FreyaLauncher.exe and the FreyaProxy.exe it ships. The cfg has no
-    // hash here on purpose -- it is bound to the launcher and ships whenever the
-    // launcher EXE mismatches (owner decision 2026-06-07).
+    // Request body the launcher POSTs: the SHA-512 hex hashes it computed of its
+    // own FreyaLauncher.exe, the FreyaProxy.exe it ships, and the MVAS injection
+    // pair (FreyaPosFeed.dll + FreyaInject.exe). Each independently-hashed binary
+    // is shipped on its own mismatch, exactly like the proxy -- so an
+    // MVAS-feed-only patch reaches existing installs without a launcher bump.
+    // The cfg has no hash here on purpose -- it is bound to the launcher and
+    // ships whenever the launcher EXE mismatches (owner decision 2026-06-07).
     public sealed class UpdateCheckRequest
     {
         [JsonPropertyName("launcherHash")] public string LauncherHash { get; set; }
         [JsonPropertyName("proxyHash")]    public string ProxyHash    { get; set; }
+        [JsonPropertyName("posFeedHash")]  public string PosFeedHash  { get; set; }
+        [JsonPropertyName("injectHash")]   public string InjectHash   { get; set; }
     }
 
     public sealed class UpdateFile

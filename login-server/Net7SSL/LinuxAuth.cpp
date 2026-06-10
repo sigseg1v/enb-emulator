@@ -620,14 +620,16 @@ char *MakeServiceUnavailable(size_t *out_len)
     return r;
 }
 
-// POST /updateCheck  body: {"launcherHash","proxyHash"}
-// Compares the client's two local hashes to the manifest cache and replies:
+// POST /updateCheck  body: {"launcherHash","proxyHash","posFeedHash","injectHash"}
+// Compares the client's local hashes to the manifest cache and replies:
 //   - UP_TO_DATE when both match;
 //   - UPDATE_NEEDED with a conditional file list otherwise -- a launcher
-//     mismatch ships FreyaLauncher.exe + FreyaLauncher.cfg + the MVAS injection
-//     pair (bin/FreyaPosFeed.dll + bin/FreyaInject.exe); all of these ride with
-//     the launcher and have no independent hash check, and the pair ships only
-//     when the manifest carries it. A proxy mismatch ships bin/FreyaProxy.exe.
+//     mismatch ships FreyaLauncher.exe + FreyaLauncher.cfg (the cfg has no
+//     independent hash and rides with the launcher). The proxy and each MVAS
+//     injection binary (bin/FreyaPosFeed.dll, bin/FreyaInject.exe) are hashed
+//     INDEPENDENTLY and shipped on their own mismatch, so a feed-only patch
+//     reaches existing installs without a launcher bump. The MVAS files ship
+//     only when the manifest carries a hash for them (optional add-on).
 // Cache miss (manifest not loaded) -> 503, which the launcher reads as the
 // server being DOWN (fail-closed: no update decision on an empty cache).
 char *HandleUpdateCheck(size_t *out_len, char *recv_buffer)
@@ -645,12 +647,22 @@ char *HandleUpdateCheck(size_t *out_len, char *recv_buffer)
 
     std::string clientLauncher = JsonField(body, "launcherHash");
     std::string clientProxy    = JsonField(body, "proxyHash");
+    std::string clientPosFeed  = JsonField(body, "posFeedHash");
+    std::string clientInject   = JsonField(body, "injectHash");
+
+    const std::string posFeedSrv = mf.PosFeedDllHash();   // "" when not published
+    const std::string injectSrv  = mf.InjectExeHash();    // "" when not published
 
     bool launcherOk = HashEq(clientLauncher, mf.LauncherExeHash());
     bool proxyOk    = HashEq(clientProxy, mf.ProxyExeHash());
+    // The MVAS pair is checked INDEPENDENTLY, like the proxy. An unpublished
+    // file (empty server hash) is treated as up-to-date: there is nothing to
+    // ship and we never emit a file the manifest does not vouch for.
+    bool posFeedOk  = posFeedSrv.empty() || HashEq(clientPosFeed, posFeedSrv);
+    bool injectOk   = injectSrv.empty()  || HashEq(clientInject, injectSrv);
 
     std::string json;
-    if (launcherOk && proxyOk)
+    if (launcherOk && proxyOk && posFeedOk && injectOk)
     {
         json = "{\"status\":\"UP_TO_DATE\"}";
     }
@@ -671,19 +683,20 @@ char *HandleUpdateCheck(size_t *out_len, char *recv_buffer)
         if (!launcherOk)
         {
             add("FreyaLauncher.exe", base + "/FreyaLauncher.exe", mf.LauncherExeHash());
+            // The cfg has no independent hash and rides with the launcher.
             add("FreyaLauncher.cfg", base + "/FreyaLauncher.cfg", mf.LauncherCfgHash());
-            // The MVAS position-feed injection pair rides with the launcher set,
-            // emitted only when the manifest carries it (optional add-on).
-            const std::string posFeedDll = mf.PosFeedDllHash();
-            const std::string injectExe  = mf.InjectExeHash();
-            if (!posFeedDll.empty())
-                add("bin/FreyaPosFeed.dll", base + "/FreyaPosFeed.dll", posFeedDll);
-            if (!injectExe.empty())
-                add("bin/FreyaInject.exe", base + "/FreyaInject.exe", injectExe);
         }
         if (!proxyOk)
         {
             add("bin/FreyaProxy.exe", base + "/FreyaProxy.exe", mf.ProxyExeHash());
+        }
+        if (!posFeedOk)
+        {
+            add("bin/FreyaPosFeed.dll", base + "/FreyaPosFeed.dll", posFeedSrv);
+        }
+        if (!injectOk)
+        {
+            add("bin/FreyaInject.exe", base + "/FreyaInject.exe", injectSrv);
         }
         json = "{\"status\":\"UPDATE_NEEDED\",\"files\":[" + files + "]}";
     }

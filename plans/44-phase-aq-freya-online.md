@@ -262,17 +262,31 @@ client.exe), so the artifacts are the SAME everywhere. Now distributed via:
       WinePathToDos short-circuits on native Windows). Launcher.cs.
 - [x] `just package-client-windows` depends on `build-posfeed-dll` and stages
       both into `bin/` -> 5-file bundle. Verified: bundle has all 5 files.
-- [x] Auto-updater carries them riding with the LAUNCHER set (like the cfg, no
-      independent client-side hash; client request stays {launcherHash,proxyHash}).
-      Stored FLAT in the bucket, mapped to `bin/` on download where the launcher
-      already looks (LocateInjectorExe/LocatePositionFeedDll search bin/ first).
+- [x] Auto-updater carries them with their OWN independent hash, exactly like
+      the proxy (owner decision: "it shouldnt go with launcher. it should have
+      its own hash") -- an MVAS-feed-only patch reaches existing installs without
+      a launcher bump. Request body is now {launcherHash, proxyHash, posFeedHash,
+      injectHash}. Stored FLAT in the bucket, mapped to `bin/` on download where
+      the launcher already looks (LocateInjectorExe/LocatePositionFeedDll search
+      bin/ first).
+      - [x] Client: UpdateCheckRequest gains posFeedHash/injectHash;
+            ComputeLocalHashes hashes bin/FreyaPosFeed.dll + bin/FreyaInject.exe;
+            BuildRequestJson sends all four. UpdateLogicTests updated (34 pass).
       - [x] PatcherManifest parses them as OPTIONAL add-ons (an older 3-file
             manifest still loads; no fail-closed window on deploy ordering).
-      - [x] LinuxAuth HandleUpdateCheck emits them in the !launcherOk block when
-            the manifest carries them.
+      - [x] LinuxAuth HandleUpdateCheck checks each INDEPENDENTLY (posFeedOk/
+            injectOk; an unpublished file == up-to-date, never offered) and ships
+            each on its own mismatch, in its own block beside the proxy's.
       - [x] Push-ClientPatch.ps1 builds/hashes/uploads/invalidates them
-            generically off the $artifacts list.
-- [x] login-server C++ compiles clean (docker compose build login).
+            generically off the $artifacts list -- CloudFront invalidation paths
+            are derived from $artifacts so both MVAS keys are invalidated.
+- [x] login-server C++ + launcher both compile clean; 34 launcher tests pass.
+- Blast radius of `cd deploy/do && just update`: builds server/login/status-
+      notifier/db-backup images + the client patch. The droplet runs
+      docker-compose.PROD.yml, which references NONE of the AQ Go-online stack
+      (freya-online, freya_online*.sql, FREYA_AH_BOTS, VITE_MOCK) -- so the AH/
+      bots/SPA/test-accounts/mock cannot ship via this push. Only the C++ login
+      /updateCheck change + the MVAS client artifacts actually deploy.
 - Linux installer (client/linux-installer) needs NO change -- it only stands up
   the base client + WINE prefix; Freya artifacts reach it via bundle + updater.
 - [ ] **Go /updateCheck port (legacy.go, deferred to AQ-1/AQ-7):** when the Go

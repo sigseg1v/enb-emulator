@@ -78,9 +78,16 @@ namespace LaunchFreya.Update
             return true;
         }
 
-        public static string BuildRequestJson(string launcherHash, string proxyHash)
+        public static string BuildRequestJson(string launcherHash, string proxyHash,
+            string posFeedHash, string injectHash)
         {
-            var req = new UpdateCheckRequest { LauncherHash = launcherHash, ProxyHash = proxyHash };
+            var req = new UpdateCheckRequest
+            {
+                LauncherHash = launcherHash,
+                ProxyHash    = proxyHash,
+                PosFeedHash  = posFeedHash,
+                InjectHash   = injectHash,
+            };
             return JsonSerializer.Serialize(req);
         }
 

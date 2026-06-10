@@ -3,8 +3,11 @@
 // Holds the authoritative SHA-512 hashes of the published Windows artifacts:
 // the required trio (FreyaLauncher.exe, FreyaLauncher.cfg, bin/FreyaProxy.exe)
 // plus the optional MVAS position-feed injection pair (bin/FreyaPosFeed.dll,
-// bin/FreyaInject.exe), which ride with the launcher set when present. The
-// cache is populated ONCE at login-server startup by an HTTPS GET of a small
+// bin/FreyaInject.exe). The proxy and the MVAS pair are hashed and shipped
+// INDEPENDENTLY (each on its own client/server mismatch); only the cfg rides
+// with the launcher. The MVAS pair is optional -- absent from an older manifest
+// it simply is not offered. The cache is populated ONCE at login-server startup
+// by an HTTPS GET of a small
 // manifest.json over CloudFront (NET7_PATCHER_MANIFEST_URL). libcurl also reads
 // file:// URLs, so the local-stub test points the env at an on-disk manifest --
 // no TLS, no cloud.

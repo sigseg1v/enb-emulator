@@ -25,6 +25,8 @@ namespace LaunchFreya.Update
     {
         public const string LauncherFileName = "FreyaLauncher.exe";
         public const string ProxyRelativePath = "bin/FreyaProxy.exe";
+        public const string PosFeedRelativePath = "bin/FreyaPosFeed.dll";
+        public const string InjectRelativePath = "bin/FreyaInject.exe";
         public const string StagingDirName = "updates";
         public const string BackupSuffix = ".old";
 
@@ -45,15 +47,18 @@ namespace LaunchFreya.Update
         // should relaunch + exit.
         public bool SelfReplaced { get; private set; }
 
-        // Hash the two local binaries the server decides on. A missing file
-        // yields null -> the request sends an empty hash -> the server reports a
+        // Hash the local binaries the server decides on. A missing file yields
+        // null -> the request sends an empty hash -> the server reports a
         // mismatch and ships that file, which is the correct recovery for a
-        // partially-broken install.
-        public (string launcherHash, string proxyHash) ComputeLocalHashes()
+        // partially-broken install. The MVAS pair is hashed independently (each
+        // ships on its own mismatch), exactly like the proxy.
+        public (string launcherHash, string proxyHash, string posFeedHash, string injectHash) ComputeLocalHashes()
         {
             string launcher = HashOrNull(_selfExePath ?? Path.Combine(_baseDir, LauncherFileName));
             string proxy = HashOrNull(Path.Combine(_baseDir, "bin", "FreyaProxy.exe"));
-            return (launcher, proxy);
+            string posFeed = HashOrNull(Path.Combine(_baseDir, "bin", "FreyaPosFeed.dll"));
+            string inject = HashOrNull(Path.Combine(_baseDir, "bin", "FreyaInject.exe"));
+            return (launcher, proxy, posFeed, inject);
         }
 
         string HashOrNull(string path)
@@ -74,10 +79,11 @@ namespace LaunchFreya.Update
         // "server not ready" -> fail-closed, Play stays disabled).
         public async Task<UpdateCheckResponse> CheckAsync(string updateCheckUrl, CancellationToken ct = default)
         {
-            var (launcher, proxy) = ComputeLocalHashes();
-            string body = UpdateLogic.BuildRequestJson(launcher ?? "", proxy ?? "");
+            var (launcher, proxy, posFeed, inject) = ComputeLocalHashes();
+            string body = UpdateLogic.BuildRequestJson(launcher ?? "", proxy ?? "", posFeed ?? "", inject ?? "");
             _log($"checkUpdates: POST {updateCheckUrl}");
-            _log($"checkUpdates: local hashes  launcher={ShortHash(launcher)}  proxy={ShortHash(proxy)}");
+            _log($"checkUpdates: local hashes  launcher={ShortHash(launcher)}  proxy={ShortHash(proxy)}" +
+                 $"  posFeed={ShortHash(posFeed)}  inject={ShortHash(inject)}");
             try
             {
                 using var content = new StringContent(body, Encoding.UTF8, "application/json");
