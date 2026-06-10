@@ -252,6 +252,35 @@ C++ source directly). The Go server must reproduce:
 - [ ] Delete C++ login-server (Net7Mysql/Net7SSL) ONLY after confirmed
 - [ ] docs/ pages; decisions-log entry
 
+### AQ-8 PB-2 distribution -- ship the MVAS injection pair to every channel (commit 0b46f3d8)
+The MVAS position-feed pair (`bin/FreyaPosFeed.dll` + `bin/FreyaInject.exe`,
+PE32/i386) was built but no distribution channel carried it. They run identically
+on native Windows and under WINE (FreyaInject.exe remote-thread LoadLibrary into
+client.exe), so the artifacts are the SAME everywhere. Now distributed via:
+- [x] Launcher injection is platform-agnostic (dropped the `!OnWindows` gate;
+      FreyaInject.exe runs directly on Windows, under the wine prefix elsewhere;
+      WinePathToDos short-circuits on native Windows). Launcher.cs.
+- [x] `just package-client-windows` depends on `build-posfeed-dll` and stages
+      both into `bin/` -> 5-file bundle. Verified: bundle has all 5 files.
+- [x] Auto-updater carries them riding with the LAUNCHER set (like the cfg, no
+      independent client-side hash; client request stays {launcherHash,proxyHash}).
+      Stored FLAT in the bucket, mapped to `bin/` on download where the launcher
+      already looks (LocateInjectorExe/LocatePositionFeedDll search bin/ first).
+      - [x] PatcherManifest parses them as OPTIONAL add-ons (an older 3-file
+            manifest still loads; no fail-closed window on deploy ordering).
+      - [x] LinuxAuth HandleUpdateCheck emits them in the !launcherOk block when
+            the manifest carries them.
+      - [x] Push-ClientPatch.ps1 builds/hashes/uploads/invalidates them
+            generically off the $artifacts list.
+- [x] login-server C++ compiles clean (docker compose build login).
+- Linux installer (client/linux-installer) needs NO change -- it only stands up
+  the base client + WINE prefix; Freya artifacts reach it via bundle + updater.
+- [ ] **Go /updateCheck port (legacy.go, deferred to AQ-1/AQ-7):** when the Go
+      login takes over /updateCheck it must mirror this 5-file manifest set.
+      Today legacy.go's handleUpdateCheck returns 503 (fail-closed), so the C++
+      login serves the live updater during coexistence -- the C++ edits above are
+      the ones that actually ship the pair.
+
 ## Open questions for the owner
 1. [RESOLVED -- shipped the offline-guard] Offline-guard vs route-through-server
    for web inventory mutations. Decision: offline-guard (the safe default that
