@@ -5,9 +5,10 @@
 // (credentials: 'include'); the Go service sets an HttpOnly cookie via its
 // session middleware -- the client never reads or writes the auth token itself.
 //
-// Until the Go backend is wired (Phase AQ-1/AQ-2/AQ-3), VITE_MOCK defaults on
-// and these calls resolve from src/mock.ts so the SPA renders standalone. Set
-// VITE_MOCK=0 to talk to the real service.
+// The Go backend (Phase AQ-1/AQ-2/AQ-3) is live, so these calls hit the real
+// JSON API by default and the SPA shows real data. The standalone mock
+// (src/mock.ts) is now opt-in for design work -- set VITE_MOCK=1 to render
+// without a backend.
 
 import type {
   Listing, Mail, MyListing, PostListingInput, ServerStatus, Session, VaultSlot,
@@ -16,7 +17,7 @@ import {
   MOCK_LISTINGS, MOCK_MAIL, MOCK_MY_LISTINGS, MOCK_SERVER, MOCK_SESSION, MOCK_VAULT,
 } from './mock';
 
-const USE_MOCK = import.meta.env.VITE_MOCK !== '0';
+const USE_MOCK = import.meta.env.VITE_MOCK === '1';
 
 export interface Bootstrap {
   session: Session;

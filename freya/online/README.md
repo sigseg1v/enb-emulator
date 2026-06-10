@@ -32,8 +32,9 @@ npm run build    # tsc -b && vite build -> web/dist/
 npm run typecheck
 ```
 
-By default `VITE_MOCK` is on, so the SPA renders against `src/mock.ts` with no
-backend. Set `VITE_MOCK=0` to talk to the Go service once it exists.
+By default the SPA talks to the real Go JSON API (dev: Vite proxies `/api` ->
+`:8080`; prod: the Go binary serves the built `dist/`). To render standalone
+against `src/mock.ts` with no backend, set `VITE_MOCK=1`.
 
 ### Notes
 
