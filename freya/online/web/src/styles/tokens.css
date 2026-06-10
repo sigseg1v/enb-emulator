@@ -1,5 +1,5 @@
 /* ============================================================
-   FREYA ONLINE — design tokens
+   FREYA ONLINE -- design tokens
    Modern sci-fi: deep-space base, thin cyan hairlines, amber warmth
    ============================================================ */
 
@@ -30,7 +30,7 @@
   --accent:       oklch(0.82 0.125 205);   /* cyan */
   --accent-dim:   oklch(0.62 0.090 210);
   --accent-glow:  oklch(0.82 0.125 205 / 0.35);
-  --warm:         oklch(0.80 0.125 72);    /* amber — Mars glow */
+  --warm:         oklch(0.80 0.125 72);    /* amber -- Mars glow */
   --warm-dim:     oklch(0.66 0.110 68);
   --danger:       oklch(0.66 0.18 28);
   --ok:           oklch(0.78 0.16 150);
@@ -114,7 +114,7 @@ body {
   position: relative;
 }
 
-/* corner ticks — the "cockpit frame" motif */
+/* corner ticks -- the "cockpit frame" motif */
 .hud-corners::before,
 .hud-corners::after {
   content: "";

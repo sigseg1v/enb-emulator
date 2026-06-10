@@ -131,31 +131,57 @@ C++ source directly). The Go server must reproduce:
 - [ ] Find/confirm online-status signal for the offline-guard
 
 ### AQ-1 Go login server (legacy parity)
-- [ ] `freya/online/` Go module, MIT header, LICENSES/Freya
-- [ ] TLS :443 GET HTTP dispatch
-- [ ] /AuthLogin (Argon2id verify, ticket UPSERT) -- byte-exact response
-- [ ] /sectorserver.cgi, /touchsession.jsp, /certificate.html, /updateCheck,
-      /who.cgi, 404 fallback
-- [ ] AF_UNIX Ping/pong keepalive
-- [ ] Dockerfile + docker-compose service (alongside C++ login, not replacing)
+- [x] `freya/online/` Go module, MIT header (`server/`, go.mod go 1.25.0,
+      scs/v2 + pgx/v5 + x/crypto). Two pgxpool pools (net7_user + net7 content).
+- [x] TLS :443 GET HTTP dispatch (main.go startServers; cert/key from
+      NET7SSL_CERT_DIR/<domain>.cer|.pem). Runtime-verified: TLS + HTTP listen.
+- [x] /AuthLogin (Argon2id verify, ticket UPSERT) -- byte-exact response.
+      RUNTIME-VERIFIED 2026-06-09: bad creds -> 13-byte `Valid=False\r\n`
+      (Server: AuthServer/2.5); good creds (freyatest) -> 63-byte
+      `Valid=TRUE\r\nTicket=freyatest-<32hex>\r\n` + login_ticket row upserted
+      (token = post-first-dash suffix, ms expiry). legacy.go + ticket.go.
+- [x] /sectorserver.cgi, /touchsession.jsp, /certificate.html, /updateCheck,
+      /who.cgi, 404 fallback (legacy.go tryLegacy dispatch in C++ order)
+- [~] AF_UNIX Ping/pong keepalive -- gated OFF (logs WARNING if
+      NET7_IPC_KEEPALIVE=1; not implemented yet). Server start does not depend
+      on it for the web/login path. Revisit at AQ-7 cutover.
+- [x] Dockerfile + docker-compose service (alongside C++ login, not replacing).
+      Runs as container-root to read the 0600 TLS key (rootless Docker:
+      container-root = unprivileged host user, same as sibling `login`).
+      Ports 8443:443, 8088:8080.
 - [ ] CLI integration test: /AuthLogin byte-pin + ticket handoff
 
 ### AQ-2 Auction House engine (Go)
-- [ ] List item (offline-guard; remove instance; 10% deposit up front; 8/12/24h)
-- [ ] Search/browse (opaque low/med/high time bucket, deliberately shuffled
-      within bucket; item display fields incl. cross-DB item_base join)
-- [ ] Bid (>=1% step, escrow, refund prior bidder via mail, high-bidder show)
-- [ ] Buyout
-- [ ] Expiry sweeper: sold->deliver item+credits to winner & seller; unsold->
-      95% deposit + item back to seller mailbox; status transitions
-- [ ] Deleted-seller listings stay live
+- [x] List item (PostListing: primary-live-char wallet debits 10% deposit up
+      front; removes instance from vault/inventory; 8/12/24h). store_ah_write.go
+- [x] Search/browse (openListings: opaque low/med/high band via computeBand,
+      ordered by name/id NOT expiry so band is the only time signal; cross-DB
+      item_base resolve via content pool). store_ah.go + store_items.go
+- [x] Bid (PlaceBid: first bid=startBid else +max(1,ceil(1% value)); refund
+      prior bidder via mailbox; FOR UPDATE row lock; high-bidder shown)
+- [x] Buyout (Buyout: FOR UPDATE, full payment, item to buyer mailbox)
+- [x] Expiry sweeper (sweepExpiredAuctions/resolveOneExpired): sold->item to
+      winner + proceeds to seller mailbox; unsold->95% deposit + item back to
+      seller mailbox. sweepers.go ticks every 5min + once at boot.
+- [x] Deleted-seller listings stay live (avatarNames resolves soft-deleted
+      avatars; status filter is on listing, not seller)
+- API wired: handlePostListing/handleBid/handleBuyout in api.go.
+  NOTE: offline-guard NOT yet enforced on the write path -- AQ open question #1
+  (default offline-guard) still needs the online-status check added before any
+  real-client use. TODO tracked here.
 
 ### AQ-3 Mailbox (Go)
-- [ ] List per account (subject/recipient/sender/has-item/read)
-- [ ] Open -> body + mark read; attachment squares
-- [ ] Loot item attachment -> recipient char vault (offline-guard, slot find)
-- [ ] Loot credits -> recipient char credits
-- [ ] 90-day expiry sweeper + warning flag surfaced in API
+- [x] List per account (accountMail: subject/recipient/sender/has-item/read,
+      newest first, expiresInDays). store_mail.go
+- [x] Open -> body + mark read (MarkRead); attachment squares (attachmentsFor)
+- [x] Loot item attachment -> recipient char vault (LootAttachment ->
+      freeVaultSlot; recipient-if-live-else-primary). store_mail_write.go
+- [x] Loot credits -> recipient char credits (deliverCredits / wallet)
+- [x] 90-day expiry sweeper (sweepExpiredMail DELETE expires_at<now) + warning
+      flag (expiresInDays surfaced in MailView for the UI).
+- API wired: handleMarkRead/handleLoot in api.go. RUNTIME-VERIFIED: bootstrap
+  returns {mail:[],listings:[],vault:{},myListings:[]} cleanly for an account
+  with no characters. Same offline-guard caveat as AQ-2.
 
 ### AQ-4 Bots (FREYA_AH_BOTS=1)
 - [ ] Create "AhBot" account/avatar on first run
@@ -177,8 +203,11 @@ C++ source directly). The Go server must reproduce:
       hand-picked rarities. Server must mirror this.
 - [x] API client (`src/api.ts`): fetch + `credentials:'include'`, VITE_MOCK
       default-on so the SPA renders standalone until the Go backend lands.
-- [ ] Wire to the real Go JSON API (flip VITE_MOCK=0) -- needs AQ-1/2/3
-- [ ] Serve built dist/ from the Go binary at the index
+- [ ] Wire to the real Go JSON API (flip VITE_MOCK=0) -- needs AQ-1/2/3.
+      Backend now live; flip + browser-verify the real login->bootstrap path.
+- [x] Serve built dist/ from the Go binary at the index (spa.go static serve +
+      SPA fallback; Dockerfile bakes web/dist -> /app/web). RUNTIME-VERIFIED:
+      GET / returns the built index.html.
 - Note: `npm audit` flags the esbuild dev-server advisory (GHSA-67mh-4wv8-2f99),
   dev-server only, NOT in the shipped static build; fix is a breaking vite@8
   bump -- deferred deliberately.

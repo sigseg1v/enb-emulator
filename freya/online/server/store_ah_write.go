@@ -1,0 +1,555 @@
+// SPDX-License-Identifier: MIT
+// Freya Online -- Auction House writes (post / bid / buyout / expiry sweep).
+//
+// All money movement runs inside a single net7_user transaction with row locks
+// (SELECT ... FOR UPDATE) so two concurrent bids / a bid racing the sweeper
+// cannot double-spend or double-deliver. The server NEVER trusts client-supplied
+// prices: item_value, the 1% min increment, and the 10% fee are recomputed from
+// item_base + the actual stored instance, not from the request body.
+//
+// Credit model (documented; flagged as an owner question in plans/44):
+//   - The account's PRIMARY live character (lowest slot) is the wallet for
+//     website-initiated debits (deposit, bid, buyout).
+//   - Proceeds, refunds, and won/returned items are DELIVERED to the mailbox and
+//     looted into a character later -- they are never silently credited.
+//
+// Economics (per spec):
+//   - 10% fee on item_value collected UP FRONT as deposit when listing.
+//   - Sale: winner pays the held bid/buyout; seller receives it in full (the fee
+//     was already taken); the item is delivered to the winner's mailbox.
+//   - Unsold at expiry: item returned to seller's mailbox; 95% of the deposit
+//     refunded (5% kept). Bids already held are refunded when outbid / on buyout.
+
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"math"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+)
+
+var (
+	errListingGone    = errors.New("listing not available")
+	errOwnListing     = errors.New("cannot bid on your own listing")
+	errNoBuyout       = errors.New("listing has no buyout")
+	errInsufficient   = errors.New("insufficient credits")
+	errNoCharacter    = errors.New("no live character on this account")
+	errItemNotFound   = errors.New("item not found in storage")
+	errItemUntradable = errors.New("item is not tradable")
+	errBadInput       = errors.New("invalid listing parameters")
+)
+
+// durationHours maps the SPA's duration token to listing hours.
+func durationHours(d string) (int, bool) {
+	switch d {
+	case "short":
+		return 8, true
+	case "med":
+		return 12, true
+	case "long":
+		return 24, true
+	}
+	return 0, false
+}
+
+// primaryAvatar returns the lowest-slot live avatar for an account (the wallet /
+// default recipient). Caller must hold the tx.
+func primaryAvatar(ctx context.Context, tx pgx.Tx, accountID int64) (int64, string, error) {
+	var id int64
+	var name string
+	err := tx.QueryRow(ctx, `
+		SELECT ai.avatar_id,
+		       trim(both '_' from coalesce(ad.first_name,'') || '_' || coalesce(ad.last_name,''))
+		  FROM avatar_info ai
+		  JOIN avatar_data ad ON ad.avatar_id = ai.avatar_id
+		 WHERE ai.account_id = $1 AND ai.deleted_at IS NULL
+		 ORDER BY ai.slot ASC
+		 LIMIT 1`, accountID).Scan(&id, &name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, "", errNoCharacter
+	}
+	return id, name, err
+}
+
+// debitAvatar deducts amount from an avatar's credits, locking the row. Fails
+// with errInsufficient if the balance would go negative.
+func debitAvatar(ctx context.Context, tx pgx.Tx, avatarID, amount int64) error {
+	var bal int64
+	err := tx.QueryRow(ctx,
+		`SELECT credits::bigint FROM avatar_level_info WHERE avatar_id = $1 FOR UPDATE`,
+		avatarID).Scan(&bal)
+	if err != nil {
+		return err
+	}
+	if bal < amount {
+		return errInsufficient
+	}
+	_, err = tx.Exec(ctx,
+		`UPDATE avatar_level_info SET credits = credits - $2 WHERE avatar_id = $1`,
+		avatarID, amount)
+	return err
+}
+
+// minIncrement is the bid step: 1% of item_value, at least 1.
+func minIncrement(itemValue int64) int64 {
+	inc := int64(math.Ceil(float64(itemValue) * 0.01))
+	if inc < 1 {
+		return 1
+	}
+	return inc
+}
+
+// PostListing lists an item from a character's vault/inventory. input mirrors the
+// SPA PostListingInput; prices in it are advisory -- the server recomputes value,
+// deposit, and the increment floor from authoritative data.
+func (s *Store) PostListing(ctx context.Context, accountID int64, itemID, slot, stack int,
+	avatarName, duration string, minBid, buyout int64) (MyListingView, error) {
+
+	hours, ok := durationHours(duration)
+	if !ok || stack < 1 {
+		return MyListingView{}, errBadInput
+	}
+
+	// Tradability + vendor value come from the content DB (separate pool).
+	tpl, err := s.resolveItems(ctx, []int{itemID})
+	if err != nil {
+		return MyListingView{}, err
+	}
+	t, ok := tpl[itemID]
+	if !ok {
+		return MyListingView{}, errItemNotFound
+	}
+	if t.view.NoTrade {
+		return MyListingView{}, errItemUntradable
+	}
+	vendor := t.view.Vendor
+
+	tx, err := s.user.Begin(ctx)
+	if err != nil {
+		return MyListingView{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	// The named character must belong to this account and be live.
+	var sellerAvatar int64
+	err = tx.QueryRow(ctx, `
+		SELECT ai.avatar_id
+		  FROM avatar_info ai
+		  JOIN avatar_data ad ON ad.avatar_id = ai.avatar_id
+		 WHERE ai.account_id = $1 AND ai.deleted_at IS NULL
+		   AND trim(both '_' from coalesce(ad.first_name,'') || '_' || coalesce(ad.last_name,'')) = $2`,
+		accountID, avatarName).Scan(&sellerAvatar)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return MyListingView{}, errNoCharacter
+	}
+	if err != nil {
+		return MyListingView{}, err
+	}
+
+	// Lock and read the actual stored instance, then remove it from storage.
+	// Try the vault first, then inventory.
+	var (
+		quality   *float64
+		cost      *int64
+		builder   *string
+		structure *float64
+		haveStack *int
+		fromTable string
+	)
+	for _, tbl := range []string{"avatar_vault_items", "avatar_inventory_items"} {
+		q := fmt.Sprintf(`
+			SELECT trade_stack, quality, cost, builder_name, structure
+			  FROM %s
+			 WHERE avatar_id = $1 AND inventory_slot = $2 AND item_id = $3
+			 FOR UPDATE`, tbl)
+		err = tx.QueryRow(ctx, q, sellerAvatar, slot, itemID).
+			Scan(&haveStack, &quality, &cost, &builder, &structure)
+		if err == nil {
+			fromTable = tbl
+			break
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return MyListingView{}, err
+		}
+	}
+	if fromTable == "" {
+		return MyListingView{}, errItemNotFound
+	}
+
+	storedStack := 1
+	if haveStack != nil && *haveStack > 0 {
+		storedStack = *haveStack
+	}
+	if stack > storedStack {
+		return MyListingView{}, errBadInput
+	}
+
+	// item_value = vendor value for the listed quantity.
+	itemValue := vendor * int64(stack)
+	deposit := int64(math.Ceil(float64(itemValue) * 0.10))
+
+	// Validate seller-chosen prices against the recomputed floor.
+	if minBid < 1 {
+		minBid = 1
+	}
+	var buyoutPtr *int64
+	if buyout > 0 {
+		if buyout <= minBid {
+			return MyListingView{}, errBadInput
+		}
+		buyoutPtr = &buyout
+	}
+
+	// Collect the 10% fee up front from the listing character.
+	if err := debitAvatar(ctx, tx, sellerAvatar, deposit); err != nil {
+		return MyListingView{}, err
+	}
+
+	// Remove the listed quantity from storage (delete the slot, or decrement a
+	// partial stack).
+	if stack >= storedStack {
+		_, err = tx.Exec(ctx,
+			fmt.Sprintf(`DELETE FROM %s WHERE avatar_id = $1 AND inventory_slot = $2`, fromTable),
+			sellerAvatar, slot)
+	} else {
+		_, err = tx.Exec(ctx,
+			fmt.Sprintf(`UPDATE %s SET trade_stack = trade_stack - $3 WHERE avatar_id = $1 AND inventory_slot = $2`, fromTable),
+			sellerAvatar, slot, stack)
+	}
+	if err != nil {
+		return MyListingView{}, err
+	}
+
+	expires := time.Now().Add(time.Duration(hours) * time.Hour)
+	var listingID int64
+	err = tx.QueryRow(ctx, `
+		INSERT INTO auction_listings
+		  (seller_avatar_id, seller_account_id, item_id, stack_size, quality,
+		   item_cost, builder_name, structure, item_value, start_bid, current_bid,
+		   buyout, deposit_paid, status, expires_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11,$12,0,$13)
+		RETURNING id`,
+		sellerAvatar, accountID, itemID, stack, quality,
+		cost, builder, structure, itemValue, minBid,
+		buyoutPtr, deposit, expires).Scan(&listingID)
+	if err != nil {
+		return MyListingView{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return MyListingView{}, err
+	}
+
+	return MyListingView{
+		ID:      fmt.Sprintf("%d", listingID),
+		Item:    t.itemView(quality),
+		Avatar:  avatarName,
+		Stack:   stack,
+		Quality: quality,
+		Band:    computeBand(time.Until(expires)),
+		Buyout:  buyoutPtr,
+	}, nil
+}
+
+// PlaceBid bids the next increment on a listing. The first bid lands at
+// start_bid; each subsequent bid adds max(1, 1% of item_value).
+func (s *Store) PlaceBid(ctx context.Context, accountID int64, listingID int64) (ListingView, error) {
+	tx, err := s.user.Begin(ctx)
+	if err != nil {
+		return ListingView{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	var (
+		sellerAccount  int64
+		itemValue      int64
+		startBid       int64
+		currentBid     int64
+		hadBidder      bool
+		prevBidderAcct *int64
+		expiresAt      time.Time
+	)
+	err = tx.QueryRow(ctx, `
+		SELECT seller_account_id, item_value, start_bid, current_bid,
+		       high_bidder_avatar_id IS NOT NULL, high_bidder_account_id, expires_at
+		  FROM auction_listings
+		 WHERE id = $1 AND status = 0
+		 FOR UPDATE`, listingID).
+		Scan(&sellerAccount, &itemValue, &startBid, &currentBid, &hadBidder, &prevBidderAcct, &expiresAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ListingView{}, errListingGone
+	}
+	if err != nil {
+		return ListingView{}, err
+	}
+	if time.Now().After(expiresAt) {
+		return ListingView{}, errListingGone
+	}
+	if sellerAccount == accountID {
+		return ListingView{}, errOwnListing
+	}
+
+	bidder, _, err := primaryAvatar(ctx, tx, accountID)
+	if err != nil {
+		return ListingView{}, err
+	}
+
+	// First bid lands at start_bid; later bids add the increment.
+	newBid := startBid
+	if hadBidder {
+		newBid = currentBid + minIncrement(itemValue)
+	}
+
+	if err := debitAvatar(ctx, tx, bidder, newBid); err != nil {
+		return ListingView{}, err
+	}
+
+	// Refund the previous high bidder via mailbox credits.
+	if hadBidder && prevBidderAcct != nil {
+		if err := deliverCredits(ctx, tx, *prevBidderAcct, "Auction House",
+			"Outbid refund", "You were outbid; your bid has been refunded.", currentBid); err != nil {
+			return ListingView{}, err
+		}
+	}
+
+	_, err = tx.Exec(ctx, `
+		UPDATE auction_listings
+		   SET current_bid = $2, high_bidder_avatar_id = $3, high_bidder_account_id = $4
+		 WHERE id = $1`, listingID, newBid, bidder, accountID)
+	if err != nil {
+		return ListingView{}, err
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO auction_bids (listing_id, bidder_avatar_id, bidder_account_id, amount)
+		VALUES ($1,$2,$3,$4)`, listingID, bidder, accountID, newBid)
+	if err != nil {
+		return ListingView{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return ListingView{}, err
+	}
+
+	return s.singleListing(ctx, listingID), nil
+}
+
+// Buyout buys a listing outright at its buyout price.
+func (s *Store) Buyout(ctx context.Context, accountID int64, listingID int64) error {
+	tx, err := s.user.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var (
+		sellerAccount  int64
+		sellerAvatar   int64
+		itemID         int
+		stack          int
+		quality        *float64
+		cost           *int64
+		builder        *string
+		structure      *float64
+		buyout         *int64
+		currentBid     int64
+		prevBidderAcct *int64
+		hadBidder      bool
+		expiresAt      time.Time
+	)
+	err = tx.QueryRow(ctx, `
+		SELECT seller_account_id, seller_avatar_id, item_id, stack_size, quality,
+		       item_cost, builder_name, structure, buyout, current_bid,
+		       high_bidder_account_id, high_bidder_avatar_id IS NOT NULL, expires_at
+		  FROM auction_listings
+		 WHERE id = $1 AND status = 0
+		 FOR UPDATE`, listingID).
+		Scan(&sellerAccount, &sellerAvatar, &itemID, &stack, &quality, &cost, &builder,
+			&structure, &buyout, &currentBid, &prevBidderAcct, &hadBidder, &expiresAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return errListingGone
+	}
+	if err != nil {
+		return err
+	}
+	if time.Now().After(expiresAt) {
+		return errListingGone
+	}
+	if buyout == nil {
+		return errNoBuyout
+	}
+	if sellerAccount == accountID {
+		return errOwnListing
+	}
+
+	buyer, _, err := primaryAvatar(ctx, tx, accountID)
+	if err != nil {
+		return err
+	}
+	if err := debitAvatar(ctx, tx, buyer, *buyout); err != nil {
+		return err
+	}
+
+	// Refund a standing high bidder (if any).
+	if hadBidder && prevBidderAcct != nil {
+		if err := deliverCredits(ctx, tx, *prevBidderAcct, "Auction House",
+			"Outbid refund", "A buyout ended the auction; your bid has been refunded.", currentBid); err != nil {
+			return err
+		}
+	}
+
+	// Deliver the item to the buyer and the proceeds to the seller.
+	if err := deliverItem(ctx, tx, accountID, buyer, "Auction House",
+		"Auction won", "You bought this item via buyout.",
+		itemID, stack, quality, cost, builder, structure); err != nil {
+		return err
+	}
+	if err := deliverCredits(ctx, tx, sellerAccount, "Auction House",
+		"Auction sold", "Your item sold via buyout.", *buyout); err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx,
+		`UPDATE auction_listings SET status = 1, resolved_at = now() WHERE id = $1`, listingID)
+	if err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// singleListing reloads one listing as a view (best-effort, post-commit).
+func (s *Store) singleListing(ctx context.Context, listingID int64) ListingView {
+	rows, err := s.user.Query(ctx, `
+		SELECT `+listingSelectCols+` FROM auction_listings WHERE id = $1`, listingID)
+	if err != nil {
+		return ListingView{}
+	}
+	lr, err := scanListings(rows)
+	if err != nil || len(lr) == 0 {
+		return ListingView{}
+	}
+	items, names := s.enrich(ctx, lr)
+	r := lr[0]
+	var highBidder *string
+	if r.highBidderAvatar != nil {
+		if n, ok := names[*r.highBidderAvatar]; ok {
+			highBidder = &n
+		}
+	}
+	return ListingView{
+		ID:         fmt.Sprintf("%d", r.id),
+		Item:       items[r.itemID].itemView(r.quality),
+		Seller:     names[r.sellerAvatarID],
+		Stack:      r.stackSize,
+		Quality:    r.quality,
+		Band:       computeBand(time.Until(r.expiresAt)),
+		Bid:        r.currentBid,
+		Buyout:     r.buyout,
+		HighBidder: highBidder,
+	}
+}
+
+// sweepExpiredAuctions resolves every active listing past its expiry: a standing
+// high bid wins (item to winner, proceeds to seller); no bids => unsold (item
+// returned to seller, 95% of deposit refunded).
+func (s *Store) sweepExpiredAuctions(ctx context.Context) (int, error) {
+	rows, err := s.user.Query(ctx, `
+		SELECT id FROM auction_listings WHERE status = 0 AND expires_at < now()`)
+	if err != nil {
+		return 0, err
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+
+	resolved := 0
+	for _, id := range ids {
+		if err := s.resolveOneExpired(ctx, id); err != nil {
+			return resolved, err
+		}
+		resolved++
+	}
+	return resolved, nil
+}
+
+func (s *Store) resolveOneExpired(ctx context.Context, listingID int64) error {
+	tx, err := s.user.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var (
+		sellerAccount int64
+		itemID        int
+		stack         int
+		quality       *float64
+		cost          *int64
+		builder       *string
+		structure     *float64
+		currentBid    int64
+		deposit       int64
+		winnerAccount *int64
+		hadBidder     bool
+	)
+	err = tx.QueryRow(ctx, `
+		SELECT seller_account_id, item_id, stack_size, quality, item_cost,
+		       builder_name, structure, current_bid, deposit_paid,
+		       high_bidder_account_id, high_bidder_avatar_id IS NOT NULL
+		  FROM auction_listings
+		 WHERE id = $1 AND status = 0 AND expires_at < now()
+		 FOR UPDATE`, listingID).
+		Scan(&sellerAccount, &itemID, &stack, &quality, &cost, &builder, &structure,
+			&currentBid, &deposit, &winnerAccount, &hadBidder)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil // already resolved by a racing path
+	}
+	if err != nil {
+		return err
+	}
+
+	if hadBidder && winnerAccount != nil {
+		// Sale at the standing bid (already held from the winner).
+		if err := deliverItem(ctx, tx, *winnerAccount, 0, "Auction House",
+			"Auction won", "You won this auction.",
+			itemID, stack, quality, cost, builder, structure); err != nil {
+			return err
+		}
+		if err := deliverCredits(ctx, tx, sellerAccount, "Auction House",
+			"Auction sold", "Your item sold at auction.", currentBid); err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx,
+			`UPDATE auction_listings SET status = 1, resolved_at = now() WHERE id = $1`, listingID)
+	} else {
+		// Unsold: return the item, refund 95% of the deposit (5% kept).
+		refund := int64(math.Floor(float64(deposit) * 0.95))
+		if err := deliverItem(ctx, tx, sellerAccount, 0, "Auction House",
+			"Auction expired", "Your item did not sell and has been returned.",
+			itemID, stack, quality, cost, builder, structure); err != nil {
+			return err
+		}
+		if refund > 0 {
+			if err := deliverCredits(ctx, tx, sellerAccount, "Auction House",
+				"Deposit refund", "95% of your listing deposit has been returned.", refund); err != nil {
+				return err
+			}
+		}
+		_, err = tx.Exec(ctx,
+			`UPDATE auction_listings SET status = 2, resolved_at = now() WHERE id = $1`, listingID)
+	}
+	if err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}

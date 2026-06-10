@@ -320,6 +320,52 @@ services:
     restart: unless-stopped
 
   # --------------------------------------------------------------
+  # Freya Online -- Go login server + website (Phase AQ).
+  #
+  # This is the MIT, self-contained Go replacement for the C++ Net7SSL above.
+  # It serves the SAME legacy game-auth endpoints byte-for-byte (legacy.go) PLUS
+  # the React SPA + JSON API for the auction house / mailbox. During the
+  # coexistence period it runs ALONGSIDE `login`: the C++ login keeps the real
+  # client.exe traffic on host:4443 and owns the AF_UNIX keepalive socket, so the
+  # Go service runs with NET7_IPC_KEEPALIVE off (default) and on its own host
+  # ports until the owner-confirmed cutover (plans/29 CV entry). At cutover,
+  # repoint the client to this service and delete the `login` service.
+  # --------------------------------------------------------------
+  freya-online:
+    build:
+      context: ./freya/online
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      schema-init:
+        condition: service_completed_successfully
+    environment:
+      # DB contract: accounts/tickets/avatars/AH/mailbox live in net7_user;
+      # item_base (catalogue) lives in net7. Two pools, cross-DB (see store.go).
+      DB_HOST: "postgres:5432"
+      DB_USER: "net7"
+      DB_PASS: "net7"
+      DB_NAME: "net7_user"
+      FREYA_DB_CONTENT: "net7"
+      DOMAIN: "localhost"
+      NET7SSL_CERT_DIR: "/app/certs"
+      FREYA_WEB_ROOT: "/app/web"
+      # Keepalive OFF during coexistence -- the C++ login owns the recv socket.
+      NET7_IPC_KEEPALIVE: "${FREYA_IPC_KEEPALIVE:-}"
+    volumes:
+      # Same dev certs the C++ login/server use; the Go service reads
+      # <DOMAIN>.cer / <DOMAIN>.pem from NET7SSL_CERT_DIR.
+      - ./deploy/certs:/app/certs:ro
+    ports:
+      # Host 8443 -> container 443 (legacy endpoints + website over TLS).
+      # Host 8088 -> container 8080 (plain HTTP API/SPA for dev / behind a
+      # separate TLS terminator).
+      - "8443:443/tcp"
+      - "8088:8080/tcp"
+    restart: unless-stopped
+
+  # --------------------------------------------------------------
   # Postgres backend (Phase N: now the canonical backend; was originally
   # behind a `postgres` profile while the libpqxx port was in flight).
   # `schema-init` below applies the converted schema + seed data on first

@@ -185,3 +185,6 @@ __pycache__/
 # Freya Online web SPA build output + deps
 /freya/online/web/node_modules/
 /freya/online/web/dist/
+
+# Freya Online: locally-built Go binary (built in Docker for deploy)
+freya/online/server/freya-online
