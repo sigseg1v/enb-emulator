@@ -37,7 +37,7 @@ The server runs natively on Linux. Concretely:
   LaunchNet7) on top of the shared `commontools-avalonia` library. The
   Item Editor is ported (`tools/item-editor-avalonia/`); its WinForms
   original at `tools/itemeditor/` is kept for reference only.
-- A headless C# CLI client (`tools/cli-client/`) and an xUnit integration
+- A headless C# CLI client (`freya/cli-client/`) and an xUnit integration
   suite drive the live server end to end and byte-pin its packets.
 - The Linux client installer (`client/linux-installer/`, GPLv3, verbatim
   from upstream) installs the original Windows client under WINE.

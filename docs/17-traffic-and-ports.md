@@ -84,7 +84,7 @@ The boundary that lives on `localhost`. Implemented in:
 - `common/include/net7/WestwoodRSA.h`, `WestwoodRC4.h` -- single source of truth for both algorithms.
 - `proxy/WestwoodRSA.cpp`, `WestwoodRC4.cpp` -- proxy-side terminator.
 - `server/src/WestwoodRSA.cpp`, `WestwoodRC4.cpp` and `login-server/Net7SSL/WestwoodRSA.cpp`, `WestwoodRC4.cpp` -- same algorithm where the server-side processes need it directly.
-- `tools/cli-client/tests/CliClient.UnitTests/Net/WestwoodRSATests.cs` and `WestwoodRC4Tests.cs` -- round-trip tests for a C# port.
+- `freya/cli-client/tests/CliClient.UnitTests/Net/WestwoodRSATests.cs` and `WestwoodRC4Tests.cs` -- round-trip tests for a C# port.
 
 Handshake:
 

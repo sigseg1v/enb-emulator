@@ -145,7 +145,7 @@ immediately follows.
 This framing is the client-facing TCP wire. The proxy implements the
 length-prefixed read in `proxy/Connection.cpp`, and the CLI client
 reimplements it in C# inside
-`tools/cli-client/CliClient.Core/Wire/EncryptedTcpConnection.cs`. The
+`freya/cli-client/CliClient.Core/Wire/EncryptedTcpConnection.cs`. The
 server itself no longer reads this framing directly: the proxy
 terminates the client TCP link and bridges to the server over UDP.
 
@@ -226,7 +226,7 @@ places that all agree:
   -- 64-bit-key RC4 (and a 128-bit variant for some channels).
 - `proxy/Connection.cpp::DoKeyExchange` and `DoClientKeyExchange`.
 - C# port for the CLI client / integration tests:
-  `tools/cli-client/CliClient.Core/Wire/WestwoodRsa.cs` +
+  `freya/cli-client/CliClient.Core/Wire/WestwoodRsa.cs` +
   `WestwoodRc4.cs`.
 
 Two RC4 streams are kept per proxy connection: `m_CryptIn` and

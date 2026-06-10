@@ -77,7 +77,7 @@ Live code paths that MUST migrate:
    or `text`.
 
 4. **Test fixtures** — every per-account row in
-   `tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql`
+   `freya/tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql`
    currently inserts `UPPER(encode(digest('testpw', 'md5'), 'hex'))`. All
    82 rows (`cli_test01` through `cli_test82`, plus `cli_test_status0`)
    need their password hash regenerated for the new scheme. A short
@@ -164,7 +164,7 @@ Out-of-scope MD5 occurrences:
   - LinuxAuth.cpp confirmed: `exec_params(... "$1", username)` parameterized, PHC never wire-bound, plaintext never crosses the Postgres wire.
   - Decisions-log entry appended (2026-05-29 -- Phase X).
 
-- [x] **W6: end-to-end ChangePassword roundtrip regression test (2026-05-29).** Added `tests/integration/CliClient.IntegrationTests/Handshake/Argon2idChangePasswordRoundtripTests.cs::SlashChangepassword_RewritesPhc_OldPasswordRejected_NewPasswordAccepted`. The test drives a real sector handshake with `TestAccounts.New` (PHC for "testpw"), fires `/changepassword phx_argon2_roundtrip_2026` via 0x0033 CLIENT_CHAT, pins the 0x001D MESSAGE_STRING success reply byte-exactly ("Your password has been changed to: `<newpw>`", 62-byte literal, msgLen=63, color=5, 66-byte total payload with trailing NUL), then re-runs AuthLogin and asserts the OLD password now returns Valid=false and the NEW password returns Valid=true. This pins the full chain: `MatchOptWithParam` -> `AccountManager::ChangePassword` -> `HashPasswordToPhc` (libsodium INTERACTIVE Argon2id) -> parameterised UPDATE -> the SEPARATE login-server process's `LinuxAuth::ValidateAccountLinux` -> `crypto_pwhash_str_verify`. Wave 189 already pinned the missing-arg ERROR fork; this is the matching success-path pin. Verified: passes in 8s against the live docker-compose stack. +0 ratchet (0x0033 + 0x001D already pinned); meaningful Phase X regression coverage.
+- [x] **W6: end-to-end ChangePassword roundtrip regression test (2026-05-29).** Added `freya/tests/integration/CliClient.IntegrationTests/Handshake/Argon2idChangePasswordRoundtripTests.cs::SlashChangepassword_RewritesPhc_OldPasswordRejected_NewPasswordAccepted`. The test drives a real sector handshake with `TestAccounts.New` (PHC for "testpw"), fires `/changepassword phx_argon2_roundtrip_2026` via 0x0033 CLIENT_CHAT, pins the 0x001D MESSAGE_STRING success reply byte-exactly ("Your password has been changed to: `<newpw>`", 62-byte literal, msgLen=63, color=5, 66-byte total payload with trailing NUL), then re-runs AuthLogin and asserts the OLD password now returns Valid=false and the NEW password returns Valid=true. This pins the full chain: `MatchOptWithParam` -> `AccountManager::ChangePassword` -> `HashPasswordToPhc` (libsodium INTERACTIVE Argon2id) -> parameterised UPDATE -> the SEPARATE login-server process's `LinuxAuth::ValidateAccountLinux` -> `crypto_pwhash_str_verify`. Wave 189 already pinned the missing-arg ERROR fork; this is the matching success-path pin. Verified: passes in 8s against the live docker-compose stack. +0 ratchet (0x0033 + 0x001D already pinned); meaningful Phase X regression coverage.
 
 ## Non-goals (deliberately deferred)
 
@@ -196,7 +196,7 @@ just build
 just test
 
 # Specifically the auth/login path
-cd tests/integration/CliClient.IntegrationTests
+cd freya/tests/integration/CliClient.IntegrationTests
 dotnet test --filter "FullyQualifiedName~GlobalConnect"
 dotnet test --filter "FullyQualifiedName~MasterJoin"
 
@@ -204,7 +204,7 @@ dotnet test --filter "FullyQualifiedName~MasterJoin"
 # fixture path:
 git grep -nE 'MD5|md5' -- 'login-server/Net7SSL/LinuxAuth.cpp' \
     'server/src/AccountManager.cpp' \
-    'tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql' \
+    'freya/tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql' \
     'db/postgres/schema.sql' \
     'db/postgres/seed.sql'
 # (expected: no matches)

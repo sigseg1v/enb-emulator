@@ -504,7 +504,7 @@ Filed `plans/19-phase-s-cli-client.md`. A passive observer client that speaks th
 
 ## 2026-05-24 — Phase T queued: CLI-client-driven integration test suite
 
-Filed `plans/20-phase-t-cli-integration-tests.md`. Real xUnit integration test project at `tests/integration/CliClient.IntegrationTests/` that references the `CliClient.Core` library (Phase S), spins docker compose via `ServerFixture : IAsyncLifetime`, drives the client in-process, and asserts opcode-by-opcode + workflow-by-workflow.
+Filed `plans/20-phase-t-cli-integration-tests.md`. Real xUnit integration test project at `freya/tests/integration/CliClient.IntegrationTests/` that references the `CliClient.Core` library (Phase S), spins docker compose via `ServerFixture : IAsyncLifetime`, drives the client in-process, and asserts opcode-by-opcode + workflow-by-workflow.
 
 **Library/console split in Phase S** is what makes Phase T possible — instead of shelling out to `dotnet run --project CliClient.App` and scraping logs (brittle: process race conditions, log-flush timing, parsing pain), the integration tests `new GlobalConnection(...)` directly, `await` responses, and `Assert.Equal` on decoded fields. Real test reporter output, fast, debuggable.
 
@@ -544,11 +544,11 @@ All actionable Phase S work is done: 14 [x] items spanning project scaffold, pac
 
 **Test count: 175 unit tests passing.** Retail-capture round-trip drove a real codec API change: `MasterJoinRequest.Ticket` was modelled as `string` based on the C struct's `char ticket[20]` declaration, but the captured frame has non-printable bytes (0x89, 0x77, 0x24, 0xDF, ...) in the ticket field — it's opaque binary, not ASCII. Refactored to `byte[]` with an `AsciiTicket(string)` helper for the test cases that genuinely want ASCII. Custom `Equals`/`GetHashCode` override on the record because byte[] fields default to reference equality and break record value semantics.
 
-**Item 15 design choice (data table, not 209 stub classes):** the plan let me choose either (a) one `IOpcodeCodec` stub per opcode in `Opcodes.h` or (b) a single bulk registrar driven by a generated name table. Chose (b): `OpcodeNames.Generated.cs` (FrozenDictionary keyed by hex), `NamedOpaqueCodec` (logs `NamedOpaquePayload(0x00CE, "GUILD_REQUEST_CHANGE", <raw bytes>)`), `OpcodeRegistry.RegisterAllNamedOpaque()` (TryAdd-based, never clobbers typed codecs). Trade-off: zero per-opcode boilerplate now; Phase K can promote opaque→typed one opcode at a time without touching 208 files. The cost is that opaque codecs can't encode (which is correct — we don't know the layout), but for log naming + inbound-only observation that's fine. Generator at `tools/cli-client/scripts/generate-opcode-names.sh`; collapses 209 `#define`s to 207 unique opcodes via the `NAME_A_OR_NAME_B` rule for 0x2010 (`SET_GLOBAL_LOGIN_LINK_OR_DATA_FILE`) and 0x2011 (`SET_PROXY_SECTOR_LINK_OR_GALAXY_MAP_CACHE`).
+**Item 15 design choice (data table, not 209 stub classes):** the plan let me choose either (a) one `IOpcodeCodec` stub per opcode in `Opcodes.h` or (b) a single bulk registrar driven by a generated name table. Chose (b): `OpcodeNames.Generated.cs` (FrozenDictionary keyed by hex), `NamedOpaqueCodec` (logs `NamedOpaquePayload(0x00CE, "GUILD_REQUEST_CHANGE", <raw bytes>)`), `OpcodeRegistry.RegisterAllNamedOpaque()` (TryAdd-based, never clobbers typed codecs). Trade-off: zero per-opcode boilerplate now; Phase K can promote opaque→typed one opcode at a time without touching 208 files. The cost is that opaque codecs can't encode (which is correct — we don't know the layout), but for log naming + inbound-only observation that's fine. Generator at `freya/cli-client/scripts/generate-opcode-names.sh`; collapses 209 `#define`s to 207 unique opcodes via the `NAME_A_OR_NAME_B` rule for 0x2010 (`SET_GLOBAL_LOGIN_LINK_OR_DATA_FILE`) and 0x2011 (`SET_PROXY_SECTOR_LINK_OR_GALAXY_MAP_CACHE`).
 
 **Docs slot conflict reconciled:** plan said `docs/12-cli-client.md`, but slot 12 was already taken by `docs/12-content-pipeline.md` (Phase H output). Landed at `docs/15-cli-client.md` instead and added the row to `docs/README.md`'s file table. The plan's historical Notes still reference "12-cli-client.md" because they reflect the plan text at write-time, not the final on-disk slot. Future readers: the file is at slot 15.
 
-**Phase T readiness audit:** `ConnectAndLogin`, `SendChat`, `CliSession`, `AuthLoginClient`, `OpcodeRegistry`, `HealthGuard`, `PacketLog`, `ChatLog`, `ConsoleSink`, all codecs, `OpcodeId`, `OpcodeNames` are `public`. A Phase T test project that ProjectReferences `tools/cli-client/src/CliClient.Core` can construct any of these directly — no internal-friend hacks, no reflection. Confirmed by the existing `tools/cli-client/tests/CliClient.UnitTests` project already doing it.
+**Phase T readiness audit:** `ConnectAndLogin`, `SendChat`, `CliSession`, `AuthLoginClient`, `OpcodeRegistry`, `HealthGuard`, `PacketLog`, `ChatLog`, `ConsoleSink`, all codecs, `OpcodeId`, `OpcodeNames` are `public`. A Phase T test project that ProjectReferences `freya/cli-client/src/CliClient.Core` can construct any of these directly — no internal-friend hacks, no reflection. Confirmed by the existing `freya/cli-client/tests/CliClient.UnitTests` project already doing it.
 
 **Coverage ratchet: equality not inequality.** Phase T Item 10's `CoverageRatchetTests.Ratchet_CountEqualsFloor` asserts `count == MinTestedCount`, not `count >= MinTestedCount`. The latter would let coverage entries sneak in unnoticed (someone adds a row, the assert still passes because the count is "at least the floor"). The former forces every entry-add to be paired with a deliberate constant-bump in the same diff, and every entry-delete to be paired with a constant-decrement plus a commit-message explanation of what coverage went away. The downside is a slightly noisier diff for legitimate coverage adds (two lines instead of one), but the upside is the floor stays load-bearing — the constant means what it says. Combined with the auxiliary asserts (every entry resolves to OpcodeNames.All; sorted by value; non-empty .cs citation), the ratchet is honest by construction: a typo or rename in `Opcodes.h` breaks the build, a duplicate breaks the build, an out-of-order insert breaks the build, and a "tested-opcode count > universe size" impossibility breaks the build. The truthfulness of "this test really exercises that opcode" remains on PR review — the ratchet can't verify intent, only structure.
 
@@ -693,7 +693,7 @@ earlier sessions; this session closed the remaining gaps and added the
 
 **What landed.**
 
-- `tests/integration/CliClient.IntegrationTests/Opcodes/GlobalConnectTests.cs`
+- `freya/tests/integration/CliClient.IntegrationTests/Opcodes/GlobalConnectTests.cs`
   — `ValidTicket_RoundTripsThroughUdpGlobalPlane_ReturnsAvatarList`
   drives the full round-trip against the live docker-compose stack:
   AuthLogin (TLS) for a real Net7SSL-issued `<user>-<rand>` ticket →
@@ -715,7 +715,7 @@ earlier sessions; this session closed the remaining gaps and added the
    load-test windows. Real accounts use status=100 (cf.
    `db/mysql/net7_user.sql` admin row). Per server-integrity rules
    (CLAUDE.md), the fix is to seed valid status, not loosen the
-   server's check. `tests/integration/CliClient.IntegrationTests/
+   server's check. `freya/tests/integration/CliClient.IntegrationTests/
    Fixtures/seed.sql` now seeds status=100 with an enum-table comment
    explaining the convention (0/-1/-2/100 each tied to its server
    meaning).
@@ -884,7 +884,7 @@ Server/proxy/login-server rebuilt cleanly. The
 the migration took on the actual wire output.
 
 To turn that into real coverage I added
-`tools/cli-client/src/CliClient.Core/Opcodes/Inbound/
+`freya/cli-client/src/CliClient.Core/Opcodes/Inbound/
 GlobalAvatarListCodec.cs` — a strongly-typed decoder for the
 struct that walks every field, returns immutable records
 (`GlobalAvatarList` / `AvatarSlot` / `AvatarInfo` / `AvatarData` /
@@ -1332,7 +1332,7 @@ Linux build's symbol resolution clean without needing yet another
 - Clean build of the proxy target. Only #pragma warning(disable:4786)
   noise (benign — MSVC-specific).
 - `docker compose up -d --build --wait` brings the full stack up healthy.
-- `dotnet test tests/integration/CliClient.IntegrationTests/...` — 38/38
+- `dotnet test freya/tests/integration/CliClient.IntegrationTests/...` — 38/38
   cli-integration tests green (no regression).
 
 ### What this unblocks
@@ -1782,11 +1782,11 @@ when path 1 lands keeps the list honest).
 
 ### Touches
 
-* `tests/integration/CliClient.IntegrationTests/Opcodes/SectorStartAckTests.cs` (new)
-* `tests/integration/CliClient.IntegrationTests/TestAccounts.cs` (Pool gains cli_test07)
-* `tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql` (cli_test07 INSERT row;
+* `freya/tests/integration/CliClient.IntegrationTests/Opcodes/SectorStartAckTests.cs` (new)
+* `freya/tests/integration/CliClient.IntegrationTests/TestAccounts.cs` (Pool gains cli_test07)
+* `freya/tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql` (cli_test07 INSERT row;
   comments 9000006→9000007, "all six"→"all seven")
-* `tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs` (MinTestedCount
+* `freya/tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs` (MinTestedCount
   19→20; +0x0006 START_ACK; CAMERA_CONTROL entry NOT added)
 
 ### What did NOT change
@@ -2146,7 +2146,7 @@ SIGSEGV until the bounds check lands.
 
 ### What landed
 
-* `tests/integration/CliClient.IntegrationTests/Opcodes/SectorVerbRequestTests.cs`
+* `freya/tests/integration/CliClient.IntegrationTests/Opcodes/SectorVerbRequestTests.cs`
   (new) — `VerbRequest_OnNonMatchingSubject_DoesNotBreakConnection_RequestTimeStillRoundTrips`
   exercises the `Player::HandleVerbRequest` silent-no-op branch (SubjectID=0,
   ObjectID=0, Action=1; 12B canonical wire payload), then probes pipe survival
@@ -2154,15 +2154,15 @@ SIGSEGV until the bounds check lands.
   tick echoed back as ClientSent. 90s budget; 400-frame drain cap. Pool[13]
   cli_test15 dedicated.
 
-* `tools/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs` — added
+* `freya/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs` — added
   `OpcodeId.Known.VerbRequest = new(0x005A)` in sorted position between SkillUp
   (0x0057) and GlobalConnect (0x006D).
 
-* `tests/integration/CliClient.IntegrationTests/TestAccounts.cs` and
+* `freya/tests/integration/CliClient.IntegrationTests/TestAccounts.cs` and
   `Fixtures/seed.sql` — added `cli_test15` (id 9_000_015, status=100) to the
   shared deterministic-account pool.
 
-* `tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs` —
+* `freya/tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs` —
   `MinTestedCount` 27 → 28; added 0x005A VERB_REQUEST entry in sorted position.
 
 * Zero server-side changes — Phase R already had VerbRequest canonical at 12B
@@ -2283,7 +2283,7 @@ mix isolated + full-suite invocations against the same stack).
 
 ### What landed
 
-`tests/integration/CliClient.IntegrationTests/Opcodes/SectorRequestTargetTests.cs`
+`freya/tests/integration/CliClient.IntegrationTests/Opcodes/SectorRequestTargetTests.cs`
 (new) — `RequestTarget_OnNullTarget_ReceivesSetTargetWithSentinelTargetIdMinusOne`.
 Test sends the 8-byte 0x0017 REQUEST_TARGET frame
 (`{int32_t GameID=0; int32_t TargetID=0}`) after the standard sector
@@ -2968,7 +2968,7 @@ falls through to bottom-of-switch `ForwardClientOpcode(...)`.
 
 ### Test
 
-`tests/integration/CliClient.IntegrationTests/Opcodes/SectorItemStateTests.cs`
+`freya/tests/integration/CliClient.IntegrationTests/Opcodes/SectorItemStateTests.cs`
 — `ItemState_UnrecognisedInventoryByte_ReceivesUnrecognisedErrorString`.
 Passes in isolation (1/1, 7s); full integration suite **55/55
 in 2m17s** from a freshly-recycled stack with all four containers
@@ -3342,22 +3342,22 @@ test-infrastructure tweak, not a Phase K opcode wave.
 
 ### Files touched
 
-* `tests/integration/CliClient.IntegrationTests/Opcodes/SectorAvatarEmoteTests.cs`
+* `freya/tests/integration/CliClient.IntegrationTests/Opcodes/SectorAvatarEmoteTests.cs`
   (new — uses Pool[20] cli_test22 dedicated to avoid colliding
   with Pool[3..19]; 90s budget; 30-attempt × 2s retry loop on
   send; xmldoc covers the login-stage race with full
   primary-source citations + the CLAUDE.md compliance argument
   for why the retry loop is the right answer rather than a
   server-side change; 6 regression classes documented)
-* `tests/integration/CliClient.IntegrationTests/TestAccounts.cs`
+* `freya/tests/integration/CliClient.IntegrationTests/TestAccounts.cs`
   (Pool gains cli_test22 entry — 9_000_022)
-* `tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql`
+* `freya/tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql`
   (cli_test22 INSERT row, status=100)
-* `tools/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs`
+* `freya/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs`
   (+0x005E AvatarEmote and +0x005F AvatarEmoteResponse in
   sorted positions between 0x005A VerbRequest and 0x006D
   GlobalConnect)
-* `tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs`
+* `freya/tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs`
   (MinTestedCount 35→37; sorted-position entries for 0x005E
   AVATAR_EMOTE and 0x005F AVATAR_EMOTE_RESPONSE with full
   primary-source citations to PlayerConnection.cpp:10217 and
@@ -3573,7 +3573,7 @@ suspected build-cache staleness (because `dotnet build
 --no-incremental` reported no rebuild). Verified dll freshness by:
 
 ```
-strings -el tests/integration/CliClient.IntegrationTests/bin/Debug/net10.0/CliClient.IntegrationTests.dll | grep cli_test24
+strings -el freya/tests/integration/CliClient.IntegrationTests/bin/Debug/net10.0/CliClient.IntegrationTests.dll | grep cli_test24
 ```
 
 — note `strings -el`, not the default `strings`. C# string
@@ -3591,7 +3591,7 @@ index after counting. If you add a 25th-and-beyond cli_test*
 account, this offset shifts again — add the row to seed.sql AND
 TestAccounts.cs Pool in parallel and update every test that uses
 the new tail index. **Do NOT** ever add cli_test10 to Pool without
-auditing every Pool[N] reference in tests/integration/ first.
+auditing every Pool[N] reference in freya/tests/integration/ first.
 
 ### Byte-order distinction: InvMove BIG-ENDIAN vs SkillUse HOST-LE
 
@@ -4517,11 +4517,11 @@ matching seed.sql row at status=100. Pool layout after Wave 32:
 
 ### Touches
 
-* `tests/integration/CliClient.IntegrationTests/Opcodes/SectorClientChatRequestTests.cs` — new
-* `tests/integration/CliClient.IntegrationTests/TestAccounts.cs` — Pool[27] += cli_test29
-* `tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql` — cli_test29 INSERT row
-* `tools/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs` — +ClientChatRequest 0x00A3, +ClientChatEvent 0x00A5
-* `tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs` — MinTestedCount 46→48; +0x00A3 and +0x00A5 entries
+* `freya/tests/integration/CliClient.IntegrationTests/Opcodes/SectorClientChatRequestTests.cs` — new
+* `freya/tests/integration/CliClient.IntegrationTests/TestAccounts.cs` — Pool[27] += cli_test29
+* `freya/tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql` — cli_test29 INSERT row
+* `freya/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs` — +ClientChatRequest 0x00A3, +ClientChatEvent 0x00A5
+* `freya/tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs` — MinTestedCount 46→48; +0x00A3 and +0x00A5 entries
 * `plans/11-phase-k-ingame.md` — Wave 32 entry
 * `plans/00-master.md` — row 19 Wave 32 preamble
 * `plans/99-decisions-log.md` — this entry
@@ -4701,20 +4701,20 @@ We are not making the server accept any new input shape, not
 loosening any security posture, not fabricating any reply.
 
 **Touches** —
-* `tests/integration/CliClient.IntegrationTests/Opcodes/SectorTriggerEmoteTests.cs`
+* `freya/tests/integration/CliClient.IntegrationTests/Opcodes/SectorTriggerEmoteTests.cs`
   (new — uses Pool[28] cli_test30 dedicated; 90s budget; 400-frame
   drain cap; xmldoc walks through the dispatcher case, two-line
   handler, SendNotifyEmote field-copy, SendToRangeList fan-out,
   SectorLogin self-add invariant, three-assertion structure, and
   8 regression classes)
-* `tests/integration/CliClient.IntegrationTests/TestAccounts.cs`
+* `freya/tests/integration/CliClient.IntegrationTests/TestAccounts.cs`
   (Pool[28] += cli_test30 — 9_000_030)
-* `tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql`
+* `freya/tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql`
   (cli_test30 INSERT row, status=100)
-* `tools/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs`
+* `freya/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs`
   (+0x00A1 TriggerEmote and +0x00A2 NotifyEmote in sorted position
   between 0x0088 PetitionStuck and 0x00A3 ClientChatRequest)
-* `tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs`
+* `freya/tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs`
   (MinTestedCount 48→**50**; **+2** sorted-position entries for
   0x00A1 TRIGGER_EMOTE and 0x00A2 NOTIFY_EMOTE inserted between
   0x009F STARBASE_ROOM_CHANGE and 0x00A3 CLIENT_CHAT_REQUEST)
@@ -4839,17 +4839,17 @@ loosening any security posture, not fabricating any reply.
 entry's "Regression coverage" subsection.
 
 **Touches** —
-* `tests/integration/CliClient.IntegrationTests/Opcodes/SectorHandshake.cs`
+* `freya/tests/integration/CliClient.IntegrationTests/Opcodes/SectorHandshake.cs`
   (Session.HandshakeOpcodes field + drain-loop capture tuple)
-* `tests/integration/CliClient.IntegrationTests/Opcodes/SectorHandshakeFanoutTests.cs`
+* `freya/tests/integration/CliClient.IntegrationTests/Opcodes/SectorHandshakeFanoutTests.cs`
   (new)
-* `tests/integration/CliClient.IntegrationTests/TestAccounts.cs`
+* `freya/tests/integration/CliClient.IntegrationTests/TestAccounts.cs`
   (Pool[29] += cli_test31)
-* `tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql`
+* `freya/tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql`
   (cli_test31 row, status=100)
-* `tools/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs`
+* `freya/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs`
   (+ClientShip 0x0047, +AvatarDescription 0x0061)
-* `tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs`
+* `freya/tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs`
   (MinTestedCount 50→52, +2 entries)
 * `plans/11-phase-k-ingame.md` (Wave 34 entry above Wave 33)
 * `plans/00-master.md` (Phase K row demotes Wave 33 to "Earlier
@@ -4953,18 +4953,18 @@ drain-loop capture (one point of failure) protects all 16
 opcodes covered by Wave 34 + Wave 35 simultaneously.
 
 **Touches** —
-* `tests/integration/CliClient.IntegrationTests/Opcodes/SectorHandshakeFanoutTests.cs`
+* `freya/tests/integration/CliClient.IntegrationTests/Opcodes/SectorHandshakeFanoutTests.cs`
   (new `HandshakeEmitsFullSendLoginShipDataFanout` test method
   — 14 `Assert.Contains` calls + xmldoc with per-opcode emit
   citations; uses Pool[30] cli_test32 dedicated to avoid racing
   the sibling Wave 34 test on Pool[29])
-* `tests/integration/CliClient.IntegrationTests/TestAccounts.cs`
+* `freya/tests/integration/CliClient.IntegrationTests/TestAccounts.cs`
   (Pool[30] += cli_test32 — 9_000_032)
-* `tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql`
+* `freya/tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql`
   (cli_test32 INSERT row, status=100)
-* `tools/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs`
+* `freya/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs`
   (+13 OpcodeId.Known entries in sorted-position order)
-* `tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs`
+* `freya/tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs`
   (MinTestedCount 52→**66**; **+14** sorted-position entries
   with full per-opcode regression-class citations)
 * `plans/11-phase-k-ingame.md` (Wave 35 entry inserted above
@@ -5085,11 +5085,11 @@ Pool[31] = cli_test33. cli_test10 still SKIPPED
 
 **Files touched** —
 
-* `tests/integration/CliClient.IntegrationTests/Opcodes/SectorStarbaseAvatarChangeTests.cs` (new)
-* `tests/integration/CliClient.IntegrationTests/TestAccounts.cs` (Pool[31] += cli_test33)
-* `tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql` (cli_test33 INSERT row)
-* `tools/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs` (+0x009D StarbaseAvatarChange)
-* `tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs`
+* `freya/tests/integration/CliClient.IntegrationTests/Opcodes/SectorStarbaseAvatarChangeTests.cs` (new)
+* `freya/tests/integration/CliClient.IntegrationTests/TestAccounts.cs` (Pool[31] += cli_test33)
+* `freya/tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql` (cli_test33 INSERT row)
+* `freya/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs` (+0x009D StarbaseAvatarChange)
+* `freya/tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs`
   (MinTestedCount 66→**67**; +1 sorted-position entry for 0x009D)
 
 **Verification** —
@@ -5165,7 +5165,7 @@ renamed firstName to "Skstreq" (lowercase 'e' at index 5).
 * Future wave authors should mechanically check candidate
   firstName against `/[aeiouy]/` before submitting.
 * OR: add a name-validation helper in
-  `tests/integration/CliClient.IntegrationTests/Opcodes/SectorHandshake.cs`
+  `freya/tests/integration/CliClient.IntegrationTests/Opcodes/SectorHandshake.cs`
   that pre-validates firstName/shipName before sending the
   CREATE_CHAR frame, surfacing the failure at test-author
   time instead of at the 3-minute compose-cycle mark.
@@ -5198,11 +5198,11 @@ Pool[32] = cli_test34. cli_test10 still SKIPPED.
 
 **Files touched** —
 
-* `tests/integration/CliClient.IntegrationTests/Opcodes/SectorSkillStringRqTests.cs` (new)
-* `tests/integration/CliClient.IntegrationTests/TestAccounts.cs` (Pool[32] += cli_test34)
-* `tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql` (cli_test34 INSERT row)
-* `tools/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs` (+0x0051 SkillStringRq)
-* `tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs`
+* `freya/tests/integration/CliClient.IntegrationTests/Opcodes/SectorSkillStringRqTests.cs` (new)
+* `freya/tests/integration/CliClient.IntegrationTests/TestAccounts.cs` (Pool[32] += cli_test34)
+* `freya/tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql` (cli_test34 INSERT row)
+* `freya/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs` (+0x0051 SkillStringRq)
+* `freya/tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs`
   (MinTestedCount 67→**68**; +1 sorted-position entry for 0x0051)
 
 **Verification** —
@@ -5339,11 +5339,11 @@ wave). cli_test10 still SKIPPED.
 
 **Files touched** —
 
-* `tests/integration/CliClient.IntegrationTests/Opcodes/SectorConfirmedActionResponseTests.cs` (new)
-* `tests/integration/CliClient.IntegrationTests/TestAccounts.cs` (Pool[33] += cli_test35)
-* `tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql` (cli_test35 INSERT row)
-* `tools/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs` (+0x00C0 ConfirmedActionResponse)
-* `tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs`
+* `freya/tests/integration/CliClient.IntegrationTests/Opcodes/SectorConfirmedActionResponseTests.cs` (new)
+* `freya/tests/integration/CliClient.IntegrationTests/TestAccounts.cs` (Pool[33] += cli_test35)
+* `freya/tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql` (cli_test35 INSERT row)
+* `freya/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs` (+0x00C0 ConfirmedActionResponse)
+* `freya/tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs`
   (MinTestedCount 68→**69**; +1 sorted-position entry for 0x00C0)
 
 **Verification** —
@@ -5519,11 +5519,11 @@ Pool[34] = cli_test36 (this wave). cli_test10 still SKIPPED.
 
 **Files touched** —
 
-* `tests/integration/CliClient.IntegrationTests/Opcodes/SectorGuildRankNamesRequestClientTests.cs` (new)
-* `tests/integration/CliClient.IntegrationTests/TestAccounts.cs` (Pool[34] += cli_test36)
-* `tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql` (cli_test36 INSERT row)
-* `tools/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs` (+0x00D4 GuildRankNamesRequestClient)
-* `tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs`
+* `freya/tests/integration/CliClient.IntegrationTests/Opcodes/SectorGuildRankNamesRequestClientTests.cs` (new)
+* `freya/tests/integration/CliClient.IntegrationTests/TestAccounts.cs` (Pool[34] += cli_test36)
+* `freya/tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql` (cli_test36 INSERT row)
+* `freya/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs` (+0x00D4 GuildRankNamesRequestClient)
+* `freya/tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs`
   (MinTestedCount 69→**70**; +1 sorted-position entry for 0x00D4 with full
   regression-class commentary and the disambiguation-finding citation)
 
@@ -5668,11 +5668,11 @@ cli_test10 still SKIPPED.
 
 **Files touched** —
 
-* `tests/integration/CliClient.IntegrationTests/Opcodes/SectorGuildSimpleClientSectorTests.cs` (new)
-* `tests/integration/CliClient.IntegrationTests/TestAccounts.cs` (Pool[35] += cli_test37)
-* `tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql` (cli_test37 INSERT row)
-* `tools/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs` (+0x00CD GuildSimpleClientSector)
-* `tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs`
+* `freya/tests/integration/CliClient.IntegrationTests/Opcodes/SectorGuildSimpleClientSectorTests.cs` (new)
+* `freya/tests/integration/CliClient.IntegrationTests/TestAccounts.cs` (Pool[35] += cli_test37)
+* `freya/tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql` (cli_test37 INSERT row)
+* `freya/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs` (+0x00CD GuildSimpleClientSector)
+* `freya/tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs`
   (MinTestedCount 70→**71**; +1 sorted-position entry for 0x00CD)
 
 **Verification** —
@@ -5826,11 +5826,11 @@ cli_test10 still SKIPPED.
 
 **Files touched** —
 
-* `tests/integration/CliClient.IntegrationTests/Opcodes/SectorMissionDismissalTests.cs` (new)
-* `tests/integration/CliClient.IntegrationTests/TestAccounts.cs` (Pool[36] += cli_test38)
-* `tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql` (cli_test38 INSERT row)
-* `tools/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs` (+0x0087 MissionDismissal)
-* `tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs`
+* `freya/tests/integration/CliClient.IntegrationTests/Opcodes/SectorMissionDismissalTests.cs` (new)
+* `freya/tests/integration/CliClient.IntegrationTests/TestAccounts.cs` (Pool[36] += cli_test38)
+* `freya/tests/integration/CliClient.IntegrationTests/Fixtures/seed.sql` (cli_test38 INSERT row)
+* `freya/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs` (+0x0087 MissionDismissal)
+* `freya/tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs`
   (MinTestedCount 71→**72**; +1 sorted-position entry for 0x0087)
 
 **Verification** —

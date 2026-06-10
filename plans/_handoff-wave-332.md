@@ -60,7 +60,7 @@ doesn't leave the hard ones unstarted):
 
 ## Code placement
 
-- Each record class: `tools/cli-client/src/CliClient.Core/Opcodes/Records/<Name>Record.cs`.
+- Each record class: `freya/cli-client/src/CliClient.Core/Opcodes/Records/<Name>Record.cs`.
 - Subclass `PacketRecord`, override `WriteFields(StringBuilder sb)`.
 - Pattern reference: `GlobalTicketRecord.cs`, `AvatarDescriptionRecord.cs`,
   `NameDecalRecord.cs`, `CreateRecord.cs`.
@@ -70,12 +70,12 @@ doesn't leave the hard ones unstarted):
   `ReadF32LE`, `ReadNulString`, `FindFirstAsciiString`,
   `ExtractAsciiStrings`.
 - Register each opcode in
-  `tools/cli-client/src/CliClient.Core/Opcodes/Records/PacketRecordRegistry.cs`
+  `freya/cli-client/src/CliClient.Core/Opcodes/Records/PacketRecordRegistry.cs`
   (one switch arm per opcode).
 
 ## Verify
 
-1. `dotnet build tools/cli-client/src/CliClient.App` -- expect `0 Warning(s), 0 Error(s)`.
+1. `dotnet build freya/cli-client/src/CliClient.App` -- expect `0 Warning(s), 0 Error(s)`.
 2. `NO_COLOR=1 just cli-replay 2>&1 | head -300` -- every frame should show
    structured fields; no `ascii-scan = (none)` lines (those signal
    `GenericRecord` fallback).

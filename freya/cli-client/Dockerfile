@@ -1,4 +1,4 @@
-# tools/cli-client/Dockerfile
+# freya/cli-client/Dockerfile
 #
 # Containerised build of the headless C# CLI client (Phase S). The image
 # exists so multiple clients can drive the dev stack at once: the Net7Proxy
@@ -9,13 +9,13 @@
 # network; scale by project name (see `just play-cli`).
 #
 # Build context is the repo root (docker-compose context: .), matching the
-# proxy/server images, so the COPY path is tools/cli-client/.
+# proxy/server images, so the COPY path is freya/cli-client/.
 
 # ---------- build stage ----------
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 
 WORKDIR /src
-COPY tools/cli-client/ /src/
+COPY freya/cli-client/ /src/
 
 # Framework-dependent publish: the runtime image carries the .NET runtime, so
 # we ship only the app. UseAppHost gives the native `enb-cli` launcher

@@ -15,7 +15,7 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\..\tools\cli-client\src\CliClient.Core\CliClient.Core.csproj" />
+    <ProjectReference Include="..\..\..\cli-client\src\CliClient.Core\CliClient.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Fixtures/Captures/**/*">

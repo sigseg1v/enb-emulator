@@ -1147,7 +1147,7 @@ Key code in **login-server** (`login-server/Net7SSL/`):
 `Connection.cpp:597` (`SendResponse`), `Connection.cpp:895`
 (`DoKeyExchange` -- Linux mirror with RSA + RC4 over POSIX sockets).
 The headless C# reference client ports the same handshake in
-`tools/cli-client/CliClient.Core/Wire/EncryptedTcpConnection.cs` --
+`freya/cli-client/CliClient.Core/Wire/EncryptedTcpConnection.cs` --
 useful when you need a byte-by-byte trace of the protocol without
 launching the Win32 client.
 

@@ -13,7 +13,7 @@ ones we already emit/fabricate against the live bytes as regression fixtures.
 The captures live in `proxy/local-debug/` (gitignored -- they contain a real
 login leg, so the `.pcapng` files are NEVER committed). What gets committed is
 the **decoded hex of individual server->client frames**, extracted into
-`tests/integration/.../Fixtures/Captures/*.hex` with a frame citation -- the
+`freya/tests/integration/.../Fixtures/Captures/*.hex` with a frame citation -- the
 approved clean-room-observation artifact, same pattern as the existing
 `masterjoin_packet220.hex` / `serverredirect_packet222.hex`.
 

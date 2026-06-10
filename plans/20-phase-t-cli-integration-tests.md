@@ -22,11 +22,11 @@ The integration test suite is the most aggressive consumer of the CLI client, so
 
 ## What this phase delivers
 
-A new test project at `tests/integration/CliClient.IntegrationTests/`:
+A new test project at `freya/tests/integration/CliClient.IntegrationTests/`:
 
 ```
-tests/integration/CliClient.IntegrationTests/
-├── CliClient.IntegrationTests.csproj   net10.0, xunit, references tools/cli-client/src/CliClient.Core
+freya/tests/integration/CliClient.IntegrationTests/
+├── CliClient.IntegrationTests.csproj   net10.0, xunit, references freya/cli-client/src/CliClient.Core
 ├── ServerFixture.cs                    xUnit IAsyncLifetime — docker compose up (postgres + login + proxy + server); waits for healthy; tears down
 ├── ClientFixture.cs                    spins a CliClient.Core instance, logs in with a known fixture account, hands the client to tests
 ├── Handshake/
@@ -59,7 +59,7 @@ tests/integration/CliClient.IntegrationTests/
 - name: Integration tests
   run: |
     docker compose -f docker-compose.yml up -d --wait
-    dotnet test tests/integration/CliClient.IntegrationTests/ --logger "trx;LogFileName=cli-integration.trx"
+    dotnet test freya/tests/integration/CliClient.IntegrationTests/ --logger "trx;LogFileName=cli-integration.trx"
     docker compose -f docker-compose.yml down -v
   timeout-minutes: 15
 ```
@@ -77,14 +77,14 @@ xUnit `[Collection("server")]` ensures the docker stack stands up exactly once p
 
 - [x] Item 1 — Project scaffold + csproj + slnx wiring + ServerFixture skeleton
       Status: done
-      Touches: tests/integration/CliClient.IntegrationTests/{CliClient.IntegrationTests.csproj, Directory.Build.props, RepoRoot.cs, ServerFixture.cs, ServerCollection.cs, ClientFixture.cs, Smoke/HarnessSmokeTest.cs, README.md}
+      Touches: freya/tests/integration/CliClient.IntegrationTests/{CliClient.IntegrationTests.csproj, Directory.Build.props, RepoRoot.cs, ServerFixture.cs, ServerCollection.cs, ClientFixture.cs, Smoke/HarnessSmokeTest.cs, README.md}
       Notes:
-        ▸ Project lives at tests/integration/CliClient.IntegrationTests/.
+        ▸ Project lives at freya/tests/integration/CliClient.IntegrationTests/.
            Linux-first Directory.Build.props mirrors the cli-client one
            (EnableWindowsTargeting=false, nullable, TreatWarningsAsErrors).
            xunit 2.9.2 + xunit.runner.visualstudio 2.8.2 + Microsoft.NET.Test.Sdk
            17.11.1 (same versions as CliClient.UnitTests for consistency).
-           ProjectReference up three levels into tools/cli-client/src/CliClient.Core.
+           ProjectReference up three levels into freya/cli-client/src/CliClient.Core.
         ▸ No slnx — neither cli-client nor the test project uses one today; each
            csproj builds standalone via `dotnet build <csproj>`. Net7Tools.slnx
            stays the WinForms-era solution. Adding a Cli.slnx wrapper is
@@ -124,7 +124,7 @@ xUnit `[Collection("server")]` ensures the docker stack stands up exactly once p
 
 - [x] Item 2 — Fixture player account seeding
       Status: done
-      Touches: tests/integration/CliClient.IntegrationTests/{Fixtures/seed.sql (new), TestAccounts.cs (new), ServerFixture.cs (SeedFixtureAccountsAsync), CliClient.IntegrationTests.csproj (CopyToOutputDirectory for Fixtures/), Smoke/HarnessSmokeTest.cs (seed-shape smoke)}
+      Touches: freya/tests/integration/CliClient.IntegrationTests/{Fixtures/seed.sql (new), TestAccounts.cs (new), ServerFixture.cs (SeedFixtureAccountsAsync), CliClient.IntegrationTests.csproj (CopyToOutputDirectory for Fixtures/), Smoke/HarnessSmokeTest.cs (seed-shape smoke)}
       Notes:
         ▸ Seed lives at Fixtures/seed.sql, copied to bin/ via csproj
            <None Include="Fixtures/**/*" CopyToOutputDirectory>. 5
@@ -164,7 +164,7 @@ xUnit `[Collection("server")]` ensures the docker stack stands up exactly once p
 
 - [x] Item 3 — Handshake tests (RSA + TLS login)
       Status: done
-      Touches: tests/integration/CliClient.IntegrationTests/Handshake/{TlsLoginTests.cs, RsaHandshakeTests.cs}
+      Touches: freya/tests/integration/CliClient.IntegrationTests/Handshake/{TlsLoginTests.cs, RsaHandshakeTests.cs}
       Notes:
         ▸ TlsLoginTests has 3 [Fact]s under [Collection(ServerCollection.Name)]:
            ValidAccount_ReturnsValidTicket (Pool[0]/testpw → Valid=true,
@@ -202,11 +202,11 @@ xUnit `[Collection("server")]` ensures the docker stack stands up exactly once p
 - [x] Item 4 — Opcode round-trip tests for everything Phase J/K has wired today
       Status: done (Sector LOGIN deferred — see notes)
       Touches:
-        tools/cli-client/src/CliClient.Core/Opcodes/Outbound/VersionRequestCodec.cs (new),
-        tools/cli-client/src/CliClient.Core/Opcodes/Inbound/VersionResponseCodec.cs (new),
-        tools/cli-client/tests/CliClient.UnitTests/Opcodes/{VersionRequestCodecTests.cs, VersionResponseCodecTests.cs} (new),
-        tests/integration/CliClient.IntegrationTests/ClientFixture.cs (register new codecs),
-        tests/integration/CliClient.IntegrationTests/Opcodes/{VersionRequestTests.cs, MasterJoinTests.cs} (new)
+        freya/cli-client/src/CliClient.Core/Opcodes/Outbound/VersionRequestCodec.cs (new),
+        freya/cli-client/src/CliClient.Core/Opcodes/Inbound/VersionResponseCodec.cs (new),
+        freya/cli-client/tests/CliClient.UnitTests/Opcodes/{VersionRequestCodecTests.cs, VersionResponseCodecTests.cs} (new),
+        freya/tests/integration/CliClient.IntegrationTests/ClientFixture.cs (register new codecs),
+        freya/tests/integration/CliClient.IntegrationTests/Opcodes/{VersionRequestTests.cs, MasterJoinTests.cs} (new)
       Notes:
         ▸ VersionRequestTests covers all three branches of the Linux
            proxy's status logic in ClientToServer_linux_stubs.cpp:50-53:
@@ -274,7 +274,7 @@ xUnit `[Collection("server")]` ensures the docker stack stands up exactly once p
         enumerate-sectors / enumerate-missions / enumerate-items
         workflows blocked on Phase K wiring the listing opcodes
         on the server side.
-      Touches: tests/integration/CliClient.IntegrationTests/Workflows/ConnectAndLoginTests.cs
+      Touches: freya/tests/integration/CliClient.IntegrationTests/Workflows/ConnectAndLoginTests.cs
       Notes:
         ▸ ConnectAndLoginTests has 2 [Fact]s:
            ValidAccount_LandsInGlobalStage_NoHealthTrip — runs the
@@ -313,8 +313,8 @@ xUnit `[Collection("server")]` ensures the docker stack stands up exactly once p
         retail-server bytes; live server-reply replay deferred to a
         follow-up tracked in Notes)
       Touches:
-        tests/integration/CliClient.IntegrationTests/Fixtures/Captures/{README.md, masterjoin_packet220.hex, serverredirect_packet222.hex} (new),
-        tests/integration/CliClient.IntegrationTests/Verification/{HexFixture.cs, CaptureReplayTests.cs} (new)
+        freya/tests/integration/CliClient.IntegrationTests/Fixtures/Captures/{README.md, masterjoin_packet220.hex, serverredirect_packet222.hex} (new),
+        freya/tests/integration/CliClient.IntegrationTests/Verification/{HexFixture.cs, CaptureReplayTests.cs} (new)
       Notes:
         ▸ Source data: archive/kyp-snapshot/capturedPackets/capture_1.rar
            is a 54MB textual hex-dump of a real 2006-era EnB session
@@ -408,7 +408,7 @@ xUnit `[Collection("server")]` ensures the docker stack stands up exactly once p
 
 - [x] Item 7 — Robustness tests (HealthGuard, malformed replies, rate-limit respect)
       Status: done
-      Touches: tests/integration/CliClient.IntegrationTests/Robustness/{ScriptedServer.cs, DisconnectMidHandshakeTests.cs, MalformedReplyTests.cs, RateLimitRespectTests.cs}
+      Touches: freya/tests/integration/CliClient.IntegrationTests/Robustness/{ScriptedServer.cs, DisconnectMidHandshakeTests.cs, MalformedReplyTests.cs, RateLimitRespectTests.cs}
       Notes:
         ▸ ScriptedServer is the bad-server harness — a single-shot
            TcpListener on 127.0.0.1:0 that accepts one connection and
@@ -538,8 +538,8 @@ xUnit `[Collection("server")]` ensures the docker stack stands up exactly once p
 
 - [x] Item 10 — Opcode coverage push: ratchet a "tested opcodes" metric in CI
       Status: done
-      Touches: tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs (NEW),
-               tests/integration/CliClient.IntegrationTests/Coverage/CoverageRatchetTests.cs (NEW)
+      Touches: freya/tests/integration/CliClient.IntegrationTests/Coverage/TestedOpcodes.cs (NEW),
+               freya/tests/integration/CliClient.IntegrationTests/Coverage/CoverageRatchetTests.cs (NEW)
       Notes: Shipped — hand-maintained list of opcodes with round-trip coverage,
              ratcheted by an equality (not >=) check against a constant floor.
         ▸ Baseline floor: MinTestedCount = 4 — VERSION_REQUEST (0x0000),
@@ -572,7 +572,7 @@ xUnit `[Collection("server")]` ensures the docker stack stands up exactly once p
           construction sanity bound tested<=universe).
         ▸ What is NOT counted as round-trip coverage (documented verbatim
           in TestedOpcodes.cs class doc): (i) codec-only unit tests under
-          tools/cli-client/tests/CliClient.UnitTests/Opcodes/ — those test
+          freya/cli-client/tests/CliClient.UnitTests/Opcodes/ — those test
           byte layout, not "the wire round-trips this"; (ii) the 207
           named-opaque registrations in OpcodeRegistry — opaque means "we
           recognise the opcode" not "we decode the payload"; (iii) opcodes
@@ -591,7 +591,7 @@ xUnit `[Collection("server")]` ensures the docker stack stands up exactly once p
 
 Phase T is done when:
 
-- `dotnet test tests/integration/CliClient.IntegrationTests/` passes locally against `docker compose up`
+- `dotnet test freya/tests/integration/CliClient.IntegrationTests/` passes locally against `docker compose up`
 - CI runs the integration suite on every PR and gates merges on it
 - At least the opcodes wired in Phase K have round-trip tests + at least one capture-replay test exists
 - Robustness tests catch a deliberately broken server (kill `proxy` mid-test → client aborts cleanly, test fails with a recognisable error, not a hang)

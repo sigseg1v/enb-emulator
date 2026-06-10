@@ -540,7 +540,7 @@ services:
   # --------------------------------------------------------------
   status-notifier:
     build:
-      context: ./status-notifier
+      context: ./freya/status-notifier
       dockerfile: Dockerfile
     depends_on:
       postgres:

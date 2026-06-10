@@ -491,7 +491,7 @@ format & byte order", Trap 2).
   internal UDP plane is unchanged (it already carried the full `username-<32hex>`
   string via `strlen(ticket)`); only the server's acceptance criterion tightened.
   The CSPRNG suffix format is byte-pinned in
-  `tests/integration/.../Handshake/TlsLoginTests.cs`; the accept (genuine ticket)
+  `freya/tests/integration/.../Handshake/TlsLoginTests.cs`; the accept (genuine ticket)
   and reject (forged suffix) paths are pinned in
   `GlobalConnectTests.ValidTicket_RoundTripsThroughUdpGlobalPlane_ReturnsAvatarList`
   and `GlobalConnectTests.ForgedTicketSuffix_GlobalConnect_ReturnsGlobalErrorTicketInvalid`.
@@ -537,7 +537,7 @@ format & byte order", Trap 2).
   observable only at a SECOND avatar in the same sector (attacker broadcasts with
   a victim's GameID; the fix makes the victim see the attacker's name, the bug
   made the victim see nothing). The two-player integration test
-  (`tests/integration/.../Opcodes/TwoPlayerChatSenderSpoofTests.cs`) is written
+  (`freya/tests/integration/.../Opcodes/TwoPlayerChatSenderSpoofTests.cs`) is written
   and byte-correct but `[Fact(Skip)]` -- BLOCKED by Net7Proxy single-tenancy
   (one UDPClient/m_MasterConnection per proxy; Player B's handshake clobbers
   Player A's routing). It will run as-is once the proxy demultiplexes by session.
@@ -578,7 +578,7 @@ format & byte order", Trap 2).
 - **Why the CLI/integration suite cannot fully validate it**: the suite proves
   the server drops an OOB move (FromSlot=20000) without crashing and that legit
   moves (cargo split, vault transfer, vendor) still round-trip
-  (`tests/integration/.../Opcodes/SectorInventoryMoveTests.cs` --
+  (`freya/tests/integration/.../Opcodes/SectorInventoryMoveTests.cs` --
   `InventoryMove_OutOfBoundsFromSlot_IsDropped_ConnectionSurvives` + the four
   existing move tests, all green). What it cannot exhaustively cover is the full
   matrix of real-client move operations against a populated inventory: equipping
@@ -617,10 +617,10 @@ format & byte order", Trap 2).
   leg ONLY -- the real client never sees this leg (the proxy terminates the
   client's encrypted TCP and re-frames). The inner [EnbUdpHeader][payload] is
   byte-for-byte identical to the cleartext form, pinned three ways: server gtest
-  `tests/server/protocol/header_layout_test.cpp` (`EnbUdpAuthWrapperIs17Bytes`),
-  C# `tools/cli-client/.../Net/AuthWrappedPacket.cs` +
+  `freya/tests/server/protocol/header_layout_test.cpp` (`EnbUdpAuthWrapperIs17Bytes`),
+  C# `freya/cli-client/.../Net/AuthWrappedPacket.cs` +
   `.../CliClient.UnitTests/Net/AuthWrappedPacketTests.cs`, and the accept/drop
-  decision gtest `tests/server/protocol/auth_wrapper_test.cpp`.
+  decision gtest `freya/tests/server/protocol/auth_wrapper_test.cpp`.
 - **Why the CLI/integration suite cannot fully validate it**: the CLI has no DTLS
   client, so the integration suite runs the plaintext opt-out path and never
   exercises the wrapper on the wire. The unit tests prove the decision logic
@@ -784,7 +784,7 @@ format & byte order", Trap 2).
 ### [ ] CV-AM-2 -- `/status` Discord bot answers correctly (Phase AM-8)
 
 - **Change**: AM-8 adds a read-only `/status` Discord bot inside the same
-  `status-notifier` sidecar (`status-notifier/bot.go`, `discordgo`). It connects
+  `status-notifier` sidecar (`freya/status-notifier/bot.go`, `discordgo`). It connects
   OUTBOUND to Discord's gateway (no inbound port) and answers `/status` with an
   embed: up/down + uptime + in-memory player/warm-sector counts (from the
   `server_status` heartbeat the game server UPSERTs), plus a per-player table

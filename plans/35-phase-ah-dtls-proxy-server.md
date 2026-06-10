@@ -467,11 +467,11 @@ After AH-3/AH-4 a Verification+TlsLogin slice showed 3 failures. Run to ground:
   in `common/include/net7/PacketStructures.h` -- one definition shared by server +
   proxy + CLI. Prepended to C->S datagrams INSIDE the DTLS channel only; S->C
   never carries it. Byte-pinned three ways (the "three places in sync" rule):
-  server gtest `tests/server/protocol/header_layout_test.cpp`
+  server gtest `freya/tests/server/protocol/header_layout_test.cpp`
   (`EnbUdpAuthWrapperIs17Bytes` + field-offset + version-constant tests, all
-  green); C# model `tools/cli-client/.../Net/AuthWrappedPacket.cs` (`UnwrappedPacket`
+  green); C# model `freya/cli-client/.../Net/AuthWrappedPacket.cs` (`UnwrappedPacket`
   = inner datagram, `AuthWrappedPacket` = {version, 16-byte token, inner}); C#
-  byte-pin `tools/cli-client/tests/CliClient.UnitTests/Net/AuthWrappedPacketTests.cs`
+  byte-pin `freya/cli-client/tests/CliClient.UnitTests/Net/AuthWrappedPacketTests.cs`
   (6 tests green: constants, exact layout, wrap/unwrap round-trip preserves inner
   bytes verbatim, zero-token pre-auth form, too-short reject, wrong-len reject).
   The CLI remains plaintext-only so it never emits a wrapper on the wire -- the

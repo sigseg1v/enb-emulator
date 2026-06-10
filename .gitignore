@@ -175,4 +175,4 @@ __pycache__/
 
 # Go build artifact for the status-notifier sidecar (rebuilt by `go build` /
 # the Dockerfile). Source-only in git; never commit the compiled binary.
-/status-notifier/status-notifier
+/freya/status-notifier/status-notifier

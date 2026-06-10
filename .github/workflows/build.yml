@@ -187,7 +187,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             g++ cmake ninja-build pkg-config libpq-dev libssl-dev
       - name: Configure
-        run: cmake -S tests/server -B build/tests -G Ninja
+        run: cmake -S freya/tests/server -B build/tests -G Ninja
       - name: Build
         run: cmake --build build/tests -j"$(nproc)"
       - name: Test
@@ -248,7 +248,7 @@ jobs:
           exit 1
       - name: Build tests
         run: |
-          cmake -S tests/server -B build/tests -G Ninja
+          cmake -S freya/tests/server -B build/tests -G Ninja
           cmake --build build/tests --target handshake_live_test replay_test -j"$(nproc)"
       - name: Run live ctest (proxy-only -- handshake + send path)
         # NOTE: This job runs the proxy in isolation, with no MVAS / sector
@@ -306,14 +306,14 @@ jobs:
           dotnet-version: '10.0.x'
       - name: Build CliClient.IntegrationTests
         run: |
-          dotnet build tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
+          dotnet build freya/tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
             --configuration Debug
       - name: Compute this shard's test filter (runtime discovery)
         # `--list-tests` only enumerates; it does not run the suite or
         # touch the stack, so this is safe before the stack is up. The
         # filter is derived from discovery, never a hardcoded name list.
         run: |
-          dotnet test tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
+          dotnet test freya/tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
             --no-build --list-tests > /tmp/alltests.txt
           FILTER="$(python3 tools/ci/integration_shard_filter.py \
             --list-file /tmp/alltests.txt --shards "$SHARDS" --shard ${{ matrix.shard }})"
@@ -355,7 +355,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             g++ cmake ninja-build pkg-config libssl-dev
-          cmake -S tests/server -B build/tests -G Ninja
+          cmake -S freya/tests/server -B build/tests -G Ninja
           cmake --build build/tests --target handshake_live_test replay_test -j"$(nproc)"
           ctest --test-dir build/tests --output-on-failure -R 'Replay\.LivePostHandshakeReplay'
       - name: Run integration suite (shard ${{ matrix.shard }}/3)
@@ -368,7 +368,7 @@ jobs:
           # always-runs step that also collects logs.
           CLI_INTEGRATION_SKIP_COMPOSE: "1"
         run: |
-          dotnet test tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
+          dotnet test freya/tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
             --no-build \
             --filter "$(cat /tmp/shard_filter.txt)" \
             --logger "trx;LogFileName=cli-integration-shard${{ matrix.shard }}.trx" \
@@ -407,12 +407,12 @@ jobs:
           dotnet-version: '10.0.x'
       - name: Build CliClient.IntegrationTests
         run: |
-          dotnet build tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
+          dotnet build freya/tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
             --configuration Debug
       - name: Verify every test class is covered exactly once
         # The --shards value MUST match cli-integration-test's matrix.
         run: |
-          dotnet test tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
+          dotnet test freya/tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
             --no-build --list-tests > /tmp/alltests.txt
           python3 tools/ci/integration_shard_filter.py \
             --list-file /tmp/alltests.txt --shards 3 --check

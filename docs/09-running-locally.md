@@ -115,7 +115,7 @@ host. Native Windows client; no WINE involved.
 
 ### Headless / scripted client
 
-The CLI client (`tools/cli-client/`) drives the same wire
+The CLI client (`freya/cli-client/`) drives the same wire
 protocol from a C# command-line binary -- useful for scripted reproduction
 of bug reports, integration tests, and packet-level traces without a
 graphical client. See `docs/15-cli-client.md`.

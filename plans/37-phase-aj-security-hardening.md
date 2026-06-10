@@ -97,7 +97,7 @@ direct re-read before fixing) and **LIVE** (compiles on the Linux build) or
   is logged at debug as a spoof attempt and the real id is used. Pure tightening
   (the retail client only sends its own id). Primary source: the
   `GetPlayer(GameID)` sender-resolution + self-skip at PlayerManager.cpp:706/724.
-  **Test:** `tests/integration/.../Opcodes/TwoPlayerChatSenderSpoofTests.cs`
+  **Test:** `freya/tests/integration/.../Opcodes/TwoPlayerChatSenderSpoofTests.cs`
   (attacker A broadcasts with `chat->GameID`=victim B's id; post-fix B sees a
   0x00A5 with Sender == A's name, pre-fix B saw nothing). `[Fact(Skip)]` --
   BLOCKED by proxy single-tenancy (same as the room-change fan-out test); the

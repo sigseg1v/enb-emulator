@@ -5,7 +5,7 @@ Opcode/packet-structure knowledge now lives in THREE places that must agree
 
 1. `server/src/` - the authoritative emitter (what bytes go on the wire).
 2. `proxy/` - the translator (strips/re-frames/consumes/rewrites/fabricates).
-3. `tools/cli-client/src/CliClient.Core/Opcodes/` - the C# decoder + the
+3. `freya/cli-client/src/CliClient.Core/Opcodes/` - the C# decoder + the
    Phase-T integration suite that byte-pins the wire format.
 
 This phase makes #3 a complete, kept-in-sync mirror of the wire knowledge in

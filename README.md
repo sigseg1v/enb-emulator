@@ -289,12 +289,17 @@ See `CLAUDE.md` for the full directory map and rules. Short version:
 
 The project default license is **Creative Commons Attribution-NonCommercial-ShareAlike 3.0 United States** because the bulk of the inherited code (the Net-7 server) is under that license and we can't relicense it.
 
+Entirely new code written for this project under the project name **Freya** is licensed **MIT** (copyright 2026 Max Verigin). This is the self-contained code under `freya/` - it produces its own new binaries/artifacts and does not depend on any Net-7 / tada-o source to compile. Existing code **not** in the `freya/*` folder is licensed to its owners under the appropriate licenses described below. If any Freya-named reference is mixed within Net-7 code, that code still follows the CC BY-NC-SA 3.0 license.
+
+In particular, **modifications to existing server files (or the existing server binary) remain Net-7 CC BY-NC-SA 3.0 licensed** - editing an inherited file in place does not make it Freya/MIT, and you may not move such a file under `freya/` to relicense it.
+
 - `LICENSES/enb-emulator` - project default (CC BY-NC-SA 3.0)
+- `LICENSES/Freya` - MIT license (copyright 2026 Max Verigin) for the new code under `freya/`
 - `LICENSES/Net7` - original Net-7 license header + deed URL
 - `LICENSES/Tada-O` - note that tada-o adds no separate license; modifications inherit CC BY-NC-SA 3.0 under ShareAlike
 - `LICENSES/enb-linux-installer` - GPLv3 verbatim (governs only `client/linux-installer/`)
 
-Precedence: per-file header > per-folder `LICENSE` > project default. See `LICENSES/README.md` for the full directory-by-directory map.
+Precedence: per-file header > per-folder `LICENSE` > `freya/` is MIT > project default. See `LICENSES/README.md` for the full directory-by-directory map.
 
 ## Credits
 

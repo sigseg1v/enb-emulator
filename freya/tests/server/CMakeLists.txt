@@ -41,7 +41,7 @@ add_executable(header_layout_test
 # so a future repack/reorder of common/include/net7/PacketStructures.h fails this
 # test instead of silently diverging from it.
 target_include_directories(header_layout_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../common/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../common/include
 )
 target_link_libraries(header_layout_test PRIVATE GTest::gtest_main)
 
@@ -52,7 +52,7 @@ add_executable(credit_save_width_test
     protocol/credit_save_width_test.cpp
 )
 target_include_directories(credit_save_width_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../server/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../server/src
 )
 target_compile_options(credit_save_width_test PRIVATE -Wno-unused-function)
 target_link_libraries(credit_save_width_test PRIVATE GTest::gtest_main)
@@ -64,7 +64,7 @@ add_executable(auth_wrapper_test
     protocol/auth_wrapper_test.cpp
 )
 target_include_directories(auth_wrapper_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../server/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../server/src
 )
 target_link_libraries(auth_wrapper_test PRIVATE GTest::gtest_main)
 
@@ -113,13 +113,13 @@ endif()
 if(LIBPQXX_FOUND)
     add_executable(sqlplus_wrapper_test
         db/sqlplus_wrapper_test.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../server/src/db/sqlplus.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../common/Mutex.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../server/src/db/sqlplus.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../common/Mutex.cpp
         db/wrapper_test_stubs.cpp
     )
     target_include_directories(sqlplus_wrapper_test PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../server/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../common/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../server/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../common/include
     )
     target_compile_definitions(sqlplus_wrapper_test PRIVATE LINUX __linux__)
     target_compile_options(sqlplus_wrapper_test PRIVATE
@@ -251,10 +251,10 @@ if(OpenSSL_FOUND)
     # in-memory BIO pump. Needs libssl (DTLS) on top of libcrypto.
     add_executable(dtls_transport_test
         protocol/dtls_transport_test.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../common/DtlsTransport.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../common/DtlsTransport.cpp
     )
     target_include_directories(dtls_transport_test PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../common/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../common/include
     )
     target_link_libraries(dtls_transport_test PRIVATE
         GTest::gtest_main

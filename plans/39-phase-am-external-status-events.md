@@ -12,7 +12,7 @@ login in this shared dev env, tracked as CV-AM-1 in plans/29). **AM-8 (read-only
 Discord webhook is the FIRST consumer, but every code/table/func/env identifier is
 generic: function `EmitExternalStatusEvent`, table `external_status_events`,
 NOTIFY channel `external_status_event`, flag `NET7_EXTERNAL_STATUS_ENABLED`, sidecar
-dir `status-notifier/`, sidecar env `STATUS_WEBHOOK_URL`. The design text below keeps
+dir `freya/status-notifier/`, sidecar env `STATUS_WEBHOOK_URL`. The design text below keeps
 the original rationale; where it says `discord_outbox` / `NET7_DISCORD_ENABLED` /
 `discord-notifier`, read the generic name.
 
@@ -190,7 +190,7 @@ hook site calls it with an already-rendered line. Keep it:
       `PlayerExperience.cpp` AwardXP skill-point branch, broadcast
       `PlayerManager::BroadcastChat`, server-start `ServerManager.cpp` after
       `m_SectorAssignmentsComplete=true`.
-- [x] **AM-4** Go sidecar `status-notifier/` (module
+- [x] **AM-4** Go sidecar `freya/status-notifier/` (module
       `github.com/enb-emulator/status-notifier`, pgx/v5 + stdlib net/http):
       `LISTEN external_status_event`, startup catch-up drain of the unsent partial
       index BEFORE settling into LISTEN, per-row deliver-then-`UPDATE sent_at` (stops
@@ -203,12 +203,12 @@ hook site calls it with an already-rendered line. Keep it:
       `docker-compose.yml` (default-off) and prod
       `deploy/do/compose/docker-compose.prod.yml` (image pulled from the `enb` repo as
       `enb:status-notifier-<v>`). `deploy/do/scripts/Build-And-Push.ps1` builds/pushes
-      the third image (per-service `Context`: it builds from `status-notifier/`, NOT
+      the third image (per-service `Context`: it builds from `freya/status-notifier/`, NOT
       the repo root) and the vN tag regex includes it. `Update-Stack.ps1` threads
       `NET7_EXTERNAL_STATUS_ENABLED` / `STATUS_WEBHOOK_URL` (secret) /
       `STATUS_RETENTION_DAYS` from the operator `.env` into the regenerated droplet
       `.env` (so they survive redeploys). Documented in `deploy/do/.env.example` +
-      README registry-layout section. `status-notifier/status-notifier` build artifact
+      README registry-layout section. `freya/status-notifier/status-notifier` build artifact
       gitignored.
 - [~] **AM-6** End-to-end. **Done:** sidecar verified against the real dev Postgres --
       NOTIFY -> drain -> POST with correct `{"content":...}` body and `sent_at` marked,
@@ -245,7 +245,7 @@ and answers `/status` with plain `SELECT`s.
       (0 players / 0 warm sectors with nobody on -- `GetSectorCount` is lazy). No DB
       errors in the server log. Needs `MemoryHandler.h`+`ServerManager.h` includes in
       SaveManager.cpp (Net7.h only forward-declares those classes).
-- [x] **AM-8c** Bot: `status-notifier/bot.go` (`discordgo`). Idles unless
+- [x] **AM-8c** Bot: `freya/status-notifier/bot.go` (`discordgo`). Idles unless
       `DISCORD_BOT_TOKEN` set (mirrors the webhook idle path). `/status` renders an
       embed: up/down from heartbeat staleness, uptime, in-memory player + warm-sector
       counts, and a per-player table (name, class name+code via race/`prof`, floored
@@ -274,7 +274,7 @@ a second relay transport (bot channel) so the toggles have a home channel.
       five known kinds (all on, `ON CONFLICT DO NOTHING`). Applied unconditionally by
       schema-init in BOTH `docker-compose.yml` and the prod compose (idempotent
       `CREATE TABLE IF NOT EXISTS`, lands on pre-existing volumes).
-- [x] **AM-9b** `status-notifier/settings.go` -- `notificationKinds` allowlist,
+- [x] **AM-9b** `freya/status-notifier/settings.go` -- `notificationKinds` allowlist,
       `isKnownKind`, `readEnabledKinds` (fail-open: unknown/absent kind => enabled, DB
       error => all enabled), `setKindEnabled` (validated + parameterized UPSERT).
 - [x] **AM-9c** Relay delivery (`main.go`): `type sender`; `botSender`
@@ -363,7 +363,7 @@ rest of AM):
 - `db/postgres/status_notification_settings.sql`: seed the two kinds (TEXT PK, no
   CHECK -- new kinds need no constraint change; readEnabledKinds fail-opens anyway).
 
-Sidecar (`status-notifier/`):
+Sidecar (`freya/status-notifier/`):
 - `deaths.go` (new): in-memory `deathTracker` (avatar name -> {messageID, content,
   when}). 30-min window. NON-DURABLE by design (owner's call): a restart forgets
   in-flight wrecks. `playerNameFromContent` pulls the name as `Fields()[1]` (EnB

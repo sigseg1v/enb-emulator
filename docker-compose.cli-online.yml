@@ -60,7 +60,7 @@ services:
   cli:
     build:
       context: .
-      dockerfile: tools/cli-client/Dockerfile
+      dockerfile: freya/cli-client/Dockerfile
     depends_on:
       - proxy
     networks:

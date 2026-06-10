@@ -257,7 +257,7 @@ launch-toolspatcher:
 
 # Build the gtest harness (Phase G).
 build-tests:
-    cmake -S tests/server -B build/tests -G Ninja
+    cmake -S freya/tests/server -B build/tests -G Ninja
     cmake --build build/tests -j"$(nproc)"
 
 # ---- dev stack ----
@@ -345,7 +345,7 @@ _image-status COMPOSE_ARGS SERVICES REBUILD_CMD:
       [proxy]="proxy common/include/net7"
       [server]="server/src common/include/net7"
       [login]="login-server common/include/net7"
-      [cli]="tools/cli-client"
+      [cli]="freya/cli-client"
     )
     STALE=()
     echo ">>> image build times (an image OLDER than its source is flagged):"
@@ -846,7 +846,7 @@ packet-replay CAPTURE='capture_1' CLIENT_PATH='':
 #     enter Aevin
 #     quit
 launch-cli:
-    dotnet run --project tools/cli-client/src/CliClient.App -- start
+    dotnet run --project freya/cli-client/src/CliClient.App -- start
 
 # Run the enb-cli REPL `replay` command against a captured ENBREPLAY S2C
 # stream and exit. Decodes every frame through the record classes (known
@@ -863,7 +863,7 @@ launch-cli:
 #   just pcap-replay proxy/local-debug/foo.pcap [server_ip] [client_ip]
 cli-replay CAPTURE='capture_1':
     printf 'replay archive/replay/{{CAPTURE}}-sector-s2c.bin\nquit\n' | \
-        dotnet run --project tools/cli-client/src/CliClient.App -- start
+        dotnet run --project freya/cli-client/src/CliClient.App -- start
 
 # Convert a raw pcap of server->proxy UDP traffic to ENBREPLAY and replay it.
 # The pcap must contain 0x2016/0x201A PACKET_SEQUENCE frames (what the Net-7
@@ -879,7 +879,7 @@ pcap-replay PCAP SERVER CLIENT:
         --pcap "{{PCAP}}" --out "$tmp" \
         --server "{{SERVER}}" --client "{{CLIENT}}" --verbose
     printf 'replay %s\nquit\n' "$tmp" | \
-        dotnet run --project tools/cli-client/src/CliClient.App -- start
+        dotnet run --project freya/cli-client/src/CliClient.App -- start
     rm -f "$tmp"
 
 # Stream all logs in the foreground.
@@ -1027,7 +1027,7 @@ integration-test:
     else
         echo ">>> reusing existing proxy on tcp/3801"
     fi
-    cmake -S tests/server -B build/tests -G Ninja
+    cmake -S freya/tests/server -B build/tests -G Ninja
     cmake --build build/tests --target handshake_live_test replay_test master_join_test version_request_test sector_login_test -j"$(nproc)"
     NET7_TEST_PROXY_HOST=127.0.0.1 NET7_TEST_PROXY_PORT=3801 NET7_TEST_GLOBAL_PORT=3805 NET7_TEST_SECTOR_PORT=3500 \
         ctest --test-dir build/tests --output-on-failure \
@@ -1054,7 +1054,7 @@ cli-integration:
     else
         echo ">>> ServerFixture will own the docker-compose lifecycle"
     fi
-    dotnet test tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
+    dotnet test freya/tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
         --logger "trx;LogFileName=cli-integration.trx" \
         --logger "console;verbosity=normal"
 
@@ -1062,7 +1062,7 @@ cli-integration:
 # CaptureReplay + Smoke). Fast path for laptop development.
 cli-integration-fast:
     CLI_INTEGRATION_SKIP_COMPOSE=1 \
-    dotnet test tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
+    dotnet test freya/tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
         --filter "FullyQualifiedName~Robustness|FullyQualifiedName~Verification|FullyQualifiedName~Smoke"
 
 # Warm-stack iteration workflow. Bring the docker-compose stack up
@@ -1088,7 +1088,7 @@ cli-int-up:
         if docker compose logs --no-color --no-log-prefix server 2>/dev/null \
                 | grep -q 'BeginSectorThread sector_id=10151'; then
             echo ">>> sector 10151 ready; building test assembly"
-            dotnet build tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj --nologo -v quiet
+            dotnet build freya/tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj --nologo -v quiet
             echo ">>> stack warm. Use \`just cli-int-run [filter]\` to run waves."
             exit 0
         fi
@@ -1110,12 +1110,12 @@ cli-int-run FILTER='':
     fi
     if [ -n "{{FILTER}}" ]; then
         CLI_INTEGRATION_SKIP_COMPOSE=1 \
-        dotnet test tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
+        dotnet test freya/tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
             --no-build \
             --filter "{{FILTER}}"
     else
         CLI_INTEGRATION_SKIP_COMPOSE=1 \
-        dotnet test tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
+        dotnet test freya/tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
             --no-build
     fi
 

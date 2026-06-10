@@ -335,7 +335,7 @@ Open items before/while implementing:
       CV-01/CV-02 queued for real-client confirmation. (This was the empty-Luna
       bug; the LATENT note above was wrong.)
 - [ ] `0x2013`/`0x2014` TRACTOR/LOOT (still need the live mine/loot harness).
-- [ ] **Byte-pin each fabricated packet.** No `tests/server` gtest can reach
+- [ ] **Byte-pin each fabricated packet.** No `freya/tests/server` gtest can reach
       the proxy fabrication (it fires only when the live server emits 0x2012
       during a real mine). The byte-pin therefore lands in the new C# CLI
       phase: the CLI must parse 0x0b/0x04/0x1b/0x46/0x07/0x0f and an

@@ -1,7 +1,7 @@
-# Integration tests (`tests/integration/CliClient.IntegrationTests/`)
+# Integration tests (`freya/tests/integration/CliClient.IntegrationTests/`)
 
 The xUnit integration suite
-(`tests/integration/CliClient.IntegrationTests/`) is the
+(`freya/tests/integration/CliClient.IntegrationTests/`) is the
 **opcode-correctness gate** for the project. xUnit 2.9 / .NET 10, it
 references the `CliClient.Core` library, drives the live docker-compose
 stack (postgres + login-server + proxy + server), and asserts protocol
@@ -39,7 +39,7 @@ CLI client is the most aggressive consumer of the server:
 ## Layout
 
 ```
-tests/integration/CliClient.IntegrationTests/
+freya/tests/integration/CliClient.IntegrationTests/
 ├── CliClient.IntegrationTests.csproj   net10.0, xunit, ref's CliClient.Core
 ├── Directory.Build.props               nullable + TreatWarningsAsErrors
 ├── ServerFixture.cs                    IAsyncLifetime: docker compose up + TCP probes
@@ -193,7 +193,7 @@ reference material.
    `Opcodes/Inbound/` or `Opcodes/Outbound/`). If it doesn't,
    add it first, register it in `ClientFixture.cs`'s registry,
    and add unit tests for it under
-   `tools/cli-client/tests/CliClient.UnitTests/Opcodes/`.
+   `freya/cli-client/tests/CliClient.UnitTests/Opcodes/`.
 2. Add `Opcodes/<OpcodeName>Tests.cs` with `[Collection(ServerCollection.Name)]`
    on the class and a `ServerFixture`/`ClientFixture` ctor.
 3. Each `[Fact]` should: connect fresh (via the fixture
@@ -309,6 +309,6 @@ ScriptedServer scenarios).
 - **Not a UI test.** The CLI client doesn't render; there are no
   Avalonia tests in here.
 - **Not the only test harness in the repo.** The C++ gtest
-  binaries (`tests/server/`) cover the server-internal paths the
+  binaries (`freya/tests/server/`) cover the server-internal paths the
   CLI client never reaches. See `docs/08-build.md` § "Running
   tests".

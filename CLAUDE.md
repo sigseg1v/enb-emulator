@@ -57,11 +57,15 @@ The source of truth for "what's done / what's next" across invocations is the `p
 ├── db/
 │   ├── mysql/         original MySQL dumps
 │   └── postgres/      converted Postgres schema (new)
-├── tests/
-│   ├── server/        gtest harness + smoke tests (new) for the C++ server
-│   │                  -- build with `cmake -S tests/server -B build/tests`
-│   └── integration/CliClient.IntegrationTests/  Phase T xUnit suite that drives CliClient.Core
-│                      against the live docker-compose stack -- see docs/16-integration-tests.md
+├── freya/             NEW self-contained code (MIT, see LICENSES/Freya) -- no Net-7 compile dependency
+│   ├── website/           project website + auction house (placeholder)
+│   ├── status-notifier/   Go sidecar: external-status events -> Discord bot + /status, /notify
+│   ├── cli-client/        C# headless CLI client (CliClient.Core / .App) -- Phase S
+│   └── tests/
+│       ├── server/        gtest harness + smoke tests for the C++ server
+│       │                  -- build with `cmake -S freya/tests/server -B build/tests`
+│       └── integration/CliClient.IntegrationTests/  Phase T xUnit suite that drives CliClient.Core
+│                          against the live docker-compose stack -- see docs/16-integration-tests.md
 ├── vendor/            third-party binaries without source (with THIRD_PARTY_BINARIES.md notes)
 ├── archive/           historical material — old snapshots, packet captures, original docs
 ├── justfile           build / lint / test / dev / package targets
@@ -77,6 +81,38 @@ The source of truth for "what's done / what's next" across invocations is the `p
 - **Never strip a per-folder LICENSE file** (e.g. `client/linux-installer/LICENSE` is GPLv3 and stays as-is).
 - **Don't relicense Net-7 code**. Only Net-7 Entertainment can do that.
 - **Don't add code that requires commercial use**. The NC clause forbids it.
+
+### Project location & the `freya/` MIT rule (where new code goes)
+
+There are exactly two buckets. Decide which one a change is BEFORE you write it:
+
+- **Modification to an existing file, or to the existing server binary == Net-7
+  CC BY-NC-SA 3.0, and it stays where it already lives.** Editing an inherited
+  Net-7 / tada-o file in place does NOT make it Freya/MIT, no matter how much
+  you rewrite inside it. It keeps its CC BY-NC-SA 3.0 header and its current
+  directory (`server/`, `login-server/`, `proxy/`, `launcher/`, `tools/`,
+  `client/`, ...). You may NOT move such a file under `freya/` to relicense it
+  -- that would relicense Net-7 code, which is forbidden.
+- **New code that produces a NEW binary/artifact and does NOT depend on any
+  Net-7 source to compile == Freya, MIT, and lives under `freya/`.** This is
+  the self-contained new work: the website + auction house (`freya/website`),
+  the Go status-notifier sidecar (`freya/status-notifier`), the C# CLI client
+  (`freya/cli-client`), and the test suites we wrote (`freya/tests`). Give it
+  the Freya name (see the naming bullet below) and the MIT header / `LICENSES/Freya`.
+
+The two are not in tension with the precedence rules above: `freya/` is MIT;
+everything else follows per-file header > per-folder LICENSE > project default
+(CC BY-NC-SA 3.0). If a Freya-named reference is mixed *inside* an inherited
+Net-7 file, that file is still CC BY-NC-SA 3.0 -- only the self-contained code
+under `freya/` is MIT. **Before adding project code, decide the bucket and put
+it in the right place first** (move existing tooling under `freya/` only if it
+is genuinely self-contained new code with no Net-7 compile dependency).
+
+Note what is deliberately NOT under `freya/`: `login-server/` (Net7Mysql /
+Net7SSL) and `proxy/` are inherited Net-7 code (the proxy compiles against
+`common/include/net7/`), so they stay put under CC BY-NC-SA 3.0 even though we
+have heavily edited them. New code that links Net-7 headers is a *modification*,
+not new independent work.
 
 ## Coding rules
 
@@ -311,7 +347,7 @@ gate extra disruption behind `ENB_NOREBUILD` instead.
    convention is wrong -- audit `htonl`/`ntohl` use on that field
    first, then field type/size.
 4. Add a fixture under
-   `tests/integration/CliClient.IntegrationTests/Fixtures/Captures/`
+   `freya/tests/integration/CliClient.IntegrationTests/Fixtures/Captures/`
    and a `CaptureReplayTests.cs` `[Fact]` that pins the bytes, so a
    future regression breaks the build.
 5. Cite the capture file + frame number in the commit message
@@ -356,7 +392,7 @@ docs), and cite it.
 
 ## When you implement a new server-side opcode handler
 
-The integration suite tracks opcodes the Net-7 server does NOT implement in `tests/integration/CliClient.IntegrationTests/Coverage/KnownUnimplementedOpcodes.cs`. Each entry has a matching `[Fact(Skip = ...)]` stub in `UnimplementedOpcodeStubTests.cs` whose body throws `NotImplementedException` on the first line.
+The integration suite tracks opcodes the Net-7 server does NOT implement in `freya/tests/integration/CliClient.IntegrationTests/Coverage/KnownUnimplementedOpcodes.cs`. Each entry has a matching `[Fact(Skip = ...)]` stub in `UnimplementedOpcodeStubTests.cs` whose body throws `NotImplementedException` on the first line.
 
 **When you wire an opcode server-side that was on the unimplemented list, you MUST**:
 
@@ -378,8 +414,8 @@ The same migration path applies if the upstream protocol catalog adds an opcode 
 | A POSIX shim for a Win32 API | `server/compat/` |
 | A new C# editor or tool | `tools/<kebab-name>/` |
 | A new documentation page | `docs/<NN-topic>.md` (numbered) |
-| A new server-side gtest | `tests/server/<area>/` |
-| A new CLI/integration xUnit test | `tests/integration/CliClient.IntegrationTests/<area>/` |
+| A new server-side gtest | `freya/tests/server/<area>/` |
+| A new CLI/integration xUnit test | `freya/tests/integration/CliClient.IntegrationTests/<area>/` |
 | A new third-party C++ dep | `server/third_party/<name>/` |
 | A precompiled binary we can't rebuild | `vendor/<name>/` with `THIRD_PARTY_BINARIES.md` |
 | A new plan/sub-plan | `plans/<NN-phase>.md`, update `plans/00-master.md` |

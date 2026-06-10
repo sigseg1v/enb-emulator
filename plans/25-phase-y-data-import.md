@@ -3,7 +3,7 @@
 Goal: close the **curatorial** gap between our server and retail. The
 Phase K byte-diff work has reduced the StationLogin handshake stream
 to a 73-frame ItemBase deficit + a handful of per-character-state
-gaps (see `tests/integration/CliClient.IntegrationTests/Verification/DockHandshakeFriendship7Tests.cs`).
+gaps (see `freya/tests/integration/CliClient.IntegrationTests/Verification/DockHandshakeFriendship7Tests.cs`).
 That residual deficit is **almost entirely DB seed**: starbase 73's
 lounge NPC roster, equipped-item EquipEffect rows, ability/skill
 definitions, sector route topology, mission/quest tables.

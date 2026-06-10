@@ -1,8 +1,9 @@
 <Project>
   <!--
-    Override the parent tools/Directory.Build.props which assumes Windows-targeting
-    legacy WinForms tooling. The CLI client is Linux-first, cross-platform, no
-    WinForms / GDI+. Reset the parent's properties explicitly.
+    The CLI client is Linux-first, cross-platform, no WinForms / GDI+ (unlike the
+    inherited WinForms tooling under tools/). It lives under freya/ as new MIT code
+    and inherits no parent Directory.Build.props, so every property it needs is set
+    explicitly here.
   -->
   <PropertyGroup>
     <EnableWindowsTargeting>false</EnableWindowsTargeting>

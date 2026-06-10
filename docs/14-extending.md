@@ -155,9 +155,9 @@ startup. Per-sector reload at runtime via the GM
   rather than Win32 shims.
 - **New documentation page** -- `docs/<NN-topic>.md`, then link
   from `docs/README.md`.
-- **New server-side gtest** -- `tests/server/<area>/`, then add an
+- **New server-side gtest** -- `freya/tests/server/<area>/`, then add an
   `add_executable` + `gtest_discover_tests` block in
-  `tests/server/CMakeLists.txt`. See `tests/server/README.md` for the
+  `freya/tests/server/CMakeLists.txt`. See `freya/tests/server/README.md` for the
   pattern. CLI-client-driven integration tests live in
-  `tests/integration/CliClient.IntegrationTests/` (xUnit, .NET) --
+  `freya/tests/integration/CliClient.IntegrationTests/` (xUnit, .NET) --
   see `docs/16-integration-tests.md`.

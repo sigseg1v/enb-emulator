@@ -1,6 +1,6 @@
-# CLI client (`tools/cli-client/`)
+# CLI client (`freya/cli-client/`)
 
-The headless CLI client (`tools/cli-client/`) is a C# .NET 10 client
+The headless CLI client (`freya/cli-client/`) is a C# .NET 10 client
 that speaks the Earth & Beyond wire protocol end to end (TLS auth
 login + RSA/RC4 handshake + opcode-level traffic on both the TCP and
 sector UDP planes). It is built for automation: capture replay,
@@ -77,10 +77,10 @@ command-line usage.
 
 ```sh
 # 1. Smoke
-dotnet run --project tools/cli-client/src/CliClient.App -- --smoke
+dotnet run --project freya/cli-client/src/CliClient.App -- --smoke
 
 # 2. Connect-and-login against a local docker-compose stack
-dotnet run --project tools/cli-client/src/CliClient.App -- connect-and-login \
+dotnet run --project freya/cli-client/src/CliClient.App -- connect-and-login \
     --user alice --pass alicepw \
     --login-host 127.0.0.1 --login-port 443 \
     --global-host 127.0.0.1 --global-port 3500 \
@@ -89,7 +89,7 @@ dotnet run --project tools/cli-client/src/CliClient.App -- connect-and-login \
 # 3. Send a single chat (the server only routes it if --game-id matches
 #    the avatar currently attached to the session; see "Limitations"
 #    below for why the standalone send-chat path needs an avatar id).
-dotnet run --project tools/cli-client/src/CliClient.App -- send-chat \
+dotnet run --project freya/cli-client/src/CliClient.App -- send-chat \
     --user alice --pass alicepw \
     --game-id 12345 \
     --channel broadcast \
@@ -186,7 +186,7 @@ record:
    client and 8 on Linux x86_64. The real wire is 4. The
    `struct MasterJoin` comment block has the canonical example.
 2. Add a `Foo.cs` under
-   `tools/cli-client/src/CliClient.Core/Opcodes/Inbound/`
+   `freya/cli-client/src/CliClient.Core/Opcodes/Inbound/`
    (server -> client) or `Opcodes/Outbound/` (client -> server).
    Mirror the shape of `ClientChatCodec` or `ServerRedirectCodec`.
 3. Add the opcode constant to `OpcodeId.Known` if it doesn't
@@ -194,14 +194,14 @@ record:
 4. Register the codec in `Program.cs` next to the existing
    `registry.Register(new ServerRedirectCodec())` line, and in
    the relevant workflow if one consumes the typed result.
-5. Write unit tests in `tools/cli-client/tests/CliClient.UnitTests/Opcodes/`.
+5. Write unit tests in `freya/cli-client/tests/CliClient.UnitTests/Opcodes/`.
    At minimum: opcode-value check, layout check against the C
    struct (each field offset asserted), round-trip
    (decode -> encode -> byte-equal), and validation guards
    (reject malformed inputs the server's handler would also
    reject).
 6. If you have a retail capture frame, add it to
-   `tools/cli-client/tests/CliClient.UnitTests/Captures/fixtures/`
+   `freya/cli-client/tests/CliClient.UnitTests/Captures/fixtures/`
    and exercise it via `RetailCaptureTests`. The fixture format
    is documented at the top of `capture3-frames.txt`.
 
@@ -233,7 +233,7 @@ reviewed.
 
 ## See also
 
-- `tests/integration/CliClient.IntegrationTests/` -- the xUnit
+- `freya/tests/integration/CliClient.IntegrationTests/` -- the xUnit
   suite that consumes `CliClient.Core` for end-to-end tests
   (`docs/16-integration-tests.md`).
 - `CLAUDE.md` "Server integrity rules" -- the non-negotiable block

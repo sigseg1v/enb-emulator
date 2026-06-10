@@ -20,7 +20,7 @@ Build a **passive, headless CLI client** in C# / .NET 10 that speaks the real En
 
 ## What this phase delivers
 
-A new project at `tools/cli-client/` (C# / .NET 10, console app + reusable library, cross-platform — Linux primary). It:
+A new project at `freya/cli-client/` (C# / .NET 10, console app + reusable library, cross-platform — Linux primary). It:
 
 - Connects to `proxy/` (TCP 3500) and `login-server/Net7SSL` (TCP 443) using the same RC4+RSA handshake the real client does
 - Authenticates against the login server (TLSv1.3, `/AuthLogin`-style ticket flow already implemented in Phase J)
@@ -42,7 +42,7 @@ A new project at `tools/cli-client/` (C# / .NET 10, console app + reusable libra
 ## Project layout
 
 ```
-tools/cli-client/
+freya/cli-client/
 ├── CliClient.sln              (or just sit inside Net7Tools.slnx)
 ├── src/
 │   ├── CliClient.Core/        ←── reusable library (xUnit pulls this in directly)
@@ -59,7 +59,7 @@ tools/cli-client/
 │       └── Repl/                   REPL UI + command parsing
 ├── tests/
 │   ├── CliClient.UnitTests/   ←── codec / handshake / opcode encoder-decoder tests
-│   └── (Phase T owns the live integration tests — they live under tests/integration/)
+│   └── (Phase T owns the live integration tests — they live under freya/tests/integration/)
 └── README.md                  what it does, what it doesn't, hard rules above
 
 CliClient.Core/Net/
@@ -106,11 +106,11 @@ CliClient.UnitTests/
 
 - [x] Item 1 — Project scaffold (Core lib + App console + UnitTests) + slnx wiring + README
       Status: done
-      Touches: tools/cli-client/Directory.Build.props,
-      tools/cli-client/src/CliClient.Core/{CliClient.Core.csproj,ClientInfo.cs},
-      tools/cli-client/src/CliClient.App/{CliClient.App.csproj,Program.cs},
-      tools/cli-client/tests/CliClient.UnitTests/{CliClient.UnitTests.csproj,TrinitySmokeTests.cs},
-      tools/cli-client/README.md, tools/Net7Tools.slnx
+      Touches: freya/cli-client/Directory.Build.props,
+      freya/cli-client/src/CliClient.Core/{CliClient.Core.csproj,ClientInfo.cs},
+      freya/cli-client/src/CliClient.App/{CliClient.App.csproj,Program.cs},
+      freya/cli-client/tests/CliClient.UnitTests/{CliClient.UnitTests.csproj,TrinitySmokeTests.cs},
+      freya/cli-client/README.md, tools/Net7Tools.slnx
       Notes: SDK-style csprojs, all net10.0 (no -windows). Core is a
       classlib (RootNamespace=N7.CliClient). App is OutputType=Exe
       `<UseAppHost>true</UseAppHost>` referencing Core, AssemblyName
@@ -126,17 +126,17 @@ CliClient.UnitTests/
       `ok: enb-cli-client 0.1.0-dev`; `dotnet test` runs
       `TrinitySmokeTests.CoreLibraryIsReferenced` green (Passed 1, Failed 0).
       The hard rules from this plan file are reproduced verbatim in
-      `tools/cli-client/README.md`.
+      `freya/cli-client/README.md`.
 
 - [x] Item 2 — Packet codec + opcode registry foundation (in CliClient.Core)
       Status: done
-      Touches: tools/cli-client/src/CliClient.Core/Net/PacketHeader.cs,
-               tools/cli-client/src/CliClient.Core/Net/Packet.cs,
-               tools/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs,
-               tools/cli-client/src/CliClient.Core/Opcodes/IOpcodeCodec.cs,
-               tools/cli-client/src/CliClient.Core/Opcodes/OpcodeRegistry.cs,
-               tools/cli-client/tests/CliClient.UnitTests/Net/PacketCodecTests.cs,
-               tools/cli-client/tests/CliClient.UnitTests/Opcodes/OpcodeRegistryTests.cs
+      Touches: freya/cli-client/src/CliClient.Core/Net/PacketHeader.cs,
+               freya/cli-client/src/CliClient.Core/Net/Packet.cs,
+               freya/cli-client/src/CliClient.Core/Opcodes/OpcodeId.cs,
+               freya/cli-client/src/CliClient.Core/Opcodes/IOpcodeCodec.cs,
+               freya/cli-client/src/CliClient.Core/Opcodes/OpcodeRegistry.cs,
+               freya/cli-client/tests/CliClient.UnitTests/Net/PacketCodecTests.cs,
+               freya/cli-client/tests/CliClient.UnitTests/Opcodes/OpcodeRegistryTests.cs
       Notes: Implementation breakdown ---
       `PacketHeader` is a `readonly record struct {ushort Size, ushort Opcode}`
       with `WireSize = 4` and `Read`/`Write` using
@@ -177,12 +177,12 @@ CliClient.UnitTests/
 
 - [x] Item 3 — RC4 + RSA handshake (mirror common/include/net7/WestwoodRC4.h + WestwoodRSA.h)
       Status: done
-      Touches: tools/cli-client/src/CliClient.Core/Net/WestwoodRC4.cs,
-               tools/cli-client/src/CliClient.Core/Net/WestwoodRSA.cs,
-               tools/cli-client/src/CliClient.Core/Net/RsaHandshake.cs,
-               tools/cli-client/tests/CliClient.UnitTests/Net/WestwoodRC4Tests.cs,
-               tools/cli-client/tests/CliClient.UnitTests/Net/WestwoodRSATests.cs,
-               tools/cli-client/tests/CliClient.UnitTests/Net/RsaHandshakeTests.cs
+      Touches: freya/cli-client/src/CliClient.Core/Net/WestwoodRC4.cs,
+               freya/cli-client/src/CliClient.Core/Net/WestwoodRSA.cs,
+               freya/cli-client/src/CliClient.Core/Net/RsaHandshake.cs,
+               freya/cli-client/tests/CliClient.UnitTests/Net/WestwoodRC4Tests.cs,
+               freya/cli-client/tests/CliClient.UnitTests/Net/WestwoodRSATests.cs,
+               freya/cli-client/tests/CliClient.UnitTests/Net/RsaHandshakeTests.cs
       Notes: Implementation breakdown ---
       `WestwoodRC4` — direct port of the KSA + PRGA loops from
       `proxy/WestwoodRC4.cpp`. Standard RC4; the Westwood-specific bit
@@ -226,12 +226,12 @@ CliClient.UnitTests/
 
 - [x] Item 4 — Login flow (TLS to Net7SSL, /AuthLogin GET, ticket extraction)
       Status: done
-      Touches: tools/cli-client/src/CliClient.Core/Auth/AuthLoginRequest.cs,
-               tools/cli-client/src/CliClient.Core/Auth/AuthLoginResponse.cs,
-               tools/cli-client/src/CliClient.Core/Auth/AuthLoginClient.cs,
-               tools/cli-client/src/CliClient.Core/CliClient.Core.csproj,
-               tools/cli-client/tests/CliClient.UnitTests/Auth/AuthLoginResponseTests.cs,
-               tools/cli-client/tests/CliClient.UnitTests/Auth/AuthLoginClientTests.cs
+      Touches: freya/cli-client/src/CliClient.Core/Auth/AuthLoginRequest.cs,
+               freya/cli-client/src/CliClient.Core/Auth/AuthLoginResponse.cs,
+               freya/cli-client/src/CliClient.Core/Auth/AuthLoginClient.cs,
+               freya/cli-client/src/CliClient.Core/CliClient.Core.csproj,
+               freya/cli-client/tests/CliClient.UnitTests/Auth/AuthLoginResponseTests.cs,
+               freya/cli-client/tests/CliClient.UnitTests/Auth/AuthLoginClientTests.cs
       Notes: Reality check: the original plan said "AuthLogin POST" but
       `login-server/Net7SSL/LinuxAuth.cpp:41` is explicit that "The
       client only ever sends GET requests" against /AuthLogin —
@@ -434,7 +434,7 @@ CliClient.UnitTests/
 
 - [!] Item 10 — Workflow: enumerate sectors (visit each sector, dump objects)
       Status: blocked on Phase K
-      Touches: tools/cli-client/src/CliClient.Core/Workflows/EnumerateSectors.cs (deferred)
+      Touches: freya/cli-client/src/CliClient.Core/Workflows/EnumerateSectors.cs (deferred)
       Notes:
         Blocked-by:
           - plans/11-phase-k-ingame.md "Wire ticket handoff" [!] — without
@@ -460,7 +460,7 @@ CliClient.UnitTests/
 
 - [!] Item 11 — Workflow: enumerate missions
       Status: blocked on Phase K
-      Touches: tools/cli-client/src/CliClient.Core/Workflows/EnumerateMissions.cs (deferred)
+      Touches: freya/cli-client/src/CliClient.Core/Workflows/EnumerateMissions.cs (deferred)
       Notes:
         Same Phase K block as Item 10 — mission boards are NPCs inside
         starbases (server-side: 0x0054 TALK_TREE / 0x0055 SELECT_TALK_TREE /
@@ -473,7 +473,7 @@ CliClient.UnitTests/
 
 - [!] Item 12 — Workflow: enumerate items
       Status: blocked on Phase K
-      Touches: tools/cli-client/src/CliClient.Core/Workflows/EnumerateItems.cs (deferred)
+      Touches: freya/cli-client/src/CliClient.Core/Workflows/EnumerateItems.cs (deferred)
       Notes:
         EnB has no bulk-item-dump opcode. Item data flows via 0x0025
         ITEM_BASE on demand when the server reports an object that
@@ -529,10 +529,10 @@ CliClient.UnitTests/
 
 - [x] Item 14 — Codec unit tests in xUnit (CliClient.UnitTests)
       Status: done
-      Touches: tools/cli-client/tests/CliClient.UnitTests/Captures/CaptureFixture.cs,
-               tools/cli-client/tests/CliClient.UnitTests/Captures/RetailCaptureTests.cs,
-               tools/cli-client/tests/CliClient.UnitTests/Captures/fixtures/capture3-frames.txt,
-               tools/cli-client/src/CliClient.Core/Opcodes/Outbound/MasterJoinCodec.cs (Ticket: string → byte[])
+      Touches: freya/cli-client/tests/CliClient.UnitTests/Captures/CaptureFixture.cs,
+               freya/cli-client/tests/CliClient.UnitTests/Captures/RetailCaptureTests.cs,
+               freya/cli-client/tests/CliClient.UnitTests/Captures/fixtures/capture3-frames.txt,
+               freya/cli-client/src/CliClient.Core/Opcodes/Outbound/MasterJoinCodec.cs (Ticket: string → byte[])
       Notes: ▸ Hand-extracted 3 reference frames from archive/kyp-snapshot/capturedPackets/capture_3.rar
                 (unrar to a tmp scratch — the .rar stays in tree as ground truth, the .txt is large
                 so we don't commit it). Each frame committed verbatim hex with provenance metadata
@@ -568,13 +568,13 @@ CliClient.UnitTests/
 
 - [x] Item 15 — Opcode coverage push: register decoders for every opcode in Opcodes.h
       Status: done
-      Touches: tools/cli-client/scripts/generate-opcode-names.sh (new),
-               tools/cli-client/src/CliClient.Core/Opcodes/OpcodeNames.Generated.cs (new, generated),
-               tools/cli-client/src/CliClient.Core/Opcodes/IOpcodeCodec.cs (NamedOpaqueCodec + NamedOpaquePayload),
-               tools/cli-client/src/CliClient.Core/Opcodes/OpcodeRegistry.cs (RegisterAllNamedOpaque),
-               tools/cli-client/src/CliClient.Core/Logging/OpcodeNameLookup.cs (overlay Known on top of OpcodeNames.All),
-               tools/cli-client/src/CliClient.App/Program.cs (call RegisterAllNamedOpaque on startup),
-               tools/cli-client/tests/CliClient.UnitTests/Opcodes/OpcodeNamesTests.cs (new — 20 tests)
+      Touches: freya/cli-client/scripts/generate-opcode-names.sh (new),
+               freya/cli-client/src/CliClient.Core/Opcodes/OpcodeNames.Generated.cs (new, generated),
+               freya/cli-client/src/CliClient.Core/Opcodes/IOpcodeCodec.cs (NamedOpaqueCodec + NamedOpaquePayload),
+               freya/cli-client/src/CliClient.Core/Opcodes/OpcodeRegistry.cs (RegisterAllNamedOpaque),
+               freya/cli-client/src/CliClient.Core/Logging/OpcodeNameLookup.cs (overlay Known on top of OpcodeNames.All),
+               freya/cli-client/src/CliClient.App/Program.cs (call RegisterAllNamedOpaque on startup),
+               freya/cli-client/tests/CliClient.UnitTests/Opcodes/OpcodeNamesTests.cs (new — 20 tests)
       Notes: ▸ Deliberately chose data-table + bulk-registrar over "209 stub codec
                 classes" — same coverage, zero per-opcode boilerplate, and Phase K
                 can light up typed codecs one at a time without churning a sea of
@@ -662,7 +662,7 @@ CliClient.UnitTests/
            HealthGuard, PacketLog, ChatLog, ConsoleSink, MasterJoinCodec,
            ServerRedirectCodec, ClientChatCodec, NamedOpaqueCodec, OpcodeId,
            OpcodeNames are all `public`. A Phase T test project that
-           ProjectReferences tools/cli-client/src/CliClient.Core can
+           ProjectReferences freya/cli-client/src/CliClient.Core can
            construct any of these directly — no internal-friend hacks, no
            reflection. Confirmed by the unit test project already doing it.
         ▸ What Phase T blocks on (NOT a Phase S problem):
@@ -690,8 +690,8 @@ CliClient.UnitTests/
 
 Phase S is done when:
 
-- `dotnet build tools/cli-client/CliClient.csproj` is clean
-- `dotnet run --project tools/cli-client/ -- --workflow connect-and-login --headless` completes successfully against the docker-compose stack
+- `dotnet build freya/cli-client/CliClient.csproj` is clean
+- `dotnet run --project freya/cli-client/ -- --workflow connect-and-login --headless` completes successfully against the docker-compose stack
 - `./logs/packets-*.ndjson` shows the expected handshake → login → idle → disconnect sequence
 - Enumerate workflows produce non-empty, schema-consistent JSON dumps for sectors / missions / items
 - CI gates the new smoke test
@@ -1017,7 +1017,7 @@ account.
 
 Solution (containerise the CLI; one proxy + one CLI per "unit"):
 
-- [x] `tools/cli-client/Dockerfile` -- multi-stage SDK->runtime publish of the
+- [x] `freya/cli-client/Dockerfile` -- multi-stage SDK->runtime publish of the
       `enb-cli` app. Invariant globalisation; ENTRYPOINT `enb-cli`, CMD `repl`.
       Build context is the repo root (matches proxy/server). Image builds clean.
 - [x] `docker-compose.cli.yml` -- a CLI+proxy unit. The proxy joins the shared
@@ -1111,7 +1111,7 @@ number instead of a reason.
 Live-play report: two CLI clients (and the real client) in the same sector saw
 each other's *chat* but `list` showed `0 avatars` and no mobs -- "can't see
 other players". Built a scripted 2-client harness
-(`tools/cli-client/test-two-client-chat.sh`: spawns cli1=c1/chara + cli2=c2/charb
+(`freya/cli-client/test-two-client-chat.sh`: spawns cli1=c1/chara + cli2=c2/charb
 in sector 1015, each connect/login/enter/chat/list) to repro deterministically.
 
 Root cause (NOT a server bug -- server was faithful): the CLI's sector handshake

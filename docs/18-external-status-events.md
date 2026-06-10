@@ -2,7 +2,7 @@
 
 Phase AM. The game server publishes a small set of live status events for an
 out-of-process consumer to relay to a chat channel or dashboard. The first
-consumer is a Discord bot (`status-notifier/`), but nothing in the server or
+consumer is a Discord bot (`freya/status-notifier/`), but nothing in the server or
 the database is Discord-specific -- the mechanism is consumer-agnostic.
 
 ## What it emits
