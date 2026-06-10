@@ -176,3 +176,12 @@ __pycache__/
 # Go build artifact for the status-notifier sidecar (rebuilt by `go build` /
 # the Dockerfile). Source-only in git; never commit the compiled binary.
 /freya/status-notifier/status-notifier
+
+# Imported Claude Design bundle for Freya Online -- reference material only
+# (contains PNG screenshots/box art; reconstructable from the design source).
+# Our own ported, typed SPA lives in freya/online/web/ and IS committed.
+/freya/online/design/
+
+# Freya Online web SPA build output + deps
+/freya/online/web/node_modules/
+/freya/online/web/dist/
