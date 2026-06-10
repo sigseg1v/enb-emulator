@@ -128,7 +128,10 @@ C++ source directly). The Go server must reproduce:
 - [x] Wire freya_online.sql into schema-init (docker-compose.yml)
 - [ ] Verify the UDP 0x4000-0x4004 dependency (does the server REQUIRE login to
       answer, or is it optional?) before deciding to port it
-- [ ] Find/confirm online-status signal for the offline-guard
+- [x] Find/confirm online-status signal for the offline-guard -- it is the
+      server's own avatar_info.last_login > last_logout (AccountManager.h;
+      crash-robust via the boot reset in ServerManager.cpp). Implemented in
+      assertAvatarOffline (store_ah_write.go).
 
 ### AQ-1 Go login server (legacy parity)
 - [x] `freya/online/` Go module, MIT header (`server/`, go.mod go 1.25.0,
@@ -166,9 +169,13 @@ C++ source directly). The Go server must reproduce:
 - [x] Deleted-seller listings stay live (avatarNames resolves soft-deleted
       avatars; status filter is on listing, not seller)
 - API wired: handlePostListing/handleBid/handleBuyout in api.go.
-  NOTE: offline-guard NOT yet enforced on the write path -- AQ open question #1
-  (default offline-guard) still needs the online-status check added before any
-  real-client use. TODO tracked here.
+- [x] OFFLINE-GUARD ENFORCED (AQ open question #1 resolved, commit pending):
+      assertAvatarOffline gates PostListing(seller)/PlaceBid(bidder)/
+      Buyout(buyer); online = server's own last_login>last_logout
+      (AccountManager.h; crash-robust via ServerManager.cpp boot reset);
+      SELECT ... FOR UPDATE serializes vs the server's login UPDATE;
+      errCharacterOnline -> HTTP 409. RUNTIME-VERIFIED 409-online/200-offline.
+      Freya-side only -- no server wire change, no integrity citation needed.
 
 ### AQ-3 Mailbox (Go)
 - [x] List per account (accountMail: subject/recipient/sender/has-item/read,
@@ -181,7 +188,11 @@ C++ source directly). The Go server must reproduce:
       flag (expiresInDays surfaced in MailView for the UI).
 - API wired: handleMarkRead/handleLoot in api.go. RUNTIME-VERIFIED: bootstrap
   returns {mail:[],listings:[],vault:{},myListings:[]} cleanly for an account
-  with no characters. Same offline-guard caveat as AQ-2.
+  with no characters.
+- [x] OFFLINE-GUARD ENFORCED on LootAttachment(loot-target) too -- loot adds
+      credits/items to the live wallet/vault. RUNTIME-VERIFIED 409-online,
+      200-offline (item lands in vault). Mailbox delivery stays unguarded by
+      design (mail tables are not held in server memory).
 
 ### AQ-4 Bots (FREYA_AH_BOTS=1)  -- DONE, RUNTIME-VERIFIED (commit 16e229ad)
 - [x] Create "AhBot" account/avatar -- seeded idempotently at schema-init via
@@ -242,8 +253,12 @@ C++ source directly). The Go server must reproduce:
 - [ ] docs/ pages; decisions-log entry
 
 ## Open questions for the owner
-1. Offline-guard vs route-through-server for web inventory mutations (default:
-   offline-guard). Affects whether players can manage AH/mail while in-game.
+1. [RESOLVED -- shipped the offline-guard] Offline-guard vs route-through-server
+   for web inventory mutations. Decision: offline-guard (the safe default that
+   needs no server change). Players manage AH/mail only while the character is
+   logged out; the UI gets HTTP 409 + "log it out" otherwise. The seamless
+   route-through-server-over-IPC alternative stays deferred (large server
+   addition, integrity-gated). Revisit only if the owner wants in-game mgmt.
 2. Mailbox is per-account but credits/items are per-character -- attachments
    loot into `recipient_avatar_id`. Confirm that's the intended target.
 3. Deleting the C++ login server: confirmed yes, but only after real-client
