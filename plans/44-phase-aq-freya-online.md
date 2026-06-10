@@ -312,6 +312,25 @@ client.exe), so the artifacts are the SAME everywhere. Now distributed via:
             generically off the $artifacts list -- CloudFront invalidation paths
             are derived from $artifacts so both MVAS keys are invalidated.
 - [x] login-server C++ + launcher both compile clean; 34 launcher tests pass.
+- [x] **2026-06-09 online MVAS was dead despite shipping the pair -- the feed
+      was disabled by default.** The artifacts shipped, but `UsePositionFeed`
+      defaulted to FALSE (`UserSettings.cs`), there is NO UI checkbox to flip it,
+      and `package-client-windows` writes no settings.json -- so every packaged
+      player launched with the feed off and `ConfigurePositionFeedInjection`
+      returned early (no injection, no 0x1004/0x3005 to the droplet). play-local
+      worked only because its justfile heredoc forced `UsePositionFeed:true`;
+      play-online's heredoc forced `false` and never built the DLL. Fix:
+      (1) `UsePositionFeed` default -> true (inert-safe: a checkout with no DLL
+      just warns and launches plain; the feed sends nothing until the engine read
+      is present); (2) a version-gated one-shot migration in `UserSettings.Load()`
+      (`SettingsVersion` 0->1) flips the stale persisted `false` to true on
+      existing client installs exactly once -- needed because changing the default
+      alone does NOT help machines that already wrote a settings.json (the owner's
+      catch); (3) `play-online` now builds `build-posfeed-dll` and writes
+      `UsePositionFeed:true`. The offsets header (`ClientEngineOffsets.local.h`)
+      stays gitignored and is NOT committed -- it is baked into the DLL at package
+      time on the build machine; committing it would leak client memory layout
+      (CLAUDE.md disclosure rule). Launcher builds clean, 34 tests still pass.
 - Blast radius of `cd deploy/do && just update`: builds server/login/status-
       notifier/db-backup images + the client patch. The droplet runs
       docker-compose.PROD.yml, which references NONE of the AQ Go-online stack

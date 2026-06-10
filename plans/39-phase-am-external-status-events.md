@@ -398,3 +398,31 @@ ability. Tracked as CV-AM-3 below (owner verifies on the live server + real clie
 - No em-dashes in committed files (`--`/`-`).
 - Best-effort: a Discord failure must never break or slow a game operation.
 - Default-OFF feature flag so dev/test/CI are untouched.
+
+## AM-10 FUTURE: login event reads levels as 0 (C0/T0/E0)
+
+Symptom (owner, 2026-06-09): the bot prints
+`Player VeretJD (level: C0/T0/E0, class: JD) logged in. (1 online)` -- name
+and class are right, but the three levels are always 0 for a character that
+clearly has levels.
+
+Root cause: the EXT_STATUS_LOGIN line is built in
+`server/src/UDP_Global.cpp` (HandleGlobalTicketRequest, right after the
+0x2005 AVATARLOGIN_CONFIRM emit). That is the GLOBAL ticket stage -- the
+player node has `avatar_data` (name, race, prof -> class) but its
+`avatar_level_info` (combat/trade/explore) has NOT been loaded yet, so
+`player->CombatLevel()/TradeLevel()/ExploreLevel()` all return 0. The levels
+only populate later, at sector login / ReInitializeSavedData /
+SaveManager load.
+
+Fix options (pick when tackled):
+  1. Move the EXT_STATUS_LOGIN emit to the point where the levels are
+     populated (e.g. the FinishLogin / sector-login path), keeping the same
+     rendered-line format. Cleanest; the online tally is still correct there.
+  2. Read the three levels straight from `avatar_level_info` (net7_user) at
+     emit time and format from those. More code, and it duplicates a load the
+     server does moments later -- prefer option 1.
+
+This is emit-only (no client wire byte changes), so no CLI byte-pin / plans/29
+CV gate applies -- but verify the moved emit still fires exactly once per login
+and the count is right. NOT urgent; the line is cosmetic Discord output.

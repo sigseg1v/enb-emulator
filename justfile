@@ -634,6 +634,13 @@ play-online CLIENT_PATH='' HOST='':
     echo ">>> building Win32 FreyaProxy.exe (idempotent; layer-cached)"
     just build-proxy-win64
 
+    # PB-2: build the in-client position-feed DLL + injector so MVAS movement
+    # works online too (same as play-local). The launcher resolves them from
+    # bin/ under the repo root (CWD). Inert until ClientEngineOffsets.local.h is
+    # filled, but the injection wiring is exercised here.
+    echo ">>> building position-feed DLL + injector (required for online MVAS)"
+    just build-posfeed-dll
+
     echo ">>> building launcher"
     dotnet build tools/LaunchFreya >/dev/null
 
@@ -649,7 +656,7 @@ play-online CLIENT_PATH='' HOST='':
       "ClientPath": $cp_json,
       "LastEmulatorName": "Net7MP",
       "LastServerName": $host_json,
-      "UsePositionFeed": false,
+      "UsePositionFeed": true,
       "UseLocalCert": false,
       "UseSecureAuthentication": true,
       "AuthenticationPort": "443",
