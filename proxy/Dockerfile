@@ -30,6 +30,11 @@ WORKDIR /src
 # headers + Phase M net7ipc::PosixIpc).
 COPY proxy/  /src/proxy/
 COPY common/ /src/common/
+# PB-2 position-feed IPC contract: a single MIT header that lives with its
+# producer (freya/client-injection) and is included by the proxy consumer
+# (UDPClient_linux.cpp). Copy just the header -- the rest of that dir is the
+# Win32/WINE client-side feed, which the Linux proxy does not compile.
+COPY freya/client-injection/ClientPositionShared.h /src/freya/client-injection/ClientPositionShared.h
 
 RUN cmake -S /src/proxy -B /build -G Ninja \
     && cmake --build /build -j"$(nproc)" -- -k 0

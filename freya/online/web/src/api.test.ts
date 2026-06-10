@@ -67,6 +67,36 @@ describe('real backend (default, VITE_MOCK unset)', () => {
     await expect(api.login('alice', 'wrong')).rejects.toThrow('401');
   });
 
+  it('resetPassword POSTs current+new to /api/account/password (no username)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const api = await importApi();
+    const got = await api.resetPassword('oldpw123', 'newpw4567');
+
+    const [url, opts] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/account/password');
+    expect(opts.method).toBe('POST');
+    expect(opts.credentials).toBe('include');
+    const sent = JSON.parse(opts.body);
+    expect(sent).toEqual({ currentPassword: 'oldpw123', newPassword: 'newpw4567' });
+    expect(sent.username).toBeUndefined(); // identity comes from the cookie
+    expect(got).toEqual({ ok: true });
+  });
+
+  it('resetPassword surfaces the server error message on failure', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: 'current password is incorrect' }), { status: 401 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const api = await importApi();
+    await expect(api.resetPassword('wrong', 'newpw4567'))
+      .rejects.toThrow('current password is incorrect');
+  });
+
   it('bootstrap GETs /api/bootstrap', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ session: {}, server: {}, mail: [], listings: [], vault: {}, myListings: [] }), { status: 200 }),

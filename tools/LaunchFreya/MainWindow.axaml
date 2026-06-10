@@ -5,29 +5,46 @@
         mc:Ignorable="d"
         x:Class="LaunchFreya.MainWindow"
         Width="1280" Height="680"
-        Title="LaunchFreya"
-        Background="{DynamicResource SystemRegionBrush}"
+        Title="Freya Launcher"
+        FontFamily="{StaticResource FreyaBodyFont}"
         CanResize="True">
-  <DockPanel Margin="12">
 
-    <!-- Project heading. "Freya" is the rebranded name for this preservation
-         project's launcher/proxy (see README "major changes"). -->
-    <TextBlock DockPanel.Dock="Top" Text="Freya"
-               FontSize="44" FontStyle="Italic" FontWeight="Bold"
-               HorizontalAlignment="Left" Margin="0,0,0,10"
-               Padding="0,0,12,0" ClipToBounds="False" />
+  <!-- Deep-space backdrop: a vertical void gradient, matching the website
+       body background (the dark blue void tokens). -->
+  <Window.Background>
+    <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+      <GradientStop Offset="0" Color="#FF060B16" />
+      <GradientStop Offset="1" Color="#FF030610" />
+    </LinearGradientBrush>
+  </Window.Background>
+
+  <DockPanel Margin="18">
+
+    <!-- Wordmark heading (mirrors the website wordmark): geometric tracked
+         "FREYA" with an orbit ring, and a wide-spaced accent subtitle. -->
+    <StackPanel DockPanel.Dock="Top" Orientation="Vertical" Margin="2,0,0,16">
+      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+        <TextBlock Text="FREYA" Classes="wordmark" FontSize="40" />
+        <!-- orbit ring -->
+        <Border Width="13" Height="13" CornerRadius="7" Margin="9,4,0,0"
+                VerticalAlignment="Center" Background="Transparent"
+                BorderBrush="{StaticResource FreyaAccentBrush}" BorderThickness="1.5"
+                Opacity="0.6" BoxShadow="0 0 9 0 #5943DBEA" />
+      </StackPanel>
+      <TextBlock Text="LAUNCHER" Classes="wordmarkSub" Margin="3,7,0,0" />
+    </StackPanel>
 
   <Grid RowDefinitions="Auto,Auto,Auto,Auto,*,Auto">
 
     <!-- Row 0: Server picker (emulator/host) -->
-    <Border Grid.Row="0" BorderBrush="Gray" BorderThickness="1" Padding="8" CornerRadius="4">
+    <Border Grid.Row="0" Classes="panel">
       <Grid ColumnDefinitions="100,*,100,*" RowDefinitions="Auto,Auto,Auto">
-        <TextBlock Grid.Row="0" Grid.Column="0" Text="Emulator:" VerticalAlignment="Center" />
+        <TextBlock Grid.Row="0" Grid.Column="0" Text="Emulator:" Classes="label" VerticalAlignment="Center" />
         <ComboBox  Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="3" Name="c_ComboBox_Emulators"
                    HorizontalAlignment="Stretch"
                    SelectionChanged="OnEmulatorsChanged" />
 
-        <TextBlock Grid.Row="1" Grid.Column="0" Text="Server:" VerticalAlignment="Center" Margin="0,8,0,0" />
+        <TextBlock Grid.Row="1" Grid.Column="0" Text="Server:" Classes="label" VerticalAlignment="Center" Margin="0,8,0,0" />
         <!-- Editable: a user can type their own server URL, or pick a known one
              from the dropdown. The typed text is the source of truth. -->
         <AutoCompleteBox Grid.Row="1" Grid.Column="1" Name="c_ComboBox_Servers"
@@ -38,7 +55,7 @@
                          SelectionChanged="OnServerSelected"
                          LostFocus="OnServerCommitted" />
 
-        <TextBlock Grid.Row="1" Grid.Column="2" Text="Status:" VerticalAlignment="Center" Margin="0,8,0,0" />
+        <TextBlock Grid.Row="1" Grid.Column="2" Text="Status:" Classes="label" VerticalAlignment="Center" Margin="0,8,0,0" />
         <TextBlock Grid.Row="1" Grid.Column="3" Name="c_ServerStatus"
                    Margin="0,8,0,0" VerticalAlignment="Center" Text="" FontWeight="Bold" />
 
@@ -48,25 +65,26 @@
     </Border>
 
     <!-- Row 1: Client path -->
-    <Border Grid.Row="1" BorderBrush="Gray" BorderThickness="1" Padding="8" CornerRadius="4" Margin="0,8,0,0">
+    <Border Grid.Row="1" Classes="panel" Margin="0,8,0,0">
       <Grid ColumnDefinitions="100,*,Auto">
-        <TextBlock Grid.Column="0" Text="Client EXE:" VerticalAlignment="Center" />
+        <TextBlock Grid.Column="0" Text="Client EXE:" Classes="label" VerticalAlignment="Center" />
         <TextBox   Grid.Column="1" Name="c_TextBox_Client" />
         <Button    Grid.Column="2" Margin="8,0,0,0" Content="Browse..." Click="OnBrowseClient" />
       </Grid>
     </Border>
 
     <!-- Row 2: Authentication -->
-    <Border Grid.Row="2" BorderBrush="Gray" BorderThickness="1" Padding="8" CornerRadius="4" Margin="0,8,0,0">
+    <Border Grid.Row="2" Classes="panel" Margin="0,8,0,0">
       <Grid ColumnDefinitions="220,*">
-        <TextBlock Grid.Column="0" Text="Upstream Auth Port (TLS):" VerticalAlignment="Center" />
+        <TextBlock Grid.Column="0" Text="Upstream Auth Port (TLS):" Classes="label" VerticalAlignment="Center" />
         <TextBox   Grid.Column="1" Name="c_TextBox_Port" Width="80" HorizontalAlignment="Left" />
       </Grid>
     </Border>
 
     <!-- Row 3: Status line + (Phase AN) indeterminate update/download spinner -->
-    <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="10" Margin="0,12,0,4">
+    <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="10" Margin="0,14,0,4">
       <TextBlock Name="c_Status" VerticalAlignment="Center"
+                 Foreground="{StaticResource FreyaTextDimBrush}"
                  Text="Please select a server and hit Play." />
       <ProgressBar Name="c_UpdateSpinner" Width="160" IsIndeterminate="True"
                    IsVisible="False" VerticalAlignment="Center" />

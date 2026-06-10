@@ -16,11 +16,10 @@ namespace LaunchFreya.Config
         // default so the shipped Windows package (which writes no settings.json)
         // injects the feed -- without it MVAS movement does not work online. The
         // injection is harmless when the artifacts are absent (a checkout that did
-        // not build the DLL just logs a warning and launches plain), and the feed
-        // itself sends nothing until the engine read is provided
-        // (client/detours/ClientEngineOffsets.local.h, baked into the DLL at build
-        // time, never committed). This is a NEW mechanism -- not the historical
-        // ClientDetours debug DLL -- hence its own name.
+        // not build the DLL just logs a warning and launches plain). The engine
+        // read is in freya/client-injection/ClientEngineOffsets.h, compiled into
+        // the DLL. This is a NEW mechanism -- not the historical ClientDetours
+        // debug DLL -- hence its own name.
         public bool UsePositionFeed { get; set; } = true;
         public string LastEmulatorName { get; set; } = "";
         public string LastServerName { get; set; } = "";

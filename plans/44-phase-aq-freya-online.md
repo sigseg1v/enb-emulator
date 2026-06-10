@@ -267,10 +267,23 @@ C++ source directly). The Go server must reproduce:
 - [x] Wire to the real Go JSON API -- USE_MOCK is now `VITE_MOCK==='1'`
       (real default, mock opt-in), api.ts/Dockerfile/README updated. AQ-1/2/3
       are live, so the SPA shows real data by default (2026-06-09).
-      Backend now live; flip + browser-verify the real login->bootstrap path.
+- [x] Wire the WRITE path (2026-06-10). Previously login+bootstrap read real
+      data but every action (bid/buyout/list/mark-read/loot) was a fake
+      optimistic local-state mutation that never hit the backend. Now every
+      action calls the real endpoint and re-pulls `bootstrap` as the source of
+      truth: App holds a single `reload()`; Mailbox calls `markRead`
+      (optimistic dot + background persist) and `lootAttachment` (await +
+      reload); AuctionHouse Buy calls `placeBid`/`buyout`, Sell calls
+      `postListing`. Buttons disable while a mutation is in flight. api.ts now
+      surfaces the server's `{error}` body verbatim (e.g. 409 "character is
+      online ...", 402 "insufficient credits") instead of a bare status code.
+      Removed the now-dead optimistic setters (setListings/setVault/
+      setMyListings/onCharge) and the fake random listing-id generator.
 - [x] Serve built dist/ from the Go binary at the index (spa.go static serve +
-      SPA fallback; Dockerfile bakes web/dist -> /app/web). RUNTIME-VERIFIED:
-      GET / returns the built index.html.
+      SPA fallback; Dockerfile bakes web/dist -> /app/web). RUNTIME-VERIFIED
+      (2026-06-10): rebuilt freya-online image serves the new bundle
+      (index hash matches the local `npm run build`), `/api/status` responds,
+      unauth `/api/bootstrap` -> 401.
 - Note: `npm audit` flags the esbuild dev-server advisory (GHSA-67mh-4wv8-2f99),
   dev-server only, NOT in the shipped static build; fix is a breaking vite@8
   bump -- deferred deliberately.
@@ -285,13 +298,45 @@ C++ source directly). The Go server must reproduce:
       loot credit. API-level test drives the real `session.LoadAndSave(routes())`
       handler over TLS httptest with a cookie jar: login(bad)->401,
       login(good)->200 + cookie, bootstrap->real characters/credits/vault.
-      Each test seeds + wipes a reserved id band (testIDBase). 17 tests pass.
+      Each test seeds + wipes a reserved id band (testIDBase).
+- [x] HTTP-level mutation flow tests (2026-06-10) pinning the exact routes /
+      JSON shapes / status codes the wired SPA depends on: post-listing ->
+      cross-account buyout -> item in buyer mailbox + gone from browse; mail
+      mark-read -> loot -> wallet grew on next bootstrap. 19 integration +
+      7 unit tests pass.
 - [x] Web SPA unit tests (`freya/online/web/src/**/*.test.ts`, vitest): rarity
       tier+level-cap table (mirrors server/rarity.go), bid/buyout/min-increment
       math, and the real-vs-mock api.ts dispatch (default GETs/POSTs with
       `credentials:'include'`; VITE_MOCK=1 serves mock without fetch). 16 tests.
 - [x] justfile: `test-online-it` (docker postgres up + FREYA_TEST_DB go test)
       and `test-online-web` (npm test).
+
+### AQ-10 Account tab -- password reset (2026-06-09)
+- [x] Third SPA tab "Account" (after Mailbox + Auction House), visible only when
+      logged in. Reset Password form: current password, new password x2, min
+      length 8, confirm-match + differ-from-current checks client-side, themed
+      with the existing `.field`/`.hud-panel`/`.btn--primary` classes
+      (`web/src/screens/Account.tsx` + `.account*` CSS). Account name comes from
+      the session cookie, never typed/sent.
+- [x] `api.resetPassword(current,new)` -> `POST /api/account/password`
+      (credentials:'include', no username in body).
+- [x] Go `POST /api/account/password` (`handleChangePassword`): requires the
+      session acctID (401 unauth), re-verifies the CURRENT password (401 wrong),
+      enforces new length >= 8 server-side (400), hashes the new password, and
+      UPDATEs `accounts.password_phc` (parameterized `updatePassword`). Rotates
+      the session token after the change.
+- [x] `hashPassword` (auth.go) emits the SAME libsodium Argon2id PHC the game
+      login verifies (m=65536,t=2,p=1, argon2id v=19, crypto/rand 16-byte salt,
+      32-byte hash, RawStdEncoding) -- byte-compatible with `just seed-account`
+      (PyNaCl) and the C++ `crypto_pwhash_str_verify`. So a website reset works
+      for BOTH the website and the game client. This is NOT a server wire change
+      (no game protocol touched) -- it writes the same credential store the C++
+      login already reads.
+- [x] Tests: Go `TestHashPassword` (format + round-trip + random-salt), Go
+      `TestIT_API_ChangePassword` (unauth 401 / wrong-current 401 / short 400 /
+      success 200, then OLD pw fails login + NEW pw succeeds), web vitest
+      (resetPassword posts current+new without username; surfaces server error).
+      Full suite green: 20 Go integration + 8 Go unit + 18 web.
 
 ### AQ-6 In-game notify
 - [ ] On player login, if unread mail: private system chat message with the
@@ -347,10 +392,9 @@ client.exe), so the artifacts are the SAME everywhere. Now distributed via:
       existing client installs exactly once -- needed because changing the default
       alone does NOT help machines that already wrote a settings.json (the owner's
       catch); (3) `play-online` now builds `build-posfeed-dll` and writes
-      `UsePositionFeed:true`. The offsets header (`ClientEngineOffsets.local.h`)
-      stays gitignored and is NOT committed -- it is baked into the DLL at package
-      time on the build machine; committing it would leak client memory layout
-      (CLAUDE.md disclosure rule). Launcher builds clean, 34 tests still pass.
+      `UsePositionFeed:true`. The offsets header
+      (`freya/client-injection/ClientEngineOffsets.h`) is committed and compiled
+      into the DLL. Launcher builds clean, 34 tests still pass.
 - Blast radius of `cd deploy/do && just update`: builds server/login/status-
       notifier/db-backup images + the client patch. The droplet runs
       docker-compose.PROD.yml, which references NONE of the AQ Go-online stack

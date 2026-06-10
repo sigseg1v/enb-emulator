@@ -64,6 +64,8 @@ func (s *apiServer) routes() http.Handler {
 	mux.HandleFunc("POST /api/auction/{id}/buyout", s.handleBuyout)
 	mux.HandleFunc("POST /api/mail/{id}/read", s.handleMarkRead)
 	mux.HandleFunc("POST /api/mail/{id}/loot", s.handleLoot)
+	// Account self-service.
+	mux.HandleFunc("POST /api/account/password", s.handleChangePassword)
 	return mux
 }
 
@@ -383,6 +385,73 @@ func (s *apiServer) handleLoot(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.LootAttachment(ctx, acctID, id, body.Index); err != nil {
 		mutationError(w, err)
 		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// minPasswordLen is the floor enforced server-side. The SPA mirrors it, but the
+// server is the authority -- a short password is rejected here regardless.
+const minPasswordLen = 8
+
+// POST /api/account/password {currentPassword,newPassword}. Changes the signed-in
+// account's password. The account is taken from the session cookie, never from
+// the request body -- you can only change your OWN password. The current password
+// must be re-supplied and verified (so a hijacked-but-idle session, or anyone at
+// an unlocked browser, cannot silently rotate it), and the new password is hashed
+// into the SAME libsodium Argon2id PHC the game login verifies, so the new
+// password works for both the website and the game client.
+func (s *apiServer) handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	_, acctID := s.loggedIn(r)
+	if acctID == 0 {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	var body struct {
+		CurrentPassword string `json:"currentPassword"`
+		NewPassword     string `json:"newPassword"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	if len([]rune(body.NewPassword)) < minPasswordLen {
+		writeJSON(w, http.StatusBadRequest,
+			map[string]string{"error": "new password must be at least 8 characters"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+
+	phc, err := s.store.passwordPHCByID(ctx, acctID)
+	if err != nil {
+		log.Printf("api: passwordPHCByID(%d): %v", acctID, err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	ok, err := verifyPassword(phc, body.CurrentPassword)
+	if err != nil || !ok {
+		writeJSON(w, http.StatusUnauthorized,
+			map[string]string{"error": "current password is incorrect"})
+		return
+	}
+
+	newPHC, err := hashPassword(body.NewPassword)
+	if err != nil {
+		log.Printf("api: hashPassword: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	if err := s.store.updatePassword(ctx, acctID, newPHC); err != nil {
+		log.Printf("api: updatePassword(%d): %v", acctID, err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	// Rotate the session token on a credential change -- a stolen pre-change
+	// cookie is useless after this point.
+	if err := s.session.RenewToken(r.Context()); err != nil {
+		log.Printf("api: RenewToken after password change: %v", err)
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

@@ -1,22 +1,22 @@
 // SPDX-License-Identifier: MIT
 // Freya Online -- app root.
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
-  Attachment, Listing, Mail, MyListing, ServerStatus as ServerStatusT, Session, VaultSlot,
+  Listing, Mail, MyListing, ServerStatus as ServerStatusT, Session, VaultSlot,
 } from './types';
 import * as api from './api';
-import { fmtNum } from './lib/format';
 import { Credits, ServerStatus, Wordmark } from './components/ui';
 import { Login } from './screens/Login';
 import { Mailbox } from './screens/Mailbox';
 import { AuctionHouse } from './screens/AuctionHouse';
+import { Account } from './screens/Account';
 
 const STATUS_POLL_MS = 60_000;
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [server, setServer] = useState<ServerStatusT>({ status: 'OFFLINE', players: 0 });
-  const [tab, setTab] = useState<'mail' | 'ah'>('mail');
+  const [tab, setTab] = useState<'mail' | 'ah' | 'account'>('mail');
   const [mail, setMail] = useState<Mail[]>([]);
   const [listings, setListings] = useState<Listing[]>([]);
   const [vault, setVault] = useState<Record<string, VaultSlot[]>>({});
@@ -35,14 +35,17 @@ export default function App() {
   }, []);
 
   const toastTimer = useRef<ReturnType<typeof setTimeout>>();
-  function toast(msg: string) {
+  const toast = useCallback((msg: string) => {
     setToastMsg(msg);
     clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToastMsg(null), 2600);
-  }
+  }, []);
 
-  async function signIn(user: string, pass: string) {
-    await api.login(user, pass);
+  // The server is the source of truth: after any mutation (bid, buyout, list,
+  // loot) we re-pull the authenticated bootstrap and replace every slice. This
+  // keeps credits, the vault, listings and the mailbox exactly in step with the
+  // backend instead of guessing the delta client-side.
+  const reload = useCallback(async () => {
     const boot = await api.bootstrap();
     setSession(boot.session);
     setServer(boot.server);
@@ -51,20 +54,16 @@ export default function App() {
     setVault(boot.vault);
     setMyListings(boot.myListings);
     setCredits(boot.session.credits);
+  }, []);
+
+  async function signIn(user: string, pass: string) {
+    await api.login(user, pass);
+    await reload();
   }
 
   async function signOut() {
     await api.logout().catch(() => {});
     setSession(null);
-  }
-
-  function loot(att: Attachment) {
-    if (att.type === 'credits') {
-      setCredits(c => c + att.amount);
-      toast(`Looted ${fmtNum(att.amount)} cr`);
-    } else {
-      toast(`Looted ${att.item.name} -> vault`);
-    }
   }
 
   if (!session) return <Login server={server} onSignIn={signIn} />;
@@ -83,6 +82,9 @@ export default function App() {
           </button>
           <button className={'tab' + (tab === 'ah' ? ' tab--active' : '')} onClick={() => setTab('ah')}>
             <span className="tab__glyph">◈</span> Auction House
+          </button>
+          <button className={'tab' + (tab === 'account' ? ' tab--active' : '')} onClick={() => setTab('account')}>
+            <span className="tab__glyph">⚙</span> Account
           </button>
         </nav>
 
@@ -103,12 +105,16 @@ export default function App() {
 
       <div className="shell__body">
         <div className="shell__bg" />
-        {tab === 'mail'
-          ? <Mailbox mail={mail} setMail={setMail} character={character} onLoot={loot} />
-          : <AuctionHouse listings={listings} setListings={setListings}
-              vault={vault} setVault={setVault} myListings={myListings} setMyListings={setMyListings}
-              avatars={session.characters} character={character}
-              onCharge={amt => setCredits(c => c - amt)} toast={toast} />}
+        {tab === 'mail' && (
+          <Mailbox mail={mail} setMail={setMail} character={character} reload={reload} toast={toast} />
+        )}
+        {tab === 'ah' && (
+          <AuctionHouse listings={listings} vault={vault} myListings={myListings}
+            avatars={session.characters} reload={reload} toast={toast} />
+        )}
+        {tab === 'account' && (
+          <Account username={session.username} toast={toast} />
+        )}
       </div>
 
       {toastMsg && <div className="toast">{toastMsg}</div>}

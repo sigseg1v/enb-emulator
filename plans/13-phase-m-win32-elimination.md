@@ -47,7 +47,7 @@ This is the technical debt Phase B left. Phase M pays it down.
 
 **OUT of scope** (Win32 is allowed):
 - `client/**` — runs under WINE or on Windows. Win32 is correct here.
-  - `client/detours/` — Microsoft Detours by definition is Win32 hooking. Leave alone.
+  - `client/detours/` — DELETED 2026-06-10: vendored Microsoft Detours + the legacy `ClientDetours.dll` sources were dead (no build target, nothing linked them). Live client instrumentation is the self-contained `freya/client-injection/`, which uses no Detours.
   - `client/mods/` — client-side patches. Leave alone.
   - `client/linux-installer/` — bash + WINE prefix setup. Already Linux; no C++.
 - `server/third_party/` — boost, cryptopp, zlib, lua, MySQL Connector/C. We consume these. Boost on Linux compiles via boost's own POSIX backend; we just need to make sure we're including the right boost headers, not the bundled Win32 ones (if any).
@@ -178,7 +178,7 @@ Server still builds. Existing Phase J integration tests (5/5 green at Phase J cl
 ## Decisions
 
 - **Boost stays**. Per user: "dont rewrite boost dear god no." Boost on Linux is a different backend behind the same `boost::interprocess::*` API; we use it as a library, not as code to rewrite.
-- **client/detours stays Win32**. Microsoft Detours is by definition a Win32 API hooking library. The client runs in WINE; Win32 is correct there.
+- **client/detours was DELETED 2026-06-10** as dead code (no build target ever compiled the vendored Detours lib or the legacy `ClientDetours.dll` sources). Live client instrumentation now lives in `freya/client-injection/` (Win32/WINE, no Detours). Win32 in the client tree is still correct -- it runs under WINE.
 - **Per-instance guards become flock**, not pthread mutexes. CreateMutex's Win32 semantics are *cross-process*; a process-local pthread mutex would silently regress to "no guard". flock on a pid file is the conventional Linux equivalent.
 - **Mailslots become AF_UNIX SOCK_DGRAM**, reusing the already-shipped `server/compat/posix_ipc` from Phase J. Don't reinvent.
 - **Don't preserve the Win32 API surface**. Phase B added "stub functions that compile-but-do-nothing" to get the build green. Phase M removes them outright. Call sites must use the real POSIX primitive directly — no thin wrappers.

@@ -79,10 +79,6 @@ Thumbs.db
 *.local
 .direnv/
 
-# PB-2 MVAS feed: build-specific client engine offsets live local-only
-# (the .example template stays tracked; the filled copy must never be committed).
-client/detours/ClientEngineOffsets.local.h
-
 # Postgres dev data dir from docker-compose
 pgdata/
 
@@ -102,9 +98,6 @@ pgdata/
 # Third-party libs vendored with the server build (we keep prebuilt artefacts for Windows builds)
 !server/third_party/**
 !server/src/LUA/**/*.lib
-
-# Detours has a prebuilt detours.lib for the samples
-!client/detours/Detours/lib/**
 
 # login-server vendored mysql lib
 !login-server/Net7Mysql/libmySQL.lib

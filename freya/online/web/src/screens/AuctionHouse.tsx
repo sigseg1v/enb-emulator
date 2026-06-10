@@ -8,6 +8,7 @@ import { bidStartOf, buyoutOf, fmtNum, minIncrementOf } from '../lib/format';
 import { Credits, ItemIcon, Quality, TimeBand } from '../components/ui';
 import { ItemDisplay } from '../components/ItemDisplay';
 import { DURATIONS } from '../mock';
+import * as api from '../api';
 
 type Vars = CSSProperties & Record<string, string | number>;
 type Filter = 'all' | Cat;
@@ -44,16 +45,16 @@ function AhRow({ listing, active, onClick }: { listing: Listing; active: boolean
 
 /* ---------------- BUY ---------------- */
 function BuyView({
-  listings, setListings, character, toast,
+  listings, reload, toast,
 }: {
   listings: Listing[];
-  setListings: React.Dispatch<React.SetStateAction<Listing[]>>;
-  character: string;
+  reload: () => Promise<void>;
   toast: (msg: string) => void;
 }) {
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [activeId, setActiveId] = useState<string | null>(listings[0] ? listings[0].id : null);
+  const [busy, setBusy] = useState(false);
 
   const shown = useMemo(() => listings.filter(l => {
     if (filter !== 'all' && l.item.cat !== filter) return false;
@@ -64,15 +65,33 @@ function BuyView({
   const active = listings.find(l => l.id === activeId) || null;
   const minInc = active ? minIncrementOf(active.item) : 0;
 
-  function placeBid() {
-    if (!active) return;
-    const inc = minIncrementOf(active.item);
-    setListings(prev => prev.map(l => l.id === active.id ? { ...l, bid: l.bid + inc, highBidder: character } : l));
-    toast(`Bid placed -- ${fmtNum(active.bid + inc)} cr -- you are the high bidder`);
+  async function placeBid() {
+    if (!active || busy) return;
+    setBusy(true);
+    try {
+      await api.placeBid(active.id);
+      toast('Bid placed -- you are the high bidder');
+      await reload();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Bid failed');
+    } finally {
+      setBusy(false);
+    }
   }
-  function buyoutNow() {
-    if (!active || active.buyout == null) return;
-    toast(`Bought out -- ${fmtNum(active.buyout)} cr -- item sent to your mailbox`);
+  async function buyoutNow() {
+    if (!active || active.buyout == null || busy) return;
+    const price = active.buyout;
+    setBusy(true);
+    try {
+      await api.buyout(active.id);
+      toast(`Bought out -- ${fmtNum(price)} cr -- item sent to your mailbox`);
+      setActiveId(null);
+      await reload();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Buyout failed');
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -125,8 +144,8 @@ function BuyView({
                   <div className="bidbox__row"><span>Buyout</span><span className="bidbox__big" style={{ color: 'var(--warm)' }}><Credits value={active.buyout} /></span></div>}
                 <p className="bidbox__hint">Next bid must be at least <b style={{ color: 'var(--text-dim)' }}>+{fmtNum(minInc)} cr</b> (1% of item value). Quantity in stack: {active.stack}.</p>
                 <div className="bidbox__actions">
-                  <button className="btn" onClick={placeBid}>Bid {fmtNum(active.bid + minInc)}</button>
-                  <button className="btn btn--warm" onClick={buyoutNow} disabled={active.buyout == null}>Buyout</button>
+                  <button className="btn" onClick={placeBid} disabled={busy}>Bid {fmtNum(active.bid + minInc)}</button>
+                  <button className="btn btn--warm" onClick={buyoutNow} disabled={busy || active.buyout == null}>Buyout</button>
                 </div>
               </div>
             </>
@@ -156,11 +175,12 @@ function MyListingRow({ listing }: { listing: MyListing }) {
 }
 
 function PostForm({
-  slotData, avatar, onPost,
+  slotData, avatar, onPost, busy,
 }: {
   slotData: VaultSlot;
   avatar: string;
   onPost: (p: PostListingInput) => void;
+  busy: boolean;
 }) {
   const item = slotData.item;
   const r = RARITY[item.rarity];
@@ -234,24 +254,23 @@ function PostForm({
       </div>
 
       <p className="pform__fee">Auction House fee <b>10%</b> &middot; <b>{fmtNum(fee)} cr</b> collected now. Unsold items return 95% to your mailbox.</p>
-      <button className="btn btn--primary pform__post" onClick={post}>List on Auction House</button>
+      <button className="btn btn--primary pform__post" onClick={post} disabled={busy}>List on Auction House</button>
     </div>
   );
 }
 
 function SellView({
-  vault, setVault, myListings, setMyListings, avatars, onCharge, toast,
+  vault, myListings, avatars, reload, toast,
 }: {
   vault: Record<string, VaultSlot[]>;
-  setVault: React.Dispatch<React.SetStateAction<Record<string, VaultSlot[]>>>;
   myListings: MyListing[];
-  setMyListings: React.Dispatch<React.SetStateAction<MyListing[]>>;
   avatars: string[];
-  onCharge: (amt: number) => void;
+  reload: () => Promise<void>;
   toast: (msg: string) => void;
 }) {
   const [avatar, setAvatar] = useState(avatars[0]);
   const [selSlot, setSelSlot] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const slots = vault[avatar] || [];
   const slotData = selSlot != null ? slots.find(s => s.slot === selSlot) || null : null;
@@ -259,21 +278,21 @@ function SellView({
 
   function changeAvatar(name: string) { setAvatar(name); setSelSlot(null); }
 
-  function post(p: PostListingInput) {
+  async function post(p: PostListingInput) {
+    if (busy) return;
     const src = (vault[p.avatar] || []).find(s => s.slot === p.slot);
     if (!src) return;
-    const id = 'S-' + Math.floor(3100 + Math.random() * 800);
-    setMyListings(prev => [
-      { id, item: src.item, avatar: p.avatar, stack: p.stack, quality: p.quality, band: 'high', currentBid: null, buyout: p.buyout || null },
-      ...prev,
-    ]);
-    setVault(prev => ({
-      ...prev,
-      [p.avatar]: prev[p.avatar].map(s => s.slot === p.slot ? { ...s, stack: s.stack - p.stack } : s).filter(s => s.stack > 0),
-    }));
-    onCharge(p.fee);
-    setSelSlot(null);
-    toast(`Listed ${src.item.name}${p.stack > 1 ? ` ×${p.stack}` : ''} -- ${fmtNum(p.fee)} cr fee collected`);
+    setBusy(true);
+    try {
+      await api.postListing(p);
+      toast(`Listed ${src.item.name}${p.stack > 1 ? ` ×${p.stack}` : ''} -- ${fmtNum(p.fee)} cr fee collected`);
+      setSelSlot(null);
+      await reload();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Listing failed');
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -306,7 +325,7 @@ function SellView({
         </div>
 
         {slotData
-          ? <PostForm slotData={slotData} avatar={avatar} onPost={post} />
+          ? <PostForm slotData={slotData} avatar={avatar} onPost={post} busy={busy} />
           : <div className="hud-panel sell__hint"><div><div className="empty__glyph">▲</div>Select a vault item<br />to set your listing terms</div></div>}
       </div>
 
@@ -335,20 +354,13 @@ function SellView({
 /* ---------------- ROOT ---------------- */
 export function AuctionHouse(props: {
   listings: Listing[];
-  setListings: React.Dispatch<React.SetStateAction<Listing[]>>;
   vault: Record<string, VaultSlot[]>;
-  setVault: React.Dispatch<React.SetStateAction<Record<string, VaultSlot[]>>>;
   myListings: MyListing[];
-  setMyListings: React.Dispatch<React.SetStateAction<MyListing[]>>;
-  character: string;
   avatars: string[];
-  onCharge: (amt: number) => void;
+  reload: () => Promise<void>;
   toast: (msg: string) => void;
 }) {
-  const {
-    listings, setListings, vault, setVault, myListings, setMyListings,
-    character, avatars, onCharge, toast,
-  } = props;
+  const { listings, vault, myListings, avatars, reload, toast } = props;
   const [sub, setSub] = useState<'buy' | 'sell'>('buy');
 
   return (
@@ -373,9 +385,9 @@ export function AuctionHouse(props: {
       </div>
 
       {sub === 'buy'
-        ? <BuyView listings={listings} setListings={setListings} character={character} toast={toast} />
-        : <SellView vault={vault} setVault={setVault} myListings={myListings} setMyListings={setMyListings}
-            avatars={avatars} onCharge={onCharge} toast={toast} />}
+        ? <BuyView listings={listings} reload={reload} toast={toast} />
+        : <SellView vault={vault} myListings={myListings}
+            avatars={avatars} reload={reload} toast={toast} />}
     </div>
   );
 }

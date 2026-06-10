@@ -69,6 +69,35 @@ func (s *Store) accountID(ctx context.Context, username string) (int64, error) {
 	return id, err
 }
 
+// passwordPHCByID returns the stored Argon2id PHC for an account id. Used by
+// the website password-change flow, which knows the account id from the session
+// cookie (not a typed username), so it must not re-resolve via username.
+func (s *Store) passwordPHCByID(ctx context.Context, accountID int64) (string, error) {
+	var phc string
+	err := s.user.QueryRow(ctx,
+		`SELECT password_phc FROM accounts WHERE id = $1`, accountID,
+	).Scan(&phc)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", errNoAccount
+	}
+	return phc, err
+}
+
+// updatePassword writes a new Argon2id PHC for an account id. The caller has
+// already verified the current password and validated the new one; this is the
+// bare parameterized UPDATE. errNoAccount if the row vanished.
+func (s *Store) updatePassword(ctx context.Context, accountID int64, phc string) error {
+	tag, err := s.user.Exec(ctx,
+		`UPDATE accounts SET password_phc = $1 WHERE id = $2`, phc, accountID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return errNoAccount
+	}
+	return nil
+}
+
 // upsertTicket stores token for username with a ms-epoch expiry, matching the
 // C++ login_ticket UPSERT exactly (BIGINT expires_at).
 func (s *Store) upsertTicket(ctx context.Context, username, token string, expiresAtMs int64) error {

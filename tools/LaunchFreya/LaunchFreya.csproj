@@ -44,6 +44,12 @@
   </PropertyGroup>
   <ItemGroup>
     <AvaloniaResource Include="Assets\**" />
+    <!-- Vendored OFL fonts (see vendor/fonts/THIRD_PARTY_BINARIES.md). Linked
+         into the assembly's avares Assets/Fonts namespace so the launcher
+         renders in the website's typefaces; referenced via
+         avares://FreyaLauncher/Assets/Fonts/...#FamilyName in App.axaml. -->
+    <AvaloniaResource Include="..\..\vendor\fonts\*.ttf"
+                      Link="Assets\Fonts\%(Filename)%(Extension)" />
     <None Include="FreyaLauncher.cfg" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>

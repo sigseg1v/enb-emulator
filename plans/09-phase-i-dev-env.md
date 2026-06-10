@@ -28,7 +28,7 @@ Polished `justfile` with grouped sections, environment-variable image overrides,
       Notes: Tag pattern `v*`; uses `docker/build-push-action@v6` with GHCR auth from `GITHUB_TOKEN`. Matrix builds server + login in parallel. `docker/metadata-action@v5` tags by semver + `latest`. `continue-on-error: true` because the server image build will currently fail end-to-end (Phase B is best-effort) and we don't want a failing release to require manual cleanup of GHCR.
 - [x] `pre-commit` config (optional): clang-format, dotnet format, shellcheck.
       Touches: .pre-commit-config.yaml
-      Notes: clang-format runs only against `tests/` and `server/compat/` (new code) — formatting the 162K LOC of legacy Net-7 source would produce an unreviewable diff. shellcheck runs on all shell. trailing-whitespace + EOF-fixer exclude archive/, server/src/, client/detours/, login-server/, proxy/ (legacy source we don't touch). Dotnet format is in `just lint`, not in pre-commit (it's slow and noisy).
+      Notes: clang-format runs only against `tests/` and `server/compat/` (new code) — formatting the 162K LOC of legacy Net-7 source would produce an unreviewable diff. shellcheck runs on all shell. trailing-whitespace + EOF-fixer exclude archive/, server/src/, login-server/, proxy/ (legacy source we don't touch). Dotnet format is in `just lint`, not in pre-commit (it's slow and noisy).
 
 ## Verification
 

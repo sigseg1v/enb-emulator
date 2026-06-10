@@ -103,6 +103,36 @@ func TestVerifyPassword(t *testing.T) {
 	}
 }
 
+// hashPassword must emit a PHC in exactly the libsodium INTERACTIVE shape
+// (m=65536,t=2,p=1, argon2id v=19) that verifyPassword -- and the C++ game
+// login's crypto_pwhash_str_verify -- accept, with a fresh random salt each
+// call. A regression here silently locks players out of the game after a
+// website password reset, so the format and round-trip are both pinned.
+func TestHashPassword(t *testing.T) {
+	const pw = "a-valid-password-123"
+	phc, err := hashPassword(pw)
+	if err != nil {
+		t.Fatalf("hashPassword: %v", err)
+	}
+	if !strings.HasPrefix(phc, "$argon2id$v=19$m=65536,t=2,p=1$") {
+		t.Fatalf("PHC has wrong params/prefix: %q", phc)
+	}
+	if ok, err := verifyPassword(phc, pw); err != nil || !ok {
+		t.Fatalf("hashPassword output failed verify: ok=%v err=%v", ok, err)
+	}
+	if ok, _ := verifyPassword(phc, "different"); ok {
+		t.Fatal("wrong password verified against hashPassword output")
+	}
+	// Fresh random salt -> two hashes of the same password must differ.
+	phc2, err := hashPassword(pw)
+	if err != nil {
+		t.Fatalf("hashPassword(2): %v", err)
+	}
+	if phc == phc2 {
+		t.Fatal("two hashes of the same password are identical -- salt is not random")
+	}
+}
+
 func TestRarityForLevelQuality(t *testing.T) {
 	f := func(v float64) *float64 { return &v }
 	cases := []struct {
