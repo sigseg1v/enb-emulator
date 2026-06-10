@@ -311,6 +311,33 @@ C++ source directly). The Go server must reproduce:
 - [x] justfile: `test-online-it` (docker postgres up + FREYA_TEST_DB go test)
       and `test-online-web` (npm test).
 
+### AQ-10 Account tab -- password reset (2026-06-09)
+- [x] Third SPA tab "Account" (after Mailbox + Auction House), visible only when
+      logged in. Reset Password form: current password, new password x2, min
+      length 8, confirm-match + differ-from-current checks client-side, themed
+      with the existing `.field`/`.hud-panel`/`.btn--primary` classes
+      (`web/src/screens/Account.tsx` + `.account*` CSS). Account name comes from
+      the session cookie, never typed/sent.
+- [x] `api.resetPassword(current,new)` -> `POST /api/account/password`
+      (credentials:'include', no username in body).
+- [x] Go `POST /api/account/password` (`handleChangePassword`): requires the
+      session acctID (401 unauth), re-verifies the CURRENT password (401 wrong),
+      enforces new length >= 8 server-side (400), hashes the new password, and
+      UPDATEs `accounts.password_phc` (parameterized `updatePassword`). Rotates
+      the session token after the change.
+- [x] `hashPassword` (auth.go) emits the SAME libsodium Argon2id PHC the game
+      login verifies (m=65536,t=2,p=1, argon2id v=19, crypto/rand 16-byte salt,
+      32-byte hash, RawStdEncoding) -- byte-compatible with `just seed-account`
+      (PyNaCl) and the C++ `crypto_pwhash_str_verify`. So a website reset works
+      for BOTH the website and the game client. This is NOT a server wire change
+      (no game protocol touched) -- it writes the same credential store the C++
+      login already reads.
+- [x] Tests: Go `TestHashPassword` (format + round-trip + random-salt), Go
+      `TestIT_API_ChangePassword` (unauth 401 / wrong-current 401 / short 400 /
+      success 200, then OLD pw fails login + NEW pw succeeds), web vitest
+      (resetPassword posts current+new without username; surfaces server error).
+      Full suite green: 20 Go integration + 8 Go unit + 18 web.
+
 ### AQ-6 In-game notify
 - [ ] On player login, if unread mail: private system chat message with the
       website URL. (Server-side -- governed by Server integrity rules; cite

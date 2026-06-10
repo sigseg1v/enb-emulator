@@ -9,13 +9,14 @@ import { Credits, ServerStatus, Wordmark } from './components/ui';
 import { Login } from './screens/Login';
 import { Mailbox } from './screens/Mailbox';
 import { AuctionHouse } from './screens/AuctionHouse';
+import { Account } from './screens/Account';
 
 const STATUS_POLL_MS = 60_000;
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [server, setServer] = useState<ServerStatusT>({ status: 'OFFLINE', players: 0 });
-  const [tab, setTab] = useState<'mail' | 'ah'>('mail');
+  const [tab, setTab] = useState<'mail' | 'ah' | 'account'>('mail');
   const [mail, setMail] = useState<Mail[]>([]);
   const [listings, setListings] = useState<Listing[]>([]);
   const [vault, setVault] = useState<Record<string, VaultSlot[]>>({});
@@ -82,6 +83,9 @@ export default function App() {
           <button className={'tab' + (tab === 'ah' ? ' tab--active' : '')} onClick={() => setTab('ah')}>
             <span className="tab__glyph">◈</span> Auction House
           </button>
+          <button className={'tab' + (tab === 'account' ? ' tab--active' : '')} onClick={() => setTab('account')}>
+            <span className="tab__glyph">⚙</span> Account
+          </button>
         </nav>
 
         <span className="topbar__spacer" />
@@ -101,10 +105,16 @@ export default function App() {
 
       <div className="shell__body">
         <div className="shell__bg" />
-        {tab === 'mail'
-          ? <Mailbox mail={mail} setMail={setMail} character={character} reload={reload} toast={toast} />
-          : <AuctionHouse listings={listings} vault={vault} myListings={myListings}
-              avatars={session.characters} reload={reload} toast={toast} />}
+        {tab === 'mail' && (
+          <Mailbox mail={mail} setMail={setMail} character={character} reload={reload} toast={toast} />
+        )}
+        {tab === 'ah' && (
+          <AuctionHouse listings={listings} vault={vault} myListings={myListings}
+            avatars={session.characters} reload={reload} toast={toast} />
+        )}
+        {tab === 'account' && (
+          <Account username={session.username} toast={toast} />
+        )}
       </div>
 
       {toastMsg && <div className="toast">{toastMsg}</div>}

@@ -114,3 +114,13 @@ export async function markRead(mailId: string): Promise<{ ok: boolean }> {
 export async function lootAttachment(mailId: string, index: number): Promise<{ ok: boolean }> {
   return postJSON<{ ok: boolean }>(`/api/mail/${mailId}/loot`, { index });
 }
+
+/**
+ * Change the signed-in account's password. The account is identified by the
+ * session cookie server-side -- we never send the username. The current password
+ * is re-verified by the server; the new password is hashed into the same
+ * Argon2id PHC the game login reads, so it works for both website and game.
+ */
+export async function resetPassword(currentPassword: string, newPassword: string): Promise<{ ok: boolean }> {
+  return postJSON<{ ok: boolean }>('/api/account/password', { currentPassword, newPassword });
+}

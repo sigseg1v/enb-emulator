@@ -257,6 +257,73 @@ func TestIT_API_MailReadAndLoot(t *testing.T) {
 	}
 }
 
+// The full password-reset path over HTTP, as the Account tab drives it:
+//   - unauthenticated -> 401 (cookie is the only identity; no username in body)
+//   - wrong current password -> 401, password unchanged
+//   - new password shorter than 8 -> 400, password unchanged
+//   - correct current + valid new -> 200, and the OLD password no longer logs in
+//     while the NEW one does (proving the stored PHC was actually rotated).
+func TestIT_API_ChangePassword(t *testing.T) {
+	st, ctx := testStore(t)
+	acct := seedAccount(t, st, ctx, 40, 1, 1000)
+	const newPass = "brand-new-pw-123"
+
+	// Unauthenticated: rejected, no session.
+	uc, base := newTestAPI(t, st)
+	resp := apiPost(t, uc, base+"/api/account/password",
+		map[string]string{"currentPassword": acct.password, "newPassword": newPass})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("change(unauth) = %d, want 401", resp.StatusCode)
+	}
+
+	// Authenticated client for the rest.
+	c, _ := newTestAPI(t, st)
+	loginAPI(t, c, base, acct)
+
+	// Wrong current password -> 401.
+	resp = apiPost(t, c, base+"/api/account/password",
+		map[string]string{"currentPassword": "wrong-pw", "newPassword": newPass})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("change(bad current) = %d, want 401", resp.StatusCode)
+	}
+
+	// Too-short new password -> 400.
+	resp = apiPost(t, c, base+"/api/account/password",
+		map[string]string{"currentPassword": acct.password, "newPassword": "short7!"})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("change(short) = %d, want 400", resp.StatusCode)
+	}
+
+	// Correct current + valid new -> 200.
+	resp = apiPost(t, c, base+"/api/account/password",
+		map[string]string{"currentPassword": acct.password, "newPassword": newPass})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("change(good) = %d, want 200", resp.StatusCode)
+	}
+
+	// The OLD password must no longer authenticate; the NEW one must. Use fresh
+	// cookie jars so each login is judged purely on credentials.
+	oldc, _ := newTestAPI(t, st)
+	r := apiPost(t, oldc, base+"/api/login",
+		map[string]string{"username": acct.username, "password": acct.password})
+	r.Body.Close()
+	if r.StatusCode != http.StatusUnauthorized {
+		t.Errorf("login(old pw) = %d, want 401", r.StatusCode)
+	}
+
+	newc, _ := newTestAPI(t, st)
+	r = apiPost(t, newc, base+"/api/login",
+		map[string]string{"username": acct.username, "password": newPass})
+	r.Body.Close()
+	if r.StatusCode != http.StatusOK {
+		t.Errorf("login(new pw) = %d, want 200", r.StatusCode)
+	}
+}
+
 // The offline-guard surfaces over HTTP as 409 Conflict when listing an online
 // character's item.
 func TestIT_API_OfflineGuard409(t *testing.T) {

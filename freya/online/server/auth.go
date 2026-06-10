@@ -14,6 +14,7 @@
 package main
 
 import (
+	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
 	"errors"
@@ -24,6 +25,36 @@ import (
 )
 
 var errBadPHC = errors.New("malformed argon2id PHC string")
+
+// libsodium INTERACTIVE limits -- the same parameters PyNaCl's
+// nacl.pwhash.argon2id.str() (used by `just seed-account`) emits and that the
+// C++ game login (login-server/Net7SSL crypto_pwhash_str_verify) accepts. A
+// password the website writes MUST land in this exact encoding or the player
+// can no longer log into the game with it, so these are pinned, not tunable.
+const (
+	phcMemKiB = 65536 // m= : 64 MiB
+	phcIters  = 2     // t=
+	phcLanes  = 1     // p=
+	phcSalt   = 16    // salt bytes
+	phcKeyLen = 32    // hash bytes
+)
+
+// hashPassword produces a libsodium-compatible Argon2id PHC string for password
+// with a fresh random 16-byte salt. The encoding is byte-for-byte what
+// verifyPassword (and the C++ login's crypto_pwhash_str_verify) parse:
+//
+//	$argon2id$v=19$m=65536,t=2,p=1$<salt-b64>$<hash-b64>   (raw std base64, no pad)
+func hashPassword(password string) (string, error) {
+	salt := make([]byte, phcSalt)
+	if _, err := rand.Read(salt); err != nil {
+		return "", fmt.Errorf("argon2id salt: %w", err)
+	}
+	hash := argon2.IDKey([]byte(password), salt, phcIters, phcMemKiB, phcLanes, phcKeyLen)
+	return fmt.Sprintf("$argon2id$v=19$m=%d,t=%d,p=%d$%s$%s",
+		phcMemKiB, phcIters, phcLanes,
+		base64.RawStdEncoding.EncodeToString(salt),
+		base64.RawStdEncoding.EncodeToString(hash)), nil
+}
 
 // verifyPassword reports whether password matches the stored Argon2id PHC.
 // It is constant-time with respect to the comparison; a malformed/empty PHC
