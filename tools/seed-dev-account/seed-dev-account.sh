@@ -74,7 +74,11 @@ printf '%s\n' \
     "CREATE TEMP TABLE _del_av AS SELECT avatar_id FROM avatar_info WHERE account_id = (SELECT id FROM accounts WHERE username = :'username');" \
     "DO \$\$ DECLARE t text; BEGIN FOR t IN SELECT table_name FROM information_schema.columns WHERE column_name='avatar_id' AND table_schema='public' LOOP EXECUTE format('DELETE FROM %I WHERE avatar_id IN (SELECT avatar_id FROM _del_av)', t); END LOOP; END \$\$;" \
     "DROP TABLE _del_av;" \
-    "SELECT setval('accounts_id_seq', GREATEST((SELECT COALESCE(MAX(id),0) FROM accounts), 1));" \
+    "-- Resync to the highest REAL account id, EXCLUDING the reserved bot band" \
+    "-- (id >= 9000001). A plain MAX(id) would pull the sequence up to the AhBot" \
+    "-- sentinel and the next signup would overflow the 32-bit GameID" \
+    "-- (account*5+1). See db/postgres/freya_online_bots.sql." \
+    "SELECT setval('accounts_id_seq', GREATEST((SELECT COALESCE(MAX(id),0) FROM accounts WHERE id < 9000001), 1));" \
     "DELETE FROM accounts WHERE username = :'username';" \
     "INSERT INTO accounts (username, password_phc, status, formname, email)" \
     "VALUES (:'username', :'phc', 100, :'username' || '_form', :'username' || '@local');" \

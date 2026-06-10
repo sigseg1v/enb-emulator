@@ -2781,3 +2781,13 @@ ALTER TABLE "forbidden_names" ALTER COLUMN "nickname"   TYPE citext;
 ALTER TABLE "accounts"        ADD CONSTRAINT "accounts_username_len"        CHECK (char_length("username")   <= 40);
 ALTER TABLE "avatar_data"     ADD CONSTRAINT "avatar_data_first_name_len"   CHECK (char_length("first_name") <= 20);
 ALTER TABLE "forbidden_names" ADD CONSTRAINT "forbidden_names_nickname_len" CHECK (char_length("nickname")   <= 255);
+-- A player's on-wire GameID is avatar_id | PLAYER_TAG (1<<30) carried in a
+-- 32-bit field (server/src/UDP_Master.cpp ProcessHandoff). avatar_id =
+-- account_id*5+slot+1 (login-server AVATAR_ID macro) must fit in bits 0..29
+-- (< 2^30) or the high bit is truncated off the wire and the master handoff
+-- cannot find the player ("Unable to find player ..."). With slot up to 4 that
+-- bounds account_id <= 214748363. Reject anything larger at insert time so an
+-- out-of-range id can never be created -- the bigint column would otherwise
+-- store a value the wire protocol cannot represent.
+ALTER TABLE "accounts"        ADD CONSTRAINT "accounts_id_gameid_fits"      CHECK ("id" BETWEEN 1 AND 214748363);
+ALTER TABLE "avatar_info"     ADD CONSTRAINT "avatar_info_id_gameid_fits"   CHECK ("avatar_id" BETWEEN 1 AND 1073741823 AND "account_id" BETWEEN 1 AND 214748363);

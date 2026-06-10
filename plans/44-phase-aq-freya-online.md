@@ -196,10 +196,41 @@ C++ source directly). The Go server must reproduce:
 
 ### AQ-4 Bots (FREYA_AH_BOTS=1)  -- DONE, RUNTIME-VERIFIED (commit 16e229ad)
 - [x] Create "AhBot" account/avatar -- seeded idempotently at schema-init via
-      `db/postgres/freya_online_bots.sql` (sentinel ids 1000000001, far above
-      the server's avatar-id range; unusable password_phc so login is
-      impossible; all avatar_data cosmetic cols double-quoted). Inert without
-      the flag (separate account, never in any player's char-select).
+      `db/postgres/freya_online_bots.sql` (reserved-but-SAFE ids account
+      9000001 / avatar 45000006; unusable password_phc so login is impossible;
+      all avatar_data cosmetic cols double-quoted). Inert without the flag
+      (separate account, never in any player's char-select).
+- [!] **2026-06-09 zone-in bug + fix (was the play-local blocker).** The
+      original AhBot used sentinel ids 1000000001 on the THEORY they were
+      "far above the server's avatar-id range" and thus harmless. WRONG: a
+      player's on-wire GameID is `avatar_id | PLAYER_TAG` (PLAYER_TAG=1<<30) in
+      a 32-bit field (`UDP_Master.cpp` ProcessHandoff casts to int32_t), and
+      `avatar_id = account_id*5 + slot + 1` (login-server AVATAR_ID macro). So
+      account_id MUST be <= 214748363 (avatar_id < 2^30) or the GameID's high
+      bit is truncated off the wire and the master handoff logs "Unable to find
+      player" forever (loading-screen hang). AhBot itself happened to work only
+      because its avatar id equals its account id (1000000001 < 2^30) instead of
+      going through *5. The real break: `just seed-account` /
+      `seed-dev-account.sh` ran `setval(accounts_id_seq, MAX(id))`, which pulled
+      the sequence UP to AhBot's 1e9 sentinel, so the next signup got
+      1000000002 -> avatar 5000000011 (> 2^32) -> truncated -> dead. Fix, all
+      idempotent: (1) AhBot -> account 9000001 / avatar 45000006 (formula-
+      consistent, under ceiling) in `freya_online_bots.sql` + `bots.go`;
+      (2) `db/postgres/account_id_guard.sql` (new, wired into BOTH compose
+      schema-init blocks after freya_online.sql, before freya_online_bots.sql)
+      re-ids the old AhBot AND any over-ceiling account down into the reserved
+      band (re-keying every *avatar_id / *account_id column incl. AH listings),
+      resyncs the sequence ignoring the reserved band, then installs CHECK
+      constraints `accounts_id_gameid_fits` / `avatar_info_id_gameid_fits` so
+      the DB now REJECTS an out-of-range id (the user's "why didn't the DB
+      error?"); same constraints added to `seed.sql` for fresh installs;
+      (3) `seed-account` (justfile) + `seed-dev-account.sh` setval now excludes
+      `id >= 9000001` so a real signup never resyncs to the bot sentinel.
+      Applied to the local net7_user DB (AhBot 1e9->9000001/45000006,
+      Starstrukk 1000000002->9000002/45000011); verified no avatar over 2^30,
+      both constraints present, AH listings remapped, go build green.
+      `[!]` pending: owner retests `just play-local` zone-in with the rescued
+      char, and the prod path runs on next `cd deploy/do && just update`.
 - [x] ~128 listings with the rarity/quality/price distribution -- `bots.go`
       shelf-target model (128 active, +16/tick/15min). Buckets: common ~70%
       ores (cat 80/81, stack 20, no quality); uncommon ~25% equipment L1-4;

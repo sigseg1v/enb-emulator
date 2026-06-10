@@ -134,6 +134,15 @@ services:
         # NOTHING are idempotent. See db/postgres/status_notification_settings.sql.
         echo "schema-init: applying /db/status_notification_settings.sql -> net7_user"
         psql -h postgres -U net7 -d net7_user -v ON_ERROR_STOP=1 -f /db/status_notification_settings.sql
+        # 32-bit GameID ceiling guard (net7_user). UNCONDITIONAL + idempotent.
+        # Re-ids the old ~1e9 AhBot sentinel (and any account already created above
+        # the ceiling) down into the reserved-but-safe band, remapping every
+        # avatar-owned row (incl. AH listings), then installs CHECK constraints so
+        # an out-of-range account/avatar id can never be inserted again. Safe on
+        # pre-existing prod volumes: its dynamic column scan skips tables that are
+        # absent. See db/postgres/account_id_guard.sql.
+        echo "schema-init: applying /db/account_id_guard.sql -> net7_user"
+        psql -h postgres -U net7 -d net7_user -v ON_ERROR_STOP=1 -f /db/account_id_guard.sql
         echo "schema-init: syncing identity sequences -> net7"
         psql -h postgres -U net7 -d net7 -v ON_ERROR_STOP=1 -f /db/sync_sequences.sql
         echo "schema-init: done"

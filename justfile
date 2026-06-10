@@ -925,7 +925,11 @@ seed-account USER='testuser' PASS='testpass':
             exit 1; \
         fi; \
         printf '%s\n' \
-            "SELECT setval('accounts_id_seq', GREATEST((SELECT COALESCE(MAX(id),0) FROM accounts), 1));" \
+            "-- Resync the identity sequence to the highest REAL account id, EXCLUDING" \
+            "-- the reserved bot band (id >= 9000001). Syncing to a plain MAX(id) would" \
+            "-- pull the sequence up to the AhBot sentinel, so the next signup overflows" \
+            "-- the 32-bit GameID (account*5+1). See db/postgres/freya_online_bots.sql." \
+            "SELECT setval('accounts_id_seq', GREATEST((SELECT COALESCE(MAX(id),0) FROM accounts WHERE id < 9000001), 1));" \
             "DELETE FROM accounts WHERE username = :'username';" \
             "INSERT INTO accounts (username, password_phc, status, formname, email)" \
             "VALUES (:'username', :'phc', 100, :'username' || '_form', :'username' || '@local');" \

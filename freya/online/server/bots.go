@@ -38,8 +38,13 @@ import (
 )
 
 const (
-	ahBotAccountID int64 = 1000000001
-	ahBotAvatarID  int64 = 1000000001
+	// Reserved high-but-SAFE ids (see db/postgres/freya_online_bots.sql): the
+	// avatar id must stay < 2^30 so the player GameID (avatar_id|PLAYER_TAG)
+	// round-trips the 32-bit wire field. account 9000001 -> avatar 45000006
+	// (= account*5+slot+1). The old ~1e9 sentinel produced a ~5e9 avatar id
+	// whose high bit was truncated off the wire and broke the master handoff.
+	ahBotAccountID int64 = 9000001
+	ahBotAvatarID  int64 = 45000006
 
 	// Bucket weights (percent). Must sum to 100.
 	botRareWeight     = 5

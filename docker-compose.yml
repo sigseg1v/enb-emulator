@@ -498,6 +498,15 @@ services:
         # EXISTS are idempotent. See db/postgres/freya_online.sql.
         echo "schema-init: applying /db/freya_online.sql -> net7_user"
         psql -h postgres -U net7 -d net7_user -v ON_ERROR_STOP=1 -f /db/freya_online.sql
+        # 32-bit GameID ceiling guard. UNCONDITIONAL + idempotent. Re-ids the old
+        # ~1e9 AhBot sentinel (and any account already created above the ceiling)
+        # down into the reserved-but-safe band, then installs CHECK constraints.
+        # MUST run AFTER freya_online.sql (needs auction_listings) and BEFORE
+        # freya_online_bots.sql (so a pre-existing AhBot is remapped to 9000001
+        # first; otherwise bots.sql would insert a second AhBot there and the
+        # remap would collide on the PK). See db/postgres/account_id_guard.sql.
+        echo "schema-init: applying /db/account_id_guard.sql -> net7_user"
+        psql -h postgres -U net7 -d net7_user -v ON_ERROR_STOP=1 -f /db/account_id_guard.sql
         # Freya Online AH faucet seller (the "AhBot" account + avatar). UNCONDITIONAL,
         # same rationale: new rows the AH bot references by fixed sentinel ids; the
         # INSERT ... WHERE NOT EXISTS guards make it idempotent. Runs regardless of
