@@ -178,7 +178,7 @@ export function Mailbox({
                     <h3 className="attach__title">Attachments -- {active.attachments.length}</h3>
                     <div className="attach__grid">
                       {active.attachments.map((att, i) => (
-                        <AttachmentSlot key={i} att={att} onLoot={() => lootIndex(active.id, i, att)} />
+                        <AttachmentSlot key={att.index ?? i} att={att} onLoot={() => lootIndex(active.id, i, att)} />
                       ))}
                     </div>
                     {active.attachments.length > 1 &&
