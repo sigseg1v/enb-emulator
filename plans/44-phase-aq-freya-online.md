@@ -183,10 +183,29 @@ C++ source directly). The Go server must reproduce:
   returns {mail:[],listings:[],vault:{},myListings:[]} cleanly for an account
   with no characters. Same offline-guard caveat as AQ-2.
 
-### AQ-4 Bots (FREYA_AH_BOTS=1)
-- [ ] Create "AhBot" account/avatar on first run
-- [ ] Daily ~128 listings with the rarity/quality/price distribution above
-- [ ] Idempotent / rate-limited so it doesn't flood on restart
+### AQ-4 Bots (FREYA_AH_BOTS=1)  -- DONE, RUNTIME-VERIFIED (commit 16e229ad)
+- [x] Create "AhBot" account/avatar -- seeded idempotently at schema-init via
+      `db/postgres/freya_online_bots.sql` (sentinel ids 1000000001, far above
+      the server's avatar-id range; unusable password_phc so login is
+      impossible; all avatar_data cosmetic cols double-quoted). Inert without
+      the flag (separate account, never in any player's char-select).
+- [x] ~128 listings with the rarity/quality/price distribution -- `bots.go`
+      shelf-target model (128 active, +16/tick/15min). Buckets: common ~70%
+      ores (cat 80/81, stack 20, no quality); uncommon ~25% equipment L1-4;
+      rare ~5% equipment L5-9 + devices L1-9. Quality normal(140,25) clamp
+      [80,200] for equipment only. item_value=buying_price*stack, open bid
+      110%, buyout 200%. Faucet pays no deposit; proceeds -> AhBot mailbox.
+- [x] Idempotent / rate-limited -- top-up reads active count first, so a
+      restart with a full shelf posts nothing; per-tick batch cap prevents
+      a cold-start dump.
+- [x] RUNTIME-VERIFIED: FREYA_AH_BOTS=1 -> "posted 16 listing(s) (0 -> 16)";
+      /api/bootstrap renders them (seller=AhBot, ores common/no-quality/band
+      only, equipment quality-driven rarity correctly level-capped, bid=1.1x
+      buyout=2.0x).
+- Also fixed two correctness bugs on the SHARED resolve path (player AH too):
+  categoryToCat mis-mapped cat 10 Weapon (1116 items) -> component; Vendor
+  used item_base.price (~10x too high) instead of buying_price -- inflated
+  every min-bid step and the 10% deposit by an order of magnitude.
 
 ### AQ-5 React + TS SPA
 - [x] Import Freya Online.html design (fetched via owner-provided API URL,
