@@ -120,15 +120,15 @@ build-posfeed-dll:
     "$cxx" -shared -O2 -static -static-libgcc -static-libstdc++ \
         -Wall -Wextra \
         -o bin/FreyaPosFeed.dll \
-        client/detours/PosFeedDllMain.cpp client/detours/ClientPositionFeed.cpp \
-        -Iclient/detours \
+        freya/client-injection/PosFeedDllMain.cpp freya/client-injection/ClientPositionFeed.cpp \
+        -Ifreya/client-injection \
         -lws2_32 \
         -Wl,--no-insert-timestamp; \
     echo ">>> building 32-bit FreyaInject.exe with $cxx"; \
     "$cxx" -O2 -static -static-libgcc -static-libstdc++ \
         -Wall -Wextra \
         -o bin/FreyaInject.exe \
-        client/detours/FreyaInject.cpp \
+        freya/client-injection/FreyaInject.cpp \
         -Wl,--no-insert-timestamp
     @echo ">>> done. bin/FreyaPosFeed.dll + bin/FreyaInject.exe (32-bit). The launcher injects the DLL into client.exe at launch via FreyaInject.exe (WINE has no AppInit_DLLs)."
 

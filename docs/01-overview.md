@@ -29,7 +29,7 @@ code buildable, keep the protocol decoded, keep the install path working.
 
 | Upstream | Snapshot date | Lives in | What it brought |
 |---|---|---|---|
-| **tada-o** fork of Net-7 server (SVN r2974) | 2010-03-15 | `server/`, `login-server/`, `proxy/`, `launcher/`, `client/detours/`, `client/mods/`, `db/mysql/` | The most complete C++ server fork we have: ~162K LOC, the MySQL schema and seed data, ~20 ability implementations that earlier forks only stubbed. |
+| **tada-o** fork of Net-7 server (SVN r2974) | 2010-03-15 | `server/`, `login-server/`, `proxy/`, `launcher/`, `client/mods/`, `db/mysql/` | The most complete C++ server fork we have: ~162K LOC, the MySQL schema and seed data, ~20 ability implementations that earlier forks only stubbed. |
 | **kyp** snapshot (older Net-7) | 2014 GitHub dump | `tools/`, `archive/kyp-snapshot/` | Full C# editor suite (Sector, Mob, Mission, Faction, Item, Effect, TalkTree, Station Tools, LaunchNet7, EnBPatcher, W3D Parser, others), packet captures, original architecture documentation, the historical Linux-port branch. |
 | **enb-linux-installer** | 2023-era, GPLv3 | `client/linux-installer/` | A bash script that automates installing and configuring the Windows client under WINE on Linux. Verbatim from upstream. |
 

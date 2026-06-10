@@ -826,13 +826,13 @@ format & byte order", Trap 2).
 
 
 - **Change**: PB-2 restores the client->server position feed the real Net7Proxy
-  provided. A minimal in-client DLL (`client/detours/ClientPositionFeed.{h,cpp}` +
+  provided. A minimal in-client DLL (`freya/client-injection/ClientPositionFeed.{h,cpp}` +
   `PosFeedDllMain.cpp`, built as `bin/FreyaPosFeed.dll`, injected via a launch-time
   remote-thread inject -- `bin/FreyaInject.exe`, NOT `AppInit_DLLs` which WINE does
   not implement)
   reads the engine ship position/orientation in-process and sends it to the proxy
   as a fixed 40-byte UDP datagram on loopback port `NET7_CLIENT_POS_PORT`=3807
-  (`proxy/ClientPositionShared.h`); the proxy consumer
+  (`freya/client-injection/ClientPositionShared.h`); the proxy consumer
   (`UDPClient::ReadClientShipPosition` -> `SendPositionIfChanged`,
   `proxy/UDPClient_linux.cpp`) binds 3807, drains the latest sample, and streams
   opcode `0x1004` to the server's MVAS port (3806), change-gated, so the server's
@@ -855,7 +855,7 @@ format & byte order", Trap 2).
   false until the owner wires it for the client build in use; until then the feed
   is inert and server behaviour is unchanged.
 - **Setup (owner)**:
-  1. Copy `client/detours/ClientEngineOffsets.local.h.example` to
+  1. Copy `freya/client-injection/ClientEngineOffsets.local.h.example` to
      `ClientEngineOffsets.local.h` (gitignored) and fill
      `Net7ReadEngineShipState_Local()` for the client build (read ship world
      position x/y/z + orientation x/y/z + current sector id from the engine

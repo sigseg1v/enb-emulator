@@ -257,7 +257,7 @@ private:
     bool    m_HaveFedOnce;
     int32_t m_PosFeedSeq;
     // Read the latest ship position/orientation the in-client hook sent us over
-    // the loopback intake socket (proxy/ClientPositionShared.h); false when no
+    // the loopback intake socket (freya/client-injection/ClientPositionShared.h); false when no
     // live feed (no hook running, or its last sample has gone stale). Drives
     // SendPositionIfChanged. Works on BOTH the Linux docker proxy and the
     // Win32/WINE proxy -- the transport is a loopback UDP datagram, not a

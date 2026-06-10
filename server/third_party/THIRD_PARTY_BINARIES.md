@@ -12,8 +12,6 @@ These are precompiled `.lib` (Windows static archive) files vendored from upstre
 
 In `server/src/LUA/` there are MSVC9 prebuilds of Lua + Luabind for **both** x86 and x64. Same status — kept for Windows builds, not used on Linux.
 
-In `client/detours/Detours/lib/detours.lib` — Microsoft Research Detours prebuilt. Used by client mods to hook the game client.
-
 ## Source availability
 
 For Lua, Luabind, TinyXML, OpenSSL — full source is publicly available, the prebuilt blobs are kept only for backward-compat with the historical MSVC9 build. The Linux build does NOT depend on them. The .NET 10 tools (`tools/`) ship their own DLL deps in `tools/<tool>/Libs/` — see `tools/THIRD_PARTY_BINARIES.md`.

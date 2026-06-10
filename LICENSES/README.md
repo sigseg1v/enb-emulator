@@ -18,7 +18,6 @@ The Earth & Beyond emulator preservation project combines code from multiple ups
 | `login-server/`        | CC BY-NC-SA 3.0                                       | `Net7` |
 | `proxy/`               | CC BY-NC-SA 3.0                                       | `Net7` |
 | `launcher/`            | CC BY-NC-SA 3.0                                       | `Net7` |
-| `client/detours/`      | Microsoft Research Detours license (per-file)         | per-file |
 | `client/mods/`         | CC BY-NC-SA 3.0                                       | `Net7` |
 | `client/linux-installer/` | GPLv3                                              | `enb-linux-installer` + `client/linux-installer/LICENSE` |
 | `tools/`               | CC BY-NC-SA 3.0 (per-file headers where present; no separate file from tada-o) | `Net7`, `Tada-O` |

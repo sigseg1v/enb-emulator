@@ -18,7 +18,7 @@ namespace LaunchFreya.Config
         // injection is harmless when the artifacts are absent (a checkout that did
         // not build the DLL just logs a warning and launches plain), and the feed
         // itself sends nothing until the engine read is provided
-        // (client/detours/ClientEngineOffsets.local.h, baked into the DLL at build
+        // (freya/client-injection/ClientEngineOffsets.local.h, baked into the DLL at build
         // time, never committed). This is a NEW mechanism -- not the historical
         // ClientDetours debug DLL -- hence its own name.
         public bool UsePositionFeed { get; set; } = true;

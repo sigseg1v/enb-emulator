@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Part of the Earth & Beyond emulator preservation project -- Freya (MIT).
+// License: LICENSES/Freya
 //==============================================================================
 // ClientPositionFeed.h
 //
@@ -5,7 +8,7 @@
 //
 // Runs inside client.exe. Reads the rendered ship position/orientation from the
 // game engine and sends it to the proxy as a loopback UDP datagram
-// (proxy/ClientPositionShared.h -> UDPClient::ReadClientShipPosition), which
+// (ClientPositionShared.h -> UDPClient::ReadClientShipPosition), which
 // streams it to the server as opcode 0x1004. This replaces the real Net7Proxy's
 // cross-process memory scrape with an in-process read handed over loopback --
 // same wire result, no scraping at a hardcoded external address, and one

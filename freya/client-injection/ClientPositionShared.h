@@ -1,13 +1,16 @@
-// SPDX-License-Identifier: CC-BY-NC-SA-3.0
-// Part of the Earth & Beyond emulator preservation project.
-// License: LICENSES/enb-emulator
+// SPDX-License-Identifier: MIT
+// Part of the Earth & Beyond emulator preservation project -- Freya (MIT).
+// License: LICENSES/Freya
 //
 // ClientPositionShared.h
 // ----------------------
 // IPC contract between TWO of our own processes for the MVAS position feed
-// (PB-2): the in-client position hook and the proxy.
+// (PB-2): the in-client position hook and the proxy. This header is wholly our
+// own work (no Net-7 content -- just a port, a magic, and a 40-byte struct), so
+// it ships MIT alongside the rest of the injection unit. The proxy (CC BY-NC-SA)
+// includes it from here; MIT permits that.
 //
-//   * PRODUCER -- the in-client position hook (client/detours). It runs inside
+//   * PRODUCER -- the in-client position hook (freya/client-injection). It runs inside
 //     client.exe, reads the rendered ship position/orientation from the game
 //     engine, and sends it to the proxy as a single fixed-size UDP datagram on
 //     the loopback intake port below, ~10x/sec.

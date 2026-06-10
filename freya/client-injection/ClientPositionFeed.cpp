@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Part of the Earth & Beyond emulator preservation project -- Freya (MIT).
+// License: LICENSES/Freya
 //==============================================================================
 // ClientPositionFeed.cpp
 //
@@ -20,11 +23,10 @@
 
 #pragma comment(lib, "ws2_32.lib")
 
-// The proxy<->hook IPC contract. Kept in the proxy tree because the proxy owns
-// the consumer; included here by relative path so both ends compile against ONE
-// definition. (Build systems add proxy/ to the include path; the relative
-// include keeps this self-evident.)
-#include "../../proxy/ClientPositionShared.h"
+// The proxy<->hook IPC contract. It lives here with the producer (this is the
+// self-contained injection unit); the proxy includes the same header from this
+// directory so both ends compile against ONE definition.
+#include "ClientPositionShared.h"
 
 //------------------------------------------------------------------------------
 // ReadEngineShipState -- OWNER SEAM.

@@ -88,7 +88,7 @@
 
 #include "Net7.h"
 #include "UDPClient.h"
-#include "ClientPositionShared.h"   // PB-2: in-client position-hook IPC contract
+#include "../freya/client-injection/ClientPositionShared.h"   // PB-2: in-client position-hook IPC contract (MIT, lives with the producer)
 #include <net7/Opcodes.h>
 #include <net7/PacketStructures.h>
 #include <net7/DtlsTransport.h>
