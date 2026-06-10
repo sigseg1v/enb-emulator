@@ -267,10 +267,23 @@ C++ source directly). The Go server must reproduce:
 - [x] Wire to the real Go JSON API -- USE_MOCK is now `VITE_MOCK==='1'`
       (real default, mock opt-in), api.ts/Dockerfile/README updated. AQ-1/2/3
       are live, so the SPA shows real data by default (2026-06-09).
-      Backend now live; flip + browser-verify the real login->bootstrap path.
+- [x] Wire the WRITE path (2026-06-10). Previously login+bootstrap read real
+      data but every action (bid/buyout/list/mark-read/loot) was a fake
+      optimistic local-state mutation that never hit the backend. Now every
+      action calls the real endpoint and re-pulls `bootstrap` as the source of
+      truth: App holds a single `reload()`; Mailbox calls `markRead`
+      (optimistic dot + background persist) and `lootAttachment` (await +
+      reload); AuctionHouse Buy calls `placeBid`/`buyout`, Sell calls
+      `postListing`. Buttons disable while a mutation is in flight. api.ts now
+      surfaces the server's `{error}` body verbatim (e.g. 409 "character is
+      online ...", 402 "insufficient credits") instead of a bare status code.
+      Removed the now-dead optimistic setters (setListings/setVault/
+      setMyListings/onCharge) and the fake random listing-id generator.
 - [x] Serve built dist/ from the Go binary at the index (spa.go static serve +
-      SPA fallback; Dockerfile bakes web/dist -> /app/web). RUNTIME-VERIFIED:
-      GET / returns the built index.html.
+      SPA fallback; Dockerfile bakes web/dist -> /app/web). RUNTIME-VERIFIED
+      (2026-06-10): rebuilt freya-online image serves the new bundle
+      (index hash matches the local `npm run build`), `/api/status` responds,
+      unauth `/api/bootstrap` -> 401.
 - Note: `npm audit` flags the esbuild dev-server advisory (GHSA-67mh-4wv8-2f99),
   dev-server only, NOT in the shipped static build; fix is a breaking vite@8
   bump -- deferred deliberately.
@@ -285,7 +298,12 @@ C++ source directly). The Go server must reproduce:
       loot credit. API-level test drives the real `session.LoadAndSave(routes())`
       handler over TLS httptest with a cookie jar: login(bad)->401,
       login(good)->200 + cookie, bootstrap->real characters/credits/vault.
-      Each test seeds + wipes a reserved id band (testIDBase). 17 tests pass.
+      Each test seeds + wipes a reserved id band (testIDBase).
+- [x] HTTP-level mutation flow tests (2026-06-10) pinning the exact routes /
+      JSON shapes / status codes the wired SPA depends on: post-listing ->
+      cross-account buyout -> item in buyer mailbox + gone from browse; mail
+      mark-read -> loot -> wallet grew on next bootstrap. 19 integration +
+      7 unit tests pass.
 - [x] Web SPA unit tests (`freya/online/web/src/**/*.test.ts`, vitest): rarity
       tier+level-cap table (mirrors server/rarity.go), bid/buyout/min-increment
       math, and the real-vs-mock api.ts dispatch (default GETs/POSTs with

@@ -5,6 +5,8 @@ import type { CSSProperties } from 'react';
 import type { Attachment, Mail } from '../types';
 import { RARITY } from '../lib/rarity';
 import { Credits } from '../components/ui';
+import { fmtNum } from '../lib/format';
+import * as api from '../api';
 
 type Vars = CSSProperties & Record<string, string | number>;
 
@@ -49,33 +51,64 @@ function AttachmentSlot({ att, onLoot }: { att: Attachment; onLoot: () => void }
   );
 }
 
+function lootLabel(att: Attachment): string {
+  return att.type === 'credits' ? `${fmtNum(att.amount)} cr` : `${att.item.name} -> vault`;
+}
+
 export function Mailbox({
-  mail, setMail, character, onLoot,
+  mail, setMail, character, reload, toast,
 }: {
   mail: Mail[];
   setMail: React.Dispatch<React.SetStateAction<Mail[]>>;
   character: string;
-  onLoot: (att: Attachment) => void;
+  reload: () => Promise<void>;
+  toast: (msg: string) => void;
 }) {
   const [activeId, setActiveId] = useState<string | null>(mail[0] ? mail[0].id : null);
+  const [busy, setBusy] = useState(false);
   const active = mail.find(m => m.id === activeId) || null;
 
   function open(m: Mail) {
     setActiveId(m.id);
-    if (!m.read) setMail(prev => prev.map(x => x.id === m.id ? { ...x, read: true } : x));
+    if (!m.read) {
+      // Optimistic: flip the dot immediately, persist in the background. A failed
+      // read-mark is cosmetic, so it only logs -- the next reload reconciles it.
+      setMail(prev => prev.map(x => x.id === m.id ? { ...x, read: true } : x));
+      api.markRead(m.id).catch(err => console.warn('markRead failed', err));
+    }
   }
 
-  function lootOne(mailId: string, idx: number) {
-    const m = mail.find(x => x.id === mailId);
-    if (!m) return;
-    onLoot(m.attachments[idx]);
-    setMail(prev => prev.map(x => x.id === mailId ? { ...x, attachments: x.attachments.filter((_, i) => i !== idx) } : x));
+  // Looting moves real credits/items server-side, so we await the API and then
+  // reload from the backend rather than mutating local state optimistically.
+  async function lootIndex(mailId: string, idx: number, att: Attachment) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await api.lootAttachment(mailId, idx);
+      toast(`Looted ${lootLabel(att)}`);
+      await reload();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Loot failed');
+    } finally {
+      setBusy(false);
+    }
   }
-  function lootAll(mailId: string) {
-    const m = mail.find(x => x.id === mailId);
-    if (!m) return;
-    m.attachments.forEach(onLoot);
-    setMail(prev => prev.map(x => x.id === mailId ? { ...x, attachments: [] } : x));
+
+  async function lootAll(m: Mail) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      // Always loot index 0: each successful loot removes that square, so the
+      // next remaining attachment shifts down to 0 server-side.
+      const n = m.attachments.length;
+      for (let i = 0; i < n; i++) await api.lootAttachment(m.id, 0);
+      toast(`Looted ${n} attachment${n > 1 ? 's' : ''}`);
+      await reload();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Loot failed');
+    } finally {
+      setBusy(false);
+    }
   }
 
   const unread = mail.filter(m => !m.read).length;
@@ -130,11 +163,11 @@ export function Mailbox({
                     <h3 className="attach__title">Attachments -- {active.attachments.length}</h3>
                     <div className="attach__grid">
                       {active.attachments.map((att, i) => (
-                        <AttachmentSlot key={i} att={att} onLoot={() => lootOne(active.id, i)} />
+                        <AttachmentSlot key={i} att={att} onLoot={() => lootIndex(active.id, i, att)} />
                       ))}
                     </div>
                     {active.attachments.length > 1 &&
-                      <button className="btn btn--sm attach__all" onClick={() => lootAll(active.id)}>Loot All</button>}
+                      <button className="btn btn--sm attach__all" disabled={busy} onClick={() => lootAll(active)}>Loot All</button>}
                   </div>
                 )}
               </>

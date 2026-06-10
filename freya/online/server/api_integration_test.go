@@ -137,6 +137,126 @@ func TestIT_API_AuthGate(t *testing.T) {
 	}
 }
 
+// loginAPI logs an account in over the real handler, asserting 200 + cookie.
+func loginAPI(t *testing.T, c *http.Client, base string, acct testAccount) {
+	t.Helper()
+	resp := apiPost(t, c, base+"/api/login",
+		map[string]string{"username": acct.username, "password": acct.password})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("login(%s) = %d, want 200", acct.username, resp.StatusCode)
+	}
+}
+
+func bootstrapAPI(t *testing.T, c *http.Client, base string) bootstrapResponse {
+	t.Helper()
+	resp, err := c.Get(base + "/api/bootstrap")
+	if err != nil {
+		t.Fatalf("GET bootstrap: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("bootstrap = %d, want 200", resp.StatusCode)
+	}
+	var boot bootstrapResponse
+	if err := json.NewDecoder(resp.Body).Decode(&boot); err != nil {
+		t.Fatalf("decode bootstrap: %v", err)
+	}
+	return boot
+}
+
+// The full SELL -> BUYOUT path over HTTP, exactly as the SPA drives it:
+// seller POSTs /api/auction, buyer POSTs /api/auction/{id}/buyout, and the
+// buyer's next /api/bootstrap shows the item waiting in the mailbox. This pins
+// the routes, the JSON request/response shapes, and the status codes the
+// wired-up frontend now depends on.
+func TestIT_API_PostThenBuyout(t *testing.T) {
+	st, ctx := testStore(t)
+	seller := seedAccount(t, st, ctx, 30, 1, 1_000_000)
+	buyer := seedAccount(t, st, ctx, 31, 1, 1_000_000)
+	itemID, _ := pickTradableItem(t, st, ctx, true)
+	seedVaultItem(t, st, ctx, seller.avatars[0].id, 0, itemID, 1, nil)
+
+	sc, base := newTestAPI(t, st)
+	loginAPI(t, sc, base, seller)
+
+	// Seller lists the item. The response is the MyListingView the SPA renders.
+	resp := apiPost(t, sc, base+"/api/auction", map[string]any{
+		"itemId": strconv.Itoa(itemID), "slot": 0, "avatar": seller.avatars[0].name,
+		"stack": 1, "duration": "short", "minBid": 100, "buyout": 5000,
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("post listing = %d, want 200", resp.StatusCode)
+	}
+	var listing MyListingView
+	if err := json.NewDecoder(resp.Body).Decode(&listing); err != nil {
+		t.Fatalf("decode listing: %v", err)
+	}
+	if listing.ID == "" {
+		t.Fatal("posted listing has empty id")
+	}
+
+	// A fresh client logs in as the buyer (separate cookie jar) and buys it out.
+	bc, _ := newTestAPI(t, st)
+	loginAPI(t, bc, base, buyer)
+	bresp := apiPost(t, bc, base+"/api/auction/"+listing.ID+"/buyout", map[string]any{})
+	bresp.Body.Close()
+	if bresp.StatusCode != http.StatusOK {
+		t.Fatalf("buyout = %d, want 200", bresp.StatusCode)
+	}
+
+	// The buyer's mailbox now carries the item; the listing is gone from browse.
+	boot := bootstrapAPI(t, bc, base)
+	if !hasItemAttachment(boot.Mail, itemID) {
+		t.Errorf("buyer mailbox missing bought item; mail=%+v", boot.Mail)
+	}
+	for _, l := range boot.Listings {
+		if l.ID == listing.ID {
+			t.Errorf("bought-out listing %s still in browse", listing.ID)
+		}
+	}
+}
+
+// The MAIL read + loot path over HTTP: deliver a credits mail, mark it read,
+// loot the attachment, and confirm the wallet grew on the next bootstrap.
+func TestIT_API_MailReadAndLoot(t *testing.T) {
+	st, ctx := testStore(t)
+	acct := seedAccount(t, st, ctx, 32, 1, 1000)
+	deliverCreditsForTest(t, st, ctx, acct.id, acct.avatars[0].id, 777)
+
+	c, base := newTestAPI(t, st)
+	loginAPI(t, c, base, acct)
+
+	boot := bootstrapAPI(t, c, base)
+	var mailID string
+	for _, m := range boot.Mail {
+		if hasCreditsAttachment([]MailView{m}, 777) {
+			mailID = m.ID
+		}
+	}
+	if mailID == "" {
+		t.Fatalf("credit mail not present in bootstrap; mail=%+v", boot.Mail)
+	}
+
+	rresp := apiPost(t, c, base+"/api/mail/"+mailID+"/read", map[string]any{})
+	rresp.Body.Close()
+	if rresp.StatusCode != http.StatusOK {
+		t.Fatalf("mark read = %d, want 200", rresp.StatusCode)
+	}
+
+	lresp := apiPost(t, c, base+"/api/mail/"+mailID+"/loot", map[string]any{"index": 0})
+	lresp.Body.Close()
+	if lresp.StatusCode != http.StatusOK {
+		t.Fatalf("loot = %d, want 200", lresp.StatusCode)
+	}
+
+	after := bootstrapAPI(t, c, base)
+	if after.Session.Credits != 1000+777 {
+		t.Errorf("credits after loot = %d, want %d", after.Session.Credits, 1000+777)
+	}
+}
+
 // The offline-guard surfaces over HTTP as 409 Conflict when listing an online
 // character's item.
 func TestIT_API_OfflineGuard409(t *testing.T) {

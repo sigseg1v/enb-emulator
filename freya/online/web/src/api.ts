@@ -28,9 +28,24 @@ export interface Bootstrap {
   myListings: MyListing[];
 }
 
+// The Go service returns `{ "error": "..." }` with a meaningful status on every
+// failure path (e.g. 409 "character is online ...", 402 "insufficient
+// credits"). Surface that message verbatim so the UI toast tells the user what
+// actually went wrong, falling back to the status code only if the body has no
+// error field.
+async function errorFor(res: Response, path: string): Promise<Error> {
+  try {
+    const data = await res.json();
+    if (data && typeof data.error === 'string') return new Error(data.error);
+  } catch {
+    /* non-JSON body -- fall through to the status line */
+  }
+  return new Error(`${path}: ${res.status}`);
+}
+
 async function getJSON<T>(path: string): Promise<T> {
   const res = await fetch(path, { credentials: 'include' });
-  if (!res.ok) throw new Error(`${path}: ${res.status}`);
+  if (!res.ok) throw await errorFor(res, path);
   return res.json() as Promise<T>;
 }
 
@@ -41,7 +56,7 @@ async function postJSON<T>(path: string, body: unknown): Promise<T> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`${path}: ${res.status}`);
+  if (!res.ok) throw await errorFor(res, path);
   return res.json() as Promise<T>;
 }
 
