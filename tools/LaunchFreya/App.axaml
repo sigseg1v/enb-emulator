@@ -59,17 +59,19 @@
       <Setter Property="Foreground" Value="{StaticResource FreyaTextDimBrush}" />
     </Style>
 
-    <!-- Wordmark main glyphs: light, geometric, wide-tracked (Michroma stand-in). -->
+    <!-- Wordmark main glyphs: Michroma, light, geometric, wide-tracked.
+         Michroma is single-weight, so no Bold (it would synthesize badly). -->
     <Style Selector="TextBlock.wordmark">
+      <Setter Property="FontFamily" Value="{StaticResource FreyaDisplayFont}" />
       <Setter Property="Foreground" Value="{StaticResource FreyaTextBrush}" />
-      <Setter Property="FontWeight" Value="Bold" />
-      <Setter Property="LetterSpacing" Value="6" />
+      <Setter Property="LetterSpacing" Value="4" />
     </Style>
 
-    <!-- Wordmark subtitle: accent, very wide tracking (wordmark sub). -->
+    <!-- Wordmark subtitle: Michroma, accent, very wide tracking. -->
     <Style Selector="TextBlock.wordmarkSub">
+      <Setter Property="FontFamily" Value="{StaticResource FreyaDisplayFont}" />
       <Setter Property="Foreground" Value="{StaticResource FreyaAccentBrush}" />
-      <Setter Property="FontSize" Value="11" />
+      <Setter Property="FontSize" Value="10" />
       <Setter Property="LetterSpacing" Value="9" />
       <Setter Property="Opacity" Value="0.85" />
     </Style>
@@ -91,6 +93,14 @@
 
   <Application.Resources>
     <ResourceDictionary>
+      <!-- Vendored OFL typefaces (vendor/fonts), the same families the website
+           loads from Google Fonts: Michroma (display), IBM Plex Sans (body,
+           variable), IBM Plex Mono. The part after '#' is the font's internal
+           family name. -->
+      <FontFamily x:Key="FreyaDisplayFont">avares://FreyaLauncher/Assets/Fonts/Michroma-Regular.ttf#Michroma</FontFamily>
+      <FontFamily x:Key="FreyaBodyFont">avares://FreyaLauncher/Assets/Fonts/IBMPlexSans-VariableFont.ttf#IBM Plex Sans</FontFamily>
+      <FontFamily x:Key="FreyaMonoFont">avares://FreyaLauncher/Assets/Fonts/IBMPlexMono-Regular.ttf#IBM Plex Mono</FontFamily>
+
       <!-- Palette brushes shared by the styles above and MainWindow.axaml.
            Hex equivalents of the website's oklch tokens. -->
       <SolidColorBrush x:Key="FreyaVoidBrush"      Color="#FF040811" />

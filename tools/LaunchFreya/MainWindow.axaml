@@ -6,6 +6,7 @@
         x:Class="LaunchFreya.MainWindow"
         Width="1280" Height="680"
         Title="Freya Launcher"
+        FontFamily="{StaticResource FreyaBodyFont}"
         CanResize="True">
 
   <!-- Deep-space backdrop: a vertical void gradient, matching the website
