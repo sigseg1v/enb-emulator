@@ -139,12 +139,13 @@ namespace LaunchFreya.Tests
         [Fact]
         public void BuildRequestJson_EmitsContractFieldNames()
         {
-            string json = UpdateLogic.BuildRequestJson("LAUNCH", "PROXY", "POSFEED", "INJECT");
+            string json = UpdateLogic.BuildRequestJson("LAUNCH", "PROXY", "POSFEED", "INJECT", "ENBMOD");
             using var doc = JsonDocument.Parse(json);
             Assert.Equal("LAUNCH", doc.RootElement.GetProperty("launcherHash").GetString());
             Assert.Equal("PROXY", doc.RootElement.GetProperty("proxyHash").GetString());
             Assert.Equal("POSFEED", doc.RootElement.GetProperty("posFeedHash").GetString());
             Assert.Equal("INJECT", doc.RootElement.GetProperty("injectHash").GetString());
+            Assert.Equal("ENBMOD", doc.RootElement.GetProperty("enbmodHash").GetString());
         }
 
         [Fact]

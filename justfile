@@ -165,7 +165,7 @@ build-enbmod:
 # Note: this packaging-only cfg is what flips the defaults to Multi-Player +
 # enb.sigsegv.land -- `just launch-net7` / `just play-*` keep the localhost dev
 # cfg untouched.
-package-client-windows: build-proxy-win64 build-posfeed-dll
+package-client-windows: build-proxy-win64 build-posfeed-dll build-enbmod
     @echo ">>> publishing self-contained win-x64 launcher (single-file)"
     dotnet publish tools/LaunchFreya/LaunchFreya.csproj -c Release -r win-x64 \
         --self-contained true \
@@ -182,14 +182,17 @@ package-client-windows: build-proxy-win64 build-posfeed-dll
     @cp bin/FreyaProxy.exe dist/enb-client-windows/bin/FreyaProxy.exe
     @cp bin/FreyaPosFeed.dll dist/enb-client-windows/bin/FreyaPosFeed.dll
     @cp bin/FreyaInject.exe dist/enb-client-windows/bin/FreyaInject.exe
+    @cp bin/enbmod.dll dist/enb-client-windows/bin/enbmod.dll
+    @cp -r bin/scripts dist/enb-client-windows/bin/scripts
     @cp tools/LaunchFreya/FreyaLauncher.windows-package.cfg dist/enb-client-windows/FreyaLauncher.cfg
     @echo ">>> zipping dist/enb-client-windows.zip"
     @rm -f dist/enb-client-windows.zip
     @cd dist && zip -qr enb-client-windows.zip enb-client-windows
     @echo ">>> done. dist/enb-client-windows/ (+ enb-client-windows.zip)"
-    @echo "    Contents: FreyaLauncher.exe + bin/FreyaProxy.exe + bin/FreyaPosFeed.dll + bin/FreyaInject.exe + FreyaLauncher.cfg"
+    @echo "    Contents: FreyaLauncher.exe + bin/FreyaProxy.exe + bin/FreyaPosFeed.dll + bin/FreyaInject.exe + bin/enbmod.dll + bin/scripts/ + FreyaLauncher.cfg"
     @echo "    User extracts the zip on Windows and runs FreyaLauncher.exe;"
-    @echo "    FreyaLauncher self-updates itself + FreyaProxy + the MVAS feed pair from the server thereafter."
+    @echo "    FreyaLauncher self-updates itself + FreyaProxy + the MVAS feed pair + enbmod.dll from the server thereafter."
+    @echo "    (Lua scripts/ ship once in the zip and are NOT force-synced -- they are user-editable mod content.)"
 
 # Smoke-run FreyaProxy.exe under WINE (no game client, just the proxy).
 # Confirms WSAStartup + binds TCP 3801/3805 + opens both UDP planes.
@@ -568,6 +571,13 @@ play-local CLIENT_PATH='':
     echo ">>> building position-feed DLL (required)"
     just build-posfeed-dll
 
+    # enbmod Lua runtime: OPTIONAL (the "Enable Lua Mods" toggle is off by
+    # default). Built here so the toggle works without a separate step; the
+    # i686 toolchain is the same one build-posfeed-dll just required, and an
+    # unchanged build is a near-instant make no-op.
+    echo ">>> building enbmod Lua runtime (optional; for the Lua-mods toggle)"
+    just build-enbmod
+
     SETTINGS_DIR=tools/LaunchFreya/bin/Debug/net10.0
     mkdir -p "$SETTINGS_DIR"
     cp_json=$(printf '%s' "$cp" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
@@ -660,6 +670,12 @@ play-online CLIENT_PATH='' HOST='':
     # bin/ under the repo root (CWD).
     echo ">>> building position-feed DLL + injector (required for online MVAS)"
     just build-posfeed-dll
+
+    # enbmod Lua runtime: OPTIONAL (the "Enable Lua Mods" toggle is off by
+    # default). Same i686 toolchain build-posfeed-dll just required; an
+    # unchanged build is a near-instant make no-op.
+    echo ">>> building enbmod Lua runtime (optional; for the Lua-mods toggle)"
+    just build-enbmod
 
     echo ">>> building launcher"
     dotnet build tools/LaunchFreya >/dev/null

@@ -620,16 +620,18 @@ char *MakeServiceUnavailable(size_t *out_len)
     return r;
 }
 
-// POST /updateCheck  body: {"launcherHash","proxyHash","posFeedHash","injectHash"}
+// POST /updateCheck  body:
+//   {"launcherHash","proxyHash","posFeedHash","injectHash","enbmodHash"}
 // Compares the client's local hashes to the manifest cache and replies:
-//   - UP_TO_DATE when both match;
+//   - UP_TO_DATE when all match;
 //   - UPDATE_NEEDED with a conditional file list otherwise -- a launcher
 //     mismatch ships FreyaLauncher.exe + FreyaLauncher.cfg (the cfg has no
-//     independent hash and rides with the launcher). The proxy and each MVAS
-//     injection binary (bin/FreyaPosFeed.dll, bin/FreyaInject.exe) are hashed
-//     INDEPENDENTLY and shipped on their own mismatch, so a feed-only patch
-//     reaches existing installs without a launcher bump. The MVAS files ship
-//     only when the manifest carries a hash for them (optional add-on).
+//     independent hash and rides with the launcher). The proxy, each MVAS
+//     injection binary (bin/FreyaPosFeed.dll, bin/FreyaInject.exe), and the Lua
+//     mod runtime (bin/enbmod.dll) are hashed INDEPENDENTLY and shipped on their
+//     own mismatch, so a feed-only or runtime-only patch reaches existing
+//     installs without a launcher bump. Each optional file ships only when the
+//     manifest carries a hash for it (optional add-on).
 // Cache miss (manifest not loaded) -> 503, which the launcher reads as the
 // server being DOWN (fail-closed: no update decision on an empty cache).
 char *HandleUpdateCheck(size_t *out_len, char *recv_buffer)
@@ -649,20 +651,23 @@ char *HandleUpdateCheck(size_t *out_len, char *recv_buffer)
     std::string clientProxy    = JsonField(body, "proxyHash");
     std::string clientPosFeed  = JsonField(body, "posFeedHash");
     std::string clientInject   = JsonField(body, "injectHash");
+    std::string clientEnbmod   = JsonField(body, "enbmodHash");
 
     const std::string posFeedSrv = mf.PosFeedDllHash();   // "" when not published
     const std::string injectSrv  = mf.InjectExeHash();    // "" when not published
+    const std::string enbmodSrv  = mf.EnbmodDllHash();    // "" when not published
 
     bool launcherOk = HashEq(clientLauncher, mf.LauncherExeHash());
     bool proxyOk    = HashEq(clientProxy, mf.ProxyExeHash());
-    // The MVAS pair is checked INDEPENDENTLY, like the proxy. An unpublished
-    // file (empty server hash) is treated as up-to-date: there is nothing to
-    // ship and we never emit a file the manifest does not vouch for.
+    // The MVAS pair and enbmod.dll are checked INDEPENDENTLY, like the proxy. An
+    // unpublished file (empty server hash) is treated as up-to-date: there is
+    // nothing to ship and we never emit a file the manifest does not vouch for.
     bool posFeedOk  = posFeedSrv.empty() || HashEq(clientPosFeed, posFeedSrv);
     bool injectOk   = injectSrv.empty()  || HashEq(clientInject, injectSrv);
+    bool enbmodOk   = enbmodSrv.empty()  || HashEq(clientEnbmod, enbmodSrv);
 
     std::string json;
-    if (launcherOk && proxyOk && posFeedOk && injectOk)
+    if (launcherOk && proxyOk && posFeedOk && injectOk && enbmodOk)
     {
         json = "{\"status\":\"UP_TO_DATE\"}";
     }
@@ -697,6 +702,10 @@ char *HandleUpdateCheck(size_t *out_len, char *recv_buffer)
         if (!injectOk)
         {
             add("bin/FreyaInject.exe", base + "/FreyaInject.exe", injectSrv);
+        }
+        if (!enbmodOk)
+        {
+            add("bin/enbmod.dll", base + "/enbmod.dll", enbmodSrv);
         }
         json = "{\"status\":\"UPDATE_NEEDED\",\"files\":[" + files + "]}";
     }

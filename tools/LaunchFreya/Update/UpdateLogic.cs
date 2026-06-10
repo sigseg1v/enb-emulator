@@ -79,7 +79,7 @@ namespace LaunchFreya.Update
         }
 
         public static string BuildRequestJson(string launcherHash, string proxyHash,
-            string posFeedHash, string injectHash)
+            string posFeedHash, string injectHash, string enbmodHash)
         {
             var req = new UpdateCheckRequest
             {
@@ -87,6 +87,7 @@ namespace LaunchFreya.Update
                 ProxyHash    = proxyHash,
                 PosFeedHash  = posFeedHash,
                 InjectHash   = injectHash,
+                EnbmodHash   = enbmodHash,
             };
             return JsonSerializer.Serialize(req);
         }
