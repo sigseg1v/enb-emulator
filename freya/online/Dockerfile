@@ -11,6 +11,10 @@ WORKDIR /web
 COPY web/package.json ./
 RUN npm install --no-audit --no-fund
 COPY web/ ./
+# Ship the real backend, never the dev mock: USE_MOCK is (VITE_MOCK !== '0'),
+# so the production bundle MUST be built with VITE_MOCK=0. The mock stays the
+# default only for standalone `npm run dev`.
+ENV VITE_MOCK=0
 RUN npm run build
 
 # ---- go ----
