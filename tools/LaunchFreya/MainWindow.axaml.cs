@@ -622,14 +622,29 @@ namespace LaunchFreya
             _user.LastServerName     = host.Hostname;
             _user.Save();
 
+            // Relaunch support: the launcher cannot reliably observe the client's
+            // exit (in the PB-2 injector mode FreyaInject.exe resumes client.exe
+            // and immediately returns, and under WINE the `wine` wrapper we start
+            // exits with it -- so the process we Start is never the client). We
+            // therefore do NOT lock Play after a launch. Instead Play is
+            // idempotent: each click first tears down the PREVIOUS session's auth
+            // relay (freeing its loopback port) so a second launch is clean rather
+            // than colliding with the first. This fixes "can't relaunch without
+            // closing the launcher entirely" without fragile PID tracking.
+            if (_activeLauncher != null)
+            {
+                AppendLog("Relaunch: tearing down the previous session before launching again.");
+                _activeLauncher.AuthRelay?.Dispose();
+                _activeLauncher = null;
+            }
+
             try
             {
                 var launcher = new Launcher(_setting, AppendLog);
                 launcher.Launch();
                 _activeLauncher = launcher;
                 _clientRunning  = true;   // pause the periodic status re-probe
-                c_Status.Text       = "Client running. Hit Quit when you're done to tear everything down.";
-                c_Button_Play.IsEnabled = false;
+                c_Status.Text   = "Client running. Press Play to relaunch, or Quit to tear everything down.";
             }
             catch (Exception ex)
             {
