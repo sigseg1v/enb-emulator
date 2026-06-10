@@ -206,5 +206,3 @@ try to render native Gadgets from scratch -- wrong cost/benefit.
   engine (§3.3).
 - **No symbols.** 42,636 functions. The catalog in §3–§5 is your map; expect per-target
   runtime confirmation.
-</content>
-</invoke>

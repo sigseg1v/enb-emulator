@@ -46,6 +46,10 @@ namespace LaunchFreya
         // PB-2: inject the in-client MVAS position-feed DLL into client.exe.
         public bool   EnablePositionFeed       { get; set; }
 
+        // Inject the enbmod Lua mod runtime (enbmod.dll) into client.exe, enabling
+        // client-side UI mods without patching the game. Experimental; opt-in.
+        public bool   EnableClientMods         { get; set; }
+
         public string EffectiveRegistrationHostname
             => string.IsNullOrEmpty(RegistrationHostname) ? Hostname : RegistrationHostname;
     }
@@ -55,13 +59,15 @@ namespace LaunchFreya
         readonly LaunchSetting _setting;
         readonly Action<string> _warn;
 
-        // PB-2 injection plan, prepared by ConfigurePositionFeedInjection and
-        // consumed by LaunchClient. WINE has no AppInit_DLLs, so the feed DLL is
-        // injected at launch via FreyaInject.exe (CreateProcess-suspended +
-        // remote-LoadLibrary). Both null/empty unless the feed is enabled AND its
-        // artifacts were located -- LaunchClient falls back to a plain launch then.
-        string _posFeedInjectorExe;   // unix path to bin/FreyaInject.exe (wine runs it)
-        string _posFeedDllDos;        // DOS path the injector hands to the client's LoadLibraryA
+        // In-client DLL injection plan, prepared by ConfigureInjection and consumed
+        // by LaunchClient. WINE has no AppInit_DLLs, so any in-client DLL (the MVAS
+        // position feed and/or the enbmod Lua runtime) is injected at launch via
+        // FreyaInject.exe (CreateProcess-suspended + remote-LoadLibrary, N DLLs in
+        // one go). _injectorExe is null / _injectDlls is empty unless at least one
+        // in-client feature is enabled AND its artifacts were staged -- LaunchClient
+        // falls back to a plain launch then.
+        string _injectorExe;                          // unix path to bin/FreyaInject.exe (wine runs it)
+        readonly List<string> _injectDlls = new();    // DOS paths the injector hands to the client's LoadLibraryA, in order
 
         public Launcher(LaunchSetting setting, Action<string> warn = null)
         {
@@ -104,7 +110,7 @@ namespace LaunchFreya
                 PatchAuthIniFile();
                 PatchNetworkIniFile(gameHost);
                 PatchRegistry();
-                ConfigurePositionFeedInjection();
+                ConfigureInjection();
 
                 switch (launch)
                 {
@@ -183,28 +189,34 @@ namespace LaunchFreya
             var clientArgs = $"-SERVER_ADDR {addrs[0]} -PROTOCOL TCP";
 
             ProcessStartInfo info;
-            if (_posFeedInjectorExe != null && _posFeedDllDos != null)
+            if (_injectorExe != null && _injectDlls.Count > 0)
             {
-                // PB-2 position feed: don't launch client.exe directly. Spawn
+                // In-client injection: don't launch client.exe directly. Spawn
                 // FreyaInject.exe, which starts client.exe suspended,
-                // remote-LoadLibrary's FreyaPosFeed.dll into it, and resumes it.
-                // The injector forwards everything after the DLL path as the
-                // client's own argv -- so the client still sees -SERVER_ADDR / etc.
-                // We pass the client's DOS path (the injector calls CreateProcessA),
-                // and the DLL's DOS path (the client's loader resolves it).
+                // remote-LoadLibrary's each enabled DLL (position feed and/or
+                // enbmod) into it, and resumes it. The injector forwards everything
+                // after the `--` delimiter as the client's own argv -- so the client
+                // still sees -SERVER_ADDR / etc. We pass the client's DOS path (the
+                // injector calls CreateProcessA), then the DLL DOS paths the client's
+                // loader resolves, then `--`, then the client args.
                 //
-                // FreyaInject.exe / FreyaPosFeed.dll are Win32 PEs: the remote-thread
+                // FreyaInject.exe and the DLLs are Win32 PEs: the remote-thread
                 // injection is identical on native Windows and under WINE. The ONLY
                 // platform difference is the `wine` prefix, so this single path serves
                 // both -- it all runs on Windows (natively or via WINE).
                 var clientDos = WinePathToDos(_setting.ClientPath) ?? _setting.ClientPath;
-                var injectArgs = $"\"{clientDos}\" \"{_posFeedDllDos}\" {clientArgs}";
+                var sb = new StringBuilder();
+                sb.Append('"').Append(clientDos).Append('"');
+                foreach (var dll in _injectDlls)
+                    sb.Append(" \"").Append(dll).Append('"');
+                sb.Append(" -- ").Append(clientArgs);
+                var injectArgs = sb.ToString();
                 if (OnWindows)
                 {
                     info = new ProcessStartInfo
                     {
                         WorkingDirectory = dir,
-                        FileName         = _posFeedInjectorExe,
+                        FileName         = _injectorExe,
                         Arguments        = injectArgs,
                         UseShellExecute  = false,
                     };
@@ -215,7 +227,7 @@ namespace LaunchFreya
                     {
                         WorkingDirectory = dir,
                         FileName         = "wine",
-                        Arguments        = $"\"{_posFeedInjectorExe}\" {injectArgs}",
+                        Arguments        = $"\"{_injectorExe}\" {injectArgs}",
                         UseShellExecute  = false,
                     };
                 }
@@ -573,72 +585,147 @@ namespace LaunchFreya
             }
         }
 
-        // ---- PB-2: in-client position-feed DLL injection ----
+        // ---- in-client DLL injection (position feed + enbmod Lua mods) ----
 
-        // Prepare the PB-2 position-feed injection. WINE (tested wine-11.8) does
-        // NOT implement the Windows AppInit_DLLs loader hook -- registering the DLL
-        // there loads it into nothing. So instead of a registry hook we inject at
-        // launch: LaunchClient spawns FreyaInject.exe, which starts client.exe
-        // suspended, remote-LoadLibrary's the DLL, and resumes it. This method only
-        // stages the artifacts and records the plan in _posFeedInjectorExe /
-        // _posFeedDllDos; the actual injection happens in LaunchClient. Nothing
-        // persists in the prefix, so there is no teardown step when the feed is off.
-        void ConfigurePositionFeedInjection()
+        // Prepare the in-client DLL injection plan. WINE (tested wine-11.8) does NOT
+        // implement the Windows AppInit_DLLs loader hook -- registering a DLL there
+        // loads it into nothing. So instead of a registry hook we inject at launch:
+        // LaunchClient spawns FreyaInject.exe, which starts client.exe suspended,
+        // remote-LoadLibrary's each staged DLL, and resumes it. This method only
+        // stages the artifacts and records the plan in _injectorExe / _injectDlls;
+        // the actual injection happens in LaunchClient. Nothing persists in the
+        // prefix, so there is no teardown step when every feature is off.
+        void ConfigureInjection()
         {
-            // Start from a clean plan every call: a disabled feed, a missing
-            // artifact, or the Windows path all leave the fields null and
+            // Start from a clean plan every call: with no feature enabled, a missing
+            // injector, or every staging step failing, _injectDlls stays empty and
             // LaunchClient does a plain launch.
-            _posFeedInjectorExe = null;
-            _posFeedDllDos      = null;
+            _injectorExe = null;
+            _injectDlls.Clear();
 
-            if (!_setting.EnablePositionFeed)
+            if (!_setting.EnablePositionFeed && !_setting.EnableClientMods)
                 return;
 
-            // Same remote-thread injection on every platform: FreyaInject.exe +
-            // FreyaPosFeed.dll are Win32 PEs that run natively on Windows and under
-            // WINE on Linux, so the staging + inject plan below is platform-agnostic
+            // FreyaInject.exe and the DLLs are Win32 PEs that run natively on Windows
+            // and under WINE on Linux, so the staging + inject plan is platform-agnostic
             // (WinePathToDos and LaunchClient handle the wine-vs-native difference).
-            var dllSrc = LocatePositionFeedDll();
             var injector = LocateInjectorExe();
-            if (dllSrc == null || injector == null)
+            if (injector == null)
             {
-                _warn("Position feed enabled but its artifacts were not found " +
-                      $"(dll={dllSrc ?? "<missing>"}, injector={injector ?? "<missing>"}). " +
-                      "Build them with `just build-posfeed-dll`. Continuing without the feed.");
+                _warn("In-client injection enabled but FreyaInject.exe was not found. " +
+                      "Build it with `just build-posfeed-dll`. Continuing without injection.");
                 return;
             }
 
-            // Stage the 32-bit DLL next to client.exe (the EnB release folder).
-            // We are NOT using AppInit_DLLs (which split on spaces and forced a
-            // no-space system32 path) -- the injector hands the full DOS path
-            // straight to the client's remote LoadLibraryA, which takes a path with
-            // spaces fine. So the DLL lives with the game, not in the Windows
-            // system dirs, and no WOW64 system32/syswow64 dance is needed.
+            if (_setting.EnablePositionFeed)
+            {
+                var dos = StagePositionFeedDll();
+                if (dos != null) _injectDlls.Add(dos);
+            }
+            if (_setting.EnableClientMods)
+            {
+                var dos = StageClientMods();
+                if (dos != null) _injectDlls.Add(dos);
+            }
+
+            if (_injectDlls.Count == 0)
+                return;   // everything failed to stage; fall back to a plain launch
+
+            _injectorExe = injector;
+            _warn($"In-client injection: {_injectDlls.Count} DLL(s) into client.exe via FreyaInject.exe.");
+        }
+
+        // Stage the 32-bit position-feed DLL next to client.exe (the EnB release
+        // folder) and return its DOS path, or null on any failure. We are NOT using
+        // AppInit_DLLs (which split on spaces and forced a no-space system32 path) --
+        // the injector hands the full DOS path straight to the client's remote
+        // LoadLibraryA, which takes a path with spaces fine. So the DLL lives with
+        // the game, not the Windows system dirs, and no WOW64 system32/syswow64
+        // dance is needed.
+        string StagePositionFeedDll()
+        {
+            var dllSrc = LocatePositionFeedDll();
+            if (dllSrc == null)
+            {
+                _warn("Position feed enabled but FreyaPosFeed.dll was not found. " +
+                      "Build it with `just build-posfeed-dll`. Continuing without the feed.");
+                return null;
+            }
+            return StageDllNextToClient(dllSrc, "FreyaPosFeed.dll", "Position feed");
+        }
+
+        // Stage the enbmod Lua runtime (enbmod.dll) AND its scripts/ folder next to
+        // client.exe, and return the DLL's DOS path, or null on any failure. enbmod
+        // resolves scripts/init.lua relative to its own module directory, so the
+        // scripts MUST sit beside the staged DLL (i.e. in the client release folder).
+        string StageClientMods()
+        {
+            var dllSrc = LocateEnbmodDll();
+            var scriptsSrc = LocateEnbmodScripts();
+            if (dllSrc == null)
+            {
+                _warn("Client mods enabled but enbmod.dll was not found. " +
+                      "Build it with `just build-enbmod`. Continuing without client mods.");
+                return null;
+            }
+
+            var dos = StageDllNextToClient(dllSrc, "enbmod.dll", "Client mods");
+            if (dos == null) return null;
+
+            // Copy the scripts/ tree beside the staged DLL. Missing scripts is not
+            // fatal -- enbmod just logs an init.lua error and keeps ticking -- but
+            // warn so the user knows why their mods aren't running.
+            try
+            {
+                var clientDir = Path.GetDirectoryName(_setting.ClientPath);
+                if (scriptsSrc != null && !string.IsNullOrEmpty(clientDir))
+                    CopyDirectory(scriptsSrc, Path.Combine(clientDir, "scripts"));
+                else
+                    _warn("Client mods: enbmod scripts/ folder not found; injecting the DLL with no scripts.");
+            }
+            catch (Exception ex)
+            {
+                _warn($"Client mods: could not stage scripts/: {ex.Message}. Injecting the DLL anyway.");
+            }
+            return dos;
+        }
+
+        // Copy a DLL into the client release folder and return its DOS path, or null
+        // (with a warning tagged `label`) on any failure.
+        string StageDllNextToClient(string dllSrc, string stagedName, string label)
+        {
             string dllStaged;
             try
             {
                 var clientDir = Path.GetDirectoryName(_setting.ClientPath);
                 if (string.IsNullOrEmpty(clientDir) || !Directory.Exists(clientDir))
                     throw new IOException($"client folder not found ('{clientDir}')");
-                dllStaged = Path.Combine(clientDir, "FreyaPosFeed.dll");
+                dllStaged = Path.Combine(clientDir, stagedName);
                 File.Copy(dllSrc, dllStaged, overwrite: true);
             }
             catch (Exception ex)
             {
-                _warn($"Position feed: could not stage FreyaPosFeed.dll: {ex.Message}. Continuing without the feed.");
-                return;
+                _warn($"{label}: could not stage {stagedName}: {ex.Message}. Continuing without it.");
+                return null;
             }
 
             var dosPath = WinePathToDos(dllStaged);
             if (string.IsNullOrEmpty(dosPath))
             {
-                _warn("Position feed: could not resolve the DLL's DOS path. Continuing without the feed.");
-                return;
+                _warn($"{label}: could not resolve {stagedName}'s DOS path. Continuing without it.");
+                return null;
             }
+            _warn($"{label}: will inject {dosPath} into client.exe via FreyaInject.exe.");
+            return dosPath;
+        }
 
-            _posFeedInjectorExe = injector;
-            _posFeedDllDos      = dosPath;
-            _warn($"Position feed: will inject {dosPath} into client.exe via FreyaInject.exe.");
+        static void CopyDirectory(string src, string dst)
+        {
+            Directory.CreateDirectory(dst);
+            foreach (var file in Directory.GetFiles(src))
+                File.Copy(file, Path.Combine(dst, Path.GetFileName(file)), overwrite: true);
+            foreach (var sub in Directory.GetDirectories(src))
+                CopyDirectory(sub, Path.Combine(dst, Path.GetFileName(sub)));
         }
 
         // Find the built injector across dev (play-local, CWD=repo root) and
@@ -668,6 +755,36 @@ namespace LaunchFreya
             };
             foreach (var c in candidates)
                 if (File.Exists(c)) return c;
+            return null;
+        }
+
+        // Find the built enbmod runtime across dev (play-local, CWD=repo root) and
+        // packaged (next to the launcher exe / its bin/) layouts.
+        static string LocateEnbmodDll()
+        {
+            var candidates = new[]
+            {
+                Path.Combine(AppContext.BaseDirectory, "bin", "enbmod.dll"),
+                Path.Combine(AppContext.BaseDirectory, "enbmod.dll"),
+                Path.Combine(Directory.GetCurrentDirectory(), "bin", "enbmod.dll"),
+            };
+            foreach (var c in candidates)
+                if (File.Exists(c)) return c;
+            return null;
+        }
+
+        // Find the enbmod scripts/ folder (staged beside enbmod.dll by `just
+        // build-enbmod`) across the same dev / packaged layouts.
+        static string LocateEnbmodScripts()
+        {
+            var candidates = new[]
+            {
+                Path.Combine(AppContext.BaseDirectory, "bin", "scripts"),
+                Path.Combine(AppContext.BaseDirectory, "scripts"),
+                Path.Combine(Directory.GetCurrentDirectory(), "bin", "scripts"),
+            };
+            foreach (var c in candidates)
+                if (Directory.Exists(c)) return c;
             return null;
         }
 

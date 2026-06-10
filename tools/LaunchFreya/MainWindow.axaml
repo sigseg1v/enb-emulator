@@ -34,7 +34,7 @@
       <TextBlock Text="LAUNCHER" Classes="wordmarkSub" Margin="3,7,0,0" />
     </StackPanel>
 
-  <Grid RowDefinitions="Auto,Auto,Auto,Auto,*,Auto">
+  <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,*,Auto">
 
     <!-- Row 0: Server picker (emulator/host) -->
     <Border Grid.Row="0" Classes="panel">
@@ -81,8 +81,14 @@
       </Grid>
     </Border>
 
-    <!-- Row 3: Status line + (Phase AN) indeterminate update/download spinner -->
-    <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="10" Margin="0,14,0,4">
+    <!-- Row 3: Options -->
+    <Border Grid.Row="3" Classes="panel" Margin="0,8,0,0">
+      <CheckBox Name="c_CheckBox_LuaMods" Content="Enable Lua Mods (experimental)"
+                ToolTip.Tip="Inject the enbmod Lua runtime into the client so Lua scripts can add client-side UI mods. Experimental and unverified -- off by default." />
+    </Border>
+
+    <!-- Row 4: Status line + (Phase AN) indeterminate update/download spinner -->
+    <StackPanel Grid.Row="4" Orientation="Horizontal" Spacing="10" Margin="0,14,0,4">
       <TextBlock Name="c_Status" VerticalAlignment="Center"
                  Foreground="{StaticResource FreyaTextDimBrush}"
                  Text="Please select a server and hit Play." />
@@ -90,12 +96,12 @@
                    IsVisible="False" VerticalAlignment="Center" />
     </StackPanel>
 
-    <!-- Row 4: filler so the button row hugs the bottom -->
-    <Border Grid.Row="4" />
+    <!-- Row 5: filler so the button row hugs the bottom -->
+    <Border Grid.Row="5" />
 
-    <!-- Row 5: Buttons. The log pane is hidden; its contents are -->
+    <!-- Row 6: Buttons. The log pane is hidden; its contents are -->
     <!-- surfaced through the Advanced... dialog.                  -->
-    <Grid Grid.Row="5">
+    <Grid Grid.Row="6">
       <TextBox Name="c_LogPane" IsVisible="False" />
       <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
         <Button Name="c_Button_Advanced" Content="Advanced..." Click="OnAdvancedClick" />

@@ -23,6 +23,20 @@ std::string g_init_path;   // <mod_dir>\scripts\init.lua
 FILETIME    g_init_mtime{};
 int         g_tick_count = 0;
 
+// True only when the current process image is client.exe. Targeted injection
+// (FreyaInject.exe) only ever loads us into client.exe, but guard anyway so an
+// accidental prefix-global load (e.g. AppInit_DLLs) never spins a Lua VM and a
+// Flip hook inside an unrelated process.
+bool host_is_client_exe() {
+    char path[MAX_PATH];
+    DWORD n = GetModuleFileNameA(nullptr, path, (DWORD)sizeof(path));
+    if (n == 0 || n >= sizeof(path)) return false;
+    const char* base = path;
+    for (const char* p = path; *p; ++p)
+        if (*p == '\\' || *p == '/') base = p + 1;
+    return _stricmp(base, "client.exe") == 0;
+}
+
 std::string module_dir() {
     HMODULE self = nullptr;
     GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
@@ -106,6 +120,8 @@ DWORD WINAPI worker(LPVOID) {
 BOOL APIENTRY DllMain(HMODULE h, DWORD reason, LPVOID reserved) {
     if (reason == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(h);
+        // Only run inside client.exe; in any other host we load and do nothing.
+        if (!host_is_client_exe()) return TRUE;
         // Do NOT do real work in loader lock -- hand off to a worker thread.
         CloseHandle(CreateThread(nullptr, 0, worker, nullptr, 0, nullptr));
     } else if (reason == DLL_PROCESS_DETACH) {

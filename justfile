@@ -125,12 +125,34 @@ build-posfeed-dll:
         -lws2_32 \
         -Wl,--no-insert-timestamp; \
     echo ">>> building 32-bit FreyaInject.exe with $cxx"; \
-    "$cxx" -O2 -static -static-libgcc -static-libstdc++ \
+    "$cxx" -O2 -std=c++17 -static -static-libgcc -static-libstdc++ \
         -Wall -Wextra \
         -o bin/FreyaInject.exe \
         freya/client-injection/FreyaInject.cpp \
         -Wl,--no-insert-timestamp
     @echo ">>> done. bin/FreyaPosFeed.dll + bin/FreyaInject.exe (32-bit). The launcher injects the DLL into client.exe at launch via FreyaInject.exe (WINE has no AppInit_DLLs)."
+
+# Cross-compile the enbmod Lua mod runtime (32-bit Win32 PE) and stage it for the
+# launcher. enbmod.dll is a SECOND DLL FreyaInject.exe can inject into client.exe
+# (alongside FreyaPosFeed.dll): a 32-bit Lua 5.4 VM that exposes an enb.* API for
+# client-side UI mods. It has its own Makefile (vendored Lua + MinHook); this just
+# drives it with the posix-threads i686 toolchain (it uses std::mutex) and copies
+# the DLL + its scripts/ folder into bin/, where the launcher looks for them.
+# Requires the same i686 MinGW toolchain as build-posfeed-dll.
+build-enbmod:
+    @if ! command -v i686-w64-mingw32-g++-posix >/dev/null 2>&1 && ! command -v i686-w64-mingw32-g++ >/dev/null 2>&1; then \
+        echo "ERROR: 32-bit MinGW not found. client.exe is PE32/i386, so enbmod.dll must be 32-bit." >&2; \
+        echo "  install it:  sudo apt install gcc-mingw-w64-i686-posix g++-mingw-w64-i686-posix" >&2; \
+        exit 1; \
+    fi
+    @cc="$(command -v i686-w64-mingw32-gcc-posix || command -v i686-w64-mingw32-gcc)"; \
+    cxx="$(command -v i686-w64-mingw32-g++-posix || command -v i686-w64-mingw32-g++)"; \
+    echo ">>> building enbmod.dll with $cxx"; \
+    make -C freya/client-injection/enbmod CC="$cc" CXX="$cxx" AR=i686-w64-mingw32-ar; \
+    mkdir -p bin; \
+    cp freya/client-injection/enbmod/build/enbmod.dll bin/enbmod.dll; \
+    rm -rf bin/scripts; cp -r freya/client-injection/enbmod/scripts bin/scripts
+    @echo ">>> done. bin/enbmod.dll + bin/scripts/. Enable in the launcher with UseClientMods=true."
 
 # Standalone Windows client package. Produces dist/enb-client-windows/ holding a
 # self-contained launcher (FreyaLauncher.exe -- no .NET runtime needed) + the Win32

@@ -190,4 +190,3 @@ you triggered the real path and didn't just poke UI.
   extending one.
 
 See `INJECTION-MAP.md` for addresses and `HOOKING-ANALYSIS.md` for the UI-architecture overview.
-</content>

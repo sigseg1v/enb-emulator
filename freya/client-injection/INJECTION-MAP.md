@@ -196,4 +196,3 @@ See the proxy for the wire side of these same packets.
    `px` physics module (§2) -- the local player's transform lives there.
 4. Validate every offset at runtime before shipping (addresses are static, but struct layouts
    are assumptions until confirmed).
-</content>
