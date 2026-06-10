@@ -37,7 +37,7 @@ $reg  = Get-RegistryEndpoint
 $services = @(
     @{ Svc = 'server';          Dockerfile = 'server/Dockerfile';          Context = '.' },
     @{ Svc = 'login';           Dockerfile = 'login-server/Dockerfile';    Context = '.' },
-    @{ Svc = 'status-notifier'; Dockerfile = 'status-notifier/Dockerfile'; Context = 'status-notifier' },
+    @{ Svc = 'status-notifier'; Dockerfile = 'freya/status-notifier/Dockerfile'; Context = 'freya/status-notifier' },
     @{ Svc = 'db-backup';       Dockerfile = 'db-backup/Dockerfile';       Context = 'db-backup' }
 )
 
