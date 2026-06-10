@@ -2,18 +2,19 @@
 # Phase AN -- publish a new FreyaLauncher self-update set.
 #
 # Builds the Windows client bundle (repo-root `just package-client-windows`),
-# writes manifest.json over the three artifacts, uploads all of it to the PRIVATE
+# writes manifest.json over the published artifacts, uploads all of it to the PRIVATE
 # patcher S3 bucket, and invalidates the CloudFront cache so the new build is
 # served immediately. The login server only re-reads the manifest at startup, so
 # run `just update` afterward to make the running login container pick it up.
 #
 # Bucket layout is FLAT (everything at the bucket root, fronted by CloudFront):
 #
-#   FreyaLauncher.exe   FreyaLauncher.cfg   FreyaProxy.exe   manifest.json
+#   FreyaLauncher.exe   FreyaLauncher.cfg   FreyaProxy.exe
+#   FreyaPosFeed.dll    FreyaInject.exe     manifest.json
 #
-# The proxy's manifest relativePath is "bin/FreyaProxy.exe" (its place in the
-# launcher's install tree), but it is stored FLAT as FreyaProxy.exe -- the login
-# server maps the relativePath to base+"/FreyaProxy.exe" when it answers
+# The proxy and the MVAS injection pair carry "bin/" manifest relativePaths (their
+# place in the launcher's install tree), but are stored FLAT at the bucket root --
+# the login server maps the relativePath to base+"/<filename>" when it answers
 # /updateCheck (see login-server/Net7SSL/LinuxAuth.cpp HandleUpdateCheck), and the
 # launcher writes it back under bin/ on download. manifest.json itself carries
 # ONLY relativePath + sha512 (the login server synthesizes the URLs), matching
@@ -61,7 +62,9 @@ $dist = Join-Path $script:RepoRoot 'dist/enb-client-windows'
 $artifacts = @(
     @{ Local = (Join-Path $dist 'FreyaLauncher.exe');     Rel = 'FreyaLauncher.exe';     Key = 'FreyaLauncher.exe';     Ctype = 'application/octet-stream' },
     @{ Local = (Join-Path $dist 'FreyaLauncher.cfg');     Rel = 'FreyaLauncher.cfg';     Key = 'FreyaLauncher.cfg';     Ctype = 'text/plain' },
-    @{ Local = (Join-Path $dist 'bin/FreyaProxy.exe');    Rel = 'bin/FreyaProxy.exe';    Key = 'FreyaProxy.exe';        Ctype = 'application/octet-stream' }
+    @{ Local = (Join-Path $dist 'bin/FreyaProxy.exe');    Rel = 'bin/FreyaProxy.exe';    Key = 'FreyaProxy.exe';        Ctype = 'application/octet-stream' },
+    @{ Local = (Join-Path $dist 'bin/FreyaPosFeed.dll');  Rel = 'bin/FreyaPosFeed.dll';  Key = 'FreyaPosFeed.dll';      Ctype = 'application/octet-stream' },
+    @{ Local = (Join-Path $dist 'bin/FreyaInject.exe');   Rel = 'bin/FreyaInject.exe';   Key = 'FreyaInject.exe';       Ctype = 'application/octet-stream' }
 )
 
 foreach ($a in $artifacts) {
@@ -131,5 +134,5 @@ finally {
 }
 
 Write-Host ""
-Write-Host "Published manifest + 3 artifacts to $bucket; CloudFront invalidation has fully propagated."
+Write-Host "Published manifest + $($artifacts.Count) artifacts to $bucket; CloudFront invalidation has fully propagated."
 Write-Host "Restart login to re-read the manifest: just apply-update   (runs automatically next if you used 'just update')."

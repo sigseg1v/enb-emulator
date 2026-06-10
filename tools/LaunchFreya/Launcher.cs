@@ -183,23 +183,42 @@ namespace LaunchFreya
             var clientArgs = $"-SERVER_ADDR {addrs[0]} -PROTOCOL TCP";
 
             ProcessStartInfo info;
-            if (_posFeedInjectorExe != null && _posFeedDllDos != null && !OnWindows)
+            if (_posFeedInjectorExe != null && _posFeedDllDos != null)
             {
                 // PB-2 position feed: don't launch client.exe directly. Spawn
-                // FreyaInject.exe (under WINE), which starts client.exe suspended,
+                // FreyaInject.exe, which starts client.exe suspended,
                 // remote-LoadLibrary's FreyaPosFeed.dll into it, and resumes it.
                 // The injector forwards everything after the DLL path as the
                 // client's own argv -- so the client still sees -SERVER_ADDR / etc.
                 // We pass the client's DOS path (the injector calls CreateProcessA),
                 // and the DLL's DOS path (the client's loader resolves it).
+                //
+                // FreyaInject.exe / FreyaPosFeed.dll are Win32 PEs: the remote-thread
+                // injection is identical on native Windows and under WINE. The ONLY
+                // platform difference is the `wine` prefix, so this single path serves
+                // both -- it all runs on Windows (natively or via WINE).
                 var clientDos = WinePathToDos(_setting.ClientPath) ?? _setting.ClientPath;
-                info = new ProcessStartInfo
+                var injectArgs = $"\"{clientDos}\" \"{_posFeedDllDos}\" {clientArgs}";
+                if (OnWindows)
                 {
-                    WorkingDirectory = dir,
-                    FileName         = "wine",
-                    Arguments        = $"\"{_posFeedInjectorExe}\" \"{clientDos}\" \"{_posFeedDllDos}\" {clientArgs}",
-                    UseShellExecute  = false,
-                };
+                    info = new ProcessStartInfo
+                    {
+                        WorkingDirectory = dir,
+                        FileName         = _posFeedInjectorExe,
+                        Arguments        = injectArgs,
+                        UseShellExecute  = false,
+                    };
+                }
+                else
+                {
+                    info = new ProcessStartInfo
+                    {
+                        WorkingDirectory = dir,
+                        FileName         = "wine",
+                        Arguments        = $"\"{_posFeedInjectorExe}\" {injectArgs}",
+                        UseShellExecute  = false,
+                    };
+                }
             }
             else
             {
@@ -575,15 +594,10 @@ namespace LaunchFreya
             if (!_setting.EnablePositionFeed)
                 return;
 
-            // Native-Windows injection (Detours withdll) is a separate mechanism and
-            // is not wired here -- this path is the WINE prefix only.
-            if (OnWindows)
-            {
-                _warn("Position feed: in-client injection on native Windows is not wired " +
-                      "in this launcher; only the WINE (Linux) path is. Skipping.");
-                return;
-            }
-
+            // Same remote-thread injection on every platform: FreyaInject.exe +
+            // FreyaPosFeed.dll are Win32 PEs that run natively on Windows and under
+            // WINE on Linux, so the staging + inject plan below is platform-agnostic
+            // (WinePathToDos and LaunchClient handle the wine-vs-native difference).
             var dllSrc = LocatePositionFeedDll();
             var injector = LocateInjectorExe();
             if (dllSrc == null || injector == null)
@@ -657,9 +671,13 @@ namespace LaunchFreya
             return null;
         }
 
-        // `winepath -w <unix>` -> the DOS path WINE uses to open the file.
+        // `winepath -w <unix>` -> the DOS path WINE uses to open the file. On
+        // native Windows there is no WINE and the path is already a DOS path, so
+        // return it unchanged.
         static string WinePathToDos(string unixPath)
         {
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                return unixPath;
             try
             {
                 var psi = new ProcessStartInfo

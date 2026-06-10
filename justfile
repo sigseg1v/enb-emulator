@@ -100,8 +100,8 @@ build-proxy-win64:
 
 # Cross-compile the standalone MVAS position-feed DLL (PB-2) as a 32-bit Win32
 # PE. It MUST be 32-bit: client.exe is a PE32/i386 process and a DLL loaded into
-# it (via AppInit_DLLs under WINE -- see tools/LaunchFreya) has to match its
-# bitness. This is the ONLY 32-bit artifact in the tree, hence the separate i686
+# it (via FreyaInject.exe remote-thread LoadLibrary -- see tools/LaunchFreya) has
+# to match its bitness. This is the ONLY 32-bit artifact in the tree, hence the separate i686
 # toolchain (the proxy/launcher are 64-bit). It is a minimal DLL: just
 # PosFeedDllMain.cpp + ClientPositionFeed.cpp, no Detours, no client offsets.
 #
@@ -134,15 +134,16 @@ build-posfeed-dll:
 
 # Standalone Windows client package. Produces dist/enb-client-windows/ holding a
 # self-contained launcher (FreyaLauncher.exe -- no .NET runtime needed) + the Win32
-# proxy (bin/FreyaProxy.exe) + a package-only FreyaLauncher.cfg that defaults to the
-# public server. The end user extracts the folder on Windows and runs
+# proxy (bin/FreyaProxy.exe) + the 32-bit MVAS position-feed injection pair
+# (bin/FreyaPosFeed.dll + bin/FreyaInject.exe) + a package-only FreyaLauncher.cfg
+# that defaults to the public server. The end user extracts the folder on Windows and runs
 # FreyaLauncher.exe: no docker, no dev environment, nothing to install beyond Earth
 # & Beyond itself. The launcher connects to a remote upstream (default
 # enb.sigsegv.land; the Server box is editable so they can point it anywhere).
 # Note: this packaging-only cfg is what flips the defaults to Multi-Player +
 # enb.sigsegv.land -- `just launch-net7` / `just play-*` keep the localhost dev
 # cfg untouched.
-package-client-windows: build-proxy-win64
+package-client-windows: build-proxy-win64 build-posfeed-dll
     @echo ">>> publishing self-contained win-x64 launcher (single-file)"
     dotnet publish tools/LaunchFreya/LaunchFreya.csproj -c Release -r win-x64 \
         --self-contained true \
@@ -157,14 +158,16 @@ package-client-windows: build-proxy-win64
     @mkdir -p dist/enb-client-windows/bin
     @cp tools/LaunchFreya/bin/win-x64-publish/FreyaLauncher.exe dist/enb-client-windows/FreyaLauncher.exe
     @cp bin/FreyaProxy.exe dist/enb-client-windows/bin/FreyaProxy.exe
+    @cp bin/FreyaPosFeed.dll dist/enb-client-windows/bin/FreyaPosFeed.dll
+    @cp bin/FreyaInject.exe dist/enb-client-windows/bin/FreyaInject.exe
     @cp tools/LaunchFreya/FreyaLauncher.windows-package.cfg dist/enb-client-windows/FreyaLauncher.cfg
     @echo ">>> zipping dist/enb-client-windows.zip"
     @rm -f dist/enb-client-windows.zip
     @cd dist && zip -qr enb-client-windows.zip enb-client-windows
     @echo ">>> done. dist/enb-client-windows/ (+ enb-client-windows.zip)"
-    @echo "    Contents: FreyaLauncher.exe + bin/FreyaProxy.exe + FreyaLauncher.cfg"
+    @echo "    Contents: FreyaLauncher.exe + bin/FreyaProxy.exe + bin/FreyaPosFeed.dll + bin/FreyaInject.exe + FreyaLauncher.cfg"
     @echo "    User extracts the zip on Windows and runs FreyaLauncher.exe;"
-    @echo "    FreyaLauncher self-updates itself + FreyaProxy from the server thereafter."
+    @echo "    FreyaLauncher self-updates itself + FreyaProxy + the MVAS feed pair from the server thereafter."
 
 # Smoke-run FreyaProxy.exe under WINE (no game client, just the proxy).
 # Confirms WSAStartup + binds TCP 3801/3805 + opens both UDP planes.

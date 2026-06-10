@@ -21,6 +21,9 @@ extern void LogMessage(const char *format, ...);
 static const char *kLauncherExeRel = "FreyaLauncher.exe";
 static const char *kLauncherCfgRel = "FreyaLauncher.cfg";
 static const char *kProxyExeRel    = "bin/FreyaProxy.exe";
+// Optional MVAS position-feed injection pair; ride with the launcher set.
+static const char *kPosFeedDllRel  = "bin/FreyaPosFeed.dll";
+static const char *kInjectExeRel   = "bin/FreyaInject.exe";
 
 PatcherManifest &PatcherManifest::Instance()
 {
@@ -162,7 +165,7 @@ bool PatcherManifest::Load()
     if (!Fetch(url, body))
         return false;   // Fetch already logged
 
-    std::string launcherExe, launcherCfg, proxyExe;
+    std::string launcherExe, launcherCfg, proxyExe, posFeedDll, injectExe;
     ForEachFileObject(body, [&](const std::string &obj) {
         std::string rel  = JsonString(obj, "relativePath");
         std::string hash = JsonString(obj, "sha512");
@@ -170,6 +173,8 @@ bool PatcherManifest::Load()
         if (rel == kLauncherExeRel)      launcherExe = hash;
         else if (rel == kLauncherCfgRel) launcherCfg = hash;
         else if (rel == kProxyExeRel)    proxyExe = hash;
+        else if (rel == kPosFeedDllRel)  posFeedDll = hash;
+        else if (rel == kInjectExeRel)   injectExe = hash;
     });
 
     if (launcherExe.empty() || launcherCfg.empty() || proxyExe.empty())
@@ -179,6 +184,9 @@ bool PatcherManifest::Load()
                    "refusing to serve a partial manifest\n", url);
         return false;
     }
+    // The MVAS injection pair is optional: an older manifest that predates it
+    // still loads (it just won't ship those two files). They ship the moment a
+    // manifest carrying them is published -- no login redeploy required.
 
     std::string dlBase;
     if (const char *b = getenv("NET7_PATCHER_DL_BASE"))
@@ -189,12 +197,15 @@ bool PatcherManifest::Load()
         m_launcherExe = launcherExe;
         m_launcherCfg = launcherCfg;
         m_proxyExe    = proxyExe;
+        m_posFeedDll  = posFeedDll;
+        m_injectExe   = injectExe;
         m_dlBase      = dlBase;
         m_loaded      = true;
     }
 
-    LogMessage("PatcherManifest: loaded 3 file hashes from %s (dl base '%s')\n",
-               url, dlBase.c_str());
+    int total = 3 + (!posFeedDll.empty() ? 1 : 0) + (!injectExe.empty() ? 1 : 0);
+    LogMessage("PatcherManifest: loaded %d file hashes from %s (dl base '%s')\n",
+               total, url, dlBase.c_str());
     return true;
 }
 
@@ -240,6 +251,18 @@ std::string PatcherManifest::ProxyExeHash() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_proxyExe;
+}
+
+std::string PatcherManifest::PosFeedDllHash() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_posFeedDll;
+}
+
+std::string PatcherManifest::InjectExeHash() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_injectExe;
 }
 
 std::string PatcherManifest::DlBase() const

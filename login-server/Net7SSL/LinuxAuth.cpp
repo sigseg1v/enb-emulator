@@ -624,9 +624,10 @@ char *MakeServiceUnavailable(size_t *out_len)
 // Compares the client's two local hashes to the manifest cache and replies:
 //   - UP_TO_DATE when both match;
 //   - UPDATE_NEEDED with a conditional file list otherwise -- a launcher
-//     mismatch ships FreyaLauncher.exe + FreyaLauncher.cfg (the cfg always
-//     rides with the launcher and has no independent hash check), a proxy
-//     mismatch ships bin/FreyaProxy.exe; both -> all three.
+//     mismatch ships FreyaLauncher.exe + FreyaLauncher.cfg + the MVAS injection
+//     pair (bin/FreyaPosFeed.dll + bin/FreyaInject.exe); all of these ride with
+//     the launcher and have no independent hash check, and the pair ships only
+//     when the manifest carries it. A proxy mismatch ships bin/FreyaProxy.exe.
 // Cache miss (manifest not loaded) -> 503, which the launcher reads as the
 // server being DOWN (fail-closed: no update decision on an empty cache).
 char *HandleUpdateCheck(size_t *out_len, char *recv_buffer)
@@ -671,6 +672,14 @@ char *HandleUpdateCheck(size_t *out_len, char *recv_buffer)
         {
             add("FreyaLauncher.exe", base + "/FreyaLauncher.exe", mf.LauncherExeHash());
             add("FreyaLauncher.cfg", base + "/FreyaLauncher.cfg", mf.LauncherCfgHash());
+            // The MVAS position-feed injection pair rides with the launcher set,
+            // emitted only when the manifest carries it (optional add-on).
+            const std::string posFeedDll = mf.PosFeedDllHash();
+            const std::string injectExe  = mf.InjectExeHash();
+            if (!posFeedDll.empty())
+                add("bin/FreyaPosFeed.dll", base + "/FreyaPosFeed.dll", posFeedDll);
+            if (!injectExe.empty())
+                add("bin/FreyaInject.exe", base + "/FreyaInject.exe", injectExe);
         }
         if (!proxyOk)
         {

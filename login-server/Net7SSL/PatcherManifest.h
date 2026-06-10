@@ -1,7 +1,9 @@
 // PatcherManifest.h -- Phase AN launcher self-update support.
 //
-// Holds the authoritative SHA-512 hashes of the three published Windows
-// artifacts (FreyaLauncher.exe, FreyaLauncher.cfg, bin/FreyaProxy.exe). The
+// Holds the authoritative SHA-512 hashes of the published Windows artifacts:
+// the required trio (FreyaLauncher.exe, FreyaLauncher.cfg, bin/FreyaProxy.exe)
+// plus the optional MVAS position-feed injection pair (bin/FreyaPosFeed.dll,
+// bin/FreyaInject.exe), which ride with the launcher set when present. The
 // cache is populated ONCE at login-server startup by an HTTPS GET of a small
 // manifest.json over CloudFront (NET7_PATCHER_MANIFEST_URL). libcurl also reads
 // file:// URLs, so the local-stub test points the env at an on-disk manifest --
@@ -34,8 +36,9 @@ class PatcherManifest
 public:
     static PatcherManifest &Instance();
 
-    // Fetch + parse NET7_PATCHER_MANIFEST_URL. Returns true only when all three
-    // known files are present with non-empty hashes. A missing env var, a
+    // Fetch + parse NET7_PATCHER_MANIFEST_URL. Returns true only when the
+    // required trio is present with non-empty hashes (the MVAS injection pair is
+    // optional and parsed when present). A missing env var, a
     // transport error, or a malformed manifest leaves the PRIOR cache intact
     // (state is overwritten only on a fully successful load) and returns false.
     // Called once at startup and again by RefreshIfStale() on the request path.
@@ -52,6 +55,8 @@ public:
     std::string LauncherExeHash() const;
     std::string LauncherCfgHash() const;
     std::string ProxyExeHash() const;
+    std::string PosFeedDllHash() const;   // "" when the manifest omits it
+    std::string InjectExeHash() const;    // "" when the manifest omits it
 
     // CloudFront base URL for the published files (NET7_PATCHER_DL_BASE),
     // trailing slash trimmed. Files are flat in the bucket; the launcher maps
@@ -70,5 +75,7 @@ private:
     std::string m_launcherExe;
     std::string m_launcherCfg;
     std::string m_proxyExe;
+    std::string m_posFeedDll;   // optional; "" when absent from the manifest
+    std::string m_injectExe;    // optional; "" when absent from the manifest
     std::string m_dlBase;
 };
