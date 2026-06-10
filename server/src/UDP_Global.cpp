@@ -295,22 +295,32 @@ void UDP_Connection::HandleGlobalTicketRequest(char *msg, EnbUdpHeader *hdr, con
         int32_t avatar_id_wire = (int32_t) avatar_id;
         SendOpcode(ENB_OPCODE_2005_AVATARLOGIN_CONFIRM, player, (unsigned char *) &avatar_id_wire, sizeof(avatar_id_wire), source_addr, source_port);
 
-        // Phase AM: announce the login as an external-status event. The player
-        // node is fully populated here (name, class, levels read from the
-        // just-loaded database), and GetPlayerCount() already counts this node,
-        // so the online tally reflects this login. No-op unless
-        // NET7_EXTERNAL_STATUS_ENABLED.
+        // Phase AM: announce the login as an external-status event. This is the
+        // once-per-login moment (the global ticket / character-select stage);
+        // the per-sector FinishLogin path fires on every gate jump, so it would
+        // spam. GetPlayerCount() already counts this node, so the online tally
+        // reflects this login. No-op unless NET7_EXTERNAL_STATUS_ENABLED.
+        //
+        // AM-10: read the levels from the database struct just populated by
+        // ReadDatabase() above, NOT from player->CombatLevel()/Trade/Explore.
+        // Those getters read PlayerIndex()->RPGInfo, which is not loaded until
+        // sector login (PlayerSaves.cpp LoadSavedData), so at this stage they
+        // all return 0 -- which is why the bot printed "C0/T0/E0". The DB fields
+        // are stored big-endian (AccountManager::ReadDatabase ntohl's on the way
+        // in from the row), so ntohl back to host order here.
         {
             // Indexed by ClassIndex() == Race*3 + Profession (Net7.h).
             static const char *kClassAbbrev[9] =
                 { "TE", "TT", "TS", "JD", "JS", "JE", "PW", "PP", "PS" };
             long ci = player->ClassIndex();
             const char *cls = (ci >= 0 && ci < 9) ? kClassAbbrev[ci] : "??";
+            long combat  = (long)(int32_t) ntohl(player->Database()->info.combat_level);
+            long trade   = (long)(int32_t) ntohl(player->Database()->info.trade_level);
+            long explore = (long)(int32_t) ntohl(player->Database()->info.explore_level);
             char line[256];
             snprintf(line, sizeof(line),
                 "Player %s (level: C%ld/T%ld/E%ld, class: %s) logged in. (%ld online)",
-                player->Name(), player->CombatLevel(), player->TradeLevel(),
-                player->ExploreLevel(), cls,
+                player->Name(), combat, trade, explore, cls,
                 g_ServerMgr->m_GlobMemMgr->GetPlayerCount());
             EmitExternalStatusEvent(EXT_STATUS_LOGIN, line);
         }

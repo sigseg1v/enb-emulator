@@ -399,7 +399,7 @@ ability. Tracked as CV-AM-3 below (owner verifies on the live server + real clie
 - Best-effort: a Discord failure must never break or slow a game operation.
 - Default-OFF feature flag so dev/test/CI are untouched.
 
-## AM-10 FUTURE: login event reads levels as 0 (C0/T0/E0)
+## AM-10 [x] DONE (2026-06-09): login event reads levels as 0 (C0/T0/E0)
 
 Symptom (owner, 2026-06-09): the bot prints
 `Player VeretJD (level: C0/T0/E0, class: JD) logged in. (1 online)` -- name
@@ -415,14 +415,17 @@ player node has `avatar_data` (name, race, prof -> class) but its
 only populate later, at sector login / ReInitializeSavedData /
 SaveManager load.
 
-Fix options (pick when tackled):
-  1. Move the EXT_STATUS_LOGIN emit to the point where the levels are
-     populated (e.g. the FinishLogin / sector-login path), keeping the same
-     rendered-line format. Cleanest; the online tally is still correct there.
-  2. Read the three levels straight from `avatar_level_info` (net7_user) at
-     emit time and format from those. More code, and it duplicates a load the
-     server does moments later -- prefer option 1.
+Fix taken: NOT option 1. The per-sector FinishLogin path fires on every gate
+jump, so moving the emit there would spam the bot on every zone-in -- the
+global ticket stage is the correct once-per-login moment. Kept the emit where
+it is and instead read the levels from the database struct that
+`g_AccountMgr->ReadDatabase()` populates just above the emit (line 288):
+`ntohl(player->Database()->info.combat_level)` (and trade/explore). Those
+fields are stored big-endian (ReadDatabase ntohl's on the way in from the
+account row), so ntohl back to host order. The `RPGInfo`-backed getters stay
+0 here because RPGInfo only loads at sector login (PlayerSaves.cpp:701) -- the
+DB struct is the source that is actually valid at the global-ticket stage.
 
-This is emit-only (no client wire byte changes), so no CLI byte-pin / plans/29
-CV gate applies -- but verify the moved emit still fires exactly once per login
-and the count is right. NOT urgent; the line is cosmetic Discord output.
+Emit-only (no client wire byte changes), so no CLI byte-pin / plans/29 CV gate.
+Fires exactly once per login (still in HandleGlobalTicketRequest); count
+unchanged.
