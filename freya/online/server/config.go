@@ -49,6 +49,10 @@ type Config struct {
 	// Treat the game server as ONLINE only if server_status.updated_at is within
 	// this many seconds. The server heartbeats that row.
 	StatusStaleSecs int // FREYA_STATUS_STALE_SECS, default 90
+
+	// AH faucet bots. When on, the AhBot account keeps the Auction House stocked
+	// with a rarity/quality/price-distributed pool of listings (see bots.go).
+	AhBotsEnabled bool // FREYA_AH_BOTS=1
 }
 
 func env(k, def string) string {
@@ -80,6 +84,7 @@ func loadConfig() Config {
 		PatcherManifestURL: env("NET7_PATCHER_MANIFEST_URL", ""),
 		PatcherDLBase:      strings.TrimRight(env("NET7_PATCHER_DL_BASE", ""), "/"),
 		StatusStaleSecs:    stale,
+		AhBotsEnabled:      env("FREYA_AH_BOTS", "") == "1",
 	}
 }
 

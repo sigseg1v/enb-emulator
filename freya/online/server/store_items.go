@@ -44,18 +44,27 @@ type itemTemplate struct {
 }
 
 // categoryToCat maps item_base.category (an item_categories id) to the SPA's
-// coarse Cat bucket. Unknown ids fall back to "component"; ores are detected by
-// name because there is no dedicated ore category id in the catalogue.
+// coarse Cat bucket (web/src/types.ts: weapon|shield|reactor|device|component|
+// ore). The catalogue ids are: 2 Shield, 6 Engine, 7 Reactor, 10 Weapon, 11
+// Device, 14 Energy Beam Weapon, 15 Missile Launcher, 16 Projectile Launcher,
+// 18 Computer, 50-54 components (Electronic/Reactor/Fabricated/Weapon/Ammo),
+// 80 Refined Resource, 81 Raw Resource, 90 Trade Good. Engine has no dedicated
+// SPA Cat, so it rides under "device" (installed ship gear). Unknown ids fall
+// back to "component".
 func categoryToCat(categoryID int, name string) string {
 	switch categoryID {
 	case 2:
 		return "shield"
 	case 7:
 		return "reactor"
-	case 11, 18, 6:
+	case 6, 11, 18:
 		return "device"
-	case 14, 15, 16:
+	case 10, 14, 15, 16:
 		return "weapon"
+	case 80, 81:
+		return "ore"
+	case 50, 51, 52, 53, 54:
+		return "component"
 	}
 	if containsFold(name, "ore") {
 		return "ore"
@@ -144,9 +153,15 @@ func (s *Store) resolveItems(ctx context.Context, ids []int) (map[int]itemTempla
 			Glyph:       glyphForCat(cat),
 			Description: description,
 			Prices:      Prices{Buy: buyPrice, Sell: sellPrice, Manufacture: manCost},
-			Vendor:      price,
-			MaxStack:    maxStack,
-			NoTrade:     noTrade != 0,
+			// Vendor is the economic base value (the SPA documents it as the
+			// "vendor sell price" and derives bid increments / open-bid / buyout
+			// from it). That is item_base.buying_price -- what an NPC vendor pays
+			// for the item -- NOT item_base.price (the inflated catalogue price,
+			// ~10x higher), which would make every AH min-bid step and deposit
+			// an order of magnitude too large.
+			Vendor:   buyPrice,
+			MaxStack: maxStack,
+			NoTrade:  noTrade != 0,
 		}}
 	}
 	return out, rows.Err()

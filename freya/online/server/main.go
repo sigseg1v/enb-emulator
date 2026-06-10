@@ -64,6 +64,11 @@ func main() {
 	// Background sweepers: expire auctions and old mail.
 	startSweepers(ctx, store)
 
+	// AH faucet bots (FREYA_AH_BOTS=1): keep the Auction House stocked.
+	if cfg.AhBotsEnabled {
+		startBots(ctx, store)
+	}
+
 	if cfg.KeepaliveEnabled {
 		// The C++ login owns the AF_UNIX recv socket during coexistence; the Go
 		// keepalive sender is not yet ported. Website status reads server_status
