@@ -1089,7 +1089,7 @@ void UDPClient::MVASKeepaliveThread()
 // in-client hook sent us over the loopback intake socket (ClientPositionShared.h).
 //
 // One transport for all three run modes (play-local / play-online / native
-// Win32): the hook sends fixed 40-byte datagrams to NET7_CLIENT_POS_PORT on
+// Win32): the hook sends fixed 40-byte datagrams to FREYA_CLIENT_POS_PORT on
 // loopback, this drains them and keeps the most recent valid one. Returns false
 // when no hook is feeding (no datagram bound/received) or the last sample has
 // gone stale (hook stopped, client closed), so the server's dead-reckoning
@@ -1111,7 +1111,7 @@ bool UDPClient::ReadClientShipPosition(float pos[3], float heading[3])
         struct sockaddr_in addr;
         memset(&addr, 0, sizeof(addr));
         addr.sin_family = AF_INET;
-        addr.sin_port   = htons(NET7_CLIENT_POS_PORT);
+        addr.sin_port   = htons(FREYA_CLIENT_POS_PORT);
         // Win32/WINE proxy: co-located with the client, bind loopback so the
         // intake is never network-reachable. Linux docker proxy: bind ANY so the
         // published-port forward delivers; compose restricts the host publish to
@@ -1139,7 +1139,7 @@ bool UDPClient::ReadClientShipPosition(float pos[3], float heading[3])
     }
 
     // Drain everything queued; keep the newest valid datagram (latest-wins).
-    Net7ClientPosDatagram dg;
+    FreyaClientPosDatagram dg;
     bool got = false;
     for (;;)
     {
@@ -1147,7 +1147,7 @@ bool UDPClient::ReadClientShipPosition(float pos[3], float heading[3])
                                NULL, NULL);
         if (n != (ssize_t) sizeof(dg))
             break;                                  // EWOULDBLOCK / short / done
-        if (dg.magic != NET7_CLIENT_POS_MAGIC || dg.valid == 0)
+        if (dg.magic != FREYA_CLIENT_POS_MAGIC || dg.valid == 0)
             continue;                               // garbage or not-in-space
         m_PosSample[0]     = dg.position[0];
         m_PosSample[1]     = dg.position[1];

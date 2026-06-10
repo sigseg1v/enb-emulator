@@ -65,7 +65,7 @@ int main(int argc, char **argv)
 
     // Suspended: the child is created but its main thread does not run until we
     // ResumeThread, giving us a window to inject before any client code (and the
-    // feed's HostIsClientExe guard / Net7ClientPosFeed_Start) executes.
+    // feed's HostIsClientExe guard / FreyaClientPosFeed_Start) executes.
     if (!CreateProcessA(NULL, cmd, NULL, NULL, FALSE,
                         CREATE_SUSPENDED, NULL, NULL, &si, &pi))
     {

@@ -8,7 +8,7 @@
 // DLL besides ClientPositionFeed.cpp -- it has NO dependency on Microsoft
 // Detours, installs NO API hooks, and contains NO hardcoded client addresses.
 // It exists only to start the in-process position publisher
-// (Net7ClientPosFeed_Start) when the DLL is loaded into client.exe, and stop it
+// (FreyaClientPosFeed_Start) when the DLL is loaded into client.exe, and stop it
 // on unload.
 //
 // Why this and not ClientDetours.dll: the legacy ClientDetours.dll links MSVC's
@@ -61,13 +61,13 @@ BOOL APIENTRY DllMain(HANDLE hModule, DWORD ul_reason_for_call, LPVOID lpReserve
                 // client.exe -- visible in the WINE console / a debugger even
                 // before the engine read is filled (when the feed sends nothing).
                 OutputDebugStringA("[FreyaPosFeed] attached to client.exe; starting MVAS position feed\n");
-                Net7ClientPosFeed_Start();   // inert until the owner seam is filled
+                FreyaClientPosFeed_Start();   // inert until the owner seam is filled
             }
             break;
 
         case DLL_PROCESS_DETACH:
             // Safe to call unconditionally: Stop() is a no-op if Start() never ran.
-            Net7ClientPosFeed_Stop();
+            FreyaClientPosFeed_Stop();
             break;
     }
     return TRUE;

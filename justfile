@@ -103,7 +103,7 @@ build-proxy-win64:
 # it (via FreyaInject.exe remote-thread LoadLibrary -- see tools/LaunchFreya) has
 # to match its bitness. This is the ONLY 32-bit artifact in the tree, hence the separate i686
 # toolchain (the proxy/launcher are 64-bit). It is a minimal DLL: just
-# PosFeedDllMain.cpp + ClientPositionFeed.cpp, no Detours, no client offsets.
+# PosFeedDllMain.cpp + ClientPositionFeed.cpp (+ ClientEngineOffsets.h), no Detours.
 #
 # Requires the i686 MinGW toolchain, which is NOT the same package as the x86-64
 # one used for the proxy:
@@ -541,9 +541,8 @@ play-local CLIENT_PATH='':
     # PB-2: build the in-client position-feed DLL so the launcher can inject it
     # (UsePositionFeed=true below). REQUIRED -- if the 32-bit MinGW toolchain is
     # missing this FAILS the launch (with the apt install line) rather than
-    # silently running a client with no feed. The feed is still inert until the
-    # owner fills ClientEngineOffsets.local.h, but the injection wiring itself is
-    # exercised every play-local.
+    # silently running a client with no feed. The engine read lives in
+    # freya/client-injection/ClientEngineOffsets.h.
     echo ">>> building position-feed DLL (required)"
     just build-posfeed-dll
 
@@ -636,8 +635,7 @@ play-online CLIENT_PATH='' HOST='':
 
     # PB-2: build the in-client position-feed DLL + injector so MVAS movement
     # works online too (same as play-local). The launcher resolves them from
-    # bin/ under the repo root (CWD). Inert until ClientEngineOffsets.local.h is
-    # filled, but the injection wiring is exercised here.
+    # bin/ under the repo root (CWD).
     echo ">>> building position-feed DLL + injector (required for online MVAS)"
     just build-posfeed-dll
 

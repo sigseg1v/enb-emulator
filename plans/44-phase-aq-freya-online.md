@@ -392,10 +392,9 @@ client.exe), so the artifacts are the SAME everywhere. Now distributed via:
       existing client installs exactly once -- needed because changing the default
       alone does NOT help machines that already wrote a settings.json (the owner's
       catch); (3) `play-online` now builds `build-posfeed-dll` and writes
-      `UsePositionFeed:true`. The offsets header (`ClientEngineOffsets.local.h`)
-      stays gitignored and is NOT committed -- it is baked into the DLL at package
-      time on the build machine; committing it would leak client memory layout
-      (CLAUDE.md disclosure rule). Launcher builds clean, 34 tests still pass.
+      `UsePositionFeed:true`. The offsets header
+      (`freya/client-injection/ClientEngineOffsets.h`) is committed and compiled
+      into the DLL. Launcher builds clean, 34 tests still pass.
 - Blast radius of `cd deploy/do && just update`: builds server/login/status-
       notifier/db-backup images + the client patch. The droplet runs
       docker-compose.PROD.yml, which references NONE of the AQ Go-online stack

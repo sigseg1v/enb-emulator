@@ -15,22 +15,19 @@
 // transport that reaches the proxy in all three run modes (including play-local,
 // where the proxy is a Linux docker process no Win32 mapping could reach).
 //
-// The engine read itself is intentionally NOT baked in here: it is build- and
-// version-specific and lives behind ReadEngineShipState(), which the project
-// owner fills for the client build in use (see ClientPositionFeed.cpp). With it
-// unfilled the producer publishes nothing and the feed stays inert -- no
-// behaviour change until the owner wires the read AND confirms it against the
-// real client (plans/29 CV-MVAS-POS).
+// The build-specific engine read lives in ClientEngineOffsets.h, behind
+// ReadEngineShipState() (see ClientPositionFeed.cpp). Confirm it against the
+// real client when changing it (plans/29 CV-MVAS-POS).
 //==============================================================================
-#ifndef _NET7_CLIENT_POSITION_FEED_H_
-#define _NET7_CLIENT_POSITION_FEED_H_
+#ifndef _FREYA_CLIENT_POSITION_FEED_H_
+#define _FREYA_CLIENT_POSITION_FEED_H_
 
 // Start the publisher thread (idempotent). Opens the loopback UDP socket and
 // spins a thread that polls ReadEngineShipState() and sends every sample. Safe
 // to call from the injected DLL's attach path; returns immediately.
-void Net7ClientPosFeed_Start();
+void FreyaClientPosFeed_Start();
 
 // Stop the publisher thread and close the socket. Call from the DLL detach.
-void Net7ClientPosFeed_Stop();
+void FreyaClientPosFeed_Stop();
 
-#endif // _NET7_CLIENT_POSITION_FEED_H_
+#endif // _FREYA_CLIENT_POSITION_FEED_H_

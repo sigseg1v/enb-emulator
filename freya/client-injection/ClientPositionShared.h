@@ -32,21 +32,21 @@
 // thruster movement).
 //
 // This header carries NO client memory layout -- only the proxy<->hook exchange
-// format. The producer keeps engine offsets to itself (ClientEngineOffsets.local.h).
-#ifndef _NET7_CLIENT_POSITION_SHARED_H_
-#define _NET7_CLIENT_POSITION_SHARED_H_
+// format. The producer keeps engine offsets to itself (ClientEngineOffsets.h).
+#ifndef _FREYA_CLIENT_POSITION_SHARED_H_
+#define _FREYA_CLIENT_POSITION_SHARED_H_
 
 #include <cstdint>
 
 // Loopback intake port the proxy binds and the hook sends to. UDP. The proxy
 // binds 127.0.0.1 on the Win32/WINE build (co-located proxy) and INADDR_ANY on
 // the Linux-native docker build, where docker publishes it back to host
-// loopback only (127.0.0.1:NET7_CLIENT_POS_PORT) -- never network-reachable.
-#define NET7_CLIENT_POS_PORT 3807
+// loopback only (127.0.0.1:FREYA_CLIENT_POS_PORT) -- never network-reachable.
+#define FREYA_CLIENT_POS_PORT 3807
 
 // Stamped in every datagram; the consumer drops any datagram whose magic does
 // not match, so unrelated loopback traffic can never feed garbage positions.
-#define NET7_CLIENT_POS_MAGIC 0x4E37504Fu  // 'N7PO'
+#define FREYA_CLIENT_POS_MAGIC 0x4E37504Fu  // 'N7PO'
 
 // One position sample, sent verbatim as the UDP payload. All fields are 4-byte
 // aligned and the total is a multiple of 4, so the struct is naturally packed
@@ -54,9 +54,9 @@
 // both LE) -- no #pragma pack needed. Datagrams are atomic at the socket layer,
 // so there is no torn-read concern and no seqlock: the consumer simply keeps the
 // most recent valid datagram it has drained.
-struct Net7ClientPosDatagram
+struct FreyaClientPosDatagram
 {
-    uint32_t magic;        // == NET7_CLIENT_POS_MAGIC
+    uint32_t magic;        // == FREYA_CLIENT_POS_MAGIC
     uint32_t seq;          // producer-monotonic; consumer keeps the latest seq
     float    position[3];  // engine ship position    x, y, z
     float    heading[3];   // engine ship orientation x, y, z
@@ -66,8 +66,8 @@ struct Net7ClientPosDatagram
 };
 
 #ifdef __cplusplus
-static_assert(sizeof(Net7ClientPosDatagram) == 40,
-              "Net7ClientPosDatagram must stay a fixed 40-byte wire struct");
+static_assert(sizeof(FreyaClientPosDatagram) == 40,
+              "FreyaClientPosDatagram must stay a fixed 40-byte wire struct");
 #endif
 
-#endif // _NET7_CLIENT_POSITION_SHARED_H_
+#endif // _FREYA_CLIENT_POSITION_SHARED_H_

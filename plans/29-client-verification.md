@@ -831,7 +831,7 @@ format & byte order", Trap 2).
   remote-thread inject -- `bin/FreyaInject.exe`, NOT `AppInit_DLLs` which WINE does
   not implement)
   reads the engine ship position/orientation in-process and sends it to the proxy
-  as a fixed 40-byte UDP datagram on loopback port `NET7_CLIENT_POS_PORT`=3807
+  as a fixed 40-byte UDP datagram on loopback port `FREYA_CLIENT_POS_PORT`=3807
   (`freya/client-injection/ClientPositionShared.h`); the proxy consumer
   (`UDPClient::ReadClientShipPosition` -> `SendPositionIfChanged`,
   `proxy/UDPClient_linux.cpp`) binds 3807, drains the latest sample, and streams
@@ -851,17 +851,15 @@ format & byte order", Trap 2).
   `live_mvas_position_1004.hex`, against the live Combat capture) and that the
   server accepts a direct feed (task #65). It does NOT prove the in-client engine
   read is correct -- there is no headless engine to read from. The engine read
-  (`ReadEngineShipState` in `ClientPositionFeed.cpp`) is an OWNER SEAM that returns
-  false until the owner wires it for the client build in use; until then the feed
-  is inert and server behaviour is unchanged.
+  (`ReadEngineShipState` in `ClientPositionFeed.cpp`, backed by
+  `FreyaReadEngineShipState_Local` in `freya/client-injection/ClientEngineOffsets.h`)
+  is filled for the current client build; this CV entry is what proves it
+  actually reads the right transform against the real client.
 - **Setup (owner)**:
-  1. Copy `freya/client-injection/ClientEngineOffsets.local.h.example` to
-     `ClientEngineOffsets.local.h` (gitignored) and fill
-     `Net7ReadEngineShipState_Local()` for the client build (read ship world
-     position x/y/z + orientation x/y/z + current sector id from the engine
-     in-process; return true only for a live in-space sample). The seam in
-     `ClientPositionFeed.cpp` includes it automatically via `__has_include`.
-     Build-specific addresses stay in that local-only file -- never committed.
+  1. The engine read is already in `freya/client-injection/ClientEngineOffsets.h`
+     (committed, compiled into the DLL) -- it reads ship world position x/y/z +
+     orientation x/y/z in-process and returns true only for a live in-space
+     sample. If the client build changes, update the addresses there.
   2. Build the feed DLL: `just build-posfeed-dll` -> `bin/FreyaPosFeed.dll`. This
      needs the **i686** MinGW toolchain (`sudo apt install gcc-mingw-w64-i686-posix
      g++-mingw-w64-i686-posix`) because `client.exe` is PE32/i386 and the injected

@@ -19,9 +19,9 @@ below is unclear.
   was the dead end last session.)
 - Proxy consumer binds loopback `udp/3807`, drains the latest sample, and streams
   `0x1004` to MVAS `3806`. No server change, no wire change.
-- The engine read (`Net7ReadEngineShipState_Local` in the gitignored
-  `freya/client-injection/ClientEngineOffsets.local.h`) still returns false -> feed inert.
-  This is the one remaining gap.
+- The engine read (`FreyaReadEngineShipState_Local` in
+  `freya/client-injection/ClientEngineOffsets.h`, committed) is filled. The one
+  remaining gap is confirming it against the real client (CV-MVAS-POS).
 
 ## Step 0 -- confirm the DLL actually loads (do this FIRST, before any offset work)
 
@@ -41,10 +41,9 @@ failure -- run the injector leg with stderr visible).
 
 ## Step 1 -- the engine read is ALREADY FILLED (verify, don't author)
 
-`freya/client-injection/ClientEngineOffsets.local.h` already exists on this machine
-(gitignored, so it is NOT in the repo and will not survive a fresh clone -- it
-lives only here). It was filled 2026-06-08 from the historical feed recipe, so
-there is normally nothing to author. It:
+`freya/client-injection/ClientEngineOffsets.h` is committed. It was filled
+2026-06-08 from the historical feed recipe, so there is normally nothing to
+author. It:
 
 - Patches five client code sites once so the running client stashes its live ship
   transform pointer + GameID into a fixed `.data` scratch slot, then reads

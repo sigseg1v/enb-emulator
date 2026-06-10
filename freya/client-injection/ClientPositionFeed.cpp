@@ -6,10 +6,10 @@
 //
 // In-client producer for the MVAS position feed (PB-2). See ClientPositionFeed.h
 // for the design. This file owns the loopback-datagram send and the polling
-// thread; the actual engine read is isolated in ReadEngineShipState() so that
-// no build-specific client internals live in version control.
+// thread; the actual engine read is isolated in ReadEngineShipState(), backed by
+// the build-specific addresses in ClientEngineOffsets.h.
 //
-// Transport: a fixed 40-byte UDP datagram to NET7_CLIENT_POS_PORT on loopback,
+// Transport: a fixed 40-byte UDP datagram to FREYA_CLIENT_POS_PORT on loopback,
 // ~10x/sec. The proxy binds that port and streams the latest sample to the
 // server as 0x1004. A loopback datagram is the one transport that works in all
 // three run modes -- crucially play-local, where the proxy is a Linux docker
@@ -29,39 +29,19 @@
 #include "ClientPositionShared.h"
 
 //------------------------------------------------------------------------------
-// ReadEngineShipState -- OWNER SEAM.
+// ReadEngineShipState.
 //
 // Reads the ship's current world position (x,y,z) and orientation (x,y,z) from
 // the running engine, returning true once a live in-space sample exists and
 // false whenever there is no valid position yet (loading, docked, char select),
-// so the publisher skips that frame.
-//
-// The build-specific engine read is NOT baked in here -- it lives in a local,
-// gitignored header so no client addresses or memory layout ever enter version
-// control (CLAUDE.md). Copy ClientEngineOffsets.local.h.example to
-// ClientEngineOffsets.local.h and fill Net7ReadEngineShipState_Local() for the
-// client build in use; this seam picks it up automatically. With no local header
-// present the feed publishes nothing, the proxy reads nothing, and server
-// behaviour is unchanged. Confirm against the real client before relying on it
-// (plans/29 CV-MVAS-POS).
+// so the publisher skips that frame. The build-specific engine read lives in
+// ClientEngineOffsets.h.
 //------------------------------------------------------------------------------
-#ifdef __has_include
-#  if __has_include("ClientEngineOffsets.local.h")
-#    include "ClientEngineOffsets.local.h"
-#    define NET7_HAVE_LOCAL_ENGINE_OFFSETS 1
-#  endif
-#endif
+#include "ClientEngineOffsets.h"
 
 static bool ReadEngineShipState(float pos[3], float heading[3], unsigned int *sector)
 {
-#ifdef NET7_HAVE_LOCAL_ENGINE_OFFSETS
-    return Net7ReadEngineShipState_Local(pos, heading, sector);
-#else
-    (void) pos;
-    (void) heading;
-    (void) sector;
-    return false; // OWNER SEAM: no local header -> feed inert (see header)
-#endif
+    return FreyaReadEngineShipState_Local(pos, heading, sector);
 }
 
 //------------------------------------------------------------------------------
@@ -80,8 +60,8 @@ static void SendSample(const float pos[3], const float heading[3], unsigned int 
 {
     if (g_Sock == INVALID_SOCKET) return;
 
-    Net7ClientPosDatagram dg;
-    dg.magic       = NET7_CLIENT_POS_MAGIC;
+    FreyaClientPosDatagram dg;
+    dg.magic       = FREYA_CLIENT_POS_MAGIC;
     dg.seq         = ++g_Seq;
     memcpy(dg.position, pos, sizeof(float) * 3);
     memcpy(dg.heading, heading, sizeof(float) * 3);
@@ -110,7 +90,7 @@ static unsigned __stdcall FeedThread(void *)
     return 0;
 }
 
-void Net7ClientPosFeed_Start()
+void FreyaClientPosFeed_Start()
 {
     if (g_Run) return;
 
@@ -124,7 +104,7 @@ void Net7ClientPosFeed_Start()
 
     memset(&g_ProxyAddr, 0, sizeof(g_ProxyAddr));
     g_ProxyAddr.sin_family      = AF_INET;
-    g_ProxyAddr.sin_port        = htons(NET7_CLIENT_POS_PORT);
+    g_ProxyAddr.sin_port        = htons(FREYA_CLIENT_POS_PORT);
     g_ProxyAddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);  // 127.0.0.1
 
     g_Run = true;
@@ -138,7 +118,7 @@ void Net7ClientPosFeed_Start()
     }
 }
 
-void Net7ClientPosFeed_Stop()
+void FreyaClientPosFeed_Stop()
 {
     g_Run = false;
     if (g_Thread)

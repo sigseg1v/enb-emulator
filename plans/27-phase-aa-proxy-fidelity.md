@@ -418,7 +418,7 @@ snap back).
   (pos xyz, heading xyz) + a trailing int32 the server ignores.
 - [x] **In-client producer** (`freya/client-injection/ClientPositionFeed.{h,cpp}`):
       sends engine ship state to the proxy as a fixed 40-byte loopback UDP
-      datagram on `NET7_CLIENT_POS_PORT`=3807 (`freya/client-injection/ClientPositionShared.h`),
+      datagram on `FREYA_CLIENT_POS_PORT`=3807 (`freya/client-injection/ClientPositionShared.h`),
       ~10x/sec. Engine read is an OWNER SEAM (`ReadEngineShipState`, returns false
       until filled -> feed inert). Ships as a minimal standalone 32-bit DLL
       `bin/FreyaPosFeed.dll` (`PosFeedDllMain.cpp` guarded DllMain, only inside
