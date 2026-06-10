@@ -1020,6 +1020,18 @@ test:
     ctest --test-dir build/tests --output-on-failure
     -dotnet test tools/FreyaTools.slnx --nologo
 
+# Freya Online backend integration tests against the live two-DB Postgres.
+# Brings the docker postgres up (host localhost:5434) and runs the Go suite
+# with FREYA_TEST_DB set so the DB-gated tests actually execute. Each test
+# seeds + wipes its own reserved id band, so it is safe against a running stack.
+test-online-it:
+    docker compose up -d postgres schema-init
+    cd freya/online/server && FREYA_TEST_DB=1 FREYA_TEST_DB_HOST=localhost:{{ENB_DB_PORT}} go test ./...
+
+# Freya Online web SPA unit tests (rarity/format math, real-vs-mock API dispatch).
+test-online-web:
+    cd freya/online/web && npm test
+
 # Live handshake + replay over TCP against the FreyaProxy. Reuses a
 # proxy already listening on 127.0.0.1:3801 if one exists (e.g. you ran
 # `just dev`); otherwise spins up a standalone one. Skips mysql + server

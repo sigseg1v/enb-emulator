@@ -264,7 +264,9 @@ C++ source directly). The Go server must reproduce:
       hand-picked rarities. Server must mirror this.
 - [x] API client (`src/api.ts`): fetch + `credentials:'include'`, VITE_MOCK
       default-on so the SPA renders standalone until the Go backend lands.
-- [ ] Wire to the real Go JSON API (flip VITE_MOCK=0) -- needs AQ-1/2/3.
+- [x] Wire to the real Go JSON API -- USE_MOCK is now `VITE_MOCK==='1'`
+      (real default, mock opt-in), api.ts/Dockerfile/README updated. AQ-1/2/3
+      are live, so the SPA shows real data by default (2026-06-09).
       Backend now live; flip + browser-verify the real login->bootstrap path.
 - [x] Serve built dist/ from the Go binary at the index (spa.go static serve +
       SPA fallback; Dockerfile bakes web/dist -> /app/web). RUNTIME-VERIFIED:
@@ -272,6 +274,24 @@ C++ source directly). The Go server must reproduce:
 - Note: `npm audit` flags the esbuild dev-server advisory (GHSA-67mh-4wv8-2f99),
   dev-server only, NOT in the shipped static build; fix is a breaking vite@8
   bump -- deferred deliberately.
+
+### AQ-9 Test suites (2026-06-09)
+- [x] Go backend integration tests against the live two-DB Postgres
+      (`freya/online/server/*_integration_test.go` + `itest_*_test.go`),
+      gated on `FREYA_TEST_DB` so plain `go test ./...` runs only unit tests.
+      Cover: Argon2id auth + accountID, liveCharacters/credit-sum, PostListing
+      10% deposit debit + vault removal, the FOR-UPDATE offline-guard (store +
+      HTTP 409), bid prior-bidder refund, buyout item/proceeds delivery, mail
+      loot credit. API-level test drives the real `session.LoadAndSave(routes())`
+      handler over TLS httptest with a cookie jar: login(bad)->401,
+      login(good)->200 + cookie, bootstrap->real characters/credits/vault.
+      Each test seeds + wipes a reserved id band (testIDBase). 17 tests pass.
+- [x] Web SPA unit tests (`freya/online/web/src/**/*.test.ts`, vitest): rarity
+      tier+level-cap table (mirrors server/rarity.go), bid/buyout/min-increment
+      math, and the real-vs-mock api.ts dispatch (default GETs/POSTs with
+      `credentials:'include'`; VITE_MOCK=1 serves mock without fetch). 16 tests.
+- [x] justfile: `test-online-it` (docker postgres up + FREYA_TEST_DB go test)
+      and `test-online-web` (npm test).
 
 ### AQ-6 In-game notify
 - [ ] On player login, if unread mail: private system chat message with the
