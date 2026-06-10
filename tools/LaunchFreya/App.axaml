@@ -1,30 +1,121 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="LaunchFreya.App"
-             RequestedThemeVariant="Light">
+             RequestedThemeVariant="Dark">
 
   <Application.Styles>
-    <!-- enb-theme: full XAML export from the Avalonia Theme Editor web
-         app, source palette ~/Documents/enb-theme. All 25-ish slots
-         (Base*, Alt*, Chrome*, List*, RegionColor) are explicit so the
-         shade ramps Fluent's control templates consume don't fall back
-         to defaults. -->
+    <!-- Freya Online theme: the launcher mirrors the website's look
+         (freya/online/web/src/styles/tokens.css): deep-space blue base,
+         thin cyan hairlines, amber warm accent. The website expresses its
+         palette in oklch(); these are the sRGB-hex equivalents Avalonia
+         parses. Single Dark variant only (RequestedThemeVariant="Dark"),
+         so the Light slots are left at sensible defaults. -->
     <FluentTheme>
       <FluentTheme.Palettes>
-        <ColorPaletteResources x:Key="Light" Accent="#ff5d00cf" AltHigh="White" AltLow="White" AltMedium="White" AltMediumHigh="White" AltMediumLow="White" BaseHigh="Black" BaseLow="#ff8e8cd8" BaseMedium="#ff4e54a3" BaseMediumHigh="#ff242f7f" BaseMediumLow="#ff394291" ChromeAltLow="#ff242f7f" ChromeBlackHigh="Black" ChromeBlackLow="#ff8e8cd8" ChromeBlackMedium="#ff242f7f" ChromeBlackMediumLow="#ff4e54a3" ChromeDisabledHigh="#ff8e8cd8" ChromeDisabledLow="#ff4e54a3" ChromeGray="#ff394291" ChromeHigh="#ff8e8cd8" ChromeLow="#ffd4d3fc" ChromeMedium="#ffc6c5f5" ChromeMediumLow="#ffd4d3fc" ChromeWhite="White" ListLow="#ffc6c5f5" ListMedium="#ff8e8cd8" RegionColor="#fff9ffff" />
-        <ColorPaletteResources x:Key="Dark"  Accent="#ff5d00cf" AltHigh="Black" AltLow="Black" AltMedium="Black" AltMediumHigh="Black" AltMediumLow="Black" BaseHigh="White" BaseLow="#ff8e8cd8" BaseMedium="#ffc6c5f5" BaseMediumHigh="#ffd4d3fc" BaseMediumLow="#ffaaa8e6" ChromeAltLow="#ffd4d3fc" ChromeBlackHigh="Black" ChromeBlackLow="#ffd4d3fc" ChromeBlackMedium="Black" ChromeBlackMediumLow="Black" ChromeDisabledHigh="#ff8e8cd8" ChromeDisabledLow="#ffc6c5f5" ChromeGray="#ffb8b7ee" ChromeHigh="#ffb8b7ee" ChromeLow="#ff394291" ChromeMedium="#ff4e54a3" ChromeMediumLow="#ff7979c6" ChromeWhite="White" ListLow="#ff4e54a3" ListMedium="#ff8e8cd8" RegionColor="#ff333230" />
+        <ColorPaletteResources x:Key="Dark"
+            Accent="#FF43DBEA"
+            AltHigh="Black" AltLow="Black" AltMedium="Black" AltMediumHigh="Black" AltMediumLow="Black"
+            BaseHigh="#FFE7ECF0" BaseMediumHigh="#FFC2C9D4" BaseMedium="#FFA2ACB6"
+            BaseMediumLow="#FF6E7682" BaseLow="#FF44586B"
+            ChromeAltLow="#FFE7ECF0" ChromeBlackHigh="Black" ChromeBlackLow="#FFD4DBE4"
+            ChromeBlackMedium="Black" ChromeBlackMediumLow="Black"
+            ChromeDisabledHigh="#FF152130" ChromeDisabledLow="#FF6E7682"
+            ChromeGray="#FF59758D" ChromeHigh="#FF59758D" ChromeLow="#FF0E1825"
+            ChromeMedium="#FF152130" ChromeMediumLow="#FF1B2738" ChromeWhite="White"
+            ListLow="#FF0E1825" ListMedium="#FF152130" RegionColor="#FF040811" />
+        <ColorPaletteResources x:Key="Light"
+            Accent="#FF1A8FA5" AltHigh="White" AltLow="White" AltMedium="White"
+            AltMediumHigh="White" AltMediumLow="White" BaseHigh="Black" BaseLow="#ff8e8cd8"
+            BaseMedium="#ff4e54a3" BaseMediumHigh="#ff242f7f" BaseMediumLow="#ff394291"
+            ChromeAltLow="#ff242f7f" ChromeBlackHigh="Black" ChromeBlackLow="#ff8e8cd8"
+            ChromeBlackMedium="#ff242f7f" ChromeBlackMediumLow="#ff4e54a3"
+            ChromeDisabledHigh="#ff8e8cd8" ChromeDisabledLow="#ff4e54a3" ChromeGray="#ff394291"
+            ChromeHigh="#ff8e8cd8" ChromeLow="#ffd4d3fc" ChromeMedium="#ffc6c5f5"
+            ChromeMediumLow="#ffd4d3fc" ChromeWhite="White" ListLow="#ffc6c5f5"
+            ListMedium="#ff8e8cd8" RegionColor="#fff9ffff" />
       </FluentTheme.Palettes>
     </FluentTheme>
+
+    <!-- ===== Freya component styles (mirror app.css) ===== -->
+
+    <!-- Hairline "HUD" panel: thin line border, subtle top-highlight
+         gradient over the panel fill, soft drop shadow (hud-panel). -->
+    <Style Selector="Border.panel">
+      <Setter Property="BorderBrush" Value="{StaticResource FreyaLineBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="5" />
+      <Setter Property="Padding" Value="10" />
+      <Setter Property="BoxShadow" Value="0 2 24 0 #73000000" />
+      <Setter Property="Background">
+        <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+          <GradientStop Offset="0" Color="#0DFFFFFF" />
+          <GradientStop Offset="1" Color="#10000000" />
+        </LinearGradientBrush>
+      </Setter>
+    </Style>
+
+    <!-- Field labels: dimmed, like the website srv labels / form captions. -->
+    <Style Selector="TextBlock.label">
+      <Setter Property="Foreground" Value="{StaticResource FreyaTextDimBrush}" />
+    </Style>
+
+    <!-- Wordmark main glyphs: light, geometric, wide-tracked (Michroma stand-in). -->
+    <Style Selector="TextBlock.wordmark">
+      <Setter Property="Foreground" Value="{StaticResource FreyaTextBrush}" />
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="LetterSpacing" Value="6" />
+    </Style>
+
+    <!-- Wordmark subtitle: accent, very wide tracking (wordmark sub). -->
+    <Style Selector="TextBlock.wordmarkSub">
+      <Setter Property="Foreground" Value="{StaticResource FreyaAccentBrush}" />
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="LetterSpacing" Value="9" />
+      <Setter Property="Opacity" Value="0.85" />
+    </Style>
+
+    <!-- Primary (Play) button: dark glyphs on the accent fill, plus an accent
+         glow (website btn primary). Fluent's Button.accent already paints the
+         accent background; we override the foreground to dark for contrast and
+         add the glow + wider tracking. -->
+    <Style Selector="Button.accent">
+      <Setter Property="Foreground" Value="#FF051018" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <!-- Glow lives on the inner border of the accent button template so it
+         renders behind the cyan fill (Button itself has no BoxShadow). -->
+    <Style Selector="Button.accent /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="BoxShadow" Value="0 0 18 0 #5943DBEA" />
+    </Style>
   </Application.Styles>
 
   <Application.Resources>
     <ResourceDictionary>
+      <!-- Palette brushes shared by the styles above and MainWindow.axaml.
+           Hex equivalents of the website's oklch tokens. -->
+      <SolidColorBrush x:Key="FreyaVoidBrush"      Color="#FF040811" />
+      <SolidColorBrush x:Key="FreyaVoid2Brush"     Color="#FF030610" />
+      <SolidColorBrush x:Key="FreyaPanelBrush"     Color="#FF09111C" />
+      <SolidColorBrush x:Key="FreyaPanel2Brush"    Color="#FF0E1825" />
+      <SolidColorBrush x:Key="FreyaElevatedBrush"  Color="#FF152130" />
+      <SolidColorBrush x:Key="FreyaInputBrush"     Color="#FF060C16" />
+      <SolidColorBrush x:Key="FreyaLineBrush"      Color="#4D44586B" />
+      <SolidColorBrush x:Key="FreyaLineStrongBrush" Color="#8C59758D" />
+      <SolidColorBrush x:Key="FreyaTextBrush"      Color="#FFE7ECF0" />
+      <SolidColorBrush x:Key="FreyaTextDimBrush"   Color="#FFA2ACB6" />
+      <SolidColorBrush x:Key="FreyaTextFaintBrush" Color="#FF6E7682" />
+      <SolidColorBrush x:Key="FreyaAccentBrush"    Color="#FF43DBEA" />
+      <SolidColorBrush x:Key="FreyaAccentDimBrush" Color="#FF3595A4" />
+      <SolidColorBrush x:Key="FreyaWarmBrush"      Color="#FFEFB05C" />
+      <SolidColorBrush x:Key="FreyaOkBrush"        Color="#FF5FD37F" />
+      <SolidColorBrush x:Key="FreyaDangerBrush"    Color="#FFEC5C50" />
+
       <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Dark">
+          <SolidColorBrush x:Key="SystemRegionBrush" Color="#FF040811" />
+        </ResourceDictionary>
         <ResourceDictionary x:Key="Light">
           <SolidColorBrush x:Key="SystemRegionBrush" Color="#f9ffff" />
-        </ResourceDictionary>
-        <ResourceDictionary x:Key="Dark">
-          <SolidColorBrush x:Key="SystemRegionBrush" Color="#333230" />
         </ResourceDictionary>
       </ResourceDictionary.ThemeDictionaries>
     </ResourceDictionary>

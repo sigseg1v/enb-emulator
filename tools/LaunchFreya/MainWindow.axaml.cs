@@ -7,6 +7,7 @@ using System.Text;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using LaunchFreya.Config;
@@ -59,6 +60,27 @@ namespace LaunchFreya
         DispatcherTimer _statusTimer;
         bool _clientRunning;
         static readonly TimeSpan StatusRefreshInterval = TimeSpan.FromSeconds(10);
+
+        // Liveness-label colours, matched to the website's status dots
+        // (freya/online/web/src/styles/app.css: --ok / --danger / --warm / --text-dim).
+        static readonly IBrush StatusOkBrush     = new SolidColorBrush(Color.Parse("#FF5FD37F"));
+        static readonly IBrush StatusDangerBrush = new SolidColorBrush(Color.Parse("#FFEC5C50"));
+        static readonly IBrush StatusWarmBrush   = new SolidColorBrush(Color.Parse("#FFEFB05C"));
+        static readonly IBrush StatusDimBrush    = new SolidColorBrush(Color.Parse("#FFA2ACB6"));
+
+        // Set the server-status label text and colour it to match: green when
+        // reachable/ready, red when offline, amber while checking or when an
+        // update is pending. Callers have already gen-guarded the write.
+        void SetServerStatus(string text)
+        {
+            c_ServerStatus.Text = text;
+            string t = (text ?? "").ToUpperInvariant();
+            c_ServerStatus.Foreground =
+                t.Length == 0 ? StatusDimBrush :
+                (t.Contains("ONLINE") || t.Contains("READY")) ? StatusOkBrush :
+                t.Contains("OFFLINE") ? StatusDangerBrush :
+                StatusWarmBrush; // CHECKING / UPDATE / UPDATE REQUIRED
+        }
 
         public MainWindow()
         {
@@ -347,7 +369,7 @@ namespace LaunchFreya
             if (!TryGetSelectedHost(out var emu, out var host))
             {
                 _statusProbeGen++;
-                c_ServerStatus.Text = "";
+                SetServerStatus("");
                 GatePlay(false);
                 return;
             }
@@ -357,14 +379,14 @@ namespace LaunchFreya
             if (emu.IsSinglePlayer)
             {
                 _statusProbeGen++;
-                c_ServerStatus.Text = "READY";
+                SetServerStatus("READY");
                 c_Button_Check.IsEnabled = false;
                 GatePlay(true);
             }
             else
             {
                 int gen = ++_statusProbeGen;
-                c_ServerStatus.Text = "CHECKING";
+                SetServerStatus("CHECKING");
                 c_Button_Check.IsEnabled = true;
                 GatePlay(false);
                 _ = KickServerProbe(NormalizeHost(host.Hostname), GetProbePort(host), gen);
@@ -394,7 +416,7 @@ namespace LaunchFreya
             {
                 Dispatcher.UIThread.Post(() =>
                 {
-                    if (gen == _statusProbeGen) c_ServerStatus.Text = text;
+                    if (gen == _statusProbeGen) SetServerStatus(text);
                 });
             }
 
@@ -453,7 +475,7 @@ namespace LaunchFreya
         async Task RunUpdateProbeAsync(string host, int port, int gen, bool auto = false)
         {
             void WriteStatus(string text)
-                => Dispatcher.UIThread.Post(() => { if (gen == _statusProbeGen) c_ServerStatus.Text = text; });
+                => Dispatcher.UIThread.Post(() => { if (gen == _statusProbeGen) SetServerStatus(text); });
             void SetPlay(bool enabled)
                 => Dispatcher.UIThread.Post(() => { if (gen == _statusProbeGen) c_Button_Play.IsEnabled = enabled; });
 
@@ -509,7 +531,7 @@ namespace LaunchFreya
             {
                 if (gen == _statusProbeGen)
                 {
-                    c_ServerStatus.Text = "UPDATE REQUIRED";
+                    SetServerStatus("UPDATE REQUIRED");
                     c_Button_Play.IsEnabled = false;
                 }
                 return;
