@@ -62,9 +62,15 @@ export interface VaultSlot {
   quality: number | null;
 }
 
+// `index` is the attachment's stable position within the message as the server
+// orders it (ORDER BY id); it is what /api/mail/{id}/loot expects, NOT the
+// client array position. `looted` marks an already-claimed square -- the server
+// keeps looted squares in place (it does not compact), so they keep coming back
+// on reload and must render spent and be skipped. Both are optional so the
+// standalone mock (which has neither concept) still satisfies the type.
 export type Attachment =
-  | { type: 'credits'; amount: number }
-  | { type: 'item'; item: Item; stack: number; quality: number | null };
+  | { type: 'credits'; amount: number; index?: number; looted?: boolean }
+  | { type: 'item'; item: Item; stack: number; quality: number | null; index?: number; looted?: boolean };
 
 export interface Mail {
   id: string;

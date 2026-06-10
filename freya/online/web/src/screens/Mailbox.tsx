@@ -27,26 +27,33 @@ function MailRow({ mail, active, onClick }: { mail: Mail; active: boolean; onCli
 }
 
 function AttachmentSlot({ att, onLoot }: { att: Attachment; onLoot: () => void }) {
+  // Spent squares persist in the list (the server never compacts them); render
+  // them dimmed and inert so they can't be re-clicked into an "already looted"
+  // error.
+  const spent = att.looted === true;
+  const spentStyle: CSSProperties = spent ? { opacity: 0.4, pointerEvents: 'none' } : {};
+  const handle = spent ? undefined : onLoot;
+  const label = spent ? 'Looted' : 'Loot';
   if (att.type === 'credits') {
     return (
-      <div className="aslot" onClick={onLoot}>
+      <div className="aslot" style={spentStyle} onClick={handle}>
         <div className="aslot__sq" style={{ '--rcolor': 'var(--warm)', '--rglow': 'oklch(0.80 0.125 72 / 0.3)' } as Vars}>
           <span className="aslot__cr">cr</span>
         </div>
         <div className="aslot__name"><Credits value={att.amount} /></div>
-        <div className="aslot__loot">Loot</div>
+        <div className="aslot__loot">{label}</div>
       </div>
     );
   }
   const r = RARITY[att.item.rarity];
   return (
-    <div className="aslot" onClick={onLoot}>
+    <div className="aslot" style={spentStyle} onClick={handle}>
       <div className="aslot__sq" style={{ '--rcolor': r.color, '--rglow': r.glow } as Vars}>
         <span className="icon__glyph">{att.item.glyph}</span>
         {att.stack > 1 && <span className="aslot__qty">{att.stack}</span>}
       </div>
       <div className="aslot__name" style={{ color: r.color }}>{att.item.name}</div>
-      <div className="aslot__loot">Loot</div>
+      <div className="aslot__loot">{label}</div>
     </div>
   );
 }
@@ -80,11 +87,15 @@ export function Mailbox({
 
   // Looting moves real credits/items server-side, so we await the API and then
   // reload from the backend rather than mutating local state optimistically.
-  async function lootIndex(mailId: string, idx: number, att: Attachment) {
+  // The loot endpoint keys on the server's stable attachment index (att.index),
+  // NOT the client array position -- the two only coincide when nothing is
+  // looted, because the server keeps spent squares in place. Fall back to the
+  // array index for the mock, which carries neither field.
+  async function lootIndex(mailId: string, arrIdx: number, att: Attachment) {
     if (busy) return;
     setBusy(true);
     try {
-      await api.lootAttachment(mailId, idx);
+      await api.lootAttachment(mailId, att.index ?? arrIdx);
       toast(`Looted ${lootLabel(att)}`);
       await reload();
     } catch (err) {
@@ -98,11 +109,15 @@ export function Mailbox({
     if (busy) return;
     setBusy(true);
     try {
-      // Always loot index 0: each successful loot removes that square, so the
-      // next remaining attachment shifts down to 0 server-side.
-      const n = m.attachments.length;
-      for (let i = 0; i < n; i++) await api.lootAttachment(m.id, 0);
-      toast(`Looted ${n} attachment${n > 1 ? 's' : ''}`);
+      // Loot every still-unclaimed square by its real server index. The server
+      // marks looted in place (no compaction), so indices stay valid as we go
+      // and already-looted squares must be skipped -- re-looting one is a 409.
+      const pending = m.attachments
+        .map((att, i) => ({ att, idx: att.index ?? i }))
+        .filter(({ att }) => att.looted !== true);
+      for (const { idx } of pending) await api.lootAttachment(m.id, idx);
+      const n = pending.length;
+      toast(`Looted ${n} attachment${n === 1 ? '' : 's'}`);
       await reload();
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Loot failed');
