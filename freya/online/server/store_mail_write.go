@@ -190,6 +190,12 @@ func (s *Store) LootAttachment(ctx context.Context, accountID int64, messageID i
 		}
 	}
 
+	// Offline-guard: looting adds credits/items directly to the character's
+	// wallet/vault, which the server owns in memory while it is online.
+	if err := assertAvatarOffline(ctx, tx, lootAvatar); err != nil {
+		return err
+	}
+
 	if a.kind == 1 {
 		if a.credits != nil && *a.credits > 0 {
 			_, err = tx.Exec(ctx,

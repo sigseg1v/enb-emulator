@@ -222,6 +222,8 @@ func mutationError(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusPaymentRequired, map[string]string{"error": "insufficient credits"})
 	case errors.Is(err, errOwnListing):
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "cannot bid on your own listing"})
+	case errors.Is(err, errCharacterOnline):
+		writeJSON(w, http.StatusConflict, map[string]string{"error": errCharacterOnline.Error()})
 	case errors.Is(err, errListingGone):
 		writeJSON(w, http.StatusGone, map[string]string{"error": "listing no longer available"})
 	case errors.Is(err, errNoBuyout):

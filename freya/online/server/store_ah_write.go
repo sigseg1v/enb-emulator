@@ -33,15 +33,53 @@ import (
 )
 
 var (
-	errListingGone    = errors.New("listing not available")
-	errOwnListing     = errors.New("cannot bid on your own listing")
-	errNoBuyout       = errors.New("listing has no buyout")
-	errInsufficient   = errors.New("insufficient credits")
-	errNoCharacter    = errors.New("no live character on this account")
-	errItemNotFound   = errors.New("item not found in storage")
-	errItemUntradable = errors.New("item is not tradable")
-	errBadInput       = errors.New("invalid listing parameters")
+	errListingGone     = errors.New("listing not available")
+	errOwnListing      = errors.New("cannot bid on your own listing")
+	errNoBuyout        = errors.New("listing has no buyout")
+	errInsufficient    = errors.New("insufficient credits")
+	errNoCharacter     = errors.New("no live character on this account")
+	errItemNotFound    = errors.New("item not found in storage")
+	errItemUntradable  = errors.New("item is not tradable")
+	errBadInput        = errors.New("invalid listing parameters")
+	errCharacterOnline = errors.New("character is online; log it out to manage its credits, items, or mail")
 )
+
+// assertAvatarOffline is the offline-guard (plans/44, AQ open question #1). The
+// AH/mail tables are shared with the live game, but the game server is a SECOND
+// authority: while a character is in-game the server holds that character's
+// credits and vault in memory and writes them back to the DB on logout (and on
+// boot it force-resets stale-online rows, ServerManager.cpp). So a website debit
+// or vault mutation applied to an ONLINE character is a lost update -- the
+// server's in-memory copy overwrites it on save, handing the player a free item
+// or a double-spend.
+//
+// The server's own definition of online is last_login > last_logout
+// (AccountManager.h). We SELECT ... FOR UPDATE the avatar_info row so this check
+// serializes against the server's last_login UPDATE at login: if a login is
+// in-flight we block until it commits, then read the fresh (online) state and
+// refuse; if we win the lock the character cannot transition to online until our
+// transaction commits. Caller must hold the tx.
+//
+// Mailbox DELIVERY (deliverItem/deliverCredits) is deliberately NOT guarded: it
+// writes only to the mailbox tables, which the game does not hold in memory, so
+// a sale can settle to an online winner's mailbox and be looted later (looting
+// IS guarded, because it touches the character's vault/wallet).
+func assertAvatarOffline(ctx context.Context, tx pgx.Tx, avatarID int64) error {
+	var offline bool
+	err := tx.QueryRow(ctx,
+		`SELECT last_login <= last_logout FROM avatar_info WHERE avatar_id = $1 FOR UPDATE`,
+		avatarID).Scan(&offline)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return errNoCharacter
+	}
+	if err != nil {
+		return err
+	}
+	if !offline {
+		return errCharacterOnline
+	}
+	return nil
+}
 
 // durationHours maps the SPA's duration token to listing hours.
 func durationHours(d string) (int, bool) {
@@ -147,6 +185,12 @@ func (s *Store) PostListing(ctx context.Context, accountID int64, itemID, slot, 
 		return MyListingView{}, errNoCharacter
 	}
 	if err != nil {
+		return MyListingView{}, err
+	}
+
+	// Offline-guard: listing debits the seller's credits and removes the item
+	// from its vault -- both are server-authoritative while the seller is online.
+	if err := assertAvatarOffline(ctx, tx, sellerAvatar); err != nil {
 		return MyListingView{}, err
 	}
 
@@ -297,6 +341,10 @@ func (s *Store) PlaceBid(ctx context.Context, accountID int64, listingID int64) 
 	if err != nil {
 		return ListingView{}, err
 	}
+	// Offline-guard: the bid debits the bidder's credits.
+	if err := assertAvatarOffline(ctx, tx, bidder); err != nil {
+		return ListingView{}, err
+	}
 
 	// First bid lands at start_bid; later bids add the increment.
 	newBid := startBid
@@ -387,6 +435,10 @@ func (s *Store) Buyout(ctx context.Context, accountID int64, listingID int64) er
 
 	buyer, _, err := primaryAvatar(ctx, tx, accountID)
 	if err != nil {
+		return err
+	}
+	// Offline-guard: the buyout debits the buyer's credits.
+	if err := assertAvatarOffline(ctx, tx, buyer); err != nil {
 		return err
 	}
 	if err := debitAvatar(ctx, tx, buyer, *buyout); err != nil {
