@@ -181,3 +181,6 @@ __pycache__/
 
 # Freya Online: locally-built Go binary (built in Docker for deploy)
 freya/online/server/freya-online
+
+# net7go: locally-built Go game-auth binary (built in Docker for deploy)
+login-server/net7go/net7go

@@ -1,5 +1,9 @@
-// SPDX-License-Identifier: MIT
-// Freya Online -- login ticket issuance (legacy parity).
+// SPDX-License-Identifier: CC-BY-NC-SA-3.0
+// Copyright (c) 2010 Net-7 Entertainment, Ltd.
+//
+// net7go -- standalone Go reimplementation of Net7SSL (see config.go header).
+//
+// ticket.go -- login ticket issuance (AccountManager parity).
 package main
 
 import (

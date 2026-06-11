@@ -1443,20 +1443,22 @@ void SaveManager::HandlePetition(long player_id, short bytes, unsigned char *dat
 		name = account_row[2];
 	}
 
-	// connect to ticket system
+	// connect to ticket system (g_Ticket_DB is the net7_user database, where
+	// the accounts/tickets live -- see deploy/Net7Config.cfg).
 	SQL_Conn.connect(g_Ticket_DB , g_Ticket_Host, g_Ticket_User, g_Ticket_Pass);
 	{
 		sql_query_c Ticket(&SQL_Conn);
 
-		// CALL <schema>.TicketViaServer(username, name, email, subject, complaint,
-		// playerlist, problemtype) — g_Ticket_DB is a server-side configured
-		// schema name (not user input). The placeholders below bind the rest.
-		std::string sql;
-		sql.reserve(96);
-		sql += "CALL ";
-		sql += g_Ticket_DB;
-		sql += ".TicketViaServer(?,?,?,?,?,?,?)";
-
+		// The retail server CALLed a MySQL stored proc TicketViaServer(...)
+		// that lived in Net-7's separate web/support DB -- never part of this
+		// tree, so the CALL failed at parse time and every petition was lost.
+		// Phase N inlined the other dead procs (accLogin/avaLogin/incWarn);
+		// this is the same treatment: INSERT into net7_user.petitions, no
+		// cross-DB schema qualifier (we are connected to net7_user already).
+		// Parameterised -- no value is spliced into the SQL text. The column
+		// order matches the seven proc args plus the petition's game id; see
+		// db/postgres/petitions.sql.
+		Ticket.AddParam(GameID);
 		Ticket.AddParam(username);
 		Ticket.AddParam(name);
 		Ticket.AddParam(email);
@@ -1464,7 +1466,11 @@ void SaveManager::HandlePetition(long player_id, short bytes, unsigned char *dat
 		Ticket.AddParam(Complaint);
 		Ticket.AddParam(PlayerList);
 		Ticket.AddParam(ProblemType);
-		Ticket.run_query_params(sql.c_str());
+		Ticket.run_query_params(
+			"INSERT INTO petitions "
+			"(game_id, username, avatar_name, email, subject, complaint, "
+			"player_list, problem_type) "
+			"VALUES (?,?,?,?,?,?,?,?)");
 	}
 	// interesting side note if sql_query_c is in scope when disconnect is called
 	// a freed heap block is written to and Windows breakpoints with a HEAP debug message in _endthread

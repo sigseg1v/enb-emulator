@@ -446,6 +446,36 @@ objects, which the CLAUDE.md server-integrity rules forbid absent a
 primary-source escape hatch. The data remains preserved as the
 structured JSONL archive in the reconstruct backup.
 
+- [ ] **Y12: Repair dangling refs in the EXISTING runtime missions**
+  (boot-log content-integrity defects -- DISTINCT from Y6, which is the
+  missing-catalog import). `TalkTreeParser` validates the 364 resident
+  missions at load and prints two surviving error classes every boot
+  (root-caused in `plans/99-decisions-log.md` ~7240, not waved off):
+  - 9x `ERROR IN MISSION: NPC [id] doesn't exist.`
+    (`server/src/TalkTreeParser.cpp:287`): a TALK_NPC node references an
+    NPC id absent from `starbase_npcs`. The 7 distinct dangling ids are
+    **329, 431, 471, 661, 664, 666, 667** (verified 0 rows; the table
+    otherwise holds 662 NPCs id 7..100501, all loading -- a data gap,
+    not the Bug-B loader regression).
+  - 24x `ERROR: Mutually exclusive types in stage N`
+    (`server/src/TalkTreeParser.cpp:323`): a mission stage carries >1
+    completion node from the mutually-exclusive set (ARRIVE_AT /
+    FIGHT_MOB / OBTAIN_ITEMS / TALK_NPC / USE_SKILL_* / TALK_SPACE_NPC /
+    PROXIMITY_TO_SPACE_NPC / NAV_MESSAGE) -- an authoring defect in the
+    seeded mission XML.
+  Acceptance: those 33 boot-log error lines drop to 0 AND the affected
+  missions still run correctly against the real client (CV entry in
+  plans/29). **Constraint (why this is open, not done):** the prior
+  decision deliberately LEFT these because fabricating the 7 NPC rows or
+  rewriting the stage XML blind is exactly the divergence the
+  server-integrity / fidelity rule forbids -- the fix needs an
+  AUTHORITATIVE Net-7 NPC/mission source (the same dump that unblocks
+  Y6), or a primary-source citation for each specific repair. Tracked
+  here so the debt is visible, NOT so it gets fixed blind. First solo
+  step: confirm whether the reconstruct dataset or any captured mission
+  XML supplies the 7 NPC definitions or the corrected stage structures;
+  if yes, the repair becomes citable and actionable.
+
 ## Tracking notes
 
 - Each Y-task above is one DB-seed import, NOT a code change. The
