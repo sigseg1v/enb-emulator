@@ -30,7 +30,7 @@ type ItemView struct {
 	MaxStack    int64  `json:"-"`
 	// Exposed so the Auction House UI can disable listing of no-trade items up
 	// front; the server still hard-rejects them (errItemUntradable) regardless.
-	NoTrade     bool   `json:"noTrade"`
+	NoTrade bool `json:"noTrade"`
 }
 
 type Prices struct {

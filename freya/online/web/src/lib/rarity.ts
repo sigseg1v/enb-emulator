@@ -6,11 +6,12 @@
 // both must agree. The server is authoritative -- this exists so the dev mock
 // and any optimistic UI render the same colour the backend would assign.
 //
-//   quality >= 180 -> epic
-//   quality >= 150 -> rare
-//   quality >= 130 -> uncommon
-//   quality <= 129 -> common  (includes < 100 "junk")
-//   no quality     -> always common
+// Quality is the game-native FRACTION (1.0 == 100%), so thresholds are fractional:
+//   quality >= 1.80 -> epic
+//   quality >= 1.50 -> rare
+//   quality >= 1.30 -> uncommon
+//   quality <  1.30 -> common  (includes < 1.00 "junk")
+//   no quality      -> always common
 //
 // Level caps (a low-level item can never read as a high tier):
 //   level 1-3 -> capped at uncommon
@@ -35,9 +36,9 @@ export function rarityFor(level: number, quality: number | null): RarityKey {
   if (quality == null) return 'common';
 
   let tier: RarityKey;
-  if (quality >= 180) tier = 'epic';
-  else if (quality >= 150) tier = 'rare';
-  else if (quality >= 130) tier = 'uncommon';
+  if (quality >= 1.80) tier = 'epic';
+  else if (quality >= 1.50) tier = 'rare';
+  else if (quality >= 1.30) tier = 'uncommon';
   else tier = 'common';
 
   let cap: RarityKey;
@@ -49,8 +50,8 @@ export function rarityFor(level: number, quality: number | null): RarityKey {
 }
 
 export function qualityClass(q: number): string {
-  if (q >= 170) return 'qual--exc';
-  if (q >= 130) return 'qual--high';
-  if (q >= 100) return 'qual--ok';
+  if (q >= 1.70) return 'qual--exc';
+  if (q >= 1.30) return 'qual--high';
+  if (q >= 1.00) return 'qual--ok';
   return 'qual--low';
 }

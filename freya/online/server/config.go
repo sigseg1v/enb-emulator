@@ -64,19 +64,19 @@ func loadConfig() Config {
 		stale = 90
 	}
 	return Config{
-		BindAddr:           env("NET7SSL_BIND_ADDR", ":443"),
-		Domain:             env("DOMAIN", "localhost"),
-		CertDir:            env("NET7SSL_CERT_DIR", "/app/certs"),
-		HTTPAddr:           env("FREYA_HTTP_ADDR", ":8080"),
-		DBHost:             env("DB_HOST", "postgres:5432"),
-		DBUser:             env("DB_USER", "net7"),
-		DBPass:             env("DB_PASS", "net7"),
-		DBUserName:         env("DB_NAME", "net7_user"),
-		DBContent:          env("FREYA_DB_CONTENT", "net7"),
-		WebRoot:            env("FREYA_WEB_ROOT", "/app/web"),
-		LoginUpstream:      env("FREYA_LOGIN_UPSTREAM", ""),
-		StatusStaleSecs:    stale,
-		AhBotsEnabled:      env("FREYA_AH_BOTS", "") == "1",
+		BindAddr:        env("NET7SSL_BIND_ADDR", ":443"),
+		Domain:          env("DOMAIN", "localhost"),
+		CertDir:         env("NET7SSL_CERT_DIR", "/app/certs"),
+		HTTPAddr:        env("FREYA_HTTP_ADDR", ":8080"),
+		DBHost:          env("DB_HOST", "postgres:5432"),
+		DBUser:          env("DB_USER", "net7"),
+		DBPass:          env("DB_PASS", "net7"),
+		DBUserName:      env("DB_NAME", "net7_user"),
+		DBContent:       env("FREYA_DB_CONTENT", "net7"),
+		WebRoot:         env("FREYA_WEB_ROOT", "/app/web"),
+		LoginUpstream:   env("FREYA_LOGIN_UPSTREAM", ""),
+		StatusStaleSecs: stale,
+		AhBotsEnabled:   env("FREYA_AH_BOTS", "") == "1",
 	}
 }
 

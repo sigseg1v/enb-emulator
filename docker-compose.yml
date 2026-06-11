@@ -104,13 +104,12 @@ services:
       # NET7_DTLS_ALLOW_PLAINTEXT= (empty) in the host env and provision certs;
       # the `-` (not `:-`) default lets an explicit empty override force DTLS.
       NET7_DTLS_ALLOW_PLAINTEXT: "${NET7_DTLS_ALLOW_PLAINTEXT-i-accept-unencrypted-udp}"
-      # Phase AM external-status events. Default OFF: when empty the server's
-      # EmitExternalStatusEvent is a no-op and writes no outbox rows, so this
-      # dev/test/CI stack (and the integration suite) are completely unaffected.
-      # Set NET7_EXTERNAL_STATUS_ENABLED=1 in the host env to have login/logout/
-      # level-up/broadcast/server-start events enqueued for the status-notifier
-      # sidecar to relay. See plans/39 + db/postgres/external_status_events.sql.
-      NET7_EXTERNAL_STATUS_ENABLED: "${NET7_EXTERNAL_STATUS_ENABLED:-}"
+      # Phase AM external-status events. Defaults ON (=1): the server enqueues
+      # login/logout/level-up/broadcast/server-start events into the outbox for
+      # the status-notifier sidecar to relay. Set NET7_EXTERNAL_STATUS_ENABLED=
+      # (empty) in the host env to turn it off (EmitExternalStatusEvent no-ops
+      # and writes no outbox rows). See plans/39 + db/postgres/external_status_events.sql.
+      NET7_EXTERNAL_STATUS_ENABLED: "${NET7_EXTERNAL_STATUS_ENABLED:-1}"
     # The server resolves g_DomainName via gethostbyname(); in docker we
     # remap local.net-7.org to the container's loopback so it succeeds
     # without external DNS.
@@ -386,11 +385,14 @@ services:
       - "-c"
       - "log_line_prefix=%m [%p] %q%u@%d app=%a "
     ports:
-      # Host 5434 -> container 5432 to dodge a developer's local
-      # system Postgres on host:5432 (and a hanging rootlesskit binding
-      # on :5433 observed in dev). Compose-internal traffic still uses
-      # postgres:5432 regardless of the host mapping.
-      - "5434:5432"
+      # Host ENB_PG_HOST_PORT (default 5434) -> container 5432 to dodge a
+      # developer's local system Postgres on host:5432 (and a hanging
+      # rootlesskit binding on :5433 observed in dev). Compose-internal
+      # traffic still uses postgres:5432 regardless of the host mapping.
+      # The host port is overridable so branch-scoped project stacks
+      # (COMPOSE_PROJECT_NAME=freya-<branch>) can run concurrently -- the
+      # justfile derives a per-branch port; a bare `docker compose` keeps 5434.
+      - "${ENB_PG_HOST_PORT:-5434}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

@@ -5,7 +5,9 @@
 // copy exists only so the dev mock / optimistic UI renders the same colour.
 // Both MUST agree:
 //
-//   quality >= 180 -> epic ; >= 150 -> rare ; >= 130 -> uncommon ; else common
+// Quality is the GAME-NATIVE FRACTION (1.0 == 100%), so the thresholds are
+// fractional:
+//   quality >= 1.80 -> epic ; >= 1.50 -> rare ; >= 1.30 -> uncommon ; else common
 //   no quality (nil) -> always common
 //   level cap: 1-3 -> uncommon, 4-6 -> rare, 7+ -> epic
 
@@ -21,11 +23,11 @@ func rarityForLevelQuality(level int, quality *float64) string {
 
 	var tier string
 	switch q := *quality; {
-	case q >= 180:
+	case q >= 1.80:
 		tier = "epic"
-	case q >= 150:
+	case q >= 1.50:
 		tier = "rare"
-	case q >= 130:
+	case q >= 1.30:
 		tier = "uncommon"
 	default:
 		tier = "common"

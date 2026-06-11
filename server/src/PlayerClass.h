@@ -464,7 +464,12 @@ public:
     bool        CanCargoAddItem(long ItemID, u32 Stack = 1, float Quality = 1.0f);
     u32         CargoAddItemCount(long ItemID, float Quality = 1.0f);
     int         CargoAddItem(long ItemID, u32 Stack, u32 TradeStack = 0);
-    int         CargoAddItem(_Item *);
+    // When touched_slots is non-null, the cargo slot indices this would have
+    // saved are appended to it INSTEAD of being saved independently, so the
+    // caller can commit them together with the source slot in one atomic move
+    // (see SaveInventoryMoveSlots). Null (the default) keeps the original
+    // per-slot autocommit-save behaviour for every other caller.
+    int         CargoAddItem(_Item *, std::vector<int> *touched_slots = nullptr);
     void        CargoRemoveItem(long ItemID, u32 Stack);
 	static void	CheckStack(u32 MoveNum, _Item * From, _Item * To);
 	void		AwardCreditsToGroup(u64 credits);
@@ -516,6 +521,24 @@ public:
 	void		SaveInventoryChange(long slot);
 	void		SaveVaultChange(long slot);
 	void		SaveTradeChange(long slot);
+	// Persist a two-slot move (source + destination) as ONE crash-atomic save
+	// message so a crash mid-move cannot dupe or lose the item. Replaces the
+	// two independent SaveInventoryChange/SaveVaultChange calls at the
+	// cargo<->vault and vault<->vault move sites. *_type is PLAYER_INVENTORY /
+	// PLAYER_VAULT / PLAYER_TRADE.
+	void		SaveInventoryMove(unsigned char from_type, long from_slot,
+						unsigned char to_type, long to_slot);
+	// One slot of a multi-slot atomic move. inv_type is PLAYER_INVENTORY /
+	// PLAYER_VAULT / PLAYER_TRADE.
+	struct InvSlotRef { unsigned char inv_type; long slot; };
+	// Persist `count` slots (their CURRENT in-memory state) as ONE crash-atomic
+	// SAVE_CODE_MOVE_INVENTORY message. Used by the vault->cargo auto-stack path
+	// where one vault stack spreads across several cargo slots: the emptied
+	// vault source plus every touched cargo slot commit together. count must be
+	// 1..SAVE_MOVE_MAX_RECORDS (guarded; over-large groups are dropped, logged).
+	void		SaveInventoryMoveSlots(const InvSlotRef *slots, int count);
+	void		PackInventorySlot(unsigned char *data, int &index,
+						unsigned char inv_type, long slot);
 	void		SaveXPBarLevel(long xp_type, float xp_bar);
 	void		SaveCreditLevel();
 	void		SaveEquipmentChange(long slot, _Item *item);

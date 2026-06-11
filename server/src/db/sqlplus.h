@@ -110,6 +110,20 @@ public:
 
     void store(sql_result_c *result);
 
+    // Multi-statement atomic transactions on the borrowed connection.
+    // Between begin() and commit(), every execute()/execute_params() issued
+    // through THIS query object runs inside one Postgres transaction and is
+    // NOT auto-committed; commit() flushes them all atomically, rollback()
+    // discards them. Outside a begin()/commit() pair each statement keeps its
+    // prior autocommit-per-statement behaviour. Used by SaveManager to persist
+    // a paired inventory move (source + destination slot) as a single
+    // crash-atomic unit so a mid-move crash can neither dupe nor lose an item.
+    // Not nestable: begin() while already in a transaction is an error.
+    bool begin();
+    bool commit();
+    void rollback();
+    bool in_transaction() const;
+
     unsigned int Error();
     char * ErrorMsg();
 

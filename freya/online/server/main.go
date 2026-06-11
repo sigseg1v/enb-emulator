@@ -67,7 +67,8 @@ func main() {
 	defer store.Close()
 
 	status := newStatusCache(store, cfg.StatusStaleSecs)
-	api := newAPIServer(store, status, cfg)
+	galaxy := newGalaxyCache(store)
+	api := newAPIServer(store, status, galaxy, cfg)
 	legacy := &legacyProxy{upstream: cfg.LoginUpstream}
 	if cfg.LoginUpstream == "" {
 		log.Printf("freya-online: WARNING FREYA_LOGIN_UPSTREAM unset; legacy game-auth endpoints (AuthLogin, updateCheck, ...) are NOT relayed and will fall through to the SPA. Point it at the net7go service (e.g. net7go:8085).")

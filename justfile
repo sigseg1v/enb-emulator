@@ -11,10 +11,12 @@ IMAGE_TAG      := env_var_or_default("IMAGE_TAG", "dev")
 # Connection to the local content DB (`net7`), exported so the Avalonia editors
 # launched via `just launch-*` prefill their Login dialog with zero typing --
 # the user can just click Login (CommonTools.Gui.LoginData.LoadFromEnvironment).
-# These mirror the docker-compose stack's host-side binding (localhost:5434 ->
+# These mirror the docker-compose stack's host-side binding (localhost:<port> ->
 # container 5432, creds net7/net7). Override any with the matching env var.
+# ENB_DB_PORT tracks the per-branch published port (ENB_PG_HOST_PORT, below) so
+# host-side tools/tests dial whichever port THIS branch's postgres is bound to.
 export ENB_DB_HOST := env_var_or_default("ENB_DB_HOST", "localhost")
-export ENB_DB_PORT := env_var_or_default("ENB_DB_PORT", "5434")
+export ENB_DB_PORT := env_var_or_default("ENB_DB_PORT", ENB_PG_HOST_PORT)
 export ENB_DB_USER := env_var_or_default("ENB_DB_USER", "net7")
 export ENB_DB_PASS := env_var_or_default("ENB_DB_PASS", "net7")
 
@@ -23,10 +25,16 @@ export ENB_DB_PASS := env_var_or_default("ENB_DB_PASS", "net7")
 # main/master/detached-HEAD collapse to plain `freya`. Already-prefixed
 # branches (freya-foo) are used as-is. Override with the env var.
 #
-# Note: only the container/network/volume *names* are namespaced. Host
-# port bindings in docker-compose.yml are still fixed at the conventional
-# defaults, so only one worktree at a time can run its stack.
+# Note: container/network/volume *names* are namespaced per branch (above), and
+# the postgres host port is too (ENB_PG_HOST_PORT below), so multiple worktrees
+# can run their stacks concurrently. main/master keeps the conventional 5434.
 export COMPOSE_PROJECT_NAME := env_var_or_default("COMPOSE_PROJECT_NAME", `b=$(git branch --show-current 2>/dev/null); if [ -z "$b" ] || [ "$b" = main ] || [ "$b" = master ]; then echo freya; else s=$(printf '%s' "$b" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9_-' '-' | tr -s '-' | sed 's/^-//;s/-$//'); case "$s" in freya-*) echo "$s";; *) echo "freya-$s";; esac; fi`)
+
+# Per-branch postgres host port so branch stacks do not collide on 5434.
+# main/master/bare-checkout -> 5434 (the conventional default); any other branch
+# -> 5500 + (hash(branch) % 400), deterministic per branch. Compose-internal
+# traffic always uses postgres:5432; this is only the host-published mapping.
+export ENB_PG_HOST_PORT := env_var_or_default("ENB_PG_HOST_PORT", `b=$(git branch --show-current 2>/dev/null); if [ -z "$b" ] || [ "$b" = main ] || [ "$b" = master ]; then echo 5434; else h=$(printf '%s' "$b" | cksum | cut -d' ' -f1); echo $((5500 + h % 400)); fi`)
 
 # Default: list targets.
 default:
@@ -972,6 +980,23 @@ shell SERVICE='server':
 # Open a psql client against the dev net7_user DB (the one with accounts).
 psql-user:
     docker compose exec -e PGPASSWORD=net7 postgres psql -U net7 -d net7_user
+
+# Give a local character credits. ADDS AMOUNT (default 1,000,000) to the named
+# character's balance in net7_user.avatar_level_info, then prints the new total.
+# Matches on avatar_data.first_name; "UPDATE 0" means no such character. The
+# name is bound via psql :'nm' (never concatenated); AMOUNT is integer-validated
+# and bound via :amt. Relog the character so the server reloads the balance.
+#   just add-credits Jetwo            # +1,000,000
+#   just add-credits Jetwo 5000000    # +5,000,000
+add-credits NAME AMOUNT='1000000':
+    @case "{{AMOUNT}}" in ''|*[!0-9]*) echo "add-credits: AMOUNT must be a non-negative integer (got '{{AMOUNT}}')" >&2; exit 1;; esac; \
+        printf '%s\n' \
+            "UPDATE avatar_level_info l SET credits = credits + :amt" \
+            "  FROM avatar_data d WHERE d.avatar_id = l.avatar_id AND d.first_name = :'nm';" \
+            "SELECT d.first_name AS character, l.credits FROM avatar_level_info l" \
+            "  JOIN avatar_data d ON d.avatar_id = l.avatar_id WHERE d.first_name = :'nm';" \
+        | docker compose exec -T -e PGPASSWORD=net7 postgres psql -U net7 -d net7_user -v ON_ERROR_STOP=1 \
+            -v nm={{ quote(NAME) }} -v amt={{ quote(AMOUNT) }}
 
 # Seed a known-good test account into net7_user.accounts. Idempotent
 # (DELETE-by-username then INSERT -- the schema has no UNIQUE on username,

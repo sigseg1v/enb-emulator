@@ -59,7 +59,13 @@ const (
 	botBatchPerTick = 16
 	botInterval     = 15 * time.Minute
 
-	// Quality roll for equipment: normal(mean, std) clamped to [min,max].
+	// Quality roll for equipment: normal(mean, std) clamped to [min,max], in
+	// PERCENT POINTS (140 == 140%). The rolled value is divided by 100 before it
+	// is stored, because quality is persisted on the GAME-NATIVE FRACTION scale
+	// (1.0 == 100%) -- the same scale avatar_inventory_items / avatar_vault_items
+	// use, which is what auction_listings round-trips into a buyer's ship on
+	// purchase (PostListing/deliverItem copy it verbatim). Storing the percent
+	// number here put a 100x quality (e.g. 15200%) onto every purchased item.
 	botQualityMean = 140.0
 	botQualityStd  = 25.0
 	botQualityMin  = 80.0
@@ -210,7 +216,7 @@ func botPostOne(ctx context.Context, s *Store) error {
 		if q > botQualityMax {
 			q = botQualityMax
 		}
-		qf := q
+		qf := q / 100 // percent points -> game-native fraction (1.0 == 100%)
 		quality = &qf
 	}
 

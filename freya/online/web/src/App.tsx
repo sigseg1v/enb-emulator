@@ -7,8 +7,11 @@ import type {
 import * as api from './api';
 import { Credits, ServerStatus, Wordmark } from './components/ui';
 import { Login } from './screens/Login';
+import { Galaxy } from './screens/Galaxy';
+import { Profile } from './screens/Profile';
 import { Mailbox } from './screens/Mailbox';
 import { AuctionHouse } from './screens/AuctionHouse';
+import { Vault } from './screens/Vault';
 import { Account } from './screens/Account';
 
 const STATUS_POLL_MS = 60_000;
@@ -29,10 +32,11 @@ export default function App() {
   // screen, so a logged-in refresh doesn't flash the login form.
   const [booting, setBooting] = useState(true);
   const [server, setServer] = useState<ServerStatusT>({ status: 'OFFLINE', players: 0 });
-  const [tab, setTab] = useState<'mail' | 'ah' | 'account'>('mail');
+  const [tab, setTab] = useState<'galaxy' | 'profile' | 'mail' | 'ah' | 'vault' | 'account'>('galaxy');
   const [mail, setMail] = useState<Mail[]>([]);
   const [listings, setListings] = useState<Listing[]>([]);
   const [vault, setVault] = useState<Record<string, VaultSlot[]>>({});
+  const [vaultStorage, setVaultStorage] = useState<Record<string, VaultSlot[]>>({});
   const [myListings, setMyListings] = useState<MyListing[]>([]);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
@@ -64,6 +68,7 @@ export default function App() {
     setMail(boot.mail);
     setListings(boot.listings);
     setVault(boot.vault);
+    setVaultStorage(boot.vaultStorage);
     setMyListings(boot.myListings);
   }, []);
 
@@ -120,12 +125,21 @@ export default function App() {
       <header className="topbar">
         <Wordmark size={20} />
         <nav className="tabs">
+          <button className={'tab' + (tab === 'galaxy' ? ' tab--active' : '')} onClick={() => setTab('galaxy')}>
+            <span className="tab__glyph">✺</span> Galaxy
+          </button>
+          <button className={'tab' + (tab === 'profile' ? ' tab--active' : '')} onClick={() => setTab('profile')}>
+            <span className="tab__glyph">◎</span> Profile
+          </button>
           <button className={'tab' + (tab === 'mail' ? ' tab--active' : '')} onClick={() => setTab('mail')}>
             <span className="tab__glyph">✉</span> Mailbox
             {unread > 0 && <span className="tab__badge">{unread}</span>}
           </button>
           <button className={'tab' + (tab === 'ah' ? ' tab--active' : '')} onClick={() => setTab('ah')}>
             <span className="tab__glyph">◈</span> Auction House
+          </button>
+          <button className={'tab' + (tab === 'vault' ? ' tab--active' : '')} onClick={() => setTab('vault')}>
+            <span className="tab__glyph">⊟</span> Vault
           </button>
           <button className={'tab' + (tab === 'account' ? ' tab--active' : '')} onClick={() => setTab('account')}>
             <span className="tab__glyph">⚙</span> Account
@@ -157,12 +171,23 @@ export default function App() {
 
       <div className="shell__body">
         <div className="shell__bg" />
+        {tab === 'galaxy' && (
+          <Galaxy />
+        )}
+        {tab === 'profile' && (
+          <Profile character={character} />
+        )}
         {tab === 'mail' && (
-          <Mailbox mail={mail} setMail={setMail} character={character} reload={reload} toast={toast} />
+          <Mailbox mail={mail} setMail={setMail} character={character}
+            vaultStorage={vaultStorage} avatars={session.characters}
+            reload={reload} toast={toast} />
         )}
         {tab === 'ah' && (
           <AuctionHouse listings={listings} vault={vault} myListings={myListings}
             avatar={character} avatars={session.characters} reload={reload} toast={toast} />
+        )}
+        {tab === 'vault' && (
+          <Vault vaultStorage={vaultStorage} avatars={session.characters} reload={reload} toast={toast} />
         )}
         {tab === 'account' && (
           <Account username={session.username} toast={toast} />

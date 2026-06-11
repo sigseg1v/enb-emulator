@@ -180,6 +180,87 @@ func (s *Store) attachmentsFor(ctx context.Context, messageIDs []int64) (map[int
 	return byMsg, itemIDs
 }
 
+// accountVaultStorage returns each live character's ACTUAL vault (the
+// avatar_vault_items table only -- not inventory), grouped by character name,
+// including no-trade items. This powers the Vault transfer page (own-account
+// moves, where no-trade is allowed) and the mail composer's item picker (which
+// surfaces the no-trade flag so the UI can mark those squares unmailable; the
+// API hard-rejects them regardless). Slots are returned sorted.
+//
+// Distinct from accountVault below, which unions vault+inventory and keeps only
+// tradable instances for the AH sell grid.
+func (s *Store) accountVaultStorage(ctx context.Context, accountID int64) map[string][]VaultSlotView {
+	out := map[string][]VaultSlotView{}
+
+	chars, err := s.liveCharacters(ctx, accountID)
+	if err != nil || len(chars) == 0 {
+		return out
+	}
+	avatarIDs := make([]int64, 0, len(chars))
+	nameByID := make(map[int64]string, len(chars))
+	for _, c := range chars {
+		avatarIDs = append(avatarIDs, c.AvatarID)
+		nameByID[c.AvatarID] = c.Name
+		out[c.Name] = []VaultSlotView{} // every live char gets a (possibly empty) vault
+	}
+
+	rows, err := s.user.Query(ctx, `
+		SELECT avatar_id, item_id, inventory_slot, trade_stack, quality
+		  FROM avatar_vault_items
+		 WHERE avatar_id = ANY($1) AND item_id IS NOT NULL`, avatarIDs)
+	if err != nil {
+		return out
+	}
+	type vrow struct {
+		avatarID int64
+		itemID   int
+		slot     int
+		stack    *int
+		quality  *float64
+	}
+	var vrows []vrow
+	var itemIDs []int
+	for rows.Next() {
+		var v vrow
+		if err := rows.Scan(&v.avatarID, &v.itemID, &v.slot, &v.stack, &v.quality); err != nil {
+			rows.Close()
+			return out
+		}
+		vrows = append(vrows, v)
+		itemIDs = append(itemIDs, v.itemID)
+	}
+	rows.Close()
+
+	items, err := s.resolveItems(ctx, itemIDs)
+	if err != nil {
+		return out
+	}
+
+	for _, v := range vrows {
+		tpl, ok := items[v.itemID]
+		if !ok {
+			continue
+		}
+		stack := 1
+		if v.stack != nil && *v.stack > 0 {
+			stack = *v.stack
+		}
+		name := nameByID[v.avatarID]
+		out[name] = append(out[name], VaultSlotView{
+			Slot:    v.slot,
+			Item:    tpl.itemView(v.quality),
+			Stack:   stack,
+			Quality: v.quality,
+		})
+	}
+	for name := range out {
+		slots := out[name]
+		sort.SliceStable(slots, func(i, j int) bool { return slots[i].Slot < slots[j].Slot })
+		out[name] = slots
+	}
+	return out
+}
+
 // accountVault returns an account's listable item instances grouped by character
 // name. Only tradable items (item_base.no_trade = 0) are listable.
 func (s *Store) accountVault(ctx context.Context, accountID int64) map[string][]VaultSlotView {

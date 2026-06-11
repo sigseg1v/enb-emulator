@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Freya Online -- Mailbox (shared per account).
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
-import type { Attachment, Mail } from '../types';
+import type { Attachment, Mail, MailItemInput, VaultSlot } from '../types';
+import { MAX_MAIL_ITEMS } from '../types';
 import { RARITY } from '../lib/rarity';
 import { Credits } from '../components/ui';
 import { fmtNum } from '../lib/format';
@@ -62,17 +63,140 @@ function lootLabel(att: Attachment): string {
   return att.type === 'credits' ? `${fmtNum(att.amount)} cr` : `${att.item.name} -> vault`;
 }
 
+// Compose is the "send mail" form. Sender is the selected topbar character; the
+// recipient is any live character name (validated server-side). Items are picked
+// from the SENDER's vault (vaultStorage) -- up to MAX_MAIL_ITEMS, and only one
+// per slot. Either a non-empty body or at least one item is required. The server
+// removes attached items from the vault atomically; we reload after.
+function Compose({
+  from, vaultSlots, reload, toast, onClose,
+}: {
+  from: string;
+  vaultSlots: VaultSlot[];
+  reload: () => Promise<void>;
+  toast: (msg: string) => void;
+  onClose: () => void;
+}) {
+  const [to, setTo] = useState('');
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  // Picked vault slots (the attachment set), keyed by slot number.
+  const [picked, setPicked] = useState<number[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  // Drop any picked slot that no longer exists (e.g. after a reload).
+  useEffect(() => {
+    setPicked(prev => prev.filter(slot => vaultSlots.some(s => s.slot === slot)));
+  }, [vaultSlots]);
+
+  function togglePick(slot: number) {
+    setPicked(prev => {
+      if (prev.includes(slot)) return prev.filter(s => s !== slot);
+      if (prev.length >= MAX_MAIL_ITEMS) {
+        toast(`A message can carry at most ${MAX_MAIL_ITEMS} items.`);
+        return prev;
+      }
+      return [...prev, slot];
+    });
+  }
+
+  const canSend = to.trim() !== '' && subject.trim() !== ''
+    && (body.trim() !== '' || picked.length > 0) && !busy;
+
+  async function send() {
+    if (!canSend) return;
+    const items: MailItemInput[] = picked.map(slot => {
+      const s = vaultSlots.find(v => v.slot === slot)!;
+      return { slot, itemId: Number(s.item.id) };
+    });
+    setBusy(true);
+    try {
+      await api.sendMail({ from, to: to.trim(), subject: subject.trim(), body, items });
+      toast(`Mail sent to ${to.trim()}`);
+      await reload();
+      onClose();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Send failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mread hud-panel hud-corners">
+      <div className="mread__head">
+        <button className="btn btn--sm mread__del" disabled={busy} onClick={onClose}>Cancel</button>
+        <h2 className="mread__subj">New Message</h2>
+        <dl className="mread__meta"><dt>From</dt><dd>{from}</dd></dl>
+      </div>
+
+      <div className="compose">
+        <label className="compose__field">
+          <span className="compose__lbl">To</span>
+          <input className="compose__input" placeholder="Recipient character name"
+            value={to} onChange={e => setTo(e.target.value)} />
+        </label>
+        <label className="compose__field">
+          <span className="compose__lbl">Subject</span>
+          <input className="compose__input" placeholder="Required" maxLength={128}
+            value={subject} onChange={e => setSubject(e.target.value)} />
+        </label>
+        <label className="compose__field">
+          <span className="compose__lbl">Message</span>
+          <textarea className="compose__input compose__body" rows={5} maxLength={4000}
+            placeholder="Body (optional if you attach an item)"
+            value={body} onChange={e => setBody(e.target.value)} />
+        </label>
+
+        <div className="compose__field">
+          <span className="compose__lbl">Attach from {from}'s vault &middot; {picked.length}/{MAX_MAIL_ITEMS}</span>
+          <div className="vgrid">
+            {vaultSlots.length === 0
+              ? <div style={{ gridColumn: '1 / -1', color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', fontSize: 12, padding: 12 }}>Vault empty</div>
+              : vaultSlots.map(s => {
+                const r = RARITY[s.item.rarity];
+                const on = picked.includes(s.slot);
+                return (
+                  <div key={s.slot}
+                    className={'vslot' + (on ? ' vslot--sel' : '')}
+                    style={{ '--rcolor': r.color, '--rglow': r.glow } as Vars}
+                    title={`${s.item.name}${s.quality != null ? ` -- Q${s.quality}%` : ''}`}
+                    onClick={() => togglePick(s.slot)}>
+                    <span className="icon__glyph">{s.item.glyph}</span>
+                    {s.stack > 1 && <span className="vslot__qty">{s.stack}</span>}
+                    {on && <span className="vslot__pick">✓</span>}
+                  </div>
+                );
+              })}
+          </div>
+        </div>
+
+        <button className="btn btn--primary" disabled={!canSend} onClick={send}>Send Mail</button>
+      </div>
+    </div>
+  );
+}
+
 export function Mailbox({
-  mail, setMail, character, reload, toast,
+  mail, setMail, character, vaultStorage, avatars, reload, toast,
 }: {
   mail: Mail[];
   setMail: React.Dispatch<React.SetStateAction<Mail[]>>;
   character: string;
+  vaultStorage: Record<string, VaultSlot[]>;
+  avatars: string[];
   reload: () => Promise<void>;
   toast: (msg: string) => void;
 }) {
   const [activeId, setActiveId] = useState<string | null>(mail[0] ? mail[0].id : null);
+  const [composing, setComposing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const senderVault = useMemo(() => vaultStorage[character] ?? [], [vaultStorage, character]);
+
+  // Leave compose mode when the active character changes (the sender vault and
+  // From line would otherwise be stale).
+  useEffect(() => { setComposing(false); }, [character]);
+  void avatars;
   // The inbox is stored per-account, but each message is addressed either to a
   // specific character (m.recipient set) or to the account at large (empty
   // recipient -- e.g. AH credit/winning payouts). Show only mail for the
@@ -156,6 +280,9 @@ export function Mailbox({
           <h1 className="page__title">Mailbox</h1>
           <div className="page__sub">Account inbox &middot; {character} &middot; {unread} unread</div>
         </div>
+        <button className="btn btn--primary" onClick={() => { setComposing(true); setActiveId(null); }}>
+          <span style={{ marginRight: 6 }}>✎</span> Compose
+        </button>
       </div>
 
       <div className="mbx">
@@ -171,6 +298,10 @@ export function Mailbox({
           </div>
         </div>
 
+        {composing ? (
+          <Compose from={character} vaultSlots={senderVault} reload={reload} toast={toast}
+            onClose={() => setComposing(false)} />
+        ) : (
         <div className="mread hud-panel hud-corners">
           {!active
             ? <div className="empty"><div className="empty__inner"><div className="empty__glyph">✉</div>Select a message</div></div>
@@ -215,6 +346,7 @@ export function Mailbox({
               </>
             )}
         </div>
+        )}
       </div>
     </div>
   );

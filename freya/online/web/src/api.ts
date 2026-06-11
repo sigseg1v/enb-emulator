@@ -11,10 +11,14 @@
 // without a backend.
 
 import type {
-  Listing, Mail, MyListing, PostListingInput, ServerStatus, Session, VaultSlot,
+  AvatarProfile, GalaxyMap, GalaxyOccupancy, Listing, Mail, MyListing,
+  PostListingInput, SendMailInput, ServerStatus, Session, ShipView, SkillView,
+  VaultSlot, VaultTransferInput,
 } from './types';
 import {
-  MOCK_LISTINGS, MOCK_MAIL, MOCK_MY_LISTINGS, MOCK_SERVER, MOCK_SESSION, MOCK_VAULT,
+  MOCK_GALAXY, MOCK_GALAXY_OCCUPANCY, MOCK_LISTINGS, MOCK_MAIL, MOCK_MY_LISTINGS,
+  MOCK_PROFILE, MOCK_SERVER, MOCK_SESSION, MOCK_SHIP, MOCK_SKILLS, MOCK_VAULT,
+  MOCK_VAULT_STORAGE,
 } from './mock';
 
 const USE_MOCK = import.meta.env.VITE_MOCK === '1';
@@ -25,6 +29,11 @@ export interface Bootstrap {
   mail: Mail[];
   listings: Listing[];
   vault: Record<string, VaultSlot[]>;
+  // vaultStorage is each character's ACTUAL vault (every item, including
+  // no-trade), keyed by character name. The Vault page and the mail composer
+  // pick items from here; `vault` above is the AH-sellable union (tradable only)
+  // used by the Sell grid.
+  vaultStorage: Record<string, VaultSlot[]>;
   myListings: MyListing[];
 }
 
@@ -95,10 +104,43 @@ export async function bootstrap(): Promise<Bootstrap> {
       mail: structuredClone(MOCK_MAIL),
       listings: structuredClone(MOCK_LISTINGS),
       vault: structuredClone(MOCK_VAULT),
+      vaultStorage: structuredClone(MOCK_VAULT_STORAGE),
       myListings: structuredClone(MOCK_MY_LISTINGS),
     };
   }
   return getJSON<Bootstrap>('/api/bootstrap');
+}
+
+// The Profile page loads its three slices on demand for the SELECTED character,
+// so switching avatars in the dropdown only re-pulls that character's data --
+// not the whole account. Each is a small, indexed, ownership-scoped read.
+const enc = encodeURIComponent;
+
+export async function fetchProfile(name: string): Promise<AvatarProfile> {
+  if (USE_MOCK) return structuredClone(MOCK_PROFILE[name] ?? MOCK_PROFILE.Kestrel_Vega);
+  return getJSON<AvatarProfile>(`/api/avatar/${enc(name)}/profile`);
+}
+
+export async function fetchShip(name: string): Promise<ShipView> {
+  if (USE_MOCK) return structuredClone(MOCK_SHIP[name] ?? MOCK_SHIP.Kestrel_Vega);
+  return getJSON<ShipView>(`/api/avatar/${enc(name)}/ship`);
+}
+
+export async function fetchSkills(name: string): Promise<SkillView[]> {
+  if (USE_MOCK) return structuredClone(MOCK_SKILLS[name] ?? MOCK_SKILLS.Kestrel_Vega);
+  return getJSON<SkillView[]>(`/api/avatar/${enc(name)}/skills`);
+}
+
+// The galaxy map: the topology is fetched once (cached hard server-side) and the
+// occupancy is polled on a short cadence to drive the per-sector glow.
+export async function fetchGalaxy(): Promise<GalaxyMap> {
+  if (USE_MOCK) return structuredClone(MOCK_GALAXY);
+  return getJSON<GalaxyMap>('/api/galaxy');
+}
+
+export async function fetchGalaxyOccupancy(): Promise<GalaxyOccupancy> {
+  if (USE_MOCK) return structuredClone(MOCK_GALAXY_OCCUPANCY);
+  return getJSON<GalaxyOccupancy>('/api/galaxy/occupancy');
 }
 
 export async function placeBid(listingId: string): Promise<Listing> {
@@ -124,6 +166,25 @@ export async function lootAttachment(mailId: string, index: number): Promise<{ o
 /** Delete a mail message (and its attachments). Unlooted attachments are forfeited. */
 export async function deleteMail(mailId: string): Promise<{ ok: boolean }> {
   return delJSON<{ ok: boolean }>(`/api/mail/${mailId}`);
+}
+
+/**
+ * Compose and send player-to-player mail. The sender must be one of the
+ * account's characters; the recipient may be any live character but not the
+ * sender. Items (up to MAX_MAIL_ITEMS) come from the sender's vault and are
+ * removed atomically server-side. The account is taken from the session cookie.
+ */
+export async function sendMail(input: SendMailInput): Promise<{ ok: boolean }> {
+  return postJSON<{ ok: boolean }>('/api/mail', input);
+}
+
+/**
+ * Move a whole vault stack from one of the account's characters to another.
+ * Both characters must belong to the account and be offline; the move runs in a
+ * serializable transaction server-side so it can never dup or lose the item.
+ */
+export async function transferVault(input: VaultTransferInput): Promise<{ ok: boolean }> {
+  return postJSON<{ ok: boolean }>('/api/vault/transfer', input);
 }
 
 /**

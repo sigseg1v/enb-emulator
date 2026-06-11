@@ -338,6 +338,185 @@ C++ source directly). The Go server must reproduce:
       (resetPassword posts current+new without username; surfaces server error).
       Full suite green: 20 Go integration + 8 Go unit + 18 web.
 
+### AQ-11 Vault transfer + Send mail + dup-safe transactionality (2026-06-10)
+- [x] **Vault transfer page (SPA `web/src/screens/Vault.tsx`, new "Vault" tab,
+      glyph ⊟).** Two character dropdowns (left/right) that must pick two
+      DIFFERENT characters you own (each side disables the other's pick). Click
+      an item on the left arms `Transfer ->` (into the right vault); click on the
+      right arms `<- Transfer`. `VAULT_SLOT_COUNT = 96` const lives in BOTH
+      `web/src/types.ts` (client) and the Go server (`vaultSlotCount` in
+      `store_mail_write.go`). Shows "need at least two characters" when
+      `avatars.length < 2`. Bootstrap gained `vaultStorage map[string][]VaultSlotView`
+      (`accountVaultStorage`) so each owned char's full vault is available client-side.
+- [x] **`POST /api/vault/transfer` (`handleVaultTransfer` + `TransferVaultItem`
+      in `store_vault_write.go`).** Validates: both chars owned by the session
+      account (acctID from cookie, never body), not the same char
+      (`errSameCharacter`), item exists in the named source slot with the
+      expected item id (`lockVaultSlot` does `SELECT ... FOR UPDATE` + id
+      cross-check -> `errItemNotFound`), destination has a free slot
+      (`freeVaultSlot`, else `errDestVaultFull`). The whole move runs in ONE
+      `serialTx` (SERIALIZABLE + 40001/40P01 retry): lock source row, insert into
+      lowest free dest slot, DELETE source row. Offline-guard on BOTH chars
+      (sorted ascending to avoid deadlock) -- a web vault mutation of an ONLINE
+      char is refused (the game server owns its vault in memory).
+- [x] **Send mail from the Mailbox tab (`Compose` in `web/src/screens/Mailbox.tsx`
+      + `POST /api/mail` -> `SendMail` in `store_mail_send.go`).** Subject required
+      (`errNoSubject`, <=128), To = a player name, body OR up to 6 items (both
+      allowed; empty body && no items -> `errEmptyMail`). Cannot send to the
+      SENDING char's own name but CAN send between two chars you own
+      (`from==to -> errSameCharacter`). Items are picked from the sender's VAULT
+      only (AH-sell-style grid). An included item is REMOVED from the vault into
+      mail-slot storage inside the same `serialTx`: per item `lockVaultSlot` +
+      DELETE, then `insertMessage` + `insertItemAttachment(kind=0)`. Pre-tx
+      `resolveItems` rejects no-trade items (`errItemUntradable`) and dup slots
+      (`errDupMailSlot`). `MAX_MAIL_ITEMS = 6` const client + server.
+- [x] **All web mutation engines made SERIALIZABLE + offline-guarded.** AH
+      PostListing/PlaceBid/Buyout/expiry and mailbox LootAttachment were converted
+      to run inside `serialTx` (so inventory/vault -> AH and mailbox looting carry
+      the same dup-safety + ownership guard as the new vault/mail paths).
+- [x] **C++ server vault-opcode atomicity (the in-game half of the same
+      request).** HONEST framing: at the C++ layer there is NO concurrency race
+      (one client per char, in-memory swap under `m_Mutex`, single FIFO
+      `SaveManager` thread). The real defect was CRASH-ATOMICITY: a vault move
+      emitted TWO independent `SaveInventoryChange`/`SaveVaultChange` messages,
+      each its own autocommit DB write, so a crash between the two commits dupes
+      (item in both slots) or loses (item in neither) on next login. Fix:
+      - `server/src/db/sqlplus.{h,cpp}`: added `begin()/commit()/rollback()/
+        in_transaction()` to `sql_query_c`. Between begin/commit every
+        execute*/run_query* on that query joins ONE `pqxx::work` on the borrowed
+        pooled connection and defers its commit; the destructor rolls back a
+        dangling open tx so a leaked transaction can't poison the pool.
+      - `server/src/SaveManager.{h,cpp}`: new `SAVE_CODE_MOVE_INVENTORY` (0x0031)
+        carrying TWO 86-byte slot records; `HandleMoveInventory` upserts both in
+        ONE transaction (`UpsertInventorySlot` refactored out of
+        `HandleChangeInventory` and shared). On a begin() failure it degrades to
+        two independent writes (reopens the window, never loses the change); on
+        any write failure it rolls back and logs.
+      - `server/src/PlayerSaves.cpp` + `PlayerClass.h`: `SaveInventoryMove(from_type,
+        from_slot, to_type, to_slot)` packs both slots into one move message
+        (`PackInventorySlot` mirrors the existing record layout AND the cargo-slot
+        `OBTAIN_ITEMS` mission-check side effect exactly).
+      - `server/src/PlayerConnection.cpp` `HandleInventoryMove`: the cargo->vault
+        (1->3), vault->cargo explicit (3->1), and vault->vault (3->3) branches now
+        emit ONE `SaveInventoryMove` instead of two separate save calls.
+      RESIDUAL GAP -- CLOSED in AQ-11b (2026-06-11): the vault->cargo auto-stack
+      path (ToSlot == -1) now ALSO commits atomically. The fixed 2-slot move
+      message was generalised to a variable-length N-slot message:
+      - `SaveManager.h`: `SAVE_CODE_MOVE_INVENTORY` payload is now N back-to-back
+        86-byte records (not exactly two); `SAVE_MOVE_MAX_RECORDS = 15` caps it to
+        what one save message buffer holds (floor((1306-12)/86)).
+      - `SaveManager::HandleMoveInventory` loops `count = bytes/86` UPSERTs inside
+        ONE transaction (validates bytes%86==0; begin-fail still degrades to
+        independent writes; any slot failure rolls back the whole batch).
+      - `Player::CargoAddItem(_Item*, std::vector<int>* touched_slots=nullptr)`:
+        when `touched_slots` is non-null it APPENDS each cargo slot it would have
+        saved instead of saving it independently (all other callers pass nullptr
+        and keep the old behaviour). `Player::SaveInventoryMoveSlots(refs, n)`
+        packs the emptied vault source + every touched cargo slot into one atomic
+        move. The pathological >14-cargo-slot spread (needs that many partial
+        stacks of the identical item already in cargo) falls back to per-slot
+        saves, logged.
+      This is NOT a wire-behaviour change: no opcode/packet/DB-content changed,
+      only the transaction GROUPING of two existing writes. So the CLI-byte-pin +
+      plans/29 wire gate does not strictly apply; a light real-client sanity check
+      is tracked anyway as **CV-AQ-VAULT-1** (plans/29) since it touches inherited
+      item persistence.
+- [x] **Tests.** Go: 18 new integration tests in
+      `freya/online/server/store_vault_mail_test.go` (transfer + send-mail happy
+      paths, ownership/same-char/offline/no-trade/full-vault rejections, and
+      CONCURRENT dup-safety: two goroutines moving the SAME source slot -> exactly
+      one wins, total item count across vaults stays exactly 1). C++: 4 new gtests
+      in `freya/tests/server/db/sqlplus_wrapper_test.cpp` proving commit persists
+      both writes, rollback discards, a failed second write leaves NOTHING (the
+      dup/loss scenario), and the destructor cleans a dangling tx so the pooled
+      connection stays usable. Server builds clean (167/167, -Wall -Wextra);
+      all 8 wrapper gtests green against live Postgres; web typecheck + 20 vitest +
+      production build clean.
+- [x] **AQ-11b variable-length move tests (2026-06-11).** 3 more gtests in
+      `sqlplus_wrapper_test.cpp` (`SqlplusWrapperTx`): an N-slot (5-record) move
+      commits all-or-nothing; a partial failure on the last of N slots rolls back
+      EVERY slot (no half-applied wide move); the cap-sized 15-record batch commits
+      as one transaction. Server rebuilt no-cache: clean, no new warnings at any
+      edited line range; all 7 `SqlplusWrapperTx` + 11 total wrapper gtests green
+      against live Postgres (port 5434).
+
+### AQ-12 Profile tab (2026-06-11)
+- [x] **Profile tab -- first tab, per-avatar character sheet.** New website tab
+      (before Mailbox) showing the selected avatar's identity, starship, and
+      learned skills. Switching the topbar avatar dropdown reloads it on demand.
+      - [x] Three split, ownership-scoped read APIs (`store_avatar.go`):
+            `GET /api/avatar/{name}/profile` (name, race/class via race*3+prof,
+            overall level = combat+explore+trade, 3 discipline bars with
+            fractional progress, sector name, credits),
+            `GET /api/avatar/{name}/ship` (ship_data name + avatar_level_info
+            hull/cargo/thrust/warp + fitted avatar_equipment, item_id>0 so the
+            -1 empty / -2 locked sentinels are excluded, resolved from the
+            content catalogue), `GET /api/avatar/{name}/skills` (learned skills
+            with name/category from content + per-class max-level column picked
+            by classIndex). Every read joins the two pools in Go (user save-state
+            + net7 content); no cross-DB statement. All values bound; identifiers
+            from catalog only. Indexed lookups only (idx_avatar_info_account_live,
+            PKs, sectors_pkey, skills_pkey) -- no migration needed.
+      - [x] React Profile screen (`web/src/screens/Profile.tsx`): identity card
+            (overall level + stylized class + sector), teal/blue/purple discipline
+            bars, starship card with hull/cargo/thrust/warp + equipment tiles
+            (hover popover reuses ItemDisplay tooltip), skills grouped with
+            filled/empty level dots. Loads its 3 slices in parallel per selected
+            avatar with an alive-guard.
+      - [x] Tests: `TestIT_AvatarProfile` / `_AvatarShip` / `_AvatarSkills`
+            (class/level/disciplines/credits, ship name + sentinel exclusion +
+            catalogue resolution, skill name/category/level/class-max), plus
+            cross-account 404 ownership negatives; `TestIT_API_Profile` (401
+            unauth / 200 owned / 404 cross-account). gofmt + go vet clean, full
+            `go test ./...` green, web vitest 20/20 + build clean. Website-only
+            read feature -- no C++/proxy/wire change, so the Server integrity /
+            CV-gate rules do not apply.
+
+### AQ-13 Galaxy tab (2026-06-11)
+- [x] **Galaxy tab -- first/default tab, live sector map.** New website tab
+      (before Profile) showing every named sector in the game, grouped by star
+      system and linked by the gate graph, with each sector lighting up and
+      glowing by how many players are currently in it. Glow is RELATIVE-max
+      normalized (count / busiest-sector count), so 1-vs-2 players reads the
+      same as 50-vs-100 -- the owner's explicit requirement.
+      - [x] Two split read APIs (`store_galaxy.go`): `GET /api/galaxy` (static
+            topology: 25 systems with normalized faction token, 130 named
+            sectors with system + faction, gate edges from
+            `sector_objects.gate_to` -- deduped undirected, self-loops dropped,
+            dock-gate interior targets remapped to parent then collapsed),
+            cached 5min; `GET /api/galaxy/occupancy` (live per-sector online
+            counts), cached 15s. Both auth-gated (401 unauth).
+      - [x] Live counts derived EXACTLY like the Discord status bot
+            (`status-notifier/bot.go readOnlinePlayers`): account online while
+            `accounts.last_login > last_logout`, avatar online while
+            `avatar_info.last_login > last_logout`, location = `avatar_info.sector`.
+            Docked players (sector = starbase INTERIOR id) remapped to the parent
+            sector via `starbases.sector_id`, else they light up nothing. No
+            server/C++ change -- the data is fully derivable website-side, so the
+            Server integrity / CV-gate rules do not apply.
+      - [x] `normalizeFaction` folds freeform `systems.notes` prose into the
+            stable token set (jenquai/progen/terran/pirate/contested/neutral/
+            deepspace; "various"->neutral, default->deepspace) the SPA colors by.
+      - [x] React Galaxy screen (`web/src/screens/Galaxy.tsx`): deterministic
+            radial cluster layout (no Math.random, no real coords exist --
+            galaxy_x/y are all 0), systems on a ring, sectors fanned in a
+            sub-ring, gate edges as SVG lines, faction-colored nodes whose
+            radius + glow halo scale with relative occupancy, hover info panel
+            (sector / system / faction / live pilot count), total-online header,
+            faction legend. Topology fetched once; occupancy polled every 15s
+            with an alive-guard.
+      - [x] Made the default + first tab in App.tsx (glyph). Tab union extended,
+            Galaxy rendered before Profile.
+      - [x] Tests: `TestIT_GalaxyMap` (non-empty topology, every sector has a
+            known faction + name, edges self-loop-free / normalized / deduped /
+            endpoints in set), `TestGalaxyNormalizeFaction` (table), 
+            `TestIT_GalaxyOccupancy` (in-space + docked-remap + offline-excluded,
+            interior id not its own key, total excludes offline),
+            `TestIT_API_Galaxy` (401 both endpoints unauth, 200 topology, live
+            count after set-online). Web: 4 new api.test.ts cases (real GET +
+            mock). gofmt + go vet clean, `FREYA_TEST_DB=1 go test ./...` green,
+            web vitest 23/23 + build clean.
+
 ### AQ-6 In-game notify
 - [ ] On player login, if unread mail: private system chat message with the
       website URL. (Server-side -- governed by Server integrity rules; cite

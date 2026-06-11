@@ -1014,3 +1014,47 @@ format & byte order", Trap 2).
      /run/net7-ipc) -- no "login DOWN" log on the server side.
   4. `/updateCheck`: an up-to-date launcher reports UP_TO_DATE; a stale one is
      offered the changed files and self-replaces (same as the old C++ path).
+
+### [ ] CV-AQ-VAULT-1 -- Real client vault moves still work + survive a relog with atomic persistence (AQ-11)
+
+- **Change**: `server/src/PlayerConnection.cpp HandleInventoryMove` (0x0027) now
+  persists a vault move's slot writes (source + destination(s)) in ONE DB
+  transaction instead of independent autocommit writes. The cargo->vault
+  (1->3), vault->cargo explicit (3->1), and vault->vault (3->3) branches emit a
+  single 2-record `SAVE_CODE_MOVE_INVENTORY` (`Player::SaveInventoryMove`) that
+  `SaveManager::HandleMoveInventory` commits atomically via the new
+  `sql_query_c::begin/commit/rollback` primitives
+  (`server/src/db/sqlplus.{h,cpp}`).
+- **AQ-11b (2026-06-11)**: the vault->cargo AUTO-STACK path (ToSlot == -1), where
+  one vault stack can spread across several cargo slots, now ALSO commits
+  atomically. The move message is variable-length (N records, capped at
+  `SAVE_MOVE_MAX_RECORDS=15`): `CargoAddItem` optionally collects the cargo slots
+  it touches and `Player::SaveInventoryMoveSlots` packs the emptied vault source
+  + every touched cargo slot into one transaction. Player-visible behaviour is
+  unchanged (same in-memory move, same Aux sends); only the persistence grouping
+  changed. So this folds into the SAME real-client check below -- in particular
+  the "drop on the vault / auto-pick" deposit/withdraw path now exercises the
+  N-slot atomic move.
+- **Why this is NOT a wire-format change**: no opcode, packet, or DB row
+  content changed. The inbound 0x0027 layout is identical; the persisted rows in
+  `avatar_vault_items`/`avatar_inventory_items` are identical values. The ONLY
+  change is that the two writes now share a transaction, so a crash between them
+  can no longer dupe or lose the item. The byte-level move parsing is already
+  pinned by `SectorInventoryMoveTests.cs` (CV-16) and the crash-atomicity is
+  pinned by the new `SqlplusWrapperTx.*` gtests. So the wire gate does not
+  strictly apply; this entry exists only because the change touches inherited
+  item persistence and item loss/dupe is high-stakes.
+- **Why the CLI/integration suite cannot fully close it**: the suite proves the
+  transaction primitive commits/rolls back correctly and that legit vault moves
+  round-trip, but it cannot simulate a real server crash in the microsecond
+  window between the two slot commits, nor exercise the real client's full
+  deposit/withdraw UI (drag-to-vault auto-slot, stack splits, multi-deposit).
+- **What to look for (real client)**: with a populated cargo + vault, deposit and
+  withdraw items every way the UI allows -- drag a specific cargo item onto a
+  specific vault slot, use the auto-pick "drop on the vault" path, move items
+  vault->vault, split stacks. Every move sticks. Then LOG OUT and back IN: no
+  item is duplicated (in both the source and dest slot) and none is lost (in
+  neither). The server log shows NO "HandleMoveInventory: ... rolled back" or
+  "could not begin transaction" line during legitimate play.
+- **Setup**: any deploy; a character with items in cargo and vault, docked at a
+  station so the vault is accessible.

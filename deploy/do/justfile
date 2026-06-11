@@ -81,3 +81,11 @@ create-account username password:
 # Show live status: container health/uptime, players online, sectors occupied.
 get-server-status:
     ./tools/Get-ServerStatus.ps1
+
+# Find avatars with negative credits (corrupted by the pre-421cd9bd credit bug)
+# and clamp them to a floor. SAFE BY DEFAULT: prints the offending rows only.
+# Pass --apply to actually clamp. Optional floor (default 100000).
+#   just fix-negative-credits            # dry run
+#   just fix-negative-credits --apply    # clamp to 100000
+fix-negative-credits *flags:
+    ./tools/Fix-NegativeCredits.ps1 {{ replace(replace(flags, "--apply", "-Apply"), "--floor", "-Floor") }}

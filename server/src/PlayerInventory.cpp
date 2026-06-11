@@ -199,7 +199,7 @@ int Player::CargoAddItem(long ItemID, u32 Stack, u32 TradeStack)
     return CargoAddItem(&TempData);
 }
 
-int Player::CargoAddItem(_Item * myItem)
+int Player::CargoAddItem(_Item * myItem, std::vector<int> *touched_slots)
 {
 	if (myItem->ItemTemplateID < 0)
 	{
@@ -255,7 +255,7 @@ int Player::CargoAddItem(_Item * myItem)
 						ShipIndex()->Inventory.CargoInv.Item[i].SetPrice(myItem->Price);
 					}
 					m_Mutex.Unlock();
-					SaveInventoryChange(i);
+					if (touched_slots) touched_slots->push_back(i); else SaveInventoryChange(i);
 					m_Mutex.Lock();
 			    }
 			    else
@@ -275,7 +275,7 @@ int Player::CargoAddItem(_Item * myItem)
 				    ShipIndex()->Inventory.CargoInv.Item[i].SetStackCount(curStack);
 				    ShipIndex()->Inventory.CargoInv.Item[i].SetTradeStack(curTrade);
 					m_Mutex.Unlock();
-					SaveInventoryChange(i);
+					if (touched_slots) touched_slots->push_back(i); else SaveInventoryChange(i);
 					goto check_mission;
                     //return 0;
 			    }
@@ -304,7 +304,7 @@ int Player::CargoAddItem(_Item * myItem)
                 // The SetTradeStack method converts negative numbers to zero so this is allowerd
 				curTrade -= maxStack;
 				m_Mutex.Unlock();
-				SaveInventoryChange(i);
+				if (touched_slots) touched_slots->push_back(i); else SaveInventoryChange(i);
 				m_Mutex.Lock();
 			}
 			else
@@ -316,7 +316,7 @@ int Player::CargoAddItem(_Item * myItem)
 				ShipIndex()->Inventory.CargoInv.Item[i].SetTradeStack(curTrade);
 				ShipIndex()->Inventory.CargoInv.Item[i].SetAveCost((float)curPrice);
 				m_Mutex.Unlock();
-				SaveInventoryChange(i);
+				if (touched_slots) touched_slots->push_back(i); else SaveInventoryChange(i);
                 goto check_mission;
 			}
 		}

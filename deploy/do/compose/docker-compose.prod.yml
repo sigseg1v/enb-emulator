@@ -191,11 +191,12 @@ services:
         condition: service_started
     environment:
       TZ: UTC
-      # Phase AM external-status events. Set NET7_EXTERNAL_STATUS_ENABLED=1 in the
-      # droplet .env to enqueue login/logout/level-up/broadcast/server-start
-      # events for the status-notifier sidecar. Default empty = off (the server's
-      # EmitExternalStatusEvent no-ops and writes nothing). See deploy README.
-      NET7_EXTERNAL_STATUS_ENABLED: "${NET7_EXTERNAL_STATUS_ENABLED:-}"
+      # Phase AM external-status events. Defaults ON (=1): the server enqueues
+      # login/logout/level-up/broadcast/server-start events for the
+      # status-notifier sidecar. Set NET7_EXTERNAL_STATUS_ENABLED= (empty) in
+      # the droplet .env to turn it off (EmitExternalStatusEvent no-ops and
+      # writes nothing). See deploy README.
+      NET7_EXTERNAL_STATUS_ENABLED: "${NET7_EXTERNAL_STATUS_ENABLED:-1}"
     # Resolve our own domain to loopback inside the container, mirroring the
     # dev stack's local.net-7.org remap. See the README "remote addressing"
     # caveat -- this is the load-bearing UNVERIFIED bit for remote play.

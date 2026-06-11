@@ -34,6 +34,69 @@ export interface Item {
   noTrade?: boolean;
 }
 
+// One of the three skill disciplines: the discrete level and the fractional
+// progress (0..1) toward the next level, used to fill the discipline bar.
+export interface Discipline { level: number; bar: number; }
+
+// The Profile identity card. `level` is the overall level (combat+explore+trade).
+export interface AvatarProfile {
+  name: string;
+  race: string;
+  class: string;     // e.g. "Terran Enforcer"
+  classCode: string; // e.g. "TE"
+  level: number;
+  combat: Discipline;
+  explore: Discipline;
+  trade: Discipline;
+  sector: string;
+  credits: number;
+}
+
+export interface EquippedItem {
+  slot: number;
+  quality: number | null;
+  item: Item;
+}
+
+export interface ShipView {
+  name: string;
+  hullPoints: number;
+  maxHullPoints: number;
+  cargoSpace: number;
+  warp: number;
+  equipment: EquippedItem[];
+}
+
+// One learned skill. The UI renders `level` filled of `maxLevel` total dots.
+export interface SkillView {
+  id: number;
+  name: string;
+  category: string; // Combat | Explore | Trade | Total
+  level: number;
+  maxLevel: number;
+}
+
+// Galaxy map (first tab). The topology is static content; the occupancy is the
+// live light-up data the SPA polls. Faction is a normalized token the UI colors
+// by ('jenquai' | 'progen' | 'terran' | 'pirate' | 'contested' | 'neutral' |
+// 'deepspace').
+export interface GalaxySystem { id: number; name: string; faction: string; }
+export interface GalaxySector {
+  id: number;
+  name: string;
+  systemId: number;
+  system: string;
+  faction: string;
+}
+export interface GalaxyEdge { from: number; to: number; }
+export interface GalaxyMap {
+  systems: GalaxySystem[];
+  sectors: GalaxySector[];
+  edges: GalaxyEdge[];
+}
+// counts is keyed by sector id (as a string); total is all online players.
+export interface GalaxyOccupancy { counts: Record<string, number>; total: number; }
+
 export interface Listing {
   id: string;
   item: Item;
@@ -109,4 +172,35 @@ export interface PostListingInput {
   minBid: number;
   buyout: number;
   fee: number;
+}
+
+// The in-game vault capacity (slots 0..95). Mirrors the server const
+// vaultSlotCount in store_mail_write.go -- the two MUST agree: the server
+// refuses a transfer / loot into a full vault, and the UI uses this to show
+// the destination's free-slot count.
+export const VAULT_SLOT_COUNT = 96;
+
+// The most attachments one message can carry (mirrors the server's maxMailItems).
+export const MAX_MAIL_ITEMS = 6;
+
+// One item the mail composer / vault transfer wants to move: the vault slot and
+// the item id the SPA last saw there (the server cross-checks it under a lock).
+export interface MailItemInput {
+  slot: number;
+  itemId: number;
+}
+
+export interface SendMailInput {
+  from: string;
+  to: string;
+  subject: string;
+  body: string;
+  items: MailItemInput[];
+}
+
+export interface VaultTransferInput {
+  from: string;
+  to: string;
+  slot: number;
+  itemId: number;
 }
