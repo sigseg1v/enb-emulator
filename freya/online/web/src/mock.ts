@@ -8,6 +8,7 @@
 
 import type {
   Item, Listing, MyListing, VaultSlot, Mail, Session, ServerStatus,
+  AvatarProfile, ShipView, SkillView,
 } from './types';
 import { rarityFor } from './lib/rarity';
 
@@ -268,3 +269,59 @@ export const DURATIONS = [
   { key: 'med',   label: 'Medium', hours: 12 },
   { key: 'long',  label: 'Long',   hours: 24 },
 ] as const;
+
+// ---- Profile mocks (VITE_MOCK=1 only) ----
+export const MOCK_PROFILE: Record<string, AvatarProfile> = {
+  Kestrel_Vega: {
+    name: 'Kestrel_Vega', race: 'Terran', class: 'Terran Enforcer', classCode: 'TE',
+    level: 121,
+    combat: { level: 50, bar: 0.62 },
+    explore: { level: 41, bar: 0.18 },
+    trade: { level: 30, bar: 0.74 },
+    sector: 'Vinda', credits: 1284500,
+  },
+  Orin_Tasca: {
+    name: 'Orin_Tasca', race: 'Jenquai', class: 'Jenquai Explorer', classCode: 'JE',
+    level: 96,
+    combat: { level: 22, bar: 0.40 },
+    explore: { level: 50, bar: 0.91 },
+    trade: { level: 24, bar: 0.12 },
+    sector: 'Aganju', credits: 642000,
+  },
+};
+
+export const MOCK_SHIP: Record<string, ShipView> = {
+  Kestrel_Vega: {
+    name: 'Belter Resolve', hullPoints: 4180, maxHullPoints: 4400, cargoSpace: 78,
+    thrust: 7, warp: 6,
+    equipment: [
+      { slot: 0, quality: 168, item: mk('claimjumper', 168) },
+      { slot: 1, quality: 117, item: mk('voidlance', 117) },
+      { slot: 2, quality: 96, item: mk('pulsecore', 96) },
+    ],
+  },
+  Orin_Tasca: {
+    name: 'Silent Aria', hullPoints: 2950, maxHullPoints: 2950, cargoSpace: 54,
+    thrust: 9, warp: 8,
+    equipment: [
+      { slot: 0, quality: 151, item: mk('tracer', 151) },
+      { slot: 1, quality: 134, item: mk('servo', 134) },
+    ],
+  },
+};
+
+export const MOCK_SKILLS: Record<string, SkillView[]> = {
+  Kestrel_Vega: [
+    { id: 1, name: 'Beam Weapon', category: 'Combat', level: 8, maxLevel: 8 },
+    { id: 0, name: 'Afterburn', category: 'Combat', level: 5, maxLevel: 9 },
+    { id: 18, name: 'Engine', category: 'Explore', level: 6, maxLevel: 7 },
+    { id: 20, name: 'Hull Upgrade', category: 'Explore', level: 4, maxLevel: 9 },
+    { id: 45, name: 'Negotiate', category: 'Trade', level: 3, maxLevel: 5 },
+    { id: 7, name: 'Build Items', category: 'Total', level: 2, maxLevel: 9 },
+  ],
+  Orin_Tasca: [
+    { id: 2, name: 'Befriend', category: 'Trade', level: 4, maxLevel: 5 },
+    { id: 18, name: 'Engine', category: 'Explore', level: 7, maxLevel: 7 },
+    { id: 1, name: 'Beam Weapon', category: 'Combat', level: 3, maxLevel: 9 },
+  ],
+};

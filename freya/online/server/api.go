@@ -76,6 +76,10 @@ func (s *apiServer) routes() http.Handler {
 	mux.HandleFunc("DELETE /api/mail/{id}", s.handleDeleteMail)
 	// Vault item transfer between two of the account's own characters.
 	mux.HandleFunc("POST /api/vault/transfer", s.handleVaultTransfer)
+	// Profile reads, split per concern so character-switch loads on demand.
+	mux.HandleFunc("GET /api/avatar/{name}/profile", s.handleAvatarProfile)
+	mux.HandleFunc("GET /api/avatar/{name}/ship", s.handleAvatarShip)
+	mux.HandleFunc("GET /api/avatar/{name}/skills", s.handleAvatarSkills)
 	// Account self-service.
 	mux.HandleFunc("POST /api/account/password", s.handleChangePassword)
 	return mux
@@ -579,4 +583,92 @@ func (s *apiServer) handleSendMail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// avatarName extracts and validates the {name} path wildcard for the Profile
+// endpoints. Empty/oversized names are rejected before any DB work.
+func avatarName(r *http.Request) (string, bool) {
+	n := r.PathValue("name")
+	if n == "" || len(n) > 64 {
+		return "", false
+	}
+	return n, true
+}
+
+// GET /api/avatar/{name}/profile -- identity card (class, levels, sector).
+func (s *apiServer) handleAvatarProfile(w http.ResponseWriter, r *http.Request) {
+	_, acctID := s.loggedIn(r)
+	if acctID == 0 {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	name, ok := avatarName(r)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad character name"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	p, err := s.store.avatarProfile(ctx, acctID, name)
+	if err != nil {
+		avatarReadError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
+// GET /api/avatar/{name}/ship -- starship card + fitted equipment.
+func (s *apiServer) handleAvatarShip(w http.ResponseWriter, r *http.Request) {
+	_, acctID := s.loggedIn(r)
+	if acctID == 0 {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	name, ok := avatarName(r)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad character name"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	ship, err := s.store.avatarShip(ctx, acctID, name)
+	if err != nil {
+		avatarReadError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, ship)
+}
+
+// GET /api/avatar/{name}/skills -- learned skills with per-class max levels.
+func (s *apiServer) handleAvatarSkills(w http.ResponseWriter, r *http.Request) {
+	_, acctID := s.loggedIn(r)
+	if acctID == 0 {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	name, ok := avatarName(r)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad character name"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	skills, err := s.store.avatarSkills(ctx, acctID, name)
+	if err != nil {
+		avatarReadError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, skills)
+}
+
+// avatarReadError maps a Profile read error to a status. A name that is not one
+// of the account's live characters is a 404 (ownership is enforced in the
+// store), not a hint that the avatar exists elsewhere; anything else is a 500.
+func avatarReadError(w http.ResponseWriter, err error) {
+	if errors.Is(err, errCharacterNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "character not found"})
+		return
+	}
+	log.Printf("api: avatar read: %v", err)
+	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 }

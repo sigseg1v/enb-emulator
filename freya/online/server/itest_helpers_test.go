@@ -220,6 +220,9 @@ func wipeAccount(t *testing.T, st *Store, ctx context.Context, acctID int64, use
 		{`DELETE FROM mailbox_messages WHERE account_id=$1`, []any{acctID}}, // attachments ON DELETE CASCADE
 		{`DELETE FROM avatar_vault_items WHERE avatar_id IN (SELECT avatar_id FROM avatar_info WHERE account_id=$1)`, []any{acctID}},
 		{`DELETE FROM avatar_inventory_items WHERE avatar_id IN (SELECT avatar_id FROM avatar_info WHERE account_id=$1)`, []any{acctID}},
+		{`DELETE FROM avatar_equipment WHERE avatar_id IN (SELECT avatar_id FROM avatar_info WHERE account_id=$1)`, []any{acctID}},
+		{`DELETE FROM avatar_skill_levels WHERE avatar_id IN (SELECT avatar_id FROM avatar_info WHERE account_id=$1)`, []any{acctID}},
+		{`DELETE FROM ship_data WHERE avatar_id IN (SELECT avatar_id FROM avatar_info WHERE account_id=$1)`, []any{acctID}},
 		{`DELETE FROM avatar_level_info WHERE avatar_id IN (SELECT avatar_id FROM avatar_info WHERE account_id=$1)`, []any{acctID}},
 		{`DELETE FROM avatar_data WHERE avatar_id IN (SELECT avatar_id FROM avatar_info WHERE account_id=$1)`, []any{acctID}},
 		{`DELETE FROM avatar_info WHERE account_id=$1`, []any{acctID}},

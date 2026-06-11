@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"testing"
 )
@@ -346,5 +347,56 @@ func TestIT_API_OfflineGuard409(t *testing.T) {
 	lresp.Body.Close()
 	if lresp.StatusCode != http.StatusConflict {
 		t.Errorf("post listing (online char) = %d, want 409", lresp.StatusCode)
+	}
+}
+
+// The Profile endpoints over HTTP: unauth is 401, an owned character returns its
+// identity card, and another account's character name is 404 (ownership scoped).
+func TestIT_API_Profile(t *testing.T) {
+	st, ctx := testStore(t)
+	owner := seedAccount(t, st, ctx, 50, 1, 4200)
+	other := seedAccount(t, st, ctx, 51, 1, 0)
+	name := owner.avatars[0].name
+
+	c, base := newTestAPI(t, st)
+
+	// Unauthenticated -> 401.
+	resp, err := c.Get(base + "/api/avatar/" + url.PathEscape(name) + "/profile")
+	if err != nil {
+		t.Fatalf("GET profile (unauth): %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauth profile = %d, want 401", resp.StatusCode)
+	}
+
+	loginAPI(t, c, base, owner)
+
+	// Owned -> 200 with the identity card.
+	resp, err = c.Get(base + "/api/avatar/" + url.PathEscape(name) + "/profile")
+	if err != nil {
+		t.Fatalf("GET profile: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("profile = %d, want 200", resp.StatusCode)
+	}
+	var p AvatarProfile
+	if err := json.NewDecoder(resp.Body).Decode(&p); err != nil {
+		t.Fatalf("decode profile: %v", err)
+	}
+	if p.Class != "Terran Enforcer" || p.Level != 3 || p.Credits != 4200 {
+		t.Errorf("profile = %+v, want class Terran Enforcer, level 3, credits 4200", p)
+	}
+
+	// The other account's character is not visible to this session -> 404.
+	oname := other.avatars[0].name
+	resp2, err := c.Get(base + "/api/avatar/" + url.PathEscape(oname) + "/profile")
+	if err != nil {
+		t.Fatalf("GET profile (cross): %v", err)
+	}
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusNotFound {
+		t.Errorf("cross-account profile = %d, want 404", resp2.StatusCode)
 	}
 }

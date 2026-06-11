@@ -7,6 +7,7 @@ import type {
 import * as api from './api';
 import { Credits, ServerStatus, Wordmark } from './components/ui';
 import { Login } from './screens/Login';
+import { Profile } from './screens/Profile';
 import { Mailbox } from './screens/Mailbox';
 import { AuctionHouse } from './screens/AuctionHouse';
 import { Vault } from './screens/Vault';
@@ -30,7 +31,7 @@ export default function App() {
   // screen, so a logged-in refresh doesn't flash the login form.
   const [booting, setBooting] = useState(true);
   const [server, setServer] = useState<ServerStatusT>({ status: 'OFFLINE', players: 0 });
-  const [tab, setTab] = useState<'mail' | 'ah' | 'vault' | 'account'>('mail');
+  const [tab, setTab] = useState<'profile' | 'mail' | 'ah' | 'vault' | 'account'>('profile');
   const [mail, setMail] = useState<Mail[]>([]);
   const [listings, setListings] = useState<Listing[]>([]);
   const [vault, setVault] = useState<Record<string, VaultSlot[]>>({});
@@ -123,6 +124,9 @@ export default function App() {
       <header className="topbar">
         <Wordmark size={20} />
         <nav className="tabs">
+          <button className={'tab' + (tab === 'profile' ? ' tab--active' : '')} onClick={() => setTab('profile')}>
+            <span className="tab__glyph">◎</span> Profile
+          </button>
           <button className={'tab' + (tab === 'mail' ? ' tab--active' : '')} onClick={() => setTab('mail')}>
             <span className="tab__glyph">✉</span> Mailbox
             {unread > 0 && <span className="tab__badge">{unread}</span>}
@@ -163,6 +167,9 @@ export default function App() {
 
       <div className="shell__body">
         <div className="shell__bg" />
+        {tab === 'profile' && (
+          <Profile character={character} />
+        )}
         {tab === 'mail' && (
           <Mailbox mail={mail} setMail={setMail} character={character}
             vaultStorage={vaultStorage} avatars={session.characters}

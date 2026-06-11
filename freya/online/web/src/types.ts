@@ -34,6 +34,49 @@ export interface Item {
   noTrade?: boolean;
 }
 
+// One of the three skill disciplines: the discrete level and the fractional
+// progress (0..1) toward the next level, used to fill the discipline bar.
+export interface Discipline { level: number; bar: number; }
+
+// The Profile identity card. `level` is the overall level (combat+explore+trade).
+export interface AvatarProfile {
+  name: string;
+  race: string;
+  class: string;     // e.g. "Terran Enforcer"
+  classCode: string; // e.g. "TE"
+  level: number;
+  combat: Discipline;
+  explore: Discipline;
+  trade: Discipline;
+  sector: string;
+  credits: number;
+}
+
+export interface EquippedItem {
+  slot: number;
+  quality: number | null;
+  item: Item;
+}
+
+export interface ShipView {
+  name: string;
+  hullPoints: number;
+  maxHullPoints: number;
+  cargoSpace: number;
+  thrust: number;
+  warp: number;
+  equipment: EquippedItem[];
+}
+
+// One learned skill. The UI renders `level` filled of `maxLevel` total dots.
+export interface SkillView {
+  id: number;
+  name: string;
+  category: string; // Combat | Explore | Trade | Total
+  level: number;
+  maxLevel: number;
+}
+
 export interface Listing {
   id: string;
   item: Item;

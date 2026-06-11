@@ -440,6 +440,38 @@ C++ source directly). The Go server must reproduce:
       edited line range; all 7 `SqlplusWrapperTx` + 11 total wrapper gtests green
       against live Postgres (port 5434).
 
+### AQ-12 Profile tab (2026-06-11)
+- [x] **Profile tab -- first tab, per-avatar character sheet.** New website tab
+      (before Mailbox) showing the selected avatar's identity, starship, and
+      learned skills. Switching the topbar avatar dropdown reloads it on demand.
+      - [x] Three split, ownership-scoped read APIs (`store_avatar.go`):
+            `GET /api/avatar/{name}/profile` (name, race/class via race*3+prof,
+            overall level = combat+explore+trade, 3 discipline bars with
+            fractional progress, sector name, credits),
+            `GET /api/avatar/{name}/ship` (ship_data name + avatar_level_info
+            hull/cargo/thrust/warp + fitted avatar_equipment, item_id>0 so the
+            -1 empty / -2 locked sentinels are excluded, resolved from the
+            content catalogue), `GET /api/avatar/{name}/skills` (learned skills
+            with name/category from content + per-class max-level column picked
+            by classIndex). Every read joins the two pools in Go (user save-state
+            + net7 content); no cross-DB statement. All values bound; identifiers
+            from catalog only. Indexed lookups only (idx_avatar_info_account_live,
+            PKs, sectors_pkey, skills_pkey) -- no migration needed.
+      - [x] React Profile screen (`web/src/screens/Profile.tsx`): identity card
+            (overall level + stylized class + sector), teal/blue/purple discipline
+            bars, starship card with hull/cargo/thrust/warp + equipment tiles
+            (hover popover reuses ItemDisplay tooltip), skills grouped with
+            filled/empty level dots. Loads its 3 slices in parallel per selected
+            avatar with an alive-guard.
+      - [x] Tests: `TestIT_AvatarProfile` / `_AvatarShip` / `_AvatarSkills`
+            (class/level/disciplines/credits, ship name + sentinel exclusion +
+            catalogue resolution, skill name/category/level/class-max), plus
+            cross-account 404 ownership negatives; `TestIT_API_Profile` (401
+            unauth / 200 owned / 404 cross-account). gofmt + go vet clean, full
+            `go test ./...` green, web vitest 20/20 + build clean. Website-only
+            read feature -- no C++/proxy/wire change, so the Server integrity /
+            CV-gate rules do not apply.
+
 ### AQ-6 In-game notify
 - [ ] On player login, if unread mail: private system chat message with the
       website URL. (Server-side -- governed by Server integrity rules; cite

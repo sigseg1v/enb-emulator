@@ -350,3 +350,90 @@
 .compose__input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-glow); }
 .compose__body { font-family: var(--font-body); resize: vertical; min-height: 90px; }
 .vslot__pick { position: absolute; top: 3px; right: 5px; font-size: 13px; color: var(--accent); text-shadow: 0 1px 3px #000; }
+
+/* ---- Profile ---------------------------------------------------------- */
+.profile { overflow: hidden; }
+.profile__body { flex: 1; overflow: auto; padding: 0 28px 28px;
+  display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 18px;
+  grid-template-areas: "id ship" "skills ship"; align-content: start; }
+.profile__err { padding: 14px; color: var(--danger); grid-area: id; }
+.pcard { padding: 20px 22px; }
+.pcard--id { grid-area: id; }
+.pcard--ship { grid-area: ship; }
+.pcard--skills { grid-area: skills; }
+.pcard__title { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--text-faint); margin-bottom: 14px; }
+.pcard__subtitle { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--text-faint); margin: 20px 0 12px; }
+
+/* identity */
+.pid { display: flex; align-items: center; gap: 22px; }
+.pid__level { display: flex; flex-direction: column; align-items: center; justify-content: center;
+  width: 92px; height: 92px; flex: none; border: 1px solid var(--line-strong); border-radius: var(--r-md);
+  background: radial-gradient(circle at 50% 30%, var(--accent-glow), transparent 70%); }
+.pid__lvlnum { font-family: var(--font-display); font-size: 34px; line-height: 1; color: var(--text); }
+.pid__lvllabel { font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--text-faint); margin-top: 7px; text-align: center; }
+.pid__name { min-width: 0; }
+.pid__char { font-size: 24px; color: var(--text); }
+.pid__class { font-family: var(--font-mono); font-size: 13px; letter-spacing: 0.1em;
+  color: var(--accent); margin-top: 6px; text-transform: uppercase; }
+.pid__loc { display: flex; align-items: center; gap: 7px; margin-top: 10px;
+  font-family: var(--font-mono); font-size: 11.5px; color: var(--text-dim); }
+.pid__locglyph { color: var(--warm); }
+
+/* discipline bars */
+.pdiscs { display: flex; flex-direction: column; gap: 14px; margin-top: 24px; }
+.disc__top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+.disc__label { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--bandc); }
+.disc__lvl { font-family: var(--font-display); font-size: 16px; color: var(--text); }
+.disc__track { height: 8px; border-radius: 99px; background: var(--bg-input);
+  border: 1px solid var(--line); overflow: hidden; }
+.disc__fill { height: 100%; border-radius: 99px; background: var(--bandc);
+  box-shadow: 0 0 10px var(--bandc); transition: width 0.4s ease; }
+
+/* starship */
+.pship__name { font-family: var(--font-display); font-size: 18px; color: var(--text); margin-bottom: 16px; }
+.pship__stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.pstat { display: flex; justify-content: space-between; align-items: baseline;
+  padding: 9px 12px; background: var(--bg-input); border: 1px solid var(--line); border-radius: var(--r-sm); }
+.pstat__label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--text-faint); }
+.pstat__value { font-family: var(--font-mono); font-size: 13px; color: var(--text); }
+.phull { height: 6px; border-radius: 99px; background: var(--bg-input); border: 1px solid var(--line);
+  overflow: hidden; margin-top: 12px; }
+.phull__fill { height: 100%; background: var(--ok); box-shadow: 0 0 8px var(--ok); transition: width 0.4s ease; }
+
+/* equipped items + hover tooltip */
+.pequip { display: flex; flex-direction: column; gap: 8px; }
+.pequip__empty { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-faint); }
+.ehover { position: relative; }
+.ehover__tile { display: flex; align-items: center; gap: 12px; padding: 9px 11px;
+  background: var(--bg-input); border: 1px solid var(--line); border-radius: var(--r-sm); cursor: default; }
+.ehover__tile:hover { border-color: var(--line-strong); }
+.ehover__meta { min-width: 0; }
+.ehover__name { font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ehover__slot { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--text-faint); margin-top: 3px; }
+.ehover__pop { position: absolute; left: 100%; top: 0; z-index: 30; margin-left: 12px; width: 340px;
+  opacity: 0; pointer-events: none; transform: translateX(-6px); transition: opacity 0.12s, transform 0.12s; }
+.ehover:hover .ehover__pop { opacity: 1; transform: translateX(0); }
+/* flip the tooltip to the left for the right-hand ship card so it stays on-screen */
+.pcard--ship .ehover__pop { left: auto; right: 100%; margin-left: 0; margin-right: 12px; transform: translateX(6px); }
+.pcard--ship .ehover:hover .ehover__pop { transform: translateX(0); }
+
+/* skills */
+.pskillgrp { margin-bottom: 16px; }
+.pskillgrp__head { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--accent-dim); border-bottom: 1px solid var(--line);
+  padding-bottom: 6px; margin-bottom: 8px; }
+.pskill { display: flex; justify-content: space-between; align-items: center; padding: 5px 2px; }
+.pskill__name { font-size: 13px; color: var(--text-dim); }
+.sdots { display: inline-flex; gap: 4px; }
+.sdot { width: 9px; height: 9px; border-radius: 50%; border: 1px solid var(--line-strong); background: transparent; }
+.sdot--on { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 6px var(--accent-glow); }
+
+@media (max-width: 1080px) {
+  .profile__body { grid-template-columns: 1fr; grid-template-areas: "id" "ship" "skills"; }
+}

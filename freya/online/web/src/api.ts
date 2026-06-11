@@ -11,12 +11,12 @@
 // without a backend.
 
 import type {
-  Listing, Mail, MyListing, PostListingInput, SendMailInput, ServerStatus,
-  Session, VaultSlot, VaultTransferInput,
+  AvatarProfile, Listing, Mail, MyListing, PostListingInput, SendMailInput,
+  ServerStatus, Session, ShipView, SkillView, VaultSlot, VaultTransferInput,
 } from './types';
 import {
-  MOCK_LISTINGS, MOCK_MAIL, MOCK_MY_LISTINGS, MOCK_SERVER, MOCK_SESSION, MOCK_VAULT,
-  MOCK_VAULT_STORAGE,
+  MOCK_LISTINGS, MOCK_MAIL, MOCK_MY_LISTINGS, MOCK_PROFILE, MOCK_SERVER, MOCK_SESSION,
+  MOCK_SHIP, MOCK_SKILLS, MOCK_VAULT, MOCK_VAULT_STORAGE,
 } from './mock';
 
 const USE_MOCK = import.meta.env.VITE_MOCK === '1';
@@ -107,6 +107,26 @@ export async function bootstrap(): Promise<Bootstrap> {
     };
   }
   return getJSON<Bootstrap>('/api/bootstrap');
+}
+
+// The Profile page loads its three slices on demand for the SELECTED character,
+// so switching avatars in the dropdown only re-pulls that character's data --
+// not the whole account. Each is a small, indexed, ownership-scoped read.
+const enc = encodeURIComponent;
+
+export async function fetchProfile(name: string): Promise<AvatarProfile> {
+  if (USE_MOCK) return structuredClone(MOCK_PROFILE[name] ?? MOCK_PROFILE.Kestrel_Vega);
+  return getJSON<AvatarProfile>(`/api/avatar/${enc(name)}/profile`);
+}
+
+export async function fetchShip(name: string): Promise<ShipView> {
+  if (USE_MOCK) return structuredClone(MOCK_SHIP[name] ?? MOCK_SHIP.Kestrel_Vega);
+  return getJSON<ShipView>(`/api/avatar/${enc(name)}/ship`);
+}
+
+export async function fetchSkills(name: string): Promise<SkillView[]> {
+  if (USE_MOCK) return structuredClone(MOCK_SKILLS[name] ?? MOCK_SKILLS.Kestrel_Vega);
+  return getJSON<SkillView[]>(`/api/avatar/${enc(name)}/skills`);
 }
 
 export async function placeBid(listingId: string): Promise<Listing> {
