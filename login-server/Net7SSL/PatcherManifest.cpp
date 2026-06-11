@@ -24,6 +24,8 @@ static const char *kProxyExeRel    = "bin/FreyaProxy.exe";
 // Optional MVAS position-feed injection pair; ride with the launcher set.
 static const char *kPosFeedDllRel  = "bin/FreyaPosFeed.dll";
 static const char *kInjectExeRel   = "bin/FreyaInject.exe";
+// Optional Lua mod runtime (enbmod). Shipped independently like the MVAS pair.
+static const char *kEnbmodDllRel   = "bin/enbmod.dll";
 
 PatcherManifest &PatcherManifest::Instance()
 {
@@ -165,7 +167,7 @@ bool PatcherManifest::Load()
     if (!Fetch(url, body))
         return false;   // Fetch already logged
 
-    std::string launcherExe, launcherCfg, proxyExe, posFeedDll, injectExe;
+    std::string launcherExe, launcherCfg, proxyExe, posFeedDll, injectExe, enbmodDll;
     ForEachFileObject(body, [&](const std::string &obj) {
         std::string rel  = JsonString(obj, "relativePath");
         std::string hash = JsonString(obj, "sha512");
@@ -175,6 +177,7 @@ bool PatcherManifest::Load()
         else if (rel == kProxyExeRel)    proxyExe = hash;
         else if (rel == kPosFeedDllRel)  posFeedDll = hash;
         else if (rel == kInjectExeRel)   injectExe = hash;
+        else if (rel == kEnbmodDllRel)   enbmodDll = hash;
     });
 
     if (launcherExe.empty() || launcherCfg.empty() || proxyExe.empty())
@@ -199,11 +202,13 @@ bool PatcherManifest::Load()
         m_proxyExe    = proxyExe;
         m_posFeedDll  = posFeedDll;
         m_injectExe   = injectExe;
+        m_enbmodDll   = enbmodDll;
         m_dlBase      = dlBase;
         m_loaded      = true;
     }
 
-    int total = 3 + (!posFeedDll.empty() ? 1 : 0) + (!injectExe.empty() ? 1 : 0);
+    int total = 3 + (!posFeedDll.empty() ? 1 : 0) + (!injectExe.empty() ? 1 : 0)
+                  + (!enbmodDll.empty() ? 1 : 0);
     LogMessage("PatcherManifest: loaded %d file hashes from %s (dl base '%s')\n",
                total, url, dlBase.c_str());
     return true;
@@ -263,6 +268,12 @@ std::string PatcherManifest::InjectExeHash() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_injectExe;
+}
+
+std::string PatcherManifest::EnbmodDllHash() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_enbmodDll;
 }
 
 std::string PatcherManifest::DlBase() const

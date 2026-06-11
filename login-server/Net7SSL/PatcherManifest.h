@@ -3,10 +3,14 @@
 // Holds the authoritative SHA-512 hashes of the published Windows artifacts:
 // the required trio (FreyaLauncher.exe, FreyaLauncher.cfg, bin/FreyaProxy.exe)
 // plus the optional MVAS position-feed injection pair (bin/FreyaPosFeed.dll,
-// bin/FreyaInject.exe). The proxy and the MVAS pair are hashed and shipped
+// bin/FreyaInject.exe) and the optional Lua mod runtime (bin/enbmod.dll). The
+// proxy, the MVAS pair, and enbmod.dll are each hashed and shipped
 // INDEPENDENTLY (each on its own client/server mismatch); only the cfg rides
-// with the launcher. The MVAS pair is optional -- absent from an older manifest
-// it simply is not offered. The cache is populated ONCE at login-server startup
+// with the launcher. Each optional file is absent-tolerant -- omitted from an
+// older manifest it simply is not offered. The Lua SCRIPTS (scripts/*.lua) are
+// deliberately NOT in the manifest: they are user-editable mod content and the
+// self-updater would clobber local edits; they ship once in the zip package.
+// The cache is populated ONCE at login-server startup
 // by an HTTPS GET of a small
 // manifest.json over CloudFront (NET7_PATCHER_MANIFEST_URL). libcurl also reads
 // file:// URLs, so the local-stub test points the env at an on-disk manifest --
@@ -60,6 +64,7 @@ public:
     std::string ProxyExeHash() const;
     std::string PosFeedDllHash() const;   // "" when the manifest omits it
     std::string InjectExeHash() const;    // "" when the manifest omits it
+    std::string EnbmodDllHash() const;    // "" when the manifest omits it (Lua mod runtime)
 
     // CloudFront base URL for the published files (NET7_PATCHER_DL_BASE),
     // trailing slash trimmed. Files are flat in the bucket; the launcher maps
@@ -80,5 +85,6 @@ private:
     std::string m_proxyExe;
     std::string m_posFeedDll;   // optional; "" when absent from the manifest
     std::string m_injectExe;    // optional; "" when absent from the manifest
+    std::string m_enbmodDll;    // optional; "" when absent from the manifest (Lua mod runtime)
     std::string m_dlBase;
 };

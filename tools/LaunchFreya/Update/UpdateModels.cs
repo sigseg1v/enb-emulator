@@ -20,6 +20,13 @@ namespace LaunchFreya.Update
         [JsonPropertyName("proxyHash")]    public string ProxyHash    { get; set; }
         [JsonPropertyName("posFeedHash")]  public string PosFeedHash  { get; set; }
         [JsonPropertyName("injectHash")]   public string InjectHash   { get; set; }
+        // enbmod.dll -- the optional Lua mod runtime. Hashed and shipped
+        // INDEPENDENTLY, exactly like the MVAS pair: it rides with the launcher
+        // set but a runtime-only patch reaches existing installs on its own
+        // mismatch. The Lua SCRIPTS are deliberately NOT hashed here -- they are
+        // user-editable mod content (init.lua hot-reloads) and the self-updater
+        // would clobber local edits; they ship as a one-time seed in the zip.
+        [JsonPropertyName("enbmodHash")]   public string EnbmodHash   { get; set; }
     }
 
     public sealed class UpdateFile

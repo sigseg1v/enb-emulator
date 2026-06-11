@@ -69,11 +69,11 @@ services:
         condition: service_healthy
       schema-init:
         condition: service_completed_successfully
-      # Phase J: the login container's entrypoint chmod's the shared
-      # /run/net7-ipc volume to 0777 (server runs as net7:net7 uid 999
-      # and otherwise can't bind a datagram socket in the root-owned
-      # volume dir). Start order matters; wait for login to be up.
-      login:
+      # The net7go login server (login-server/net7go) mkdir+chmod's the
+      # shared /run/net7-ipc volume to 0777 (server runs as net7:net7 uid
+      # 999 and otherwise can't bind a datagram socket in the root-owned
+      # volume dir). Start order matters; wait for net7go to be up.
+      net7go:
         condition: service_started
     environment:
       # Net7Config.cfg is the file the server actually reads on boot
@@ -258,78 +258,59 @@ services:
     restart: unless-stopped
 
   # --------------------------------------------------------------
-  # Net7SSL server-side TLS authentication listener (Phase J).
-  # Binds 443 (SSL_PORT) — the Westwood SSL auth handshake the
-  # client speaks first. The WIN32-only Connection/MailManager/MySQL
-  # tree under login-server/Net7SSL/ is walled at source level; the
-  # Linux path drives SSL_accept() inline and closes. Opcode
-  # dispatch / account lookup are the next pass.
+  # net7go -- standalone Go reimplementation of the Net7SSL game-auth
+  # server (login-server/net7go). CC BY-NC-SA 3.0, NOT MIT (a direct port
+  # of the C++ Net7SSL). It REPLACES the old C++ `login` (net7ssl) service.
+  #
+  # It does NOT terminate TLS: it listens plain HTTP on :8085 and the
+  # freya-online service terminates TLS on :443 and raw-relays the legacy
+  # game-auth URIs to it (FREYA_LOGIN_UPSTREAM=net7go:8085), copying
+  # net7go's response bytes verbatim back to the client. net7go also owns
+  # the AF_UNIX server-liveness keepalive on the shared /run/net7-ipc
+  # volume (it mkdir+chmod's the dir 0777 itself, so the server container
+  # -- uid 999 -- can bind its socket there too). No host port: the only
+  # client-facing endpoint is freya-online's TLS listener.
   # --------------------------------------------------------------
-  login:
+  net7go:
     build:
-      # Phase R: build context is the repo root so the Dockerfile can
-      # COPY common/ in addition to login-server/.
-      context: .
-      dockerfile: login-server/Dockerfile
+      context: ./login-server/net7go
+      dockerfile: Dockerfile
     depends_on:
-      # Phase N: login-server (Net7SSL) also speaks Postgres via libpqxx
-      # now. See the depends_on block on the `server` service for why
-      # this block was rewritten.
       postgres:
         condition: service_healthy
       schema-init:
         condition: service_completed_successfully
-    extra_hosts:
-      - "local.net-7.org:127.0.0.1"
     environment:
-      # LinuxAuth.cpp reads these to talk to the DB (Postgres since Phase N).
-      # Renamed MYSQL_*->DB_* in the login-server/proxy MySQL-name cleanup;
-      # the env-var contract is a closed loop (only set here, only read by
-      # LinuxAuth's EnvOr), so the rename is a coordinated code+compose change.
+      # net7go reads these to talk to the user DB (accounts + login_ticket).
       DB_HOST: "postgres:5432"
       DB_USER: "net7"
       DB_PASS: "net7"
       DB_NAME: "net7_user"
+      # certificate.html body text.
+      DOMAIN: "localhost"
+      # Launcher self-update (/updateCheck). Unset -> 503 (fail-closed), same
+      # as the C++ login on a cold manifest cache.
+      NET7_PATCHER_MANIFEST_URL: "${NET7_PATCHER_MANIFEST_URL:-}"
+      NET7_PATCHER_DL_BASE: "${NET7_PATCHER_DL_BASE:-}"
     volumes:
-      # SSL_Listener.cpp reads "<g_DomainName>.cer" and "<g_DomainName>.pem"
-      # from CWD; the same certs the server container uses also work here.
-      - ./deploy/certs/localhost.cer:/app/localhost.cer:ro
-      - ./deploy/certs/localhost.pem:/app/localhost.pem:ro
-      # Phase J IPC: shares the AF_UNIX SOCK_DGRAM sockets with the server
-      # container (Net7SSL writes /run/net7-ipc/net7.sock,
-      # reads /run/net7-ipc/net7SSL.sock; server is the mirror).
+      # AF_UNIX SOCK_DGRAM keepalive sockets, shared with the server container
+      # (net7go writes /run/net7-ipc/net7.sock, reads /run/net7-ipc/net7SSL.sock;
+      # the server is the mirror).
       - net7-ipc:/run/net7-ipc
-    # The login container runs as root; we use that to chmod the shared
-    # /run/net7-ipc volume to 0777 before exec'ing net7ssl, so the
-    # server container (running as net7:net7, uid 999) can also bind a
-    # datagram socket there. Same-host trust model — see posix_ipc.h.
-    entrypoint:
-      - /bin/sh
-      - -c
-      - |
-        mkdir -p /run/net7-ipc
-        chmod 0777 /run/net7-ipc
-        exec /app/net7ssl
-    ports:
-      # Container binds 443 internally (the protocol-correct port). The
-      # host side is remapped to 4443 so the stack works under rootless
-      # docker, which forbids publishing host ports < 1024. For prod, set
-      # `sysctl net.ipv4.ip_unprivileged_port_start=443` on the host and
-      # change the left side to 443.
-      - "4443:443/tcp"
     restart: unless-stopped
 
   # --------------------------------------------------------------
-  # Freya Online -- Go login server + website (Phase AQ).
+  # Freya Online -- Go TLS terminator + website (Phase AQ).
   #
-  # This is the MIT, self-contained Go replacement for the C++ Net7SSL above.
-  # It serves the SAME legacy game-auth endpoints byte-for-byte (legacy.go) PLUS
-  # the React SPA + JSON API for the auction house / mailbox. During the
-  # coexistence period it runs ALONGSIDE `login`: the C++ login keeps the real
-  # client.exe traffic on host:4443 and owns the AF_UNIX keepalive socket, so the
-  # Go service runs with NET7_IPC_KEEPALIVE off (default) and on its own host
-  # ports until the owner-confirmed cutover (plans/29 CV entry). At cutover,
-  # repoint the client to this service and delete the `login` service.
+  # This MIT, self-contained Go service owns the client-facing TLS :443
+  # endpoint. It terminates TLS for BOTH the website (React SPA + JSON API
+  # for the auction house / mailbox) AND the legacy game-auth endpoints --
+  # but it does NOT implement the legacy endpoints itself. The legacy auth
+  # logic is the CC BY-NC-SA net7go binary (login-server/net7go); this
+  # service raw-relays the legacy URIs to it (FREYA_LOGIN_UPSTREAM) and
+  # copies net7go's response bytes verbatim back to the client (byte-exact;
+  # see freya/online/server/legacy_proxy.go). It is the host:4443 entry the
+  # real client.exe / launcher reach (replacing the old C++ `login`).
   # --------------------------------------------------------------
   freya-online:
     build:
@@ -340,6 +321,9 @@ services:
         condition: service_healthy
       schema-init:
         condition: service_completed_successfully
+      # The legacy game-auth backend we relay to.
+      net7go:
+        condition: service_started
     environment:
       # DB contract: accounts/tickets/avatars/AH/mailbox live in net7_user;
       # item_base (catalogue) lives in net7. Two pools, cross-DB (see store.go).
@@ -351,20 +335,24 @@ services:
       DOMAIN: "localhost"
       NET7SSL_CERT_DIR: "/app/certs"
       FREYA_WEB_ROOT: "/app/web"
-      # Keepalive OFF during coexistence -- the C++ login owns the recv socket.
-      NET7_IPC_KEEPALIVE: "${FREYA_IPC_KEEPALIVE:-}"
+      # Raw-relay the legacy game-auth URIs (AuthLogin, updateCheck, ...) to the
+      # net7go login server on the docker network.
+      FREYA_LOGIN_UPSTREAM: "net7go:8085"
       # AH faucet bots. OFF by default; set FREYA_AH_BOTS=1 in the host env to
       # keep the Auction House stocked from the AhBot account (see bots.go).
       FREYA_AH_BOTS: "${FREYA_AH_BOTS:-}"
     volumes:
-      # Same dev certs the C++ login/server use; the Go service reads
+      # Same dev certs the server uses; the Go service reads
       # <DOMAIN>.cer / <DOMAIN>.pem from NET7SSL_CERT_DIR.
       - ./deploy/certs:/app/certs:ro
     ports:
-      # Host 8443 -> container 443 (legacy endpoints + website over TLS).
-      # Host 8088 -> container 8080 (plain HTTP API/SPA for dev / behind a
-      # separate TLS terminator).
-      - "8443:443/tcp"
+      # Host 4443 -> container 443: the client-facing TLS endpoint (legacy
+      # game-auth via the net7go relay + the website). 4443 because rootless
+      # docker forbids publishing host ports < 1024; the client's
+      # AuthenticationPort is set to 4443 to match (see play-local).
+      # Host 8088 -> container 8080: plain HTTP API/SPA for dev / behind a
+      # separate TLS terminator.
+      - "4443:443/tcp"
       - "8088:8080/tcp"
     restart: unless-stopped
 
@@ -469,6 +457,13 @@ services:
         # would fail closed for every login). See db/postgres/login_ticket.sql.
         echo "schema-init: applying /db/login_ticket.sql -> net7_user"
         psql -h postgres -U net7 -d net7_user -v ON_ERROR_STOP=1 -f /db/login_ticket.sql
+        # In-game petition store (net7_user). UNCONDITIONAL for the same reason
+        # as login_ticket above: new relation, so a probe-gated apply would skip
+        # pre-existing volumes and SaveManager::HandlePetition's INSERT would
+        # error on a missing relation. CREATE TABLE IF NOT EXISTS is idempotent.
+        # See db/postgres/petitions.sql.
+        echo "schema-init: applying /db/petitions.sql -> net7_user"
+        psql -h postgres -U net7 -d net7_user -v ON_ERROR_STOP=1 -f /db/petitions.sql
         # Phase AM external-status outbox table (net7_user). UNCONDITIONAL for the
         # same reason as login_ticket above: the table is new, so a probe-gated
         # apply would skip every pre-existing volume and the server's INSERT+NOTIFY

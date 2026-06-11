@@ -95,22 +95,25 @@ write_files:
         --dns route53 --domains "$DOMAIN" --path /data "$${ACTION[@]}"
       after="$(sha256sum "$CRT" | cut -d' ' -f1)"
       if [ "$before" = "$after" ]; then echo "cert unchanged; nothing to do"; exit 0; fi
-      # New cert: hand it to the server under the names SSL_Listener.cpp loads,
-      # then bounce ONLY the login container so it re-reads the cert at startup.
-      # Own the files 999:999 -- the server container runs as the unprivileged
-      # net7 (uid/gid 999, pinned in server/Dockerfile) and fail-closes at boot
-      # if it cannot READ the DTLS cert/key. login runs as root and reads them
-      # regardless. (We bounce only login here to avoid kicking players; the
-      # server keeps its in-memory cert until its next restart, at which point
-      # this ownership lets it re-read the renewed pair.)
+      # New cert: hand it to the server (DTLS) and the TLS terminator under the
+      # names each loads, then bounce ONLY the freya-online container so it
+      # re-reads the cert at startup. freya-online is now the TLS terminator on
+      # :443 (it relays game-auth to net7go); it reads <DOMAIN>.cer/.pem from
+      # /app/certs. Own the files 999:999 -- the server container runs as the
+      # unprivileged net7 (uid/gid 999, pinned in server/Dockerfile) and
+      # fail-closes at boot if it cannot READ the DTLS cert/key. freya-online
+      # runs as container-root (like the old net7ssl login) and reads them
+      # regardless. (We bounce only freya-online here to avoid kicking players;
+      # the server keeps its in-memory cert until its next restart, at which
+      # point this ownership lets it re-read the renewed pair.)
       install -m600 -o 999 -g 999 "$CRT" "$DST/$DOMAIN.cer"
       install -m600 -o 999 -g 999 "$LEGO/certificates/$DOMAIN.key" "$DST/$DOMAIN.pem"
       if [ -f /opt/enb/docker-compose.prod.yml ] && [ -f /opt/enb/.env ]; then
         cd /opt/enb
-        docker compose --env-file .env -f docker-compose.prod.yml up -d --force-recreate login
-        echo "cert renewed + login restarted"
+        docker compose --env-file .env -f docker-compose.prod.yml up -d --force-recreate freya-online
+        echo "cert renewed + freya-online (TLS terminator) restarted"
       else
-        echo "cert renewed (stack not deployed yet; login picks it up on next deploy)"
+        echo "cert renewed (stack not deployed yet; freya-online picks it up on next deploy)"
       fi
   - path: /etc/systemd/system/enb-cert-renew.service
     content: |

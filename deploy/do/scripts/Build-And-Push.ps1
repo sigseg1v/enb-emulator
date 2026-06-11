@@ -2,9 +2,10 @@
 # Build the server-side images for linux/amd64 and push them to the private
 # DigitalOcean Container Registry as a SINGLE repository ("enb") with
 # per-service version tags, so the whole stack fits DOCR's free Starter tier
-# (1 repository, 500 MiB). Build context per service (see $services): server and
-# login use the repo root (their Dockerfiles COPY common/ as well as their own
-# tree); status-notifier is self-contained and builds from its own dir.
+# (1 repository, 500 MiB). Build context per service (see $services): server
+# uses the repo root (its Dockerfile COPYs common/ as well as its own tree);
+# net7go, freya-online and status-notifier are self-contained and build from
+# their own dirs.
 #
 # The proxy is deliberately NOT pushed: it is a per-client, single-connection
 # bridge that runs on each player's own (Windows) machine, not server-side. It
@@ -13,8 +14,8 @@
 # Tagging model -- one shared, monotonic version counter across both services
 # (they always bump together):
 #
-#   enb:server-vN enb:login-vN enb:status-notifier-vN enb:db-backup-vN  <- produced
-#   enb:{server,login,status-notifier,db-backup}-latest   <- re-pointed at vN,
+#   enb:server-vN enb:net7go-vN enb:freya-online-vN enb:status-notifier-vN enb:db-backup-vN  <- produced
+#   enb:{server,net7go,freya-online,status-notifier,db-backup}-latest   <- re-pointed at vN,
 #                                                 but only AFTER every versioned
 #                                                 push succeeds
 #
@@ -31,14 +32,16 @@ Import-DeployEnv
 
 $repo = 'enb'
 $reg  = Get-RegistryEndpoint
-# Context is the docker build context, relative to the repo root. server/login
-# need the repo root (their Dockerfiles COPY common/ as well as their own tree);
-# status-notifier is self-contained, so its context is just its own dir.
+# Context is the docker build context, relative to the repo root. server needs
+# the repo root (its Dockerfile COPYs common/ as well as its own tree); net7go,
+# freya-online and status-notifier are self-contained, so each context is just
+# its own dir.
 $services = @(
-    @{ Svc = 'server';          Dockerfile = 'server/Dockerfile';          Context = '.' },
-    @{ Svc = 'login';           Dockerfile = 'login-server/Dockerfile';    Context = '.' },
-    @{ Svc = 'status-notifier'; Dockerfile = 'freya/status-notifier/Dockerfile'; Context = 'freya/status-notifier' },
-    @{ Svc = 'db-backup';       Dockerfile = 'db-backup/Dockerfile';       Context = 'db-backup' }
+    @{ Svc = 'server';          Dockerfile = 'server/Dockerfile';                 Context = '.' },
+    @{ Svc = 'net7go';          Dockerfile = 'login-server/net7go/Dockerfile';    Context = 'login-server/net7go' },
+    @{ Svc = 'freya-online';    Dockerfile = 'freya/online/Dockerfile';           Context = 'freya/online' },
+    @{ Svc = 'status-notifier'; Dockerfile = 'freya/status-notifier/Dockerfile';  Context = 'freya/status-notifier' },
+    @{ Svc = 'db-backup';       Dockerfile = 'db-backup/Dockerfile';              Context = 'db-backup' }
 )
 
 # ---- determine the version label ----
@@ -48,7 +51,7 @@ if ($Tag) {
 } else {
     $maxN = 0
     foreach ($t in $existingTags) {
-        if ($t -match '^(server|login|status-notifier|db-backup)-v(\d+)$') {
+        if ($t -match '^(server|net7go|freya-online|status-notifier|db-backup)-v(\d+)$') {
             $n = [int]$Matches[2]
             if ($n -gt $maxN) { $maxN = $n }
         }
@@ -116,5 +119,5 @@ foreach ($s in $services) {
 if ($deletedAny) { Start-DocrGarbageCollection }
 
 Write-Host ""
-Write-Host "Pushed enb:{server,login,status-notifier,db-backup}-$version (+ -latest)."
+Write-Host "Pushed enb:{server,net7go,freya-online,status-notifier,db-backup}-$version (+ -latest)."
 Write-Host "Ship it with: just apply-update $version   (runs automatically next if you used 'just update')."

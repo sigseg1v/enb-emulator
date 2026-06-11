@@ -13,7 +13,12 @@
 - sector servers spin up/down as needed when players gate/enter (cuts memory footprint 70%)
 - added full integration test suite
 - added CLI that can fully parse all network packet fields and can stimulate a client via REPL (you can log in and play the game through the CLI)
-- to avoid confusion for users, the launcher/etc for this project is called Freya to indicate that it has undergone significant changes from Net7
+- added Discord bot that can display server status, who is logged in, and alert when players level up or log in/out
+- added website with login, account panel, mailbox, auction house where you can auction your items from your Vault to other players
+- added clientside Lua for user interface modding
+- containerized everything
+- added terraform/infra-as-code to make managing and spinning server up easier
+- to avoid confusion for users, the launcher/etc for this project is called Freya to indicate that it has undergone significant changes from Net7. All original and derivative Net7 code remains Net7 licensed.
 
 ## Quick Start
 

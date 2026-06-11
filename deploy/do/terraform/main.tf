@@ -17,8 +17,9 @@ resource "digitalocean_ssh_key" "enb" {
   public_key = var.ssh_public_key
 }
 
-# Private image registry. The droplet pulls enb:server-* / enb:login-* from
-# here; the operator pushes to it (scripts/Build-And-Push.ps1).
+# Private image registry. The droplet pulls enb:server-* / enb:net7go-* /
+# enb:freya-online-* from here; the operator pushes to it
+# (scripts/Build-And-Push.ps1).
 resource "digitalocean_container_registry" "enb" {
   name                   = var.registry_name
   subscription_tier_slug = var.registry_tier
@@ -101,7 +102,7 @@ resource "digitalocean_reserved_ip_assignment" "enb" {
 
 # ---------------------------------------------------------------------------
 # Firewall. Port list is the protocol's, from common/include/net7/Ports.h:
-#   443/tcp         auth TLS (login-server, the ONLY TLS leg)
+#   443/tcp         auth TLS (freya-online terminates + relays to net7go; the ONLY TLS leg)
 #   3501-3800/udp   per-sector UDP planes
 #   3806/udp        MVAS position channel (MVAS_LOGIN_PORT)
 #   3808/udp        master UDP (UDP_MASTER_SERVER_PORT)

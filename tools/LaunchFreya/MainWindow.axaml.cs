@@ -171,6 +171,7 @@ namespace LaunchFreya
                 c_TextBox_Port.Text = _user.AuthenticationPort;
             if (_user.FormMainPositionX > 0 && _user.FormMainPositionY > 0)
                 Position = new Avalonia.PixelPoint(_user.FormMainPositionX, _user.FormMainPositionY);
+            c_CheckBox_LuaMods.IsChecked = _user.UseClientMods;
 
             FillEmulators();
             FillClientPath();
@@ -637,6 +638,8 @@ namespace LaunchFreya
             _setting.Hostname           = NormalizeHost(host.Hostname);
             _setting.LaunchName         = emu.GetLaunchName();
             _setting.EnablePositionFeed = _user.UsePositionFeed;   // PB-2
+            _user.UseClientMods         = c_CheckBox_LuaMods.IsChecked == true;
+            _setting.EnableClientMods   = _user.UseClientMods;     // enbmod Lua mods
 
             // Persist (keep the raw typed value so the box redisplays it verbatim)
             _user.AuthenticationPort = c_TextBox_Port.Text;

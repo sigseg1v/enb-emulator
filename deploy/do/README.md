@@ -29,7 +29,8 @@ want just one of them.
 ```
             AWS Route53                     DigitalOcean
    A enb.sigsegv.land -> reserved IP  ->  [ droplet, docker compose ]
-                                            |- login   :443  (TLS auth)
+                                            |- freya-online :443  (TLS; website + relays auth to net7go)
+                                            |- net7go  (game-auth, internal :8085 plain HTTP)
                                             |- server  :3501-3800/3806/3808/3810 udp
                                             |- postgres (internal only)
    images pulled from  ->  DigitalOcean Container Registry (private)
@@ -38,7 +39,7 @@ want just one of them.
 
    The proxy is NOT here. It is a per-client, single-connection bridge (one
    proxy per player), so each player runs their own on their Windows machine;
-   it dials login :443 + the server UDP planes above.
+   it dials freya-online :443 + the server UDP planes above.
 ```
 
 One droplet runs the server-side stack via `docker compose`. Images are built
@@ -104,7 +105,7 @@ stable across droplet rebuilds, so you set DNS once.
 | `just up` | DRY RUN -- print the terraform plan, apply nothing. (Backs up the DB first.) |
 | `just up -y` | Converge infra. Idempotent. Issues the bootstrap cert; the droplet auto-renews thereafter (see below). (Backs up the DB first -- a droplet REPLACE wipes the local pgdata volume.) |
 | `just update [tag]` | **THE full deploy.** Chains `just push` (build + push server images, and the client patch when configured) then `just apply-update` (ship + restart). This is all you normally run. |
-| `just push-server [vN]` | Build + push the server-side services (server + login + status-notifier + db-backup) into repo `enb` as `*-vN` (default: auto-increment), re-point `*-latest`, prune to the newest 3 versions/service, GC. |
+| `just push-server [vN]` | Build + push the server-side services (server + net7go + freya-online + status-notifier + db-backup) into repo `enb` as `*-vN` (default: auto-increment), re-point `*-latest`, prune to the newest 3 versions/service, GC. |
 | `just push-client` | (Phase AN, opt-in) Build the Windows launcher bundle, write `manifest.json`, upload all of it to the patcher S3 bucket, and invalidate CloudFront. Errors out unless the patcher is configured (see "Launcher self-update"). |
 | `just push [tag]` | `push-server` + (when the patcher is configured) `push-client`. Build + push everything, but does NOT ship to the droplet. |
 | `just apply-update [tag]` | Pull images + recreate changed containers on the droplet. The ship half of `update`; does NOT build or push. (Backs up the DB first.) |
@@ -161,8 +162,8 @@ paid Basic tier. To stay free, all server-side services live in a **single
 repository** named `enb`, distinguished by tag prefix:
 
 ```
-enb:server-vN  enb:login-vN  enb:status-notifier-vN      <- immutable versioned
-enb:{server,login,status-notifier}-latest                <- alias, re-pointed at vN
+enb:server-vN  enb:net7go-vN  enb:freya-online-vN  enb:status-notifier-vN      <- immutable versioned
+enb:{server,net7go,freya-online,status-notifier}-latest                       <- alias, re-pointed at vN
 ```
 
 `status-notifier` is the Phase AM sidecar: a Discord bot that posts the
@@ -194,7 +195,7 @@ above.) The server-side push:
 
 `just apply-update [vN|latest]` (and the `apply-update` leg of `just update`)
 ships whichever tag suffix you name (default `latest`); the compose file resolves
-`enb:server-<tag>` / `enb:login-<tag>` / `enb:status-notifier-<tag>`.
+`enb:server-<tag>` / `enb:net7go-<tag>` / `enb:freya-online-<tag>` / `enb:status-notifier-<tag>`.
 
 ## HTTPS / the certificate
 
@@ -221,8 +222,8 @@ in tfstate. The droplet's renewer registers its own account on first renewal.
    container on a **daily systemd timer** (`enb-cert-renew.timer`). It renews
    in place within 30 days of expiry -- a fresh DNS-01 challenge each time
    (ACME always revalidates on renewal) -- writes the new cert to
-   `/opt/enb/certs/`, and restarts **only** the `login` container so it
-   re-reads the cert (`SSL_Listener.cpp` loads at startup, no hot-reload).
+   `/opt/enb/certs/`, and restarts **only** the `freya-online` container (the
+   TLS terminator) so it re-reads the cert (loaded at startup, no hot-reload).
    **No workstation involvement** -- renewal does not depend on anyone running
    `just up` again. After bootstrap, `just update` detects the droplet already
    has a cert and stops shipping the local copy, so it never clobbers a
@@ -368,8 +369,9 @@ From `common/include/net7/Ports.h`:
 
 The proxy's client-facing TCP ports (3500/3801/3805) are **not** opened here:
 the proxy runs on each player's own Windows machine, so those listeners live on
-the player's box. Each player's local proxy dials login `443` + the server UDP
-planes above, which are the only inbound game ports the cloud exposes.
+the player's box. Each player's local proxy dials freya-online `443` (TLS auth,
+relayed to net7go) + the server UDP planes above, which are the only inbound
+game ports the cloud exposes.
 
 ## Honest caveats (read before trusting a public deploy)
 
@@ -404,8 +406,9 @@ planes above, which are the only inbound game ports the cloud exposes.
 
 The Windows **FreyaLauncher** can keep itself and the bundled **FreyaProxy.exe**
 current without the player re-running the installer. At startup it SHA-512s its
-own `FreyaLauncher.exe` and `bin/FreyaProxy.exe` and POSTs both hashes to the
-login server's `/updateCheck`. The login server compares them against a
+own `FreyaLauncher.exe` and `bin/FreyaProxy.exe` and POSTs both hashes to
+`/updateCheck` (terminated by freya-online, relayed to net7go). net7go compares
+them against a
 `manifest.json` it fetched at boot and replies `UP_TO_DATE` or a list of changed
 files + a base URL. The launcher downloads each changed file from that URL,
 verifies its hash, and self-replaces (rename-self-then-relaunch). `FreyaLauncher.cfg`
@@ -413,12 +416,12 @@ has no independent hash -- it rides along whenever the launcher EXE changes.
 
 Delivery is a **private S3 bucket fronted by CloudFront** (Origin Access Control,
 so nothing is world-readable from S3 directly), with an ACM cert + Route53
-`dl.<domain>` alias and a single per-source-IP WAF rate rule to cap abuse. The
-login server reads `manifest.json` credential-free over that same CloudFront host.
+`dl.<domain>` alias and a single per-source-IP WAF rate rule to cap abuse. net7go
+reads `manifest.json` credential-free over that same CloudFront host.
 
 **Entirely opt-in and OFF by default.** With `ENB_PATCHER_PRIVATE_S3_BUCKET`
 blank (the default), `TF_VAR_manage_patcher=false`: terraform creates none of the
-S3/CloudFront/ACM/WAF resources, the login container gets empty
+S3/CloudFront/ACM/WAF resources, the net7go container gets empty
 `NET7_PATCHER_*` env, its manifest never loads, and `/updateCheck` fail-closes
 (reports the server DOWN to the launcher -- harmless, the launcher just doesn't
 self-update). An existing deploy is untouched until you opt in.

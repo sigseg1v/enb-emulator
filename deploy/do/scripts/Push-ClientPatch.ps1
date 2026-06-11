@@ -10,7 +10,14 @@
 # Bucket layout is FLAT (everything at the bucket root, fronted by CloudFront):
 #
 #   FreyaLauncher.exe   FreyaLauncher.cfg   FreyaProxy.exe
-#   FreyaPosFeed.dll    FreyaInject.exe     manifest.json
+#   FreyaPosFeed.dll    FreyaInject.exe     enbmod.dll
+#   manifest.json
+#
+# The Lua mod runtime (enbmod.dll) is published here and self-updated like the
+# MVAS pair. The Lua SCRIPTS (scripts/*.lua) are deliberately NOT published: they
+# are user-editable mod content (init.lua hot-reloads) and force-syncing them
+# would clobber a modder's local edits. They ship once in the zip package
+# (just package-client-windows -> bin/scripts/), not through self-update.
 #
 # The proxy and the MVAS injection pair carry "bin/" manifest relativePaths (their
 # place in the launcher's install tree), but are stored FLAT at the bucket root --
@@ -64,7 +71,8 @@ $artifacts = @(
     @{ Local = (Join-Path $dist 'FreyaLauncher.cfg');     Rel = 'FreyaLauncher.cfg';     Key = 'FreyaLauncher.cfg';     Ctype = 'text/plain' },
     @{ Local = (Join-Path $dist 'bin/FreyaProxy.exe');    Rel = 'bin/FreyaProxy.exe';    Key = 'FreyaProxy.exe';        Ctype = 'application/octet-stream' },
     @{ Local = (Join-Path $dist 'bin/FreyaPosFeed.dll');  Rel = 'bin/FreyaPosFeed.dll';  Key = 'FreyaPosFeed.dll';      Ctype = 'application/octet-stream' },
-    @{ Local = (Join-Path $dist 'bin/FreyaInject.exe');   Rel = 'bin/FreyaInject.exe';   Key = 'FreyaInject.exe';       Ctype = 'application/octet-stream' }
+    @{ Local = (Join-Path $dist 'bin/FreyaInject.exe');   Rel = 'bin/FreyaInject.exe';   Key = 'FreyaInject.exe';       Ctype = 'application/octet-stream' },
+    @{ Local = (Join-Path $dist 'bin/enbmod.dll');        Rel = 'bin/enbmod.dll';        Key = 'enbmod.dll';            Ctype = 'application/octet-stream' }
 )
 
 foreach ($a in $artifacts) {

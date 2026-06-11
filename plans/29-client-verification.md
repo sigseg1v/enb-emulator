@@ -975,3 +975,42 @@ format & byte order", Trap 2).
   3. Run it on a name that does NOT end in a class code -> "Your name must end in a
      class suffix (...)" and the name is unchanged.
   4. Confirm it does not affect any other player's name and cannot be aimed at one.
+
+### [ ] CV-NET7GO-1 -- Real client logs in + self-updates through the net7go relay (net7ssl cutover)
+
+- **Change**: the C++ `login` (net7ssl) TLS auth server is removed from every
+  deploy path. Game-auth is now served by `net7go` (`login-server/net7go`, a CC
+  BY-NC-SA Go reimplementation that speaks PLAIN HTTP on :8085) sitting behind
+  `freya-online`, which terminates TLS on :443 and RAW-RELAYS the legacy auth
+  URIs (`/AuthLogin`, `/SectorServer`, `/Certificate`, `/updateCheck`) to net7go,
+  copying net7go's hand-framed response bytes back to the client verbatim
+  (`freya/online/server/legacy_proxy.go`). Touches docker-compose.yml, the
+  prod compose (`deploy/do/compose/docker-compose.prod.yml`), the justfile
+  launch recipes, and the deploy build/push pipeline + cloud-init cert hook.
+- **Why the CLI/integration suite does NOT close this**: the suite hits the
+  same host:4443 endpoint, so it exercises the relay path -- but it uses
+  CliClient, not client.exe. The bytes are byte-pinned by
+  `legacy_proxy_test.go` (TestRelayIsByteExact: no Date header, `AuthServer/2.5`
+  token, exact framing) and net7go's own auth/ticket tests. What only the real
+  Win32 client proves: that client.exe's TLS stack completes the handshake
+  against freya-online's listener, parses net7go's relayed `Valid=TRUE` /
+  ticket / certificate responses byte-for-byte the way it did net7ssl's, and
+  that the issued login ticket is accepted by the game server (ticket-suffix
+  validation, CV-14) end-to-end. Also: the launcher self-update `/updateCheck`
+  round-trip (previously a C++ path, now net7go's manifest-backed handler).
+- **Setup (owner)**: `just play-local` (boots postgres + server + net7go +
+  freya-online + proxy; client AuthenticationPort=4443 -> freya-online). Log in
+  a seeded account, create/enter a character, confirm you reach space/station.
+  Then separately point the FreyaLauncher at a deploy with the patcher
+  configured and confirm `/updateCheck` still reports UP_TO_DATE / triggers a
+  self-update as before.
+- **What to look for**:
+  1. Login succeeds with no "EA.com temporarily unavailable (INV-300)" or TLS
+     error (compare CV-19) -- the freya-online cert/handshake must satisfy the
+     client exactly as net7ssl's did.
+  2. Character select + enter-game work (the ticket net7go issued is accepted by
+     the game server; no G_ERROR_TICKET_INVALID).
+  3. The server's keepalive shows net7go as UP (the AF_UNIX Ping/pong on
+     /run/net7-ipc) -- no "login DOWN" log on the server side.
+  4. `/updateCheck`: an up-to-date launcher reports UP_TO_DATE; a stale one is
+     offered the changed files and self-replaces (same as the old C++ path).

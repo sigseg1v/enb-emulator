@@ -7913,3 +7913,37 @@ starts a FRESH empty DB volume named freya_pgdata. Prod sets PROJECT_NAME
 explicitly so set it to the prior value to keep the existing volume, or migrate.
 Verified: launcher builds clean (0 warn), smoke test reports title="LaunchFreya",
 FreyaTools.slnx restores.
+
+## 2026-06-10 -- HandlePetition: dead MySQL proc -> Postgres petitions table
+
+Post-cutover log audit (net7ssl->net7go). Of the Postgres errors in the live
+logs, only ONE is reachable in the deployed design (game-server + proxy +
+net7go + freya-online): `SaveManager::HandlePetition` (SAVE_CODE_PETITION, the
+in-game petition / GM-ticket submit) ran `CALL <g_Ticket_DB>.TicketViaServer(...)`
+against net7_user. Two faults: net7_user is the DATABASE not a schema (so
+`net7_user.TicketViaServer` => "schema net7_user does not exist"), and the proc
+`TicketViaServer` exists nowhere in this tree (it lived in Net-7's separate
+web/support DB). Petitions had never persisted under Postgres and error-spammed
+the log (app=net7-server).
+
+Fix (same treatment Phase N gave accLogin/avaLogin/incWarn): new
+`db/postgres/petitions.sql` table in net7_user + parameterised INSERT in
+HandlePetition (bound params, no schema qualifier, no string-concat). Wired into
+schema-init UNCONDITIONALLY in docker-compose.yml AND
+deploy/do/compose/docker-compose.prod.yml (CREATE TABLE IF NOT EXISTS, lands on
+pre-existing volumes). NOT a wire-format change -- petition packet parse and the
+client reply are byte-identical -- so no CLI wire test / CV-NN entry required.
+Verified: table created, parameterised INSERT round-trips, server rebuilds +
+boots clean, zero app=net7-server Postgres errors after restart. UNSTAGED.
+
+The OTHER logged Postgres errors were attributed and deliberately NOT fixed (not
+reachable in the deployed design, per owner scope "only fix if reachable"):
+- last_login timestamp-vs-integer x9, invalid integer "" x9 (app=[unknown],
+  03:35 burst): integration-suite direct-Npgsql fixture connections, NOT the
+  live server. Proof: only 1 app=net7-server error exists in 24h despite the
+  377-pass run exercising live char-create/login/logout many times.
+- forbidden_names_pkey dup: NameCollationFidelityTests.cs:74,84 (test).
+- auction_bids_listing_id_fkey: itest_helpers_test.go:219 (Go test cleanup).
+- role "postgres" does not exist (FATAL x3, startup): transient probe; our
+  postgres healthcheck correctly uses `-U net7`. Not ours.
+These are test-harness hygiene debt, tracked separately, not deployed-path bugs.

@@ -25,9 +25,33 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
+
+// tlsErrorFilter drops the benign "http: TLS handshake error ... EOF" /
+// "connection reset" / "i/o timeout" lines the stdlib TLS server emits for
+// every bare-TCP probe -- docker healthchecks, the integration fixture's
+// WaitForPortAsync, and `</dev/tcp/HOST/443>` readiness checks all open a
+// socket and close it without completing a handshake. Those are not errors;
+// logging them as "error" violates the "a log line that says Error must mean
+// Error" rule. A genuine TLS misconfiguration ("remote error: tls: ...",
+// "unsupported versions", "bad certificate") carries no EOF/reset/timeout
+// suffix and still passes through to the real log.
+type tlsErrorFilter struct{ out *log.Logger }
+
+func (f tlsErrorFilter) Write(p []byte) (int, error) {
+	line := string(p)
+	if strings.Contains(line, "TLS handshake error") &&
+		(strings.Contains(line, ": EOF") ||
+			strings.Contains(line, "connection reset by peer") ||
+			strings.Contains(line, "i/o timeout")) {
+		return len(p), nil
+	}
+	f.out.Print(strings.TrimRight(line, "\n"))
+	return len(p), nil
+}
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.LUTC)
@@ -44,10 +68,13 @@ func main() {
 
 	status := newStatusCache(store, cfg.StatusStaleSecs)
 	api := newAPIServer(store, status, cfg)
-	legacy := &legacyServer{store: store, cfg: cfg}
+	legacy := &legacyProxy{upstream: cfg.LoginUpstream}
+	if cfg.LoginUpstream == "" {
+		log.Printf("freya-online: WARNING FREYA_LOGIN_UPSTREAM unset; legacy game-auth endpoints (AuthLogin, updateCheck, ...) are NOT relayed and will fall through to the SPA. Point it at the net7go service (e.g. net7go:8085).")
+	}
 	spa := newSPAHandler(cfg.WebRoot)
 
-	// Top-level handler: legacy first (it hijacks and writes raw bytes), then
+	// Top-level handler: legacy first (raw-relayed byte-exact to net7go), then
 	// the API (session-wrapped), then the SPA.
 	apiHandler := api.session.LoadAndSave(api.routes())
 	root := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -67,14 +94,6 @@ func main() {
 	// AH faucet bots (FREYA_AH_BOTS=1): keep the Auction House stocked.
 	if cfg.AhBotsEnabled {
 		startBots(ctx, store)
-	}
-
-	if cfg.KeepaliveEnabled {
-		// The C++ login owns the AF_UNIX recv socket during coexistence; the Go
-		// keepalive sender is not yet ported. Website status reads server_status
-		// directly, so this only matters to the game server's view of login
-		// liveness at cutover. Fail loud rather than silently pretend.
-		log.Printf("freya-online: WARNING NET7_IPC_KEEPALIVE=1 but the keepalive sender is not yet ported; leave the C++ login running to own it until cutover")
 	}
 
 	servers := startServers(cfg, root)
@@ -107,6 +126,7 @@ func startServers(cfg Config, handler http.Handler) []*http.Server {
 			Handler:           handler,
 			ReadHeaderTimeout: 10 * time.Second,
 			TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS12},
+			ErrorLog:          log.New(tlsErrorFilter{out: log.Default()}, "", 0),
 		}
 		servers = append(servers, tlsSrv)
 		go func() {

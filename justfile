@@ -125,12 +125,34 @@ build-posfeed-dll:
         -lws2_32 \
         -Wl,--no-insert-timestamp; \
     echo ">>> building 32-bit FreyaInject.exe with $cxx"; \
-    "$cxx" -O2 -static -static-libgcc -static-libstdc++ \
+    "$cxx" -O2 -std=c++17 -static -static-libgcc -static-libstdc++ \
         -Wall -Wextra \
         -o bin/FreyaInject.exe \
         freya/client-injection/FreyaInject.cpp \
         -Wl,--no-insert-timestamp
     @echo ">>> done. bin/FreyaPosFeed.dll + bin/FreyaInject.exe (32-bit). The launcher injects the DLL into client.exe at launch via FreyaInject.exe (WINE has no AppInit_DLLs)."
+
+# Cross-compile the enbmod Lua mod runtime (32-bit Win32 PE) and stage it for the
+# launcher. enbmod.dll is a SECOND DLL FreyaInject.exe can inject into client.exe
+# (alongside FreyaPosFeed.dll): a 32-bit Lua 5.4 VM that exposes an enb.* API for
+# client-side UI mods. It has its own Makefile (vendored Lua + MinHook); this just
+# drives it with the posix-threads i686 toolchain (it uses std::mutex) and copies
+# the DLL + its scripts/ folder into bin/, where the launcher looks for them.
+# Requires the same i686 MinGW toolchain as build-posfeed-dll.
+build-enbmod:
+    @if ! command -v i686-w64-mingw32-g++-posix >/dev/null 2>&1 && ! command -v i686-w64-mingw32-g++ >/dev/null 2>&1; then \
+        echo "ERROR: 32-bit MinGW not found. client.exe is PE32/i386, so enbmod.dll must be 32-bit." >&2; \
+        echo "  install it:  sudo apt install gcc-mingw-w64-i686-posix g++-mingw-w64-i686-posix" >&2; \
+        exit 1; \
+    fi
+    @cc="$(command -v i686-w64-mingw32-gcc-posix || command -v i686-w64-mingw32-gcc)"; \
+    cxx="$(command -v i686-w64-mingw32-g++-posix || command -v i686-w64-mingw32-g++)"; \
+    echo ">>> building enbmod.dll with $cxx"; \
+    make -C freya/client-injection/enbmod CC="$cc" CXX="$cxx" AR=i686-w64-mingw32-ar; \
+    mkdir -p bin; \
+    cp freya/client-injection/enbmod/build/enbmod.dll bin/enbmod.dll; \
+    rm -rf bin/scripts; cp -r freya/client-injection/enbmod/scripts bin/scripts
+    @echo ">>> done. bin/enbmod.dll + bin/scripts/. Enable in the launcher with UseClientMods=true."
 
 # Standalone Windows client package. Produces dist/enb-client-windows/ holding a
 # self-contained launcher (FreyaLauncher.exe -- no .NET runtime needed) + the Win32
@@ -143,7 +165,7 @@ build-posfeed-dll:
 # Note: this packaging-only cfg is what flips the defaults to Multi-Player +
 # enb.sigsegv.land -- `just launch-net7` / `just play-*` keep the localhost dev
 # cfg untouched.
-package-client-windows: build-proxy-win64 build-posfeed-dll
+package-client-windows: build-proxy-win64 build-posfeed-dll build-enbmod
     @echo ">>> publishing self-contained win-x64 launcher (single-file)"
     dotnet publish tools/LaunchFreya/LaunchFreya.csproj -c Release -r win-x64 \
         --self-contained true \
@@ -160,14 +182,17 @@ package-client-windows: build-proxy-win64 build-posfeed-dll
     @cp bin/FreyaProxy.exe dist/enb-client-windows/bin/FreyaProxy.exe
     @cp bin/FreyaPosFeed.dll dist/enb-client-windows/bin/FreyaPosFeed.dll
     @cp bin/FreyaInject.exe dist/enb-client-windows/bin/FreyaInject.exe
+    @cp bin/enbmod.dll dist/enb-client-windows/bin/enbmod.dll
+    @cp -r bin/scripts dist/enb-client-windows/bin/scripts
     @cp tools/LaunchFreya/FreyaLauncher.windows-package.cfg dist/enb-client-windows/FreyaLauncher.cfg
     @echo ">>> zipping dist/enb-client-windows.zip"
     @rm -f dist/enb-client-windows.zip
     @cd dist && zip -qr enb-client-windows.zip enb-client-windows
     @echo ">>> done. dist/enb-client-windows/ (+ enb-client-windows.zip)"
-    @echo "    Contents: FreyaLauncher.exe + bin/FreyaProxy.exe + bin/FreyaPosFeed.dll + bin/FreyaInject.exe + FreyaLauncher.cfg"
+    @echo "    Contents: FreyaLauncher.exe + bin/FreyaProxy.exe + bin/FreyaPosFeed.dll + bin/FreyaInject.exe + bin/enbmod.dll + bin/scripts/ + FreyaLauncher.cfg"
     @echo "    User extracts the zip on Windows and runs FreyaLauncher.exe;"
-    @echo "    FreyaLauncher self-updates itself + FreyaProxy + the MVAS feed pair from the server thereafter."
+    @echo "    FreyaLauncher self-updates itself + FreyaProxy + the MVAS feed pair + enbmod.dll from the server thereafter."
+    @echo "    (Lua scripts/ ship once in the zip and are NOT force-synced -- they are user-editable mod content.)"
 
 # Smoke-run FreyaProxy.exe under WINE (no game client, just the proxy).
 # Confirms WSAStartup + binds TCP 3801/3805 + opens both UDP planes.
@@ -297,10 +322,13 @@ gen-certs:
     fi
 
 # Bring up the full runtime stack (postgres + schema-init + server +
-# login + proxy). Server image is built on demand. Streams logs in the
-# foreground; Ctrl-C to stop.
+# net7go + freya-online + proxy). Server image is built on demand. Streams
+# logs in the foreground; Ctrl-C to stop.
 #
-# Includes `proxy` (and not just server + login) so the docker proxy is
+# `net7go` is the CC BY-NC-SA Go game-auth server (login-server/net7go) that
+# replaced the old C++ `login` (net7ssl); `freya-online` terminates TLS on
+# :443 and raw-relays the legacy auth URIs to net7go (the client-facing
+# endpoint). Includes `proxy` (not just server + auth) so the docker proxy is
 # what the WINE client TCP-connects to on localhost:3801 / :3805 / :3500.
 # Keeping the proxy in-network means proxy <-> server UDP never crosses
 # the docker NAT, which dodges the rootless-docker slirp4netns conntrack
@@ -308,11 +336,11 @@ gen-certs:
 # integration suite (ServerFixture `compose up -d --wait`) also brings
 # the proxy up; this keeps `just dev` parity with the test stack.
 run-stack: init
-    docker compose up server login proxy
+    docker compose up server net7go freya-online proxy
 
 # Same but detached.
 run-stack-bg: init
-    docker compose up -d server login proxy
+    docker compose up -d server net7go freya-online proxy
 
 # Convenience: legacy name. Same as run-stack-bg.
 dev: run-stack-bg
@@ -321,13 +349,14 @@ dev: run-stack-bg
 # recompiles just the images whose build context changed (Docker's layer cache
 # makes an unchanged service a near-instant no-op -- no recompile); then plain
 # `up -d` (deliberately NOT --force-recreate) recreates only the containers
-# whose image ID actually changed, so an unchanged server/login keeps running
+# whose image ID actually changed, so an unchanged server/auth keeps running
 # and does NOT bounce or lose in-flight state. Scope it tighter with an arg:
 # `just rebuild proxy` touches only the proxy. Run this after changing C++ in
-# server/, proxy/, or login-server/ -- `just play-local` / `run-stack-bg`
-# deliberately REUSE running containers, so without a rebuild a relaunch keeps
-# serving the OLD binary. postgres + its pgdata volume are never touched.
-rebuild SERVICES='proxy server login':
+# server/, proxy/, the Go net7go (login-server/net7go), or freya-online --
+# `just play-local` / `run-stack-bg` deliberately REUSE running containers, so
+# without a rebuild a relaunch keeps serving the OLD binary. postgres + its
+# pgdata volume are never touched.
+rebuild SERVICES='proxy server net7go freya-online':
     docker compose build {{SERVICES}}
     docker compose up -d {{SERVICES}}
 
@@ -347,7 +376,8 @@ _image-status COMPOSE_ARGS SERVICES REBUILD_CMD:
     declare -A SRC=(
       [proxy]="proxy common/include/net7"
       [server]="server/src common/include/net7"
-      [login]="login-server common/include/net7"
+      [net7go]="login-server/net7go"
+      [freya-online]="freya/online"
       [cli]="freya/cli-client"
     )
     STALE=()
@@ -417,12 +447,12 @@ play-cli UNIT='cli1':
     #!/usr/bin/env bash
     set -euo pipefail
     # Ensure the shared stack is up WITHOUT ever bouncing it. Launching a CLI
-    # must never restart the shared server/login/proxy or wipe another player's
+    # must never restart the shared server/auth/proxy or wipe another player's
     # in-flight session, so `--no-recreate` starts only missing containers and
     # leaves running ones (and their state) untouched. play-cli NEVER rebuilds
     # the shared server -- use `just play-local` or `just rebuild` for that.
     just init
-    docker compose up -d --no-recreate server login proxy
+    docker compose up -d --no-recreate server net7go freya-online proxy
     # The CLI unit attaches to the shared stack network by name. It's derived
     # from COMPOSE_PROJECT_NAME (per-worktree), so pass it through rather than
     # hardcoding `freya_default`.
@@ -509,17 +539,17 @@ play-local CLIENT_PATH='':
         exit 1
     fi
 
-    echo ">>> bringing up local stack (postgres + server + login + proxy)"
+    echo ">>> bringing up local stack (postgres + server + net7go + freya-online + proxy)"
     just init
     # BUILD-IF-STALE (default). `docker compose build` recompiles ONLY the
     # services whose build context actually changed -- Docker's layer cache
     # makes an unchanged service a near-instant no-op -- then `up -d` recreates
     # ONLY the containers whose image ID changed. So if you changed nothing,
     # nothing rebuilds and nothing restarts: your in-flight session is left
-    # alone. If you changed server/ proxy/ login-server/ C++, the new binary is
-    # built and only that one container bounces. This is what kills the
-    # stale-image trap (testing an OLD binary because the container was never
-    # rebuilt -- see CLAUDE.md "Wire format & byte order").
+    # alone. If you changed server/ proxy/ C++ or the Go net7go/freya-online,
+    # the new binary is built and only that one container bounces. This is what
+    # kills the stale-image trap (testing an OLD binary because the container
+    # was never rebuilt -- see CLAUDE.md "Wire format & byte order").
     #
     # ENB_NOREBUILD=1 forces a PURE ATTACH: skip the build entirely and start
     # only containers that are missing. `--no-recreate` leaves every running
@@ -527,13 +557,13 @@ play-local CLIENT_PATH='':
     # Use it when you KNOW the running binaries are current and must not bounce.
     if [ -n "${ENB_NOREBUILD:-}" ]; then
         echo ">>> ENB_NOREBUILD=1 -- skipping build; starting only missing containers, running state untouched"
-        docker compose up -d --no-recreate server login proxy
+        docker compose up -d --no-recreate server net7go freya-online proxy
     else
         echo ">>> build-if-stale (layer cache skips unchanged services); set ENB_NOREBUILD=1 to skip"
-        docker compose build server login proxy
-        docker compose up -d server login proxy
+        docker compose build server net7go freya-online proxy
+        docker compose up -d server net7go freya-online proxy
     fi
-    just _image-status "" "proxy server login" "just rebuild"
+    just _image-status "" "proxy server net7go freya-online" "just rebuild"
 
     echo ">>> building launcher (so its output dir exists for settings.json)"
     dotnet build tools/LaunchFreya >/dev/null
@@ -545,6 +575,13 @@ play-local CLIENT_PATH='':
     # freya/client-injection/ClientEngineOffsets.h.
     echo ">>> building position-feed DLL (required)"
     just build-posfeed-dll
+
+    # enbmod Lua runtime: OPTIONAL (the "Enable Lua Mods" toggle is off by
+    # default). Built here so the toggle works without a separate step; the
+    # i686 toolchain is the same one build-posfeed-dll just required, and an
+    # unchanged build is a near-instant make no-op.
+    echo ">>> building enbmod Lua runtime (optional; for the Lua-mods toggle)"
+    just build-enbmod
 
     SETTINGS_DIR=tools/LaunchFreya/bin/Debug/net10.0
     mkdir -p "$SETTINGS_DIR"
@@ -638,6 +675,12 @@ play-online CLIENT_PATH='' HOST='':
     # bin/ under the repo root (CWD).
     echo ">>> building position-feed DLL + injector (required for online MVAS)"
     just build-posfeed-dll
+
+    # enbmod Lua runtime: OPTIONAL (the "Enable Lua Mods" toggle is off by
+    # default). Same i686 toolchain build-posfeed-dll just required; an
+    # unchanged build is a near-instant make no-op.
+    echo ">>> building enbmod Lua runtime (optional; for the Lua-mods toggle)"
+    just build-enbmod
 
     echo ">>> building launcher"
     dotnet build tools/LaunchFreya >/dev/null
@@ -1062,7 +1105,7 @@ integration-test:
 
 # Phase T: xUnit integration suite that drives CliClient.Core
 # (Phase S library) against the live docker-compose stack
-# (mysql + login + proxy + server). Reuses an existing
+# (postgres + net7go + freya-online + proxy + server). Reuses an existing
 # `just dev`/`just run-stack-bg` stack if one is up by exporting
 # CLI_INTEGRATION_SKIP_COMPOSE=1; otherwise the test fixture brings
 # its own stack up + tears it down.
@@ -1073,7 +1116,7 @@ cli-integration:
     && timeout 1 bash -c '</dev/tcp/127.0.0.1/3801' 2>/dev/null \
     && timeout 1 bash -c '</dev/tcp/127.0.0.1/3805' 2>/dev/null \
     && timeout 1 bash -c '</dev/tcp/127.0.0.1/3500' 2>/dev/null; then
-        echo ">>> reusing existing stack (login/proxy/sector ports listening)"
+        echo ">>> reusing existing stack (auth/proxy/sector ports listening)"
         export CLI_INTEGRATION_SKIP_COMPOSE=1
     else
         echo ">>> ServerFixture will own the docker-compose lifecycle"
@@ -1149,16 +1192,18 @@ cli-int-down:
 
 # ---- package / release ----
 
-# Build OCI images for server + login locally.
+# Build OCI images for server + net7go + freya-online locally.
 package:
-    docker compose build server login
+    docker compose build server net7go freya-online
 
 # Build + push OCI images to {{IMAGE_REGISTRY}}:{{IMAGE_TAG}}.
 push:
-    docker build -t {{IMAGE_REGISTRY}}/server:{{IMAGE_TAG}} server/
-    docker build -t {{IMAGE_REGISTRY}}/login:{{IMAGE_TAG}}  login-server/
+    docker build -t {{IMAGE_REGISTRY}}/server:{{IMAGE_TAG}}       server/
+    docker build -t {{IMAGE_REGISTRY}}/net7go:{{IMAGE_TAG}}       login-server/net7go/
+    docker build -t {{IMAGE_REGISTRY}}/freya-online:{{IMAGE_TAG}} freya/online/
     docker push  {{IMAGE_REGISTRY}}/server:{{IMAGE_TAG}}
-    docker push  {{IMAGE_REGISTRY}}/login:{{IMAGE_TAG}}
+    docker push  {{IMAGE_REGISTRY}}/net7go:{{IMAGE_TAG}}
+    docker push  {{IMAGE_REGISTRY}}/freya-online:{{IMAGE_TAG}}
 
 # ---- lint ----
 

@@ -12,9 +12,11 @@
 # each CLI gets its own proxy here.
 #
 # TOPOLOGY
-#   cli ──TCP──> proxy(cliproxy) ──UDP──> server      (global/master/sector)
-#   cli ──TLS──────────────────────────> login:443    (auth, N7_AUTH_HOST)
-#   cli ──UDP──────────────────────────> server:3806  (MVAS, N7_MVAS_HOST)
+#   cli ──TCP──> proxy(cliproxy) ──UDP──> server          (global/master/sector)
+#   cli ──TLS──────────────────────────> freya-online:443 (auth, N7_AUTH_HOST)
+#   cli ──UDP──────────────────────────> server:3806      (MVAS, N7_MVAS_HOST)
+# (freya-online terminates TLS on :443 and raw-relays the legacy auth URIs to
+#  the net7go login backend -- see docker-compose.yml.)
 # The proxy joins the shared stack network (to resolve `server`) and a private
 # per-unit network (so the CLI reaches ITS proxy via the `cliproxy` alias,
 # which exists only on the private net -- no cross-unit DNS collision even when
@@ -77,14 +79,14 @@ services:
     depends_on:
       - proxy
     networks:
-      # `unit` to reach the proxy (cliproxy); `stack` to reach login (auth TLS)
-      # and server (MVAS UDP 3806) directly.
+      # `unit` to reach the proxy (cliproxy); `stack` to reach freya-online
+      # (auth TLS) and server (MVAS UDP 3806) directly.
       unit: {}
       stack: {}
     environment:
-      - N7_PROXY_HOST=cliproxy  # global/master/sector TCP -> THIS unit's proxy
-      - N7_AUTH_HOST=login   # auth TLS terminates on the login container...
-      - N7_AUTH_PORT=443     # ...on 443 in-network (not the 4443 host remap)
+      - N7_PROXY_HOST=cliproxy     # global/master/sector TCP -> THIS unit's proxy
+      - N7_AUTH_HOST=freya-online  # auth TLS terminates on freya-online...
+      - N7_AUTH_PORT=443           # ...on 443 in-network (not the 4443 host remap)
       - N7_MVAS_HOST=server  # MVAS UDP goes direct to the server container
       - DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
     # Interactive REPL: `docker compose run` gives a TTY so the line editor +

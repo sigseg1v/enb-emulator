@@ -98,18 +98,6 @@ func (s *Store) updatePassword(ctx context.Context, accountID int64, phc string)
 	return nil
 }
 
-// upsertTicket stores token for username with a ms-epoch expiry, matching the
-// C++ login_ticket UPSERT exactly (BIGINT expires_at).
-func (s *Store) upsertTicket(ctx context.Context, username, token string, expiresAtMs int64) error {
-	_, err := s.user.Exec(ctx,
-		`INSERT INTO login_ticket (username, token, expires_at)
-		 VALUES ($1, $2, $3)
-		 ON CONFLICT (username) DO UPDATE
-		   SET token = EXCLUDED.token, expires_at = EXCLUDED.expires_at`,
-		username, token, expiresAtMs)
-	return err
-}
-
 // Character is one live (non-soft-deleted) avatar on an account.
 type Character struct {
 	AvatarID int64  `json:"-"`

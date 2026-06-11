@@ -34,17 +34,13 @@ type Config struct {
 	// Static SPA assets (built dist/). Empty -> API only, no website.
 	WebRoot string // FREYA_WEB_ROOT, default "/app/web"
 
-	// AF_UNIX server-liveness keepalive (matches Net7SSL MailslotManager).
-	// OFF by default: only one process may bind the recv socket, so during the
-	// coexistence period the C++ login owns it. Turn on at cutover.
-	KeepaliveEnabled bool   // NET7_IPC_KEEPALIVE=1
-	IPCSendSock      string // /run/net7-ipc/net7.sock
-	IPCRecvSock      string // /run/net7-ipc/net7SSL.sock
-
-	// Patcher self-update (/updateCheck). Empty manifest URL -> 503, matching
-	// the C++ behaviour when the manifest cache is cold.
-	PatcherManifestURL string // NET7_PATCHER_MANIFEST_URL
-	PatcherDLBase      string // NET7_PATCHER_DL_BASE
+	// Standalone net7go login server (login-server/net7go) host:port. Freya
+	// Online terminates TLS and raw-relays the legacy game-auth URIs to it (see
+	// legacy_proxy.go). Empty disables the relay -- legacy endpoints then fall
+	// through to the SPA, which is wrong for a live stack, so it is logged at
+	// startup. The legacy auth/ticket/keepalive/manifest logic is NOT here; it
+	// is the separate CC BY-NC-SA binary at login-server/net7go.
+	LoginUpstream string // FREYA_LOGIN_UPSTREAM, default "" (e.g. "net7go:8085")
 
 	// Treat the game server as ONLINE only if server_status.updated_at is within
 	// this many seconds. The server heartbeats that row.
@@ -78,11 +74,7 @@ func loadConfig() Config {
 		DBUserName:         env("DB_NAME", "net7_user"),
 		DBContent:          env("FREYA_DB_CONTENT", "net7"),
 		WebRoot:            env("FREYA_WEB_ROOT", "/app/web"),
-		KeepaliveEnabled:   env("NET7_IPC_KEEPALIVE", "") == "1",
-		IPCSendSock:        env("NET7_IPC_SEND_SOCK", "/run/net7-ipc/net7.sock"),
-		IPCRecvSock:        env("NET7_IPC_RECV_SOCK", "/run/net7-ipc/net7SSL.sock"),
-		PatcherManifestURL: env("NET7_PATCHER_MANIFEST_URL", ""),
-		PatcherDLBase:      strings.TrimRight(env("NET7_PATCHER_DL_BASE", ""), "/"),
+		LoginUpstream:      env("FREYA_LOGIN_UPSTREAM", ""),
 		StatusStaleSecs:    stale,
 		AhBotsEnabled:      env("FREYA_AH_BOTS", "") == "1",
 	}
