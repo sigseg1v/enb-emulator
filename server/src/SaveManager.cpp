@@ -599,34 +599,44 @@ void SaveManager::HandleChangeInventory(long player_id, short bytes, unsigned ch
 
 void SaveManager::HandleMoveInventory(long player_id, short bytes, unsigned char *data)
 {
-	// One logical item move == two slot writes (source + destination). Persist
-	// them inside a single transaction so a crash between the two can neither
-	// duplicate the item (in both slots) nor lose it (in neither). The payload
-	// is two back-to-back 86-byte slot records, identical in layout to a
-	// SAVE_CODE_CHANGE_INVENTORY record. See SAVE_INVENTORY_RECORD_BYTES.
+	// One logical item move == N paired slot writes: one source plus one or more
+	// destination slots (a single vault stack can spread across several cargo
+	// slots). Persist them ALL inside one transaction so a crash mid-move can
+	// neither duplicate the item (some slots written, some not) nor lose it. The
+	// payload is N back-to-back 86-byte slot records, each identical in layout to
+	// a SAVE_CODE_CHANGE_INVENTORY record. See SAVE_INVENTORY_RECORD_BYTES.
+	if (bytes <= 0 || (bytes % SAVE_INVENTORY_RECORD_BYTES) != 0)
+	{
+		LogMessage("HandleMoveInventory: bad payload size %d for id %d (not a multiple of %d)\n",
+			(int)bytes, player_id, SAVE_INVENTORY_RECORD_BYTES);
+		return;
+	}
+	int count = bytes / SAVE_INVENTORY_RECORD_BYTES;
+
 	sql_query_c account_query (&m_SQL_Conn);
 
 	if (!account_query.begin())
 	{
-		// Could not open a transaction -- fall back to two independent
-		// autocommit writes rather than dropping the save entirely. This
-		// reopens the crash-atomicity window but never loses the change.
-		LogMessage("HandleMoveInventory: could not begin transaction for id %d, %s -- writing slots independently\n",
-			player_id, account_query.ErrorMsg());
-		UpsertInventorySlot(account_query, player_id, &data[0]);
-		UpsertInventorySlot(account_query, player_id, &data[SAVE_INVENTORY_RECORD_BYTES]);
+		// Could not open a transaction -- fall back to independent autocommit
+		// writes rather than dropping the save entirely. This reopens the
+		// crash-atomicity window but never loses the change.
+		LogMessage("HandleMoveInventory: could not begin transaction for id %d, %s -- writing %d slots independently\n",
+			player_id, account_query.ErrorMsg(), count);
+		for (int i = 0; i < count; i++)
+			UpsertInventorySlot(account_query, player_id, &data[i * SAVE_INVENTORY_RECORD_BYTES]);
 		return;
 	}
 
-	bool ok = UpsertInventorySlot(account_query, player_id, &data[0])
-		&& UpsertInventorySlot(account_query, player_id, &data[SAVE_INVENTORY_RECORD_BYTES]);
+	bool ok = true;
+	for (int i = 0; i < count && ok; i++)
+		ok = UpsertInventorySlot(account_query, player_id, &data[i * SAVE_INVENTORY_RECORD_BYTES]);
 
 	if (ok && account_query.commit())
 		return;
 
 	account_query.rollback();
-	LogMessage("HandleMoveInventory: move not persisted for id %d, %s -- rolled back\n",
-		player_id, account_query.ErrorMsg());
+	LogMessage("HandleMoveInventory: %d-slot move not persisted for id %d, %s -- rolled back\n",
+		count, player_id, account_query.ErrorMsg());
 }
 
 bool SaveManager::UpsertInventorySlot(sql_query_c &account_query, long player_id, const unsigned char *data)

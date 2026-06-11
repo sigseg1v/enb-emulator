@@ -3019,17 +3019,44 @@ void Player::HandleInventoryMove(unsigned char *data)
 				//find an empty inventory slot or somewhere to stack this object
 				if (CargoAddItemCount(Source.ItemTemplateID,Source.Quality) >= Source.StackCount)
 				{
-					CargoAddItem(&Source);
+					// Collect the cargo slots CargoAddItem touches instead of letting
+					// it save them independently, so the emptied vault source and every
+					// affected cargo slot commit together in one transaction -- no dupe
+					// or loss if the server crashes mid-move.
+					std::vector<int> cargo_slots;
+					CargoAddItem(&Source, &cargo_slots);
 					m_Mutex.Lock();
 					PlayerIndex()->SecureInv.Item[InvMo.FromSlot].SetData(&g_ItemBaseMgr->EmptyItem);
 					m_Mutex.Unlock();
 
 					SendAuxShip();
 					SendAuxPlayer();
-					// The cargo side may stack across several slots and is
-					// persisted by CargoAddItem itself; only the emptied vault
-					// source slot is saved here.
-					SaveVaultChange(InvMo.FromSlot);
+
+					// One source vault slot + every touched cargo slot, atomic. Falls
+					// back to independent saves only if the stack spread across more
+					// cargo slots than one move message can hold (pathological; see
+					// SAVE_MOVE_MAX_RECORDS).
+					if ((int)cargo_slots.size() + 1 <= SAVE_MOVE_MAX_RECORDS)
+					{
+						InvSlotRef refs[SAVE_MOVE_MAX_RECORDS];
+						int n = 0;
+						refs[n].inv_type = PLAYER_VAULT;
+						refs[n].slot = InvMo.FromSlot;
+						n++;
+						for (size_t s = 0; s < cargo_slots.size(); s++)
+						{
+							refs[n].inv_type = PLAYER_INVENTORY;
+							refs[n].slot = cargo_slots[s];
+							n++;
+						}
+						SaveInventoryMoveSlots(refs, n);
+					}
+					else
+					{
+						SaveVaultChange(InvMo.FromSlot);
+						for (size_t s = 0; s < cargo_slots.size(); s++)
+							SaveInventoryChange(cargo_slots[s]);
+					}
 				}
 				else
 				{

@@ -174,20 +174,30 @@ struct EnbSaveHeader
 // followed by the already-rendered UTF-8 message line; HandleExternalStatusEvent
 // INSERTs it into external_status_events + NOTIFYs the consumer. player_id unused.
 #define SAVE_CODE_EXT_STATUS_EVENT					0x0030
-// Atomic two-slot inventory move. Payload is TWO back-to-back
-// SAVE_CODE_CHANGE_INVENTORY slot records (86 bytes each, source then
-// destination); HandleMoveInventory persists both inside ONE DB transaction so
-// a crash mid-move can neither duplicate nor lose the item. Emitted by
-// Player::SaveInventoryMove for cargo<->vault and vault<->vault moves in place
-// of two independent SAVE_CODE_CHANGE_INVENTORY messages.
+// Atomic inventory move. Payload is N back-to-back SAVE_CODE_CHANGE_INVENTORY
+// slot records (86 bytes each); HandleMoveInventory persists ALL of them inside
+// ONE DB transaction so a crash mid-move can neither duplicate nor lose the
+// item. N == 2 for a plain source->destination swap (Player::SaveInventoryMove,
+// cargo<->vault and vault<->vault). N > 2 for a vault->cargo auto-stack where
+// one vault stack spreads across several cargo slots: the emptied vault source
+// plus every touched cargo slot all commit together (Player::SaveInventoryMoveSlots).
 #define SAVE_CODE_MOVE_INVENTORY					0x0031
 
 // Wire size of one inventory/vault/trade slot record as packed by
 // Player::SaveInventoryChange / SaveVaultChange / SaveTradeChange and parsed by
 // SaveManager::UpsertInventorySlot: slot(1) + type(1) + stack_level(2) +
 // trade_stack(2) + quality(4) + item_id(4) + cost(4) + structure(4) +
-// builder_name(64) = 86. A SAVE_CODE_MOVE_INVENTORY payload is two of these.
+// builder_name(64) = 86. A SAVE_CODE_MOVE_INVENTORY payload is N of these.
 #define SAVE_INVENTORY_RECORD_BYTES					86
+
+// Maximum slot records one SAVE_CODE_MOVE_INVENTORY payload may carry. Bounded
+// by AddSaveMessage's SAVE_MESSAGE_MAX_LENGTH (1306) buffer minus the 12-byte
+// EnbSaveHeader: floor((1306 - 12) / 86) = 15. A move that would touch more
+// slots than this (a single vault stack spreading across >14 cargo slots --
+// pathological, needs that many partial stacks of the identical item already in
+// cargo) falls back to independent per-slot saves at the call site, trading
+// crash-atomicity for not dropping the save.
+#define SAVE_MOVE_MAX_RECORDS						15
 
 // external_status_events.kind bytes (wire-packed at data[0]; mapped to the kind
 // text stored in the row). Keep in sync with HandleExternalStatusEvent + docs.

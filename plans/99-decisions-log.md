@@ -7990,4 +7990,34 @@ gtests green against live Postgres (commit persists both, rollback discards,
 failed-second-write leaves nothing, destructor cleans a dangling tx); 18 new Go
 integration tests green (incl. concurrent two-goroutine same-slot dup-safety:
 exactly one wins, total item count stays 1); web typecheck + 20 vitest + prod
-build clean. UNCOMMITTED -- on branch website-dev2.
+build clean. Committed 43e12965 on branch website-dev2.
+
+## 2026-06-11 -- AQ-11b: variable-length atomic move closes the auto-stack gap
+
+Closed the residual gap above. The fixed 2-slot SAVE_CODE_MOVE_INVENTORY message
+was generalised to a variable-length N-record message so the vault->cargo
+auto-stack path (ToSlot == -1) -- where one vault stack can spread across several
+cargo slots -- also commits atomically.
+
+- SaveManager.h: payload is now N back-to-back 86-byte records; SAVE_MOVE_MAX_RECORDS
+  = 15 caps it to one save-message buffer (floor((1306-12)/86)).
+- SaveManager::HandleMoveInventory: loops count = bytes/86 UPSERTs in ONE tx
+  (validates bytes%86==0; begin-fail degrades to independent writes; any slot
+  failure rolls back the whole batch).
+- Player::CargoAddItem(_Item*, std::vector<int>* touched_slots=nullptr): when
+  touched_slots is non-null it APPENDS each cargo slot it would have saved instead
+  of saving it; every other caller passes nullptr (unchanged). The OBTAIN_ITEMS
+  mission side effect still fires once per cargo slot via PackInventorySlot.
+- Player::SaveInventoryMoveSlots(refs, n): packs emptied vault source + every
+  touched cargo slot into one atomic move. PlayerConnection vault->cargo -1 path
+  uses it; the pathological >14-slot spread falls back to per-slot saves, logged.
+
+Still NOT a wire-behaviour change (server-internal save-queue message only; no
+opcode/packet/DB-content changed), so no CLI byte-pin required; folded into the
+existing CV-AQ-VAULT-1 real-client check (the auto-pick deposit path now
+exercises the N-slot move).
+
+Verified: server rebuilt no-cache, clean, no new warnings at any edited line
+range; 3 new SqlplusWrapperTx gtests green (N-slot all-or-nothing commit,
+partial-failure rolls back every slot, cap-sized 15-record batch commits as one
+tx); all 11 wrapper gtests green against live Postgres (port 5434).

@@ -399,11 +399,23 @@ C++ source directly). The Go server must reproduce:
       - `server/src/PlayerConnection.cpp` `HandleInventoryMove`: the cargo->vault
         (1->3), vault->cargo explicit (3->1), and vault->vault (3->3) branches now
         emit ONE `SaveInventoryMove` instead of two separate save calls.
-      RESIDUAL GAP (documented in code + honest to owner): the vault->cargo
-      auto-stack path (ToSlot == -1) still saves the cargo side via `CargoAddItem`
-      (which may stack across N slots) separately from the emptied vault slot --
-      that variable-N case does not fit the fixed 2-slot atomic message and is
-      left as-is.
+      RESIDUAL GAP -- CLOSED in AQ-11b (2026-06-11): the vault->cargo auto-stack
+      path (ToSlot == -1) now ALSO commits atomically. The fixed 2-slot move
+      message was generalised to a variable-length N-slot message:
+      - `SaveManager.h`: `SAVE_CODE_MOVE_INVENTORY` payload is now N back-to-back
+        86-byte records (not exactly two); `SAVE_MOVE_MAX_RECORDS = 15` caps it to
+        what one save message buffer holds (floor((1306-12)/86)).
+      - `SaveManager::HandleMoveInventory` loops `count = bytes/86` UPSERTs inside
+        ONE transaction (validates bytes%86==0; begin-fail still degrades to
+        independent writes; any slot failure rolls back the whole batch).
+      - `Player::CargoAddItem(_Item*, std::vector<int>* touched_slots=nullptr)`:
+        when `touched_slots` is non-null it APPENDS each cargo slot it would have
+        saved instead of saving it independently (all other callers pass nullptr
+        and keep the old behaviour). `Player::SaveInventoryMoveSlots(refs, n)`
+        packs the emptied vault source + every touched cargo slot into one atomic
+        move. The pathological >14-cargo-slot spread (needs that many partial
+        stacks of the identical item already in cargo) falls back to per-slot
+        saves, logged.
       This is NOT a wire-behaviour change: no opcode/packet/DB-content changed,
       only the transaction GROUPING of two existing writes. So the CLI-byte-pin +
       plans/29 wire gate does not strictly apply; a light real-client sanity check
@@ -420,6 +432,13 @@ C++ source directly). The Go server must reproduce:
       connection stays usable. Server builds clean (167/167, -Wall -Wextra);
       all 8 wrapper gtests green against live Postgres; web typecheck + 20 vitest +
       production build clean.
+- [x] **AQ-11b variable-length move tests (2026-06-11).** 3 more gtests in
+      `sqlplus_wrapper_test.cpp` (`SqlplusWrapperTx`): an N-slot (5-record) move
+      commits all-or-nothing; a partial failure on the last of N slots rolls back
+      EVERY slot (no half-applied wide move); the cap-sized 15-record batch commits
+      as one transaction. Server rebuilt no-cache: clean, no new warnings at any
+      edited line range; all 7 `SqlplusWrapperTx` + 11 total wrapper gtests green
+      against live Postgres (port 5434).
 
 ### AQ-6 In-game notify
 - [ ] On player login, if unread mail: private system chat message with the

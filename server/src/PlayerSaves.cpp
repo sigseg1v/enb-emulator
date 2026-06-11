@@ -1413,6 +1413,29 @@ void Player::SaveInventoryMove(unsigned char from_type, long from_slot,
 	g_SaveMgr->AddSaveMessage(SAVE_CODE_MOVE_INVENTORY, m_CharacterID, index, data);
 }
 
+void Player::SaveInventoryMoveSlots(const InvSlotRef *slots, int count)
+{
+	// N 86-byte slot records persisted atomically by
+	// SaveManager::HandleMoveInventory. count is capped so the packed payload
+	// always fits one save message; callers that could exceed the cap fall back
+	// to independent per-slot saves instead of calling this.
+	if (count <= 0)
+		return;
+	if (count > SAVE_MOVE_MAX_RECORDS)
+	{
+		LogMessage("SaveInventoryMoveSlots: %d slots exceeds max %d for char %d -- not saved\n",
+			count, SAVE_MOVE_MAX_RECORDS, m_CharacterID);
+		return;
+	}
+
+	unsigned char data[SAVE_MOVE_MAX_RECORDS * SAVE_INVENTORY_RECORD_BYTES];
+	int index = 0;
+	for (int i = 0; i < count; i++)
+		PackInventorySlot(data, index, slots[i].inv_type, slots[i].slot);
+
+	g_SaveMgr->AddSaveMessage(SAVE_CODE_MOVE_INVENTORY, m_CharacterID, index, data);
+}
+
 void Player::SaveXPBarLevel(long xp_type, float xp_bar)
 {
 	unsigned char data[32];

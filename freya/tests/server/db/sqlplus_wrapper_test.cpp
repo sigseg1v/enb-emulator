@@ -332,3 +332,115 @@ TEST(SqlplusWrapperTx, DestructorRollsBackOpenTransactionSoPoolStaysClean) {
     sql_row_c row; r.fetch_row(&row);
     EXPECT_EQ((int)row[0], 2);
 }
+
+///////////////////////////////////////////////////////////////////////////////
+// Variable-length (N-slot) atomic move.
+//
+// A vault->cargo auto-stack can spread ONE vault stack across several cargo
+// slots, so the move is one source write plus N destination writes -- not a
+// fixed pair. SaveManager::HandleMoveInventory commits all N in one transaction
+// (Player::SaveInventoryMoveSlots emits them as one SAVE_CODE_MOVE_INVENTORY of
+// N back-to-back 86-byte records). These pin the all-or-nothing property for an
+// arbitrary record count, which is what keeps a wide move from half-applying.
+
+TEST(SqlplusWrapperTx, MultiSlotMoveCommitsAllOrNothing) {
+    const char *raw = std::getenv("NET7_TEST_DB_DSN");
+    if (!raw || !*raw) GTEST_SKIP() << "NET7_TEST_DB_DSN not set";
+    Dsn dsn; ASSERT_TRUE(parse_kv_dsn(raw, dsn));
+    sql_connection_c conn(
+        const_cast<char *>(dsn.dbname.c_str()), const_cast<char *>(dsn.host.c_str()),
+        dsn.user.empty() ? nullptr : const_cast<char *>(dsn.user.c_str()),
+        dsn.password.empty() ? nullptr : const_cast<char *>(dsn.password.c_str()));
+    ASSERT_TRUE(conn.connected());
+
+    sql_query_c q(&conn);
+    char create[] = "CREATE TEMP TABLE tx_multi (k int, v int)";
+    ASSERT_NE(q.execute(create), 0) << q.ErrorMsg();
+
+    // One source slot + four destination slots == a 5-record move.
+    const int kRecords = 5;
+    ASSERT_TRUE(q.begin()) << q.ErrorMsg();
+    for (int i = 0; i < kRecords; i++) {
+        q.AddParam(i);
+        q.AddParam(i * 10);
+        ASSERT_NE(q.execute_params("INSERT INTO tx_multi VALUES (?, ?)"), 0)
+            << "record " << i << ": " << q.ErrorMsg();
+    }
+    ASSERT_TRUE(q.commit()) << q.ErrorMsg();
+
+    char count[] = "SELECT count(*) FROM tx_multi";
+    ASSERT_NE(q.execute(count), 0);
+    sql_result_c r; q.store(&r);
+    sql_row_c row; r.fetch_row(&row);
+    EXPECT_EQ((int)row[0], kRecords) << "every slot of an N-slot move must survive a commit";
+}
+
+TEST(SqlplusWrapperTx, MultiSlotMovePartialFailureRollsBackEverySlot) {
+    // A wide move where the LAST destination write fails (e.g. a constraint or
+    // type error on one slot) must leave the DB with zero slots applied -- never
+    // the source emptied with only some destinations written, which would lose
+    // part of the stack.
+    const char *raw = std::getenv("NET7_TEST_DB_DSN");
+    if (!raw || !*raw) GTEST_SKIP() << "NET7_TEST_DB_DSN not set";
+    Dsn dsn; ASSERT_TRUE(parse_kv_dsn(raw, dsn));
+    sql_connection_c conn(
+        const_cast<char *>(dsn.dbname.c_str()), const_cast<char *>(dsn.host.c_str()),
+        dsn.user.empty() ? nullptr : const_cast<char *>(dsn.user.c_str()),
+        dsn.password.empty() ? nullptr : const_cast<char *>(dsn.password.c_str()));
+    ASSERT_TRUE(conn.connected());
+
+    sql_query_c q(&conn);
+    char create[] = "CREATE TEMP TABLE tx_multi_fail (k int, v int)";
+    ASSERT_NE(q.execute(create), 0) << q.ErrorMsg();
+
+    ASSERT_TRUE(q.begin()) << q.ErrorMsg();
+    for (int i = 0; i < 3; i++) {
+        q.AddParam(i);
+        q.AddParam(i * 10);
+        ASSERT_NE(q.execute_params("INSERT INTO tx_multi_fail VALUES (?, ?)"), 0)
+            << "record " << i << ": " << q.ErrorMsg();
+    }
+    // Fourth slot write is a type error -- aborts the backend transaction.
+    q.AddParam(3);
+    EXPECT_EQ(q.execute_params("INSERT INTO tx_multi_fail VALUES (?, 'not-an-int')"), 0);
+    EXPECT_GT(q.Error(), 0u);
+    q.rollback();
+
+    char count[] = "SELECT count(*) FROM tx_multi_fail";
+    ASSERT_NE(q.execute(count), 0) << q.ErrorMsg();
+    sql_result_c r; q.store(&r);
+    sql_row_c row; r.fetch_row(&row);
+    EXPECT_EQ((int)row[0], 0) << "a partly-failed N-slot move must persist no slot at all";
+}
+
+TEST(SqlplusWrapperTx, WidestMoveRecordCountCommitsInOneTransaction) {
+    // The cap-sized batch (SAVE_MOVE_MAX_RECORDS == 15) must be a valid single
+    // transaction; anything wider falls back to per-slot saves at the call site.
+    const char *raw = std::getenv("NET7_TEST_DB_DSN");
+    if (!raw || !*raw) GTEST_SKIP() << "NET7_TEST_DB_DSN not set";
+    Dsn dsn; ASSERT_TRUE(parse_kv_dsn(raw, dsn));
+    sql_connection_c conn(
+        const_cast<char *>(dsn.dbname.c_str()), const_cast<char *>(dsn.host.c_str()),
+        dsn.user.empty() ? nullptr : const_cast<char *>(dsn.user.c_str()),
+        dsn.password.empty() ? nullptr : const_cast<char *>(dsn.password.c_str()));
+    ASSERT_TRUE(conn.connected());
+
+    sql_query_c q(&conn);
+    char create[] = "CREATE TEMP TABLE tx_widest (k int)";
+    ASSERT_NE(q.execute(create), 0) << q.ErrorMsg();
+
+    const int kMax = 15;   // keep in lockstep with SAVE_MOVE_MAX_RECORDS
+    ASSERT_TRUE(q.begin()) << q.ErrorMsg();
+    for (int i = 0; i < kMax; i++) {
+        q.AddParam(i);
+        ASSERT_NE(q.execute_params("INSERT INTO tx_widest VALUES (?)"), 0)
+            << "record " << i << ": " << q.ErrorMsg();
+    }
+    ASSERT_TRUE(q.commit()) << q.ErrorMsg();
+
+    char count[] = "SELECT count(*) FROM tx_widest";
+    ASSERT_NE(q.execute(count), 0);
+    sql_result_c r; q.store(&r);
+    sql_row_c row; r.fetch_row(&row);
+    EXPECT_EQ((int)row[0], kMax) << "the widest permitted move must commit as one unit";
+}
