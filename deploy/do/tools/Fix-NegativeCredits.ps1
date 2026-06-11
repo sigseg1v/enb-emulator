@@ -55,7 +55,7 @@ if ($rows.Count -eq 0) {
 }
 
 if (-not $Apply) {
-    Write-Host ">>> DRY RUN. Re-run with -Apply to clamp these to $Floor:"
+    Write-Host ">>> DRY RUN. Re-run with -Apply to clamp these to ${Floor}:"
     Write-Host "      just fix-negative-credits --apply"
     return
 }
