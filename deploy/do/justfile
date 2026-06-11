@@ -88,4 +88,4 @@ get-server-status:
 #   just fix-negative-credits            # dry run
 #   just fix-negative-credits --apply    # clamp to 100000
 fix-negative-credits *flags:
-    ./tools/Fix-NegativeCredits.ps1 {{flags}}
+    ./tools/Fix-NegativeCredits.ps1 {{ replace(replace(flags, "--apply", "-Apply"), "--floor", "-Floor") }}
