@@ -260,23 +260,25 @@ function PostForm({
 }
 
 function SellView({
-  vault, myListings, avatars, reload, toast,
+  vault, myListings, avatar, avatars, reload, toast,
 }: {
   vault: Record<string, VaultSlot[]>;
   myListings: MyListing[];
+  avatar: string;
   avatars: string[];
   reload: () => Promise<void>;
   toast: (msg: string) => void;
 }) {
-  const [avatar, setAvatar] = useState(avatars[0]);
   const [selSlot, setSelSlot] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // The active avatar is chosen from the top-bar character dropdown; clear any
+  // selected vault slot when it changes so we never carry a stale selection.
+  useEffect(() => { setSelSlot(null); }, [avatar]);
 
   const slots = vault[avatar] || [];
   const slotData = selSlot != null ? slots.find(s => s.slot === selSlot) || null : null;
   const mine = myListings.filter(l => avatars.includes(l.avatar));
-
-  function changeAvatar(name: string) { setAvatar(name); setSelSlot(null); }
 
   async function post(p: PostListingInput) {
     if (busy) return;
@@ -301,23 +303,27 @@ function SellView({
         <div className="vault hud-panel">
           <div className="vault__head">
             <span className="vault__title">Vault Inventory</span>
-            <div className="vsel">
-              <select value={avatar} onChange={e => changeAvatar(e.target.value)}>
-                {avatars.map(a => <option key={a} value={a}>{a}</option>)}
-              </select>
-            </div>
+            <span className="vault__avatar">{avatar}</span>
           </div>
           <div className="vgrid">
             {slots.length === 0
               ? <div style={{ gridColumn: '1 / -1', color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', fontSize: 12, padding: 12 }}>Vault empty</div>
               : slots.map(s => {
                 const r = RARITY[s.item.rarity];
+                const untradable = s.item.noTrade === true;
                 return (
-                  <div key={s.slot} className={'vslot' + (selSlot === s.slot ? ' vslot--sel' : '')}
+                  <div key={s.slot}
+                    className={'vslot' + (selSlot === s.slot ? ' vslot--sel' : '') + (untradable ? ' vslot--locked' : '')}
                     style={{ '--rcolor': r.color, '--rglow': r.glow } as Vars}
-                    title={`${s.item.name}${s.quality != null ? ` -- Q${s.quality}%` : ''}`} onClick={() => setSelSlot(s.slot)}>
+                    title={untradable
+                      ? `${s.item.name} -- Not Tradable, cannot be listed`
+                      : `${s.item.name}${s.quality != null ? ` -- Q${s.quality}%` : ''}`}
+                    onClick={() => untradable
+                      ? toast('That item is flagged Not Tradable and cannot be listed.')
+                      : setSelSlot(s.slot)}>
                     <span className="icon__glyph">{s.item.glyph}</span>
                     {s.stack > 1 && <span className="vslot__qty">{s.stack}</span>}
+                    {untradable && <span className="vslot__lock" title="Not Tradable">⊘</span>}
                   </div>
                 );
               })}
@@ -356,11 +362,12 @@ export function AuctionHouse(props: {
   listings: Listing[];
   vault: Record<string, VaultSlot[]>;
   myListings: MyListing[];
+  avatar: string;
   avatars: string[];
   reload: () => Promise<void>;
   toast: (msg: string) => void;
 }) {
-  const { listings, vault, myListings, avatars, reload, toast } = props;
+  const { listings, vault, myListings, avatar, avatars, reload, toast } = props;
   const [sub, setSub] = useState<'buy' | 'sell'>('buy');
 
   return (
@@ -387,7 +394,7 @@ export function AuctionHouse(props: {
       {sub === 'buy'
         ? <BuyView listings={listings} reload={reload} toast={toast} />
         : <SellView vault={vault} myListings={myListings}
-            avatars={avatars} reload={reload} toast={toast} />}
+            avatar={avatar} avatars={avatars} reload={reload} toast={toast} />}
     </div>
   );
 }

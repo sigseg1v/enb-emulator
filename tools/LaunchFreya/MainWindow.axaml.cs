@@ -588,6 +588,50 @@ namespace LaunchFreya
             _ = KickServerProbe(NormalizeHost(host.Hostname), GetProbePort(host), gen);
         }
 
+        // Open the Freya Online website for the currently-selected server. The
+        // website is served by the freya-online service, co-located with the
+        // server: on play-local it is the plain-HTTP dev endpoint (host 8088 ->
+        // container 8080); on a live host freya-online terminates TLS on :443,
+        // so the site is https://<host>.
+        void OnWebsiteClick(object sender, RoutedEventArgs e)
+        {
+            OpenUrl(WebsiteUrlFor(c_ComboBox_Servers.Text ?? ""));
+        }
+
+        // Map a server hostname/URL to its website URL. Empty or loopback ->
+        // the play-local dev site; anything else -> https on the same host.
+        static string WebsiteUrlFor(string rawServer)
+        {
+            var host = NormalizeHost(rawServer);
+            int colon = host.IndexOf(':');          // drop a typed-in :port
+            if (colon >= 0) host = host.Substring(0, colon);
+
+            if (string.IsNullOrEmpty(host) ||
+                host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+                host == "127.0.0.1")
+            {
+                return "http://localhost:8088";
+            }
+            return "https://" + host;
+        }
+
+        static void OpenUrl(string url)
+        {
+            // Fully-qualified: the `using System.Diagnostics` above is gated
+            // behind #if CHECK_FOR_UPDATES, so don't depend on it here.
+            try
+            {
+                System.Diagnostics.Process.Start(
+                    new System.Diagnostics.ProcessStartInfo { FileName = url, UseShellExecute = true });
+            }
+            catch
+            {
+                // UseShellExecute=true may not resolve a handler on some Linux
+                // setups; fall back to xdg-open directly.
+                try { System.Diagnostics.Process.Start("xdg-open", url); } catch { /* nothing else to try */ }
+            }
+        }
+
         async void OnBrowseClient(object sender, RoutedEventArgs e)
         {
             var top = TopLevel.GetTopLevel(this);

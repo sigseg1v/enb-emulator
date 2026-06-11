@@ -12,16 +12,28 @@ import { AuctionHouse } from './screens/AuctionHouse';
 import { Account } from './screens/Account';
 
 const STATUS_POLL_MS = 60_000;
+// While signed in, re-pull the full bootstrap on this cadence so the server
+// status, player count, and the account's live character list stay current
+// without a manual action.
+const AUTO_RELOAD_MS = 120_000;
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
+  // Selected character (index into session.characters). Drives the topbar
+  // name dropdown, the mailbox, and the Auction House vault. -1/out-of-range
+  // is clamped at render so a shorter character list after a reload is safe.
+  const [charIdx, setCharIdx] = useState(0);
+  // True until the first rehydrate attempt resolves. We try api.bootstrap()
+  // once on mount: a valid session cookie restores the signed-in shell without
+  // a fresh login. While this is in flight we show a splash, not the Login
+  // screen, so a logged-in refresh doesn't flash the login form.
+  const [booting, setBooting] = useState(true);
   const [server, setServer] = useState<ServerStatusT>({ status: 'OFFLINE', players: 0 });
   const [tab, setTab] = useState<'mail' | 'ah' | 'account'>('mail');
   const [mail, setMail] = useState<Mail[]>([]);
   const [listings, setListings] = useState<Listing[]>([]);
   const [vault, setVault] = useState<Record<string, VaultSlot[]>>({});
   const [myListings, setMyListings] = useState<MyListing[]>([]);
-  const [credits, setCredits] = useState(0);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   // Server status is always visible (login screen + shell) and refreshed on a
@@ -53,23 +65,55 @@ export default function App() {
     setListings(boot.listings);
     setVault(boot.vault);
     setMyListings(boot.myListings);
-    setCredits(boot.session.credits);
   }, []);
+
+  // Rehydrate from the session cookie on first load: if it is still valid the
+  // bootstrap succeeds and we land directly in the shell; a 401 (or any error)
+  // just leaves us on the Login screen. Runs exactly once.
+  useEffect(() => {
+    let alive = true;
+    reload().catch(() => {}).finally(() => { if (alive) setBooting(false); });
+    return () => { alive = false; };
+  }, [reload]);
+
+  // Auto-refresh the signed-in shell (status, players, characters, credits,
+  // vault, listings, mail) every 2 minutes. Gated on a stable boolean so the
+  // interval isn't torn down and recreated every time `reload` swaps `session`.
+  const loggedIn = session !== null;
+  useEffect(() => {
+    if (!loggedIn) return;
+    const h = setInterval(() => { reload().catch(() => {}); }, AUTO_RELOAD_MS);
+    return () => clearInterval(h);
+  }, [loggedIn, reload]);
 
   async function signIn(user: string, pass: string) {
     await api.login(user, pass);
+    setCharIdx(0);
     await reload();
   }
 
   async function signOut() {
     await api.logout().catch(() => {});
     setSession(null);
+    setCharIdx(0);
   }
 
+  if (booting && !session) {
+    return (
+      <div className="boot-splash">
+        <Wordmark size={28} />
+      </div>
+    );
+  }
   if (!session) return <Login server={server} onSignIn={signIn} />;
 
-  const character = session.characters[0];
-  const unread = mail.filter(m => !m.read).length;
+  const safeIdx = charIdx < session.characters.length ? charIdx : 0;
+  const character = session.characters[safeIdx];
+  // Credits for the selected character (not the account total).
+  const charCredits = session.creditsByCharacter?.[character] ?? 0;
+  // Unread badge is per selected character (matching the Mailbox filter): mail
+  // addressed to this character plus account-level mail (empty recipient).
+  const unread = mail.filter(m => !m.read && (!m.recipient || m.recipient === character)).length;
 
   return (
     <div className="shell">
@@ -93,10 +137,18 @@ export default function App() {
         <ServerStatus status={server.status} players={server.players} />
         <span className="topbar__sep" />
         <div className="topbar__acct">
-          <span className="topbar__credits"><Credits value={credits} /></span>
+          <span className="topbar__credits"><Credits value={charCredits} /></span>
           <span className="topbar__sep" />
           <div className="topbar__user">
-            <b>{character}</b>
+            {session.characters.length > 1 ? (
+              <div className="vsel topbar__charsel">
+                <select value={safeIdx} onChange={e => setCharIdx(Number(e.target.value))}>
+                  {session.characters.map((c, i) => <option key={c} value={i}>{c}</option>)}
+                </select>
+              </div>
+            ) : (
+              <b>{character}</b>
+            )}
             <span>acct: {session.username}</span>
           </div>
         </div>
@@ -110,7 +162,7 @@ export default function App() {
         )}
         {tab === 'ah' && (
           <AuctionHouse listings={listings} vault={vault} myListings={myListings}
-            avatars={session.characters} reload={reload} toast={toast} />
+            avatar={character} avatars={session.characters} reload={reload} toast={toast} />
         )}
         {tab === 'account' && (
           <Account username={session.username} toast={toast} />

@@ -88,10 +88,38 @@ static inline COLORREF cr(uint32_t rgb) {
     return RGB((rgb>>16)&0xFF, (rgb>>8)&0xFF, rgb&0xFF);
 }
 
-// ---- Flip hook --------------------------------------------------------------
+// ---- present hooks (Flip + Blt) ---------------------------------------------
+// Windowed DirectDraw under Wine usually presents by BLITTING the back buffer to
+// the primary surface (Blt, vtable[5]) rather than Flip (vtable[11]). A box that
+// never appears despite "Flip hook installed" is the classic symptom: the hook is
+// installed but the game never calls Flip. So we hook BOTH and draw on whichever
+// fires. The once-only "FIRED" logs below tell us which path the build actually
+// uses (and if NEITHER fires, the game is on a different IDirectDrawSurface
+// interface version than our v1 probe -- the vtable we hooked is never called).
 typedef HRESULT (WINAPI *Flip_t)(LPDIRECTDRAWSURFACE, LPDIRECTDRAWSURFACE, DWORD);
+typedef HRESULT (WINAPI *Blt_t)(LPDIRECTDRAWSURFACE, LPRECT, LPDIRECTDRAWSURFACE,
+                                LPRECT, DWORD, LPDDBLTFX);
 static Flip_t real_Flip = nullptr;
+static Blt_t  real_Blt  = nullptr;
 static HFONT g_font = nullptr;
+
+static void paint(HDC dc);   // defined below
+
+// Is this surface the visible primary (the one a windowed present blits into)?
+static bool is_primary(LPDIRECTDRAWSURFACE surf) {
+    if (!surf) return false;
+    DDSURFACEDESC d = {}; d.dwSize = sizeof d;
+    if (FAILED(surf->GetSurfaceDesc(&d))) return false;
+    return (d.ddsCaps.dwCaps & DDSCAPS_PRIMARYSURFACE) != 0;
+}
+
+static void draw_on(LPDIRECTDRAWSURFACE surf) {
+    HDC dc = nullptr;
+    if (surf && SUCCEEDED(surf->GetDC(&dc)) && dc) {
+        paint(dc);
+        surf->ReleaseDC(dc);
+    }
+}
 
 static void paint(HDC dc) {
     std::vector<Cmd> frame;
@@ -142,14 +170,26 @@ static void paint(HDC dc) {
 }
 
 static HRESULT WINAPI hk_Flip(LPDIRECTDRAWSURFACE surf, LPDIRECTDRAWSURFACE override, DWORD flags) {
-    if (surf) {
-        HDC dc = nullptr;
-        if (SUCCEEDED(surf->GetDC(&dc)) && dc) {
-            paint(dc);
-            surf->ReleaseDC(dc);
-        }
-    }
+    static bool logged = false;
+    if (!logged) { logged = true; logf("overlay: Flip hook FIRED -- presenting via Flip"); }
+    // Flip presents the back buffer next: draw BEFORE the flip so the overlay
+    // rides along onto the screen.
+    draw_on(surf);
     return real_Flip(surf, override, flags);
+}
+
+static HRESULT WINAPI hk_Blt(LPDIRECTDRAWSURFACE surf, LPRECT dstRect,
+                             LPDIRECTDRAWSURFACE src, LPRECT srcRect,
+                             DWORD flags, LPDDBLTFX fx) {
+    // Do the real blit first, then draw on top -- for a windowed present the blit
+    // IS the frame reaching the primary, so the overlay must land on it AFTER.
+    HRESULT hr = real_Blt(surf, dstRect, src, srcRect, flags, fx);
+    if (is_primary(surf)) {
+        static bool logged = false;
+        if (!logged) { logged = true; logf("overlay: Blt->primary FIRED -- presenting via Blt"); }
+        draw_on(surf);
+    }
+    return hr;
 }
 
 bool init() {
@@ -171,6 +211,7 @@ bool init() {
         logf("overlay: CreateSurface(probe) failed"); dd->Release(); return false;
     }
     void** vtable = *(void***)surf;          // IDirectDrawSurface vtable
+    void* blt_addr  = vtable[5];             // index 5  = Blt
     void* flip_addr = vtable[11];            // index 11 = Flip
     surf->Release();
     dd->Release();
@@ -180,10 +221,19 @@ bool init() {
     }
     if (MH_EnableHook(flip_addr) != MH_OK) { logf("overlay: enable Flip hook failed"); return false; }
 
+    // Blt is the windowed present path; hooking it too is what actually makes the
+    // overlay visible on most Wine setups. A failure here is non-fatal -- Flip may
+    // still carry it -- so warn and continue rather than abort the overlay.
+    if (MH_CreateHook(blt_addr, (void*)&hk_Blt, (void**)&real_Blt) == MH_OK) {
+        if (MH_EnableHook(blt_addr) != MH_OK) logf("overlay: enable Blt hook failed");
+    } else {
+        logf("overlay: hook Blt failed (continuing with Flip only)");
+    }
+
     g_font = CreateFontA(-14, 0, 0, 0, FW_NORMAL, 0, 0, 0, ANSI_CHARSET,
                          OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY,
                          FF_DONTCARE | DEFAULT_PITCH, "Tahoma");
-    logf("overlay: Flip hook installed @ %p", flip_addr);
+    logf("overlay: hooks installed -- Flip @ %p, Blt @ %p", flip_addr, blt_addr);
     return true;
 }
 

@@ -294,12 +294,23 @@ build-tests:
 # wait for it + the one-shot `schema-init` service to finish loading the
 # converted schema + seed data, smoke-check it's reachable.
 init: gen-certs
-    @echo ">>> bringing up postgres + applying schema"
-    docker compose up -d postgres schema-init
+    @echo ">>> bringing up postgres"
+    docker compose up -d postgres
     @echo ">>> waiting for postgres to become healthy"
     @bash -c 'until [ "$(docker inspect -f {{{{.State.Health.Status}} ${COMPOSE_PROJECT_NAME}-postgres-1 2>/dev/null)" = "healthy" ]; do echo "  ...waiting"; sleep 3; done'
+    # Force a fresh schema-init run every invocation. It is idempotent, and a
+    # prior FAILED one-shot (e.g. a transient docker-DNS race) would otherwise
+    # linger as Exited and `up -d` would NOT re-run it -- the stack would then
+    # boot against a half-initialised DB (missing net7_user). --no-deps so we
+    # don't bounce the healthy postgres we just waited on.
+    @echo ">>> (re)running schema-init"
+    docker compose up -d --force-recreate --no-deps schema-init
     @echo ">>> waiting for schema-init to finish"
     @bash -c 'until docker inspect -f "{{{{.State.Status}}" ${COMPOSE_PROJECT_NAME}-schema-init-1 2>/dev/null | grep -q exited; do echo "  ...waiting"; sleep 2; done'
+    # A non-zero exit means the schema apply failed (the DNS race, an SQL error,
+    # etc.). Surface its logs and abort rather than blunder into the verify step
+    # (or worse, boot the server) against an incomplete DB.
+    @bash -c 'code=$(docker inspect -f "{{{{.State.ExitCode}}" ${COMPOSE_PROJECT_NAME}-schema-init-1 2>/dev/null); if [ "$code" != 0 ]; then echo ">>> schema-init FAILED (exit $code) -- logs:"; docker compose logs schema-init; exit 1; fi'
     @echo ">>> verifying net7 + net7_user databases"
     docker compose exec -T -e PGPASSWORD=net7 postgres psql -U net7 -l
     docker compose exec -T -e PGPASSWORD=net7 postgres psql -U net7 -d net7_user -c "SELECT COUNT(*) AS account_rows FROM accounts;"
@@ -530,6 +541,11 @@ stop-cli UNIT='cli1':
 play-local CLIENT_PATH='':
     #!/usr/bin/env bash
     set -euo pipefail
+    # Enable the server_status heartbeat (and the external-status outbox) for the
+    # local stack so the Freya Online website shows the server ONLINE with a live
+    # player count. This is OFF by default in docker-compose.yml because the
+    # integration suite relies on it being off; play-local opts in explicitly.
+    export NET7_EXTERNAL_STATUS_ENABLED=1
     cp="{{CLIENT_PATH}}"
     if [ -z "$cp" ]; then cp="${ENB_CLIENT_PATH:-}"; fi
     if [ -z "$cp" ]; then cp="$HOME/.wine-enb/drive_c/Program Files/EA GAMES/Earth & Beyond/release/client.exe"; fi

@@ -60,6 +60,12 @@ async function postJSON<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+async function delJSON<T>(path: string): Promise<T> {
+  const res = await fetch(path, { method: 'DELETE', credentials: 'include' });
+  if (!res.ok) throw await errorFor(res, path);
+  return res.json() as Promise<T>;
+}
+
 /** Always-available, unauthenticated server status (cached 60s server-side). */
 export async function fetchStatus(): Promise<ServerStatus> {
   if (USE_MOCK) return structuredClone(MOCK_SERVER);
@@ -113,6 +119,11 @@ export async function markRead(mailId: string): Promise<{ ok: boolean }> {
 
 export async function lootAttachment(mailId: string, index: number): Promise<{ ok: boolean }> {
   return postJSON<{ ok: boolean }>(`/api/mail/${mailId}/loot`, { index });
+}
+
+/** Delete a mail message (and its attachments). Unlooted attachments are forfeited. */
+export async function deleteMail(mailId: string): Promise<{ ok: boolean }> {
+  return delJSON<{ ok: boolean }>(`/api/mail/${mailId}`);
 }
 
 /**

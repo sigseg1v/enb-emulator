@@ -44,6 +44,19 @@ var (
 	errCharacterOnline = errors.New("character is online; log it out to manage its credits, items, or mail")
 )
 
+// wonSubject builds the "Auction won" mail subject, naming the item (and its
+// stack count when > 1) so the inbox shows what was won at a glance. Falls back
+// to the bare subject if the name could not be resolved.
+func wonSubject(name string, stack int) string {
+	if name == "" {
+		return "Auction won"
+	}
+	if stack > 1 {
+		return fmt.Sprintf("Auction won - %s x%d", name, stack)
+	}
+	return "Auction won - " + name
+}
+
 // assertAvatarOffline is the offline-guard (plans/44, AQ open question #1). The
 // AH/mail tables are shared with the live game, but the game server is a SECOND
 // authority: while a character is in-game the server holds that character's
@@ -455,7 +468,7 @@ func (s *Store) Buyout(ctx context.Context, accountID int64, listingID int64) er
 
 	// Deliver the item to the buyer and the proceeds to the seller.
 	if err := deliverItem(ctx, tx, accountID, buyer, "Auction House",
-		"Auction won", "You bought this item via buyout.",
+		wonSubject(s.itemName(ctx, itemID), stack), "You bought this item via buyout.",
 		itemID, stack, quality, cost, builder, structure); err != nil {
 		return err
 	}
@@ -573,7 +586,7 @@ func (s *Store) resolveOneExpired(ctx context.Context, listingID int64) error {
 	if hadBidder && winnerAccount != nil {
 		// Sale at the standing bid (already held from the winner).
 		if err := deliverItem(ctx, tx, *winnerAccount, 0, "Auction House",
-			"Auction won", "You won this auction.",
+			wonSubject(s.itemName(ctx, itemID), stack), "You won this auction.",
 			itemID, stack, quality, cost, builder, structure); err != nil {
 			return err
 		}

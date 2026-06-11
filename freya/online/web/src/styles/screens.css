@@ -62,6 +62,9 @@
 
 /* ============ APP SHELL ============ */
 .shell { display: flex; flex-direction: column; height: 100vh; background: var(--bg-void); }
+/* Brief splash while we rehydrate the session cookie on first load, so a
+   logged-in refresh doesn't flash the Login form before bootstrap resolves. */
+.boot-splash { display: grid; place-items: center; height: 100vh; background: var(--bg-void); }
 .topbar { display: flex; align-items: center; gap: 36px; padding: 0 28px; height: 64px; flex: none;
   background: linear-gradient(180deg, var(--bg-panel), var(--bg-void-2));
   border-bottom: 1px solid var(--line); position: relative; z-index: 10; }
@@ -87,6 +90,18 @@
 .topbar__user { display: flex; flex-direction: column; line-height: 1.3; text-align: right; }
 .topbar__user b { font-family: var(--font-body); font-size: 12.5px; color: var(--text); font-weight: 500; }
 .topbar__user span { font-size: 10px; color: var(--text-faint); letter-spacing: 0.06em; }
+/* Top-bar character selector: the avatar dropdown styled to read like the
+   plain name it replaced (no chrome until hovered), with the shared .vsel
+   arrow pulled in tight against the right edge. */
+.topbar__charsel { align-self: flex-end; }
+/* Doubled-up selector (.topbar__charsel.vsel) so these win over the generic
+   .vsel select rules defined later in this file -- same single-class
+   specificity would otherwise let the later .vsel rule take over. */
+.topbar__charsel.vsel select { appearance: none; background: none; border: none;
+  font-family: var(--font-body); font-size: 12.5px; font-weight: 500; color: var(--text);
+  text-align: right; padding: 1px 15px 1px 6px; cursor: pointer; transition: color .15s; }
+.topbar__charsel.vsel select:hover, .topbar__charsel.vsel select:focus { outline: none; color: var(--accent); }
+.topbar__charsel.vsel::after { right: 2px; }
 .topbar__logout { background: none; border: 1px solid var(--line); color: var(--text-faint); cursor: pointer;
   width: 32px; height: 32px; border-radius: var(--r-sm); font-size: 14px; transition: all .15s; }
 .topbar__logout:hover { border-color: var(--danger); color: var(--danger); }
@@ -132,7 +147,17 @@
 .mail__clip { font-size: 13px; color: var(--warm); }
 
 .mread { display: flex; flex-direction: column; min-height: 0; }
-.mread__head { padding: 20px 24px 16px; border-bottom: 1px solid var(--line); flex: none; }
+.mread__head { position: relative; padding: 20px 24px 16px; border-bottom: 1px solid var(--line); flex: none; }
+.mread__del {
+  position: absolute; top: 16px; right: 20px;
+  border-color: oklch(0.66 0.18 28 / 0.5);
+  color: var(--danger);
+  background: oklch(0.66 0.18 28 / 0.08);
+}
+.mread__del:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: oklch(0.66 0.18 28 / 0.18);
+}
 .mread__subj { font-family: var(--font-display); font-size: 17px; margin: 0 0 12px; letter-spacing: 0.02em; }
 .mread__meta { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-family: var(--font-mono); font-size: 11.5px; }
 .mread__meta dt { color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.08em; font-size: 10px; align-self: center; }
@@ -236,11 +261,17 @@
 .vault { display: flex; flex-direction: column; flex: none; }
 .vault__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--line); flex: none; }
 .vault__title { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-faint); }
+/* The active avatar is chosen in the top bar now; show it here read-only. */
+.vault__avatar { font-family: var(--font-body); font-size: 12.5px; font-weight: 500; color: var(--accent); }
 .vsel { position: relative; }
 .vsel select { appearance: none; background: var(--bg-input); border: 1px solid var(--line-strong); border-radius: var(--r-sm);
   color: var(--text); font-family: var(--font-mono); font-size: 12px; padding: 7px 28px 7px 11px; cursor: pointer; }
 .vsel select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-glow); }
-.vsel::after { content: "\\25BE"; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: var(--accent); font-size: 10px; pointer-events: none; }
+.vsel::after { content: "\25BE"; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: var(--accent); font-size: 10px; pointer-events: none; }
+/* The open dropdown list (the <option>s) inherits a light system background
+   otherwise -- the transparent top-bar select makes that especially jarring.
+   Paint the options black so the popup matches the deep-space theme. */
+.vsel select option { background: #000; color: var(--text); }
 
 .vgrid { padding: 14px; overflow-y: auto; max-height: 38vh; display: grid; grid-template-columns: repeat(auto-fill, 64px); gap: 10px; align-content: start; }
 .vslot { width: 64px; height: 64px; border-radius: var(--r-sm); display: grid; place-items: center; position: relative; cursor: pointer;
@@ -251,6 +282,11 @@
 .vslot--sel::after { content: ""; position: absolute; inset: -4px; border: 1px solid var(--accent); border-radius: var(--r-sm); pointer-events: none; }
 .vslot .icon__glyph { font-size: 28px; }
 .vslot__qty { position: absolute; bottom: 3px; right: 5px; font-family: var(--font-mono); font-size: 11px; color: var(--text); text-shadow: 0 1px 3px #000; }
+/* Not-Tradable vault items: dimmed, desaturated, not selectable for listing.
+   The server rejects them regardless; this just stops the click up front. */
+.vslot--locked { opacity: 0.4; filter: grayscale(0.8); cursor: not-allowed; }
+.vslot--locked:hover { transform: none; box-shadow: none; }
+.vslot__lock { position: absolute; top: 3px; left: 5px; font-size: 13px; color: var(--danger); text-shadow: 0 1px 3px #000; }
 
 .pform { flex: none; padding: 16px; }
 .pform__preview { display: flex; gap: 12px; align-items: center; padding-bottom: 12px; border-bottom: 1px solid var(--line); margin-bottom: 14px; }

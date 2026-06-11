@@ -338,9 +338,10 @@ services:
       # Raw-relay the legacy game-auth URIs (AuthLogin, updateCheck, ...) to the
       # net7go login server on the docker network.
       FREYA_LOGIN_UPSTREAM: "net7go:8085"
-      # AH faucet bots. OFF by default; set FREYA_AH_BOTS=1 in the host env to
-      # keep the Auction House stocked from the AhBot account (see bots.go).
-      FREYA_AH_BOTS: "${FREYA_AH_BOTS:-}"
+      # AH faucet bots. ON by default so the Auction House is stocked from the
+      # AhBot account (see bots.go); set FREYA_AH_BOTS=0 in the host env to
+      # disable.
+      FREYA_AH_BOTS: "${FREYA_AH_BOTS:-1}"
     volumes:
       # Same dev certs the server uses; the Go service reads
       # <DOMAIN>.cer / <DOMAIN>.pem from NET7SSL_CERT_DIR.
@@ -412,6 +413,17 @@ services:
     command:
       - |
         set -e
+        # Docker can briefly fail to resolve the `postgres` service name on a
+        # freshly-created container (embedded-DNS / slirp4netns race), e.g.
+        # "could not translate host name postgres to address". With `set -e`
+        # that aborts this one-shot before any DB work runs, leaving net7_user
+        # uncreated. Wait until postgres is actually reachable (name resolves
+        # AND accepts connections) before proceeding.
+        for i in $$(seq 1 30); do
+          if pg_isready -h postgres -U net7 -d postgres -q; then break; fi
+          echo "schema-init: waiting for postgres to be reachable ($$i/30)..."
+          sleep 2
+        done
         # The C++ server connects to two databases: "net7" (game content;
         # schema.sql) and "net7_user" (accounts/avatars; seed.sql in this
         # repo's MySQL-derived dumps).

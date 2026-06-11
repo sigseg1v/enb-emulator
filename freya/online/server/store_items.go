@@ -28,7 +28,9 @@ type ItemView struct {
 	Prices      Prices `json:"prices"`
 	Vendor      int64  `json:"vendor"`
 	MaxStack    int64  `json:"-"`
-	NoTrade     bool   `json:"-"`
+	// Exposed so the Auction House UI can disable listing of no-trade items up
+	// front; the server still hard-rejects them (errItemUntradable) regardless.
+	NoTrade     bool   `json:"noTrade"`
 }
 
 type Prices struct {
@@ -165,6 +167,20 @@ func (s *Store) resolveItems(ctx context.Context, ids []int) (map[int]itemTempla
 		}}
 	}
 	return out, rows.Err()
+}
+
+// itemName resolves a single item's display name from the content pool, for
+// building human-readable mail subjects. Returns "" if the id is unknown so
+// callers fall back to a bare subject. Uses the content pool (net7), so it is
+// safe to call alongside a net7_user transaction -- it is a separate connection,
+// not a cross-DB read on the same one.
+func (s *Store) itemName(ctx context.Context, itemID int) string {
+	var name string
+	if err := s.content.QueryRow(ctx,
+		`SELECT name FROM item_base WHERE id = $1`, itemID).Scan(&name); err != nil {
+		return ""
+	}
+	return name
 }
 
 // itemView applies an instance quality to a template, producing the SPA Item

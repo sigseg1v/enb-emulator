@@ -30,6 +30,8 @@ export interface Item {
   prices: Prices;
   /** Baseline item value (vendor sell price). Bid increments are 1% of this. */
   vendor: number;
+  /** Flagged Not Tradable in the content DB -- cannot be listed on the AH. */
+  noTrade?: boolean;
 }
 
 export interface Listing {
@@ -92,6 +94,9 @@ export interface Session {
   username: string;
   characters: string[];
   credits: number;
+  // Per-character credit balance, keyed by character name. The top bar shows
+  // the selected character's value; `credits` above is the account total.
+  creditsByCharacter: Record<string, number>;
 }
 
 export interface PostListingInput {

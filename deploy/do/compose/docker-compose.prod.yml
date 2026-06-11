@@ -149,6 +149,13 @@ services:
         # NOTHING are idempotent. See db/postgres/status_notification_settings.sql.
         echo "schema-init: applying /db/status_notification_settings.sql -> net7_user"
         psql -h postgres -U net7 -d net7_user -v ON_ERROR_STOP=1 -f /db/status_notification_settings.sql
+        # Freya Online auction-house + mailbox tables + avatar_info.deleted_at
+        # (net7_user). UNCONDITIONAL + idempotent (CREATE TABLE / ADD COLUMN IF
+        # NOT EXISTS): the relations the Go web/AH service reads & writes. MUST
+        # apply BEFORE account_id_guard.sql (which scans auction_listings) and
+        # freya_online_bots.sql. See db/postgres/freya_online.sql.
+        echo "schema-init: applying /db/freya_online.sql -> net7_user"
+        psql -h postgres -U net7 -d net7_user -v ON_ERROR_STOP=1 -f /db/freya_online.sql
         # 32-bit GameID ceiling guard (net7_user). UNCONDITIONAL + idempotent.
         # Re-ids the old ~1e9 AhBot sentinel (and any account already created above
         # the ceiling) down into the reserved-but-safe band, remapping every
@@ -158,6 +165,14 @@ services:
         # absent. See db/postgres/account_id_guard.sql.
         echo "schema-init: applying /db/account_id_guard.sql -> net7_user"
         psql -h postgres -U net7 -d net7_user -v ON_ERROR_STOP=1 -f /db/account_id_guard.sql
+        # Freya Online AH faucet seller (the "AhBot" account + avatar, fixed
+        # sentinel ids 9000001 / 45000006). UNCONDITIONAL + idempotent (INSERT ...
+        # WHERE NOT EXISTS); runs regardless of FREYA_AH_BOTS (an AhBot with no
+        # listings is inert). Without this the bot loop, when FREYA_AH_BOTS=1, has
+        # no seller account to reference. MUST apply AFTER freya_online.sql and
+        # account_id_guard.sql. See db/postgres/freya_online_bots.sql.
+        echo "schema-init: applying /db/freya_online_bots.sql -> net7_user"
+        psql -h postgres -U net7 -d net7_user -v ON_ERROR_STOP=1 -f /db/freya_online_bots.sql
         echo "schema-init: syncing identity sequences -> net7"
         psql -h postgres -U net7 -d net7 -v ON_ERROR_STOP=1 -f /db/sync_sequences.sql
         echo "schema-init: done"
@@ -260,8 +275,9 @@ services:
       FREYA_WEB_ROOT: "/app/web"
       # Raw-relay the legacy game-auth URIs to the net7go login backend.
       FREYA_LOGIN_UPSTREAM: "net7go:8085"
-      # AH faucet bots. OFF unless FREYA_AH_BOTS=1 is set in the droplet .env.
-      FREYA_AH_BOTS: "${FREYA_AH_BOTS:-}"
+      # AH faucet bots. ON by default to keep the Auction House stocked; set
+      # FREYA_AH_BOTS=0 in the droplet .env to disable.
+      FREYA_AH_BOTS: "${FREYA_AH_BOTS:-1}"
     volumes:
       # The real (CN=${DOMAIN}) cert/key; freya-online reads <DOMAIN>.cer /
       # <DOMAIN>.pem from NET7SSL_CERT_DIR.
