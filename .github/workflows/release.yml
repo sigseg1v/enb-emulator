@@ -23,8 +23,12 @@ jobs:
       fail-fast: false
       matrix:
         component:
-          - { name: "server", context: "./server" }
-          - { name: "login",  context: "./login-server" }
+          # AQ-7 cutover: the C++ `login` (net7ssl) image is no longer
+          # deployed. Game-auth ships as `net7go` (Go, login-server/net7go)
+          # behind `freya-online` (freya/online, TLS terminator + website).
+          - { name: "server",       context: "./server" }
+          - { name: "net7go",       context: "./login-server/net7go" }
+          - { name: "freya-online", context: "./freya/online" }
     steps:
       - uses: actions/checkout@v4
 
