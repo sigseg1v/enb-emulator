@@ -418,9 +418,9 @@ services:
         # that aborts this one-shot before any DB work runs, leaving net7_user
         # uncreated. Wait until postgres is actually reachable (name resolves
         # AND accepts connections) before proceeding.
-        for i in $(seq 1 30); do
+        for i in $$(seq 1 30); do
           if pg_isready -h postgres -U net7 -d postgres -q; then break; fi
-          echo "schema-init: waiting for postgres to be reachable ($i/30)..."
+          echo "schema-init: waiting for postgres to be reachable ($$i/30)..."
           sleep 2
         done
         # The C++ server connects to two databases: "net7" (game content;
