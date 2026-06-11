@@ -310,12 +310,20 @@ function SellView({
               ? <div style={{ gridColumn: '1 / -1', color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', fontSize: 12, padding: 12 }}>Vault empty</div>
               : slots.map(s => {
                 const r = RARITY[s.item.rarity];
+                const untradable = s.item.noTrade === true;
                 return (
-                  <div key={s.slot} className={'vslot' + (selSlot === s.slot ? ' vslot--sel' : '')}
+                  <div key={s.slot}
+                    className={'vslot' + (selSlot === s.slot ? ' vslot--sel' : '') + (untradable ? ' vslot--locked' : '')}
                     style={{ '--rcolor': r.color, '--rglow': r.glow } as Vars}
-                    title={`${s.item.name}${s.quality != null ? ` -- Q${s.quality}%` : ''}`} onClick={() => setSelSlot(s.slot)}>
+                    title={untradable
+                      ? `${s.item.name} -- Not Tradable, cannot be listed`
+                      : `${s.item.name}${s.quality != null ? ` -- Q${s.quality}%` : ''}`}
+                    onClick={() => untradable
+                      ? toast('That item is flagged Not Tradable and cannot be listed.')
+                      : setSelSlot(s.slot)}>
                     <span className="icon__glyph">{s.item.glyph}</span>
                     {s.stack > 1 && <span className="vslot__qty">{s.stack}</span>}
+                    {untradable && <span className="vslot__lock" title="Not Tradable">⊘</span>}
                   </div>
                 );
               })}

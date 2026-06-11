@@ -157,6 +157,7 @@ export const MOCK_SESSION: Session = {
   username: 'kestrel',
   characters: ['Kestrel_Vega', 'Orin_Tasca'],
   credits: 1284960,
+  creditsByCharacter: { Kestrel_Vega: 845210, Orin_Tasca: 439750 },
 };
 
 export const MOCK_LISTINGS: Listing[] = [

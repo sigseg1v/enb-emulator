@@ -12,6 +12,10 @@ import { AuctionHouse } from './screens/AuctionHouse';
 import { Account } from './screens/Account';
 
 const STATUS_POLL_MS = 60_000;
+// While signed in, re-pull the full bootstrap on this cadence so the server
+// status, player count, and the account's live character list stay current
+// without a manual action.
+const AUTO_RELOAD_MS = 120_000;
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -30,7 +34,6 @@ export default function App() {
   const [listings, setListings] = useState<Listing[]>([]);
   const [vault, setVault] = useState<Record<string, VaultSlot[]>>({});
   const [myListings, setMyListings] = useState<MyListing[]>([]);
-  const [credits, setCredits] = useState(0);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   // Server status is always visible (login screen + shell) and refreshed on a
@@ -62,7 +65,6 @@ export default function App() {
     setListings(boot.listings);
     setVault(boot.vault);
     setMyListings(boot.myListings);
-    setCredits(boot.session.credits);
   }, []);
 
   // Rehydrate from the session cookie on first load: if it is still valid the
@@ -73,6 +75,16 @@ export default function App() {
     reload().catch(() => {}).finally(() => { if (alive) setBooting(false); });
     return () => { alive = false; };
   }, [reload]);
+
+  // Auto-refresh the signed-in shell (status, players, characters, credits,
+  // vault, listings, mail) every 2 minutes. Gated on a stable boolean so the
+  // interval isn't torn down and recreated every time `reload` swaps `session`.
+  const loggedIn = session !== null;
+  useEffect(() => {
+    if (!loggedIn) return;
+    const h = setInterval(() => { reload().catch(() => {}); }, AUTO_RELOAD_MS);
+    return () => clearInterval(h);
+  }, [loggedIn, reload]);
 
   async function signIn(user: string, pass: string) {
     await api.login(user, pass);
@@ -97,6 +109,8 @@ export default function App() {
 
   const safeIdx = charIdx < session.characters.length ? charIdx : 0;
   const character = session.characters[safeIdx];
+  // Credits for the selected character (not the account total).
+  const charCredits = session.creditsByCharacter?.[character] ?? 0;
   const unread = mail.filter(m => !m.read).length;
 
   return (
@@ -121,7 +135,7 @@ export default function App() {
         <ServerStatus status={server.status} players={server.players} />
         <span className="topbar__sep" />
         <div className="topbar__acct">
-          <span className="topbar__credits"><Credits value={credits} /></span>
+          <span className="topbar__credits"><Credits value={charCredits} /></span>
           <span className="topbar__sep" />
           <div className="topbar__user">
             {session.characters.length > 1 ? (
