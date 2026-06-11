@@ -260,23 +260,25 @@ function PostForm({
 }
 
 function SellView({
-  vault, myListings, avatars, reload, toast,
+  vault, myListings, avatar, avatars, reload, toast,
 }: {
   vault: Record<string, VaultSlot[]>;
   myListings: MyListing[];
+  avatar: string;
   avatars: string[];
   reload: () => Promise<void>;
   toast: (msg: string) => void;
 }) {
-  const [avatar, setAvatar] = useState(avatars[0]);
   const [selSlot, setSelSlot] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // The active avatar is chosen from the top-bar character dropdown; clear any
+  // selected vault slot when it changes so we never carry a stale selection.
+  useEffect(() => { setSelSlot(null); }, [avatar]);
 
   const slots = vault[avatar] || [];
   const slotData = selSlot != null ? slots.find(s => s.slot === selSlot) || null : null;
   const mine = myListings.filter(l => avatars.includes(l.avatar));
-
-  function changeAvatar(name: string) { setAvatar(name); setSelSlot(null); }
 
   async function post(p: PostListingInput) {
     if (busy) return;
@@ -301,11 +303,7 @@ function SellView({
         <div className="vault hud-panel">
           <div className="vault__head">
             <span className="vault__title">Vault Inventory</span>
-            <div className="vsel">
-              <select value={avatar} onChange={e => changeAvatar(e.target.value)}>
-                {avatars.map(a => <option key={a} value={a}>{a}</option>)}
-              </select>
-            </div>
+            <span className="vault__avatar">{avatar}</span>
           </div>
           <div className="vgrid">
             {slots.length === 0
@@ -356,11 +354,12 @@ export function AuctionHouse(props: {
   listings: Listing[];
   vault: Record<string, VaultSlot[]>;
   myListings: MyListing[];
+  avatar: string;
   avatars: string[];
   reload: () => Promise<void>;
   toast: (msg: string) => void;
 }) {
-  const { listings, vault, myListings, avatars, reload, toast } = props;
+  const { listings, vault, myListings, avatar, avatars, reload, toast } = props;
   const [sub, setSub] = useState<'buy' | 'sell'>('buy');
 
   return (
@@ -387,7 +386,7 @@ export function AuctionHouse(props: {
       {sub === 'buy'
         ? <BuyView listings={listings} reload={reload} toast={toast} />
         : <SellView vault={vault} myListings={myListings}
-            avatars={avatars} reload={reload} toast={toast} />}
+            avatar={avatar} avatars={avatars} reload={reload} toast={toast} />}
     </div>
   );
 }

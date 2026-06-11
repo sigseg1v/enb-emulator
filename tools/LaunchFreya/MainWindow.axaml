@@ -59,8 +59,16 @@
         <TextBlock Grid.Row="1" Grid.Column="3" Name="c_ServerStatus"
                    Margin="0,8,0,0" VerticalAlignment="Center" Text="" FontWeight="Bold" />
 
-        <Button    Grid.Row="2" Grid.Column="3" Name="c_Button_Check" Margin="0,8,0,0"
-                   HorizontalAlignment="Right" Content="Check" Click="OnCheckClick" />
+        <StackPanel Grid.Row="2" Grid.Column="3" Orientation="Horizontal"
+                    HorizontalAlignment="Right" VerticalAlignment="Center"
+                    Margin="0,8,0,0" Spacing="12">
+          <!-- Opens the Freya Online website. URL is derived from the selected
+               server: localhost/127.0.0.1 -> the play-local dev site over HTTP
+               (http://localhost:8088); any other host -> https://<host>, which
+               is the live freya-online TLS endpoint (:443). -->
+          <Button Name="c_Button_Website" Content="Website" Click="OnWebsiteClick" />
+          <Button Name="c_Button_Check" Content="Check" Click="OnCheckClick" />
+        </StackPanel>
       </Grid>
     </Border>
 

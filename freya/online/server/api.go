@@ -44,7 +44,15 @@ func newAPIServer(store *Store, status *statusCache, cfg Config) *apiServer {
 	sm.Cookie.Name = "freya_session"
 	sm.Cookie.HttpOnly = true
 	sm.Cookie.SameSite = http.SameSiteLaxMode
-	sm.Cookie.Secure = true
+	// Persist across browser restarts (scs default), so a refresh keeps the
+	// session instead of dropping back to the login form.
+	sm.Cookie.Persist = true
+	// Secure means the browser only sends the cookie over HTTPS. The live site
+	// is TLS, so it must stay set there -- but play-local serves the SPA over
+	// plain HTTP (http://localhost:8088), where a Secure cookie is silently
+	// dropped and the session never survives a refresh. DOMAIN=localhost is the
+	// play-local marker, so drop Secure only there.
+	sm.Cookie.Secure = cfg.Domain != "localhost"
 	sm.Cookie.Path = "/"
 	return &apiServer{store: store, status: status, session: sm, cfg: cfg}
 }
