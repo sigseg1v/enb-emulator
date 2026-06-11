@@ -109,3 +109,9 @@ end
 --   enb.call(enb.addr.SkillLifecycle, skill_this, slot_or_id)
 -- WRONG args can corrupt game state -- test on a throwaway character. The asm caller is verified
 -- correct (this in ECX, args ordered, ESP balanced); the *arguments* are your responsibility.
+
+-- ---------------------------------------------------------------------------
+-- XP bars HUD: draws "<level> <pct>%" next to the Combat/Exploration/Trade bars
+-- in the bottom-left. Shows "L? ?%" until the level/pct offsets are calibrated.
+-- ---------------------------------------------------------------------------
+require("xp_overlay")
