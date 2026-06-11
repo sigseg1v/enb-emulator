@@ -235,6 +235,27 @@ export const MOCK_VAULT: Record<string, VaultSlot[]> = {
   ],
 };
 
+// MOCK_VAULT_STORAGE is each character's ACTUAL vault (the Vault page + mail
+// composer source). It mirrors MOCK_VAULT here; the real server includes
+// no-trade items in this set (they can be vault-transferred but not mailed/sold).
+export const MOCK_VAULT_STORAGE: Record<string, VaultSlot[]> = {
+  Kestrel_Vega: [
+    { slot: 0, item: mk('claimjumper', 168), stack: 1,  quality: 168 },
+    { slot: 1, item: mk('tracer', 188),      stack: 1,  quality: 188 },
+    { slot: 2, item: mk('voidlance', 142),   stack: 1,  quality: 142 },
+    { slot: 3, item: mk('pulsecore', 96),    stack: 1,  quality: 96 },
+    { slot: 4, item: mk('servo', 134),       stack: 9,  quality: 134 },
+    { slot: 5, item: mk('tungsten', null),   stack: 20, quality: null },
+    { slot: 6, item: mk('promethium', null), stack: 14, quality: null },
+  ],
+  Orin_Tasca: [
+    { slot: 0, item: mk('claimjumper', 151), stack: 1,  quality: 151 },
+    { slot: 1, item: mk('voidlance', 117),   stack: 1,  quality: 117 },
+    { slot: 2, item: mk('servo', null),      stack: 12, quality: null },
+    { slot: 3, item: mk('tungsten', null),   stack: 20, quality: null },
+  ],
+};
+
 export const MOCK_MY_LISTINGS: MyListing[] = [
   { id: 'S-3012', item: mk('claimjumper', 168), avatar: 'Kestrel_Vega', stack: 1,  quality: 168, band: 'med',  currentBid: 559659, buyout: 1017562 },
   { id: 'S-3008', item: mk('tracer', 151),      avatar: 'Kestrel_Vega', stack: 1,  quality: 151, band: 'high', currentBid: null,   buyout: 14700 },

@@ -110,3 +110,34 @@ export interface PostListingInput {
   buyout: number;
   fee: number;
 }
+
+// The in-game vault capacity (slots 0..95). Mirrors the server const
+// vaultSlotCount in store_mail_write.go -- the two MUST agree: the server
+// refuses a transfer / loot into a full vault, and the UI uses this to show
+// the destination's free-slot count.
+export const VAULT_SLOT_COUNT = 96;
+
+// The most attachments one message can carry (mirrors the server's maxMailItems).
+export const MAX_MAIL_ITEMS = 6;
+
+// One item the mail composer / vault transfer wants to move: the vault slot and
+// the item id the SPA last saw there (the server cross-checks it under a lock).
+export interface MailItemInput {
+  slot: number;
+  itemId: number;
+}
+
+export interface SendMailInput {
+  from: string;
+  to: string;
+  subject: string;
+  body: string;
+  items: MailItemInput[];
+}
+
+export interface VaultTransferInput {
+  from: string;
+  to: string;
+  slot: number;
+  itemId: number;
+}

@@ -133,15 +133,16 @@ func (s *Store) DeleteMessage(ctx context.Context, accountID int64, messageID in
 // lootAvatar is the account's primary live character when the message is not
 // addressed to a specific (still-live) character.
 func (s *Store) LootAttachment(ctx context.Context, accountID int64, messageID int64, index int) error {
-	tx, err := s.user.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
+	return s.serialTx(ctx, func(tx pgx.Tx) error {
+		return s.lootAttachmentTx(ctx, tx, accountID, messageID, index)
+	})
+}
 
+// lootAttachmentTx is the body of LootAttachment, run inside a serializable tx.
+func (s *Store) lootAttachmentTx(ctx context.Context, tx pgx.Tx, accountID int64, messageID int64, index int) error {
 	// Confirm ownership and find the loot-target character.
 	var recipientAvatar *int64
-	err = tx.QueryRow(ctx,
+	err := tx.QueryRow(ctx,
 		`SELECT recipient_avatar_id FROM mailbox_messages WHERE id = $1 AND account_id = $2 FOR UPDATE`,
 		messageID, accountID).Scan(&recipientAvatar)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -253,7 +254,7 @@ func (s *Store) LootAttachment(ctx context.Context, accountID int64, messageID i
 	if _, err := tx.Exec(ctx, `UPDATE mailbox_attachments SET looted = true WHERE id = $1`, a.id); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	return nil
 }
 
 // freeVaultSlot finds the lowest unused vault slot for an avatar.

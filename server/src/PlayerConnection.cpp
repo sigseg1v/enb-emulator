@@ -18,6 +18,7 @@
 */
 
 #include "PlayerClass.h"
+#include "SaveManager.h"   // PLAYER_INVENTORY / PLAYER_VAULT slot-type codes for SaveInventoryMove
 #include "ServerManager.h"
 #include "ObjectManager.h"
 #include <net7/Opcodes.h>
@@ -2659,8 +2660,9 @@ void Player::HandleInventoryMove(unsigned char *data)
 
 			SendAuxPlayer();
 			SendAuxShip();
-			SaveInventoryChange(InvMo.FromSlot);
-			SaveVaultChange(InvMo.ToSlot);
+			// Atomic: cargo source + vault destination persist in one DB
+			// transaction so a crash mid-move can neither dupe nor lose it.
+			SaveInventoryMove(PLAYER_INVENTORY, InvMo.FromSlot, PLAYER_VAULT, InvMo.ToSlot);
 		}
 		else if(InvMo.ToInv == 4)	//selling cargo
 		{
@@ -3021,6 +3023,13 @@ void Player::HandleInventoryMove(unsigned char *data)
 					m_Mutex.Lock();
 					PlayerIndex()->SecureInv.Item[InvMo.FromSlot].SetData(&g_ItemBaseMgr->EmptyItem);
 					m_Mutex.Unlock();
+
+					SendAuxShip();
+					SendAuxPlayer();
+					// The cargo side may stack across several slots and is
+					// persisted by CargoAddItem itself; only the emptied vault
+					// source slot is saved here.
+					SaveVaultChange(InvMo.FromSlot);
 				}
 				else
 				{
@@ -3050,11 +3059,11 @@ void Player::HandleInventoryMove(unsigned char *data)
 				PlayerIndex()->SecureInv.Item[InvMo.FromSlot].SetData(&Destination);
 				m_Mutex.Unlock();
 
-				SaveInventoryChange(InvMo.ToSlot);
+				SendAuxShip();
+				SendAuxPlayer();
+				// Atomic: vault source + cargo destination in one transaction.
+				SaveInventoryMove(PLAYER_VAULT, InvMo.FromSlot, PLAYER_INVENTORY, InvMo.ToSlot);
 			}
-			SendAuxShip();					
-			SendAuxPlayer();
-			SaveVaultChange(InvMo.FromSlot);
 		}
 		else if(InvMo.ToInv == 3)	//vault to vault
 		{
@@ -3067,8 +3076,8 @@ void Player::HandleInventoryMove(unsigned char *data)
 			m_Mutex.Unlock();
 
 			SendAuxPlayer();
-			SaveVaultChange(InvMo.ToSlot);
-			SaveVaultChange(InvMo.FromSlot);
+			// Atomic: both vault slots in one transaction.
+			SaveInventoryMove(PLAYER_VAULT, InvMo.FromSlot, PLAYER_VAULT, InvMo.ToSlot);
 		}
 		break;
 

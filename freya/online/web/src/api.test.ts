@@ -147,5 +147,28 @@ describe('mock backend (VITE_MOCK=1, opt-in)', () => {
     expect(boot.session).toBeTruthy();
     expect(Array.isArray(boot.listings)).toBe(true);
     expect(Array.isArray(boot.mail)).toBe(true);
+    expect(boot.vaultStorage).toBeTruthy();
+  });
+
+  it('sendMail POSTs /api/mail with the composed payload', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const api = await importApi();
+    await api.sendMail({ from: 'A_One', to: 'B_Two', subject: 'hi', body: 'yo', items: [] });
+    expect(fetchMock).toHaveBeenCalledWith('/api/mail', expect.objectContaining({ method: 'POST' }));
+  });
+
+  it('transferVault POSTs /api/vault/transfer', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const api = await importApi();
+    await api.transferVault({ from: 'A_One', to: 'B_Two', slot: 0, itemId: 42 });
+    expect(fetchMock).toHaveBeenCalledWith('/api/vault/transfer', expect.objectContaining({ method: 'POST' }));
   });
 });

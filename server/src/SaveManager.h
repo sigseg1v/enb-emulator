@@ -55,6 +55,13 @@ private:
 	void	HandleAdvanceLevel(long player_id, short bytes, unsigned char *data);
 	void	HandleAdvanceSkill(long player_id, short bytes, unsigned char *data);
 	void	HandleChangeInventory(long player_id, short bytes, unsigned char *data);
+	void	HandleMoveInventory(long player_id, short bytes, unsigned char *data);
+	// Upsert ONE 86-byte inventory/vault/trade slot record through `q`. When
+	// `q` is mid-transaction (begin() called) the write defers to that
+	// transaction's commit; otherwise it autocommits. Returns false on SQL
+	// failure (already logged). Shared by HandleChangeInventory (single slot,
+	// autocommit) and HandleMoveInventory (two slots, one transaction).
+	bool	UpsertInventorySlot(sql_query_c &q, long player_id, const unsigned char *rec);
 	void	HandleChangeEquipment(long player_id, short bytes, unsigned char *data);
 	void	HandleAwardXP(long player_id, short bytes, unsigned char *data);
 	void	HandleCreditChange(long player_id, short bytes, unsigned char *data);
@@ -167,6 +174,20 @@ struct EnbSaveHeader
 // followed by the already-rendered UTF-8 message line; HandleExternalStatusEvent
 // INSERTs it into external_status_events + NOTIFYs the consumer. player_id unused.
 #define SAVE_CODE_EXT_STATUS_EVENT					0x0030
+// Atomic two-slot inventory move. Payload is TWO back-to-back
+// SAVE_CODE_CHANGE_INVENTORY slot records (86 bytes each, source then
+// destination); HandleMoveInventory persists both inside ONE DB transaction so
+// a crash mid-move can neither duplicate nor lose the item. Emitted by
+// Player::SaveInventoryMove for cargo<->vault and vault<->vault moves in place
+// of two independent SAVE_CODE_CHANGE_INVENTORY messages.
+#define SAVE_CODE_MOVE_INVENTORY					0x0031
+
+// Wire size of one inventory/vault/trade slot record as packed by
+// Player::SaveInventoryChange / SaveVaultChange / SaveTradeChange and parsed by
+// SaveManager::UpsertInventorySlot: slot(1) + type(1) + stack_level(2) +
+// trade_stack(2) + quality(4) + item_id(4) + cost(4) + structure(4) +
+// builder_name(64) = 86. A SAVE_CODE_MOVE_INVENTORY payload is two of these.
+#define SAVE_INVENTORY_RECORD_BYTES					86
 
 // external_status_events.kind bytes (wire-packed at data[0]; mapped to the kind
 // text stored in the row). Keep in sync with HandleExternalStatusEvent + docs.

@@ -35,6 +35,12 @@ struct net7_db_handle {
     pqxx::connection *conn;
     std::string       last_error;
     unsigned int      last_errno;
+    // Non-null while a sql_query_c has an explicit begin()..commit() open on
+    // this connection. execute()/execute_params() then run inside *active_tx
+    // instead of opening their own autocommit pqxx::work. One handle is
+    // checked out by exactly one query at a time (pool busy flag), so a single
+    // open transaction per handle is the only state we need.
+    pqxx::work       *active_tx = nullptr;
     // OID -> relname cache for compound "table.field" row lookups (see
     // resolve_column_tables). OIDs are stable for the life of a database and
     // a handle is checked out exclusively by one query at a time, so this
@@ -348,6 +354,10 @@ sql_query_c::~sql_query_c()
 {
     free_result();
     if (params) { delete params; params = 0; }
+    // A begin() with no matching commit()/rollback() (e.g. an early return on
+    // error) must not return the connection to the pool with an open
+    // transaction -- that would corrupt the next borrower's state. Discard it.
+    rollback();
     if (odb) sql_connection->freedb(odb);
 }
 
@@ -408,6 +418,23 @@ int sql_query_c::execute(char *sql)
     std::string translated = translate_dialect(sql);
 
     try {
+        // Inside an explicit begin()..commit() the statement joins the open
+        // transaction and is NOT committed here; otherwise it runs in its own
+        // autocommit work as before.
+        if (odb->db->active_tx) {
+            pqxx::work &tx = *odb->db->active_tx;
+            pqxx::result r = tx.exec(translated);
+            std::vector<std::string> col_tables = resolve_column_tables(odb->db, tx, r);
+
+            net7_result_holder *holder = new net7_result_holder;
+            holder->affected_rows = r.affected_rows();
+            holder->column_tables = std::move(col_tables);
+            holder->result = std::move(r);
+            res = holder;
+            last_affected = holder->affected_rows;
+            return 1;
+        }
+
         pqxx::work tx(*odb->db->conn);
         pqxx::result r = tx.exec(translated);
         std::vector<std::string> col_tables = resolve_column_tables(odb->db, tx, r);
@@ -508,10 +535,29 @@ int sql_query_c::execute_params(const char *sql)
     std::string translated   = translate_dialect(translated_q.c_str());
 
     try {
-        pqxx::work tx(*odb->db->conn);
         // pqxx::exec_params(zview, Args&&...) builds a fresh pqxx::params
         // pack from each variadic arg; pqxx::params has an append(params)
         // overload, so passing our accumulator flattens it correctly.
+        // Inside an explicit begin()..commit() the statement joins the open
+        // transaction and is NOT committed here.
+        if (odb->db->active_tx) {
+            pqxx::work &tx = *odb->db->active_tx;
+            pqxx::result r = params
+                ? tx.exec_params(translated, params->p)
+                : tx.exec(translated);
+            std::vector<std::string> col_tables = resolve_column_tables(odb->db, tx, r);
+
+            net7_result_holder *holder = new net7_result_holder;
+            holder->affected_rows = r.affected_rows();
+            holder->column_tables = std::move(col_tables);
+            holder->result = std::move(r);
+            res = holder;
+            last_affected = holder->affected_rows;
+            ClearParams();
+            return 1;
+        }
+
+        pqxx::work tx(*odb->db->conn);
         pqxx::result r = params
             ? tx.exec_params(translated, params->p)
             : tx.exec(translated);
@@ -556,6 +602,77 @@ void sql_query_c::store(sql_result_c *result)
     if (!res) return;
     result->take(res);  // transfer ownership
     res = 0;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////
+// Explicit multi-statement transactions. See header. begin() opens one
+// pqxx::work on the borrowed connection; every subsequent execute*/run_query*
+// on this query joins it and defers its commit. commit() flushes, rollback()
+// discards. The pool busy flag guarantees this handle is ours exclusively, so
+// a single active_tx pointer is all the bookkeeping required.
+
+bool sql_query_c::in_transaction() const
+{
+    return odb && odb->db && odb->db->active_tx != nullptr;
+}
+
+bool sql_query_c::begin()
+{
+    last_errno = 0;
+    last_errmsg[0] = '\0';
+
+    if (!odb || !odb->db || !odb->db->conn) {
+        last_errno = 1000;
+        strcpy_s(last_errmsg, sizeof(last_errmsg), "no open connection");
+        return false;
+    }
+    if (odb->db->active_tx) {
+        // Not nestable -- a caller bug. Leave the existing transaction intact.
+        last_errno = 1001;
+        strcpy_s(last_errmsg, sizeof(last_errmsg), "transaction already open");
+        return false;
+    }
+    try {
+        odb->db->active_tx = new pqxx::work(*odb->db->conn);
+        return true;
+    } catch (const std::exception &e) {
+        odb->db->active_tx = nullptr;
+        last_errno = 2;
+        snprintf(last_errmsg, sizeof(last_errmsg), "%s", e.what());
+        return false;
+    }
+}
+
+bool sql_query_c::commit()
+{
+    if (!odb || !odb->db || !odb->db->active_tx) {
+        last_errno = 1002;
+        strcpy_s(last_errmsg, sizeof(last_errmsg), "no transaction to commit");
+        return false;
+    }
+    pqxx::work *tx = odb->db->active_tx;
+    odb->db->active_tx = nullptr;   // clear first so a throw can't leave it dangling
+    try {
+        tx->commit();
+        delete tx;
+        return true;
+    } catch (const std::exception &e) {
+        delete tx;
+        last_errno = 2;
+        snprintf(last_errmsg, sizeof(last_errmsg), "%s", e.what());
+        return false;
+    }
+}
+
+void sql_query_c::rollback()
+{
+    if (!odb || !odb->db || !odb->db->active_tx) return;
+    pqxx::work *tx = odb->db->active_tx;
+    odb->db->active_tx = nullptr;
+    // abort() is safe even after a statement already failed and implicitly
+    // aborted the backend transaction; swallow anything it raises.
+    try { tx->abort(); } catch (const std::exception &) { }
+    delete tx;
 }
 
 void sql_query_c::free_result()

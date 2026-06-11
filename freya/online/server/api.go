@@ -70,9 +70,12 @@ func (s *apiServer) routes() http.Handler {
 	mux.HandleFunc("POST /api/auction", s.handlePostListing)
 	mux.HandleFunc("POST /api/auction/{id}/bid", s.handleBid)
 	mux.HandleFunc("POST /api/auction/{id}/buyout", s.handleBuyout)
+	mux.HandleFunc("POST /api/mail", s.handleSendMail)
 	mux.HandleFunc("POST /api/mail/{id}/read", s.handleMarkRead)
 	mux.HandleFunc("POST /api/mail/{id}/loot", s.handleLoot)
 	mux.HandleFunc("DELETE /api/mail/{id}", s.handleDeleteMail)
+	// Vault item transfer between two of the account's own characters.
+	mux.HandleFunc("POST /api/vault/transfer", s.handleVaultTransfer)
 	// Account self-service.
 	mux.HandleFunc("POST /api/account/password", s.handleChangePassword)
 	return mux
@@ -176,19 +179,24 @@ type sessionView struct {
 	Characters []string `json:"characters"`
 	// Credits is the account total (kept for any account-wide use); the top bar
 	// shows the selected character's balance from CreditsByCharacter.
-	Credits           int64            `json:"credits"`
+	Credits            int64            `json:"credits"`
 	CreditsByCharacter map[string]int64 `json:"creditsByCharacter"`
 }
 
 // bootstrapResponse is the single payload the SPA loads after login. Field
 // names/shape match the client's Bootstrap interface (web/src/api.ts).
 type bootstrapResponse struct {
-	Session    sessionView                `json:"session"`
-	Server     ServerStatus               `json:"server"`
-	Mail       []MailView                 `json:"mail"`
-	Listings   []ListingView              `json:"listings"`
-	Vault      map[string][]VaultSlotView `json:"vault"`
-	MyListings []MyListingView            `json:"myListings"`
+	Session  sessionView                `json:"session"`
+	Server   ServerStatus               `json:"server"`
+	Mail     []MailView                 `json:"mail"`
+	Listings []ListingView              `json:"listings"`
+	Vault    map[string][]VaultSlotView `json:"vault"`
+	// VaultStorage is each character's ACTUAL vault (avatar_vault_items only,
+	// including no-trade items) -- the Vault transfer page and the mail composer's
+	// item picker render it. Distinct from Vault above (AH-listable: vault +
+	// inventory, tradable only).
+	VaultStorage map[string][]VaultSlotView `json:"vaultStorage"`
+	MyListings   []MyListingView            `json:"myListings"`
 }
 
 // GET /api/bootstrap -- the authenticated SPA's initial data load.
@@ -219,12 +227,13 @@ func (s *apiServer) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := bootstrapResponse{
-		Session:    sessionView{Username: user, Characters: names, Credits: credits, CreditsByCharacter: creditsBy},
-		Server:     s.status.get(ctx, time.Now()),
-		Mail:       s.store.accountMail(ctx, acctID),
-		Listings:   s.store.openListings(ctx),
-		Vault:      s.store.accountVault(ctx, acctID),
-		MyListings: s.store.listingsBySeller(ctx, acctID),
+		Session:      sessionView{Username: user, Characters: names, Credits: credits, CreditsByCharacter: creditsBy},
+		Server:       s.status.get(ctx, time.Now()),
+		Mail:         s.store.accountMail(ctx, acctID),
+		Listings:     s.store.openListings(ctx),
+		Vault:        s.store.accountVault(ctx, acctID),
+		VaultStorage: s.store.accountVaultStorage(ctx, acctID),
+		MyListings:   s.store.listingsBySeller(ctx, acctID),
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -254,6 +263,13 @@ func mutationError(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "already looted"})
 	case errors.Is(err, errNoVaultSpace):
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "vault is full, cannot loot mail"})
+	case errors.Is(err, errDestVaultFull):
+		writeJSON(w, http.StatusConflict, map[string]string{"error": errDestVaultFull.Error()})
+	case errors.Is(err, errSameCharacter), errors.Is(err, errCharacterNotFound),
+		errors.Is(err, errBadRecipient), errors.Is(err, errEmptyMail),
+		errors.Is(err, errTooManyItems), errors.Is(err, errDupMailSlot),
+		errors.Is(err, errNoSubject):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 	default:
 		log.Printf("api: mutation: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
@@ -489,6 +505,78 @@ func (s *apiServer) handleChangePassword(w http.ResponseWriter, r *http.Request)
 	// cookie is useless after this point.
 	if err := s.session.RenewToken(r.Context()); err != nil {
 		log.Printf("api: RenewToken after password change: %v", err)
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// POST /api/vault/transfer {from,to,slot,itemId}. Moves a vault item between two
+// of the account's own characters. The account is taken from the session; both
+// characters must belong to it, must differ, and must be offline. Dup-safe: the
+// move runs in one serializable transaction.
+func (s *apiServer) handleVaultTransfer(w http.ResponseWriter, r *http.Request) {
+	_, acctID := s.loggedIn(r)
+	if acctID == 0 {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	var body struct {
+		From   string `json:"from"`
+		To     string `json:"to"`
+		Slot   int    `json:"slot"`
+		ItemID int    `json:"itemId"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	if body.From == "" || body.To == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "both characters are required"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+
+	if err := s.store.TransferVaultItem(ctx, acctID, body.From, body.To, body.Slot, body.ItemID); err != nil {
+		mutationError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// POST /api/mail {from,to,subject,body,items}. Composes player-to-player mail
+// from one of the account's characters. Items (up to 6) come from the sender's
+// vault and are removed atomically. Either a body or at least one item is
+// required. The sender is taken (by name) from the account's own characters; the
+// recipient may be any live character but not the sender.
+func (s *apiServer) handleSendMail(w http.ResponseWriter, r *http.Request) {
+	_, acctID := s.loggedIn(r)
+	if acctID == 0 {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	var body struct {
+		From    string          `json:"from"`
+		To      string          `json:"to"`
+		Subject string          `json:"subject"`
+		Body    string          `json:"body"`
+		Items   []MailItemInput `json:"items"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	if body.From == "" || body.To == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "sender and recipient are required"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+
+	if err := s.store.SendMail(ctx, acctID, body.From, body.To, body.Subject, body.Body, body.Items); err != nil {
+		mutationError(w, err)
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

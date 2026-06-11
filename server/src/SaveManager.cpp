@@ -199,6 +199,9 @@ void SaveManager::HandleSaveCode(short save_code, long player_id, short bytes, u
 	case SAVE_CODE_CHANGE_INVENTORY:
 		HandleChangeInventory(player_id, bytes, data);
 		break;
+	case SAVE_CODE_MOVE_INVENTORY:
+		HandleMoveInventory(player_id, bytes, data);
+		break;
 	case SAVE_CODE_CHANGE_EQUIPMENT:
 		HandleChangeEquipment(player_id, bytes, data);
 		break;
@@ -591,6 +594,43 @@ void SaveManager::HandleChangeInventory(long player_id, short bytes, unsigned ch
 {
 	//player has just had an inventory change of some sort
 	sql_query_c account_query (&m_SQL_Conn);
+	UpsertInventorySlot(account_query, player_id, data);
+}
+
+void SaveManager::HandleMoveInventory(long player_id, short bytes, unsigned char *data)
+{
+	// One logical item move == two slot writes (source + destination). Persist
+	// them inside a single transaction so a crash between the two can neither
+	// duplicate the item (in both slots) nor lose it (in neither). The payload
+	// is two back-to-back 86-byte slot records, identical in layout to a
+	// SAVE_CODE_CHANGE_INVENTORY record. See SAVE_INVENTORY_RECORD_BYTES.
+	sql_query_c account_query (&m_SQL_Conn);
+
+	if (!account_query.begin())
+	{
+		// Could not open a transaction -- fall back to two independent
+		// autocommit writes rather than dropping the save entirely. This
+		// reopens the crash-atomicity window but never loses the change.
+		LogMessage("HandleMoveInventory: could not begin transaction for id %d, %s -- writing slots independently\n",
+			player_id, account_query.ErrorMsg());
+		UpsertInventorySlot(account_query, player_id, &data[0]);
+		UpsertInventorySlot(account_query, player_id, &data[SAVE_INVENTORY_RECORD_BYTES]);
+		return;
+	}
+
+	bool ok = UpsertInventorySlot(account_query, player_id, &data[0])
+		&& UpsertInventorySlot(account_query, player_id, &data[SAVE_INVENTORY_RECORD_BYTES]);
+
+	if (ok && account_query.commit())
+		return;
+
+	account_query.rollback();
+	LogMessage("HandleMoveInventory: move not persisted for id %d, %s -- rolled back\n",
+		player_id, account_query.ErrorMsg());
+}
+
+bool SaveManager::UpsertInventorySlot(sql_query_c &account_query, long player_id, const unsigned char *data)
+{
 	sql_result_c result;
 
 	u8 inventory_slot = *((u8 *) &data[0]);
@@ -631,12 +671,17 @@ void SaveManager::HandleChangeInventory(long player_id, short bytes, unsigned ch
 		break;
 	}
 
-	if (!select_sql) return;
+	if (!select_sql) return false;
 
 	//does this item exist in the DB?
 	account_query.AddParam(player_id);
 	account_query.AddParam((int)inventory_slot);
-	account_query.execute_params(select_sql);
+	if (!account_query.execute_params(select_sql) && account_query.Error() > 0)
+	{
+		LogMessage("Could not read Inventory slot for id %d slot %d, %s\n",
+			player_id, (int)inventory_slot, account_query.ErrorMsg());
+		return false;
+	}
 	account_query.store(&result);
 
 	if (result.n_rows() != 0)
@@ -651,7 +696,7 @@ void SaveManager::HandleChangeInventory(long player_id, short bytes, unsigned ch
 		account_query.AddParam((double)structure);
 		account_query.AddParam(player_id);
 		account_query.AddParam((int)inventory_slot);
-		account_query.run_query_params(update_sql);
+		return account_query.run_query_params(update_sql);
 	}
 	else
 	{
@@ -687,8 +732,10 @@ void SaveManager::HandleChangeInventory(long player_id, short bytes, unsigned ch
 		if (!account_query.run_query(ItemBuilder.CreateQuery()))
 		{
 			LogMessage("Could not save Inventory Info for id %d [item id %d], %s\n", player_id, item_id, account_query.ErrorMsg());
+			return false;
 		}
 	}
+	return true;
 }
 
 void SaveManager::HandleChangeEquipment(long player_id, short bytes, unsigned char *data)

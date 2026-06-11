@@ -516,6 +516,15 @@ public:
 	void		SaveInventoryChange(long slot);
 	void		SaveVaultChange(long slot);
 	void		SaveTradeChange(long slot);
+	// Persist a two-slot move (source + destination) as ONE crash-atomic save
+	// message so a crash mid-move cannot dupe or lose the item. Replaces the
+	// two independent SaveInventoryChange/SaveVaultChange calls at the
+	// cargo<->vault and vault<->vault move sites. *_type is PLAYER_INVENTORY /
+	// PLAYER_VAULT / PLAYER_TRADE.
+	void		SaveInventoryMove(unsigned char from_type, long from_slot,
+						unsigned char to_type, long to_slot);
+	void		PackInventorySlot(unsigned char *data, int &index,
+						unsigned char inv_type, long slot);
 	void		SaveXPBarLevel(long xp_type, float xp_bar);
 	void		SaveCreditLevel();
 	void		SaveEquipmentChange(long slot, _Item *item);

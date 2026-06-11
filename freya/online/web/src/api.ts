@@ -11,10 +11,12 @@
 // without a backend.
 
 import type {
-  Listing, Mail, MyListing, PostListingInput, ServerStatus, Session, VaultSlot,
+  Listing, Mail, MyListing, PostListingInput, SendMailInput, ServerStatus,
+  Session, VaultSlot, VaultTransferInput,
 } from './types';
 import {
   MOCK_LISTINGS, MOCK_MAIL, MOCK_MY_LISTINGS, MOCK_SERVER, MOCK_SESSION, MOCK_VAULT,
+  MOCK_VAULT_STORAGE,
 } from './mock';
 
 const USE_MOCK = import.meta.env.VITE_MOCK === '1';
@@ -25,6 +27,11 @@ export interface Bootstrap {
   mail: Mail[];
   listings: Listing[];
   vault: Record<string, VaultSlot[]>;
+  // vaultStorage is each character's ACTUAL vault (every item, including
+  // no-trade), keyed by character name. The Vault page and the mail composer
+  // pick items from here; `vault` above is the AH-sellable union (tradable only)
+  // used by the Sell grid.
+  vaultStorage: Record<string, VaultSlot[]>;
   myListings: MyListing[];
 }
 
@@ -95,6 +102,7 @@ export async function bootstrap(): Promise<Bootstrap> {
       mail: structuredClone(MOCK_MAIL),
       listings: structuredClone(MOCK_LISTINGS),
       vault: structuredClone(MOCK_VAULT),
+      vaultStorage: structuredClone(MOCK_VAULT_STORAGE),
       myListings: structuredClone(MOCK_MY_LISTINGS),
     };
   }
@@ -124,6 +132,25 @@ export async function lootAttachment(mailId: string, index: number): Promise<{ o
 /** Delete a mail message (and its attachments). Unlooted attachments are forfeited. */
 export async function deleteMail(mailId: string): Promise<{ ok: boolean }> {
   return delJSON<{ ok: boolean }>(`/api/mail/${mailId}`);
+}
+
+/**
+ * Compose and send player-to-player mail. The sender must be one of the
+ * account's characters; the recipient may be any live character but not the
+ * sender. Items (up to MAX_MAIL_ITEMS) come from the sender's vault and are
+ * removed atomically server-side. The account is taken from the session cookie.
+ */
+export async function sendMail(input: SendMailInput): Promise<{ ok: boolean }> {
+  return postJSON<{ ok: boolean }>('/api/mail', input);
+}
+
+/**
+ * Move a whole vault stack from one of the account's characters to another.
+ * Both characters must belong to the account and be offline; the move runs in a
+ * serializable transaction server-side so it can never dup or lose the item.
+ */
+export async function transferVault(input: VaultTransferInput): Promise<{ ok: boolean }> {
+  return postJSON<{ ok: boolean }>('/api/vault/transfer', input);
 }
 
 /**

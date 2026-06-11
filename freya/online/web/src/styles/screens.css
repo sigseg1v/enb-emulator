@@ -328,3 +328,25 @@
 .dash { color: var(--text-faint); }
 .sell__hint { flex: 1; min-height: 160px; display: grid; place-items: center; text-align: center; color: var(--text-faint); font-family: var(--font-mono); font-size: 12px; line-height: 1.6; letter-spacing: 0.04em; padding: 24px; }
 .sell__hint .empty__glyph { font-size: 34px; opacity: 0.3; margin-bottom: 12px; }
+
+/* ---- Vault transfer page ---- */
+.vxfer { display: flex; flex-direction: column; gap: 16px; }
+.vxfer__cols { display: grid; grid-template-columns: 1fr auto 1fr; gap: 16px; align-items: start; }
+.vxfer .vault { min-width: 0; }
+.vxfer__mid { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  min-width: 180px; padding: 24px 8px; align-self: center; }
+.vxfer__hint { max-width: 160px; line-height: 1.6; }
+@media (max-width: 900px) {
+  .vxfer__cols { grid-template-columns: 1fr; }
+  .vxfer__mid { min-width: 0; padding: 8px; }
+}
+
+/* ---- Mail composer ---- */
+.compose { display: flex; flex-direction: column; gap: 14px; padding: 16px; overflow-y: auto; }
+.compose__field { display: flex; flex-direction: column; gap: 6px; }
+.compose__lbl { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-faint); }
+.compose__input { background: var(--bg-input); border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+  color: var(--text); font-family: var(--font-body); font-size: 13px; padding: 9px 11px; width: 100%; }
+.compose__input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-glow); }
+.compose__body { font-family: var(--font-body); resize: vertical; min-height: 90px; }
+.vslot__pick { position: absolute; top: 3px; right: 5px; font-size: 13px; color: var(--accent); text-shadow: 0 1px 3px #000; }

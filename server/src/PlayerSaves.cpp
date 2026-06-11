@@ -1360,6 +1360,59 @@ void Player::SaveTradeChange(long slot)
 	g_SaveMgr->AddSaveMessage(SAVE_CODE_CHANGE_INVENTORY, m_CharacterID, index, data);
 }
 
+// Pack one slot's CURRENT in-memory state into an 86-byte record (the same
+// layout SaveInventoryChange / SaveVaultChange / SaveTradeChange emit), at
+// offset `index` (advanced past the record). inv_type selects the array:
+// PLAYER_INVENTORY -> CargoInv, PLAYER_VAULT -> SecureInv, PLAYER_TRADE ->
+// TradeInv. Mirrors the per-type side effect: a cargo slot change fires the
+// OBTAIN_ITEMS mission check, exactly as SaveInventoryChange did.
+void Player::PackInventorySlot(unsigned char *data, int &index, unsigned char inv_type, long slot)
+{
+	_Item *item = NULL;
+	switch (inv_type)
+	{
+	case PLAYER_INVENTORY: item = ShipIndex()->Inventory.CargoInv.Item[slot].GetData(); break;
+	case PLAYER_VAULT:     item = PlayerIndex()->SecureInv.Item[slot].GetData();        break;
+	case PLAYER_TRADE:     item = ShipIndex()->Inventory.TradeInv.Item[slot].GetData(); break;
+	default: return;
+	}
+
+	long item_id = item->ItemTemplateID;
+	short stack_level = (short)item->StackCount;
+	short trade_stack = (short)item->TradeStack;
+	float quality = item->Quality;
+	u32 price = (u32)item->AveCost;
+	float structure = item->Structure;
+	char builder_name[64];
+	memcpy(builder_name, item->BuilderName, sizeof(builder_name));
+
+	AddData(data, (u8)slot, index);
+	AddData(data, inv_type, index);
+	AddData(data, stack_level, index);
+	AddData(data, trade_stack, index);
+	AddData(data, quality, index);
+	AddData(data, item_id, index);
+	AddData(data, price, index);
+	AddData(data, structure, index);
+	AddBuffer(data, (unsigned char *) &builder_name, sizeof(builder_name), index);
+
+	if (inv_type == PLAYER_INVENTORY)
+		CheckMissions(0, item->ItemTemplateID, 0, OBTAIN_ITEMS);
+}
+
+void Player::SaveInventoryMove(unsigned char from_type, long from_slot,
+	unsigned char to_type, long to_slot)
+{
+	// Two 86-byte slot records, source then destination, persisted atomically
+	// by SaveManager::HandleMoveInventory.
+	unsigned char data[2 * SAVE_INVENTORY_RECORD_BYTES + 8];
+	int index = 0;
+	PackInventorySlot(data, index, from_type, from_slot);
+	PackInventorySlot(data, index, to_type, to_slot);
+
+	g_SaveMgr->AddSaveMessage(SAVE_CODE_MOVE_INVENTORY, m_CharacterID, index, data);
+}
+
 void Player::SaveXPBarLevel(long xp_type, float xp_bar)
 {
 	unsigned char data[32];

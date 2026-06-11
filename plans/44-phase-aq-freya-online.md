@@ -338,6 +338,89 @@ C++ source directly). The Go server must reproduce:
       (resetPassword posts current+new without username; surfaces server error).
       Full suite green: 20 Go integration + 8 Go unit + 18 web.
 
+### AQ-11 Vault transfer + Send mail + dup-safe transactionality (2026-06-10)
+- [x] **Vault transfer page (SPA `web/src/screens/Vault.tsx`, new "Vault" tab,
+      glyph ⊟).** Two character dropdowns (left/right) that must pick two
+      DIFFERENT characters you own (each side disables the other's pick). Click
+      an item on the left arms `Transfer ->` (into the right vault); click on the
+      right arms `<- Transfer`. `VAULT_SLOT_COUNT = 96` const lives in BOTH
+      `web/src/types.ts` (client) and the Go server (`vaultSlotCount` in
+      `store_mail_write.go`). Shows "need at least two characters" when
+      `avatars.length < 2`. Bootstrap gained `vaultStorage map[string][]VaultSlotView`
+      (`accountVaultStorage`) so each owned char's full vault is available client-side.
+- [x] **`POST /api/vault/transfer` (`handleVaultTransfer` + `TransferVaultItem`
+      in `store_vault_write.go`).** Validates: both chars owned by the session
+      account (acctID from cookie, never body), not the same char
+      (`errSameCharacter`), item exists in the named source slot with the
+      expected item id (`lockVaultSlot` does `SELECT ... FOR UPDATE` + id
+      cross-check -> `errItemNotFound`), destination has a free slot
+      (`freeVaultSlot`, else `errDestVaultFull`). The whole move runs in ONE
+      `serialTx` (SERIALIZABLE + 40001/40P01 retry): lock source row, insert into
+      lowest free dest slot, DELETE source row. Offline-guard on BOTH chars
+      (sorted ascending to avoid deadlock) -- a web vault mutation of an ONLINE
+      char is refused (the game server owns its vault in memory).
+- [x] **Send mail from the Mailbox tab (`Compose` in `web/src/screens/Mailbox.tsx`
+      + `POST /api/mail` -> `SendMail` in `store_mail_send.go`).** Subject required
+      (`errNoSubject`, <=128), To = a player name, body OR up to 6 items (both
+      allowed; empty body && no items -> `errEmptyMail`). Cannot send to the
+      SENDING char's own name but CAN send between two chars you own
+      (`from==to -> errSameCharacter`). Items are picked from the sender's VAULT
+      only (AH-sell-style grid). An included item is REMOVED from the vault into
+      mail-slot storage inside the same `serialTx`: per item `lockVaultSlot` +
+      DELETE, then `insertMessage` + `insertItemAttachment(kind=0)`. Pre-tx
+      `resolveItems` rejects no-trade items (`errItemUntradable`) and dup slots
+      (`errDupMailSlot`). `MAX_MAIL_ITEMS = 6` const client + server.
+- [x] **All web mutation engines made SERIALIZABLE + offline-guarded.** AH
+      PostListing/PlaceBid/Buyout/expiry and mailbox LootAttachment were converted
+      to run inside `serialTx` (so inventory/vault -> AH and mailbox looting carry
+      the same dup-safety + ownership guard as the new vault/mail paths).
+- [x] **C++ server vault-opcode atomicity (the in-game half of the same
+      request).** HONEST framing: at the C++ layer there is NO concurrency race
+      (one client per char, in-memory swap under `m_Mutex`, single FIFO
+      `SaveManager` thread). The real defect was CRASH-ATOMICITY: a vault move
+      emitted TWO independent `SaveInventoryChange`/`SaveVaultChange` messages,
+      each its own autocommit DB write, so a crash between the two commits dupes
+      (item in both slots) or loses (item in neither) on next login. Fix:
+      - `server/src/db/sqlplus.{h,cpp}`: added `begin()/commit()/rollback()/
+        in_transaction()` to `sql_query_c`. Between begin/commit every
+        execute*/run_query* on that query joins ONE `pqxx::work` on the borrowed
+        pooled connection and defers its commit; the destructor rolls back a
+        dangling open tx so a leaked transaction can't poison the pool.
+      - `server/src/SaveManager.{h,cpp}`: new `SAVE_CODE_MOVE_INVENTORY` (0x0031)
+        carrying TWO 86-byte slot records; `HandleMoveInventory` upserts both in
+        ONE transaction (`UpsertInventorySlot` refactored out of
+        `HandleChangeInventory` and shared). On a begin() failure it degrades to
+        two independent writes (reopens the window, never loses the change); on
+        any write failure it rolls back and logs.
+      - `server/src/PlayerSaves.cpp` + `PlayerClass.h`: `SaveInventoryMove(from_type,
+        from_slot, to_type, to_slot)` packs both slots into one move message
+        (`PackInventorySlot` mirrors the existing record layout AND the cargo-slot
+        `OBTAIN_ITEMS` mission-check side effect exactly).
+      - `server/src/PlayerConnection.cpp` `HandleInventoryMove`: the cargo->vault
+        (1->3), vault->cargo explicit (3->1), and vault->vault (3->3) branches now
+        emit ONE `SaveInventoryMove` instead of two separate save calls.
+      RESIDUAL GAP (documented in code + honest to owner): the vault->cargo
+      auto-stack path (ToSlot == -1) still saves the cargo side via `CargoAddItem`
+      (which may stack across N slots) separately from the emptied vault slot --
+      that variable-N case does not fit the fixed 2-slot atomic message and is
+      left as-is.
+      This is NOT a wire-behaviour change: no opcode/packet/DB-content changed,
+      only the transaction GROUPING of two existing writes. So the CLI-byte-pin +
+      plans/29 wire gate does not strictly apply; a light real-client sanity check
+      is tracked anyway as **CV-AQ-VAULT-1** (plans/29) since it touches inherited
+      item persistence.
+- [x] **Tests.** Go: 18 new integration tests in
+      `freya/online/server/store_vault_mail_test.go` (transfer + send-mail happy
+      paths, ownership/same-char/offline/no-trade/full-vault rejections, and
+      CONCURRENT dup-safety: two goroutines moving the SAME source slot -> exactly
+      one wins, total item count across vaults stays exactly 1). C++: 4 new gtests
+      in `freya/tests/server/db/sqlplus_wrapper_test.cpp` proving commit persists
+      both writes, rollback discards, a failed second write leaves NOTHING (the
+      dup/loss scenario), and the destructor cleans a dangling tx so the pooled
+      connection stays usable. Server builds clean (167/167, -Wall -Wextra);
+      all 8 wrapper gtests green against live Postgres; web typecheck + 20 vitest +
+      production build clean.
+
 ### AQ-6 In-game notify
 - [ ] On player login, if unread mail: private system chat message with the
       website URL. (Server-side -- governed by Server integrity rules; cite

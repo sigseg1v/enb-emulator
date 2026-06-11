@@ -7947,3 +7947,47 @@ reachable in the deployed design, per owner scope "only fix if reachable"):
 - role "postgres" does not exist (FATAL x3, startup): transient probe; our
   postgres healthcheck correctly uses `-U net7`. Not ours.
 These are test-harness hygiene debt, tracked separately, not deployed-path bugs.
+
+---
+
+## 2026-06-10 -- AQ-11: web vault transfer / send-mail + C++ vault-move crash-atomicity
+
+Added a Freya Online (MIT) Vault transfer page and Mailbox compose/send, both
+SERIALIZABLE + offline-guarded + ownership-checked (acctID from cookie, never
+body); converted the AH-sell and mailbox-loot engines to the same serialTx so
+inventory/vault -> AH and looting carry the dup-safety guard too.
+
+C++ decision worth recording. The owner asked for "transactionality ... not
+vulnerable to duplication races" on the in-game vault opcodes. BRUTALLY HONEST
+finding stated to the owner: at the C++ layer there is no concurrency race --
+one client per character, in-memory swap under m_Mutex, a single FIFO
+SaveManager thread. The real defect was CRASH-ATOMICITY: a vault move emitted
+two independent SaveInventoryChange/SaveVaultChange messages, each its own
+autocommit write, so a crash between the two commits dupes or loses the item on
+next login. Fix grouped the paired writes into ONE transaction:
+- sqlplus gained begin/commit/rollback/in_transaction on sql_query_c (deferred
+  commit on the borrowed pooled connection; destructor rolls back a dangling tx
+  so a leak can't poison the pool).
+- New SAVE_CODE_MOVE_INVENTORY (0x0031) carries two 86-byte slot records;
+  HandleMoveInventory upserts both in one transaction (UpsertInventorySlot
+  refactored out of HandleChangeInventory). begin() failure degrades to two
+  independent writes (never loses the change); write failure rolls back + logs.
+- PlayerConnection cargo<->vault (1<->3) and vault<->vault (3->3) branches emit
+  one SaveInventoryMove instead of two save calls.
+
+This is NOT a wire-behaviour change -- no opcode/packet/DB-content changed, only
+the transaction grouping of two existing writes -- so the CLI-byte-pin + plans/29
+wire gate does not strictly apply. A light real-client sanity check is tracked
+anyway as CV-AQ-VAULT-1 because it touches inherited item persistence.
+
+RESIDUAL GAP (documented, not closed): the vault->cargo auto-stack path
+(ToSlot == -1) saves the cargo side via CargoAddItem (which may stack across N
+slots) separately from the emptied vault slot; that variable-N case does not fit
+the fixed 2-slot atomic message and is left as-is.
+
+Verified: server builds clean (167/167, -Wall -Wextra); 4 new SqlplusWrapperTx
+gtests green against live Postgres (commit persists both, rollback discards,
+failed-second-write leaves nothing, destructor cleans a dangling tx); 18 new Go
+integration tests green (incl. concurrent two-goroutine same-slot dup-safety:
+exactly one wins, total item count stays 1); web typecheck + 20 vitest + prod
+build clean. UNCOMMITTED -- on branch website-dev2.
