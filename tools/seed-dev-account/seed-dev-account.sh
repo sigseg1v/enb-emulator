@@ -58,7 +58,7 @@ cleanup_proxy() {
 trap cleanup_proxy EXIT
 
 echo ">>> [1/7] ensuring shared stack is up (no recreate)"
-docker compose up -d --no-recreate postgres server login proxy >/dev/null
+docker compose up -d --no-recreate postgres server net7go proxy >/dev/null
 
 echo ">>> [2/7] generating Argon2id PHC + (re)creating account '$USER'"
 PHC=$(printf '%s' "$PASS" | python3 -c 'import nacl.pwhash,sys; sys.stdout.write(nacl.pwhash.argon2id.str(sys.stdin.buffer.read()).decode())')

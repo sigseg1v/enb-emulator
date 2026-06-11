@@ -338,9 +338,10 @@ services:
       # Raw-relay the legacy game-auth URIs (AuthLogin, updateCheck, ...) to the
       # net7go login server on the docker network.
       FREYA_LOGIN_UPSTREAM: "net7go:8085"
-      # AH faucet bots. OFF by default; set FREYA_AH_BOTS=1 in the host env to
-      # keep the Auction House stocked from the AhBot account (see bots.go).
-      FREYA_AH_BOTS: "${FREYA_AH_BOTS:-}"
+      # AH faucet bots. ON by default so the Auction House is stocked from the
+      # AhBot account (see bots.go); set FREYA_AH_BOTS=0 in the host env to
+      # disable.
+      FREYA_AH_BOTS: "${FREYA_AH_BOTS:-1}"
     volumes:
       # Same dev certs the server uses; the Go service reads
       # <DOMAIN>.cer / <DOMAIN>.pem from NET7SSL_CERT_DIR.
