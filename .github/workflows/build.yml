@@ -329,9 +329,13 @@ jobs:
             -addext "subjectAltName=DNS:localhost,DNS:local.net-7.org,IP:127.0.0.1" \
             -keyout deploy/certs/localhost.pem \
             -out    deploy/certs/localhost.cer
-      - name: Bring up docker-compose stack (postgres + login + proxy + server)
+      - name: Bring up docker-compose stack (postgres + net7go + freya-online + proxy + server)
+        # AQ-7 cutover: the C++ `login` (net7ssl) was removed from the deploy
+        # path. Game-auth is now net7go (plain HTTP :8085) behind freya-online
+        # (TLS :443 raw-relay) -- the TLS login the suite drives lands on
+        # freya-online, so both must be up.
         run: |
-          docker compose up -d --wait postgres login proxy server
+          docker compose up -d --wait postgres net7go freya-online proxy server
           docker compose ps
       - name: Build + run C++ ctest with a real MVAS behind the proxy
         # Proxy<->MVAS handoff smoke. Runs on shard 1 only -- it is not a
@@ -385,7 +389,8 @@ jobs:
         if: failure()
         run: |
           echo "=== postgres ==="; docker compose logs postgres || true
-          echo "=== login ===";  docker compose logs login  || true
+          echo "=== net7go ===";  docker compose logs net7go || true
+          echo "=== freya-online ==="; docker compose logs freya-online || true
           echo "=== proxy ===";  docker compose logs proxy  || true
           echo "=== server ==="; docker compose logs server || true
       - name: Tear down docker-compose stack
