@@ -11,10 +11,12 @@ IMAGE_TAG      := env_var_or_default("IMAGE_TAG", "dev")
 # Connection to the local content DB (`net7`), exported so the Avalonia editors
 # launched via `just launch-*` prefill their Login dialog with zero typing --
 # the user can just click Login (CommonTools.Gui.LoginData.LoadFromEnvironment).
-# These mirror the docker-compose stack's host-side binding (localhost:5434 ->
+# These mirror the docker-compose stack's host-side binding (localhost:<port> ->
 # container 5432, creds net7/net7). Override any with the matching env var.
+# ENB_DB_PORT tracks the per-branch published port (ENB_PG_HOST_PORT, below) so
+# host-side tools/tests dial whichever port THIS branch's postgres is bound to.
 export ENB_DB_HOST := env_var_or_default("ENB_DB_HOST", "localhost")
-export ENB_DB_PORT := env_var_or_default("ENB_DB_PORT", "5434")
+export ENB_DB_PORT := env_var_or_default("ENB_DB_PORT", ENB_PG_HOST_PORT)
 export ENB_DB_USER := env_var_or_default("ENB_DB_USER", "net7")
 export ENB_DB_PASS := env_var_or_default("ENB_DB_PASS", "net7")
 
@@ -23,10 +25,16 @@ export ENB_DB_PASS := env_var_or_default("ENB_DB_PASS", "net7")
 # main/master/detached-HEAD collapse to plain `freya`. Already-prefixed
 # branches (freya-foo) are used as-is. Override with the env var.
 #
-# Note: only the container/network/volume *names* are namespaced. Host
-# port bindings in docker-compose.yml are still fixed at the conventional
-# defaults, so only one worktree at a time can run its stack.
+# Note: container/network/volume *names* are namespaced per branch (above), and
+# the postgres host port is too (ENB_PG_HOST_PORT below), so multiple worktrees
+# can run their stacks concurrently. main/master keeps the conventional 5434.
 export COMPOSE_PROJECT_NAME := env_var_or_default("COMPOSE_PROJECT_NAME", `b=$(git branch --show-current 2>/dev/null); if [ -z "$b" ] || [ "$b" = main ] || [ "$b" = master ]; then echo freya; else s=$(printf '%s' "$b" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9_-' '-' | tr -s '-' | sed 's/^-//;s/-$//'); case "$s" in freya-*) echo "$s";; *) echo "freya-$s";; esac; fi`)
+
+# Per-branch postgres host port so branch stacks do not collide on 5434.
+# main/master/bare-checkout -> 5434 (the conventional default); any other branch
+# -> 5500 + (hash(branch) % 400), deterministic per branch. Compose-internal
+# traffic always uses postgres:5432; this is only the host-published mapping.
+export ENB_PG_HOST_PORT := env_var_or_default("ENB_PG_HOST_PORT", `b=$(git branch --show-current 2>/dev/null); if [ -z "$b" ] || [ "$b" = main ] || [ "$b" = master ]; then echo 5434; else h=$(printf '%s' "$b" | cksum | cut -d' ' -f1); echo $((5500 + h % 400)); fi`)
 
 # Default: list targets.
 default:

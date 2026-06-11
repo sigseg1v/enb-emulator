@@ -385,11 +385,14 @@ services:
       - "-c"
       - "log_line_prefix=%m [%p] %q%u@%d app=%a "
     ports:
-      # Host 5434 -> container 5432 to dodge a developer's local
-      # system Postgres on host:5432 (and a hanging rootlesskit binding
-      # on :5433 observed in dev). Compose-internal traffic still uses
-      # postgres:5432 regardless of the host mapping.
-      - "5434:5432"
+      # Host ENB_PG_HOST_PORT (default 5434) -> container 5432 to dodge a
+      # developer's local system Postgres on host:5432 (and a hanging
+      # rootlesskit binding on :5433 observed in dev). Compose-internal
+      # traffic still uses postgres:5432 regardless of the host mapping.
+      # The host port is overridable so branch-scoped project stacks
+      # (COMPOSE_PROJECT_NAME=freya-<branch>) can run concurrently -- the
+      # justfile derives a per-branch port; a bare `docker compose` keeps 5434.
+      - "${ENB_PG_HOST_PORT:-5434}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
