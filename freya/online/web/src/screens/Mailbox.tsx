@@ -73,7 +73,13 @@ export function Mailbox({
 }) {
   const [activeId, setActiveId] = useState<string | null>(mail[0] ? mail[0].id : null);
   const [busy, setBusy] = useState(false);
-  const active = mail.find(m => m.id === activeId) || null;
+  // The inbox is stored per-account, but each message is addressed either to a
+  // specific character (m.recipient set) or to the account at large (empty
+  // recipient -- e.g. AH credit/winning payouts). Show only mail for the
+  // selected character plus account-level mail; switching characters in the
+  // topbar re-filters here.
+  const visible = mail.filter(m => !m.recipient || m.recipient === character);
+  const active = visible.find(m => m.id === activeId) || null;
 
   function open(m: Mail) {
     setActiveId(m.id);
@@ -126,7 +132,22 @@ export function Mailbox({
     }
   }
 
-  const unread = mail.filter(m => !m.read).length;
+  async function deleteMail(m: Mail) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await api.deleteMail(m.id);
+      setMail(prev => prev.filter(x => x.id !== m.id));
+      if (activeId === m.id) setActiveId(null);
+      toast('Mail deleted');
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Delete failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const unread = visible.filter(m => !m.read).length;
 
   return (
     <div className="page">
@@ -140,13 +161,13 @@ export function Mailbox({
       <div className="mbx">
         <div className="mbx__list hud-panel">
           <div className="mbx__listhead">
-            <span>{mail.length} Messages</span>
+            <span>{visible.length} Messages</span>
             <span>Subject / Sender</span>
           </div>
           <div className="mbx__scroll">
-            {mail.length === 0
+            {visible.length === 0
               ? <div className="empty"><div className="empty__inner"><div className="empty__glyph">✉</div>Inbox empty</div></div>
-              : mail.map(m => <MailRow key={m.id} mail={m} active={m.id === activeId} onClick={() => open(m)} />)}
+              : visible.map(m => <MailRow key={m.id} mail={m} active={m.id === activeId} onClick={() => open(m)} />)}
           </div>
         </div>
 
@@ -156,6 +177,12 @@ export function Mailbox({
             : (
               <>
                 <div className="mread__head">
+                  <button
+                    className="btn btn--sm mread__del"
+                    disabled={busy}
+                    title="Delete this message"
+                    onClick={() => deleteMail(active)}
+                  >Delete</button>
                   <h2 className="mread__subj">{active.subject}</h2>
                   <dl className="mread__meta">
                     <dt>From</dt><dd>{active.sender}</dd>

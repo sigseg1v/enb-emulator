@@ -147,7 +147,8 @@
 .mail__clip { font-size: 13px; color: var(--warm); }
 
 .mread { display: flex; flex-direction: column; min-height: 0; }
-.mread__head { padding: 20px 24px 16px; border-bottom: 1px solid var(--line); flex: none; }
+.mread__head { position: relative; padding: 20px 24px 16px; border-bottom: 1px solid var(--line); flex: none; }
+.mread__del { position: absolute; top: 16px; right: 20px; }
 .mread__subj { font-family: var(--font-display); font-size: 17px; margin: 0 0 12px; letter-spacing: 0.02em; }
 .mread__meta { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-family: var(--font-mono); font-size: 11.5px; }
 .mread__meta dt { color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.08em; font-size: 10px; align-self: center; }
@@ -258,6 +259,10 @@
   color: var(--text); font-family: var(--font-mono); font-size: 12px; padding: 7px 28px 7px 11px; cursor: pointer; }
 .vsel select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-glow); }
 .vsel::after { content: "\25BE"; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: var(--accent); font-size: 10px; pointer-events: none; }
+/* The open dropdown list (the <option>s) inherits a light system background
+   otherwise -- the transparent top-bar select makes that especially jarring.
+   Paint the options black so the popup matches the deep-space theme. */
+.vsel select option { background: #000; color: var(--text); }
 
 .vgrid { padding: 14px; overflow-y: auto; max-height: 38vh; display: grid; grid-template-columns: repeat(auto-fill, 64px); gap: 10px; align-content: start; }
 .vslot { width: 64px; height: 64px; border-radius: var(--r-sm); display: grid; place-items: center; position: relative; cursor: pointer;
@@ -268,6 +273,11 @@
 .vslot--sel::after { content: ""; position: absolute; inset: -4px; border: 1px solid var(--accent); border-radius: var(--r-sm); pointer-events: none; }
 .vslot .icon__glyph { font-size: 28px; }
 .vslot__qty { position: absolute; bottom: 3px; right: 5px; font-family: var(--font-mono); font-size: 11px; color: var(--text); text-shadow: 0 1px 3px #000; }
+/* Not-Tradable vault items: dimmed, desaturated, not selectable for listing.
+   The server rejects them regardless; this just stops the click up front. */
+.vslot--locked { opacity: 0.4; filter: grayscale(0.8); cursor: not-allowed; }
+.vslot--locked:hover { transform: none; box-shadow: none; }
+.vslot__lock { position: absolute; top: 3px; left: 5px; font-size: 13px; color: var(--danger); text-shadow: 0 1px 3px #000; }
 
 .pform { flex: none; padding: 16px; }
 .pform__preview { display: flex; gap: 12px; align-items: center; padding-bottom: 12px; border-bottom: 1px solid var(--line); margin-bottom: 14px; }

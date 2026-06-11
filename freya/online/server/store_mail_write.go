@@ -17,11 +17,15 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// vaultSlotCount is the in-game vault capacity (slots 0..95). Looting refuses
+// once all are occupied -- the client cannot display a 97th slot.
+const vaultSlotCount = 96
+
 var (
 	errMailGone      = errors.New("mail not found")
 	errAttachGone    = errors.New("attachment not found")
 	errAlreadyLooted = errors.New("attachment already looted")
-	errNoVaultSpace  = errors.New("no free vault slot")
+	errNoVaultSpace  = errors.New("vault is full, cannot loot mail")
 )
 
 // recipientName resolves an avatar's display name within a tx (best-effort).
@@ -98,6 +102,22 @@ func deliverItem(ctx context.Context, tx pgx.Tx, accountID, recipientAvatar int6
 func (s *Store) MarkRead(ctx context.Context, accountID int64, messageID int64) error {
 	tag, err := s.user.Exec(ctx,
 		`UPDATE mailbox_messages SET is_read = true WHERE id = $1 AND account_id = $2`,
+		messageID, accountID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return errMailGone
+	}
+	return nil
+}
+
+// DeleteMessage removes a mail message (and its attachments, via FK cascade),
+// scoped to the owning account. Any unlooted attachments are forfeited -- this
+// is the user explicitly discarding the mail. Mirrors the expiry sweep.
+func (s *Store) DeleteMessage(ctx context.Context, accountID int64, messageID int64) error {
+	tag, err := s.user.Exec(ctx,
+		`DELETE FROM mailbox_messages WHERE id = $1 AND account_id = $2`,
 		messageID, accountID)
 	if err != nil {
 		return err
@@ -215,10 +235,15 @@ func (s *Store) LootAttachment(ctx context.Context, accountID int64, messageID i
 		if a.stack != nil {
 			stack = *a.stack
 		}
+		// The game reads BOTH stack_level (-> StackCount, the displayed quantity)
+		// and trade_stack; it writes both equal for a stack (PlayerSaves.cpp
+		// SaveVaultChange). Setting only trade_stack leaves stack_level=0, which
+		// the loader forces to 1 (PlayerSaves.cpp:561) -- so a stack of 20 would
+		// show as 1 in the vault. Write both equal, mirroring the game.
 		_, err = tx.Exec(ctx, `
 			INSERT INTO avatar_vault_items
-			  (avatar_id, item_id, inventory_slot, trade_stack, quality, cost, builder_name, structure)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+			  (avatar_id, item_id, inventory_slot, stack_level, trade_stack, quality, cost, builder_name, structure)
+			VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $8)`,
 			lootAvatar, a.itemID, slot, stack, a.quality, e.cost, e.builder, e.structure)
 		if err != nil {
 			return err
@@ -251,8 +276,10 @@ func freeVaultSlot(ctx context.Context, tx pgx.Tx, avatarID int64) (int, error) 
 	if err := rows.Err(); err != nil {
 		return 0, err
 	}
-	// Vault capacity is large; scan a generous range for the first gap.
-	for i := 0; i < 1000; i++ {
+	// The in-game vault is 96 slots (0..95). If every slot is occupied there is
+	// nowhere to put the looted item, so refuse rather than write slot 96+ (which
+	// the client cannot show and the server would clamp/drop).
+	for i := 0; i < vaultSlotCount; i++ {
 		if !used[i] {
 			return i, nil
 		}

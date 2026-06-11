@@ -72,6 +72,7 @@ func (s *apiServer) routes() http.Handler {
 	mux.HandleFunc("POST /api/auction/{id}/buyout", s.handleBuyout)
 	mux.HandleFunc("POST /api/mail/{id}/read", s.handleMarkRead)
 	mux.HandleFunc("POST /api/mail/{id}/loot", s.handleLoot)
+	mux.HandleFunc("DELETE /api/mail/{id}", s.handleDeleteMail)
 	// Account self-service.
 	mux.HandleFunc("POST /api/account/password", s.handleChangePassword)
 	return mux
@@ -173,7 +174,10 @@ func (s *apiServer) handleSession(w http.ResponseWriter, r *http.Request) {
 type sessionView struct {
 	Username   string   `json:"username"`
 	Characters []string `json:"characters"`
-	Credits    int64    `json:"credits"`
+	// Credits is the account total (kept for any account-wide use); the top bar
+	// shows the selected character's balance from CreditsByCharacter.
+	Credits           int64            `json:"credits"`
+	CreditsByCharacter map[string]int64 `json:"creditsByCharacter"`
 }
 
 // bootstrapResponse is the single payload the SPA loads after login. Field
@@ -206,14 +210,16 @@ func (s *apiServer) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	}
 
 	names := make([]string, 0, len(chars))
+	creditsBy := make(map[string]int64, len(chars))
 	var credits int64
 	for _, c := range chars {
 		names = append(names, c.Name)
+		creditsBy[c.Name] = c.Credits
 		credits += c.Credits
 	}
 
 	resp := bootstrapResponse{
-		Session:    sessionView{Username: user, Characters: names, Credits: credits},
+		Session:    sessionView{Username: user, Characters: names, Credits: credits, CreditsByCharacter: creditsBy},
 		Server:     s.status.get(ctx, time.Now()),
 		Mail:       s.store.accountMail(ctx, acctID),
 		Listings:   s.store.openListings(ctx),
@@ -247,7 +253,7 @@ func mutationError(w http.ResponseWriter, err error) {
 	case errors.Is(err, errAlreadyLooted):
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "already looted"})
 	case errors.Is(err, errNoVaultSpace):
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "no free vault slot"})
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "vault is full, cannot loot mail"})
 	default:
 		log.Printf("api: mutation: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
@@ -362,6 +368,29 @@ func (s *apiServer) handleMarkRead(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	if err := s.store.MarkRead(ctx, acctID, id); err != nil {
+		mutationError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// DELETE /api/mail/{id} -- discard a message (and its attachments). Unlooted
+// attachments are forfeited.
+func (s *apiServer) handleDeleteMail(w http.ResponseWriter, r *http.Request) {
+	_, acctID := s.loggedIn(r)
+	if acctID == 0 {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	id, ok := pathID(r)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad mail id"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	if err := s.store.DeleteMessage(ctx, acctID, id); err != nil {
 		mutationError(w, err)
 		return
 	}
