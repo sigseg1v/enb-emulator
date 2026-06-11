@@ -981,6 +981,23 @@ shell SERVICE='server':
 psql-user:
     docker compose exec -e PGPASSWORD=net7 postgres psql -U net7 -d net7_user
 
+# Give a local character credits. ADDS AMOUNT (default 1,000,000) to the named
+# character's balance in net7_user.avatar_level_info, then prints the new total.
+# Matches on avatar_data.first_name; "UPDATE 0" means no such character. The
+# name is bound via psql :'nm' (never concatenated); AMOUNT is integer-validated
+# and bound via :amt. Relog the character so the server reloads the balance.
+#   just add-credits Jetwo            # +1,000,000
+#   just add-credits Jetwo 5000000    # +5,000,000
+add-credits NAME AMOUNT='1000000':
+    @case "{{AMOUNT}}" in ''|*[!0-9]*) echo "add-credits: AMOUNT must be a non-negative integer (got '{{AMOUNT}}')" >&2; exit 1;; esac; \
+        printf '%s\n' \
+            "UPDATE avatar_level_info l SET credits = credits + :amt" \
+            "  FROM avatar_data d WHERE d.avatar_id = l.avatar_id AND d.first_name = :'nm';" \
+            "SELECT d.first_name AS character, l.credits FROM avatar_level_info l" \
+            "  JOIN avatar_data d ON d.avatar_id = l.avatar_id WHERE d.first_name = :'nm';" \
+        | docker compose exec -T -e PGPASSWORD=net7 postgres psql -U net7 -d net7_user -v ON_ERROR_STOP=1 \
+            -v nm={{ quote(NAME) }} -v amt={{ quote(AMOUNT) }}
+
 # Seed a known-good test account into net7_user.accounts. Idempotent
 # (DELETE-by-username then INSERT -- the schema has no UNIQUE on username,
 # so a plain UPSERT isn't available). Default user/pass: testuser/testpass.
