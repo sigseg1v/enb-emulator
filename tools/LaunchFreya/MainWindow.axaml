@@ -31,7 +31,7 @@
                 BorderBrush="{StaticResource FreyaAccentBrush}" BorderThickness="1.5"
                 Opacity="0.6" BoxShadow="0 0 9 0 #5943DBEA" />
       </StackPanel>
-      <TextBlock Text="LAUNCHER" Classes="wordmarkSub" Margin="3,7,0,0" />
+      <TextBlock Text="ONLINE" Classes="wordmarkSub" Margin="3,7,0,0" />
     </StackPanel>
 
   <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,*,Auto">

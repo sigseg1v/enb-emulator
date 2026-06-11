@@ -3,6 +3,50 @@
              x:Class="LaunchFreya.App"
              RequestedThemeVariant="Dark">
 
+  <!-- Resources MUST be declared before Styles: Avalonia resolves the
+       {StaticResource ...} refs in the styles below eagerly, in document
+       order, during App populate. If this block came after the styles, the
+       first brush ref (FreyaLineBrush) would throw KeyNotFound at load. -->
+  <Application.Resources>
+    <ResourceDictionary>
+      <!-- Vendored OFL typefaces (vendor/fonts), the same families the website
+           loads from Google Fonts: Michroma (display), IBM Plex Sans (body,
+           variable), IBM Plex Mono. The part after '#' is the font's internal
+           family name. -->
+      <FontFamily x:Key="FreyaDisplayFont">avares://FreyaLauncher/Assets/Fonts/Michroma-Regular.ttf#Michroma</FontFamily>
+      <FontFamily x:Key="FreyaBodyFont">avares://FreyaLauncher/Assets/Fonts/IBMPlexSans-VariableFont.ttf#IBM Plex Sans</FontFamily>
+      <FontFamily x:Key="FreyaMonoFont">avares://FreyaLauncher/Assets/Fonts/IBMPlexMono-Regular.ttf#IBM Plex Mono</FontFamily>
+
+      <!-- Palette brushes shared by the styles below and MainWindow.axaml.
+           Hex equivalents of the website's oklch tokens. -->
+      <SolidColorBrush x:Key="FreyaVoidBrush"      Color="#FF040811" />
+      <SolidColorBrush x:Key="FreyaVoid2Brush"     Color="#FF030610" />
+      <SolidColorBrush x:Key="FreyaPanelBrush"     Color="#FF09111C" />
+      <SolidColorBrush x:Key="FreyaPanel2Brush"    Color="#FF0E1825" />
+      <SolidColorBrush x:Key="FreyaElevatedBrush"  Color="#FF152130" />
+      <SolidColorBrush x:Key="FreyaInputBrush"     Color="#FF060C16" />
+      <SolidColorBrush x:Key="FreyaLineBrush"      Color="#4D44586B" />
+      <SolidColorBrush x:Key="FreyaLineStrongBrush" Color="#8C59758D" />
+      <SolidColorBrush x:Key="FreyaTextBrush"      Color="#FFE7ECF0" />
+      <SolidColorBrush x:Key="FreyaTextDimBrush"   Color="#FFA2ACB6" />
+      <SolidColorBrush x:Key="FreyaTextFaintBrush" Color="#FF6E7682" />
+      <SolidColorBrush x:Key="FreyaAccentBrush"    Color="#FF43DBEA" />
+      <SolidColorBrush x:Key="FreyaAccentDimBrush" Color="#FF3595A4" />
+      <SolidColorBrush x:Key="FreyaWarmBrush"      Color="#FFEFB05C" />
+      <SolidColorBrush x:Key="FreyaOkBrush"        Color="#FF5FD37F" />
+      <SolidColorBrush x:Key="FreyaDangerBrush"    Color="#FFEC5C50" />
+
+      <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Dark">
+          <SolidColorBrush x:Key="SystemRegionBrush" Color="#FF040811" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Light">
+          <SolidColorBrush x:Key="SystemRegionBrush" Color="#f9ffff" />
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
+
   <Application.Styles>
     <!-- Freya Online theme: the launcher mirrors the website's look
          (freya/online/web/src/styles/tokens.css): deep-space blue base,
@@ -90,44 +134,4 @@
       <Setter Property="BoxShadow" Value="0 0 18 0 #5943DBEA" />
     </Style>
   </Application.Styles>
-
-  <Application.Resources>
-    <ResourceDictionary>
-      <!-- Vendored OFL typefaces (vendor/fonts), the same families the website
-           loads from Google Fonts: Michroma (display), IBM Plex Sans (body,
-           variable), IBM Plex Mono. The part after '#' is the font's internal
-           family name. -->
-      <FontFamily x:Key="FreyaDisplayFont">avares://FreyaLauncher/Assets/Fonts/Michroma-Regular.ttf#Michroma</FontFamily>
-      <FontFamily x:Key="FreyaBodyFont">avares://FreyaLauncher/Assets/Fonts/IBMPlexSans-VariableFont.ttf#IBM Plex Sans</FontFamily>
-      <FontFamily x:Key="FreyaMonoFont">avares://FreyaLauncher/Assets/Fonts/IBMPlexMono-Regular.ttf#IBM Plex Mono</FontFamily>
-
-      <!-- Palette brushes shared by the styles above and MainWindow.axaml.
-           Hex equivalents of the website's oklch tokens. -->
-      <SolidColorBrush x:Key="FreyaVoidBrush"      Color="#FF040811" />
-      <SolidColorBrush x:Key="FreyaVoid2Brush"     Color="#FF030610" />
-      <SolidColorBrush x:Key="FreyaPanelBrush"     Color="#FF09111C" />
-      <SolidColorBrush x:Key="FreyaPanel2Brush"    Color="#FF0E1825" />
-      <SolidColorBrush x:Key="FreyaElevatedBrush"  Color="#FF152130" />
-      <SolidColorBrush x:Key="FreyaInputBrush"     Color="#FF060C16" />
-      <SolidColorBrush x:Key="FreyaLineBrush"      Color="#4D44586B" />
-      <SolidColorBrush x:Key="FreyaLineStrongBrush" Color="#8C59758D" />
-      <SolidColorBrush x:Key="FreyaTextBrush"      Color="#FFE7ECF0" />
-      <SolidColorBrush x:Key="FreyaTextDimBrush"   Color="#FFA2ACB6" />
-      <SolidColorBrush x:Key="FreyaTextFaintBrush" Color="#FF6E7682" />
-      <SolidColorBrush x:Key="FreyaAccentBrush"    Color="#FF43DBEA" />
-      <SolidColorBrush x:Key="FreyaAccentDimBrush" Color="#FF3595A4" />
-      <SolidColorBrush x:Key="FreyaWarmBrush"      Color="#FFEFB05C" />
-      <SolidColorBrush x:Key="FreyaOkBrush"        Color="#FF5FD37F" />
-      <SolidColorBrush x:Key="FreyaDangerBrush"    Color="#FFEC5C50" />
-
-      <ResourceDictionary.ThemeDictionaries>
-        <ResourceDictionary x:Key="Dark">
-          <SolidColorBrush x:Key="SystemRegionBrush" Color="#FF040811" />
-        </ResourceDictionary>
-        <ResourceDictionary x:Key="Light">
-          <SolidColorBrush x:Key="SystemRegionBrush" Color="#f9ffff" />
-        </ResourceDictionary>
-      </ResourceDictionary.ThemeDictionaries>
-    </ResourceDictionary>
-  </Application.Resources>
 </Application>
