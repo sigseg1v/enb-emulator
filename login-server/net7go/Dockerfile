@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: CC-BY-NC-SA-3.0
 # Copyright (c) 2010 Net-7 Entertainment, Ltd.
+# Modified by: Max Verigin, 2026 -- ported to go
 #
 # net7go -- standalone Go reimplementation of the Net7SSL game-auth server.
 # This is a direct functional port of login-server/Net7SSL and inherits the
