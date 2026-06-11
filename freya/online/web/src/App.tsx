@@ -111,7 +111,9 @@ export default function App() {
   const character = session.characters[safeIdx];
   // Credits for the selected character (not the account total).
   const charCredits = session.creditsByCharacter?.[character] ?? 0;
-  const unread = mail.filter(m => !m.read).length;
+  // Unread badge is per selected character (matching the Mailbox filter): mail
+  // addressed to this character plus account-level mail (empty recipient).
+  const unread = mail.filter(m => !m.read && (!m.recipient || m.recipient === character)).length;
 
   return (
     <div className="shell">
