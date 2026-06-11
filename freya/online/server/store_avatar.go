@@ -153,15 +153,23 @@ type EquippedItem struct {
 	Item    ItemView `json:"item"`
 }
 
-// ShipView is the starship card: chassis name, hull integrity, cargo, drive
-// speeds, and every fitted item.
+// ShipView is the starship card: chassis name, hull integrity, cargo, warp
+// speed, and every fitted item.
+//
+// We deliberately expose only Warp, not impulse/thrust. Warp is a flat property
+// of the equipped engine (item_engine.warp), so it round-trips exactly. The
+// in-game thrust number is a RUNTIME aggregate (hull base + engine + Engine
+// skill + buffs) that the server computes and never persists; the save DB has
+// no column for it and the engine's raw thrust_100 does not match the in-game
+// figure. Showing a wrong thrust is worse than showing none, so it is omitted.
+// The legacy avatar_level_info.engine_thrust_type / warp_power_level columns are
+// an engine TRAIL type and a power-level INDEX -- not speeds -- so we ignore them.
 type ShipView struct {
 	Name          string         `json:"name"`
 	HullPoints    float64        `json:"hullPoints"`
 	MaxHullPoints float64        `json:"maxHullPoints"`
 	CargoSpace    int            `json:"cargoSpace"`
-	Thrust        int            `json:"thrust"` // engine_thrust_type
-	Warp          int            `json:"warp"`   // warp_power_level
+	Warp          int            `json:"warp"` // equipped engine's item_engine.warp
 	Equipment     []EquippedItem `json:"equipment"`
 }
 
@@ -178,13 +186,12 @@ func (s *Store) avatarShip(ctx context.Context, accountID int64, name string) (S
 	err = s.user.QueryRow(ctx, `
 		SELECT coalesce(sd.name, ''),
 		       coalesce(ali.hull_points, 0), coalesce(ali.max_hull_points, 0),
-		       coalesce(ali.cargo_space, 0), coalesce(ali.engine_thrust_type, 0),
-		       coalesce(ali.warp_power_level, 0)
+		       coalesce(ali.cargo_space, 0)
 		  FROM avatar_info ai
 		  LEFT JOIN ship_data sd        ON sd.avatar_id = ai.avatar_id
 		  LEFT JOIN avatar_level_info ali ON ali.avatar_id = ai.avatar_id
 		 WHERE ai.avatar_id = $1`, a.id).
-		Scan(&ship.Name, &ship.HullPoints, &ship.MaxHullPoints, &ship.CargoSpace, &ship.Thrust, &ship.Warp)
+		Scan(&ship.Name, &ship.HullPoints, &ship.MaxHullPoints, &ship.CargoSpace)
 	if err != nil {
 		return ShipView{}, err
 	}
@@ -224,6 +231,24 @@ func (s *Store) avatarShip(ctx context.Context, accountID int64, name string) (S
 	if err != nil {
 		return ShipView{}, err
 	}
+
+	// Warp speed comes from the fitted engine itself, not from any save-state
+	// column. Of the fitted item ids, at most one is an engine; look its warp up
+	// in the content pool. (Cross-DB join is impossible -- avatar_equipment is in
+	// the user pool, item_engine in the content pool -- so this is a second query
+	// keyed on the ids we already gathered.)
+	if len(ids) > 0 {
+		var warp int
+		err = s.content.QueryRow(ctx, `
+			SELECT warp FROM item_engine WHERE item_id = ANY($1)
+			 ORDER BY warp DESC LIMIT 1`, ids).Scan(&warp)
+		if err == nil {
+			ship.Warp = warp
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return ShipView{}, err
+		}
+	}
+
 	for _, e := range fitted {
 		t, ok := templates[e.itemID]
 		if !ok {

@@ -63,7 +63,6 @@ export interface ShipView {
   hullPoints: number;
   maxHullPoints: number;
   cargoSpace: number;
-  thrust: number;
   warp: number;
   equipment: EquippedItem[];
 }

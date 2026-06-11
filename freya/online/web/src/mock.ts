@@ -162,17 +162,17 @@ export const MOCK_SESSION: Session = {
 };
 
 export const MOCK_LISTINGS: Listing[] = [
-  { id: 'L-4471', item: mk('claimjumper', 168), seller: 'Kestrel_Vega', stack: 1,  quality: 168, band: 'med',  bid: 559659, buyout: 1017562, highBidder: 'Orin_Tasca' },
-  { id: 'L-4470', item: mk('voidlance', 142),   seller: 'AhBot',        stack: 1,  quality: 142, band: 'high', bid: 17688,  buyout: 32160,   highBidder: null },
-  { id: 'L-4468', item: mk('aegis', 122),       seller: 'Mara_Sol',     stack: 1,  quality: 122, band: 'low',  bid: 12870,  buyout: 19800,   highBidder: 'Dax_Reyne' },
-  { id: 'L-4465', item: mk('tracer', 188),      seller: 'AhBot',        stack: 1,  quality: 188, band: 'high', bid: 8085,   buyout: 14700,   highBidder: null },
-  { id: 'L-4463', item: mk('pulsecore', 96),    seller: 'Quill_Adaro',  stack: 1,  quality: 96,  band: 'med',  bid: 3399,   buyout: 6180,    highBidder: 'AhBot' },
+  { id: 'L-4471', item: mk('claimjumper', 1.68), seller: 'Kestrel_Vega', stack: 1,  quality: 1.68, band: 'med',  bid: 559659, buyout: 1017562, highBidder: 'Orin_Tasca' },
+  { id: 'L-4470', item: mk('voidlance', 1.42),   seller: 'AhBot',        stack: 1,  quality: 1.42, band: 'high', bid: 17688,  buyout: 32160,   highBidder: null },
+  { id: 'L-4468', item: mk('aegis', 1.22),       seller: 'Mara_Sol',     stack: 1,  quality: 1.22, band: 'low',  bid: 12870,  buyout: 19800,   highBidder: 'Dax_Reyne' },
+  { id: 'L-4465', item: mk('tracer', 1.88),      seller: 'AhBot',        stack: 1,  quality: 1.88, band: 'high', bid: 8085,   buyout: 14700,   highBidder: null },
+  { id: 'L-4463', item: mk('pulsecore', 0.96),    seller: 'Quill_Adaro',  stack: 1,  quality: 0.96,  band: 'med',  bid: 3399,   buyout: 6180,    highBidder: 'AhBot' },
   { id: 'L-4460', item: mk('tungsten', null),   seller: 'AhBot',        stack: 20, quality: null, band: 'high', bid: 528,    buyout: 960,     highBidder: null },
-  { id: 'L-4459', item: mk('servo', 134),       seller: 'Petra_Kuhn',   stack: 8,  quality: 134, band: 'low',  bid: 693,    buyout: 1260,    highBidder: 'Yuki_Hale' },
+  { id: 'L-4459', item: mk('servo', 1.34),       seller: 'Petra_Kuhn',   stack: 8,  quality: 1.34, band: 'low',  bid: 693,    buyout: 1260,    highBidder: 'Yuki_Hale' },
   { id: 'L-4456', item: mk('promethium', null), seller: 'AhBot',        stack: 20, quality: null, band: 'med',  bid: 924,    buyout: 1680,    highBidder: null },
-  { id: 'L-4454', item: mk('voidlance', 117),   seller: 'Dax_Reyne',    stack: 1,  quality: 117, band: 'low',  bid: 17688,  buyout: 32160,   highBidder: null },
-  { id: 'L-4451', item: mk('claimjumper', 134), seller: 'AhBot',        stack: 1,  quality: 134, band: 'high', bid: 43051,  buyout: 78274,   highBidder: null },
-  { id: 'L-4449', item: mk('tracer', 151),      seller: 'Sable_Wren',   stack: 1,  quality: 151, band: 'med',  bid: 8085,   buyout: 14700,   highBidder: 'Mara_Sol' },
+  { id: 'L-4454', item: mk('voidlance', 1.17),   seller: 'Dax_Reyne',    stack: 1,  quality: 1.17, band: 'low',  bid: 17688,  buyout: 32160,   highBidder: null },
+  { id: 'L-4451', item: mk('claimjumper', 1.34), seller: 'AhBot',        stack: 1,  quality: 1.34, band: 'high', bid: 43051,  buyout: 78274,   highBidder: null },
+  { id: 'L-4449', item: mk('tracer', 1.51),      seller: 'Sable_Wren',   stack: 1,  quality: 1.51, band: 'med',  bid: 8085,   buyout: 14700,   highBidder: 'Mara_Sol' },
   { id: 'L-4446', item: mk('servo', null),      seller: 'AhBot',        stack: 12, quality: null, band: 'low',  bid: 693,    buyout: 1260,    highBidder: null },
 ];
 
@@ -182,7 +182,7 @@ export const MOCK_MAIL: Mail[] = [
     read: false, expiresInDays: 90,
     body: "Your auction for the following item did not sell and has been returned to you. A 5% deposit was retained by the Auction House; 95% of your listing deposit is enclosed.\n\nUnclaimed items and credits are removed after 90 days. Please collect your attachments promptly.",
     attachments: [
-      { type: 'item', item: mk('aegis', 122), stack: 1, quality: 122 },
+      { type: 'item', item: mk('aegis', 1.22), stack: 1, quality: 1.22 },
       { type: 'credits', amount: 9405 },
     ],
   },
@@ -191,7 +191,7 @@ export const MOCK_MAIL: Mail[] = [
     read: false, expiresInDays: 90,
     body: "Congratulations -- you are the winning bidder. Your item is enclosed. The Auction House thanks you for your patronage.",
     attachments: [
-      { type: 'item', item: mk('tracer', 188), stack: 1, quality: 188 },
+      { type: 'item', item: mk('tracer', 1.88), stack: 1, quality: 1.88 },
     ],
   },
   {
@@ -220,17 +220,17 @@ export const MOCK_MAIL: Mail[] = [
 
 export const MOCK_VAULT: Record<string, VaultSlot[]> = {
   Kestrel_Vega: [
-    { slot: 0, item: mk('claimjumper', 168), stack: 1,  quality: 168 },
-    { slot: 1, item: mk('tracer', 188),      stack: 1,  quality: 188 },
-    { slot: 2, item: mk('voidlance', 142),   stack: 1,  quality: 142 },
-    { slot: 3, item: mk('pulsecore', 96),    stack: 1,  quality: 96 },
-    { slot: 4, item: mk('servo', 134),       stack: 9,  quality: 134 },
+    { slot: 0, item: mk('claimjumper', 1.68), stack: 1,  quality: 1.68 },
+    { slot: 1, item: mk('tracer', 1.88),      stack: 1,  quality: 1.88 },
+    { slot: 2, item: mk('voidlance', 1.42),   stack: 1,  quality: 1.42 },
+    { slot: 3, item: mk('pulsecore', 0.96),    stack: 1,  quality: 0.96 },
+    { slot: 4, item: mk('servo', 1.34),       stack: 9,  quality: 1.34 },
     { slot: 5, item: mk('tungsten', null),   stack: 20, quality: null },
     { slot: 6, item: mk('promethium', null), stack: 14, quality: null },
   ],
   Orin_Tasca: [
-    { slot: 0, item: mk('claimjumper', 151), stack: 1,  quality: 151 },
-    { slot: 1, item: mk('voidlance', 117),   stack: 1,  quality: 117 },
+    { slot: 0, item: mk('claimjumper', 1.51), stack: 1,  quality: 1.51 },
+    { slot: 1, item: mk('voidlance', 1.17),   stack: 1,  quality: 1.17 },
     { slot: 2, item: mk('servo', null),      stack: 12, quality: null },
     { slot: 3, item: mk('tungsten', null),   stack: 20, quality: null },
   ],
@@ -241,26 +241,26 @@ export const MOCK_VAULT: Record<string, VaultSlot[]> = {
 // no-trade items in this set (they can be vault-transferred but not mailed/sold).
 export const MOCK_VAULT_STORAGE: Record<string, VaultSlot[]> = {
   Kestrel_Vega: [
-    { slot: 0, item: mk('claimjumper', 168), stack: 1,  quality: 168 },
-    { slot: 1, item: mk('tracer', 188),      stack: 1,  quality: 188 },
-    { slot: 2, item: mk('voidlance', 142),   stack: 1,  quality: 142 },
-    { slot: 3, item: mk('pulsecore', 96),    stack: 1,  quality: 96 },
-    { slot: 4, item: mk('servo', 134),       stack: 9,  quality: 134 },
+    { slot: 0, item: mk('claimjumper', 1.68), stack: 1,  quality: 1.68 },
+    { slot: 1, item: mk('tracer', 1.88),      stack: 1,  quality: 1.88 },
+    { slot: 2, item: mk('voidlance', 1.42),   stack: 1,  quality: 1.42 },
+    { slot: 3, item: mk('pulsecore', 0.96),    stack: 1,  quality: 0.96 },
+    { slot: 4, item: mk('servo', 1.34),       stack: 9,  quality: 1.34 },
     { slot: 5, item: mk('tungsten', null),   stack: 20, quality: null },
     { slot: 6, item: mk('promethium', null), stack: 14, quality: null },
   ],
   Orin_Tasca: [
-    { slot: 0, item: mk('claimjumper', 151), stack: 1,  quality: 151 },
-    { slot: 1, item: mk('voidlance', 117),   stack: 1,  quality: 117 },
+    { slot: 0, item: mk('claimjumper', 1.51), stack: 1,  quality: 1.51 },
+    { slot: 1, item: mk('voidlance', 1.17),   stack: 1,  quality: 1.17 },
     { slot: 2, item: mk('servo', null),      stack: 12, quality: null },
     { slot: 3, item: mk('tungsten', null),   stack: 20, quality: null },
   ],
 };
 
 export const MOCK_MY_LISTINGS: MyListing[] = [
-  { id: 'S-3012', item: mk('claimjumper', 168), avatar: 'Kestrel_Vega', stack: 1,  quality: 168, band: 'med',  currentBid: 559659, buyout: 1017562 },
-  { id: 'S-3008', item: mk('tracer', 151),      avatar: 'Kestrel_Vega', stack: 1,  quality: 151, band: 'high', currentBid: null,   buyout: 14700 },
-  { id: 'S-2995', item: mk('servo', 134),       avatar: 'Kestrel_Vega', stack: 9,  quality: 134, band: 'med',  currentBid: null,   buyout: 11340 },
+  { id: 'S-3012', item: mk('claimjumper', 1.68), avatar: 'Kestrel_Vega', stack: 1,  quality: 1.68, band: 'med',  currentBid: 559659, buyout: 1017562 },
+  { id: 'S-3008', item: mk('tracer', 1.51),      avatar: 'Kestrel_Vega', stack: 1,  quality: 1.51, band: 'high', currentBid: null,   buyout: 14700 },
+  { id: 'S-2995', item: mk('servo', 1.34),       avatar: 'Kestrel_Vega', stack: 9,  quality: 1.34, band: 'med',  currentBid: null,   buyout: 11340 },
   { id: 'S-2988', item: mk('tungsten', null),   avatar: 'Orin_Tasca',   stack: 20, quality: null, band: 'low',  currentBid: 528,    buyout: 960 },
 ];
 
@@ -293,19 +293,19 @@ export const MOCK_PROFILE: Record<string, AvatarProfile> = {
 export const MOCK_SHIP: Record<string, ShipView> = {
   Kestrel_Vega: {
     name: 'Belter Resolve', hullPoints: 4180, maxHullPoints: 4400, cargoSpace: 78,
-    thrust: 7, warp: 6,
+    warp: 3000,
     equipment: [
-      { slot: 0, quality: 168, item: mk('claimjumper', 168) },
-      { slot: 1, quality: 117, item: mk('voidlance', 117) },
-      { slot: 2, quality: 96, item: mk('pulsecore', 96) },
+      { slot: 0, quality: 1.68, item: mk('claimjumper', 1.68) },
+      { slot: 1, quality: 1.17, item: mk('voidlance', 1.17) },
+      { slot: 2, quality: 0.96, item: mk('pulsecore', 0.96) },
     ],
   },
   Orin_Tasca: {
     name: 'Silent Aria', hullPoints: 2950, maxHullPoints: 2950, cargoSpace: 54,
-    thrust: 9, warp: 8,
+    warp: 2000,
     equipment: [
-      { slot: 0, quality: 151, item: mk('tracer', 151) },
-      { slot: 1, quality: 134, item: mk('servo', 134) },
+      { slot: 0, quality: 1.51, item: mk('tracer', 1.51) },
+      { slot: 1, quality: 1.34, item: mk('servo', 1.34) },
     ],
   },
 };

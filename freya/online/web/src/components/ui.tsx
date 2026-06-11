@@ -47,8 +47,10 @@ export function ItemIcon({ item, className = '' }: { item: Item; className?: str
   );
 }
 
+// `value` is the game-native quality fraction (1.0 == 100%); render it as a
+// percent for humans. qualityClass thresholds are likewise fractional.
 export function Quality({ value }: { value: number }) {
-  return <span className={'qual ' + qualityClass(value)}>{value}%</span>;
+  return <span className={'qual ' + qualityClass(value)}>{Math.round(value * 100)}%</span>;
 }
 
 export function TimeBand({ band, showLabel = true }: { band: Band; showLabel?: boolean }) {

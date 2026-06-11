@@ -85,13 +85,14 @@ func TestRarityForLevelQuality(t *testing.T) {
 		q     *float64
 		want  string
 	}{
-		{9, f(190), "epic"},
-		{9, f(160), "rare"},
-		{9, f(140), "uncommon"},
-		{9, f(120), "common"},
-		{2, f(200), "uncommon"}, // level cap 1-3
-		{5, f(200), "rare"},     // level cap 4-6
-		{9, nil, "common"},      // no quality
+		// quality is the game-native fraction (1.0 == 100%).
+		{9, f(1.90), "epic"},
+		{9, f(1.60), "rare"},
+		{9, f(1.40), "uncommon"},
+		{9, f(1.20), "common"},
+		{2, f(2.00), "uncommon"}, // level cap 1-3
+		{5, f(2.00), "rare"},     // level cap 4-6
+		{9, nil, "common"},       // no quality
 	}
 	for _, c := range cases {
 		if got := rarityForLevelQuality(c.level, c.q); got != c.want {

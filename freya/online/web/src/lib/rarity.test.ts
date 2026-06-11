@@ -16,41 +16,42 @@ describe('rarityFor', () => {
   });
 
   it('maps quality thresholds to tiers (uncapped, high level)', () => {
+    // Quality is the game-native fraction (1.0 == 100%).
     const lvl = 10; // above every cap, so tier == raw tier
-    expect(rarityFor(lvl, 129)).toBe('common');
-    expect(rarityFor(lvl, 130)).toBe('uncommon');
-    expect(rarityFor(lvl, 149)).toBe('uncommon');
-    expect(rarityFor(lvl, 150)).toBe('rare');
-    expect(rarityFor(lvl, 179)).toBe('rare');
-    expect(rarityFor(lvl, 180)).toBe('epic');
-    expect(rarityFor(lvl, 255)).toBe('epic');
+    expect(rarityFor(lvl, 1.29)).toBe('common');
+    expect(rarityFor(lvl, 1.30)).toBe('uncommon');
+    expect(rarityFor(lvl, 1.49)).toBe('uncommon');
+    expect(rarityFor(lvl, 1.50)).toBe('rare');
+    expect(rarityFor(lvl, 1.79)).toBe('rare');
+    expect(rarityFor(lvl, 1.80)).toBe('epic');
+    expect(rarityFor(lvl, 2.55)).toBe('epic');
   });
 
   it('caps a high-quality item by its level', () => {
-    // quality 200 is epic-tier, but the level cap pulls it down.
-    expect(rarityFor(1, 200)).toBe('uncommon'); // L1-3 -> uncommon cap
-    expect(rarityFor(3, 200)).toBe('uncommon');
-    expect(rarityFor(4, 200)).toBe('rare'); // L4-6 -> rare cap
-    expect(rarityFor(6, 200)).toBe('rare');
-    expect(rarityFor(7, 200)).toBe('epic'); // L7+ -> epic reachable
+    // quality 2.00 is epic-tier, but the level cap pulls it down.
+    expect(rarityFor(1, 2.00)).toBe('uncommon'); // L1-3 -> uncommon cap
+    expect(rarityFor(3, 2.00)).toBe('uncommon');
+    expect(rarityFor(4, 2.00)).toBe('rare'); // L4-6 -> rare cap
+    expect(rarityFor(6, 2.00)).toBe('rare');
+    expect(rarityFor(7, 2.00)).toBe('epic'); // L7+ -> epic reachable
   });
 
   it('never raises a low tier to the cap (cap is a ceiling, not a floor)', () => {
-    expect(rarityFor(10, 130)).toBe('uncommon'); // not forced up to epic
-    expect(rarityFor(1, 130)).toBe('uncommon'); // tier == cap
-    expect(rarityFor(1, 100)).toBe('common'); // below tier threshold
+    expect(rarityFor(10, 1.30)).toBe('uncommon'); // not forced up to epic
+    expect(rarityFor(1, 1.30)).toBe('uncommon'); // tier == cap
+    expect(rarityFor(1, 1.00)).toBe('common'); // below tier threshold
   });
 });
 
 describe('qualityClass', () => {
   it('buckets quality into the CSS class bands', () => {
-    expect(qualityClass(170)).toBe('qual--exc');
-    expect(qualityClass(200)).toBe('qual--exc');
-    expect(qualityClass(130)).toBe('qual--high');
-    expect(qualityClass(169)).toBe('qual--high');
-    expect(qualityClass(100)).toBe('qual--ok');
-    expect(qualityClass(129)).toBe('qual--ok');
-    expect(qualityClass(99)).toBe('qual--low');
+    expect(qualityClass(1.70)).toBe('qual--exc');
+    expect(qualityClass(2.00)).toBe('qual--exc');
+    expect(qualityClass(1.30)).toBe('qual--high');
+    expect(qualityClass(1.69)).toBe('qual--high');
+    expect(qualityClass(1.00)).toBe('qual--ok');
+    expect(qualityClass(1.29)).toBe('qual--ok');
+    expect(qualityClass(0.99)).toBe('qual--low');
     expect(qualityClass(0)).toBe('qual--low');
   });
 });

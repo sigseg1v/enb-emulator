@@ -52,7 +52,7 @@ function SkillDots({ level, max }: { level: number; max: number }) {
   for (let i = 0; i < total; i++) {
     dots.push(<span key={i} className={'sdot' + (i < level ? ' sdot--on' : '')} />);
   }
-  return <span className="sdots">{dots}</span>;
+  return <span className="sdots" title={`Rank ${level}`}>{dots}</span>;
 }
 
 function EquipTile({ eq }: { eq: EquippedItem }) {
@@ -144,9 +144,8 @@ export function Profile({ character }: { character: string }) {
 
           <div className="pship__stats">
             <Stat label="Hull"
-              value={ship ? `${Math.round(ship.hullPoints)} / ${Math.round(ship.maxHullPoints)}` : '--'} />
+              value={ship ? String(Math.round(ship.maxHullPoints)) : '--'} />
             <Stat label="Cargo" value={ship ? `${ship.cargoSpace} slots` : '--'} />
-            <Stat label="Thrust" value={ship ? String(ship.thrust) : '--'} />
             <Stat label="Warp" value={ship ? String(ship.warp) : '--'} />
           </div>
           {ship && ship.maxHullPoints > 0 && (
