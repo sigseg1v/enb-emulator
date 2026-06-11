@@ -152,7 +152,12 @@ try {
         # (renew.sh installs it 999:999 itself). login runs as root, unaffected.
         'if ls certs/*.cer certs/*.pem >/dev/null 2>&1; then chown 999:999 certs/*.cer certs/*.pem; fi'
         'docker compose --env-file .env -f docker-compose.prod.yml pull'
-        'docker compose --env-file .env -f docker-compose.prod.yml up -d'
+        # --remove-orphans: the AQ-7 cutover replaced the C++ `login` (net7ssl)
+        # service with net7go + freya-online, but a plain `up -d` leaves the old
+        # enb-emulator-login-1 container running -- and it still holds :443, so
+        # freya-online (the new TLS terminator) fails to bind with "port is
+        # already allocated". Removing orphans drops the dead login container.
+        'docker compose --env-file .env -f docker-compose.prod.yml up -d --remove-orphans'
         'docker compose --env-file .env -f docker-compose.prod.yml ps'
     ) -join '; '
     Invoke-RemoteShell $ip $remote
