@@ -8,7 +8,7 @@
 
 import type {
   Item, Listing, MyListing, VaultSlot, Mail, Session, ServerStatus,
-  AvatarProfile, ShipView, SkillView,
+  AvatarProfile, ShipView, SkillView, GalaxyMap, GalaxyOccupancy,
 } from './types';
 import { rarityFor } from './lib/rarity';
 
@@ -308,6 +308,51 @@ export const MOCK_SHIP: Record<string, ShipView> = {
       { slot: 1, quality: 134, item: mk('servo', 134) },
     ],
   },
+};
+
+// A small slice of the galaxy for backend-less design work: a few systems
+// across factions, their sectors, and the gate links between them.
+export const MOCK_GALAXY: GalaxyMap = {
+  systems: [
+    { id: 5, name: 'Sol', faction: 'neutral' },
+    { id: 6, name: 'Tau Ceti', faction: 'terran' },
+    { id: 11, name: 'Vega', faction: 'progen' },
+    { id: 1, name: 'Capella', faction: 'jenquai' },
+    { id: 7, name: '61 Cygni', faction: 'contested' },
+    { id: 10, name: 'Smugglers Run', faction: 'pirate' },
+  ],
+  sectors: [
+    { id: 1060, name: 'Earth', systemId: 5, system: 'Sol', faction: 'neutral' },
+    { id: 1020, name: 'High Earth', systemId: 5, system: 'Sol', faction: 'neutral' },
+    { id: 1015, name: 'Luna', systemId: 5, system: 'Sol', faction: 'neutral' },
+    { id: 1005, name: 'Mercury', systemId: 5, system: 'Sol', faction: 'neutral' },
+    { id: 2005, name: 'Hadean', systemId: 6, system: 'Tau Ceti', faction: 'terran' },
+    { id: 2010, name: 'Saturn', systemId: 6, system: 'Tau Ceti', faction: 'terran' },
+    { id: 3060, name: 'Endriago', systemId: 11, system: 'Vega', faction: 'progen' },
+    { id: 3070, name: 'Lagarto', systemId: 11, system: 'Vega', faction: 'progen' },
+    { id: 1075, name: 'Antares', systemId: 1, system: 'Capella', faction: 'jenquai' },
+    { id: 1076, name: 'Dahin', systemId: 1, system: 'Capella', faction: 'jenquai' },
+    { id: 4515, name: 'Paramis', systemId: 7, system: '61 Cygni', faction: 'contested' },
+    { id: 4520, name: 'Glenn', systemId: 10, system: 'Smugglers Run', faction: 'pirate' },
+  ],
+  edges: [
+    { from: 1015, to: 1060 },
+    { from: 1020, to: 1060 },
+    { from: 1005, to: 1015 },
+    { from: 1060, to: 2005 },
+    { from: 2005, to: 2010 },
+    { from: 2010, to: 3060 },
+    { from: 3060, to: 3070 },
+    { from: 1060, to: 1075 },
+    { from: 1075, to: 1076 },
+    { from: 2005, to: 4515 },
+    { from: 4515, to: 4520 },
+  ],
+};
+
+export const MOCK_GALAXY_OCCUPANCY: GalaxyOccupancy = {
+  counts: { '1060': 50, '2005': 12, '3060': 7, '1075': 25, '4515': 1, '1015': 3 },
+  total: 98,
 };
 
 export const MOCK_SKILLS: Record<string, SkillView[]> = {

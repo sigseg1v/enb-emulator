@@ -33,11 +33,12 @@ const (
 type apiServer struct {
 	store   *Store
 	status  *statusCache
+	galaxy  *galaxyCache
 	session *scs.SessionManager
 	cfg     Config
 }
 
-func newAPIServer(store *Store, status *statusCache, cfg Config) *apiServer {
+func newAPIServer(store *Store, status *statusCache, galaxy *galaxyCache, cfg Config) *apiServer {
 	sm := scs.New()
 	sm.Lifetime = 24 * time.Hour
 	sm.IdleTimeout = 2 * time.Hour
@@ -54,7 +55,7 @@ func newAPIServer(store *Store, status *statusCache, cfg Config) *apiServer {
 	// play-local marker, so drop Secure only there.
 	sm.Cookie.Secure = cfg.Domain != "localhost"
 	sm.Cookie.Path = "/"
-	return &apiServer{store: store, status: status, session: sm, cfg: cfg}
+	return &apiServer{store: store, status: status, galaxy: galaxy, session: sm, cfg: cfg}
 }
 
 // routes registers the JSON API under /api/. The returned handler must be
@@ -66,6 +67,10 @@ func (s *apiServer) routes() http.Handler {
 	mux.HandleFunc("/api/logout", s.handleLogout)
 	mux.HandleFunc("/api/session", s.handleSession)
 	mux.HandleFunc("/api/bootstrap", s.handleBootstrap)
+	// Galaxy map: static topology (cached hard) + live per-sector occupancy
+	// (short-cached, polled by the SPA).
+	mux.HandleFunc("GET /api/galaxy", s.handleGalaxyMap)
+	mux.HandleFunc("GET /api/galaxy/occupancy", s.handleGalaxyOccupancy)
 	// AH + mailbox mutations (Go 1.22 method+wildcard patterns).
 	mux.HandleFunc("POST /api/auction", s.handlePostListing)
 	mux.HandleFunc("POST /api/auction/{id}/bid", s.handleBid)
@@ -659,6 +664,45 @@ func (s *apiServer) handleAvatarSkills(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, skills)
+}
+
+// GET /api/galaxy -- the static galaxy topology (systems, sectors, gate edges).
+// Auth-gated like the rest of the signed-in shell; the payload is cached hard
+// server-side so this is a near-free map read.
+func (s *apiServer) handleGalaxyMap(w http.ResponseWriter, r *http.Request) {
+	_, acctID := s.loggedIn(r)
+	if acctID == 0 {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	m, err := s.galaxy.getMap(ctx, time.Now())
+	if err != nil {
+		log.Printf("api: galaxy map: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, m)
+}
+
+// GET /api/galaxy/occupancy -- live online-player count per sector. Short-cached;
+// the SPA polls it to drive the per-sector glow.
+func (s *apiServer) handleGalaxyOccupancy(w http.ResponseWriter, r *http.Request) {
+	_, acctID := s.loggedIn(r)
+	if acctID == 0 {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	occ, err := s.galaxy.getOccupancy(ctx, time.Now())
+	if err != nil {
+		log.Printf("api: galaxy occupancy: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, occ)
 }
 
 // avatarReadError maps a Profile read error to a status. A name that is not one

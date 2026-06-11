@@ -77,6 +77,27 @@ export interface SkillView {
   maxLevel: number;
 }
 
+// Galaxy map (first tab). The topology is static content; the occupancy is the
+// live light-up data the SPA polls. Faction is a normalized token the UI colors
+// by ('jenquai' | 'progen' | 'terran' | 'pirate' | 'contested' | 'neutral' |
+// 'deepspace').
+export interface GalaxySystem { id: number; name: string; faction: string; }
+export interface GalaxySector {
+  id: number;
+  name: string;
+  systemId: number;
+  system: string;
+  faction: string;
+}
+export interface GalaxyEdge { from: number; to: number; }
+export interface GalaxyMap {
+  systems: GalaxySystem[];
+  sectors: GalaxySector[];
+  edges: GalaxyEdge[];
+}
+// counts is keyed by sector id (as a string); total is all online players.
+export interface GalaxyOccupancy { counts: Record<string, number>; total: number; }
+
 export interface Listing {
   id: string;
   item: Item;

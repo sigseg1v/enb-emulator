@@ -472,6 +472,51 @@ C++ source directly). The Go server must reproduce:
             read feature -- no C++/proxy/wire change, so the Server integrity /
             CV-gate rules do not apply.
 
+### AQ-13 Galaxy tab (2026-06-11)
+- [x] **Galaxy tab -- first/default tab, live sector map.** New website tab
+      (before Profile) showing every named sector in the game, grouped by star
+      system and linked by the gate graph, with each sector lighting up and
+      glowing by how many players are currently in it. Glow is RELATIVE-max
+      normalized (count / busiest-sector count), so 1-vs-2 players reads the
+      same as 50-vs-100 -- the owner's explicit requirement.
+      - [x] Two split read APIs (`store_galaxy.go`): `GET /api/galaxy` (static
+            topology: 25 systems with normalized faction token, 130 named
+            sectors with system + faction, gate edges from
+            `sector_objects.gate_to` -- deduped undirected, self-loops dropped,
+            dock-gate interior targets remapped to parent then collapsed),
+            cached 5min; `GET /api/galaxy/occupancy` (live per-sector online
+            counts), cached 15s. Both auth-gated (401 unauth).
+      - [x] Live counts derived EXACTLY like the Discord status bot
+            (`status-notifier/bot.go readOnlinePlayers`): account online while
+            `accounts.last_login > last_logout`, avatar online while
+            `avatar_info.last_login > last_logout`, location = `avatar_info.sector`.
+            Docked players (sector = starbase INTERIOR id) remapped to the parent
+            sector via `starbases.sector_id`, else they light up nothing. No
+            server/C++ change -- the data is fully derivable website-side, so the
+            Server integrity / CV-gate rules do not apply.
+      - [x] `normalizeFaction` folds freeform `systems.notes` prose into the
+            stable token set (jenquai/progen/terran/pirate/contested/neutral/
+            deepspace; "various"->neutral, default->deepspace) the SPA colors by.
+      - [x] React Galaxy screen (`web/src/screens/Galaxy.tsx`): deterministic
+            radial cluster layout (no Math.random, no real coords exist --
+            galaxy_x/y are all 0), systems on a ring, sectors fanned in a
+            sub-ring, gate edges as SVG lines, faction-colored nodes whose
+            radius + glow halo scale with relative occupancy, hover info panel
+            (sector / system / faction / live pilot count), total-online header,
+            faction legend. Topology fetched once; occupancy polled every 15s
+            with an alive-guard.
+      - [x] Made the default + first tab in App.tsx (glyph). Tab union extended,
+            Galaxy rendered before Profile.
+      - [x] Tests: `TestIT_GalaxyMap` (non-empty topology, every sector has a
+            known faction + name, edges self-loop-free / normalized / deduped /
+            endpoints in set), `TestGalaxyNormalizeFaction` (table), 
+            `TestIT_GalaxyOccupancy` (in-space + docked-remap + offline-excluded,
+            interior id not its own key, total excludes offline),
+            `TestIT_API_Galaxy` (401 both endpoints unauth, 200 topology, live
+            count after set-online). Web: 4 new api.test.ts cases (real GET +
+            mock). gofmt + go vet clean, `FREYA_TEST_DB=1 go test ./...` green,
+            web vitest 23/23 + build clean.
+
 ### AQ-6 In-game notify
 - [ ] On player login, if unread mail: private system chat message with the
       website URL. (Server-side -- governed by Server integrity rules; cite

@@ -154,6 +154,15 @@ func setAvatarOnline(t *testing.T, st *Store, ctx context.Context, avID int64) {
 		`UPDATE avatar_info SET last_login = now(), last_logout = now() - interval '1 hour' WHERE avatar_id = $1`, avID)
 }
 
+// setAccountOnline flips an account to "online" (last_login > last_logout). The
+// galaxy occupancy read (like the /status bot) requires BOTH the account and the
+// avatar to read online before the avatar is counted.
+func setAccountOnline(t *testing.T, st *Store, ctx context.Context, acctID int64) {
+	t.Helper()
+	mustExec(t, st.user, ctx,
+		`UPDATE accounts SET last_login = now(), last_logout = now() - interval '1 hour' WHERE id = $1`, acctID)
+}
+
 // seedVaultItem puts one item instance into an avatar's vault slot.
 func seedVaultItem(t *testing.T, st *Store, ctx context.Context, avID int64, slot, itemID, stack int, quality *float64) {
 	t.Helper()

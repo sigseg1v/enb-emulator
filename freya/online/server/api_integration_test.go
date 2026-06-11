@@ -26,7 +26,7 @@ import (
 func newTestAPI(t *testing.T, st *Store) (*http.Client, string) {
 	t.Helper()
 	cfg := Config{StatusStaleSecs: 90}
-	api := newAPIServer(st, newStatusCache(st, cfg.StatusStaleSecs), cfg)
+	api := newAPIServer(st, newStatusCache(st, cfg.StatusStaleSecs), newGalaxyCache(st), cfg)
 	handler := api.session.LoadAndSave(api.routes())
 	srv := httptest.NewTLSServer(handler)
 	t.Cleanup(srv.Close)
@@ -398,5 +398,69 @@ func TestIT_API_Profile(t *testing.T) {
 	resp2.Body.Close()
 	if resp2.StatusCode != http.StatusNotFound {
 		t.Errorf("cross-account profile = %d, want 404", resp2.StatusCode)
+	}
+}
+
+// The galaxy endpoints are auth-gated, return the static topology, and the live
+// occupancy reflects an online avatar's sector.
+func TestIT_API_Galaxy(t *testing.T) {
+	st, ctx := testStore(t)
+	acct := seedAccount(t, st, ctx, 52, 1, 0)
+
+	c, base := newTestAPI(t, st)
+
+	// Unauthenticated -> 401 on both.
+	for _, path := range []string{"/api/galaxy", "/api/galaxy/occupancy"} {
+		resp, err := c.Get(base + path)
+		if err != nil {
+			t.Fatalf("GET %s (unauth): %v", path, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("unauth %s = %d, want 401", path, resp.StatusCode)
+		}
+	}
+
+	loginAPI(t, c, base, acct)
+
+	// Topology.
+	resp, err := c.Get(base + "/api/galaxy")
+	if err != nil {
+		t.Fatalf("GET galaxy: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("galaxy = %d, want 200", resp.StatusCode)
+	}
+	var m GalaxyMap
+	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
+		t.Fatalf("decode galaxy: %v", err)
+	}
+	if len(m.Systems) == 0 || len(m.Sectors) == 0 || len(m.Edges) == 0 {
+		t.Fatalf("thin topology: %d systems, %d sectors, %d edges",
+			len(m.Systems), len(m.Sectors), len(m.Edges))
+	}
+
+	// Put this account's avatar online in Earth (1060) and confirm occupancy
+	// reflects it. The cache is fresh per test server, so the first read is live.
+	const earth int64 = 1060
+	mustExec(t, st.user, ctx, `UPDATE avatar_info SET sector = $1 WHERE avatar_id = $2`, earth, acct.avatars[0].id)
+	setAccountOnline(t, st, ctx, acct.id)
+	setAvatarOnline(t, st, ctx, acct.avatars[0].id)
+
+	resp2, err := c.Get(base + "/api/galaxy/occupancy")
+	if err != nil {
+		t.Fatalf("GET occupancy: %v", err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("occupancy = %d, want 200", resp2.StatusCode)
+	}
+	var occ GalaxyOccupancy
+	if err := json.NewDecoder(resp2.Body).Decode(&occ); err != nil {
+		t.Fatalf("decode occupancy: %v", err)
+	}
+	if occ.Counts[itoa(earth)] < 1 {
+		t.Errorf("Earth occupancy = %d, want >= 1 (our online avatar)", occ.Counts[itoa(earth)])
 	}
 }

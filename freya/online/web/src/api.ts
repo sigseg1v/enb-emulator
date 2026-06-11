@@ -11,12 +11,14 @@
 // without a backend.
 
 import type {
-  AvatarProfile, Listing, Mail, MyListing, PostListingInput, SendMailInput,
-  ServerStatus, Session, ShipView, SkillView, VaultSlot, VaultTransferInput,
+  AvatarProfile, GalaxyMap, GalaxyOccupancy, Listing, Mail, MyListing,
+  PostListingInput, SendMailInput, ServerStatus, Session, ShipView, SkillView,
+  VaultSlot, VaultTransferInput,
 } from './types';
 import {
-  MOCK_LISTINGS, MOCK_MAIL, MOCK_MY_LISTINGS, MOCK_PROFILE, MOCK_SERVER, MOCK_SESSION,
-  MOCK_SHIP, MOCK_SKILLS, MOCK_VAULT, MOCK_VAULT_STORAGE,
+  MOCK_GALAXY, MOCK_GALAXY_OCCUPANCY, MOCK_LISTINGS, MOCK_MAIL, MOCK_MY_LISTINGS,
+  MOCK_PROFILE, MOCK_SERVER, MOCK_SESSION, MOCK_SHIP, MOCK_SKILLS, MOCK_VAULT,
+  MOCK_VAULT_STORAGE,
 } from './mock';
 
 const USE_MOCK = import.meta.env.VITE_MOCK === '1';
@@ -127,6 +129,18 @@ export async function fetchShip(name: string): Promise<ShipView> {
 export async function fetchSkills(name: string): Promise<SkillView[]> {
   if (USE_MOCK) return structuredClone(MOCK_SKILLS[name] ?? MOCK_SKILLS.Kestrel_Vega);
   return getJSON<SkillView[]>(`/api/avatar/${enc(name)}/skills`);
+}
+
+// The galaxy map: the topology is fetched once (cached hard server-side) and the
+// occupancy is polled on a short cadence to drive the per-sector glow.
+export async function fetchGalaxy(): Promise<GalaxyMap> {
+  if (USE_MOCK) return structuredClone(MOCK_GALAXY);
+  return getJSON<GalaxyMap>('/api/galaxy');
+}
+
+export async function fetchGalaxyOccupancy(): Promise<GalaxyOccupancy> {
+  if (USE_MOCK) return structuredClone(MOCK_GALAXY_OCCUPANCY);
+  return getJSON<GalaxyOccupancy>('/api/galaxy/occupancy');
 }
 
 export async function placeBid(listingId: string): Promise<Listing> {

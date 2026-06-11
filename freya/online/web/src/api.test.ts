@@ -107,6 +107,28 @@ describe('real backend (default, VITE_MOCK unset)', () => {
     await api.bootstrap();
     expect(fetchMock).toHaveBeenCalledWith('/api/bootstrap', { credentials: 'include' });
   });
+
+  it('fetchGalaxy GETs /api/galaxy (topology)', async () => {
+    const body = { systems: [], sectors: [], edges: [] };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const api = await importApi();
+    const got = await api.fetchGalaxy();
+    expect(fetchMock).toHaveBeenCalledWith('/api/galaxy', { credentials: 'include' });
+    expect(got).toEqual(body);
+  });
+
+  it('fetchGalaxyOccupancy GETs /api/galaxy/occupancy (live counts)', async () => {
+    const body = { counts: { '1060': 3 }, total: 3 };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const api = await importApi();
+    const got = await api.fetchGalaxyOccupancy();
+    expect(fetchMock).toHaveBeenCalledWith('/api/galaxy/occupancy', { credentials: 'include' });
+    expect(got).toEqual(body);
+  });
 });
 
 describe('mock backend (VITE_MOCK=1, opt-in)', () => {
@@ -170,5 +192,17 @@ describe('mock backend (VITE_MOCK=1, opt-in)', () => {
     const api = await importApi();
     await api.transferVault({ from: 'A_One', to: 'B_Two', slot: 0, itemId: 42 });
     expect(fetchMock).toHaveBeenCalledWith('/api/vault/transfer', expect.objectContaining({ method: 'POST' }));
+  });
+
+  it('serves the galaxy topology + occupancy from the mock without fetch', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const api = await importApi();
+    const m = await api.fetchGalaxy();
+    const o = await api.fetchGalaxyOccupancy();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(m.sectors.length).toBeGreaterThan(0);
+    expect(o.total).toBeGreaterThan(0);
   });
 });

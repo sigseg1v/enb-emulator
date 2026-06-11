@@ -437,3 +437,31 @@
 @media (max-width: 1080px) {
   .profile__body { grid-template-columns: 1fr; grid-template-areas: "id" "ship" "skills"; }
 }
+
+/* galaxy map */
+.galaxy__stage { position: relative; padding: 0; overflow: hidden;
+  background: radial-gradient(ellipse at center, var(--bg-panel-2) 0%, var(--bg-input) 70%, #000 140%); }
+.galaxy__svg { display: block; width: 100%; height: min(72vh, 760px); }
+.galaxy__edges line { stroke: var(--line-strong); stroke-width: 0.6; opacity: 0.30; }
+.galaxy__labels text { font-family: var(--font-mono); font-size: 13px; letter-spacing: 0.06em;
+  opacity: 0.55; pointer-events: none; }
+.galaxy__node { cursor: pointer; }
+.galaxy__glow { pointer-events: none; }
+.galaxy__dot { transition: r 0.15s, opacity 0.4s; }
+.galaxy__node:hover .galaxy__dot { stroke-width: 2; }
+
+.galaxy__info { position: absolute; left: 16px; bottom: 16px; min-width: 180px; z-index: 5;
+  background: var(--bg-panel); border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+  padding: 11px 14px; pointer-events: none; box-shadow: 0 8px 28px rgba(0,0,0,0.45); }
+.galaxy__info-name { font-size: 15px; color: var(--text); }
+.galaxy__info-sys { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.05em;
+  color: var(--text-faint); margin-top: 3px; display: flex; gap: 8px; align-items: center; }
+.galaxy__info-fac { text-transform: uppercase; letter-spacing: 0.1em; }
+.galaxy__info-pop { font-size: 12.5px; color: var(--text-dim); margin-top: 7px; }
+.galaxy__info-pop b { color: var(--accent); font-size: 15px; }
+
+.gxlegend { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; max-width: 460px;
+  justify-content: flex-end; }
+.gxlegend__item { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--text-faint); display: inline-flex; align-items: center; gap: 6px; }
+.gxlegend__dot { width: 9px; height: 9px; border-radius: 50%; box-shadow: 0 0 6px currentColor; }
