@@ -38,9 +38,22 @@ func (h *spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if info, err := os.Stat(target); err == nil && !info.IsDir() {
+		// Vite emits content-hashed assets under /assets/ (the filename changes
+		// whenever the bytes change), so they are safe to cache forever. Any
+		// other real file (index.html, favicon, ...) is NOT hashed, so it must
+		// revalidate -- otherwise a browser heuristically caches a stale
+		// index.html and keeps loading old bundle references.
+		if strings.HasPrefix(r.URL.Path, "/assets/") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "no-cache")
+		}
 		http.ServeFile(w, r, target)
 		return
 	}
-	// SPA fallback -- serve index.html for client-side routes.
+	// SPA fallback -- serve index.html for client-side routes. Never cache the
+	// entry point; it points at the current hashed bundles and must always be
+	// revalidated so a deploy is picked up on the next load.
+	w.Header().Set("Cache-Control", "no-cache")
 	http.ServeFile(w, r, h.index)
 }
