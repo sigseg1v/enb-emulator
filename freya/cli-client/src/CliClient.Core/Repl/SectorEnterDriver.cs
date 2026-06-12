@@ -110,18 +110,25 @@ public static class SectorEnterDriver
         int gameId,
         int slot,
         int toSectorId,
+        int fromSectorId,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(ctx);
 
         var redirect = await DoMasterJoinAsync(
-            ctx.Host, ctx.MasterPort, ctx.Ticket!, gameId, toSectorId, ct);
+            ctx.Host, ctx.MasterPort, ctx.Ticket!, gameId, toSectorId, ct, fromSectorId);
         if (redirect.SectorId != toSectorId)
             throw new InvalidOperationException(
                 $"ServerRedirect sector mismatch after handoff: got {redirect.SectorId}, expected {toSectorId}");
 
+        // Echo the origin sector in the sector LOGIN: the sector server reads
+        // FromSectorID off this join (HandleSectorLogin -> m_FromSectorID) and
+        // positions the avatar at FindGate(m_FromSectorID) -- the gate in the
+        // destination sector that links back to where we came from. Sending 0
+        // here (as we do for a fresh login) makes FindGate(0) fail, dropping the
+        // avatar at FindFirstNav() far from any gate.
         var (sectorConn, startId, packets) = await DoSectorLoginUntilStartAsync(
-            ctx.Host, ctx.SectorPort, ctx.Ticket!, gameId, toSectorId, ct);
+            ctx.Host, ctx.SectorPort, ctx.Ticket!, gameId, toSectorId, ct, fromSectorId);
 
         return new SectorEntryResult(sectorConn, gameId, startId, slot, toSectorId, packets);
     }
@@ -214,7 +221,7 @@ public static class SectorEnterDriver
     public static async Task<ServerRedirect> DoMasterJoinAsync(
         string masterHost, int masterPort,
         string authTicket, int gameId, int sectorId,
-        CancellationToken ct)
+        CancellationToken ct, int fromSectorId = 0)
     {
         await using var conn = await EncryptedTcpConnection.ConnectAsync(
             masterHost, masterPort, ct);
@@ -227,7 +234,7 @@ public static class SectorEnterDriver
         var join = new MasterJoinRequest(
             Unknown1: 0, Unknown2: 0, Unknown3: 0,
             AvatarIdMsb: 0, AvatarIdLsb: gameId,
-            ToSectorId: sectorId, FromSectorId: 0,
+            ToSectorId: sectorId, FromSectorId: fromSectorId,
             PlayerLevel: 1, Unknown8: 0, Unknown9: 0, Unknown10: 0,
             Ticket: ticketBytes);
 
@@ -255,13 +262,13 @@ public static class SectorEnterDriver
         DoSectorLoginUntilStartAsync(
             string sectorHost, int sectorPort,
             string authTicket, int gameId, int sectorId,
-            CancellationToken ct)
+            CancellationToken ct, int fromSectorId = 0)
     {
         var conn = await EncryptedTcpConnection.ConnectAsync(sectorHost, sectorPort, ct);
 
         try
         {
-            await conn.SendAsync(BuildLoginPacket(authTicket, gameId, sectorId), ct);
+            await conn.SendAsync(BuildLoginPacket(authTicket, gameId, sectorId, fromSectorId), ct);
 
             var frames = new List<Packet>();
             int framesSeen = 0;
@@ -331,7 +338,8 @@ public static class SectorEnterDriver
         return Packet.ForOpcode(OpcodeId.Known.StartAck.Value, payload);
     }
 
-    public static Packet BuildLoginPacket(string authTicket, int gameId, int sectorId)
+    public static Packet BuildLoginPacket(
+        string authTicket, int gameId, int sectorId, int fromSectorId = 0)
     {
         var payload = new byte[64 + 4 + 65 + 4];
 
@@ -343,7 +351,7 @@ public static class SectorEnterDriver
         var join = new MasterJoinRequest(
             Unknown1: 0, Unknown2: 0, Unknown3: 0,
             AvatarIdMsb: 0, AvatarIdLsb: gameId,
-            ToSectorId: sectorId, FromSectorId: 0,
+            ToSectorId: sectorId, FromSectorId: fromSectorId,
             PlayerLevel: 1, Unknown8: 0, Unknown9: 0, Unknown10: 0,
             Ticket: ticketBytes);
 

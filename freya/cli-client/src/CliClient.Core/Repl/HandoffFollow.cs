@@ -35,6 +35,7 @@ public static class HandoffFollow
         int gameId,
         int slot,
         int toSectorId,
+        int fromSectorId,
         EncryptedTcpConnection oldSector,
         string arrivedLabel,
         CancellationToken ct)
@@ -53,7 +54,7 @@ public static class HandoffFollow
         SectorEnterDriver.SectorEntryResult result;
         try
         {
-            result = await SectorEnterDriver.FollowHandoffAsync(ctx, gameId, slot, toSectorId, ct)
+            result = await SectorEnterDriver.FollowHandoffAsync(ctx, gameId, slot, toSectorId, fromSectorId, ct)
                 .ConfigureAwait(false);
         }
         catch (Exception ex)

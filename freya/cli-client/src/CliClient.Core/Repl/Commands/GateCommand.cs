@@ -139,12 +139,12 @@ public sealed class GateCommand : ICommandHandler
             AnsiPalette.Muted("(0x002C Action=19 -> SectorServerHandoff). Awaiting server handoff..."))
             .ConfigureAwait(false);
 
-        int toSectorId;
+        HandoffTarget handoff;
         try
         {
             using var handoffCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             handoffCts.CancelAfter(TimeSpan.FromSeconds(15));
-            toSectorId = await handoffTask.WaitAsync(handoffCts.Token).ConfigureAwait(false);
+            handoff = await handoffTask.WaitAsync(handoffCts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -155,11 +155,12 @@ public sealed class GateCommand : ICommandHandler
         }
 
         await output.WriteLineAsync(
-            AnsiPalette.Muted("handoff -> ") + AnsiPalette.Value(_ctx.SectorLabel(toSectorId)) +
+            AnsiPalette.Muted("handoff -> ") + AnsiPalette.Value(_ctx.SectorLabel(handoff.ToSectorId)) +
             AnsiPalette.Muted("; re-joining...")).ConfigureAwait(false);
 
         return await HandoffFollow.CompleteAsync(
-            _ctx, output, id, slot, toSectorId, oldSector, "gated", ct).ConfigureAwait(false);
+            _ctx, output, id, slot, handoff.ToSectorId, handoff.FromSectorId, oldSector, "gated", ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>

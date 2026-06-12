@@ -14,6 +14,15 @@ using N7.CliClient.Session;
 namespace N7.CliClient.Repl;
 
 /// <summary>
+/// The pair of sector ids carried by a 0x003A SERVER_HANDOFF: where the server
+/// is sending the avatar (<paramref name="ToSectorId"/>) and the sector it is
+/// handing off FROM (<paramref name="FromSectorId"/>). The re-join MasterJoin
+/// echoes FromSectorId so the destination sector spawns the avatar at the gate
+/// that links back to the origin.
+/// </summary>
+public readonly record struct HandoffTarget(int ToSectorId, int FromSectorId);
+
+/// <summary>
 /// Mutable session state shared between REPL commands. One instance is
 /// constructed when the REPL starts and the commands pass it around to
 /// keep `connect` -> `login` -> `list` -> `create` -> `enter` coherent.
@@ -569,30 +578,37 @@ public sealed class SessionContext : IAsyncDisposable
         catch { /* best-effort notification */ }
     }
 
-    private TaskCompletionSource<int>? _handoffTcs;
+    private TaskCompletionSource<HandoffTarget>? _handoffTcs;
 
     /// <summary>
     /// Arm a one-shot capture of the next inbound 0x003A SERVER_HANDOFF's
-    /// ToSectorID. Returns a task that completes when that frame crosses the
+    /// sector ids. Returns a task that completes when that frame crosses the
     /// active sector connection (read cleanly by the background drain -- so no
     /// mid-frame cancellation of the RC4-stateful reader is needed). The
-    /// <c>undock</c> command awaits this to learn where the server is handing
-    /// the avatar off to, then re-joins that sector. See
-    /// <see cref="CaptureHandoff"/>.
+    /// <c>undock</c>/<c>gate</c> commands await this to learn where the server
+    /// is handing the avatar off to (<see cref="HandoffTarget.ToSectorId"/>),
+    /// then re-join that sector -- echoing
+    /// <see cref="HandoffTarget.FromSectorId"/> back in the re-join MasterJoin
+    /// so the destination sector spawns the avatar at the gate that links back
+    /// to the origin (Player::SendLoginCamera -> FindGate(m_FromSectorID)).
+    /// See <see cref="CaptureHandoff"/>.
     /// </summary>
-    public Task<int> ArmHandoffCapture()
+    public Task<HandoffTarget> ArmHandoffCapture()
     {
-        var tcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var tcs = new TaskCompletionSource<HandoffTarget>(TaskCreationOptions.RunContinuationsAsynchronously);
         _handoffTcs = tcs;
         return tcs.Task;
     }
 
     /// <summary>
-    /// Complete an armed handoff capture with the ToSectorID carried by a
+    /// Complete an armed handoff capture with the sector ids carried by a
     /// 0x003A SERVER_HANDOFF. The inner MasterJoin-shaped struct puts
-    /// ToSectorID at offset 20, BIG-ENDIAN (SendServerHandoff writes it via
-    /// ntohl -- PlayerConnection.cpp:10167 -- while the rest of the struct is
-    /// host LE). Never throws -- a malformed frame must not kill the drain.
+    /// ToSectorID at offset 20 and FromSectorID at offset 24, BIG-ENDIAN
+    /// (SendServerHandoff writes both via ntohl -- PlayerConnection.cpp:10167 --
+    /// while the rest of the struct is host LE). FromSectorID is the sector the
+    /// server is handing us off FROM; the destination needs it to position the
+    /// avatar at the correct back-gate. Never throws -- a malformed frame must
+    /// not kill the drain.
     /// </summary>
     private void CaptureHandoff(Packet p)
     {
@@ -602,10 +618,11 @@ public sealed class SessionContext : IAsyncDisposable
         try
         {
             var span = p.Payload.Span;
-            if (span.Length < 24) return;
-            int toSectorId = BinaryPrimitives.ReadInt32BigEndian(span.Slice(20, 4));
+            if (span.Length < 28) return;
+            int toSectorId   = BinaryPrimitives.ReadInt32BigEndian(span.Slice(20, 4));
+            int fromSectorId = BinaryPrimitives.ReadInt32BigEndian(span.Slice(24, 4));
             _handoffTcs = null;
-            tcs.TrySetResult(toSectorId);
+            tcs.TrySetResult(new HandoffTarget(toSectorId, fromSectorId));
         }
         catch { /* leave the capture armed; the awaiter will time out */ }
     }

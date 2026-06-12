@@ -121,12 +121,12 @@ public sealed class UndockCommand : ICommandHandler
             AnsiPalette.Muted("(0x004E Action=1 -> LaunchIntoSpace). Awaiting server handoff..."))
             .ConfigureAwait(false);
 
-        int toSectorId;
+        HandoffTarget handoff;
         try
         {
             using var handoffCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             handoffCts.CancelAfter(TimeSpan.FromSeconds(15));
-            toSectorId = await handoffTask.WaitAsync(handoffCts.Token).ConfigureAwait(false);
+            handoff = await handoffTask.WaitAsync(handoffCts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -137,15 +137,18 @@ public sealed class UndockCommand : ICommandHandler
         }
 
         await output.WriteLineAsync(
-            AnsiPalette.Muted("handoff -> space ") + AnsiPalette.Value(_ctx.SectorLabel(toSectorId)) +
+            AnsiPalette.Muted("handoff -> space ") + AnsiPalette.Value(_ctx.SectorLabel(handoff.ToSectorId)) +
             AnsiPalette.Muted("; re-joining...")).ConfigureAwait(false);
 
         // LaunchIntoSpace dropped us from the station sector (DropPlayerFromSector,
         // not DropPlayerFromGalaxy) and kept the player node alive, so the re-join
         // reuses the same avatar id. Identical to `gate` (0x002C ACTION 18->19),
-        // so the follow-the-handoff sequence is shared.
+        // so the follow-the-handoff sequence is shared. FromSectorID echoes the
+        // station sector so the destination spawns us at the station entry point
+        // (FromSector() > 9999 -> FindStation), not at FindFirstNav().
         return await HandoffFollow.CompleteAsync(
-            _ctx, output, id, slot, toSectorId, oldSector, "in space", ct).ConfigureAwait(false);
+            _ctx, output, id, slot, handoff.ToSectorId, handoff.FromSectorId, oldSector, "in space", ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
