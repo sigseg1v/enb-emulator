@@ -71,7 +71,7 @@ func (s *apiServer) routes() http.Handler {
 	// (short-cached, polled by the SPA).
 	mux.HandleFunc("GET /api/galaxy", s.handleGalaxyMap)
 	mux.HandleFunc("GET /api/galaxy/occupancy", s.handleGalaxyOccupancy)
-	// Live directed sector-to-sector traffic (last 5 min, grouped by ordered
+	// Live directed sector-to-sector traffic (last 30 min, grouped by ordered
 	// pair); cached 60s. Drives the travelling-light animation on the lanes.
 	mux.HandleFunc("GET /api/galaxy/gateflow", s.handleGalaxyGateFlow)
 	// The logged-in account's own characters and the sectors they sit in (for

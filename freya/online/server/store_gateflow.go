@@ -45,8 +45,9 @@ type GalaxyGateFlow struct {
 }
 
 // galaxyGateFlowWindow is how far back a transition still animates. The user-
-// facing spec: "all gate events in the last 5 minutes".
-const galaxyGateFlowWindow = "5 minutes"
+// facing spec: "all gate events in the last 30 minutes". Safely inside the
+// server's 1-hour gate_events retention (SaveManager.cpp prunes older rows).
+const galaxyGateFlowWindow = "30 minutes"
 
 // galaxyGateFlowTTL bounds how stale the flow data can be. The spec asks the
 // website to cache this query and refresh it every 60s when someone asks for it.

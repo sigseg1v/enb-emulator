@@ -691,7 +691,7 @@ export function Galaxy() {
             })}
           </g>
 
-          {/* live traffic: one travelling light per gate event over the last 5
+          {/* live traffic: one travelling light per gate event over the last 30
               minutes, riding the directed lane between source and destination.
               N concurrent events on the same ordered pair => N lights spaced
               equidistant (staggered start phase) along the same path. */}
