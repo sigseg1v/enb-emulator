@@ -277,26 +277,9 @@ OPENDB *sql_connection_c::grabdb()
         open_db->busy = false;
         open_db->db = 0;
 
-        // Build a libpq keyword/value DSN. password may be NULL (peer-auth
-        // setups), user may be NULL (use process owner).
-        std::string dsn;
-        dsn.reserve(256);
-        dsn += "host="; dsn += (host ? host : "localhost");
-        char portbuf[16]; snprintf(portbuf, sizeof(portbuf), " port=%d", portn);
-        dsn += portbuf;
-        dsn += " dbname="; dsn += (database ? database : "");
-        if (user)     { dsn += " user=";     dsn += user; }
-        if (password) { dsn += " password="; dsn += password; }
-        // Tag every server-originated connection so postgres logs attribute
-        // each line to us (log_line_prefix carries %a). Lets the boot-log
-        // health guard scope "does not exist" errors to the server's own SQL
-        // and ignore ad-hoc psql / tooling on a shared dev stack. Connection
-        // metadata only -- no wire/security/input-acceptance effect.
-        dsn += " application_name=net7-server";
-
         try {
             net7_db_handle *h = new net7_db_handle;
-            h->conn = new pqxx::connection(dsn);
+            h->conn = new pqxx::connection(build_dsn());
             h->last_errno = 0;
             open_db->db = h;
         } catch (const pqxx::failure &e) {
@@ -333,6 +316,51 @@ void sql_connection_c::freedb(OPENDB *odb)
         m_Mutex.Lock();
         odb->busy = false;
         m_Mutex.Unlock();
+    }
+}
+
+// Build a libpq keyword/value DSN from the stored connection parameters.
+// password may be NULL (peer-auth setups), user may be NULL (use process
+// owner). Factored out of grabdb() so reopen() rebuilds the exact same DSN.
+std::string sql_connection_c::build_dsn() const
+{
+    std::string dsn;
+    dsn.reserve(256);
+    dsn += "host="; dsn += (host ? host : "localhost");
+    char portbuf[16]; snprintf(portbuf, sizeof(portbuf), " port=%d", portn);
+    dsn += portbuf;
+    dsn += " dbname="; dsn += (database ? database : "");
+    if (user)     { dsn += " user=";     dsn += user; }
+    if (password) { dsn += " password="; dsn += password; }
+    // Tag every server-originated connection so postgres logs attribute
+    // each line to us (log_line_prefix carries %a). Lets the boot-log
+    // health guard scope "does not exist" errors to the server's own SQL
+    // and ignore ad-hoc psql / tooling on a shared dev stack. Connection
+    // metadata only -- no wire/security/input-acceptance effect.
+    dsn += " application_name=net7-server";
+    return dsn;
+}
+
+bool sql_connection_c::reopen(OPENDB *odb)
+{
+    if (!odb || !odb->db) return false;
+    // A half-finished explicit transaction cannot be transparently resumed on a
+    // fresh connection -- its statements are already gone. Refuse; the caller's
+    // begin()..commit() must fail and be retried as a whole by higher-level code.
+    if (odb->db->active_tx) return false;
+
+    try {
+        pqxx::connection *fresh = new pqxx::connection(build_dsn());
+        delete odb->db->conn;          // pqxx::connection RAII close of the dead one
+        odb->db->conn = fresh;
+        odb->db->last_errno = 0;
+        LogMessage("sqlplus: reconnected to database '%s' after a broken "
+                   "connection (postgres restarted?)\n", database ? database : "");
+        return true;
+    } catch (const std::exception &e) {
+        printf("sql_connection_c::reopen - reconnect to '%s' failed: %s\n",
+               database ? database : "", e.what());
+        return false;
     }
 }
 
@@ -417,11 +445,11 @@ int sql_query_c::execute(char *sql)
 
     std::string translated = translate_dialect(sql);
 
-    try {
-        // Inside an explicit begin()..commit() the statement joins the open
-        // transaction and is NOT committed here; otherwise it runs in its own
-        // autocommit work as before.
-        if (odb->db->active_tx) {
+    // Inside an explicit begin()..commit() the statement joins the open
+    // transaction and is NOT committed here. A broken connection cannot be
+    // transparently recovered mid-transaction, so this path runs once.
+    if (odb->db->active_tx) {
+        try {
             pqxx::work &tx = *odb->db->active_tx;
             pqxx::result r = tx.exec(translated);
             std::vector<std::string> col_tables = resolve_column_tables(odb->db, tx, r);
@@ -433,35 +461,57 @@ int sql_query_c::execute(char *sql)
             res = holder;
             last_affected = holder->affected_rows;
             return 1;
+        } catch (const pqxx::sql_error &e) {
+            last_errno = 1; snprintf(last_errmsg, sizeof(last_errmsg), "%s", e.what()); return 0;
+        } catch (const pqxx::failure &e) {
+            last_errno = 2; snprintf(last_errmsg, sizeof(last_errmsg), "%s", e.what()); return 0;
+        } catch (const std::exception &e) {
+            last_errno = 3; snprintf(last_errmsg, sizeof(last_errmsg), "%s", e.what()); return 0;
         }
-
-        pqxx::work tx(*odb->db->conn);
-        pqxx::result r = tx.exec(translated);
-        std::vector<std::string> col_tables = resolve_column_tables(odb->db, tx, r);
-        tx.commit();
-
-        net7_result_holder *holder = new net7_result_holder;
-        holder->affected_rows = r.affected_rows();
-        holder->column_tables = std::move(col_tables);
-        holder->result = std::move(r);
-        res = holder;
-        last_affected = holder->affected_rows;
-        // Mirror legacy contract: nonzero means "execute returned something"
-        // (i.e. the query ran). Callers cast to bool or to int.
-        return 1;
-    } catch (const pqxx::sql_error &e) {
-        last_errno = 1;
-        snprintf(last_errmsg, sizeof(last_errmsg), "%s", e.what());
-        return 0;
-    } catch (const pqxx::failure &e) {
-        last_errno = 2;
-        snprintf(last_errmsg, sizeof(last_errmsg), "%s", e.what());
-        return 0;
-    } catch (const std::exception &e) {
-        last_errno = 3;
-        snprintf(last_errmsg, sizeof(last_errmsg), "%s", e.what());
-        return 0;
     }
+
+    // Autocommit path: one transparent reconnect+retry if the pooled connection
+    // died (e.g. postgres was restarted while this server stayed up). Without
+    // this, the first broken query poisons the handle forever and every DB read
+    // -- ticket validation, account lookups, saves -- silently fails until the
+    // whole server process is restarted.
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        try {
+            pqxx::work tx(*odb->db->conn);
+            pqxx::result r = tx.exec(translated);
+            std::vector<std::string> col_tables = resolve_column_tables(odb->db, tx, r);
+            tx.commit();
+
+            net7_result_holder *holder = new net7_result_holder;
+            holder->affected_rows = r.affected_rows();
+            holder->column_tables = std::move(col_tables);
+            holder->result = std::move(r);
+            res = holder;
+            last_affected = holder->affected_rows;
+            // Mirror legacy contract: nonzero means "execute returned something"
+            // (i.e. the query ran). Callers cast to bool or to int.
+            return 1;
+        } catch (const pqxx::broken_connection &e) {
+            if (attempt == 0 && sql_connection && sql_connection->reopen(odb))
+                continue;   // fresh connection -- replay the statement once
+            last_errno = 2;
+            snprintf(last_errmsg, sizeof(last_errmsg), "%s", e.what());
+            return 0;
+        } catch (const pqxx::sql_error &e) {
+            last_errno = 1;
+            snprintf(last_errmsg, sizeof(last_errmsg), "%s", e.what());
+            return 0;
+        } catch (const pqxx::failure &e) {
+            last_errno = 2;
+            snprintf(last_errmsg, sizeof(last_errmsg), "%s", e.what());
+            return 0;
+        } catch (const std::exception &e) {
+            last_errno = 3;
+            snprintf(last_errmsg, sizeof(last_errmsg), "%s", e.what());
+            return 0;
+        }
+    }
+    return 0;
 }
 
 bool sql_query_c::run_query(char *sql)
@@ -534,13 +584,15 @@ int sql_query_c::execute_params(const char *sql)
     std::string translated_q = translate_placeholders(sql, n_placeholders);
     std::string translated   = translate_dialect(translated_q.c_str());
 
-    try {
-        // pqxx::exec_params(zview, Args&&...) builds a fresh pqxx::params
-        // pack from each variadic arg; pqxx::params has an append(params)
-        // overload, so passing our accumulator flattens it correctly.
-        // Inside an explicit begin()..commit() the statement joins the open
-        // transaction and is NOT committed here.
-        if (odb->db->active_tx) {
+    // pqxx::exec_params(zview, Args&&...) builds a fresh pqxx::params pack from
+    // each variadic arg; pqxx::params has an append(params) overload, so passing
+    // our accumulator flattens it correctly.
+    //
+    // Inside an explicit begin()..commit() the statement joins the open
+    // transaction and is NOT committed here. A broken connection cannot be
+    // transparently recovered mid-transaction, so this path runs once.
+    if (odb->db->active_tx) {
+        try {
             pqxx::work &tx = *odb->db->active_tx;
             pqxx::result r = params
                 ? tx.exec_params(translated, params->p)
@@ -555,39 +607,62 @@ int sql_query_c::execute_params(const char *sql)
             last_affected = holder->affected_rows;
             ClearParams();
             return 1;
+        } catch (const pqxx::sql_error &e) {
+            last_errno = 1; snprintf(last_errmsg, sizeof(last_errmsg), "%s", e.what()); ClearParams(); return 0;
+        } catch (const pqxx::failure &e) {
+            last_errno = 2; snprintf(last_errmsg, sizeof(last_errmsg), "%s", e.what()); ClearParams(); return 0;
+        } catch (const std::exception &e) {
+            last_errno = 3; snprintf(last_errmsg, sizeof(last_errmsg), "%s", e.what()); ClearParams(); return 0;
         }
-
-        pqxx::work tx(*odb->db->conn);
-        pqxx::result r = params
-            ? tx.exec_params(translated, params->p)
-            : tx.exec(translated);
-        std::vector<std::string> col_tables = resolve_column_tables(odb->db, tx, r);
-        tx.commit();
-
-        net7_result_holder *holder = new net7_result_holder;
-        holder->affected_rows = r.affected_rows();
-        holder->column_tables = std::move(col_tables);
-        holder->result = std::move(r);
-        res = holder;
-        last_affected = holder->affected_rows;
-        ClearParams();
-        return 1;
-    } catch (const pqxx::sql_error &e) {
-        last_errno = 1;
-        snprintf(last_errmsg, sizeof(last_errmsg), "%s", e.what());
-        ClearParams();
-        return 0;
-    } catch (const pqxx::failure &e) {
-        last_errno = 2;
-        snprintf(last_errmsg, sizeof(last_errmsg), "%s", e.what());
-        ClearParams();
-        return 0;
-    } catch (const std::exception &e) {
-        last_errno = 3;
-        snprintf(last_errmsg, sizeof(last_errmsg), "%s", e.what());
-        ClearParams();
-        return 0;
     }
+
+    // Autocommit path: one transparent reconnect+retry if the pooled connection
+    // died (postgres restarted under a still-running server). The bound params
+    // are preserved across the retry -- ClearParams() runs only once we either
+    // succeed or give up, so the replayed statement re-binds the same values.
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        try {
+            pqxx::work tx(*odb->db->conn);
+            pqxx::result r = params
+                ? tx.exec_params(translated, params->p)
+                : tx.exec(translated);
+            std::vector<std::string> col_tables = resolve_column_tables(odb->db, tx, r);
+            tx.commit();
+
+            net7_result_holder *holder = new net7_result_holder;
+            holder->affected_rows = r.affected_rows();
+            holder->column_tables = std::move(col_tables);
+            holder->result = std::move(r);
+            res = holder;
+            last_affected = holder->affected_rows;
+            ClearParams();
+            return 1;
+        } catch (const pqxx::broken_connection &e) {
+            if (attempt == 0 && sql_connection && sql_connection->reopen(odb))
+                continue;   // fresh connection -- replay with the same params
+            last_errno = 2;
+            snprintf(last_errmsg, sizeof(last_errmsg), "%s", e.what());
+            ClearParams();
+            return 0;
+        } catch (const pqxx::sql_error &e) {
+            last_errno = 1;
+            snprintf(last_errmsg, sizeof(last_errmsg), "%s", e.what());
+            ClearParams();
+            return 0;
+        } catch (const pqxx::failure &e) {
+            last_errno = 2;
+            snprintf(last_errmsg, sizeof(last_errmsg), "%s", e.what());
+            ClearParams();
+            return 0;
+        } catch (const std::exception &e) {
+            last_errno = 3;
+            snprintf(last_errmsg, sizeof(last_errmsg), "%s", e.what());
+            ClearParams();
+            return 0;
+        }
+    }
+    ClearParams();
+    return 0;
 }
 
 my_ulonglong sql_query_c::n_rows()

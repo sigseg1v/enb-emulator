@@ -17,6 +17,7 @@
 
 #include <net7/Mutex.h>
 #include <cstdint>
+#include <string>
 
 #define _CRT_SECURE_NO_WARNINGS 1		// Disable Warning messages about new Secure Functions in VS2008
 
@@ -57,7 +58,17 @@ public:
     OPENDB *grabdb();
     void freedb(OPENDB *odb);
 
+    // Replace a borrowed handle's underlying pqxx::connection with a fresh one
+    // (same DSN) after the server lost its link to postgres -- e.g. postgres
+    // was restarted while this server stayed up, leaving every pooled
+    // connection broken. Returns false (and leaves the handle untouched) if a
+    // transaction is open on it, since a half-finished transaction cannot be
+    // transparently resumed. Caller must own the handle (busy == true).
+    bool reopen(OPENDB *odb);
+
 private:
+    std::string build_dsn() const;
+
     char *host;
     char *user;
     char *password;
