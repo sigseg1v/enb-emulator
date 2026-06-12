@@ -7,7 +7,7 @@
 // so the UI never has to resolve a separate catalogue across a network call.
 
 export type RarityKey = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary';
-export type Cat = 'weapon' | 'shield' | 'reactor' | 'device' | 'component' | 'ore';
+export type Cat = 'weapon' | 'shield' | 'reactor' | 'device' | 'engine' | 'component' | 'ore';
 export type Band = 'low' | 'med' | 'high';
 
 export interface Buff { name: string; scope: string; text: string; }

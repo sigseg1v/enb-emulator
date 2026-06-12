@@ -50,16 +50,18 @@ type itemTemplate struct {
 // ore). The catalogue ids are: 2 Shield, 6 Engine, 7 Reactor, 10 Weapon, 11
 // Device, 14 Energy Beam Weapon, 15 Missile Launcher, 16 Projectile Launcher,
 // 18 Computer, 50-54 components (Electronic/Reactor/Fabricated/Weapon/Ammo),
-// 80 Refined Resource, 81 Raw Resource, 90 Trade Good. Engine has no dedicated
-// SPA Cat, so it rides under "device" (installed ship gear). Unknown ids fall
-// back to "component".
+// 80 Refined Resource, 81 Raw Resource, 90 Trade Good. Engine (cat 6) is its own
+// SPA Cat so the AH can filter it apart from generic Devices/Computers. Unknown
+// ids fall back to "component".
 func categoryToCat(categoryID int, name string) string {
 	switch categoryID {
 	case 2:
 		return "shield"
 	case 7:
 		return "reactor"
-	case 6, 11, 18:
+	case 6:
+		return "engine"
+	case 11, 18:
 		return "device"
 	case 10, 14, 15, 16:
 		return "weapon"
@@ -84,6 +86,8 @@ func glyphForCat(cat string) string {
 		return "⚙"
 	case "device":
 		return "◉"
+	case "engine":
+		return "▷"
 	case "ore":
 		return "◇"
 	default:
@@ -189,8 +193,7 @@ func (s *Store) resolveItems(ctx context.Context, ids []int) (map[int]itemTempla
 // templates whose true type is reactor / shield / engine, determined by which
 // specialized item_* table the id belongs to. Without this they render as the
 // "component" fallback (the Profile equip card showed a fitted reactor, shield
-// and engine all as "COMPONENT"). Engine has no dedicated SPA Cat, so it keeps
-// the "device" visual bucket but is LABELLED "engine".
+// and engine all as "COMPONENT"). Engine is its own SPA Cat ("engine").
 func (s *Store) classifyCoreItems(ctx context.Context, out map[int]itemTemplate, coreIDs []int) error {
 	if len(coreIDs) == 0 {
 		return nil
@@ -200,7 +203,7 @@ func (s *Store) classifyCoreItems(ctx context.Context, out map[int]itemTemplate,
 	probes := []struct{ table, cat, slot, glyph string }{
 		{"item_reactor", "reactor", "reactor", "⚙"},
 		{"item_shield", "shield", "shield", "◐"},
-		{"item_engine", "device", "engine", "▷"},
+		{"item_engine", "engine", "engine", "▷"},
 	}
 	for _, p := range probes {
 		rows, err := s.content.Query(ctx,
