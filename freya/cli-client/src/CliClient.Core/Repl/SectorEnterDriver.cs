@@ -405,6 +405,8 @@ public static class SectorEnterDriver
         10 => "ship name is on the restricted list",
         11 => "server internal error",
         12 => "server closed (stress-test gate)",
+        13 => "account already in use (another session is logged in -- log it out first)",
+        14 => "server is shutting down",
         _  => "unknown reason",
     };
 }
