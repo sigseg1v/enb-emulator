@@ -269,9 +269,29 @@ func (s *Store) avatarShip(ctx context.Context, accountID int64, name string) (S
 type SkillView struct {
 	ID       int    `json:"id"`
 	Name     string `json:"name"`
-	Category string `json:"category"` // Combat | Explore | Trade | Total
+	Category string `json:"category"` // Combat | Explore | Trade | Equipment Tech | Total
 	Level    int    `json:"level"`
 	MaxLevel int    `json:"maxLevel"`
+}
+
+// equipmentTechSkills are the ship-gear proficiency skills (Device / Engine /
+// Reactor / Shield Tech). The catalogue files them under the catch-all "Total"
+// category alongside unrelated cross-discipline skills (Build Items, Engineering,
+// the Lores), which reads wrong in the UI -- they get their own "Equipment Tech"
+// heading instead. Keyed by skill_id (stable; the names are not).
+var equipmentTechSkills = map[int]bool{
+	18: true, // Device Tech
+	20: true, // Engine Tech
+	45: true, // Reactor Tech
+	55: true, // Shield Tech
+}
+
+// displaySkillCategory overrides the catalogue category for display grouping.
+func displaySkillCategory(id int, cat string) string {
+	if equipmentTechSkills[id] {
+		return "Equipment Tech"
+	}
+	return cat
 }
 
 // avatarSkills lists an owned avatar's learned skills with per-class caps.
@@ -350,6 +370,7 @@ func (s *Store) avatarSkills(ctx context.Context, accountID int64, name string) 
 		if max < lvl {
 			max = lvl // never render more filled dots than the cap
 		}
+		cat = displaySkillCategory(id, cat)
 		out = append(out, SkillView{ID: id, Name: nm, Category: cat, Level: lvl, MaxLevel: max})
 	}
 	if err := defRows.Err(); err != nil {

@@ -457,6 +457,13 @@ export function Galaxy() {
     return p;
   }, [idByNorm, occ]);
 
+  // The busiest sector's online count, used to NORMALIZE the presence glow:
+  // every node's ring intensity is its count relative to this max, so the
+  // fullest sector(s) glow hardest and the rest scale down proportionally.
+  const maxOnline = useMemo(
+    () => Object.values(presence).reduce((m, v) => Math.max(m, v), 0),
+    [presence]);
+
   const dimall = hover != null || hl != null;
   const total = occ?.total ?? 0;
 
@@ -646,14 +653,20 @@ export function Galaxy() {
               // Endriago and Dahin are also hand-placed above their planet.
               const forceAbove = s.n === 'Endriago' || s.n === 'Dahin';
               const above = (s.y > 1150 || forceAbove) && s.n !== "Blackbeard's Wake";
-              // Gallina's label is nudged down by about one text-height to clear
-              // its neighbours.
-              const labelDy = s.n === 'Gallina' ? (s.hub ? 22 : 13) : 0;
-              // Alpha Centauri's label shifts left ~20% of its text width (rough
-              // glyph-width estimate: ~0.5em per char).
+              // Per-label hand nudges to clear neighbours / planet glyphs.
+              // Gallina sits low to clear its neighbours; Sirius lifts up a touch.
+              const labelDy =
+                s.n === 'Gallina' ? (s.hub ? 30 : 21) :
+                s.n === 'Sirius'  ? -8 :
+                0;
+              // Alpha Centauri shifts left ~20% of its text width (rough
+              // glyph-width estimate: ~0.5em per char) plus a small extra nudge;
+              // Sirius shifts right a touch.
               const fontPx = s.hub ? 22 : 13;
-              const labelDx = s.n === 'Alpha Centauri'
-                ? -0.2 * s.n.length * fontPx * 0.5 : 0;
+              const labelDx =
+                s.n === 'Alpha Centauri' ? -0.2 * s.n.length * fontPx * 0.5 - 8 :
+                s.n === 'Sirius'         ? 8 :
+                0;
               return (
                 <g key={s.n} className={cls} tabIndex={0}
                   onMouseEnter={() => { setHover(s.n); placeTip(s); }}
@@ -689,15 +702,22 @@ export function Galaxy() {
                       {s.n}
                     </text>
                   )}
-                  {/* live presence: sonar waves + count */}
-                  {online > 0 && [0, 1, 2].map(w => (
-                    <circle key={'w' + w} className={styles.wave} cx={s.x} cy={s.y} r={R + 3} fill="none"
-                      stroke="var(--presence)" strokeWidth={online > 4 ? 2.2 : 1.5}
-                      style={{ animationDelay: (w * 0.95).toFixed(2) + 's' }} />
-                  ))}
-                  {online > 1 && (
-                    <text className={styles.count} x={s.x + R + 7} y={s.y - R - 4} fontSize={s.hub ? 19 : 16}>{online}</text>
-                  )}
+                  {/* live presence: sonar waves whose intensity is normalized to
+                      the busiest sector (count / maxOnline), with a small floor so
+                      a lone pilot is still legible; plus the pilot count. */}
+                  {online > 0 && (() => {
+                    const intensity = maxOnline > 0
+                      ? Math.max(0.3, online / maxOnline) : 0;
+                    return <>
+                      {[0, 1, 2].map(w => (
+                        <circle key={'w' + w} className={styles.wave} cx={s.x} cy={s.y} r={R + 3} fill="none"
+                          stroke="var(--presence)" strokeWidth={1.2 + 1.4 * intensity}
+                          style={{ animationDelay: (w * 0.95).toFixed(2) + 's', '--wi': intensity.toFixed(3) } as React.CSSProperties} />
+                      ))}
+                      <text className={styles.count} x={s.x + R + 7} y={s.y - R - 4}
+                        fontSize={s.hub ? 19 : 16}>{online}</text>
+                    </>;
+                  })()}
                 </g>
               );
             })}

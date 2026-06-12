@@ -10,6 +10,7 @@ using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using LaunchFreya.Config;
 #if CHECK_FOR_UPDATES
 using System.Diagnostics;
@@ -188,7 +189,7 @@ namespace LaunchFreya
             _user.FormMainPositionX = Position.X;
             _user.FormMainPositionY = Position.Y;
             _user.Save();
-            _activeLauncher?.AuthRelay?.Dispose();
+            _activeLauncher?.Dispose();
         }
 
         // Re-probe the currently-selected multiplayer server so its status stays
@@ -697,13 +698,15 @@ namespace LaunchFreya
             // exits with it -- so the process we Start is never the client). We
             // therefore do NOT lock Play after a launch. Instead Play is
             // idempotent: each click first tears down the PREVIOUS session's auth
-            // relay (freeing its loopback port) so a second launch is clean rather
-            // than colliding with the first. This fixes "can't relaunch without
-            // closing the launcher entirely" without fragile PID tracking.
+            // relay (freeing its loopback port) AND the still-running FreyaProxy
+            // (which otherwise keeps the loopback listen ports bound) so a second
+            // launch is clean rather than colliding with the first. This fixes
+            // "can't relaunch without closing the launcher entirely" without
+            // fragile PID tracking.
             if (_activeLauncher != null)
             {
-                AppendLog("Relaunch: tearing down the previous session before launching again.");
-                _activeLauncher.AuthRelay?.Dispose();
+                AppendLog("Relaunch: closing the previous proxy + session before launching again.");
+                _activeLauncher.Dispose();
                 _activeLauncher = null;
             }
 
@@ -722,31 +725,198 @@ namespace LaunchFreya
             }
         }
 
+        // How many lines of the tail of each log to show. Refresh re-reads the
+        // file and re-renders the last LogTail lines (it does NOT accumulate).
+        const int LogTail = 500;
+
+        // One Advanced-viewer tab: a named source and the read-only box that
+        // renders the tail of it. ReadAll returns the FULL log text (or null when
+        // the source does not exist yet); Render tails it to the last LogTail.
+        sealed class LogTab
+        {
+            public string         Header;
+            public Func<string>   ReadAll;
+            public string         EmptyMsg;
+            public TextBox        Box;
+        }
+
         async void OnAdvancedClick(object sender, RoutedEventArgs e)
         {
-            // Surface the launcher's own log (config load, server probe
-            // results, patch decisions, child-process spawn output). The
-            // main window keeps the log pane hidden to stay compact.
-            var body = string.IsNullOrEmpty(c_LogPane.Text)
-                ? "(no log output yet)"
-                : c_LogPane.Text;
+            // Where the spawned children write. The proxy runs with WorkingDir =
+            // <launcher>/bin and logs there as _YYYY_MM_DD.log; enbmod writes
+            // enbmod.log next to the client exe (where the DLL is staged).
+            string proxyDir  = Path.Combine(AppContext.BaseDirectory, "bin");
+            string clientDir = string.IsNullOrEmpty(_setting.ClientPath)
+                ? null : Path.GetDirectoryName(_setting.ClientPath);
+
+            var tabs = new[]
+            {
+                new LogTab
+                {
+                    Header   = "Launcher",
+                    // The launcher's own log is the in-memory pane (config load,
+                    // server probe, patch decisions, spawn output) -- not a file.
+                    ReadAll  = () => c_LogPane.Text,
+                    EmptyMsg = "(no launcher log output yet)",
+                },
+                new LogTab
+                {
+                    Header   = "E&B",
+                    ReadAll  = ReadLogFile(() => FindClientLog(clientDir)),
+                    EmptyMsg = "(no Earth & Beyond client log found)",
+                },
+                new LogTab
+                {
+                    Header   = "Proxy",
+                    ReadAll  = ReadLogFile(() => NewestLogFile(proxyDir, "*.log")),
+                    EmptyMsg = "(no proxy log yet -- launch the game first)",
+                },
+                new LogTab
+                {
+                    Header   = "Mods",
+                    ReadAll  = ReadLogFile(() => clientDir == null
+                        ? null : ExistingFile(Path.Combine(clientDir, "enbmod.log"))),
+                    EmptyMsg = "(no enbmod log -- enable Client Mods and launch)",
+                },
+            };
+
+            var tabControl = new TabControl { Margin = new Avalonia.Thickness(0) };
+            foreach (var t in tabs)
+            {
+                t.Box = new TextBox
+                {
+                    IsReadOnly    = true,
+                    AcceptsReturn = true,
+                    TextWrapping  = Avalonia.Media.TextWrapping.NoWrap,
+                    FontFamily    = "Cascadia Mono,Consolas,monospace",
+                    Margin        = new Avalonia.Thickness(0, 8, 0, 0),
+                };
+                tabControl.Items.Add(new TabItem { Header = t.Header, Content = t.Box });
+            }
+
+            var refresh = new Button
+            {
+                Content             = "↻ Refresh",   // ↻
+                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+            };
+            refresh.Click += (_, __) =>
+            {
+                int i = tabControl.SelectedIndex;
+                if (i < 0 || i >= tabs.Length) return;
+                RenderLogTab(tabs[i]);   // re-read the file, show the last LogTail lines
+            };
+
+            tabControl.SelectionChanged += (_, __) =>
+            {
+                int i = tabControl.SelectedIndex;
+                if (i >= 0 && i < tabs.Length) RenderLogTab(tabs[i]);
+            };
+
+            var root = new DockPanel { Margin = new Avalonia.Thickness(8) };
+            DockPanel.SetDock(refresh, Dock.Top);
+            root.Children.Add(refresh);
+            root.Children.Add(tabControl);   // fills the rest
 
             var dlg = new Window
             {
-                Title  = "Advanced -- launcher log",
-                Width  = 720,
-                Height = 480,
-                Content = new TextBox
-                {
-                    Text           = body,
-                    IsReadOnly     = true,
-                    AcceptsReturn  = true,
-                    TextWrapping   = Avalonia.Media.TextWrapping.NoWrap,
-                    FontFamily     = "Cascadia Mono,Consolas,monospace",
-                    Margin         = new Avalonia.Thickness(8),
-                },
+                Title   = "Freya - Advanced Logs",
+                Width   = 820,
+                Height  = 560,
+                Content = root,
             };
+
+            tabControl.SelectedIndex = 0;
+            RenderLogTab(tabs[0]);   // SelectionChanged does not fire for the initial index
+
             await dlg.ShowDialog(this);
+        }
+
+        // Render a tab: read its source, keep only the last `Lines` lines, and
+        // always pin the scrollbar to the bottom (newest output).
+        void RenderLogTab(LogTab t)
+        {
+            string full;
+            try { full = t.ReadAll(); }
+            catch (Exception ex) { full = "(error reading log: " + ex.Message + ")"; }
+
+            if (string.IsNullOrEmpty(full))
+            {
+                t.Box.Text = t.EmptyMsg;
+                ScrollBoxToEnd(t.Box);
+                return;
+            }
+
+            var lines = full.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+            var tail  = lines.Length > LogTail
+                ? lines.Skip(lines.Length - LogTail)
+                : lines;
+            t.Box.Text = string.Join("\n", tail);
+            ScrollBoxToEnd(t.Box);
+        }
+
+        // Pin a TextBox's scrollbar to the bottom. The inner ScrollViewer is not
+        // realized until after a layout pass, so we also retry at Loaded priority.
+        void ScrollBoxToEnd(TextBox box)
+        {
+            void Pin()
+            {
+                box.CaretIndex = box.Text?.Length ?? 0;
+                box.FindDescendantOfType<ScrollViewer>()?.ScrollToEnd();
+            }
+            Pin();
+            Dispatcher.UIThread.Post(Pin, DispatcherPriority.Loaded);
+        }
+
+        // Wrap a path resolver into a full-text reader. Opens with FileShare
+        // ReadWrite because the proxy / enbmod hold the file open for appending.
+        static Func<string> ReadLogFile(Func<string> resolve) => () =>
+        {
+            string path;
+            try { path = resolve(); } catch { path = null; }
+            if (string.IsNullOrEmpty(path) || !File.Exists(path)) return null;
+            try
+            {
+                using var fs = new FileStream(
+                    path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                using var sr = new StreamReader(fs);
+                return sr.ReadToEnd();
+            }
+            catch (Exception ex)
+            {
+                return "(could not read " + Path.GetFileName(path) + ": " + ex.Message + ")";
+            }
+        };
+
+        static string ExistingFile(string path)
+            => File.Exists(path) ? path : null;
+
+        // Newest file matching `pattern` in `dir` by last-write time. The proxy's
+        // daily log is _YYYY_MM_DD.log, so "most recent" == newest mtime.
+        static string NewestLogFile(string dir, string pattern)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return null;
+                return new DirectoryInfo(dir).GetFiles(pattern)
+                    .OrderByDescending(f => f.LastWriteTimeUtc)
+                    .Select(f => f.FullName)
+                    .FirstOrDefault();
+            }
+            catch { return null; }
+        }
+
+        // The EnB client has no standard text log; probe the names it might use
+        // and report none rather than mis-grabbing an unrelated *.log (enbmod's
+        // log lives in the same folder).
+        static string FindClientLog(string clientDir)
+        {
+            if (string.IsNullOrEmpty(clientDir)) return null;
+            foreach (var name in new[] { "client.log", "Net7.log", "clientlog.txt", "eb.log" })
+            {
+                var p = Path.Combine(clientDir, name);
+                if (File.Exists(p)) return p;
+            }
+            return null;
         }
 
         void OnCancelClick(object sender, RoutedEventArgs e) => Close();

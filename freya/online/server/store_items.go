@@ -133,6 +133,13 @@ func (s *Store) resolveItems(ctx context.Context, ids []int) (map[int]itemTempla
 	}
 	defer rows.Close()
 
+	// item_base.category 12 ("Core Item") is a generic supercategory: reactors,
+	// shields and engines are ALL stored as Core Items, so categoryToCat can only
+	// fall back to "component" for them. The real ship-gear type is knowable only
+	// from membership in the specialized item_reactor / item_shield / item_engine
+	// tables, probed after the base scan.
+	var coreIDs []int
+
 	for rows.Next() {
 		var (
 			id, category, manCost int64
@@ -146,6 +153,9 @@ func (s *Store) resolveItems(ctx context.Context, ids []int) (map[int]itemTempla
 			return nil, err
 		}
 		cat := categoryToCat(int(category), name)
+		if category == 12 {
+			coreIDs = append(coreIDs, int(id))
+		}
 		out[int(id)] = itemTemplate{view: ItemView{
 			ID:          strconv.FormatInt(id, 10),
 			Name:        name,
@@ -166,7 +176,57 @@ func (s *Store) resolveItems(ctx context.Context, ids []int) (map[int]itemTempla
 			NoTrade:  noTrade != 0,
 		}}
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := s.classifyCoreItems(ctx, out, coreIDs); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// classifyCoreItems rewrites the cat/slot/glyph of "Core Item" (category 12)
+// templates whose true type is reactor / shield / engine, determined by which
+// specialized item_* table the id belongs to. Without this they render as the
+// "component" fallback (the Profile equip card showed a fitted reactor, shield
+// and engine all as "COMPONENT"). Engine has no dedicated SPA Cat, so it keeps
+// the "device" visual bucket but is LABELLED "engine".
+func (s *Store) classifyCoreItems(ctx context.Context, out map[int]itemTemplate, coreIDs []int) error {
+	if len(coreIDs) == 0 {
+		return nil
+	}
+	// table is a fixed internal literal, never user input; only the id list is a
+	// bound parameter ($1) -- no value is ever concatenated into the SQL.
+	probes := []struct{ table, cat, slot, glyph string }{
+		{"item_reactor", "reactor", "reactor", "⚙"},
+		{"item_shield", "shield", "shield", "◐"},
+		{"item_engine", "device", "engine", "▷"},
+	}
+	for _, p := range probes {
+		rows, err := s.content.Query(ctx,
+			"SELECT item_id FROM "+p.table+" WHERE item_id = ANY($1)", coreIDs)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var id int
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			if t, ok := out[id]; ok {
+				t.view.Cat = p.cat
+				t.view.Slot = p.slot
+				t.view.Glyph = p.glyph
+				out[id] = t
+			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // itemName resolves a single item's display name from the content pool, for
