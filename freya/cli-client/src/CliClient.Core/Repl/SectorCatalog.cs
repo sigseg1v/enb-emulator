@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: CC-BY-NC-SA-3.0
-// Part of the Earth & Beyond emulator preservation project.
-// License: LICENSES/enb-emulator
+// SPDX-License-Identifier: MIT
+// Part of the Earth & Beyond emulator preservation project -- Freya (MIT).
+// License: LICENSES/Freya
 
 namespace N7.CliClient.Repl;
 
@@ -13,10 +13,7 @@ namespace N7.CliClient.Repl;
 /// <para>
 /// The names mirror the server content DB's <c>sectors</c> table
 /// (<c>net7.sectors.name</c>), the same authoritative source the server reads
-/// at runtime -- this is a baked snapshot of that game content, NOT new Freya
-/// work, so the file carries the project's CC-BY-NC-SA header like
-/// <see cref="CharacterClass"/> rather than the MIT header the rest of
-/// <c>freya/cli-client</c> uses.
+/// at runtime -- a baked snapshot of that game content for display only.
 /// </para>
 /// <para>
 /// Every entry is a SPACE sector (id &lt;= 9999). Station-interior sectors

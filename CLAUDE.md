@@ -114,6 +114,24 @@ Net7SSL) and `proxy/` are inherited Net-7 code (the proxy compiles against
 have heavily edited them. New code that links Net-7 headers is a *modification*,
 not new independent work.
 
+**SPDX header for `freya/*` files: MIT, always.** Every source file under
+`freya/` carries `// SPDX-License-Identifier: MIT` (with the
+`Part of the Earth & Beyond emulator preservation project -- Freya (MIT). /
+License: LICENSES/Freya` lines), NOT the CC BY-NC-SA header. `freya/` is
+self-contained original work observed from server behaviour; it is not Net-7
+code. **Before adding or moving a file into `freya/`, decide if it would
+violate that** -- i.e. if it is actually a derivative of Net-7
+CC-BY-NC-SA source (a port/transcription of `server/`, `proxy/`,
+`login-server/`, or `common/include/net7/` code) rather than independent work.
+If you think any file would violate the MIT premise, **STOP and flag it to the
+project owner to decide** (leave CC, clean-room rewrite, or owner-directed MIT)
+-- do NOT silently stamp MIT on a Net-7 derivative, and do NOT silently leave a
+genuine `freya/` original under CC. The crypto handshake files
+(`freya/cli-client/src/CliClient.Core/Net/WestwoodRSA.cs`, `WestwoodRC4.cs`,
+`RsaHandshake.cs`) are the precedent: their licensing was ambiguous (textbook
+RC4/RSA but originally written as ports), so by owner decision they carry **no
+SPDX/license header at all** rather than a claimed license.
+
 ## Coding rules
 
 - **Naming new code "Freya", not "Net7"**: the inherited upstream code carries the `Net7` brand (Net-7 / tada-o) -- leave those existing names alone (renaming live symbols/files churns the merge and breaks cross-refs). But anything **new** -- a new system, subsystem, tool, DLL, rewrite, or replacement for an old Net7 component -- gets the **Freya** name (`FreyaProxy`, `FreyaPosFeed.dll`, `FreyaInject.exe`, `tools/LaunchFreya`, ...). Rule of thumb: if you're writing it fresh or rewriting an old piece, it's Freya; if you're editing inherited code in place, keep its Net7 name.
