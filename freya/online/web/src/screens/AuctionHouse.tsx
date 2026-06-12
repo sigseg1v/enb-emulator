@@ -20,6 +20,7 @@ const AH_FILTERS: { key: Filter; label: string }[] = [
   { key: 'shield', label: 'Shields' },
   { key: 'reactor', label: 'Reactors' },
   { key: 'device', label: 'Devices' },
+  { key: 'engine', label: 'Engines' },
   { key: 'component', label: 'Components' },
   { key: 'ore', label: 'Ore' },
 ];

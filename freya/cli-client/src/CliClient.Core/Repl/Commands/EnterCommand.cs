@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: CC-BY-NC-SA-3.0
-// Part of the Earth & Beyond emulator preservation project.
-// License: LICENSES/enb-emulator
+// SPDX-License-Identifier: MIT
+// Part of the Earth & Beyond emulator preservation project -- Freya (MIT).
+// License: LICENSES/Freya
 
 using N7.CliClient.Logging;
 using N7.CliClient.Net;
@@ -59,8 +59,9 @@ public sealed class EnterCommand : ICommandHandler
         }
         if (_ctx.Sector is not null)
         {
+            string where = _ctx.ActiveSectorId is { } sid ? _ctx.SectorLabel(sid) : "a sector";
             await output.WriteLineAsync(AnsiPalette.Warn(
-                $"already in sector {_ctx.ActiveSectorId} -- restart the REPL to switch"))
+                $"already in {where} -- restart the REPL to switch"))
                 .ConfigureAwait(false);
             return 1;
         }
@@ -95,7 +96,7 @@ public sealed class EnterCommand : ICommandHandler
         }
 
         await output.WriteLineAsync(
-            AnsiPalette.Muted("entering sector ") + AnsiPalette.Value($"{sectorId}") +
+            AnsiPalette.Muted("entering ") + AnsiPalette.Value(_ctx.SectorLabel(sectorId)) +
             AnsiPalette.Muted(" on slot ") + AnsiPalette.Value($"{slot}") +
             AnsiPalette.Muted(" as ") + AnsiPalette.Accent(firstName) + AnsiPalette.Muted("..."))
             .ConfigureAwait(false);

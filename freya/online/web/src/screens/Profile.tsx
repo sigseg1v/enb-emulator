@@ -75,7 +75,7 @@ function EquipTile({ eq }: { eq: EquippedItem }) {
 
 // The skill categories in display order. "Total" skills (cross-discipline, e.g.
 // Build Items) sort last under a neutral heading.
-const SKILL_ORDER = ['Combat', 'Explore', 'Trade', 'Total'];
+const SKILL_ORDER = ['Combat', 'Explore', 'Trade', 'Equipment Tech', 'Total'];
 
 export function Profile({ character }: { character: string }) {
   const [profile, setProfile] = useState<AvatarProfile | null>(null);

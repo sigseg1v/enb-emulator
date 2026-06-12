@@ -99,6 +99,11 @@ private:
 	void 	HandleDeleteGuild(long guild_id);
 	void	HandleChangeFieldRespawn(short bytes, unsigned char *data);
 	void	HandleExternalStatusEvent(long player_id, short bytes, unsigned char *data);
+	// Phase AQ. Persist one sector-transition row into gate_events (net7_user)
+	// for the website's galaxy-traffic animation. Runs on the SaveManager thread
+	// (shares m_SQL_Conn like every Handle*). Payload is two packed int32s:
+	// [from_sector][to_sector]; player_id carries the moving avatar_id.
+	void	HandleGateEvent(long player_id, short bytes, unsigned char *data);
 
 private:
 	MessageQueue    * m_SaveQueue;
@@ -120,6 +125,14 @@ private:
 // touches the lock-free save queue, exactly like SaveLogout). `content` is the
 // final message line; it is truncated to fit the save slot.
 void EmitExternalStatusEvent(unsigned char kind, const char *content);
+
+// Phase AQ. Enqueue a sector-transition (gate / undock / dock) for the website's
+// galaxy-traffic animation. On by default (NET7_GATE_EVENTS_ENABLED=0 disables
+// it); no-op unless the SaveManager is up. Best-effort and off the DB thread, exactly
+// like EmitExternalStatusEvent: a failure here must never stall a handoff.
+// avatar_id is the moving character; from_sector/to_sector are host-order
+// sector ids (a self-hop from == to is dropped by the caller).
+void EmitGateEvent(long avatar_id, long from_sector, long to_sector);
 
 struct EnbSaveHeader
 {
@@ -182,6 +195,13 @@ struct EnbSaveHeader
 // one vault stack spreads across several cargo slots: the emptied vault source
 // plus every touched cargo slot all commit together (Player::SaveInventoryMoveSlots).
 #define SAVE_CODE_MOVE_INVENTORY					0x0031
+// Phase AQ. Not a save -- reuses the SaveManager queue (which owns the single
+// serialized net7_user connection) to append a sector-transition row to
+// gate_events for the website's galaxy-traffic animation. player_id carries the
+// moving avatar_id; the payload is two packed int32s [from_sector][to_sector].
+// HandleGateEvent INSERTs the row. On by default (NET7_GATE_EVENTS_ENABLED=0
+// disables it).
+#define SAVE_CODE_GATE_EVENT						0x0032
 
 // Wire size of one inventory/vault/trade slot record as packed by
 // Player::SaveInventoryChange / SaveVaultChange / SaveTradeChange and parsed by

@@ -1058,3 +1058,69 @@ format & byte order", Trap 2).
   "could not begin transaction" line during legitimate play.
 - **Setup**: any deploy; a character with items in cargo and vault, docked at a
   station so the vault is accessible.
+
+### [ ] CV-21 -- Can buy more than one item per transaction at a vendor (vendor slot shows a full stack, not 1)
+
+- **Change**: `Player::NPCTradeItems` (server/src/PlayerConnection.cpp) now sets
+  each presented vendor slot's `StackCount` to the item's `MaxStack()` (clamped
+  to >= 1) instead of the hardcoded `1`. The buy handler (case 4 in
+  HandleInventoryMove) was already correct -- it honours `InvMo.Num` and caps the
+  purchase by credits (`Cost = Source.Price * InvMo.Num`) and cargo space
+  (`CargoAddItem`). Nothing else changed.
+- **Why it was wrong**: the client's buy-quantity slider is bounded by the source
+  stack it drags from. With every vendor slot presented as a stack of 1, the
+  slider was pinned at 1 -- the reported "can only buy 1 bullet at a time" bug.
+  The item's true `MaxStack` (200-900 for bullets) already reaches the client in
+  the ItemBase template (that is why ammo stacks to 200 in cargo), so the slider
+  being capped at 1 proves it is bounded by the per-slot stack, not the template
+  -- hence raising the slot stack to `MaxStack` is the fix. Vendor stock is
+  effectively infinite (`starbase_vender_inventory.quanity == -1` for ~all rows),
+  so a full-stack presentation is correct.
+- **Evidence gap (honest)**: there is NO retail (EA) capture of a vendor buy to
+  cite. The only vendor capture on hand
+  (`proxy/local-debug/VendorInvEco-*.pcapng`, opdump
+  `proxy/local-debug/opdump-VendorInvEco.txt`) is against the live **Net-7**
+  reference server, and its 0x0027 buy frame carries `Num == 1` -- but Net-7 is
+  the SAME lineage as our server, so that is consistent with the inherited bug,
+  not proof of correct retail behaviour. The fix rests on the logical proof above
+  (template MaxStack reaches the client yet the slider is 1) plus the known
+  retail UX of buying ammo stacks, NOT on a primary-source capture. The
+  CLI/integration suite also does not yet model the vendor/buy flow, so the
+  "CLI parse + test first" precondition is not satisfied here -- flagged.
+- **What to look for (real client)**: dock, open a vendor that sells ammo
+  ("bullets"), drag an ammo item toward cargo: the quantity slider must now run
+  1..stack (not be stuck at 1). Buy several (e.g. 100). Cargo receives the full
+  amount, credits drop by `unit price * quantity`, and an over-credits or
+  over-cargo request is refused with the existing "Insufficient credits!" /
+  "Insufficient space in cargo hold." message. Confirm the same for trade goods
+  (category 90) and ordinary stackable items.
+- **Setup**: any deploy; a character docked at a station with a vendor, holding
+  enough credits and free cargo to buy a multi-item stack.
+
+### [ ] CV-22 -- Formation commands arrange the group (CLI emits 0x00BC CTA_REQUEST)
+
+- **Change**: NO server/proxy wire change. This is a new CLI emitter only: the
+  `formation <pipe|block|slot|join|break>` command sends `0x00BC` CTA_REQUEST
+  (struct CTARequest: int32 SourceID, TargetID, Action; 12 bytes LE) with the
+  GroupAction codes the server's `PlayerManager::GroupAction` already dispatches
+  -- 6 pipe / 5 block / 4 slot-back (leader SetFormation), 7 form-up (member
+  FormUp), 8 leave-formation (member), 9 break-formation (leader). SourceID is
+  our own tagged GameID; the server strips PLAYER_TAG in GetPlayer. The server
+  handler is inherited and unchanged. Logged here because the CLI cannot observe
+  ships physically snapping into formation -- only the real client proves the
+  feature works end to end.
+- **CLI byte-pin**: `CtaRequest_IsByteExact` in
+  `freya/cli-client/tests/CliClient.UnitTests/Opcodes/SelfGroupStateTests.cs`
+  pins the 12-byte emitter; `SelfGroupStateTests` pins the self-group-state
+  decode (PlayerIndex 0x001B GroupInfo) that drives command gating.
+- **What to look for (real client)**: form a group (one client leads, others
+  accept). On the leader, run `formation pipe` (then `block`, `slot`) -- the
+  group's formation indicator changes. On a non-leader member, `formation join`
+  snaps the ship into the leader's formation (needs same sector, within 5000 of
+  the leader). On the leader `formation break` ends the formation for everyone;
+  on a member `formation break` drops just that ship out. Cross-check that the
+  CLI's offered verbs match the role: a leader is offered pipe/block/slot/break,
+  a not-yet-formed member is offered join/break, and `formation` is hidden when
+  solo (not grouped).
+- **Setup**: `just play-cli` (or `play-local`) with at least two characters in
+  the same sector, grouped via `group invite <player>` + `group accept`.

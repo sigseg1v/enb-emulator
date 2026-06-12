@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: CC-BY-NC-SA-3.0
-// Part of the Earth & Beyond emulator preservation project.
-// License: LICENSES/enb-emulator
+// SPDX-License-Identifier: MIT
+// Part of the Earth & Beyond emulator preservation project -- Freya (MIT).
+// License: LICENSES/Freya
 
 using System.Buffers.Binary;
 using N7.CliClient.Logging;
@@ -12,6 +12,15 @@ using N7.CliClient.Opcodes.Records;
 using N7.CliClient.Session;
 
 namespace N7.CliClient.Repl;
+
+/// <summary>
+/// The pair of sector ids carried by a 0x003A SERVER_HANDOFF: where the server
+/// is sending the avatar (<paramref name="ToSectorId"/>) and the sector it is
+/// handing off FROM (<paramref name="FromSectorId"/>). The re-join MasterJoin
+/// echoes FromSectorId so the destination sector spawns the avatar at the gate
+/// that links back to the origin.
+/// </summary>
+public readonly record struct HandoffTarget(int ToSectorId, int FromSectorId);
 
 /// <summary>
 /// Mutable session state shared between REPL commands. One instance is
@@ -126,6 +135,72 @@ public sealed class SessionContext : IAsyncDisposable
     /// <summary>Sector id the active avatar entered.</summary>
     public int? ActiveSectorId { get; set; }
 
+    // Sector id -> name learned at runtime from a 0x0097 GALAXY_MAP Type-4
+    // frame (the server's "you are here" update), keyed when one arrives while
+    // ActiveSectorId is known. This is the only name source for a station
+    // interior (id > 9999), which SectorCatalog does not carry; static space
+    // sectors fall back to SectorCatalog, so only the >9999 interiors need this.
+    private readonly Dictionary<int, string> _sectorNameCache = new();
+    private readonly object _sectorNameGate = new();
+
+    /// <summary>
+    /// "&lt;name&gt; (&lt;id&gt;)" for a sector, preferring a name the server
+    /// reported at runtime (covers station interiors) over the static
+    /// <see cref="SectorCatalog"/>, and falling back to "sector &lt;id&gt;"
+    /// when neither knows it. This is the single place that turns a raw sector
+    /// id into the labelled form shown in the prompt, the character list, and
+    /// the gate/undock/dock handoff lines.
+    /// </summary>
+    public string SectorLabel(int sectorId)
+    {
+        string? runtime;
+        lock (_sectorNameGate) _sectorNameCache.TryGetValue(sectorId, out runtime);
+        runtime ??= SectorCatalog.Name(sectorId);
+        return runtime is { } n ? $"{n} ({sectorId})" : $"sector {sectorId}";
+    }
+
+    /// <summary>
+    /// Capture the current sector's name from a 0x0097 GALAXY_MAP Type-4 frame
+    /// (PlayerID then NUL-terminated System / Sector / Station strings -- see
+    /// GalaxyMapRecord). The Station name wins when docked (the avatar is in the
+    /// station interior); otherwise the Sector name is used. Keyed into the
+    /// runtime cache against the current sector id. Never throws -- a name is a
+    /// convenience, never a failure point.
+    /// </summary>
+    private void CaptureSectorName(Packet p)
+    {
+        if (p.Header.Opcode != 0x0097) return;
+        try
+        {
+            var s = p.Payload.Span;
+            if (s.Length < 12) return;
+            if (BinaryPrimitives.ReadInt32LittleEndian(s[..4]) != 4) return; // Type 4 only
+            int off = 12; // skip Type, Size, PlayerID
+            string? system = ReadCString(s, ref off);
+            string? sector = ReadCString(s, ref off);
+            string? station = ReadCString(s, ref off);
+            _ = system;
+            // When docked the avatar sits in the station interior, so the
+            // station's own name is the right label for the current sector;
+            // in open space it is empty and the sector name applies.
+            string? name = !string.IsNullOrEmpty(station) ? station : sector;
+            if (string.IsNullOrEmpty(name)) return;
+            if (ActiveSectorId is { } sid)
+                lock (_sectorNameGate) _sectorNameCache[sid] = name;
+        }
+        catch { /* best-effort: the static catalog still covers space sectors */ }
+    }
+
+    private static string? ReadCString(ReadOnlySpan<byte> s, ref int off)
+    {
+        if (off >= s.Length) return null;
+        int nul = s[off..].IndexOf((byte)0);
+        int end = nul < 0 ? s.Length : off + nul;
+        string str = System.Text.Encoding.ASCII.GetString(s[off..end]);
+        off = end + 1;
+        return str;
+    }
+
     /// <summary>True once <c>connect</c> has probed a reachable endpoint.</summary>
     public bool Connected { get; set; }
 
@@ -142,7 +217,15 @@ public sealed class SessionContext : IAsyncDisposable
             if (Sector is not null)
             {
                 string who = string.IsNullOrEmpty(Username) ? "in-sector" : Username;
-                return ActiveSectorId is { } sid ? $"{who}@{sid}" : who;
+                // Prefer the server-reported / catalog name; fall back to the
+                // bare id. Compact form for the prompt: "who@Name" (or the raw
+                // id when unknown) -- the "(id)" form is kept for the verbose
+                // surfaces (list / handoff lines), not the every-keystroke prompt.
+                if (ActiveSectorId is not { } sid) return who;
+                string? name;
+                lock (_sectorNameGate) _sectorNameCache.TryGetValue(sid, out name);
+                name ??= SectorCatalog.Name(sid);
+                return name is { } n ? $"{who}@{n}" : $"{who}@{sid}";
             }
             if (Global is not null) return string.IsNullOrEmpty(Username) ? "online" : Username;
             if (Connected) return "connected";
@@ -261,10 +344,20 @@ public sealed class SessionContext : IAsyncDisposable
     /// <summary>
     /// Name of the most recent player who sent us a group invite (0x001E GROUP,
     /// Flag 0x01), or null if none is pending. Set when the invite frame
-    /// arrives; the <c>group-invite-accept</c> command reads it to decide
-    /// whether there is anything to accept. Cleared once accepted/left.
+    /// arrives; the <c>group accept</c> command reads it to decide whether there
+    /// is anything to accept. Cleared once accepted/left.
     /// </summary>
     public string? PendingGroupInviter { get; set; }
+
+    /// <summary>
+    /// Latest self group/formation state, decoded from the self <c>PlayerIndex</c>
+    /// aux (0x001B, GameID == 0) whenever one carries GroupInfo. Drives the
+    /// availability gating of the <c>group</c> and <c>formation</c> subcommands.
+    /// Defaults to solo (not grouped, not leader, no formation); only a self aux
+    /// that actually carries GroupInfo updates it (see
+    /// <see cref="TrackSelfGroup"/>), so a credits-only diff aux never clobbers it.
+    /// </summary>
+    public AuxDataRecord.GroupState SelfGroup { get; private set; }
 
     public SessionContext(OpcodeRegistry registry)
     {
@@ -466,7 +559,9 @@ public sealed class SessionContext : IAsyncDisposable
         EchoChat(p, PacketDirection.Inbound);
         Narrate(p, events);
         AnnounceGroupInvite(p);
+        TrackSelfGroup(p);
         CaptureHandoff(p);
+        CaptureSectorName(p);
         PrintIfEnabled(p, PacketDirection.Inbound);
     }
 
@@ -494,30 +589,37 @@ public sealed class SessionContext : IAsyncDisposable
         catch { /* best-effort notification */ }
     }
 
-    private TaskCompletionSource<int>? _handoffTcs;
+    private TaskCompletionSource<HandoffTarget>? _handoffTcs;
 
     /// <summary>
     /// Arm a one-shot capture of the next inbound 0x003A SERVER_HANDOFF's
-    /// ToSectorID. Returns a task that completes when that frame crosses the
+    /// sector ids. Returns a task that completes when that frame crosses the
     /// active sector connection (read cleanly by the background drain -- so no
     /// mid-frame cancellation of the RC4-stateful reader is needed). The
-    /// <c>undock</c> command awaits this to learn where the server is handing
-    /// the avatar off to, then re-joins that sector. See
-    /// <see cref="CaptureHandoff"/>.
+    /// <c>undock</c>/<c>gate</c> commands await this to learn where the server
+    /// is handing the avatar off to (<see cref="HandoffTarget.ToSectorId"/>),
+    /// then re-join that sector -- echoing
+    /// <see cref="HandoffTarget.FromSectorId"/> back in the re-join MasterJoin
+    /// so the destination sector spawns the avatar at the gate that links back
+    /// to the origin (Player::SendLoginCamera -> FindGate(m_FromSectorID)).
+    /// See <see cref="CaptureHandoff"/>.
     /// </summary>
-    public Task<int> ArmHandoffCapture()
+    public Task<HandoffTarget> ArmHandoffCapture()
     {
-        var tcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var tcs = new TaskCompletionSource<HandoffTarget>(TaskCreationOptions.RunContinuationsAsynchronously);
         _handoffTcs = tcs;
         return tcs.Task;
     }
 
     /// <summary>
-    /// Complete an armed handoff capture with the ToSectorID carried by a
+    /// Complete an armed handoff capture with the sector ids carried by a
     /// 0x003A SERVER_HANDOFF. The inner MasterJoin-shaped struct puts
-    /// ToSectorID at offset 20, BIG-ENDIAN (SendServerHandoff writes it via
-    /// ntohl -- PlayerConnection.cpp:10167 -- while the rest of the struct is
-    /// host LE). Never throws -- a malformed frame must not kill the drain.
+    /// ToSectorID at offset 20 and FromSectorID at offset 24, BIG-ENDIAN
+    /// (SendServerHandoff writes both via ntohl -- PlayerConnection.cpp:10167 --
+    /// while the rest of the struct is host LE). FromSectorID is the sector the
+    /// server is handing us off FROM; the destination needs it to position the
+    /// avatar at the correct back-gate. Never throws -- a malformed frame must
+    /// not kill the drain.
     /// </summary>
     private void CaptureHandoff(Packet p)
     {
@@ -527,10 +629,11 @@ public sealed class SessionContext : IAsyncDisposable
         try
         {
             var span = p.Payload.Span;
-            if (span.Length < 24) return;
-            int toSectorId = BinaryPrimitives.ReadInt32BigEndian(span.Slice(20, 4));
+            if (span.Length < 28) return;
+            int toSectorId   = BinaryPrimitives.ReadInt32BigEndian(span.Slice(20, 4));
+            int fromSectorId = BinaryPrimitives.ReadInt32BigEndian(span.Slice(24, 4));
             _handoffTcs = null;
-            tcs.TrySetResult(toSectorId);
+            tcs.TrySetResult(new HandoffTarget(toSectorId, fromSectorId));
         }
         catch { /* leave the capture armed; the awaiter will time out */ }
     }
@@ -541,7 +644,7 @@ public sealed class SessionContext : IAsyncDisposable
     /// Surface an inbound group invite (0x001E GROUP, Flag 0x01, message
     /// "&lt;name&gt; is requesting you to join their group") as a one-line prompt
     /// telling the operator how to accept, and remember the inviter so
-    /// <c>group-invite-accept</c> has something to act on. Never throws -- a
+    /// <c>group accept</c> has something to act on. Never throws -- a
     /// malformed frame must not kill the drain.
     /// </summary>
     private void AnnounceGroupInvite(Packet p)
@@ -562,7 +665,7 @@ public sealed class SessionContext : IAsyncDisposable
             string line = AnsiPalette.Colorize(
                 AnsiPalette.BrightYellow + AnsiPalette.Bold,
                 $"** You have been invited to a group by {inviter}. " +
-                "Use `group-invite-accept` to accept.");
+                "Use `group accept` to accept.");
             lock (_chatGate)
             {
                 if (LivePrompt is { } lp && lp.TryWriteLineAbove(line)) return;
@@ -571,6 +674,25 @@ public sealed class SessionContext : IAsyncDisposable
             }
         }
         catch { /* best-effort notification */ }
+    }
+
+    /// <summary>
+    /// Update <see cref="SelfGroup"/> from an inbound self <c>PlayerIndex</c> aux
+    /// (0x001B). Only a frame that actually carries GroupInfo moves the cached
+    /// state -- the server re-sends the self aux on every group/formation change
+    /// (GroupManager.cpp: SetData/SendEmptyGroupAux/SetFormation/FormUp/Leave),
+    /// so the gating stays current. Never throws -- state tracking is a
+    /// convenience, never a failure point for the drain.
+    /// </summary>
+    private void TrackSelfGroup(Packet p)
+    {
+        if (p.Header.Opcode != 0x001B) return;
+        try
+        {
+            if (AuxDataRecord.TryExtractGroupState(p.Payload.Span) is { } gs)
+                SelfGroup = gs;
+        }
+        catch { /* best-effort state tracking */ }
     }
 
     /// <summary>

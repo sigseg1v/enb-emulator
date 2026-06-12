@@ -25,7 +25,10 @@
 //
 // Pricing mirrors the player path: item_value = vendor (buying_price) * stack;
 // the bot's opening bid is 110% of item_value and its buyout 200% (the same
-// ratios the SPA suggests to a human seller).
+// ratios the SPA suggests to a human seller), then scaled by a per-category
+// factor (botPriceMultiplier) -- the raw vendor base undervalued several gear
+// families and ore, so weapons/ore list at 20x, shields/reactors/engines/
+// components at 10x, and devices at 40x.
 
 package main
 
@@ -85,6 +88,31 @@ type botCandidate struct {
 	id       int
 	vendor   int64 // buying_price (economic base)
 	maxStack int64
+	category int64 // item_base.category (drives botPriceMultiplier)
+}
+
+// botPriceMultiplier scales a listing's opening bid and buyout per item
+// category, on top of the base 110%/200% ratios. The faucet was pricing several
+// gear families and ore far below their real worth; these per-category factors
+// bring the shelf in line. Engine (cat 6) is priced as ship gear (10x), not as a
+// generic device (40x). Mapping uses the raw item_base.category -- the bot pools
+// only ever select direct categories (never the cat-12 "Core Item"
+// supercategory), so no item_engine/reactor/shield probe is needed here.
+func botPriceMultiplier(category int64) float64 {
+	switch category {
+	case 10, 14, 15, 16: // weapons
+		return 20
+	case 80, 81: // ore (refined / raw resource)
+		return 20
+	case 11, 18: // device, computer
+		return 40
+	case 2, 7, 6: // shield, reactor, engine
+		return 10
+	case 50, 51, 52, 53, 54: // components
+		return 10
+	default:
+		return 1
+	}
 }
 
 // startBots launches the faucet loop if enabled. It tops the shelf up once
@@ -148,7 +176,7 @@ func botPickCandidate(ctx context.Context, s *Store) (botCandidate, bool, int, b
 	case roll < botRareWeight:
 		// rare: equipment L5-9 OR devices L1-9.
 		c, ok := botQuery(ctx, s, `
-			SELECT id, buying_price, max_stack
+			SELECT id, buying_price, max_stack, category
 			  FROM item_base
 			 WHERE no_trade = 0 AND buying_price > 0
 			   AND ( (category = ANY($1) AND level BETWEEN 5 AND 9)
@@ -158,7 +186,7 @@ func botPickCandidate(ctx context.Context, s *Store) (botCandidate, bool, int, b
 	case roll < botRareWeight+botUncommonWeight:
 		// uncommon: equipment family at L1-4.
 		c, ok := botQuery(ctx, s, `
-			SELECT id, buying_price, max_stack
+			SELECT id, buying_price, max_stack, category
 			  FROM item_base
 			 WHERE no_trade = 0 AND buying_price > 0
 			   AND category = ANY($1) AND level BETWEEN 1 AND 4
@@ -167,7 +195,7 @@ func botPickCandidate(ctx context.Context, s *Store) (botCandidate, bool, int, b
 	default:
 		// common: ores/resources, stacked, no quality.
 		c, ok := botQuery(ctx, s, `
-			SELECT id, buying_price, max_stack
+			SELECT id, buying_price, max_stack, category
 			  FROM item_base
 			 WHERE no_trade = 0 AND buying_price > 0
 			   AND category = ANY($1)
@@ -194,7 +222,7 @@ func botQuery(ctx context.Context, s *Store, sql string, arg1, arg2 []int) (botC
 	} else {
 		row = s.content.QueryRow(ctx, sql, arg1, arg2)
 	}
-	if err := row.Scan(&c.id, &c.vendor, &c.maxStack); err != nil {
+	if err := row.Scan(&c.id, &c.vendor, &c.maxStack, &c.category); err != nil {
 		return botCandidate{}, false
 	}
 	return c, true
@@ -221,11 +249,12 @@ func botPostOne(ctx context.Context, s *Store) error {
 	}
 
 	itemValue := cand.vendor * int64(stack)
-	startBid := int64(math.Round(float64(itemValue) * 1.10))
+	mult := botPriceMultiplier(cand.category)
+	startBid := int64(math.Round(float64(itemValue) * 1.10 * mult))
 	if startBid < 1 {
 		startBid = 1
 	}
-	buyout := int64(math.Round(float64(itemValue) * 2.00))
+	buyout := int64(math.Round(float64(itemValue) * 2.00 * mult))
 	if buyout <= startBid {
 		buyout = startBid + 1
 	}

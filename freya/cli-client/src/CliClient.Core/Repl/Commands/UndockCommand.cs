@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: CC-BY-NC-SA-3.0
-// Part of the Earth & Beyond emulator preservation project.
-// License: LICENSES/enb-emulator
+// SPDX-License-Identifier: MIT
+// Part of the Earth & Beyond emulator preservation project -- Freya (MIT).
+// License: LICENSES/Freya
 
 using System.Buffers.Binary;
 using N7.CliClient.Logging;
@@ -78,7 +78,12 @@ public sealed class UndockCommand : ICommandHandler
         "  On success you are in open space; run `list` to see the asteroids and\n" +
         "  other ships, then `move`/`warp`.";
     public string? Placeholder => null;
-    public bool Available => _ctx.Sector is not null && _ctx.GameId is not null;
+    // Only meaningful while docked, i.e. in a station-interior sector. The
+    // server gates StationLogin on m_SectorID > 9999 (the interior id space is
+    // parent*10+n), so an ActiveSectorId above that range means we are inside a
+    // station and `undock` applies; in open space it is hidden.
+    public bool Available =>
+        _ctx.Sector is not null && _ctx.GameId is not null && _ctx.ActiveSectorId is > 9999;
 
     public async Task<int> ExecuteAsync(IReadOnlyList<string> args, TextWriter output, CancellationToken ct)
     {
@@ -116,12 +121,12 @@ public sealed class UndockCommand : ICommandHandler
             AnsiPalette.Muted("(0x004E Action=1 -> LaunchIntoSpace). Awaiting server handoff..."))
             .ConfigureAwait(false);
 
-        int toSectorId;
+        HandoffTarget handoff;
         try
         {
             using var handoffCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             handoffCts.CancelAfter(TimeSpan.FromSeconds(15));
-            toSectorId = await handoffTask.WaitAsync(handoffCts.Token).ConfigureAwait(false);
+            handoff = await handoffTask.WaitAsync(handoffCts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -132,15 +137,18 @@ public sealed class UndockCommand : ICommandHandler
         }
 
         await output.WriteLineAsync(
-            AnsiPalette.Muted("handoff -> space sector ") + AnsiPalette.Value($"{toSectorId}") +
+            AnsiPalette.Muted("handoff -> space ") + AnsiPalette.Value(_ctx.SectorLabel(handoff.ToSectorId)) +
             AnsiPalette.Muted("; re-joining...")).ConfigureAwait(false);
 
         // LaunchIntoSpace dropped us from the station sector (DropPlayerFromSector,
         // not DropPlayerFromGalaxy) and kept the player node alive, so the re-join
         // reuses the same avatar id. Identical to `gate` (0x002C ACTION 18->19),
-        // so the follow-the-handoff sequence is shared.
+        // so the follow-the-handoff sequence is shared. FromSectorID echoes the
+        // station sector so the destination spawns us at the station entry point
+        // (FromSector() > 9999 -> FindStation), not at FindFirstNav().
         return await HandoffFollow.CompleteAsync(
-            _ctx, output, id, slot, toSectorId, oldSector, "in space", ct).ConfigureAwait(false);
+            _ctx, output, id, slot, handoff.ToSectorId, handoff.FromSectorId, oldSector, "in space", ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>

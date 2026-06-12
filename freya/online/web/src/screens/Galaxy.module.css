@@ -78,10 +78,23 @@
 
 @keyframes gx-hubpulse { 0% { transform: scale(0.5); opacity: 0.55; } 70%,100% { transform: scale(2.4); opacity: 0; } }
 
+/* live traffic: travelling lights riding the lanes (one per recent gate event).
+   Position is driven by <animateMotion> in the SVG; this only styles the glyph. */
+.galaxy .flow { pointer-events: none; }
+.galaxy .flow-dot {
+  fill: var(--presence);
+  paint-order: stroke;
+  stroke: oklch(0.09 0.02 240 / 0.55);
+  stroke-width: 1px;
+  filter: drop-shadow(0 0 5px var(--presence));
+  animation: gx-flow-pulse 1.6s ease-in-out infinite;
+}
+@keyframes gx-flow-pulse { 0%,100% { opacity: 0.95; } 50% { opacity: 0.55; } }
+
 /* live pilot presence */
 .galaxy .wave { pointer-events: none; transform-box: fill-box; transform-origin: center; animation: gx-wave 2.85s ease-out infinite; }
 
-@keyframes gx-wave { 0% { transform: scale(0.4); opacity: 0.8; } 100% { transform: scale(3.4); opacity: 0; } }
+@keyframes gx-wave { 0% { transform: scale(0.4); opacity: 0.85; } 100% { transform: scale(3.4); opacity: 0; } }
 .galaxy .node--online .node__core { filter: drop-shadow(0 0 7px var(--presence)); }
 .galaxy .count { font-family: var(--font-mono); font-weight: 600; fill: var(--presence); opacity: 0.6;
   letter-spacing: 0.01em; pointer-events: none; paint-order: stroke; stroke: oklch(0.09 0.02 240 / 0.85);

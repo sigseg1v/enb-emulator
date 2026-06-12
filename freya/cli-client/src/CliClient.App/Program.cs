@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: CC-BY-NC-SA-3.0
-// Part of the Earth & Beyond emulator preservation project.
-// License: LICENSES/enb-emulator
+// SPDX-License-Identifier: MIT
+// Part of the Earth & Beyond emulator preservation project -- Freya (MIT).
+// License: LICENSES/Freya
 
 using N7.CliClient;
 using N7.CliClient.Logging;
@@ -69,7 +69,7 @@ if (args[0] is "repl" or "start")
     // cycle with a captured local the editor's callback reads at run time.
     Repl repl = null!;
     var editor = new LineEditor(() => repl.Commands
-        .Select(h => new CommandSpec(h.Name, h.Available, h.Placeholder, h.Priority, h.ArgCandidates))
+        .Select(h => new CommandSpec(h.Name, h.Available, h.Placeholder, h.Priority, h.ArgCandidates, h.WholeLineArg))
         .ToList(), livePrompt);
     // State-aware, coloured prompt: tracks offline -> connected -> user ->
     // user@sector. Plain automatically when colour is off (piped/NO_COLOR).
@@ -83,7 +83,9 @@ if (args[0] is "repl" or "start")
     repl.Register(new CreateCommand(sessionCtx));
     repl.Register(new EnterCommand(sessionCtx));
     repl.Register(new UndockCommand(sessionCtx));
+    repl.Register(new DockCommand(sessionCtx));
     repl.Register(new GateCommand(sessionCtx));
+    repl.Register(new NavsCommand(sessionCtx));
     repl.Register(new MoveCommand(sessionCtx));
     repl.Register(new WarpCommand(sessionCtx));
     repl.Register(new ChatCommand(sessionCtx));
@@ -92,9 +94,8 @@ if (args[0] is "repl" or "start")
     repl.Register(new StarbaseCommand(sessionCtx));
     repl.Register(new SkillUpCommand(sessionCtx));
     repl.Register(new AbilityCommand(sessionCtx));
-    repl.Register(new GroupInviteCommand(sessionCtx));
-    repl.Register(new GroupInviteAcceptCommand(sessionCtx));
-    repl.Register(new GroupLeaveCommand(sessionCtx));
+    repl.Register(new GroupCommand(sessionCtx));
+    repl.Register(new FormationCommand(sessionCtx));
     repl.Register(new DumpCommand(sessionCtx));
     repl.Register(new DumpOnCommand(sessionCtx));
     repl.Register(new DumpOffCommand(sessionCtx));
@@ -333,7 +334,8 @@ static void PrintHelp()
                                       (MVAS position; ESC aborts an in-flight move)
                               warp    <gid>   (direct warp; no client-side cancel)
                               chat    [sector|gm|dev|beta|whisper] <message>
-                              group-invite <player> / group-invite-accept / group-leave
+                              group   <invite <player>|accept|leave|create>
+                              formation <pipe|block|slot|join|break>
                               help, quit (aliases: exit, stop)
                             Tab/Shift-Tab complete the available commands
                             (the likely next step leads the list). Past the

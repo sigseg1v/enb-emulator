@@ -8021,3 +8021,57 @@ Verified: server rebuilt no-cache, clean, no new warnings at any edited line
 range; 3 new SqlplusWrapperTx gtests green (N-slot all-or-nothing commit,
 partial-failure rolls back every slot, cap-sized 15-record batch commits as one
 tx); all 11 wrapper gtests green against live Postgres (port 5434).
+
+## CLI: sector names everywhere + navs/dock commands, name-or-gid for warp/gate (2026-06-11)
+
+CLI usability pass on the Phase-S REPL (freya/cli-client). No server/proxy/wire
+change -- read-only client UX over packets we already parse.
+
+- SectorCatalog.cs (NEW, CC-BY-NC-SA like CharacterClass): baked snapshot of the
+  content DB `sectors` table (space sectors, id <= 9999). Station interiors
+  (id > 9999, not in the table) get their name from the live 0x0097 GALAXY_MAP
+  Type-4 "you are here" frame, captured in SessionContext and cached by sector id.
+- SessionContext.SectorLabel(id) is the single id->"Name (id)" formatter; used by
+  the prompt (compact who@Name), the character list, and the gate/dock/undock
+  handoff lines. EnterCommand/HandoffFollow/ListCommand updated to use it.
+- navs (NEW): lists discovered/visible navs, stargates, stations in the current
+  sector (nearest first, gid + distance) -- the warp/gate/dock target finder.
+- dock <station> (NEW): two-step 0x002C ACTION 28 (select, Target=station gid) ->
+  ~6s -> 7 (confirm) -> 0x003A SERVER_HANDOFF -> re-join interior, the dock-side
+  mirror of gate's 18->19. Available only in open space. Source: HandleAction
+  case 28 (OT_STATION, m_Gating, SectorManager::Dock sets StargateDestination)
+  and case 7 (SectorServerHandoff) -- no server change, the CLI reproduces the
+  retail packet sequence. Real-client confirmation tracked under the existing
+  undock/dock CV entry.
+- warp/gate now accept a nav/gate/station NAME (with spaces) or a gid, via
+  TargetArg.ResolveWords; both Tab-complete from SectorWorld nav targets.
+- Completion: added CommandSpec.WholeLineArg (additive, default false) so a
+  multi-word target name completes as one unit; 5 new CompletionTests pin it.
+- undock now appears only inside a station (ActiveSectorId > 9999); dock only in
+  open space.
+
+Verified: CliClient.App builds clean (0 warnings); 792/792 unit tests green.
+
+## CLI: quote multi-word completion targets + CI-gate the unit suite (2026-06-11)
+
+Follow-up to the sector-names/navs/dock commit.
+
+- Completion now wraps a matched warp/gate/dock target name in double quotes ON
+  FILL **iff it contains a space** (`warp Mars G` -> Tab -> `warp "Mars Gate"`);
+  single-word names stay bare. The REPL already had a quote-aware tokenizer
+  (Repl.Tokenise, `chat "hello world"` -> one arg), so the quoted line parses
+  back as a single argument -- this replaces the brittle "treat the whole line
+  as one token" matching with output the existing parser handles. A quote the
+  user opens (`warp "Mar`) is stripped for the prefix match and re-applied on
+  fill. The ghost still previews the bare remainder (quotes added on Tab).
+  Honest limitation unchanged: same-prefix siblings (Mars Gate / Mars Station)
+  still need a disambiguating keystroke -- stateless completion can't cycle
+  disjoint names once the buffer holds a full candidate.
+- CI gap closed: FreyaTools.slnx only *built* CliClient.UnitTests; the suite
+  never *ran* in CI (only the docker integration suite did). Added a dedicated
+  `cli-unit-test` job (pure net10.0, no docker) that runs the 795-test unit
+  suite on every PR, so the REPL/completion/codec tests actually gate. No tests
+  were found to be flaky; no retries added.
+
+Verified: 795/795 unit tests green in Release; integration project still builds
+against the changed Core; mojibake gate exit 0; build.yml is valid YAML.

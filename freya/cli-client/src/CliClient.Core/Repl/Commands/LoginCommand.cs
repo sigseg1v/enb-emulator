@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: CC-BY-NC-SA-3.0
-// Part of the Earth & Beyond emulator preservation project.
-// License: LICENSES/enb-emulator
+// SPDX-License-Identifier: MIT
+// Part of the Earth & Beyond emulator preservation project -- Freya (MIT).
+// License: LICENSES/Freya
 
 using N7.CliClient.Auth;
 using N7.CliClient.Logging;
@@ -144,7 +144,7 @@ public sealed class LoginCommand : ICommandHandler
                 .QueryAsync(global, TimeSpan.FromSeconds(2), ct).ConfigureAwait(false);
             await output.WriteLineAsync(ProxyStatus.DtlsLine(proxyStatus)).ConfigureAwait(false);
 
-            await ListCommand.PrintAvatarsAsync(avatars, output).ConfigureAwait(false);
+            await ListCommand.PrintAvatarsAsync(_ctx, avatars, output).ConfigureAwait(false);
             return 0;
         }
         catch (Exception ex)

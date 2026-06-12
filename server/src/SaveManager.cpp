@@ -310,6 +310,9 @@ void SaveManager::HandleSaveCode(short save_code, long player_id, short bytes, u
 	case SAVE_CODE_EXT_STATUS_EVENT:
 		HandleExternalStatusEvent(player_id, bytes, data);
 		break;
+	case SAVE_CODE_GATE_EVENT:
+		HandleGateEvent(player_id, bytes, data);
+		break;
 	default:
 		LogMessage( "Bad save code : %d for player %x\n", save_code, (player_id&0x00FFFFFF) );
 		break;
@@ -479,6 +482,63 @@ void EmitExternalStatusEvent(unsigned char kind, const char *content)
 	buf[0] = kind;
 	memcpy(buf + 1, content, len);
 	g_SaveMgr->AddSaveMessage(SAVE_CODE_EXT_STATUS_EVENT, 0, (short) (len + 1), buf);
+}
+
+// Phase AQ. Append one sector-transition row to gate_events. Runs on the
+// SaveManager thread, so it shares the single serialized net7_user connection
+// (m_SQL_Conn) with every other Handle*. The payload is two packed int32s
+// [from_sector][to_sector]; the moving avatar_id arrives as player_id. All three
+// are bound as parameters (never concatenated into the SQL).
+void SaveManager::HandleGateEvent(long player_id, short bytes, unsigned char *data)
+{
+	if (bytes < 8)
+		return;
+
+	int32_t from_sector = *((int32_t *) &data[0]);
+	int32_t to_sector   = *((int32_t *) &data[4]);
+
+	sql_query_c insert_query (&m_SQL_Conn);
+	insert_query.AddParam((int) player_id);
+	insert_query.AddParam((int) from_sector);
+	insert_query.AddParam((int) to_sector);
+	insert_query.run_query_params(
+		"INSERT INTO gate_events (avatar_id, from_sector, to_sector) VALUES (?, ?, ?)");
+
+	// Retention: prune anything older than an hour on the SAME write. The website
+	// only ever reads the last few minutes, so an hour is generous headroom; this
+	// keeps gate_events bounded without a separate sweeper. The interval is a
+	// fixed literal (no value interpolated), and the gate_events_window index
+	// (led by created_at) makes the range delete cheap.
+	char prune_sql[] = "DELETE FROM gate_events WHERE created_at < now() - interval '1 hour'";
+	sql_query_c prune_query (&m_SQL_Conn);
+	prune_query.run_query(prune_sql);
+}
+
+// Free helper -- the call site (Player::SendServerHandoff) lives on a gameplay
+// thread; this only enqueues to the lock-free save queue (the DB write happens
+// later on the SaveManager thread in HandleGateEvent), exactly like
+// EmitExternalStatusEvent.
+void EmitGateEvent(long avatar_id, long from_sector, long to_sector)
+{
+	// Cache the feature flag once. Default ON: an unset variable enables the
+	// write (the galaxy traffic animation is a first-class feature, not opt-in).
+	// Only an explicit NET7_GATE_EVENTS_ENABLED=0 / empty / false turns it off
+	// (e.g. a stack that does not run the website). The rows are tiny and pruned
+	// to a short horizon, so an always-on write is cheap even under the
+	// integration suite's constant gating.
+	static int s_enabled = -1;
+	if (s_enabled < 0)
+	{
+		const char *v = getenv("NET7_GATE_EVENTS_ENABLED");
+		s_enabled = (v == NULL || *v == '1' || *v == 't' || *v == 'T' || *v == 'y' || *v == 'Y') ? 1 : 0;
+	}
+	if (!s_enabled || !g_SaveMgr || avatar_id <= 0 || from_sector == to_sector)
+		return;
+
+	int32_t buf[2];
+	buf[0] = (int32_t) from_sector;
+	buf[1] = (int32_t) to_sector;
+	g_SaveMgr->AddSaveMessage(SAVE_CODE_GATE_EVENT, avatar_id, (short) sizeof(buf), (unsigned char *) buf);
 }
 
 void SaveManager::HandleNewRecipe(long player_id, short bytes, unsigned char *data)

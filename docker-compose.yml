@@ -110,6 +110,12 @@ services:
       # (empty) in the host env to turn it off (EmitExternalStatusEvent no-ops
       # and writes no outbox rows). See plans/39 + db/postgres/external_status_events.sql.
       NET7_EXTERNAL_STATUS_ENABLED: "${NET7_EXTERNAL_STATUS_ENABLED:-1}"
+      # Phase AQ gate-events. Defaults ON (=1): the server appends a row to
+      # gate_events on every sector transition (gate/undock/dock) for the Freya
+      # Online galaxy traffic animation. Set NET7_GATE_EVENTS_ENABLED= (empty) in
+      # the host env to turn it off (EmitGateEvent no-ops, writes no rows). See
+      # db/postgres/gate_events.sql + freya/online/server/store_gateflow.go.
+      NET7_GATE_EVENTS_ENABLED: "${NET7_GATE_EVENTS_ENABLED:-1}"
     # The server resolves g_DomainName via gethostbyname(); in docker we
     # remap local.net-7.org to the container's loopback so it succeeds
     # without external DNS.
@@ -485,6 +491,14 @@ services:
         # idempotent. See db/postgres/external_status_events.sql.
         echo "schema-init: applying /db/external_status_events.sql -> net7_user"
         psql -h postgres -U net7 -d net7_user -v ON_ERROR_STOP=1 -f /db/external_status_events.sql
+        # Phase AQ sector-transition log (net7_user). UNCONDITIONAL for the same
+        # reason as external_status_events above: new relation the server INSERTs
+        # into on every gate/undock/dock and the website reads for the galaxy
+        # traffic animation; a probe-gated apply would skip pre-existing volumes
+        # and the server's INSERT would error on a missing relation. CREATE TABLE
+        # IF NOT EXISTS is idempotent. See db/postgres/gate_events.sql.
+        echo "schema-init: applying /db/gate_events.sql -> net7_user"
+        psql -h postgres -U net7 -d net7_user -v ON_ERROR_STOP=1 -f /db/gate_events.sql
         # Phase AM-8 server_status heartbeat singleton (net7_user). UNCONDITIONAL
         # for the same reason as the two tables above: new relation, so a
         # probe-gated apply would skip pre-existing volumes and the server's

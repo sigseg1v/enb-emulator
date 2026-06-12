@@ -7,7 +7,7 @@
 // so the UI never has to resolve a separate catalogue across a network call.
 
 export type RarityKey = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary';
-export type Cat = 'weapon' | 'shield' | 'reactor' | 'device' | 'component' | 'ore';
+export type Cat = 'weapon' | 'shield' | 'reactor' | 'device' | 'engine' | 'component' | 'ore';
 export type Band = 'low' | 'med' | 'high';
 
 export interface Buff { name: string; scope: string; text: string; }
@@ -96,6 +96,12 @@ export interface GalaxyMap {
 }
 // counts is keyed by sector id (as a string); total is all online players.
 export interface GalaxyOccupancy { counts: Record<string, number>; total: number; }
+
+// One directed sector-to-sector flow over the trailing window: count is how many
+// players moved from -> to (and hence how many lights to animate along the lane).
+export interface GateLane { from: number; to: number; count: number; }
+// Live directed traffic. Direction matters: from->to and to->from are separate.
+export interface GalaxyGateFlow { lanes: GateLane[]; }
 
 // One of the logged-in account's own characters and the sector it sits in.
 // sector is the (parent) sector id as a string, matching GalaxyOccupancy keys.

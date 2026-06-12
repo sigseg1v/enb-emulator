@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: CC-BY-NC-SA-3.0
-// Part of the Earth & Beyond emulator preservation project.
-// License: LICENSES/enb-emulator
+// SPDX-License-Identifier: MIT
+// Part of the Earth & Beyond emulator preservation project -- Freya (MIT).
+// License: LICENSES/Freya
 
 namespace N7.CliClient.Repl;
 
@@ -62,6 +62,14 @@ public interface ICommandHandler
     /// drives completion instead.
     /// </summary>
     IReadOnlyList<string>? ArgCandidates => null;
+
+    /// <summary>
+    /// When true, the completer treats the ENTIRE text after the command word
+    /// as one argument, so a candidate whose name contains spaces (a warp/gate
+    /// target like "Mars Gate") completes as a unit instead of being split into
+    /// separate argument tokens. Defaults false (space-delimited arguments).
+    /// </summary>
+    bool WholeLineArg => false;
 
     /// <summary>Execute the command. Returns an exit-style int (see interface remarks).</summary>
     Task<int> ExecuteAsync(

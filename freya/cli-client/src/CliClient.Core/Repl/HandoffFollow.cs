@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: CC-BY-NC-SA-3.0
-// Part of the Earth & Beyond emulator preservation project.
-// License: LICENSES/enb-emulator
+// SPDX-License-Identifier: MIT
+// Part of the Earth & Beyond emulator preservation project -- Freya (MIT).
+// License: LICENSES/Freya
 
 using N7.CliClient.Logging;
 using N7.CliClient.Net;
@@ -35,6 +35,7 @@ public static class HandoffFollow
         int gameId,
         int slot,
         int toSectorId,
+        int fromSectorId,
         EncryptedTcpConnection oldSector,
         string arrivedLabel,
         CancellationToken ct)
@@ -53,7 +54,7 @@ public static class HandoffFollow
         SectorEnterDriver.SectorEntryResult result;
         try
         {
-            result = await SectorEnterDriver.FollowHandoffAsync(ctx, gameId, slot, toSectorId, ct)
+            result = await SectorEnterDriver.FollowHandoffAsync(ctx, gameId, slot, toSectorId, fromSectorId, ct)
                 .ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -84,7 +85,7 @@ public static class HandoffFollow
 
         await output.WriteLineAsync(
             AnsiPalette.Ok($"{arrivedLabel}: ") +
-            AnsiPalette.Muted("sector=") + AnsiPalette.Value($"{result.SectorId}") + " " +
+            AnsiPalette.Muted("sector=") + AnsiPalette.Value(ctx.SectorLabel(result.SectorId)) + " " +
             AnsiPalette.Muted("handshake-frames=") + AnsiPalette.Value($"{result.HandshakeFrames.Count}") +
             AnsiPalette.Muted(" -- run `list` for the sector objects.")).ConfigureAwait(false);
 

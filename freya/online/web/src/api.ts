@@ -11,8 +11,8 @@
 // without a backend.
 
 import type {
-  AvatarLocation, AvatarProfile, GalaxyMap, GalaxyOccupancy, Listing, Mail, MyListing,
-  PostListingInput, SendMailInput, ServerStatus, Session, ShipView, SkillView,
+  AvatarLocation, AvatarProfile, GalaxyGateFlow, GalaxyMap, GalaxyOccupancy, Listing, Mail,
+  MyListing, PostListingInput, SendMailInput, ServerStatus, Session, ShipView, SkillView,
   VaultSlot, VaultTransferInput,
 } from './types';
 import {
@@ -141,6 +141,14 @@ export async function fetchGalaxy(): Promise<GalaxyMap> {
 export async function fetchGalaxyOccupancy(): Promise<GalaxyOccupancy> {
   if (USE_MOCK) return structuredClone(MOCK_GALAXY_OCCUPANCY);
   return getJSON<GalaxyOccupancy>('/api/galaxy/occupancy');
+}
+
+// Live directed sector-to-sector traffic over the trailing window. Cached 60s
+// server-side; the SPA polls it to animate a travelling light per event along
+// each lane. Mock mode has no traffic to show.
+export async function fetchGalaxyGateFlow(): Promise<GalaxyGateFlow> {
+  if (USE_MOCK) return { lanes: [] };
+  return getJSON<GalaxyGateFlow>('/api/galaxy/gateflow');
 }
 
 // The logged-in account's own characters and the sectors they sit in (personal

@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: CC-BY-NC-SA-3.0
-// Part of the Earth & Beyond emulator preservation project.
-// License: LICENSES/enb-emulator
+// SPDX-License-Identifier: MIT
+// Part of the Earth & Beyond emulator preservation project -- Freya (MIT).
+// License: LICENSES/Freya
 
 using System.Buffers.Binary;
 using N7.CliClient.Logging;
@@ -32,14 +32,22 @@ public sealed class WarpCommand : ICommandHandler
     public WarpCommand(SessionContext ctx) { ArgumentNullException.ThrowIfNull(ctx); _ctx = ctx; }
 
     public string Name    => "warp";
-    public string Summary => "warp to a target gid (direct; no client-side cancel exists)";
+    public string Summary => "warp to a nav/gate/station name or gid (direct; no client-side cancel exists)";
     public string Usage   =>
-        "warp <gid>\n" +
-        "  gid = 0x.. / decimal / a tracked object name. Sends a one-waypoint\n" +
-        "  0x009B WARP route. Fire-and-forget: there is no cancel-warp packet, so\n" +
-        "  the warp runs until it arrives or the game interrupts it.";
-    public string? Placeholder => "<gid>";
+        "warp <name-or-gid>\n" +
+        "  Target = a tracked nav, gate, or station name (with spaces, e.g.\n" +
+        "  `warp Mars Gate`) or any object's gid (0x.. / decimal). Tab-completes\n" +
+        "  from `navs`. Sends a one-waypoint 0x009B WARP route. Fire-and-forget:\n" +
+        "  there is no cancel-warp packet, so the warp runs until it arrives or\n" +
+        "  the game interrupts it.";
+    public string? Placeholder => "<name-or-gid>";
     public bool Available => _ctx.Sector is not null && _ctx.GameId is not null;
+
+    // Tab-complete from every navigable destination (navs/gates/stations),
+    // nearest first. Whole-line so multi-word names complete as one unit.
+    public bool WholeLineArg => true;
+    public IReadOnlyList<string>? ArgCandidates =>
+        _ctx.GameId is { } id ? _ctx.World.NavTargetNames(id) : null;
 
     public async Task<int> ExecuteAsync(IReadOnlyList<string> args, TextWriter output, CancellationToken ct)
     {
@@ -53,10 +61,10 @@ public sealed class WarpCommand : ICommandHandler
             await output.WriteLineAsync(AnsiPalette.Warn($"usage: {Usage}")).ConfigureAwait(false);
             return 1;
         }
-        if (TargetArg.Resolve(args[0], _ctx.World) is not { } target)
+        if (TargetArg.ResolveWords(args, _ctx.World) is not { } target)
         {
             await output.WriteLineAsync(AnsiPalette.Warn(
-                $"can't resolve '{args[0]}' to a target -- give 0x.. / decimal gid or a tracked name (`list`)")).ConfigureAwait(false);
+                $"can't resolve '{string.Join(' ', args)}' to a target -- give 0x.. / decimal gid or a tracked name (`navs`)")).ConfigureAwait(false);
             return 1;
         }
 

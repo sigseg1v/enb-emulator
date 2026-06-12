@@ -25,13 +25,21 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import type { AvatarLocation, GalaxyMap, GalaxyOccupancy } from '../types';
+import type { AvatarLocation, GalaxyGateFlow, GalaxyMap, GalaxyOccupancy } from '../types';
 import * as api from '../api';
 import styles from './Galaxy.module.css';
 
 type Vars = CSSProperties & Record<string, string | number>;
 
 const OCCUPANCY_POLL_MS = 15_000;
+// Gate-flow is cached 60s server-side, so polling faster only re-serves the same
+// payload. Match the cache cadence.
+const GATEFLOW_POLL_MS = 60_000;
+// Seconds for one light to traverse a lane, and the largest number of lights we
+// draw on a single directed lane (a huge burst is capped so the lane stays
+// readable rather than turning into a solid stream).
+const FLOW_DUR_S = 3.2;
+const FLOW_MAX_DOTS = 6;
 const W = 1960;
 const H = 1280;
 // Five-pointed star centered on the origin (outer r 13, inner r 5.5), used for
@@ -149,6 +157,31 @@ function gnorm(s: string): string {
     .replace(/\bmaelstrom\b/g, '')
     .replace(/asteroid belt/g, 'astrobelt')
     .replace(/[^a-z0-9]/g, '');
+}
+
+// A handful of authored "Planet" nodes carry a design label that differs from the
+// DB sector name for the same in-game location (word order, or a descriptive
+// sub-area name), so gnorm(node) never matched a sector and the node could never
+// light up. Each entry maps the authored node name to the real, occupiable DB
+// sector it represents -- verified to be a standalone sector (not a starbase
+// interior) that dead-ends off its base sector, the planet-sub-sector pattern.
+// Confirmed by the project owner. See plans/46-galaxy-node-name-validation.md.
+// Nodes with NO standalone sector (Lagarto Moon Risco -- a nav inside the Lagarto
+// sector; FishBowl -- unreachable) are intentionally absent and stay dark.
+const NODE_ALIAS: Record<string, string> = {
+  'Inverness Planet': 'Planet Inverness',
+  'Grissom Planet': 'Grissom Meteorological Site',
+  'Arduinne Planet': 'Arduinne Gas Cloud',
+  'Primus Planet': 'Praetorium Mons Area (Planet Primus)',
+  'Dahin Planet': 'Dahin Mining Interest',
+  'Swooping Eagle Planet': 'Yasuragi Area',
+  'Zweihander Planet': 'Jagerstadt',
+  'Endriago Planet': 'Porvenir Mons Area',
+};
+
+// Node name -> normalized DB-lookup key, applying NODE_ALIAS first.
+function nodeNorm(name: string): string {
+  return gnorm(NODE_ALIAS[name] ?? name);
 }
 
 // ---- jump lanes: the real gate network. Intra-system = solid, inter-system =
@@ -378,6 +411,7 @@ function pad4(n: number) { return String(Math.max(0, Math.round(n))).padStart(4,
 
 export function Galaxy() {
   const [occ, setOcc] = useState<GalaxyOccupancy | null>(null);
+  const [flow, setFlow] = useState<GalaxyGateFlow | null>(null);
   const [myAvatars, setMyAvatars] = useState<AvatarLocation[]>([]);
   const [idByNorm, setIdByNorm] = useState<Record<string, string>>({});
   const [err, setErr] = useState<string | null>(null);
@@ -413,6 +447,18 @@ export function Galaxy() {
     return () => { alive = false; clearInterval(h); };
   }, []);
 
+  // Directed sector-to-sector traffic. Polled on the server cache cadence (60s);
+  // keep last good flow on a failed poll so the lights don't flicker out.
+  useEffect(() => {
+    let alive = true;
+    const tick = () => api.fetchGalaxyGateFlow()
+      .then(f => { if (alive) setFlow(f); })
+      .catch(() => { /* keep last good flow */ });
+    tick();
+    const h = setInterval(tick, GATEFLOW_POLL_MS);
+    return () => { alive = false; clearInterval(h); };
+  }, []);
+
   // The account's own characters and where they are. Polled on the same cadence
   // so a marker follows a character that jumps sectors. Shown online or not.
   useEffect(() => {
@@ -432,7 +478,7 @@ export function Galaxy() {
   const myMarkers = useMemo(() => {
     const nodeById: Record<string, Node> = {};
     for (const s of NODES) {
-      const id = idByNorm[gnorm(s.n)];
+      const id = idByNorm[nodeNorm(s.n)];
       if (id) nodeById[id] = s;
     }
     const bySector = new Map<string, { node: Node; names: string[]; online: boolean }>();
@@ -451,11 +497,50 @@ export function Galaxy() {
     const counts = occ?.counts ?? {};
     const p: Record<string, number> = {};
     for (const s of NODES) {
-      const id = idByNorm[gnorm(s.n)];
+      const id = idByNorm[nodeNorm(s.n)];
       p[s.n] = id ? (counts[id] ?? 0) : 0;
     }
     return p;
   }, [idByNorm, occ]);
+
+  // The busiest sector's online count, used to NORMALIZE the presence glow:
+  // every node's ring intensity is its count relative to this max, so the
+  // fullest sector(s) glow hardest and the rest scale down proportionally.
+  const maxOnline = useMemo(
+    () => Object.values(presence).reduce((m, v) => Math.max(m, v), 0),
+    [presence]);
+
+  // Directed traffic lights. Each flow lane {from,to,count} is matched to the
+  // undirected LANE whose endpoints are those two sectors; `reverse` tells the
+  // dot which way to travel along the lane's path. The path itself (L.d) runs
+  // a -> b, so a flow that goes b -> a animates with keyPoints reversed. count
+  // dots are spaced equidistant by staggering their start phase. A flow whose
+  // endpoints are not directly lane-connected (the server collapses dock/undock
+  // to self-hops, but a multi-hop or unknown pair could still appear) is
+  // dropped -- there is no single lane to ride.
+  const flowDots = useMemo(() => {
+    if (!flow || flow.lanes.length === 0) return [];
+    // ordered "aId>bId" / "bId>aId" -> the lane and its authored a-endpoint id.
+    const laneByPair: Record<string, { d: string; aId: string }> = {};
+    for (const L of LANES) {
+      const aId = idByNorm[gnorm(L.a)], bId = idByNorm[gnorm(L.b)];
+      if (!aId || !bId) continue;
+      laneByPair[aId + '>' + bId] = { d: L.d, aId };
+      laneByPair[bId + '>' + aId] = { d: L.d, aId };
+    }
+    const out: { key: string; d: string; reverse: boolean; count: number }[] = [];
+    for (const ln of flow.lanes) {
+      const hit = laneByPair[String(ln.from) + '>' + String(ln.to)];
+      if (!hit) continue;
+      out.push({
+        key: ln.from + '-' + ln.to,
+        d: hit.d,
+        reverse: String(hit.aId) !== String(ln.from), // path is a->b; reverse if flow is b->a
+        count: Math.min(ln.count, FLOW_MAX_DOTS),
+      });
+    }
+    return out;
+  }, [flow, idByNorm]);
 
   const dimall = hover != null || hl != null;
   const total = occ?.total ?? 0;
@@ -631,6 +716,28 @@ export function Galaxy() {
             })}
           </g>
 
+          {/* live traffic: one travelling light per gate event over the last 30
+              minutes, riding the directed lane between source and destination.
+              N concurrent events on the same ordered pair => N lights spaced
+              equidistant (staggered start phase) along the same path. */}
+          <g className={styles.flow}>
+            {flowDots.flatMap(fd =>
+              Array.from({ length: fd.count }).map((_, i) => (
+                <circle key={fd.key + '-' + i} className={styles.flowDot} r={3}>
+                  <animateMotion
+                    dur={`${FLOW_DUR_S}s`}
+                    repeatCount="indefinite"
+                    path={fd.d}
+                    calcMode="linear"
+                    keyPoints={fd.reverse ? '1;0' : '0;1'}
+                    keyTimes="0;1"
+                    begin={`-${((i / fd.count) * FLOW_DUR_S).toFixed(2)}s`}
+                  />
+                </circle>
+              )),
+            )}
+          </g>
+
           {/* sector nodes */}
           <g>
             {NODES.map(s => {
@@ -646,14 +753,20 @@ export function Galaxy() {
               // Endriago and Dahin are also hand-placed above their planet.
               const forceAbove = s.n === 'Endriago' || s.n === 'Dahin';
               const above = (s.y > 1150 || forceAbove) && s.n !== "Blackbeard's Wake";
-              // Gallina's label is nudged down by about one text-height to clear
-              // its neighbours.
-              const labelDy = s.n === 'Gallina' ? (s.hub ? 22 : 13) : 0;
-              // Alpha Centauri's label shifts left ~20% of its text width (rough
-              // glyph-width estimate: ~0.5em per char).
+              // Per-label hand nudges to clear neighbours / planet glyphs.
+              // Gallina sits low to clear its neighbours; Sirius lifts up a touch.
+              const labelDy =
+                s.n === 'Gallina' ? (s.hub ? 30 : 21) :
+                s.n === 'Sirius'  ? -8 :
+                0;
+              // Alpha Centauri shifts left ~20% of its text width (rough
+              // glyph-width estimate: ~0.5em per char) plus a small extra nudge;
+              // Sirius shifts right a touch.
               const fontPx = s.hub ? 22 : 13;
-              const labelDx = s.n === 'Alpha Centauri'
-                ? -0.2 * s.n.length * fontPx * 0.5 : 0;
+              const labelDx =
+                s.n === 'Alpha Centauri' ? -0.2 * s.n.length * fontPx * 0.5 - 8 :
+                s.n === 'Sirius'         ? 8 :
+                0;
               return (
                 <g key={s.n} className={cls} tabIndex={0}
                   onMouseEnter={() => { setHover(s.n); placeTip(s); }}
@@ -689,15 +802,26 @@ export function Galaxy() {
                       {s.n}
                     </text>
                   )}
-                  {/* live presence: sonar waves + count */}
-                  {online > 0 && [0, 1, 2].map(w => (
-                    <circle key={'w' + w} className={styles.wave} cx={s.x} cy={s.y} r={R + 3} fill="none"
-                      stroke="var(--presence)" strokeWidth={online > 4 ? 2.2 : 1.5}
-                      style={{ animationDelay: (w * 0.95).toFixed(2) + 's' }} />
-                  ))}
-                  {online > 1 && (
-                    <text className={styles.count} x={s.x + R + 7} y={s.y - R - 4} fontSize={s.hub ? 19 : 16}>{online}</text>
-                  )}
+                  {/* live presence: sonar waves whose intensity is normalized to
+                      the busiest sector (count / maxOnline), with a small floor so
+                      a lone pilot is still legible; plus the pilot count. The
+                      normalized intensity is a STATIC group opacity that multiplies
+                      the waves' own fade animation -- robust, no var() in keyframes. */}
+                  {online > 0 && (() => {
+                    const intensity = maxOnline > 0
+                      ? Math.max(0.35, online / maxOnline) : 0;
+                    return <>
+                      <g style={{ opacity: intensity }}>
+                        {[0, 1, 2].map(w => (
+                          <circle key={'w' + w} className={styles.wave} cx={s.x} cy={s.y} r={R + 3} fill="none"
+                            stroke="var(--presence)" strokeWidth={1.5 + intensity}
+                            style={{ animationDelay: (w * 0.95).toFixed(2) + 's' }} />
+                        ))}
+                      </g>
+                      <text className={styles.count} x={s.x + R + 7} y={s.y - R - 4}
+                        fontSize={s.hub ? 19 : 16}>{online}</text>
+                    </>;
+                  })()}
                 </g>
               );
             })}

@@ -69,10 +69,42 @@ namespace LaunchFreya
         string _injectorExe;                          // unix path to bin/FreyaInject.exe (wine runs it)
         readonly List<string> _injectDlls = new();    // DOS paths the injector hands to the client's LoadLibraryA, in order
 
+        // The spawned FreyaProxy.exe (under wine on Linux, directly on Windows).
+        // Tracked so we can (a) tear it down on relaunch -- a stale proxy still
+        // holding the loopback listen ports makes the next launch collide -- and
+        // (b) suppress its console window now that the Advanced log viewer reads
+        // the proxy's own _YYYY_MM_DD.log instead.
+        Process _proxyProcess;
+
         public Launcher(LaunchSetting setting, Action<string> warn = null)
         {
             _setting = setting ?? throw new ArgumentNullException(nameof(setting));
             _warn = warn ?? (_ => { });
+        }
+
+        // Kill a previously-spawned proxy (if any) and forget it. Safe to call
+        // when none is running. Used both on relaunch and on launcher shutdown.
+        public void StopProxy()
+        {
+            var p = _proxyProcess;
+            _proxyProcess = null;
+            if (p == null) return;
+            try
+            {
+                if (!p.HasExited)
+                    p.Kill(entireProcessTree: true);
+            }
+            catch { /* already gone / not killable -- nothing more to do */ }
+            finally { try { p.Dispose(); } catch { } }
+        }
+
+        // Tear everything this launcher spawned down: the wine proxy and the
+        // loopback auth relay. MainWindow calls this on relaunch and on close.
+        public void Dispose()
+        {
+            StopProxy();
+            AuthRelay?.Dispose();
+            AuthRelay = null;
         }
 
         // The relay's lifetime is tied to the launcher process. MainWindow
@@ -276,9 +308,37 @@ namespace LaunchFreya
             // because its hostname already resolves to 127.0.0.1.)
             ConfigureProxyDtlsEnv(_setting.Hostname, _setting.AuthenticationPort, dir);
 
+            // A proxy from a previous Play is still bound to the loopback listen
+            // ports; relaunching over it collides. Kill it first.
+            StopProxy();
+
             var info = WinExe(dir, exe, "/ADDRESS:127.0.0.1");
 
-            try { Process.Start(info); }
+            // Run the proxy headless: it is a console-subsystem PE, so without
+            // this it pops a console window (a wineconsole under WINE). The
+            // Advanced log viewer reads the proxy's own _YYYY_MM_DD.log, so the
+            // console is redundant. CreateNoWindow + redirecting stdio is what
+            // actually suppresses the window on BOTH native Windows and WINE
+            // (WINE won't allocate a console when stdout/stderr are inherited).
+            // We drain and discard the pipes so the proxy never blocks on a full
+            // buffer -- the file log is the real record.
+            info.UseShellExecute        = false;
+            info.CreateNoWindow         = true;
+            info.RedirectStandardOutput = true;
+            info.RedirectStandardError  = true;
+
+            try
+            {
+                var p = Process.Start(info);
+                _proxyProcess = p;
+                if (p != null)
+                {
+                    p.OutputDataReceived += (_, __) => { };
+                    p.ErrorDataReceived  += (_, __) => { };
+                    p.BeginOutputReadLine();
+                    p.BeginErrorReadLine();
+                }
+            }
             catch (Exception e)
             {
                 throw new ApplicationException(
