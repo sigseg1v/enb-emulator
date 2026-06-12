@@ -162,6 +162,24 @@ jobs:
       - name: Build tool suite
         run: dotnet build tools/FreyaTools.slnx
 
+  cli-unit-test:
+    name: cli-unit-test (freya/cli-client)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      # The CLI unit suite (Core parsers, REPL completion, codecs) is pure
+      # net10.0 with no docker dependency, so unlike the integration suite it
+      # can gate every PR. FreyaTools.slnx only *builds* it; this *runs* it.
+      - name: Run CLI unit tests
+        run: >-
+          dotnet test
+          freya/cli-client/tests/CliClient.UnitTests/CliClient.UnitTests.csproj
+          -c Release
+
   ctest:
     name: ctest (gtest harness)
     runs-on: ubuntu-24.04

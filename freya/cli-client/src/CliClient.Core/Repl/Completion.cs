@@ -107,15 +107,20 @@ public static class Completion
         // first space-delimited token.
         if (spec.ArgCandidates is { Count: > 0 } argCands && (spec.WholeLineArg || !afterCmd.Contains(' ')))
         {
-            if (afterCmd.Length == 0)
+            // A whole-line value (warp/gate/dock target names, which may contain
+            // spaces and get quoted on Tab) is matched with any quote the user
+            // has opened stripped, so `warp "Mar` still ghosts. The ghost itself
+            // previews the bare remainder; the quotes are added on Tab/execute.
+            string partial = spec.WholeLineArg ? afterCmd.Trim('"') : afterCmd;
+            if (partial.Length == 0)
                 return string.Join("  ", argCands);
             var matches = argCands
-                .Where(c => c.StartsWith(afterCmd, StringComparison.OrdinalIgnoreCase))
+                .Where(c => c.StartsWith(partial, StringComparison.OrdinalIgnoreCase))
                 .ToArray();
             if (matches.Length > 0)
             {
                 string first = matches[0];
-                string remainder = first.Length >= afterCmd.Length ? first[afterCmd.Length..] : string.Empty;
+                string remainder = first.Length >= partial.Length ? first[partial.Length..] : string.Empty;
                 if (matches.Length > 1) remainder += $"  (+{matches.Length - 1})";
                 return remainder;
             }
@@ -164,16 +169,22 @@ public static class Completion
         // candidate set and cycle on repeated Tab.
         if (spec.WholeLineArg && spec.ArgCandidates is { Count: > 0 } wholeCands)
         {
+            // The value may contain spaces; strip any quote the user opened so
+            // `warp "Mars G` matches "Mars Gate". On fill, a name that contains
+            // a space is wrapped in double quotes so the REPL's quote-aware
+            // tokenizer (Repl.Tokenise) parses it back as ONE argument; a
+            // single-word name is left bare.
+            string typed = args.Trim('"');
             string? match = wholeCands.FirstOrDefault(
-                c => c.StartsWith(args, StringComparison.OrdinalIgnoreCase));
+                c => c.StartsWith(typed, StringComparison.OrdinalIgnoreCase));
             if (match is null) return null;
-            string filled = cmd + " " + match;
+            string filled = cmd + " " + Quote(match);
             if (filled != buffer) return filled;
             string? next = wholeCands
                 .SkipWhile(c => !string.Equals(c, match, StringComparison.OrdinalIgnoreCase))
                 .Skip(1)
-                .FirstOrDefault(c => c.StartsWith(args, StringComparison.OrdinalIgnoreCase));
-            return next is null ? null : cmd + " " + next;
+                .FirstOrDefault(c => c.StartsWith(typed, StringComparison.OrdinalIgnoreCase));
+            return next is null ? null : cmd + " " + Quote(next);
         }
 
         // First-arg dynamic candidates (e.g. character names for `enter`):
@@ -207,6 +218,14 @@ public static class Completion
         string rebuilt = cmd + " " + string.Join(' ', parts.Take(argIndex).Append(value));
         return rebuilt == buffer ? null : rebuilt;
     }
+
+    /// <summary>
+    /// Wrap a completion value in double quotes IF it contains a space, so the
+    /// REPL tokenizer (<see cref="Repl.Tokenise"/>) keeps it as one argument;
+    /// single-word values are returned bare.
+    /// </summary>
+    private static string Quote(string value) =>
+        value.Contains(' ') ? $"\"{value}\"" : value;
 
     /// <summary>The suggested value for one placeholder slot, or null.</summary>
     private static string? SuggestArg(string slot, string partial)

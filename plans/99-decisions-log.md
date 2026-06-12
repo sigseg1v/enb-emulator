@@ -8051,3 +8051,27 @@ change -- read-only client UX over packets we already parse.
   open space.
 
 Verified: CliClient.App builds clean (0 warnings); 792/792 unit tests green.
+
+## CLI: quote multi-word completion targets + CI-gate the unit suite (2026-06-11)
+
+Follow-up to the sector-names/navs/dock commit.
+
+- Completion now wraps a matched warp/gate/dock target name in double quotes ON
+  FILL **iff it contains a space** (`warp Mars G` -> Tab -> `warp "Mars Gate"`);
+  single-word names stay bare. The REPL already had a quote-aware tokenizer
+  (Repl.Tokenise, `chat "hello world"` -> one arg), so the quoted line parses
+  back as a single argument -- this replaces the brittle "treat the whole line
+  as one token" matching with output the existing parser handles. A quote the
+  user opens (`warp "Mar`) is stripped for the prefix match and re-applied on
+  fill. The ghost still previews the bare remainder (quotes added on Tab).
+  Honest limitation unchanged: same-prefix siblings (Mars Gate / Mars Station)
+  still need a disambiguating keystroke -- stateless completion can't cycle
+  disjoint names once the buffer holds a full candidate.
+- CI gap closed: FreyaTools.slnx only *built* CliClient.UnitTests; the suite
+  never *ran* in CI (only the docker integration suite did). Added a dedicated
+  `cli-unit-test` job (pure net10.0, no docker) that runs the 795-test unit
+  suite on every PR, so the REPL/completion/codec tests actually gate. No tests
+  were found to be flaky; no retries added.
+
+Verified: 795/795 unit tests green in Release; integration project still builds
+against the changed Core; mojibake gate exit 0; build.yml is valid YAML.

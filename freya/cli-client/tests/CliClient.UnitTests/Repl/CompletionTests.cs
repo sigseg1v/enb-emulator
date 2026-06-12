@@ -229,11 +229,16 @@ public sealed class CompletionTests
     }
 
     // ---- WholeLineArg (multi-word nav names: warp/gate/dock) ----
+    //
+    // A name with a space is filled WRAPPED in double quotes so the REPL's
+    // quote-aware tokenizer (Repl.Tokenise) parses it back as one argument; a
+    // single-word name ("Glenn") is filled bare. The ghost previews the bare
+    // remainder -- the quotes are added on Tab/execute.
 
     private static readonly IReadOnlyList<CommandSpec> WholeLineSpecs = new[]
     {
         new CommandSpec("warp", true, "<name-or-gid>", 100,
-            new[] { "Mars Gate", "Mars Station", "Terra Nav" },
+            new[] { "Mars Gate", "Mars Station", "Terra Nav", "Glenn" },
             WholeLineArg: true),
     };
 
@@ -254,27 +259,51 @@ public sealed class CompletionTests
     }
 
     [Fact]
-    public void CompleteArgument_WholeLine_FillsMultiWordName()
+    public void Ghost_WholeLine_OpenQuote_StripsQuoteForMatch()
     {
-        Assert.Equal("warp Mars Gate", Completion.CompleteArgument("warp Mars G", WholeLineSpecs));
+        // The user opened a quote: `warp "Mars ` still ghosts the remainder.
+        Assert.Equal("Gate  (+1)", Completion.Ghost("warp \"Mars ", WholeLineSpecs));
+    }
+
+    [Fact]
+    public void CompleteArgument_WholeLine_FillsMultiWordName_Quoted()
+    {
+        Assert.Equal("warp \"Mars Gate\"",
+            Completion.CompleteArgument("warp Mars G", WholeLineSpecs));
+    }
+
+    [Fact]
+    public void CompleteArgument_WholeLine_OpenQuote_Fills()
+    {
+        // A quote the user already opened is stripped for the prefix match and
+        // re-applied (with a closing quote) on fill.
+        Assert.Equal("warp \"Mars Gate\"",
+            Completion.CompleteArgument("warp \"Mars G", WholeLineSpecs));
+    }
+
+    [Fact]
+    public void CompleteArgument_WholeLine_SingleWordNotQuoted()
+    {
+        // "Glenn" has no space -> filled bare, no quotes.
+        Assert.Equal("warp Glenn", Completion.CompleteArgument("warp Gl", WholeLineSpecs));
     }
 
     [Fact]
     public void CompleteArgument_WholeLine_FullMatch_NoFurtherCycle()
     {
-        // Once filled to a complete candidate ("Mars Gate"), the whole typed
-        // text is the prefix, and no sibling starts with "Mars Gate", so a
+        // Once filled to a complete candidate (quoted "Mars Gate"), the whole
+        // typed text is the prefix, and no sibling starts with "Mars Gate", so a
         // repeated Tab has nothing more to offer. (To reach "Mars Station" the
-        // user disambiguates by typing, e.g. "warp Mars S".)
-        Assert.Null(Completion.CompleteArgument("warp Mars Gate", WholeLineSpecs));
-        Assert.Equal("warp Mars Station",
+        // user disambiguates by typing, e.g. `warp Mars S`.)
+        Assert.Null(Completion.CompleteArgument("warp \"Mars Gate\"", WholeLineSpecs));
+        Assert.Equal("warp \"Mars Station\"",
             Completion.CompleteArgument("warp Mars S", WholeLineSpecs));
     }
 
     [Fact]
-    public void CompleteArgument_WholeLine_FreshArg_FillsFirst()
+    public void CompleteArgument_WholeLine_FreshArg_FillsFirstQuoted()
     {
-        Assert.Equal("warp Mars Gate", Completion.CompleteArgument("warp ", WholeLineSpecs));
+        Assert.Equal("warp \"Mars Gate\"", Completion.CompleteArgument("warp ", WholeLineSpecs));
     }
 
     // ---- AvailableNames priority ordering ----
