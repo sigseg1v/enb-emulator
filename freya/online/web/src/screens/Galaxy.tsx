@@ -159,6 +159,31 @@ function gnorm(s: string): string {
     .replace(/[^a-z0-9]/g, '');
 }
 
+// A handful of authored "Planet" nodes carry a design label that differs from the
+// DB sector name for the same in-game location (word order, or a descriptive
+// sub-area name), so gnorm(node) never matched a sector and the node could never
+// light up. Each entry maps the authored node name to the real, occupiable DB
+// sector it represents -- verified to be a standalone sector (not a starbase
+// interior) that dead-ends off its base sector, the planet-sub-sector pattern.
+// Confirmed by the project owner. See plans/46-galaxy-node-name-validation.md.
+// Nodes with NO standalone sector (Lagarto Moon Risco -- a nav inside the Lagarto
+// sector; FishBowl -- unreachable) are intentionally absent and stay dark.
+const NODE_ALIAS: Record<string, string> = {
+  'Inverness Planet': 'Planet Inverness',
+  'Grissom Planet': 'Grissom Meteorological Site',
+  'Arduinne Planet': 'Arduinne Gas Cloud',
+  'Primus Planet': 'Praetorium Mons Area (Planet Primus)',
+  'Dahin Planet': 'Dahin Mining Interest',
+  'Swooping Eagle Planet': 'Yasuragi Area',
+  'Zweihander Planet': 'Jagerstadt',
+  'Endriago Planet': 'Porvenir Mons Area',
+};
+
+// Node name -> normalized DB-lookup key, applying NODE_ALIAS first.
+function nodeNorm(name: string): string {
+  return gnorm(NODE_ALIAS[name] ?? name);
+}
+
 // ---- jump lanes: the real gate network. Intra-system = solid, inter-system =
 // dashed "gate". Pulled from the gate list (docs/sector-gates.md). ----
 const GATES: [string, string][] = [
@@ -453,7 +478,7 @@ export function Galaxy() {
   const myMarkers = useMemo(() => {
     const nodeById: Record<string, Node> = {};
     for (const s of NODES) {
-      const id = idByNorm[gnorm(s.n)];
+      const id = idByNorm[nodeNorm(s.n)];
       if (id) nodeById[id] = s;
     }
     const bySector = new Map<string, { node: Node; names: string[]; online: boolean }>();
@@ -472,7 +497,7 @@ export function Galaxy() {
     const counts = occ?.counts ?? {};
     const p: Record<string, number> = {};
     for (const s of NODES) {
-      const id = idByNorm[gnorm(s.n)];
+      const id = idByNorm[nodeNorm(s.n)];
       p[s.n] = id ? (counts[id] ?? 0) : 0;
     }
     return p;

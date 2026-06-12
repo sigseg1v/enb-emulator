@@ -37,33 +37,45 @@ starbase interior id (join `starbases.starbase_sector_id`).
 
 ## The 10 nodes (design name -> best DB candidate)
 
-| # | Node (design)         | gnorm key            | Candidate DB row (id, name)                          | Likely | Status |
-|---|-----------------------|----------------------|------------------------------------------------------|--------|--------|
-| 1 | Inverness Planet      | invernessplanet      | 4093 `Planet Inverness`                              | **A**  | [ ] |
-| 2 | Grissom Planet        | grissomplanet        | 4595 `Grissom Meteorological Site ` (trailing space) | **A**  | [ ] |
-| 3 | Arduinne Planet       | arduinneplanet       | 4095 `Arduinne Gas Cloud`                            | **A?** | [ ] |
-| 4 | Primus Planet         | primusplanet         | 3595 `Praetorium Mons Area (Planet Primus)`          | **A?** | [ ] |
-| 5 | Dahin Planet          | dahinplanet          | 1930 `Dahin Mining Interest`                         | **A?** | [ ] |
-| 6 | Swooping Eagle Planet | swoopingeagleplanet  | (none -- only 4120 `Swooping Eagle`)                | **B**  | [ ] |
-| 7 | Zweihander Planet     | zweihanderplanet     | (none -- only 1425 `Zweihander`)                    | **B**  | [ ] |
-| 8 | Endriago Planet       | endriagoplanet       | (none -- only 2210 `Endriago`)                      | **B**  | [ ] |
-| 9 | Lagarto Moon Risco    | lagartomoonrisco     | (none -- only 2215 `Lagarto`)                       | **B**  | [ ] |
-| 10| FishBowl              | fishbowl             | (none at all)                                        | **B**  | [ ] |
+RESOLVED 2026-06-12 -- owner-confirmed every row. 8 nodes aliased, 2 confirmed
+dark. The aliases live in `NODE_ALIAS` in `Galaxy.tsx` (applied via `nodeNorm()`
+before the `idByNorm` lookup at both the presence-count and my-avatar-marker
+sites). Initial candidate hunt found 5 (rows 1-5); the owner supplied the real
+sector names for 4 of the remaining 5 (rows 6-9), of which 3 resolved to real
+occupiable sectors and 1 (Lagarto Moon Risco) is a nav inside the Lagarto sector.
 
-Notes:
-- #1 is the strongest fix candidate: pure word-order skew (`Inverness Planet` vs
-  `Planet Inverness`). Confirm it is a standalone sector, then alias it.
-- #2 trailing-space DB name already normalizes away under `gnorm`; the mismatch is
-  `Planet` vs `Meteorological Site`. Confirm same place, then alias.
-- #3-#5 are "A?" because the DB candidate is a descriptive variant (Gas Cloud / Mons
-  Area / Mining Interest). Confirm it is the same in-game location AND a sector a pilot
-  can occupy before aliasing; otherwise mark B.
-- #6-#10: if the DB truly has no separate sector row, these are POIs inside the parent
-  and stay dark by design. Just record the confirmation.
+| # | Node (design)         | DB sector aliased to (id, name)                      | Case | Status |
+|---|-----------------------|------------------------------------------------------|------|--------|
+| 1 | Inverness Planet      | 4093 `Planet Inverness`                              | A    | [x] aliased |
+| 2 | Grissom Planet        | 4595 `Grissom Meteorological Site ` (trailing space) | A    | [x] aliased |
+| 3 | Arduinne Planet       | 4095 `Arduinne Gas Cloud`                            | A    | [x] aliased |
+| 4 | Primus Planet         | 3595 `Praetorium Mons Area (Planet Primus)`          | A    | [x] aliased |
+| 5 | Dahin Planet          | 1930 `Dahin Mining Interest`                         | A    | [x] aliased |
+| 6 | Swooping Eagle Planet | 4195 `Yasuragi Area ` (trailing space)              | A    | [x] aliased |
+| 7 | Zweihander Planet     | 1493 `Jagerstadt`                                   | A    | [x] aliased |
+| 8 | Endriago Planet       | 2295 `Porvenir Mons Area`                           | A    | [x] aliased |
+| 9 | Lagarto Moon Risco    | (none -- Risco is a nav INSIDE 2215 `Lagarto`)      | B    | [x] dark |
+| 10| FishBowl              | (none -- unreachable)                                | B    | [x] dark |
 
-## Done criteria
+Validation evidence (per candidate, `freya-dev-postgres-1` / db `net7`): each
+aliased sector is a normal sector (NOT a `starbases.starbase_sector_id` interior)
+whose only gate-out is back to its base sector -- the planet-sub-sector dead-end
+pattern -- so a docked/in-space pilot there is genuinely in that sector id and
+lights the node. No double-mapping: each base node ("Inverness", "Grissom", ...)
+already matched its own sector, so the "Planet" node claims the previously
+orphaned dead-end.
 
-- Every row above flipped to `[x]` with the case (A-aliased / B-confirmed-dark) recorded.
-- Any A-row has its alias added in `Galaxy.tsx` and a manual check that a pilot there
-  lights the node.
-- This file updated; `plans/00-master.md` ticked if it tracks plan 46.
+Owner notes that fed rows 6-9: Swooping Eagle Planet was "Master Cha'han's Dojo or
+Yasuragi" -- there is no Cha'han/Dojo sector row, only `Yasuragi Area` (4195), so
+that is the one. Zweihander Planet = `Jagerstadt`. Endriago Planet = `Porvenir
+Mons Area`. Lagarto Moon Risco is reached via the Risco nav inside the Lagarto
+sector (Gallina system) -- no standalone sector, so it correctly stays dark
+(aliasing it to 2215 would double-count the "Lagarto" node).
+
+## Done criteria (met)
+
+- [x] Every row flipped with its case (A-aliased / B-confirmed-dark) recorded.
+- [x] A-rows aliased in `Galaxy.tsx` (`NODE_ALIAS` + `nodeNorm()`); `npm run build`
+      clean. Real-client pilot-lights-the-node check is the last manual step the
+      owner does when convenient (the id bridge is byte-verified against the DB).
+- [x] This file updated.
