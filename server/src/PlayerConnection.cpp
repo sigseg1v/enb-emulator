@@ -10857,7 +10857,15 @@ bool Player::NPCTradeItems()
 			SendItemBase(item->ItemTemplateID());
 
 			PlayerIndex()->VendorInv.Item[TotalItems].SetItemTemplateID(item->ItemTemplateID());
-			PlayerIndex()->VendorInv.Item[TotalItems].SetStackCount(1);
+			// Present the vendor slot as a full stack, not a single unit. The
+			// client's buy-quantity slider is bounded by the source stack it is
+			// dragging from, so a slot of 1 pins every purchase to one item --
+			// that is the "can only buy 1 bullet at a time" bug. Vendor stock is
+			// effectively infinite (starbase_vender_inventory.quanity == -1), and
+			// the buy handler (case 4) already honours any InvMo.Num the client
+			// sends, capped by credits + cargo space, so show MaxStack to let a
+			// player buy up to a full stack per drag (drag again for more).
+			PlayerIndex()->VendorInv.Item[TotalItems].SetStackCount(item->MaxStack() > 1 ? item->MaxStack() : 1);
 			PlayerIndex()->VendorInv.Item[TotalItems].SetStructure(1.0f);
 			PlayerIndex()->VendorInv.Item[TotalItems].SetQuality(1.0f);
 
