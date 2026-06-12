@@ -97,6 +97,10 @@ export interface GalaxyMap {
 // counts is keyed by sector id (as a string); total is all online players.
 export interface GalaxyOccupancy { counts: Record<string, number>; total: number; }
 
+// One of the logged-in account's own characters and the sector it sits in.
+// sector is the (parent) sector id as a string, matching GalaxyOccupancy keys.
+export interface AvatarLocation { name: string; sector: string; online: boolean; }
+
 export interface Listing {
   id: string;
   item: Item;

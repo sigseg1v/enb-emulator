@@ -1,0 +1,32 @@
+/* ============================================================
+   FREYA ONLINE -- breakpoint system
+   ============================================================
+
+   The single source of truth for responsive breakpoints. CSS custom
+   properties cannot be used inside an @media condition, so the canonical
+   values live here as a documented scale and are referenced literally and
+   CONSISTENTLY across base.css and every *.module.css. Do not invent new
+   one-off widths -- pick the nearest token below.
+
+   The UI is desktop-first, so layouts collapse with `max-width` queries:
+
+     --bp-sm   30rem / 480px   small phones        @media (max-width: 30rem)
+     --bp-md   48rem / 768px   phones / phablets   @media (max-width: 48rem)   <- primary mobile collapse
+     --bp-lg   64rem / 1024px  tablets / laptops    @media (max-width: 64rem)   <- relax dense two-pane grids
+     --bp-xl   80rem / 1280px  desktop
+
+   Convention:
+   - `md` (48rem) is the main "go single-column / reflow the top bar" line.
+   - `sm` (30rem) is for the tightest phones (drop padding, hide non-essential
+     columns, shrink type).
+   - `lg` (64rem) loosens the master/detail two-pane screens before they get
+     cramped on small laptops/tablets.
+
+   The :root vars are exported for JS/container-query/calc() use; the @media
+   literals are what the stylesheets actually key off. Keep them in lockstep. */
+:root {
+  --bp-sm: 30rem;
+  --bp-md: 48rem;
+  --bp-lg: 64rem;
+  --bp-xl: 80rem;
+}

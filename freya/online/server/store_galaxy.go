@@ -261,6 +261,60 @@ func (s *Store) galaxyOccupancy(ctx context.Context, starbase map[int64]int64) (
 	return GalaxyOccupancy{Counts: counts, Total: total}, nil
 }
 
+// AvatarLocation is one of the logged-in account's own characters and the sector
+// it is currently parked in -- shown on the map as a personal star marker
+// regardless of whether the character is online. Sector is the (parent) sector id
+// as a string, matching the keys in GalaxyOccupancy.Counts so the SPA can resolve
+// it to a node with the same id->node bridge it already uses.
+type AvatarLocation struct {
+	Name   string `json:"name"`
+	Sector string `json:"sector"`
+	Online bool   `json:"online"`
+}
+
+// myAvatarLocations lists the account's live characters with their current
+// sector, online or not. Docked characters (whose stored sector is a starbase
+// interior id) are attributed to the parent sector via the starbase map, exactly
+// as galaxyOccupancy does, so a docked character's star lands on the real sector
+// node. A character whose sector is unknown (id 0 / no node) is still returned;
+// the SPA simply skips drawing a marker it cannot place.
+func (s *Store) myAvatarLocations(ctx context.Context, accountID int64, starbase map[int64]int64) ([]AvatarLocation, error) {
+	rows, err := s.user.Query(ctx, `
+		SELECT trim(both '_' from coalesce(ad.first_name,'') || '_' || coalesce(ad.last_name,'')),
+		       ai.sector,
+		       (ai.last_login > ai.last_logout) AS online
+		  FROM avatar_info ai
+		  JOIN avatar_data ad ON ad.avatar_id = ai.avatar_id
+		 WHERE ai.account_id = $1
+		   AND ai.deleted_at IS NULL
+		 ORDER BY ai.slot ASC`, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []AvatarLocation
+	for rows.Next() {
+		var (
+			name   string
+			sector int64
+			online bool
+		)
+		if err := rows.Scan(&name, &sector, &online); err != nil {
+			return nil, err
+		}
+		if p, ok := starbase[sector]; ok { // docked -> parent sector
+			sector = p
+		}
+		out = append(out, AvatarLocation{
+			Name:   name,
+			Sector: strconv.FormatInt(sector, 10),
+			Online: online,
+		})
+	}
+	return out, rows.Err()
+}
+
 // galaxyMapTTL is how long the static topology is cached. It is content data
 // that effectively never changes at runtime, so a long TTL is safe and keeps the
 // (relatively heavy) three-query build off the hot path.
@@ -325,6 +379,14 @@ func (c *galaxyCache) getMap(ctx context.Context, now time.Time) (GalaxyMap, err
 	c.cachedMap = &m
 	c.mapAt = now
 	return m, nil
+}
+
+// starbaseMap returns the cached interior->parent sector map (refreshing on the
+// topology TTL), taking the lock for callers outside the cache.
+func (c *galaxyCache) starbaseMap(ctx context.Context, now time.Time) (map[int64]int64, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.starbaseParents(ctx, now)
 }
 
 // getOccupancy returns the cached live counts, refreshing past the short TTL.

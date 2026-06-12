@@ -9,6 +9,7 @@ import { Credits, ItemIcon, Quality, TimeBand } from '../components/ui';
 import { ItemDisplay } from '../components/ItemDisplay';
 import { DURATIONS } from '../mock';
 import * as api from '../api';
+import styles from './AuctionHouse.module.css';
 
 type Vars = CSSProperties & Record<string, string | number>;
 type Filter = 'all' | Cat;
@@ -26,19 +27,19 @@ const AH_FILTERS: { key: Filter; label: string }[] = [
 function AhRow({ listing, active, onClick }: { listing: Listing; active: boolean; onClick: () => void }) {
   const r = RARITY[listing.item.rarity];
   return (
-    <div className={'ahrow' + (active ? ' ahrow--active' : '')} onClick={onClick}>
-      <ItemIcon item={listing.item} className="ahrow__icon" />
+    <div className={styles.ahrow + (active ? ' ' + styles.ahrowActive : '')} onClick={onClick}>
+      <ItemIcon item={listing.item} className={styles.ahrowIcon} />
       <div style={{ minWidth: 0, '--rcolor': r.color } as Vars}>
-        <div className="ahrow__name" style={{ color: r.color }}>
+        <div className={styles.ahrowName} style={{ color: r.color }}>
           {listing.item.name}{listing.stack > 1 ? ` ×${listing.stack}` : ''}
         </div>
-        <div className="ahrow__meta">L{listing.item.level} &middot; {listing.item.slot}</div>
+        <div className={styles.ahrowMeta}>L{listing.item.level} &middot; {listing.item.slot}</div>
       </div>
-      <div className={'ahrow__seller' + (listing.seller === 'AhBot' ? ' ahrow__seller--bot' : '')}>{listing.seller}</div>
-      <div className="ahrow__num">{listing.quality != null ? <Quality value={listing.quality} /> : <span className="dash">-</span>}</div>
-      <div className="ahrow__num"><TimeBand band={listing.band} showLabel={false} /></div>
-      <div className="ahrow__price"><b><Credits value={listing.bid} /></b></div>
-      <div className="ahrow__price ahrow__price--buyout">{listing.buyout != null ? <b><Credits value={listing.buyout} /></b> : <span className="dash">-</span>}</div>
+      <div className={styles.ahrowSeller + (listing.seller === 'AhBot' ? ' ' + styles.ahrowSellerBot : '')}>{listing.seller}</div>
+      <div className={styles.ahrowNum}>{listing.quality != null ? <Quality value={listing.quality} /> : <span className="dash">-</span>}</div>
+      <div className={styles.ahrowNum}><TimeBand band={listing.band} showLabel={false} /></div>
+      <div className={styles.ahrowPrice}><b><Credits value={listing.bid} /></b></div>
+      <div className={`${styles.ahrowPrice} ${styles.ahrowPriceBuyout}`}>{listing.buyout != null ? <b><Credits value={listing.buyout} /></b> : <span className="dash">-</span>}</div>
     </div>
   );
 }
@@ -95,25 +96,25 @@ function BuyView({
   }
 
   return (
-    <div className="ah">
-      <div className="ah__left hud-panel">
-        <div className="ah__toolbar">
-          <div className="search">
-            <span className="search__icon">⌕</span>
-            <input className="search__input" placeholder="Search item or seller..." value={q} onChange={e => setQ(e.target.value)} />
+    <div className={styles.ah}>
+      <div className={`${styles.ahLeft} hud-panel`}>
+        <div className={styles.ahToolbar}>
+          <div className={styles.search}>
+            <span className={styles.searchIcon}>⌕</span>
+            <input className={styles.searchInput} placeholder="Search item or seller..." value={q} onChange={e => setQ(e.target.value)} />
           </div>
-          <div className="chips">
+          <div className={styles.chips}>
             {AH_FILTERS.map(f => (
-              <button key={f.key} className={'chip' + (filter === f.key ? ' chip--on' : '')} onClick={() => setFilter(f.key)}>{f.label}</button>
+              <button key={f.key} className={styles.chip + (filter === f.key ? ' ' + styles.chipOn : '')} onClick={() => setFilter(f.key)}>{f.label}</button>
             ))}
           </div>
         </div>
 
-        <div className="ahtable">
-          <div className="ahrow ahrow--head">
+        <div className={styles.ahtable}>
+          <div className={`${styles.ahrow} ${styles.ahrowHead}`}>
             <div></div><div>Item</div><div>Seller</div>
-            <div className="ahrow__num">Quality</div>
-            <div className="ahrow__num">Time</div>
+            <div className={styles.ahrowNum}>Quality</div>
+            <div className={styles.ahrowNum}>Time</div>
             <div style={{ textAlign: 'right' }}>Bid</div>
             <div style={{ textAlign: 'right' }}>Buyout</div>
           </div>
@@ -123,27 +124,27 @@ function BuyView({
         </div>
       </div>
 
-      <div className="ah__detail">
+      <div className={styles.ahDetail}>
         {!active
           ? <div className="hud-panel empty" style={{ height: '100%' }}><div className="empty__inner"><div className="empty__glyph">◈</div>Select a listing</div></div>
           : (
             <>
               <ItemDisplay item={active.item} quality={active.quality} />
-              <div className="bidbox hud-panel hud-corners">
-                <div className="bidbox__row">
+              <div className={`${styles.bidbox} hud-panel hud-corners`}>
+                <div className={styles.bidboxRow}>
                   <span>Seller</span>
-                  <span className={active.seller === 'AhBot' ? 'ahrow__seller--bot' : ''} style={{ fontFamily: 'var(--font-mono)' }}>{active.seller}</span>
+                  <span className={active.seller === 'AhBot' ? styles.ahrowSellerBot : ''} style={{ fontFamily: 'var(--font-mono)' }}>{active.seller}</span>
                 </div>
-                <div className="bidbox__row"><span>Time remaining</span><TimeBand band={active.band} /></div>
-                <div className="bidbox__row">
+                <div className={styles.bidboxRow}><span>Time remaining</span><TimeBand band={active.band} /></div>
+                <div className={styles.bidboxRow}>
                   <span>High bidder</span>
-                  <span className={'mono ' + (active.highBidder ? 'bidder' : 'bidder--none')}>{active.highBidder || 'No bids yet'}</span>
+                  <span className={'mono ' + (active.highBidder ? styles.bidder : styles.bidderNone)}>{active.highBidder || 'No bids yet'}</span>
                 </div>
-                <div className="bidbox__row"><span>Current bid</span><span className="bidbox__big"><Credits value={active.bid} /></span></div>
+                <div className={styles.bidboxRow}><span>Current bid</span><span className={styles.bidboxBig}><Credits value={active.bid} /></span></div>
                 {active.buyout != null &&
-                  <div className="bidbox__row"><span>Buyout</span><span className="bidbox__big" style={{ color: 'var(--warm)' }}><Credits value={active.buyout} /></span></div>}
-                <p className="bidbox__hint">Next bid must be at least <b style={{ color: 'var(--text-dim)' }}>+{fmtNum(minInc)} cr</b> (1% of item value). Quantity in stack: {active.stack}.</p>
-                <div className="bidbox__actions">
+                  <div className={styles.bidboxRow}><span>Buyout</span><span className={styles.bidboxBig} style={{ color: 'var(--warm)' }}><Credits value={active.buyout} /></span></div>}
+                <p className={styles.bidboxHint}>Next bid must be at least <b style={{ color: 'var(--text-dim)' }}>+{fmtNum(minInc)} cr</b> (1% of item value). Quantity in stack: {active.stack}.</p>
+                <div className={styles.bidboxActions}>
                   <button className="btn" onClick={placeBid} disabled={busy}>Bid {fmtNum(active.bid + minInc)}</button>
                   <button className="btn btn--warm" onClick={buyoutNow} disabled={busy || active.buyout == null}>Buyout</button>
                 </div>
@@ -159,17 +160,17 @@ function BuyView({
 function MyListingRow({ listing }: { listing: MyListing }) {
   const r = RARITY[listing.item.rarity];
   return (
-    <div className="ahrow" style={{ cursor: 'default', gridTemplateColumns: '44px 2.2fr 1.1fr 0.8fr 0.8fr 1fr 1fr' }}>
-      <ItemIcon item={listing.item} className="ahrow__icon" />
+    <div className={styles.ahrow} style={{ cursor: 'default' }}>
+      <ItemIcon item={listing.item} className={styles.ahrowIcon} />
       <div style={{ minWidth: 0 }}>
-        <div className="ahrow__name" style={{ color: r.color }}>{listing.item.name}{listing.stack > 1 ? ` ×${listing.stack}` : ''}</div>
-        <div className="ahrow__meta">L{listing.item.level} &middot; {listing.item.slot}</div>
+        <div className={styles.ahrowName} style={{ color: r.color }}>{listing.item.name}{listing.stack > 1 ? ` ×${listing.stack}` : ''}</div>
+        <div className={styles.ahrowMeta}>L{listing.item.level} &middot; {listing.item.slot}</div>
       </div>
-      <div className="ahrow__seller">{listing.avatar}</div>
-      <div className="ahrow__num">{listing.quality != null ? <Quality value={listing.quality} /> : <span className="dash">-</span>}</div>
-      <div className="ahrow__num"><TimeBand band={listing.band} showLabel={false} /></div>
-      <div className="ahrow__price">{listing.currentBid != null ? <b><Credits value={listing.currentBid} /></b> : <span className="dash">-</span>}</div>
-      <div className="ahrow__price ahrow__price--buyout">{listing.buyout != null ? <b><Credits value={listing.buyout} /></b> : <span className="dash">-</span>}</div>
+      <div className={styles.ahrowSeller}>{listing.avatar}</div>
+      <div className={styles.ahrowNum}>{listing.quality != null ? <Quality value={listing.quality} /> : <span className="dash">-</span>}</div>
+      <div className={styles.ahrowNum}><TimeBand band={listing.band} showLabel={false} /></div>
+      <div className={styles.ahrowPrice}>{listing.currentBid != null ? <b><Credits value={listing.currentBid} /></b> : <span className="dash">-</span>}</div>
+      <div className={`${styles.ahrowPrice} ${styles.ahrowPriceBuyout}`}>{listing.buyout != null ? <b><Credits value={listing.buyout} /></b> : <span className="dash">-</span>}</div>
     </div>
   );
 }
@@ -207,54 +208,54 @@ function PostForm({
   }
 
   return (
-    <div className="pform hud-panel hud-corners">
-      <div className="pform__preview" style={{ '--rcolor': r.color, '--rglow': r.glow } as Vars}>
-        <ItemIcon item={item} className="pform__icon" />
+    <div className={`${styles.pform} hud-panel hud-corners`}>
+      <div className={styles.pformPreview} style={{ '--rcolor': r.color, '--rglow': r.glow } as Vars}>
+        <ItemIcon item={item} className={styles.pformIcon} />
         <div>
-          <div className="pform__pname">{item.name}</div>
-          <div className="pform__psub">L{item.level} &middot; {item.slot}{slotData.quality != null && <> &middot; Quality <Quality value={slotData.quality} /></>}</div>
+          <div className={styles.pformPname}>{item.name}</div>
+          <div className={styles.pformPsub}>L{item.level} &middot; {item.slot}{slotData.quality != null && <> &middot; Quality <Quality value={slotData.quality} /></>}</div>
         </div>
       </div>
 
-      <div className="pform__field">
-        <span className="pform__lbl">Post duration</span>
-        <div className="seg">
+      <div className={styles.pformField}>
+        <span className={styles.pformLbl}>Post duration</span>
+        <div className={styles.seg}>
           {DURATIONS.map(d => (
-            <button key={d.key} className={'seg__btn' + (duration === d.key ? ' seg__btn--on' : '')} onClick={() => setDuration(d.key)}>
+            <button key={d.key} className={styles.segBtn + (duration === d.key ? ' ' + styles.segBtnOn : '')} onClick={() => setDuration(d.key)}>
               {d.label}<small>{d.hours}h</small>
             </button>
           ))}
         </div>
       </div>
 
-      <div className="pform__field">
-        <span className="pform__lbl">Stack size</span>
-        <div className="stepper">
-          <button className="stepper__btn" disabled={qty <= 1} onClick={() => setQty(v => Math.max(1, v - 1))}>−</button>
-          <div className="stepper__val">{qty}</div>
-          <button className="stepper__btn" disabled={qty >= maxStack} onClick={() => setQty(v => Math.min(maxStack, v + 1))}>+</button>
+      <div className={styles.pformField}>
+        <span className={styles.pformLbl}>Stack size</span>
+        <div className={styles.stepper}>
+          <button className={styles.stepperBtn} disabled={qty <= 1} onClick={() => setQty(v => Math.max(1, v - 1))}>−</button>
+          <div className={styles.stepperVal}>{qty}</div>
+          <button className={styles.stepperBtn} disabled={qty >= maxStack} onClick={() => setQty(v => Math.min(maxStack, v + 1))}>+</button>
         </div>
-        <div className="stepper__max">{maxStack === 1 ? 'Single item -- fixed at 1' : `Up to ${maxStack} available in this slot`}</div>
+        <div className={styles.stepperMax}>{maxStack === 1 ? 'Single item -- fixed at 1' : `Up to ${maxStack} available in this slot`}</div>
       </div>
 
-      <div className="pform__field">
-        <span className="pform__lbl">Minimum bid</span>
-        <div className="pinput">
+      <div className={styles.pformField}>
+        <span className={styles.pformLbl}>Minimum bid</span>
+        <div className={styles.pinput}>
           <input type="number" min="1" value={minBid} onChange={e => setMinBid(e.target.value)} />
-          <span className="pinput__unit">cr</span>
+          <span className={styles.pinputUnit}>cr</span>
         </div>
       </div>
 
-      <div className="pform__field">
-        <span className="pform__lbl">Buyout price <span style={{ textTransform: 'none', letterSpacing: 0 }}>(optional)</span></span>
-        <div className="pinput">
+      <div className={styles.pformField}>
+        <span className={styles.pformLbl}>Buyout price <span style={{ textTransform: 'none', letterSpacing: 0 }}>(optional)</span></span>
+        <div className={styles.pinput}>
           <input type="number" min="0" value={buyout} onChange={e => setBuyout(e.target.value)} />
-          <span className="pinput__unit">cr</span>
+          <span className={styles.pinputUnit}>cr</span>
         </div>
       </div>
 
-      <p className="pform__fee">Auction House fee <b>10%</b> &middot; <b>{fmtNum(fee)} cr</b> collected now. Unsold items return 95% to your mailbox.</p>
-      <button className="btn btn--primary pform__post" onClick={post} disabled={busy}>List on Auction House</button>
+      <p className={styles.pformFee}>Auction House fee <b>10%</b> &middot; <b>{fmtNum(fee)} cr</b> collected now. Unsold items return 95% to your mailbox.</p>
+      <button className={`btn btn--primary ${styles.pformPost}`} onClick={post} disabled={busy}>List on Auction House</button>
     </div>
   );
 }
@@ -298,8 +299,8 @@ function SellView({
   }
 
   return (
-    <div className="sell">
-      <div className="sell__left">
+    <div className={styles.sell}>
+      <div className={styles.sellLeft}>
         <div className="vault hud-panel">
           <div className="vault__head">
             <span className="vault__title">Vault Inventory</span>
@@ -332,19 +333,19 @@ function SellView({
 
         {slotData
           ? <PostForm slotData={slotData} avatar={avatar} onPost={post} busy={busy} />
-          : <div className="hud-panel sell__hint"><div><div className="empty__glyph">▲</div>Select a vault item<br />to set your listing terms</div></div>}
+          : <div className={`hud-panel ${styles.sellHint}`}><div><div className="empty__glyph">▲</div>Select a vault item<br />to set your listing terms</div></div>}
       </div>
 
-      <div className="sell__main hud-panel">
-        <div className="sell__mainhead">
+      <div className={`${styles.sellMain} hud-panel`}>
+        <div className={styles.sellMainhead}>
           <span>Your Listings -- {mine.length}</span>
           <span>{slotData ? 'Set terms, then list →' : 'Select a vault item to list ◂'}</span>
         </div>
-        <div className="ahtable">
-          <div className="ahrow ahrow--head" style={{ gridTemplateColumns: '44px 2.2fr 1.1fr 0.8fr 0.8fr 1fr 1fr' }}>
+        <div className={styles.ahtable}>
+          <div className={`${styles.ahrow} ${styles.ahrowHead}`}>
             <div></div><div>Item</div><div>Avatar</div>
-            <div className="ahrow__num">Quality</div>
-            <div className="ahrow__num">Time</div>
+            <div className={styles.ahrowNum}>Quality</div>
+            <div className={styles.ahrowNum}>Time</div>
             <div style={{ textAlign: 'right' }}>Current Bid</div>
             <div style={{ textAlign: 'right' }}>Buyout</div>
           </div>

@@ -15,6 +15,7 @@ import { VAULT_SLOT_COUNT } from '../types';
 import { RARITY } from '../lib/rarity';
 import { Quality } from '../components/ui';
 import * as api from '../api';
+import styles from './Vault.module.css';
 
 type Vars = CSSProperties & Record<string, string | number>;
 type Side = 'left' | 'right';
@@ -140,25 +141,25 @@ export function Vault({
           <div className="empty__inner"><div className="empty__glyph">⊟</div>You need at least two characters to transfer items</div>
         </div>
       ) : (
-        <div className="vxfer">
-          <div className="vxfer__cols">
+        <div className={styles.vxfer}>
+          <div className={styles.vxferCols}>
             <VaultGrid title="Source / Destination" avatar={left} avatars={avatars}
               slots={leftSlots} selSlot={sel?.side === 'left' ? sel.slot : null}
               onPick={slot => setSel({ side: 'left', slot })}
               onSelectAvatar={setLeft} exclude={right} />
 
-            <div className="vxfer__mid">
+            <div className={styles.vxferMid}>
               {armed ? (
                 <button className="btn btn--primary" disabled={busy || sameChar} onClick={transfer}>
                   {sel?.side === 'left' ? 'Transfer →' : '← Transfer'}
                 </button>
               ) : (
-                <div className="vxfer__hint" style={{ color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', fontSize: 12, textAlign: 'center' }}>
+                <div className={styles.vxferHint} style={{ color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', fontSize: 12, textAlign: 'center' }}>
                   Select an item on either side to move it to the other
                 </div>
               )}
               {armed && (
-                <div className="vxfer__preview" style={{ marginTop: 12, textAlign: 'center' }}>
+                <div style={{ marginTop: 12, textAlign: 'center' }}>
                   <div style={{ color: RARITY[armed.item.rarity].color, fontWeight: 600 }}>
                     {armed.item.name}{armed.stack > 1 ? ` ×${armed.stack}` : ''}
                   </div>

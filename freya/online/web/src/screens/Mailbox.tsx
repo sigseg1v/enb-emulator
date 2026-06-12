@@ -8,20 +8,21 @@ import { RARITY } from '../lib/rarity';
 import { Credits } from '../components/ui';
 import { fmtNum } from '../lib/format';
 import * as api from '../api';
+import styles from './Mailbox.module.css';
 
 type Vars = CSSProperties & Record<string, string | number>;
 
 function MailRow({ mail, active, onClick }: { mail: Mail; active: boolean; onClick: () => void }) {
   const hasItem = mail.attachments.length > 0;
   return (
-    <div className={'mail' + (active ? ' mail--active' : '')} onClick={onClick}>
-      <span className={'mail__unread' + (mail.read ? ' mail__unread--read' : '')} />
-      <div className="mail__main">
-        <div className={'mail__subj' + (mail.read ? '' : ' mail__subj--unread')}>{mail.subject}</div>
-        <div className="mail__from">{mail.sender}</div>
+    <div className={styles.mail + (active ? ' ' + styles.mailActive : '')} onClick={onClick}>
+      <span className={styles.mailUnread + (mail.read ? ' ' + styles.mailUnreadRead : '')} />
+      <div className={styles.mailMain}>
+        <div className={styles.mailSubj + (mail.read ? '' : ' ' + styles.mailSubjUnread)}>{mail.subject}</div>
+        <div className={styles.mailFrom}>{mail.sender}</div>
       </div>
-      <div className="mail__right">
-        {hasItem && <span className="mail__clip" title="Has item">◈</span>}
+      <div className={styles.mailRight}>
+        {hasItem && <span className={styles.mailClip} title="Has item">◈</span>}
       </div>
     </div>
   );
@@ -37,24 +38,24 @@ function AttachmentSlot({ att, onLoot }: { att: Attachment; onLoot: () => void }
   const label = spent ? 'Looted' : 'Loot';
   if (att.type === 'credits') {
     return (
-      <div className="aslot" style={spentStyle} onClick={handle}>
-        <div className="aslot__sq" style={{ '--rcolor': 'var(--warm)', '--rglow': 'oklch(0.80 0.125 72 / 0.3)' } as Vars}>
-          <span className="aslot__cr">cr</span>
+      <div className={styles.aslot} style={spentStyle} onClick={handle}>
+        <div className={styles.aslotSq} style={{ '--rcolor': 'var(--warm)', '--rglow': 'oklch(0.80 0.125 72 / 0.3)' } as Vars}>
+          <span className={styles.aslotCr}>cr</span>
         </div>
-        <div className="aslot__name"><Credits value={att.amount} /></div>
-        <div className="aslot__loot">{label}</div>
+        <div className={styles.aslotName}><Credits value={att.amount} /></div>
+        <div className={styles.aslotLoot}>{label}</div>
       </div>
     );
   }
   const r = RARITY[att.item.rarity];
   return (
-    <div className="aslot" style={spentStyle} onClick={handle}>
-      <div className="aslot__sq" style={{ '--rcolor': r.color, '--rglow': r.glow } as Vars}>
+    <div className={styles.aslot} style={spentStyle} onClick={handle}>
+      <div className={styles.aslotSq} style={{ '--rcolor': r.color, '--rglow': r.glow } as Vars}>
         <span className="icon__glyph">{att.item.glyph}</span>
-        {att.stack > 1 && <span className="aslot__qty">{att.stack}</span>}
+        {att.stack > 1 && <span className={styles.aslotQty}>{att.stack}</span>}
       </div>
-      <div className="aslot__name" style={{ color: r.color }}>{att.item.name}</div>
-      <div className="aslot__loot">{label}</div>
+      <div className={styles.aslotName} style={{ color: r.color }}>{att.item.name}</div>
+      <div className={styles.aslotLoot}>{label}</div>
     </div>
   );
 }
@@ -123,33 +124,33 @@ function Compose({
   }
 
   return (
-    <div className="mread hud-panel hud-corners">
-      <div className="mread__head">
-        <button className="btn btn--sm mread__del" disabled={busy} onClick={onClose}>Cancel</button>
-        <h2 className="mread__subj">New Message</h2>
-        <dl className="mread__meta"><dt>From</dt><dd>{from}</dd></dl>
+    <div className={`${styles.mread} hud-panel hud-corners`}>
+      <div className={styles.mreadHead}>
+        <button className={`btn btn--sm ${styles.mreadDel}`} disabled={busy} onClick={onClose}>Cancel</button>
+        <h2 className={styles.mreadSubj}>New Message</h2>
+        <dl className={styles.mreadMeta}><dt>From</dt><dd>{from}</dd></dl>
       </div>
 
-      <div className="compose">
-        <label className="compose__field">
-          <span className="compose__lbl">To</span>
-          <input className="compose__input" placeholder="Recipient character name"
+      <div className={styles.compose}>
+        <label className={styles.composeField}>
+          <span className={styles.composeLbl}>To</span>
+          <input className={styles.composeInput} placeholder="Recipient character name"
             value={to} onChange={e => setTo(e.target.value)} />
         </label>
-        <label className="compose__field">
-          <span className="compose__lbl">Subject</span>
-          <input className="compose__input" placeholder="Required" maxLength={128}
+        <label className={styles.composeField}>
+          <span className={styles.composeLbl}>Subject</span>
+          <input className={styles.composeInput} placeholder="Required" maxLength={128}
             value={subject} onChange={e => setSubject(e.target.value)} />
         </label>
-        <label className="compose__field">
-          <span className="compose__lbl">Message</span>
-          <textarea className="compose__input compose__body" rows={5} maxLength={4000}
+        <label className={styles.composeField}>
+          <span className={styles.composeLbl}>Message</span>
+          <textarea className={`${styles.composeInput} ${styles.composeBody}`} rows={5} maxLength={4000}
             placeholder="Body (optional if you attach an item)"
             value={body} onChange={e => setBody(e.target.value)} />
         </label>
 
-        <div className="compose__field">
-          <span className="compose__lbl">Attach from {from}'s vault &middot; {picked.length}/{MAX_MAIL_ITEMS}</span>
+        <div className={styles.composeField}>
+          <span className={styles.composeLbl}>Attach from {from}'s vault &middot; {picked.length}/{MAX_MAIL_ITEMS}</span>
           <div className="vgrid">
             {vaultSlots.length === 0
               ? <div style={{ gridColumn: '1 / -1', color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', fontSize: 12, padding: 12 }}>Vault empty</div>
@@ -285,13 +286,13 @@ export function Mailbox({
         </button>
       </div>
 
-      <div className="mbx">
-        <div className="mbx__list hud-panel">
-          <div className="mbx__listhead">
+      <div className={styles.mbx}>
+        <div className={`${styles.mbxList} hud-panel`}>
+          <div className={styles.mbxListhead}>
             <span>{visible.length} Messages</span>
             <span>Subject / Sender</span>
           </div>
-          <div className="mbx__scroll">
+          <div className={styles.mbxScroll}>
             {visible.length === 0
               ? <div className="empty"><div className="empty__inner"><div className="empty__glyph">✉</div>Inbox empty</div></div>
               : visible.map(m => <MailRow key={m.id} mail={m} active={m.id === activeId} onClick={() => open(m)} />)}
@@ -302,20 +303,20 @@ export function Mailbox({
           <Compose from={character} vaultSlots={senderVault} reload={reload} toast={toast}
             onClose={() => setComposing(false)} />
         ) : (
-        <div className="mread hud-panel hud-corners">
+        <div className={`${styles.mread} hud-panel hud-corners`}>
           {!active
             ? <div className="empty"><div className="empty__inner"><div className="empty__glyph">✉</div>Select a message</div></div>
             : (
               <>
-                <div className="mread__head">
+                <div className={styles.mreadHead}>
                   <button
-                    className="btn btn--sm mread__del"
+                    className={`btn btn--sm ${styles.mreadDel}`}
                     disabled={busy}
                     title="Delete this message"
                     onClick={() => deleteMail(active)}
                   >Delete</button>
-                  <h2 className="mread__subj">{active.subject}</h2>
-                  <dl className="mread__meta">
+                  <h2 className={styles.mreadSubj}>{active.subject}</h2>
+                  <dl className={styles.mreadMeta}>
                     <dt>From</dt><dd>{active.sender}</dd>
                     <dt>To</dt><dd>{active.recipient}</dd>
                     <dt>Expires</dt><dd>{active.expiresInDays} days</dd>
@@ -323,24 +324,24 @@ export function Mailbox({
                 </div>
 
                 {active.attachments.length > 0 && (
-                  <div className="mread__warn">
+                  <div className={styles.mreadWarn}>
                     <span>⚠</span>
                     <span>This message contains attachments. Unclaimed items and credits are <b>permanently removed after 90 days</b>. Collect them to your account before they expire.</span>
                   </div>
                 )}
 
-                <div className="mread__body">{active.body}</div>
+                <div className={styles.mreadBody}>{active.body}</div>
 
                 {active.attachments.length > 0 && (
-                  <div className="attach">
-                    <h3 className="attach__title">Attachments -- {active.attachments.length}</h3>
-                    <div className="attach__grid">
+                  <div className={styles.attach}>
+                    <h3 className={styles.attachTitle}>Attachments -- {active.attachments.length}</h3>
+                    <div className={styles.attachGrid}>
                       {active.attachments.map((att, i) => (
                         <AttachmentSlot key={att.index ?? i} att={att} onLoot={() => lootIndex(active.id, i, att)} />
                       ))}
                     </div>
                     {active.attachments.length > 1 &&
-                      <button className="btn btn--sm attach__all" disabled={busy} onClick={() => lootAll(active)}>Loot All</button>}
+                      <button className={`btn btn--sm ${styles.attachAll}`} disabled={busy} onClick={() => lootAll(active)}>Loot All</button>}
                   </div>
                 )}
               </>
