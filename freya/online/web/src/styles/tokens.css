@@ -35,6 +35,12 @@
   --danger:       oklch(0.66 0.18 28);
   --ok:           oklch(0.78 0.16 150);
 
+  /* live-pilot presence accent (Galaxy sonar waves + counts). Base token so
+     it exists on EVERY palette -- it was previously defined only under
+     [data-palette="amber"], so default/teal rendered the waves, the legend
+     dot, and the count transparent. */
+  --presence:     oklch(0.90 0.13 196);
+
   /* ---- rarity ramp (MMO standard) ---- */
   --r-common:     oklch(0.86 0.005 250);
   --r-uncommon:   oklch(0.78 0.16 148);
@@ -87,9 +93,6 @@
   --accent-dim:   oklch(0.64 0.10 70);
   --accent-glow:  oklch(0.82 0.13 72 / 0.35);
   --warm:         oklch(0.80 0.13 40);
-
-  /* live-pilot presence accent (Galaxy sonar waves + counts) */
-  --presence:     oklch(0.90 0.13 196);
 }
 
 * { box-sizing: border-box; }
