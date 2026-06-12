@@ -69,7 +69,7 @@ if (args[0] is "repl" or "start")
     // cycle with a captured local the editor's callback reads at run time.
     Repl repl = null!;
     var editor = new LineEditor(() => repl.Commands
-        .Select(h => new CommandSpec(h.Name, h.Available, h.Placeholder, h.Priority, h.ArgCandidates))
+        .Select(h => new CommandSpec(h.Name, h.Available, h.Placeholder, h.Priority, h.ArgCandidates, h.WholeLineArg))
         .ToList(), livePrompt);
     // State-aware, coloured prompt: tracks offline -> connected -> user ->
     // user@sector. Plain automatically when colour is off (piped/NO_COLOR).
@@ -83,7 +83,9 @@ if (args[0] is "repl" or "start")
     repl.Register(new CreateCommand(sessionCtx));
     repl.Register(new EnterCommand(sessionCtx));
     repl.Register(new UndockCommand(sessionCtx));
+    repl.Register(new DockCommand(sessionCtx));
     repl.Register(new GateCommand(sessionCtx));
+    repl.Register(new NavsCommand(sessionCtx));
     repl.Register(new MoveCommand(sessionCtx));
     repl.Register(new WarpCommand(sessionCtx));
     repl.Register(new ChatCommand(sessionCtx));

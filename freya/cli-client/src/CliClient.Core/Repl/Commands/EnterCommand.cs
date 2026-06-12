@@ -95,7 +95,7 @@ public sealed class EnterCommand : ICommandHandler
         }
 
         await output.WriteLineAsync(
-            AnsiPalette.Muted("entering sector ") + AnsiPalette.Value($"{sectorId}") +
+            AnsiPalette.Muted("entering ") + AnsiPalette.Value(_ctx.SectorLabel(sectorId)) +
             AnsiPalette.Muted(" on slot ") + AnsiPalette.Value($"{slot}") +
             AnsiPalette.Muted(" as ") + AnsiPalette.Accent(firstName) + AnsiPalette.Muted("..."))
             .ConfigureAwait(false);

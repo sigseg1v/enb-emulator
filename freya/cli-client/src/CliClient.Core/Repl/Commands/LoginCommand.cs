@@ -144,7 +144,7 @@ public sealed class LoginCommand : ICommandHandler
                 .QueryAsync(global, TimeSpan.FromSeconds(2), ct).ConfigureAwait(false);
             await output.WriteLineAsync(ProxyStatus.DtlsLine(proxyStatus)).ConfigureAwait(false);
 
-            await ListCommand.PrintAvatarsAsync(avatars, output).ConfigureAwait(false);
+            await ListCommand.PrintAvatarsAsync(_ctx, avatars, output).ConfigureAwait(false);
             return 0;
         }
         catch (Exception ex)

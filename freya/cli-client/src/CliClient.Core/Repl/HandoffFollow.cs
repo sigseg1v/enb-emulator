@@ -84,7 +84,7 @@ public static class HandoffFollow
 
         await output.WriteLineAsync(
             AnsiPalette.Ok($"{arrivedLabel}: ") +
-            AnsiPalette.Muted("sector=") + AnsiPalette.Value($"{result.SectorId}") + " " +
+            AnsiPalette.Muted("sector=") + AnsiPalette.Value(ctx.SectorLabel(result.SectorId)) + " " +
             AnsiPalette.Muted("handshake-frames=") + AnsiPalette.Value($"{result.HandshakeFrames.Count}") +
             AnsiPalette.Muted(" -- run `list` for the sector objects.")).ConfigureAwait(false);
 

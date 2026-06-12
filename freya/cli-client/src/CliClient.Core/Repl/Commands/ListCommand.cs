@@ -46,12 +46,13 @@ public sealed class ListCommand : ICommandHandler
                 AnsiPalette.Warn("no avatar list yet -- run `login` first")).ConfigureAwait(false);
             return 1;
         }
-        await PrintAvatarsAsync(_ctx.AvatarList, output).ConfigureAwait(false);
+        await PrintAvatarsAsync(_ctx, _ctx.AvatarList, output).ConfigureAwait(false);
         return 0;
     }
 
-    public static async Task PrintAvatarsAsync(GlobalAvatarList list, TextWriter output)
+    public static async Task PrintAvatarsAsync(SessionContext ctx, GlobalAvatarList list, TextWriter output)
     {
+        ArgumentNullException.ThrowIfNull(ctx);
         ArgumentNullException.ThrowIfNull(list);
         ArgumentNullException.ThrowIfNull(output);
 
@@ -76,7 +77,7 @@ public sealed class ListCommand : ICommandHandler
                 "  " + AnsiPalette.Muted($"[{i}]") + " " +
                 AnsiPalette.Accent($"{slot.Data.FirstName,-20}") + " " +
                 AnsiPalette.Info($"{race} {cls} ({code})") + "  " +
-                AnsiPalette.Muted($"sector={slot.Info.SectorId} loc={loc} ") +
+                AnsiPalette.Muted($"sector={ctx.SectorLabel(slot.Info.SectorId)} loc={loc} ") +
                 AnsiPalette.Value(
                     $"levels(C/E/T)={slot.Info.CombatLevel}/{slot.Info.ExploreLevel}/{slot.Info.TradeLevel}"))
                 .ConfigureAwait(false);

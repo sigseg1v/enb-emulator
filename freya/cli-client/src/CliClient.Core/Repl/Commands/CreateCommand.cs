@@ -128,7 +128,7 @@ public sealed class CreateCommand : ICommandHandler
                 ct).ConfigureAwait(false);
 
             _ctx.AvatarList = avatars;
-            await ListCommand.PrintAvatarsAsync(avatars, output).ConfigureAwait(false);
+            await ListCommand.PrintAvatarsAsync(_ctx, avatars, output).ConfigureAwait(false);
             return 0;
         }
         catch (Exception ex)

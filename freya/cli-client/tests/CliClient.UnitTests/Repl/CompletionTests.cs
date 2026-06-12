@@ -228,6 +228,55 @@ public sealed class CompletionTests
         Assert.Equal("enter Griever", Completion.CompleteArgument("enter ", CandSpecs));
     }
 
+    // ---- WholeLineArg (multi-word nav names: warp/gate/dock) ----
+
+    private static readonly IReadOnlyList<CommandSpec> WholeLineSpecs = new[]
+    {
+        new CommandSpec("warp", true, "<name-or-gid>", 100,
+            new[] { "Mars Gate", "Mars Station", "Terra Nav" },
+            WholeLineArg: true),
+    };
+
+    [Fact]
+    public void Ghost_WholeLine_CompletesAcrossSpaces()
+    {
+        // A space in the typed arg must NOT hide the ghost for a whole-line
+        // command -- "Mars " still matches "Mars Gate"/"Mars Station".
+        string ghost = Completion.Ghost("warp Mars ", WholeLineSpecs);
+        Assert.Equal("Gate  (+1)", ghost);
+    }
+
+    [Fact]
+    public void Ghost_WholeLine_SingleMultiWordMatch()
+    {
+        // "Mars Sta" (8 chars) -> remainder of "Mars Station" is "tion".
+        Assert.Equal("tion", Completion.Ghost("warp Mars Sta", WholeLineSpecs));
+    }
+
+    [Fact]
+    public void CompleteArgument_WholeLine_FillsMultiWordName()
+    {
+        Assert.Equal("warp Mars Gate", Completion.CompleteArgument("warp Mars G", WholeLineSpecs));
+    }
+
+    [Fact]
+    public void CompleteArgument_WholeLine_FullMatch_NoFurtherCycle()
+    {
+        // Once filled to a complete candidate ("Mars Gate"), the whole typed
+        // text is the prefix, and no sibling starts with "Mars Gate", so a
+        // repeated Tab has nothing more to offer. (To reach "Mars Station" the
+        // user disambiguates by typing, e.g. "warp Mars S".)
+        Assert.Null(Completion.CompleteArgument("warp Mars Gate", WholeLineSpecs));
+        Assert.Equal("warp Mars Station",
+            Completion.CompleteArgument("warp Mars S", WholeLineSpecs));
+    }
+
+    [Fact]
+    public void CompleteArgument_WholeLine_FreshArg_FillsFirst()
+    {
+        Assert.Equal("warp Mars Gate", Completion.CompleteArgument("warp ", WholeLineSpecs));
+    }
+
     // ---- AvailableNames priority ordering ----
 
     [Fact]

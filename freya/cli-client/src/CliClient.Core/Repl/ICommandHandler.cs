@@ -63,6 +63,14 @@ public interface ICommandHandler
     /// </summary>
     IReadOnlyList<string>? ArgCandidates => null;
 
+    /// <summary>
+    /// When true, the completer treats the ENTIRE text after the command word
+    /// as one argument, so a candidate whose name contains spaces (a warp/gate
+    /// target like "Mars Gate") completes as a unit instead of being split into
+    /// separate argument tokens. Defaults false (space-delimited arguments).
+    /// </summary>
+    bool WholeLineArg => false;
+
     /// <summary>Execute the command. Returns an exit-style int (see interface remarks).</summary>
     Task<int> ExecuteAsync(
         IReadOnlyList<string> args,

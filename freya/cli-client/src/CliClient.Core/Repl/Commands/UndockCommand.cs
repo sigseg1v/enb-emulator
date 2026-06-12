@@ -78,7 +78,12 @@ public sealed class UndockCommand : ICommandHandler
         "  On success you are in open space; run `list` to see the asteroids and\n" +
         "  other ships, then `move`/`warp`.";
     public string? Placeholder => null;
-    public bool Available => _ctx.Sector is not null && _ctx.GameId is not null;
+    // Only meaningful while docked, i.e. in a station-interior sector. The
+    // server gates StationLogin on m_SectorID > 9999 (the interior id space is
+    // parent*10+n), so an ActiveSectorId above that range means we are inside a
+    // station and `undock` applies; in open space it is hidden.
+    public bool Available =>
+        _ctx.Sector is not null && _ctx.GameId is not null && _ctx.ActiveSectorId is > 9999;
 
     public async Task<int> ExecuteAsync(IReadOnlyList<string> args, TextWriter output, CancellationToken ct)
     {
@@ -132,7 +137,7 @@ public sealed class UndockCommand : ICommandHandler
         }
 
         await output.WriteLineAsync(
-            AnsiPalette.Muted("handoff -> space sector ") + AnsiPalette.Value($"{toSectorId}") +
+            AnsiPalette.Muted("handoff -> space ") + AnsiPalette.Value(_ctx.SectorLabel(toSectorId)) +
             AnsiPalette.Muted("; re-joining...")).ConfigureAwait(false);
 
         // LaunchIntoSpace dropped us from the station sector (DropPlayerFromSector,

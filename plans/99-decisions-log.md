@@ -8021,3 +8021,33 @@ Verified: server rebuilt no-cache, clean, no new warnings at any edited line
 range; 3 new SqlplusWrapperTx gtests green (N-slot all-or-nothing commit,
 partial-failure rolls back every slot, cap-sized 15-record batch commits as one
 tx); all 11 wrapper gtests green against live Postgres (port 5434).
+
+## CLI: sector names everywhere + navs/dock commands, name-or-gid for warp/gate (2026-06-11)
+
+CLI usability pass on the Phase-S REPL (freya/cli-client). No server/proxy/wire
+change -- read-only client UX over packets we already parse.
+
+- SectorCatalog.cs (NEW, CC-BY-NC-SA like CharacterClass): baked snapshot of the
+  content DB `sectors` table (space sectors, id <= 9999). Station interiors
+  (id > 9999, not in the table) get their name from the live 0x0097 GALAXY_MAP
+  Type-4 "you are here" frame, captured in SessionContext and cached by sector id.
+- SessionContext.SectorLabel(id) is the single id->"Name (id)" formatter; used by
+  the prompt (compact who@Name), the character list, and the gate/dock/undock
+  handoff lines. EnterCommand/HandoffFollow/ListCommand updated to use it.
+- navs (NEW): lists discovered/visible navs, stargates, stations in the current
+  sector (nearest first, gid + distance) -- the warp/gate/dock target finder.
+- dock <station> (NEW): two-step 0x002C ACTION 28 (select, Target=station gid) ->
+  ~6s -> 7 (confirm) -> 0x003A SERVER_HANDOFF -> re-join interior, the dock-side
+  mirror of gate's 18->19. Available only in open space. Source: HandleAction
+  case 28 (OT_STATION, m_Gating, SectorManager::Dock sets StargateDestination)
+  and case 7 (SectorServerHandoff) -- no server change, the CLI reproduces the
+  retail packet sequence. Real-client confirmation tracked under the existing
+  undock/dock CV entry.
+- warp/gate now accept a nav/gate/station NAME (with spaces) or a gid, via
+  TargetArg.ResolveWords; both Tab-complete from SectorWorld nav targets.
+- Completion: added CommandSpec.WholeLineArg (additive, default false) so a
+  multi-word target name completes as one unit; 5 new CompletionTests pin it.
+- undock now appears only inside a station (ActiveSectorId > 9999); dock only in
+  open space.
+
+Verified: CliClient.App builds clean (0 warnings); 792/792 unit tests green.

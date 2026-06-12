@@ -7,11 +7,13 @@ using System.Globalization;
 namespace N7.CliClient.Repl.Commands;
 
 /// <summary>
-/// Parses a "target" argument shared by <c>move</c> and <c>warp</c>. Accepts a
-/// game id in several forms -- <c>gid=0x000186A5</c>, <c>0x000186A5</c>, a bare
-/// decimal id, or (angle-bracket placeholder text tolerated) <c>&lt;gid=...&gt;</c>
-/// -- and falls back to resolving a tracked object name against the sector
-/// world. Returns the game id, or null when nothing matches.
+/// Parses a "target" argument shared by <c>move</c>, <c>warp</c>, <c>gate</c>,
+/// and <c>dock</c>. Accepts a game id in several forms -- <c>gid=0x000186A5</c>,
+/// <c>0x000186A5</c>, a bare decimal id, or (angle-bracket placeholder text
+/// tolerated) <c>&lt;gid=...&gt;</c> -- and falls back to resolving a tracked
+/// object name against the sector world. <see cref="ResolveWords"/> additionally
+/// joins a multi-word name ("Mars Gate"). Returns the game id, or null when
+/// nothing matches.
 /// </summary>
 internal static class TargetArg
 {
@@ -38,5 +40,22 @@ internal static class TargetArg
     {
         if (TryParseGid(token, out int gid)) return gid;
         return world.FindByName(token.Trim().Trim('<', '>'));
+    }
+
+    /// <summary>
+    /// Resolve a target from the whole argument list, so a multi-word object
+    /// name ("Mars Gate", "Sigurd's Cradle") works as well as a single gid.
+    /// A lone token is a gid-or-name; multiple tokens are joined and resolved
+    /// by name first, falling back to treating the first token as a gid. Null
+    /// when nothing matches.
+    /// </summary>
+    public static int? ResolveWords(IReadOnlyList<string> args, SectorWorld world)
+    {
+        if (args is null || args.Count == 0) return null;
+        if (args.Count == 1) return Resolve(args[0], world);
+
+        string joined = string.Join(' ', args).Trim().Trim('<', '>');
+        return world.FindByName(joined)
+            ?? (TryParseGid(args[0], out int gid) ? gid : (int?)null);
     }
 }

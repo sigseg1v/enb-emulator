@@ -61,10 +61,21 @@ The top-level entry points are:
 The `repl` subcommand is the interactive driver. It registers a full
 command set against a live `SessionContext`; commands include
 `connect`, `login`, `list` (avatars), `create`, `enter`, `undock`,
-`gate`, `move`, `warp`, `chat`, `inv`, `use`, `starbase`, `skillup`,
-`ability`, the `group*` invite/leave commands, the `dump`/`narrate`
-toggles, `replay`, plus `help` and `quit`/`exit`/`stop`. A coloured,
-state-aware prompt tracks `offline -> connected -> user -> user@sector`.
+`dock`, `gate`, `navs`, `move`, `warp`, `chat`, `inv`, `use`, `starbase`,
+`skillup`, `ability`, the `group*` invite/leave commands, the
+`dump`/`narrate` toggles, `replay`, plus `help` and `quit`/`exit`/`stop`.
+A coloured, state-aware prompt tracks
+`offline -> connected -> user -> user@sector`.
+
+Sectors are shown as `Name (id)` everywhere (the prompt, the character
+list, the gate/dock/undock handoff lines) -- the name comes from a baked
+snapshot of the content DB's `sectors` table (`SectorCatalog`, space
+sectors) or, for a station interior, the live 0x0097 GALAXY_MAP "you are
+here" frame. `navs` lists the discovered/visible navs, stargates, and
+stations in the current sector (nearest first, with gid + distance);
+those names are exactly what `warp`, `gate`, and `dock` accept (by name
+or gid) and Tab-complete against. `undock` appears only inside a station;
+`dock <station>` only in open space.
 The REPL reads connection defaults from the environment
 (`N7_PROXY_HOST`, `N7_MVAS_HOST`, `N7_AUTH_HOST`, `N7_AUTH_PORT`) so the
 same binary can run on the docker host or inside the compose network.

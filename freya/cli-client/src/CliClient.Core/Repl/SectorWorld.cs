@@ -414,6 +414,79 @@ public sealed class SectorWorld
     }
 
     /// <summary>
+    /// One navigable destination in the current sector -- a discovered/visible
+    /// nav, stargate, or station the player can warp/gate/dock to. The set
+    /// <c>navs</c> lists and that <c>warp</c>/<c>gate</c>/<c>dock</c> complete
+    /// against.
+    /// </summary>
+    public readonly record struct NavTarget(
+        int GameId, string Name, string Kind,
+        bool IsGate, bool IsStation, bool IsNav,
+        bool? Visited, bool? OnRadar, float? Dist);
+
+    // Stargate create-types are 10/11; station is 12 (see TypeName).
+    private static bool IsNavigable(Tracked t)
+        => t.IsNav || t.CreateType is 10 or 11 or 12;
+
+    /// <summary>
+    /// The navigable destinations in the sector (navs, stargates, stations),
+    /// nearest first. Only named entries are returned -- an unnamed target
+    /// cannot be picked by name and is not a useful warp/gate destination. The
+    /// self avatar is excluded. Used by <c>navs</c> and by the warp/gate/dock
+    /// completion candidate sets.
+    /// </summary>
+    public IReadOnlyList<NavTarget> NavTargets(int selfGameId)
+    {
+        lock (_gate)
+        {
+            (float X, float Y, float Z)? self =
+                _objects.TryGetValue(selfGameId, out var me) && me.HasPos
+                    ? (me.X, me.Y, me.Z)
+                    : null;
+
+            return _objects.Values
+                .Where(o => o.GameId != selfGameId && IsNavigable(o) && !string.IsNullOrEmpty(o.Name))
+                .Select(o =>
+                {
+                    bool isGate = o.CreateType is 10 or 11;
+                    bool isStation = o.CreateType is 12;
+                    float? d = (self is { } sp && o.HasPos)
+                        ? MathF.Sqrt(
+                            (o.X - sp.X) * (o.X - sp.X) +
+                            (o.Y - sp.Y) * (o.Y - sp.Y) +
+                            (o.Z - sp.Z) * (o.Z - sp.Z))
+                        : (float?)null;
+                    string kind = isGate ? "stargate" : isStation ? "station" : TypeName(o);
+                    return new NavTarget(
+                        o.GameId, o.Name!, kind, isGate, isStation,
+                        !isGate && !isStation, o.Visited, o.OnRadar, d);
+                })
+                .OrderBy(t => t.Dist ?? float.MaxValue)
+                .ToArray();
+        }
+    }
+
+    /// <summary>
+    /// Names of every navigable destination (navs/gates/stations), nearest
+    /// first, de-duplicated -- the candidate set for <c>warp</c> and
+    /// <c>gate</c> Tab completion.
+    /// </summary>
+    public IReadOnlyList<string> NavTargetNames(int selfGameId)
+        => NavTargets(selfGameId)
+            .Select(t => t.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+    /// <summary>Names of station destinations only -- the candidate set for
+    /// <c>dock</c> completion.</summary>
+    public IReadOnlyList<string> StationNames(int selfGameId)
+        => NavTargets(selfGameId)
+            .Where(t => t.IsStation)
+            .Select(t => t.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+    /// <summary>
     /// Snapshot the tracked objects, sorted by distance from the self
     /// avatar (objects with no known position sort last).
     /// </summary>

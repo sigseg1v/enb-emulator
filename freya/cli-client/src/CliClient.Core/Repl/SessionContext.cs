@@ -126,6 +126,72 @@ public sealed class SessionContext : IAsyncDisposable
     /// <summary>Sector id the active avatar entered.</summary>
     public int? ActiveSectorId { get; set; }
 
+    // Sector id -> name learned at runtime from a 0x0097 GALAXY_MAP Type-4
+    // frame (the server's "you are here" update), keyed when one arrives while
+    // ActiveSectorId is known. This is the only name source for a station
+    // interior (id > 9999), which SectorCatalog does not carry; static space
+    // sectors fall back to SectorCatalog, so only the >9999 interiors need this.
+    private readonly Dictionary<int, string> _sectorNameCache = new();
+    private readonly object _sectorNameGate = new();
+
+    /// <summary>
+    /// "&lt;name&gt; (&lt;id&gt;)" for a sector, preferring a name the server
+    /// reported at runtime (covers station interiors) over the static
+    /// <see cref="SectorCatalog"/>, and falling back to "sector &lt;id&gt;"
+    /// when neither knows it. This is the single place that turns a raw sector
+    /// id into the labelled form shown in the prompt, the character list, and
+    /// the gate/undock/dock handoff lines.
+    /// </summary>
+    public string SectorLabel(int sectorId)
+    {
+        string? runtime;
+        lock (_sectorNameGate) _sectorNameCache.TryGetValue(sectorId, out runtime);
+        runtime ??= SectorCatalog.Name(sectorId);
+        return runtime is { } n ? $"{n} ({sectorId})" : $"sector {sectorId}";
+    }
+
+    /// <summary>
+    /// Capture the current sector's name from a 0x0097 GALAXY_MAP Type-4 frame
+    /// (PlayerID then NUL-terminated System / Sector / Station strings -- see
+    /// GalaxyMapRecord). The Station name wins when docked (the avatar is in the
+    /// station interior); otherwise the Sector name is used. Keyed into the
+    /// runtime cache against the current sector id. Never throws -- a name is a
+    /// convenience, never a failure point.
+    /// </summary>
+    private void CaptureSectorName(Packet p)
+    {
+        if (p.Header.Opcode != 0x0097) return;
+        try
+        {
+            var s = p.Payload.Span;
+            if (s.Length < 12) return;
+            if (BinaryPrimitives.ReadInt32LittleEndian(s[..4]) != 4) return; // Type 4 only
+            int off = 12; // skip Type, Size, PlayerID
+            string? system = ReadCString(s, ref off);
+            string? sector = ReadCString(s, ref off);
+            string? station = ReadCString(s, ref off);
+            _ = system;
+            // When docked the avatar sits in the station interior, so the
+            // station's own name is the right label for the current sector;
+            // in open space it is empty and the sector name applies.
+            string? name = !string.IsNullOrEmpty(station) ? station : sector;
+            if (string.IsNullOrEmpty(name)) return;
+            if (ActiveSectorId is { } sid)
+                lock (_sectorNameGate) _sectorNameCache[sid] = name;
+        }
+        catch { /* best-effort: the static catalog still covers space sectors */ }
+    }
+
+    private static string? ReadCString(ReadOnlySpan<byte> s, ref int off)
+    {
+        if (off >= s.Length) return null;
+        int nul = s[off..].IndexOf((byte)0);
+        int end = nul < 0 ? s.Length : off + nul;
+        string str = System.Text.Encoding.ASCII.GetString(s[off..end]);
+        off = end + 1;
+        return str;
+    }
+
     /// <summary>True once <c>connect</c> has probed a reachable endpoint.</summary>
     public bool Connected { get; set; }
 
@@ -142,7 +208,15 @@ public sealed class SessionContext : IAsyncDisposable
             if (Sector is not null)
             {
                 string who = string.IsNullOrEmpty(Username) ? "in-sector" : Username;
-                return ActiveSectorId is { } sid ? $"{who}@{sid}" : who;
+                // Prefer the server-reported / catalog name; fall back to the
+                // bare id. Compact form for the prompt: "who@Name" (or the raw
+                // id when unknown) -- the "(id)" form is kept for the verbose
+                // surfaces (list / handoff lines), not the every-keystroke prompt.
+                if (ActiveSectorId is not { } sid) return who;
+                string? name;
+                lock (_sectorNameGate) _sectorNameCache.TryGetValue(sid, out name);
+                name ??= SectorCatalog.Name(sid);
+                return name is { } n ? $"{who}@{n}" : $"{who}@{sid}";
             }
             if (Global is not null) return string.IsNullOrEmpty(Username) ? "online" : Username;
             if (Connected) return "connected";
@@ -467,6 +541,7 @@ public sealed class SessionContext : IAsyncDisposable
         Narrate(p, events);
         AnnounceGroupInvite(p);
         CaptureHandoff(p);
+        CaptureSectorName(p);
         PrintIfEnabled(p, PacketDirection.Inbound);
     }
 

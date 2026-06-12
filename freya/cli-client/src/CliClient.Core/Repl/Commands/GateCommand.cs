@@ -61,14 +61,23 @@ public sealed class GateCommand : ICommandHandler
     public string Name    => "gate";
     public string Summary => "jump through a stargate to its destination sector (0x002C ACTION 18 -> 19)";
     public string Usage   =>
-        "gate <gid>\n" +
-        "  gid = 0x.. / decimal / a tracked stargate name (`list`). Sends the\n" +
+        "gate <name-or-gid>\n" +
+        "  Target = a tracked stargate name (with spaces, e.g. `gate Mars Gate`)\n" +
+        "  or its gid (0x.. / decimal). Tab-completes from `navs`. Sends the\n" +
         "  retail gate sequence (0x002C ACTION Action=18 to select the gate, then\n" +
         "  Action=19 ~6s later to confirm), waits for the server's 0x003A\n" +
         "  SERVER_HANDOFF, then re-joins the destination sector with the same\n" +
         "  avatar id. On success you are in the new sector; run `list`.";
-    public string? Placeholder => "<gid>";
+    public string? Placeholder => "<name-or-gid>";
     public bool Available => _ctx.Sector is not null && _ctx.GameId is not null;
+
+    // Tab-complete gate names from the tracked sector world (nearest first).
+    // Whole-line so a name with spaces ("Mars Gate") completes as one unit.
+    public bool WholeLineArg => true;
+    public IReadOnlyList<string>? ArgCandidates =>
+        _ctx.GameId is { } id
+            ? _ctx.World.NavTargets(id).Where(t => t.IsGate).Select(t => t.Name).Distinct().ToArray()
+            : null;
 
     public async Task<int> ExecuteAsync(IReadOnlyList<string> args, TextWriter output, CancellationToken ct)
     {
@@ -87,10 +96,10 @@ public sealed class GateCommand : ICommandHandler
             await output.WriteLineAsync(AnsiPalette.Warn($"usage: {Usage}")).ConfigureAwait(false);
             return 1;
         }
-        if (TargetArg.Resolve(args[0], _ctx.World) is not { } gate)
+        if (TargetArg.ResolveWords(args, _ctx.World) is not { } gate)
         {
             await output.WriteLineAsync(AnsiPalette.Warn(
-                $"can't resolve '{args[0]}' to a gate -- give 0x.. / decimal gid or a tracked name (`list`)")).ConfigureAwait(false);
+                $"can't resolve '{string.Join(' ', args)}' to a gate -- give 0x.. / decimal gid or a tracked name (`navs`)")).ConfigureAwait(false);
             return 1;
         }
 
@@ -146,7 +155,7 @@ public sealed class GateCommand : ICommandHandler
         }
 
         await output.WriteLineAsync(
-            AnsiPalette.Muted("handoff -> sector ") + AnsiPalette.Value($"{toSectorId}") +
+            AnsiPalette.Muted("handoff -> ") + AnsiPalette.Value(_ctx.SectorLabel(toSectorId)) +
             AnsiPalette.Muted("; re-joining...")).ConfigureAwait(false);
 
         return await HandoffFollow.CompleteAsync(

@@ -12,7 +12,7 @@ namespace N7.CliClient.Repl;
 /// </summary>
 public sealed record CommandSpec(
     string Name, bool Available, string? Placeholder, int Priority = 0,
-    IReadOnlyList<string>? ArgCandidates = null);
+    IReadOnlyList<string>? ArgCandidates = null, bool WholeLineArg = false);
 
 /// <summary>
 /// Pure completion logic for the REPL line editor -- candidate filtering
@@ -102,7 +102,10 @@ public static class Completion
 
         // Dynamic first-arg candidates (e.g. character names for `enter`) take
         // precedence over the static placeholder while still on the first arg.
-        if (spec.ArgCandidates is { Count: > 0 } argCands && !afterCmd.Contains(' '))
+        // A whole-line-arg command (warp/gate/dock: targets whose names contain
+        // spaces) keeps matching against the entire remainder, not just the
+        // first space-delimited token.
+        if (spec.ArgCandidates is { Count: > 0 } argCands && (spec.WholeLineArg || !afterCmd.Contains(' ')))
         {
             if (afterCmd.Length == 0)
                 return string.Join("  ", argCands);
@@ -154,6 +157,24 @@ public static class Completion
         bool onNewArg = args.Length == 0 || char.IsWhiteSpace(args[^1]);
         int argIndex = onNewArg ? parts.Length : parts.Length - 1;
         string partial = onNewArg ? string.Empty : parts[^1];
+
+        // Whole-line-arg commands (warp/gate/dock) treat everything after the
+        // command word as ONE argument, so a target name with spaces ("Mars
+        // Gate") Tab-completes as a unit. Match the full remainder against the
+        // candidate set and cycle on repeated Tab.
+        if (spec.WholeLineArg && spec.ArgCandidates is { Count: > 0 } wholeCands)
+        {
+            string? match = wholeCands.FirstOrDefault(
+                c => c.StartsWith(args, StringComparison.OrdinalIgnoreCase));
+            if (match is null) return null;
+            string filled = cmd + " " + match;
+            if (filled != buffer) return filled;
+            string? next = wholeCands
+                .SkipWhile(c => !string.Equals(c, match, StringComparison.OrdinalIgnoreCase))
+                .Skip(1)
+                .FirstOrDefault(c => c.StartsWith(args, StringComparison.OrdinalIgnoreCase));
+            return next is null ? null : cmd + " " + next;
+        }
 
         // First-arg dynamic candidates (e.g. character names for `enter`):
         // fill the first one that the partial is a prefix of, before consulting
