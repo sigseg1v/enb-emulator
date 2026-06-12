@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import type { ServerStatus as ServerStatusT } from '../types';
 import { ServerStatus, Wordmark } from '../components/ui';
+import styles from './Login.module.css';
 
 /** Deep-space backdrop: procedural starfield + planet with a warm rim. */
 function Starfield({ count = 140 }: { count?: number }) {
@@ -17,12 +18,12 @@ function Starfield({ count = 140 }: { count?: number }) {
     return parts.join(', ');
   }, [count]);
   return (
-    <div className="sky">
-      <div className="sky__stars" style={{ boxShadow: shadow }} />
-      <div className="sky__stars sky__stars--lg" style={{ boxShadow: shadow }} />
-      <div className="sky__neb" />
-      <div className="sky__planet" />
-      <div className="sky__rim" />
+    <div className={styles.sky}>
+      <div className={styles.skyStars} style={{ boxShadow: shadow }} />
+      <div className={`${styles.skyStars} ${styles.skyStarsLg}`} style={{ boxShadow: shadow }} />
+      <div className={styles.skyNeb} />
+      <div className={styles.skyPlanet} />
+      <div className={styles.skyRim} />
     </div>
   );
 }
@@ -52,26 +53,26 @@ export function Login({
   }
 
   return (
-    <div className="login">
+    <div className={styles.login}>
       <Starfield />
-      <div className="login__topbar">
+      <div className={styles.loginTopbar}>
         <Wordmark size={22} />
         <ServerStatus status={server.status} players={server.players} />
       </div>
 
-      <div className="login__center">
-        <div className="login__hero">
+      <div className={styles.loginCenter}>
+        <div className={styles.loginHero}>
           <Wordmark size={68} />
-          <p className="login__tag">Navigate the Stars, Control the Economy,<br />Survive the Void</p>
-          <div className="login__rule" />
-          <p className="login__blurb">
+          <p className={styles.loginTag}>Navigate the Stars, Control the Economy,<br />Survive the Void</p>
+          <div className={styles.loginRule} />
+          <p className={styles.loginBlurb}>
             Sign in to manage your account and access the galactic network.
           </p>
         </div>
 
-        <form className="login__card hud-panel hud-corners" onSubmit={submit}>
-          <div className="login__cardhead">
-            <span className="disp login__cardtitle">Account Sign In</span>
+        <form className={`${styles.loginCard} hud-panel hud-corners`} onSubmit={submit}>
+          <div className={styles.loginCardhead}>
+            <span className={`disp ${styles.loginCardtitle}`}>Account Sign In</span>
             <span className={'srv__dot ' + (server.status === 'ONLINE' ? 'srv__dot--on' : 'srv__dot--off')} />
           </div>
 
@@ -87,19 +88,19 @@ export function Login({
               onChange={e => setPass(e.target.value)} placeholder="********" />
           </label>
 
-          {err && <div className="login__err mono">{err}</div>}
+          {err && <div className={`${styles.loginErr} mono`}>{err}</div>}
 
-          <button className="btn btn--primary login__submit" type="submit" disabled={busy}>
+          <button className={`btn btn--primary ${styles.loginSubmit}`} type="submit" disabled={busy}>
             {busy ? 'Establishing link...' : 'Sign In'}
           </button>
 
-          <div className="login__foot mono">
+          <div className={`${styles.loginFoot} mono`}>
             Secure session &middot; authorized pilots only
           </div>
         </form>
       </div>
 
-      <div className="login__legal mono">&copy; 2002&ndash;2026 Freya Online &middot; enb.sigsegv.land<br />All original assets, art and other items that belong to Electronic Arts remain their sole property with all rights reserved to them allowed by law.</div>
+      <div className={`${styles.loginLegal} mono`}>&copy; 2026 Freya Online &middot; enb.sigsegv.land<br />All original assets, art and other items that belong to Electronic Arts remain their sole property with all rights reserved to them allowed by law.</div>
     </div>
   );
 }

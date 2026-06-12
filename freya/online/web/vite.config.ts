@@ -8,6 +8,13 @@ import react from '@vitejs/plugin-react';
 // /api and the legacy auth endpoints to the Go service on :8080.
 export default defineConfig({
   plugins: [react()],
+  css: {
+    // Per-screen styles are authored as *.module.css and scoped by Vite. BEM
+    // class names (`mbx__list`, `ahrow--active`, `l-stars`) are exposed to TSX
+    // as camelCase locals only (`s.mbxList`, `s.ahrowActive`, `s.lStars`), so a
+    // stray global string can never silently match a screen-local rule.
+    modules: { localsConvention: 'camelCaseOnly' },
+  },
   server: {
     port: 5173,
     proxy: {

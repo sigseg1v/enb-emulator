@@ -11,14 +11,14 @@
 // without a backend.
 
 import type {
-  AvatarProfile, GalaxyMap, GalaxyOccupancy, Listing, Mail, MyListing,
+  AvatarLocation, AvatarProfile, GalaxyMap, GalaxyOccupancy, Listing, Mail, MyListing,
   PostListingInput, SendMailInput, ServerStatus, Session, ShipView, SkillView,
   VaultSlot, VaultTransferInput,
 } from './types';
 import {
-  MOCK_GALAXY, MOCK_GALAXY_OCCUPANCY, MOCK_LISTINGS, MOCK_MAIL, MOCK_MY_LISTINGS,
-  MOCK_PROFILE, MOCK_SERVER, MOCK_SESSION, MOCK_SHIP, MOCK_SKILLS, MOCK_VAULT,
-  MOCK_VAULT_STORAGE,
+  MOCK_GALAXY, MOCK_GALAXY_OCCUPANCY, MOCK_MY_AVATARS, MOCK_LISTINGS, MOCK_MAIL,
+  MOCK_MY_LISTINGS, MOCK_PROFILE, MOCK_SERVER, MOCK_SESSION, MOCK_SHIP, MOCK_SKILLS,
+  MOCK_VAULT, MOCK_VAULT_STORAGE,
 } from './mock';
 
 const USE_MOCK = import.meta.env.VITE_MOCK === '1';
@@ -141,6 +141,14 @@ export async function fetchGalaxy(): Promise<GalaxyMap> {
 export async function fetchGalaxyOccupancy(): Promise<GalaxyOccupancy> {
   if (USE_MOCK) return structuredClone(MOCK_GALAXY_OCCUPANCY);
   return getJSON<GalaxyOccupancy>('/api/galaxy/occupancy');
+}
+
+// The logged-in account's own characters and the sectors they sit in (personal
+// star markers). Polled alongside occupancy; shown online or not.
+export async function fetchMyAvatars(): Promise<AvatarLocation[]> {
+  if (USE_MOCK) return structuredClone(MOCK_MY_AVATARS);
+  const r = await getJSON<{ avatars: AvatarLocation[] | null }>('/api/galaxy/me');
+  return r.avatars ?? [];
 }
 
 export async function placeBid(listingId: string): Promise<Listing> {

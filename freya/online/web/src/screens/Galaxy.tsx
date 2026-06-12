@@ -25,22 +25,27 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import type { GalaxyMap, GalaxyOccupancy } from '../types';
+import type { AvatarLocation, GalaxyMap, GalaxyOccupancy } from '../types';
 import * as api from '../api';
+import styles from './Galaxy.module.css';
 
 type Vars = CSSProperties & Record<string, string | number>;
 
 const OCCUPANCY_POLL_MS = 15_000;
 const W = 1960;
 const H = 1280;
+// Five-pointed star centered on the origin (outer r 13, inner r 5.5), used for
+// the account's own-character markers.
+const STAR_PATH = 'M0,-13 L3.2,-4.5 L12.4,-4 L5.2,1.7 L7.6,10.5 L0,5.5 '
+  + 'L-7.6,10.5 L-5.2,1.7 L-12.4,-4 L-3.2,-4.5 Z';
 
 // ---- factions: OKLCH lightness / chroma / hue per territory ----
 const F: Record<string, { label: string; L: number; C: number; H: number }> = {
-  jenquai: { label: 'Jenquai', L: 0.62, C: 0.135, H: 256 },
+  jenquai: { label: 'Jenquai', L: 0.62, C: 0.150, H: 300 },
   neutral: { label: 'Neutral', L: 0.70, C: 0.018, H: 250 },
-  contested: { label: 'Contested', L: 0.60, C: 0.180, H: 305 },
+  infiniticorp: { label: 'InfinitiCorp', L: 0.64, C: 0.150, H: 150 },
   progen: { label: 'Progen', L: 0.58, C: 0.195, H: 26 },
-  terran: { label: 'Terran', L: 0.64, C: 0.150, H: 150 },
+  terran: { label: 'Terran', L: 0.64, C: 0.135, H: 256 },
   pirate: { label: 'Pirate', L: 0.74, C: 0.140, H: 72 },
 };
 const col = (f: string, L: number, a?: number) =>
@@ -58,13 +63,13 @@ const SYSTEMS: Sys[] = [
   { name: 'Mazzaroth Maelstrom', f: 'neutral', cx: 165, cy: 481, r: 66 },
   { name: 'Unknown', f: 'neutral', cx: 82, cy: 646, r: 66 },
   { name: 'Mondara Maelstrom', f: 'neutral', cx: 1103, cy: 150, r: 66 },
-  { name: 'Sol', f: 'neutral', cx: 993, cy: 508, r: 287 },
+  { name: 'Sol', f: 'terran', cx: 993, cy: 508, r: 287 },
   { name: 'Beta Hydri', f: 'terran', cx: 248, cy: 867, r: 199 },
-  { name: 'Tau Ceti', f: 'terran', cx: 662, cy: 757, r: 154 },
-  { name: 'Alpha Centauri', f: 'terran', cx: 1075, cy: 922, r: 132 },
-  { name: 'Aquitaine', f: 'terran', cx: 1296, cy: 1088, r: 66 },
-  { name: 'Proxima Centauri', f: 'terran', cx: 1324, cy: 812, r: 110 },
-  { name: '61 Cygni', f: 'contested', cx: 772, cy: 1005, r: 110 },
+  { name: 'Tau Ceti', f: 'infiniticorp', cx: 662, cy: 757, r: 154 },
+  { name: 'Alpha Centauri', f: 'infiniticorp', cx: 1075, cy: 922, r: 132 },
+  { name: 'Aquitaine', f: 'neutral', cx: 1296, cy: 1088, r: 66 },
+  { name: 'Proxima Centauri', f: 'neutral', cx: 1324, cy: 812, r: 110 },
+  { name: '61 Cygni', f: 'infiniticorp', cx: 772, cy: 1005, r: 110 },
   { name: 'Smugglers Run', f: 'pirate', cx: 524, cy: 1143, r: 110 },
   { name: 'Vega', f: 'progen', cx: 1351, cy: 177, r: 132 },
   { name: 'Gallina', f: 'progen', cx: 1737, cy: 260, r: 154 },
@@ -148,111 +153,111 @@ function gnorm(s: string): string {
 
 // ---- jump lanes: the real gate network. Intra-system = solid, inter-system =
 // dashed "gate". Pulled from the gate list (docs/sector-gates.md). ----
-const GATE_TXT = `
-Adriel Prime|Freya
-Adriel Prime|Margesi
-Aganju|Inverness
-Aganju|Moto
-Akerons Gate|Freya
-Akerons Gate|Pluto and Charon
-Akerons Gate|Saturn
-Altair III|Endriago
-Altair III|Mars Gamma
-Altair III|Moto
-Altair III|Nostrand Vor
-Antares Frontier|Vishao's Cove
-Aragoth Prime|Muspelheim
-Aragoth Prime|Valkyrie Twins
-Aragoth Prime|Varens Girdle
-Arduinne|Inverness
-Ardus|Witberg
-Asteroid Belt Alpha|Asteroid Belt Beta
-Asteroid Belt Alpha|Earth
-Asteroid Belt Alpha|Saturn
-Asteroid Belt Beta|Asteroid Belt Gamma
-Asteroid Belt Beta|Saturn
-Asteroid Belt Beta|Venus
-Asteroid Belt Gamma|Mars
-Asteroid Belt Gamma|Saturn
-Blackbeards Wake|Grissom
-Blackbeards Wake|Inverness
-Blackbeards Wake|Muspelheim
-Blackbeards Wake|Paramis
-Blackbeards Wake|Xipe Totec
-Carpenter|Glenn
-Carpenter|New Edinburgh
-Carpenter|Shepard
-Carpenter|Slayton
-Ceres/Thule|Venus
-Cooper|Grissom
-Dahin|Kailaasa
-Dahin|Kitara's Veil
-Earth|Asteroid Belt Alpha
-Earth|Equatorial Earth
-Earth|High Earth
-Earth|Luna
-Endriago|Lagarto
-Endriago|Primus
-Equatorial Earth|Margesi
-Europa|Jupiter
-Europa|Swooping Eagle
-Fenris|Valkyrie Twins
-Fenris|Varens Girdle
-Freya|Jotunheim
-Freya|Nifleheim Cloud
-Freya|Ragnarok
-Freya|Witberg
-Ganymede|Ishuan
-Ganymede|Jupiter
-Glenn|Saturn
-Glenn|Slayton
-Glenn|Swooping Eagle
-Glorys Orbit|Slayton
-Grissom|Shepard
-High Earth|New Edinburgh
-Inverness|New Edinburgh
-Io|Jupiter
-Io|Kailaasa
-Ishuan|Yokan
-Jotunheim|Odin Rex
-Jotunheim|Ragnarok
-Jupiter|Saturn
-Kailaasa|Yokan
-Kitara's Veil|Vishao's Cove
-Lagarto|Mars Beta
-Lagarto|Odins Belt
-Lagarto|Roc
-Margesi|Equatorial Earth
-Mars|Mars Alpha
-Mars|Mars Beta
-Mars|Mars Gamma
-Mars Alpha|Tarsis
-Mars Beta|Lagarto
-Mazzaroth Maelstrom|Swooping Eagle
-Menorb|Ishuan
-Mercury|Pluto and Charon
-Mercury|Venus
-Mondara Maelstrom|Tarsis
-Muspelheim|Odins Belt
-Neptune|Uranus
-Nostrand Vor|Altair III
-Odin Rex|Odins Belt
-Odin Rex|Paramis
-Paramis|Odin Rex
-Pluto and Charon|Uranus
-Primus|Tarsis
-Ragnarok|Jotunheim
-Roc|Lagarto
-Saturn|Uranus
-Tarsis|Primus
-Venus|Mercury
-Vishao's Cove|Kitara's Veil
-Witberg|Zweihander
-Witberg|der Todesengel
-Xipe Totec|Swooping Eagle
-Yokan|Swooping Eagle
-Zweihander|Luna
-`;
+const GATES: [string, string][] = [
+  ['Adriel Prime', 'Freya'],
+  ['Adriel Prime', 'Margesi'],
+  ['Aganju', 'Inverness'],
+  ['Aganju', 'Moto'],
+  ['Akerons Gate', 'Freya'],
+  ['Akerons Gate', 'Pluto and Charon'],
+  ['Akerons Gate', 'Saturn'],
+  ['Altair III', 'Endriago'],
+  ['Altair III', 'Mars Gamma'],
+  ['Altair III', 'Moto'],
+  ['Altair III', 'Nostrand Vor'],
+  ['Antares Frontier', 'Vishao\'s Cove'],
+  ['Aragoth Prime', 'Muspelheim'],
+  ['Aragoth Prime', 'Valkyrie Twins'],
+  ['Aragoth Prime', 'Varens Girdle'],
+  ['Arduinne', 'Inverness'],
+  ['Ardus', 'Witberg'],
+  ['Asteroid Belt Alpha', 'Asteroid Belt Beta'],
+  ['Asteroid Belt Alpha', 'Earth'],
+  ['Asteroid Belt Alpha', 'Saturn'],
+  ['Asteroid Belt Beta', 'Asteroid Belt Gamma'],
+  ['Asteroid Belt Beta', 'Saturn'],
+  ['Asteroid Belt Beta', 'Venus'],
+  ['Asteroid Belt Gamma', 'Mars'],
+  ['Asteroid Belt Gamma', 'Saturn'],
+  ['Blackbeards Wake', 'Grissom'],
+  ['Blackbeards Wake', 'Inverness'],
+  ['Blackbeards Wake', 'Muspelheim'],
+  ['Blackbeards Wake', 'Paramis'],
+  ['Blackbeards Wake', 'Xipe Totec'],
+  ['Carpenter', 'Glenn'],
+  ['Carpenter', 'New Edinburgh'],
+  ['Carpenter', 'Shepard'],
+  ['Carpenter', 'Slayton'],
+  ['Ceres/Thule', 'Venus'],
+  ['Cooper', 'Grissom'],
+  ['Dahin', 'Kailaasa'],
+  ['Dahin', 'Kitara\'s Veil'],
+  ['Earth', 'Asteroid Belt Alpha'],
+  ['Earth', 'Equatorial Earth'],
+  ['Earth', 'High Earth'],
+  ['Earth', 'Luna'],
+  ['Endriago', 'Lagarto'],
+  ['Endriago', 'Primus'],
+  ['Equatorial Earth', 'Margesi'],
+  ['Europa', 'Jupiter'],
+  ['Europa', 'Swooping Eagle'],
+  ['Fenris', 'Valkyrie Twins'],
+  ['Fenris', 'Varens Girdle'],
+  ['Freya', 'Jotunheim'],
+  ['Freya', 'Nifleheim Cloud'],
+  ['Freya', 'Ragnarok'],
+  ['Freya', 'Witberg'],
+  ['Ganymede', 'Ishuan'],
+  ['Ganymede', 'Jupiter'],
+  ['Glenn', 'Saturn'],
+  ['Glenn', 'Slayton'],
+  ['Glenn', 'Swooping Eagle'],
+  ['Glorys Orbit', 'Slayton'],
+  ['Grissom', 'Shepard'],
+  ['High Earth', 'New Edinburgh'],
+  ['Inverness', 'New Edinburgh'],
+  ['Io', 'Jupiter'],
+  ['Io', 'Kailaasa'],
+  ['Ishuan', 'Yokan'],
+  ['Jotunheim', 'Odin Rex'],
+  ['Jotunheim', 'Ragnarok'],
+  ['Jupiter', 'Saturn'],
+  ['Kailaasa', 'Yokan'],
+  ['Kitara\'s Veil', 'Vishao\'s Cove'],
+  ['Lagarto', 'Mars Beta'],
+  ['Lagarto', 'Odins Belt'],
+  ['Lagarto', 'Roc'],
+  ['Margesi', 'Equatorial Earth'],
+  ['Mars', 'Mars Alpha'],
+  ['Mars', 'Mars Beta'],
+  ['Mars', 'Mars Gamma'],
+  ['Mars Alpha', 'Tarsis'],
+  ['Mars Beta', 'Lagarto'],
+  ['Mazzaroth Maelstrom', 'Swooping Eagle'],
+  ['Menorb', 'Ishuan'],
+  ['Mercury', 'Pluto and Charon'],
+  ['Mercury', 'Venus'],
+  ['Mondara Maelstrom', 'Tarsis'],
+  ['Muspelheim', 'Odins Belt'],
+  ['Neptune', 'Uranus'],
+  ['Nostrand Vor', 'Altair III'],
+  ['Odin Rex', 'Odins Belt'],
+  ['Odin Rex', 'Paramis'],
+  ['Paramis', 'Odin Rex'],
+  ['Pluto and Charon', 'Uranus'],
+  ['Primus', 'Tarsis'],
+  ['Ragnarok', 'Jotunheim'],
+  ['Roc', 'Lagarto'],
+  ['Saturn', 'Uranus'],
+  ['Tarsis', 'Primus'],
+  ['Venus', 'Mercury'],
+  ['Vishao\'s Cove', 'Kitara\'s Veil'],
+  ['Witberg', 'Zweihander'],
+  ['Witberg', 'der Todesengel'],
+  ['Xipe Totec', 'Swooping Eagle'],
+  ['Yokan', 'Swooping Eagle'],
+  ['Zweihander', 'Luna'],
+];
 
 // ---- deterministic PRNG (no Math.random: identical layout every render) ----
 function mulberry(seed: number): () => number {
@@ -280,14 +285,20 @@ const NODES: Node[] = RAW.map(([n, x, y]) => {
 const byName: Record<string, Node> = Object.fromEntries(NODES.map(s => [s.n, s]));
 
 // ---- lanes: dedup undirected, precompute the curved path once ----
-interface Lane { a: string; b: string; gate: boolean; d: string; }
+// `dRev` is the gate's second strand, shifted PERPENDICULAR to the lane (not by a
+// fixed diagonal). A diagonal screen-space shift has an along-the-line component
+// that varies with the lane's angle, which randomizes the two strands' dash
+// phase per lane -- so some gates looked dense and some sparse. A perpendicular
+// shift keeps both strands parallel with identical dash phase, so every gate's
+// dash spacing reads the same regardless of orientation.
+interface Lane { a: string; b: string; gate: boolean; d: string; dRev: string; }
 const LANES: Lane[] = (() => {
   const normMap: Record<string, Node> = {};
   NODES.forEach(s => { normMap[gnorm(s.n)] = s; });
   const out: Lane[] = [];
   const seen = new Set<string>();
-  GATE_TXT.trim().split('\n').forEach(line => {
-    const [a, b] = line.split('|');
+  const STRAND_SEP = 2.4; // px between the two gate strands, measured perpendicular
+  GATES.forEach(([a, b]) => {
     const sa = normMap[gnorm(a)], sb = normMap[gnorm(b)];
     if (!sa || !sb || sa === sb) return;
     const key = [sa.n, sb.n].sort().join('¦');
@@ -296,9 +307,15 @@ const LANES: Lane[] = (() => {
     const gate = sa.sys !== sb.sys;
     const mx = (sa.x + sb.x) / 2, my = (sa.y + sb.y) / 2;
     const dx = sb.x - sa.x, dy = sb.y - sa.y, len = Math.hypot(dx, dy) || 1;
+    const px = -dy / len, py = dx / len; // unit perpendicular to the lane
     const off = gate ? 22 : 10;
-    const cx = mx + (-dy / len) * off, cy = my + (dx / len) * off;
-    out.push({ a: sa.n, b: sb.n, gate, d: `M${sa.x} ${sa.y} Q${cx} ${cy} ${sb.x} ${sb.y}` });
+    const cx = mx + px * off, cy = my + py * off;
+    const o = STRAND_SEP;
+    out.push({
+      a: sa.n, b: sb.n, gate,
+      d: `M${sa.x} ${sa.y} Q${cx} ${cy} ${sb.x} ${sb.y}`,
+      dRev: `M${sa.x + px * o} ${sa.y + py * o} Q${cx + px * o} ${cy + py * o} ${sb.x + px * o} ${sb.y + py * o}`,
+    });
   });
   return out;
 })();
@@ -353,7 +370,7 @@ const GRID = (() => {
   return { v, h };
 })();
 
-const FACTION_LEGEND = ['jenquai', 'progen', 'terran', 'pirate', 'contested', 'neutral'];
+const FACTION_LEGEND = ['jenquai', 'progen', 'terran', 'pirate', 'infiniticorp', 'neutral'];
 
 type Highlight = { kind: 'faction'; f: string } | { kind: 'online' } | null;
 
@@ -361,6 +378,7 @@ function pad4(n: number) { return String(Math.max(0, Math.round(n))).padStart(4,
 
 export function Galaxy() {
   const [occ, setOcc] = useState<GalaxyOccupancy | null>(null);
+  const [myAvatars, setMyAvatars] = useState<AvatarLocation[]>([]);
   const [idByNorm, setIdByNorm] = useState<Record<string, string>>({});
   const [err, setErr] = useState<string | null>(null);
   const [hover, setHover] = useState<string | null>(null);
@@ -395,16 +413,49 @@ export function Galaxy() {
     return () => { alive = false; clearInterval(h); };
   }, []);
 
-  const counts = occ?.counts ?? {};
+  // The account's own characters and where they are. Polled on the same cadence
+  // so a marker follows a character that jumps sectors. Shown online or not.
+  useEffect(() => {
+    let alive = true;
+    const tick = () => api.fetchMyAvatars()
+      .then(a => { if (alive) setMyAvatars(a); })
+      .catch(() => { /* keep last good locations */ });
+    tick();
+    const h = setInterval(tick, OCCUPANCY_POLL_MS);
+    return () => { alive = false; clearInterval(h); };
+  }, []);
+
+  // My character markers: resolve each avatar's sector id to a node via the same
+  // id bridge occupancy uses, then group avatars that share a sector so their
+  // name labels stack instead of overprinting. Avatars whose sector has no node
+  // are dropped (nothing to point at).
+  const myMarkers = useMemo(() => {
+    const nodeById: Record<string, Node> = {};
+    for (const s of NODES) {
+      const id = idByNorm[gnorm(s.n)];
+      if (id) nodeById[id] = s;
+    }
+    const bySector = new Map<string, { node: Node; names: string[]; online: boolean }>();
+    for (const a of myAvatars) {
+      const node = nodeById[a.sector];
+      if (!node) continue;
+      const g = bySector.get(a.sector);
+      if (g) { g.names.push(a.name); g.online = g.online || a.online; }
+      else bySector.set(a.sector, { node, names: [a.name], online: a.online });
+    }
+    return [...bySector.values()];
+  }, [myAvatars, idByNorm]);
+
   // Live pilot count per AUTHORED node: gnorm(name) -> sector id -> count.
   const presence = useMemo(() => {
+    const counts = occ?.counts ?? {};
     const p: Record<string, number> = {};
     for (const s of NODES) {
       const id = idByNorm[gnorm(s.n)];
       p[s.n] = id ? (counts[id] ?? 0) : 0;
     }
     return p;
-  }, [idByNorm, counts]);
+  }, [idByNorm, occ]);
 
   const dimall = hover != null || hl != null;
   const total = occ?.total ?? 0;
@@ -444,7 +495,7 @@ export function Galaxy() {
   }
 
   return (
-    <div className="page galaxy">
+    <div className={`page ${styles.galaxy}`}>
       <div className="page__head">
         <div>
           <h1 className="page__title">Galaxy</h1>
@@ -452,31 +503,31 @@ export function Galaxy() {
             Live sector chart &middot; <b>{total}</b> pilot{total === 1 ? '' : 's'} online &middot; {NODES.length} charted sectors
           </div>
         </div>
-        <div className={'gxlegend' + (hl ? ' dim' : '')}>
+        <div className={styles.gxlegend + (hl ? ' ' + styles.dim : '')}>
           {FACTION_LEGEND.map(f => (
             <span
               key={f}
-              className={'gxlegend__item' + (hl?.kind === 'faction' && hl.f === f ? ' on' : '')}
+              className={styles.gxlegendItem + (hl?.kind === 'faction' && hl.f === f ? ' ' + styles.on : '')}
               onMouseEnter={() => setHl({ kind: 'faction', f })}
               onMouseLeave={() => setHl(h => (h?.kind === 'faction' && h.f === f ? null : h))}>
-              <span className="gxlegend__sw" style={{ background: node(f) }} />
+              <span className={styles.gxlegendSw} style={{ background: node(f) }} />
               {F[f].label}
             </span>
           ))}
           <span
-            className={'gxlegend__online' + (hl?.kind === 'online' ? ' on' : '')}
+            className={styles.gxlegendOnline + (hl?.kind === 'online' ? ' ' + styles.on : '')}
             onMouseEnter={() => setHl({ kind: 'online' })}
             onMouseLeave={() => setHl(h => (h?.kind === 'online' ? null : h))}>
-            <span className="gxlegend__pulse" /> Pilots online
+            <span className={styles.gxlegendPulse} /> Pilots online
           </span>
         </div>
       </div>
 
       {err && <div className="hud-panel empty">{err}</div>}
 
-      <div className="mapwrap" ref={wrapRef} onMouseMove={onMove}>
+      <div className={styles.mapwrap} ref={wrapRef} onMouseMove={onMove}>
         <svg
-          className={'map' + (dimall ? ' dimall' : '')}
+          className={styles.map + (dimall ? ' ' + styles.dimall : '')}
           viewBox={`0 0 ${W} ${H}`}
           preserveAspectRatio="xMidYMid meet"
           aria-label="Galaxy map">
@@ -511,21 +562,21 @@ export function Galaxy() {
           </defs>
 
           {/* starfield */}
-          <g className="l-stars">
+          <g>
             {STARS.map((st, i) => (
               <circle
                 key={i} cx={st.x.toFixed(1)} cy={st.y.toFixed(1)} r={st.r.toFixed(2)}
                 fill={st.fill} opacity={st.opacity.toFixed(2)}
-                className={st.twinkle ? 'twinkle' : undefined}
+                className={st.twinkle ? styles.twinkle : undefined}
                 style={st.twinkle ? ({ '--d': st.dur.toFixed(1) + 's' } as Vars) : undefined} />
             ))}
           </g>
 
           {/* nebula territories */}
-          <g className="l-neb">
+          <g>
             {NEBULAE.map(nb => (
               <g key={nb.sm.name}>
-                <g className="nebula" style={{ '--nd': nb.nd + 's', '--dx': nb.dx.toFixed(1) + 'px', '--dy': nb.dy.toFixed(1) + 'px' } as Vars}>
+                <g className={styles.nebula} style={{ '--nd': nb.nd + 's', '--dx': nb.dx.toFixed(1) + 'px', '--dy': nb.dy.toFixed(1) + 'px' } as Vars}>
                   <ellipse
                     cx={nb.sm.cx} cy={nb.sm.cy} rx={nb.sm.r} ry={nb.ry}
                     fill={`url(#gx-neb-${nb.sm.f})`} filter="url(#gx-neb)"
@@ -540,7 +591,7 @@ export function Galaxy() {
                     fill={node(nb.sm.f)} opacity={d.opacity.toFixed(2)} />
                 ))}
                 <text
-                  className="reg-label" x={nb.sm.cx} y={nb.ly} fontSize={nb.fs.toFixed(0)}
+                  className={styles.regLabel} x={nb.sm.cx} y={nb.ly} fontSize={nb.fs.toFixed(0)}
                   textAnchor="middle"
                   style={{
                     '--rl': col(nb.sm.f, 0.88, 0.95),
@@ -554,36 +605,55 @@ export function Galaxy() {
           </g>
 
           {/* faint graticule */}
-          <g className="l-grid">
+          <g>
             {GRID.v.map(gx => <line key={'v' + gx} x1={gx} y1={0} x2={gx} y2={H} stroke="oklch(0.5 0.04 250 / 0.05)" strokeWidth={1} />)}
             {GRID.h.map(gy => <line key={'h' + gy} x1={0} y1={gy} x2={W} y2={gy} stroke="oklch(0.5 0.04 250 / 0.05)" strokeWidth={1} />)}
           </g>
 
           {/* jump lanes */}
-          <g className="l-lanes">
+          <g>
             {LANES.map((L, i) => {
               const hot = hover != null && (L.a === hover || L.b === hover);
-              return (
-                <path
-                  key={i} className={'lane' + (L.gate ? ' lane--gate' : '') + (hot ? ' hot' : '')}
-                  d={L.d} stroke={L.gate ? 'var(--line-strong)' : undefined} />
-              );
+              const base = styles.lane + (hot ? ' ' + styles.hot : '');
+              // Inter-system gates: two slightly-offset dashed lines whose dashes
+              // crawl in opposite directions, suggesting two-way traffic.
+              if (L.gate) {
+                return (
+                  <g key={i}>
+                    <path className={base + ' ' + styles.laneGate + ' ' + styles.laneFlowFwd}
+                      d={L.d} stroke="var(--line-strong)" />
+                    <path className={base + ' ' + styles.laneGate + ' ' + styles.laneFlowRev}
+                      d={L.dRev} stroke="var(--line-strong)" />
+                  </g>
+                );
+              }
+              return <path key={i} className={base} d={L.d} />;
             })}
           </g>
 
           {/* sector nodes */}
-          <g className="l-nodes">
+          <g>
             {NODES.map(s => {
               const online = presence[s.n];
               const hot = nodeHot(s);
-              const cls = 'node'
-                + (s.hub ? ' node--hub' : '')
-                + (s.minor ? ' node--minor' : '')
-                + (s.special ? ' node--special' : '')
-                + (online > 0 ? ' node--online' : '')
-                + (hot ? ' hot' : '');
+              const cls = styles.node
+                + (s.hub ? ' ' + styles.nodeHub : '')
+                + (online > 0 ? ' ' + styles.nodeOnline : '')
+                + (hot ? ' ' + styles.hot : '');
               const R = s.R;
-              const above = s.y > 1150;
+              // Nodes near the bottom edge put their label above to avoid
+              // clipping -- except Blackbeard's Wake, which reads better below.
+              // Endriago and Dahin are also hand-placed above their planet.
+              const forceAbove = s.n === 'Endriago' || s.n === 'Dahin';
+              const above = (s.y > 1150 || forceAbove) && s.n !== "Blackbeard's Wake";
+              // Gallina's label is nudged down by about one text-height to clear
+              // its neighbours.
+              const labelDy = s.n === 'Gallina' ? (s.hub ? 22 : 13) : 0;
+              // Alpha Centauri's label shifts left ~20% of its text width (rough
+              // glyph-width estimate: ~0.5em per char).
+              const fontPx = s.hub ? 22 : 13;
+              const labelDx = s.n === 'Alpha Centauri'
+                ? -0.2 * s.n.length * fontPx * 0.5 : 0;
               return (
                 <g key={s.n} className={cls} tabIndex={0}
                   onMouseEnter={() => { setHover(s.n); placeTip(s); }}
@@ -594,7 +664,7 @@ export function Galaxy() {
                   <circle cx={s.x} cy={s.y} r={R * 2.6} fill={glowc(s.f)} filter="url(#gx-neb2)" opacity={0.5} />
                   {/* pulsing ring for hubs */}
                   {s.hub && (
-                    <circle className="pulse" cx={s.x} cy={s.y} r={R} fill="none" stroke={node(s.f)} strokeWidth={1.6}
+                    <circle className={styles.pulse} cx={s.x} cy={s.y} r={R} fill="none" stroke={node(s.f)} strokeWidth={1.6}
                       opacity={0.5} style={{ animationDelay: ((s.x % 30) / 10).toFixed(1) + 's' }} />
                   )}
                   {/* namesake accent on Freya */}
@@ -606,59 +676,78 @@ export function Galaxy() {
                   <circle cx={s.x} cy={s.y} r={R + 2} fill={glowc(s.f)} filter="url(#gx-glow)" opacity={0.6} />
                   {/* core */}
                   <circle
-                    className="node__core" cx={s.x} cy={s.y} r={hot ? R + 1.6 : R}
+                    className={styles.nodeCore} cx={s.x} cy={s.y} r={hot ? R + 1.6 : R}
                     fill={`url(#gx-core-${s.f})`}
                     stroke={s.special ? 'var(--accent)' : s.hub ? col(s.f, 0.95, 0.9) : 'none'}
                     strokeWidth={s.hub || s.special ? 1.4 : 0} />
                   {/* label */}
                   {!s.minor && (
                     <text
-                      className="node__label" x={s.x}
-                      y={above ? s.y - R - 10 : s.y + R + (s.hub ? 26 : 17)}
-                      textAnchor="middle" fontSize={s.hub ? 22 : 13}>
+                      className={styles.nodeLabel} x={s.x + labelDx}
+                      y={(above ? s.y - R - 10 : s.y + R + (s.hub ? 26 : 17)) + labelDy}
+                      textAnchor="middle" fontSize={fontPx}>
                       {s.n}
                     </text>
                   )}
                   {/* live presence: sonar waves + count */}
                   {online > 0 && [0, 1, 2].map(w => (
-                    <circle key={'w' + w} className="wave" cx={s.x} cy={s.y} r={R + 3} fill="none"
+                    <circle key={'w' + w} className={styles.wave} cx={s.x} cy={s.y} r={R + 3} fill="none"
                       stroke="var(--presence)" strokeWidth={online > 4 ? 2.2 : 1.5}
                       style={{ animationDelay: (w * 0.95).toFixed(2) + 's' }} />
                   ))}
                   {online > 1 && (
-                    <text className="count" x={s.x + R + 7} y={s.y - R - 4} fontSize={s.hub ? 19 : 16}>{online}</text>
+                    <text className={styles.count} x={s.x + R + 7} y={s.y - R - 4} fontSize={s.hub ? 19 : 16}>{online}</text>
                   )}
                 </g>
               );
             })}
           </g>
+
+          {/* my-character markers: a pulsing yellow star emanating wakes, with
+              the character name(s) labelled beside it. Drawn last so it sits
+              above the sector nodes. */}
+          <g className={styles.mine}>
+            {myMarkers.map(m => (
+              <g key={m.node.n} transform={`translate(${m.node.x},${m.node.y})`}>
+                {[0, 1].map(w => (
+                  <circle key={w} className={styles.mineWake} r={m.node.R + 4} fill="none"
+                    style={{ animationDelay: (w * 1.1).toFixed(2) + 's' }} />
+                ))}
+                <path className={styles.mineStar} d={STAR_PATH} />
+                {m.names.map((nm, i) => (
+                  <text key={nm} className={styles.mineLabel}
+                    x={m.node.R + 13} y={5 + i * 19} fontSize={15}>{nm.replace(/_/g, ' ')}</text>
+                ))}
+              </g>
+            ))}
+          </g>
         </svg>
 
         {/* bottom-left readout */}
-        <div className="readout">
+        <div className={styles.readout}>
           <div>SECTOR GRID &middot; <b>FREYA-9</b></div>
-          <div className="readout__crosshair" ref={coordsRef}>[ 0000 &middot; 0000 ]</div>
+          <div className={styles.readoutCrosshair} ref={coordsRef}>[ 0000 &middot; 0000 ]</div>
         </div>
 
         {/* tooltip */}
         {hovered && tip && (
           <div
-            className="tip show"
+            className={`${styles.tip} ${styles.show}`}
             style={{ left: tip.x, top: tip.y, '--tc': col(hovered.f, 0.74) } as Vars}>
-            <div className="tip__bar" />
-            <div className="tip__in">
-              <div className="tip__name">{hovered.n}</div>
-              <div className="tip__faction">{F[hovered.f].label} Space</div>
-              <div className="tip__rows">
+            <div className={styles.tipBar} />
+            <div className={styles.tipIn}>
+              <div className={styles.tipName}>{hovered.n}</div>
+              <div className={styles.tipFaction}>{F[hovered.f].label} Space</div>
+              <div className={styles.tipRows}>
                 {presence[hovered.n] > 0 && (
-                  <div className="tip__row">
+                  <div className={styles.tipRow}>
                     <span>Pilots online</span>
                     <span style={{ color: 'var(--presence)' }}>{presence[hovered.n]}</span>
                   </div>
                 )}
-                <div className="tip__row"><span>System</span><span>{hovered.sys}</span></div>
-                <div className="tip__row"><span>Type</span><span>{hovered.type}</span></div>
-                <div className="tip__row"><span>Coord</span><span>{pad4(hovered.x)} &middot; {pad4(hovered.y)}</span></div>
+                <div className={styles.tipRow}><span>System</span><span>{hovered.sys}</span></div>
+                <div className={styles.tipRow}><span>Type</span><span>{hovered.type}</span></div>
+                <div className={styles.tipRow}><span>Coord</span><span>{pad4(hovered.x)} &middot; {pad4(hovered.y)}</span></div>
               </div>
             </div>
           </div>

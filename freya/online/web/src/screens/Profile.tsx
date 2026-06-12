@@ -16,6 +16,7 @@ import type { AvatarProfile, EquippedItem, ShipView, SkillView } from '../types'
 import * as api from '../api';
 import { ItemIcon } from '../components/ui';
 import { ItemDisplay } from '../components/ItemDisplay';
+import styles from './Profile.module.css';
 
 type Vars = CSSProperties & Record<string, string | number>;
 
@@ -32,13 +33,13 @@ function DisciplineBar({
   const d = DISC[kind];
   const pct = Math.round(Math.max(0, Math.min(1, bar)) * 100);
   return (
-    <div className="disc" style={{ '--bandc': d.color } as Vars}>
-      <div className="disc__top">
-        <span className="disc__label">{d.label}</span>
-        <span className="disc__lvl">{level}</span>
+    <div style={{ '--bandc': d.color } as Vars}>
+      <div className={styles.discTop}>
+        <span className={styles.discLabel}>{d.label}</span>
+        <span className={styles.discLvl}>{level}</span>
       </div>
-      <div className="disc__track">
-        <div className="disc__fill" style={{ width: `${pct}%` }} />
+      <div className={styles.discTrack}>
+        <div className={styles.discFill} style={{ width: `${pct}%` }} />
       </div>
     </div>
   );
@@ -50,22 +51,22 @@ function SkillDots({ level, max }: { level: number; max: number }) {
   const total = Math.max(level, Math.min(max, 12));
   const dots = [];
   for (let i = 0; i < total; i++) {
-    dots.push(<span key={i} className={'sdot' + (i < level ? ' sdot--on' : '')} />);
+    dots.push(<span key={i} className={styles.sdot + (i < level ? ' ' + styles.sdotOn : '')} />);
   }
-  return <span className="sdots" title={`Rank ${level}`}>{dots}</span>;
+  return <span className={styles.sdots} title={`Rank ${level}`}>{dots}</span>;
 }
 
 function EquipTile({ eq }: { eq: EquippedItem }) {
   return (
-    <div className="ehover">
-      <div className="ehover__tile">
-        <ItemIcon item={eq.item} className="ehover__icon" />
-        <div className="ehover__meta">
-          <div className="ehover__name">{eq.item.name}</div>
-          <div className="ehover__slot">{eq.item.slot}</div>
+    <div className={styles.ehover}>
+      <div className={styles.ehoverTile}>
+        <ItemIcon item={eq.item} />
+        <div className={styles.ehoverMeta}>
+          <div className={styles.ehoverName}>{eq.item.name}</div>
+          <div className={styles.ehoverSlot}>{eq.item.slot}</div>
         </div>
       </div>
-      <div className="ehover__pop">
+      <div className={styles.ehoverPop}>
         <ItemDisplay item={eq.item} quality={eq.quality} />
       </div>
     </div>
@@ -100,7 +101,7 @@ export function Profile({ character }: { character: string }) {
     .filter(g => g.list.length > 0);
 
   return (
-    <div className="page profile">
+    <div className={`page ${styles.profile}`}>
       <div className="page__head">
         <div>
           <h1 className="page__title">Profile</h1>
@@ -108,27 +109,27 @@ export function Profile({ character }: { character: string }) {
         </div>
       </div>
 
-      {err && <div className="hud-panel empty profile__err">{err}</div>}
+      {err && <div className={`hud-panel empty ${styles.profileErr}`}>{err}</div>}
 
-      <div className="profile__body">
+      <div className={styles.profileBody}>
         {/* Identity + disciplines */}
-        <section className="hud-panel hud-corners pcard pcard--id">
-          <div className="pid">
-            <div className="pid__level">
-              <span className="pid__lvlnum">{profile?.level ?? '--'}</span>
-              <span className="pid__lvllabel">Overall Level</span>
+        <section className={`hud-panel hud-corners ${styles.pcard} ${styles.pcardId}`}>
+          <div className={styles.pid}>
+            <div className={styles.pidLevel}>
+              <span className={styles.pidLvlnum}>{profile?.level ?? '--'}</span>
+              <span className={styles.pidLvllabel}>Overall Level</span>
             </div>
-            <div className="pid__name">
-              <div className="disp pid__char">{character.replace(/_/g, ' ')}</div>
-              <div className="pid__class">{profile?.class ?? ''}</div>
-              <div className="pid__loc">
-                <span className="pid__locglyph">◎</span>
+            <div className={styles.pidName}>
+              <div className={`disp ${styles.pidChar}`}>{character.replace(/_/g, ' ')}</div>
+              <div className={styles.pidClass}>{profile?.class ?? ''}</div>
+              <div className={styles.pidLoc}>
+                <span className={styles.pidLocglyph}>◎</span>
                 {profile?.sector ? profile.sector : 'Unknown space'}
               </div>
             </div>
           </div>
 
-          <div className="pdiscs">
+          <div className={styles.pdiscs}>
             {profile && <>
               <DisciplineBar kind="combat" level={profile.combat.level} bar={profile.combat.bar} />
               <DisciplineBar kind="explore" level={profile.explore.level} bar={profile.explore.bar} />
@@ -138,47 +139,47 @@ export function Profile({ character }: { character: string }) {
         </section>
 
         {/* Starship */}
-        <section className="hud-panel hud-corners pcard pcard--ship">
-          <div className="pcard__title">Starship</div>
-          <div className="pship__name">{ship?.name?.trim() || 'Unnamed ship'}</div>
+        <section className={`hud-panel hud-corners ${styles.pcard} ${styles.pcardShip}`}>
+          <div className={styles.pcardTitle}>Starship</div>
+          <div className={styles.pshipName}>{ship?.name?.trim() || 'Unnamed ship'}</div>
 
-          <div className="pship__stats">
+          <div className={styles.pshipStats}>
             <Stat label="Hull"
               value={ship ? String(Math.round(ship.maxHullPoints)) : '--'} />
             <Stat label="Cargo" value={ship ? `${ship.cargoSpace} slots` : '--'} />
             <Stat label="Warp" value={ship ? String(ship.warp) : '--'} />
           </div>
           {ship && ship.maxHullPoints > 0 && (
-            <div className="phull">
-              <div className="phull__fill"
+            <div className={styles.phull}>
+              <div className={styles.phullFill}
                 style={{ width: `${Math.round(Math.min(1, ship.hullPoints / ship.maxHullPoints) * 100)}%` }} />
             </div>
           )}
 
-          <div className="pcard__subtitle">Equipped</div>
+          <div className={styles.pcardSubtitle}>Equipped</div>
           {ship && ship.equipment.length > 0 ? (
-            <div className="pequip">
+            <div className={styles.pequip}>
               {ship.equipment.map(eq => <EquipTile key={eq.slot} eq={eq} />)}
             </div>
           ) : (
-            <div className="pequip__empty">{ship ? 'No equipment fitted.' : 'Loading...'}</div>
+            <div className={styles.pequipEmpty}>{ship ? 'No equipment fitted.' : 'Loading...'}</div>
           )}
         </section>
 
         {/* Skills */}
-        <section className="hud-panel hud-corners pcard pcard--skills">
-          <div className="pcard__title">Skills &amp; Abilities</div>
+        <section className={`hud-panel hud-corners ${styles.pcard} ${styles.pcardSkills}`}>
+          <div className={styles.pcardTitle}>Skills &amp; Abilities</div>
           {skills === null ? (
-            <div className="pequip__empty">Loading...</div>
+            <div className={styles.pequipEmpty}>Loading...</div>
           ) : grouped.length === 0 ? (
-            <div className="pequip__empty">No skills learned yet.</div>
+            <div className={styles.pequipEmpty}>No skills learned yet.</div>
           ) : (
             grouped.map(g => (
-              <div className="pskillgrp" key={g.cat}>
-                <div className="pskillgrp__head">{g.cat}</div>
+              <div className={styles.pskillgrp} key={g.cat}>
+                <div className={styles.pskillgrpHead}>{g.cat}</div>
                 {g.list.map(s => (
-                  <div className="pskill" key={s.id}>
-                    <span className="pskill__name">{s.name}</span>
+                  <div className={styles.pskill} key={s.id}>
+                    <span className={styles.pskillName}>{s.name}</span>
                     <SkillDots level={s.level} max={s.maxLevel} />
                   </div>
                 ))}
@@ -193,9 +194,9 @@ export function Profile({ character }: { character: string }) {
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="pstat">
-      <span className="pstat__label">{label}</span>
-      <span className="pstat__value">{value}</span>
+    <div className={styles.pstat}>
+      <span className={styles.pstatLabel}>{label}</span>
+      <span className={styles.pstatValue}>{value}</span>
     </div>
   );
 }

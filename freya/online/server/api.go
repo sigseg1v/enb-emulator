@@ -71,6 +71,9 @@ func (s *apiServer) routes() http.Handler {
 	// (short-cached, polled by the SPA).
 	mux.HandleFunc("GET /api/galaxy", s.handleGalaxyMap)
 	mux.HandleFunc("GET /api/galaxy/occupancy", s.handleGalaxyOccupancy)
+	// The logged-in account's own characters and the sectors they sit in (for
+	// personal star markers on the map). Auth-gated -- it is per-account data.
+	mux.HandleFunc("GET /api/galaxy/me", s.handleGalaxyMe)
 	// AH + mailbox mutations (Go 1.22 method+wildcard patterns).
 	mux.HandleFunc("POST /api/auction", s.handlePostListing)
 	mux.HandleFunc("POST /api/auction/{id}/bid", s.handleBid)
@@ -703,6 +706,32 @@ func (s *apiServer) handleGalaxyOccupancy(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, occ)
+}
+
+// GET /api/galaxy/me -- the logged-in account's own characters and the sector
+// each is in, for personal star markers. Per-account, so auth-gated. Returns
+// characters whether online or not.
+func (s *apiServer) handleGalaxyMe(w http.ResponseWriter, r *http.Request) {
+	_, acctID := s.loggedIn(r)
+	if acctID == 0 {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	sb, err := s.galaxy.starbaseMap(ctx, time.Now())
+	if err != nil {
+		log.Printf("api: galaxy me: starbase: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	locs, err := s.store.myAvatarLocations(ctx, acctID, sb)
+	if err != nil {
+		log.Printf("api: galaxy me: locations(%d): %v", acctID, err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string][]AvatarLocation{"avatars": locs})
 }
 
 // avatarReadError maps a Profile read error to a status. A name that is not one

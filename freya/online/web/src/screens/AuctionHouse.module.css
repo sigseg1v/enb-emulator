@@ -1,0 +1,111 @@
+/* Auction House screen -- Buy (master/detail) + Sell (vault + post form).
+   See AuctionHouse.tsx. Scoped CSS module: exports camelCase locals
+   (`styles.ah`, `styles.ahrowPriceBuyout`, `styles.segBtnOn`, ...). Global
+   primitives in the markup (page*, hud-*, btn*, empty*, subtabs/subtab*, vault*,
+   vsel, vgrid, vslot*, dash, icon__glyph) stay plain strings -- base.css/app.css. */
+
+.ah { display: grid; grid-template-columns: 1fr 412px; gap: 18px; flex: 1; min-height: 0; padding: 0 28px 28px; }
+.ah__left { display: flex; flex-direction: column; min-height: 0; }
+
+.ah__toolbar { display: flex; gap: 10px; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--line); flex: none; flex-wrap: wrap; }
+.search { position: relative; flex: 1; min-width: 200px; }
+.search__icon { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--text-faint); font-size: 13px; }
+.search__input { width: 100%; background: var(--bg-input); border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+  color: var(--text); font-size: 13px; padding: 9px 12px 9px 32px; }
+.search__input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-glow); }
+.search__input::placeholder { color: var(--text-faint); }
+
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase;
+  padding: 7px 11px; border: 1px solid var(--line); border-radius: 999px; background: none; color: var(--text-faint); cursor: pointer; transition: all .13s; }
+.chip:hover { color: var(--text-dim); border-color: var(--line-strong); }
+.chip--on { color: var(--accent); border-color: var(--accent); background: var(--accent-glow); box-shadow: 0 0 10px var(--accent-glow); }
+
+.ahtable { flex: 1; overflow-y: auto; }
+.ahrow { display: grid; grid-template-columns: 44px 2.2fr 1.1fr 0.8fr 0.8fr 1fr 1fr; gap: 12px; align-items: center;
+  padding: 11px 14px; border-bottom: 1px solid oklch(0.45 0.04 248 / 0.13); cursor: pointer; transition: background .12s; position: relative; }
+.ahrow--head { position: sticky; top: 0; z-index: 2; background: var(--bg-void-2); border-bottom: 1px solid var(--line); cursor: default;
+  font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-faint); }
+.ahrow:not(.ahrow--head):hover { background: oklch(1 0 0 / 0.025); }
+.ahrow--active { background: oklch(0.82 0.125 205 / 0.08); }
+.ahrow--active::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+.ahrow__icon { width: 36px; height: 36px; }
+.ahrow__icon :global(.icon__glyph) { font-size: 19px; }
+.ahrow__name { font-size: 13px; color: var(--rcolor); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ahrow__meta { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); margin-top: 2px; }
+.ahrow__seller { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ahrow__seller--bot { color: var(--accent-dim); }
+.ahrow__price { font-family: var(--font-mono); font-size: 12px; text-align: right; }
+.ahrow__price b { color: var(--text); font-weight: 500; }
+.ahrow__price--buyout b { color: var(--warm); }
+.ahrow__num { justify-self: end; }
+
+/* AH detail pane */
+.ah__detail { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
+.bidbox { margin-top: 14px; padding: 16px; }
+.bidbox__row { display: flex; justify-content: space-between; align-items: center; padding: 7px 0; font-size: 12.5px; border-bottom: 1px solid oklch(0.45 0.04 248 / 0.12); }
+.bidbox__row:last-of-type { border-bottom: 0; }
+.bidbox__row span:first-child { color: var(--text-faint); font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
+.bidbox__big { font-family: var(--font-mono); font-size: 15px; }
+.bidbox__hint { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint); margin: 10px 0 0; line-height: 1.5; }
+.bidbox__actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+.bidder { color: var(--accent); }
+.bidder--none { color: var(--text-faint); }
+
+/* ---- Sell view ---- */
+.sell { display: grid; grid-template-columns: minmax(330px, 0.62fr) 1fr; gap: 18px; flex: 1; min-height: 0; padding: 0 28px 28px; }
+.sell__left { display: flex; flex-direction: column; gap: 16px; min-height: 0; overflow: hidden auto; padding-right: 2px; }
+
+.pform { flex: none; padding: 16px; }
+.pform__preview { display: flex; gap: 12px; align-items: center; padding-bottom: 12px; border-bottom: 1px solid var(--line); margin-bottom: 14px; }
+.pform__icon { width: 44px; height: 44px; }
+.pform__pname { font-family: var(--font-display); font-size: 13px; color: var(--rcolor); }
+.pform__psub { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); margin-top: 3px; }
+.pform__field { margin-bottom: 13px; }
+.pform__lbl { display: block; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-faint); margin-bottom: 7px; }
+
+.seg { display: flex; gap: 6px; }
+.seg__btn { flex: 1; padding: 8px 6px; border: 1px solid var(--line-strong); border-radius: var(--r-sm); background: var(--bg-input);
+  font-family: var(--font-display); font-size: 11px; letter-spacing: 0.04em; color: var(--text-faint); cursor: pointer; transition: all .13s; text-align: center; }
+.seg__btn small { display: block; font-family: var(--font-mono); font-size: 9px; letter-spacing: 0; margin-top: 2px; opacity: 0.7; }
+.seg__btn:hover { color: var(--text-dim); }
+.seg__btn--on { color: var(--accent); border-color: var(--accent); background: var(--accent-glow); }
+
+.stepper { display: flex; align-items: stretch; width: 100%; height: 38px; }
+.stepper__btn { width: 38px; border: 1px solid var(--line-strong); background: var(--bg-elevated); color: var(--text); font-size: 16px; cursor: pointer; transition: all .13s; }
+.stepper__btn:first-child { border-radius: var(--r-sm) 0 0 var(--r-sm); }
+.stepper__btn:last-child { border-radius: 0 var(--r-sm) var(--r-sm) 0; }
+.stepper__btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.stepper__btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.stepper__val { flex: 1; text-align: center; font-family: var(--font-mono); font-size: 14px; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); display: grid; place-items: center; }
+.stepper__max { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); margin-top: 5px; }
+
+.pinput { position: relative; }
+.pinput input { width: 100%; background: var(--bg-input); border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+  color: var(--text); font-family: var(--font-mono); font-size: 13px; padding: 9px 34px 9px 11px; }
+.pinput input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-glow); }
+.pinput__unit { position: absolute; right: 11px; top: 50%; transform: translateY(-50%); font-family: var(--font-mono); font-size: 11px; color: var(--warm); pointer-events: none; }
+
+.pform__fee { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint); line-height: 1.5; margin: 4px 0 12px; }
+.pform__fee b { color: var(--warm); }
+.pform__post { width: 100%; }
+
+.sell__main { display: flex; flex-direction: column; min-height: 0; }
+.sell__mainhead { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--line); flex: none;
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-faint); }
+.sell__hint { flex: 1; min-height: 160px; display: grid; place-items: center; text-align: center; color: var(--text-faint); font-family: var(--font-mono); font-size: 12px; line-height: 1.6; letter-spacing: 0.04em; padding: 24px; }
+.sell__hint :global(.empty__glyph) { font-size: 34px; opacity: 0.3; margin-bottom: 12px; }
+
+/* ===== responsive (see breakpoints.css) ===== */
+/* md (768px): collapse the two-pane Buy + Sell layouts to a single column, and
+   reduce each auction row to icon | name | bid (the dense seller/quality/time/
+   buyout columns are dropped -- still visible in the detail pane on tap). */
+@media (max-width: 48rem) {
+  .ah { grid-template-columns: 1fr; gap: 14px; padding: 0 14px 22px; }
+  .ah__left { max-height: 56vh; }
+  .sell { grid-template-columns: 1fr; gap: 14px; padding: 0 14px 22px; }
+
+  .ahrow { grid-template-columns: 36px 1fr auto; gap: 10px; }
+  .ahrow--head { display: none; }
+  .ahrow__seller, .ahrow__num, .ahrow__price--buyout { display: none; }
+}

@@ -1,0 +1,147 @@
+/* Galaxy map -- fixed-coordinate star chart (see Galaxy.tsx).
+   Scoped CSS module: class names are exposed to TSX as camelCase locals
+   (`styles.mapwrap`, `styles.laneGate`, ...). Selectors stay descendant-scoped
+   under `.galaxy` as before; `--presence` is a global token (tokens.css). */
+.galaxy { position: relative; }
+
+/* map frame -- full-bleed: the dark panel runs to the page's left/right edges
+   with only top + bottom rules (no side border, no corner ticks). The map SVG is
+   xMidYMid-letterboxed, so the extra width is just side letterboxing: the map's
+   size and centering (and the tooltip math that reads this box) are unchanged. */
+.galaxy .mapwrap { flex: 1; min-height: 0; position: relative; overflow: hidden;
+  width: 100vw; margin-left: calc(50% - 50vw); margin-right: calc(50% - 50vw);
+  border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  background:
+    radial-gradient(120% 90% at 50% 0%, oklch(0.20 0.04 256 / 0.55), transparent 60%),
+    radial-gradient(90% 120% at 100% 100%, oklch(0.18 0.05 20 / 0.30), transparent 55%),
+    radial-gradient(90% 120% at 0% 100%, oklch(0.18 0.04 255 / 0.30), transparent 55%),
+    linear-gradient(180deg, var(--bg-void-2), oklch(0.10 0.018 258));
+  box-shadow: inset 0 0 70px oklch(0 0 0 / 0.6); }
+.galaxy .map { width: 100%; height: 100%; display: block; user-select: none; }
+
+/* readout chip bottom-left */
+.galaxy .readout { position: absolute; left: 16px; bottom: 14px; z-index: 6; font-family: var(--font-mono);
+  font-size: 10.5px; color: var(--text-faint); letter-spacing: 0.08em; line-height: 1.8; pointer-events: none; }
+.galaxy .readout b { color: var(--text-dim); font-weight: 500; }
+.galaxy .readout__crosshair { color: var(--accent); }
+
+/* tooltip */
+.galaxy .tip { position: absolute; z-index: 8; pointer-events: none; min-width: 168px; padding: 0;
+  opacity: 0; transform: translateY(4px); transition: opacity .12s ease, transform .12s ease;
+  background: linear-gradient(180deg, oklch(0.22 0.03 256 / 0.96), oklch(0.16 0.025 258 / 0.96));
+  border: 1px solid var(--tc, var(--line-strong)); border-radius: var(--r-sm);
+  box-shadow: 0 8px 30px oklch(0 0 0 / 0.6), 0 0 0 1px oklch(0 0 0 / 0.3), inset 0 0 22px oklch(0 0 0 / 0.3); }
+.galaxy .tip.show { opacity: 1; transform: translateY(0); }
+.galaxy .tip__bar { height: 3px; background: var(--tc); border-radius: var(--r-sm) var(--r-sm) 0 0; box-shadow: 0 0 12px var(--tc); }
+.galaxy .tip__in { padding: 11px 13px 12px; }
+.galaxy .tip__name { font-family: var(--font-display); font-size: 13.5px; letter-spacing: 0.03em; color: var(--text); }
+.galaxy .tip__faction { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--tc); margin-top: 4px; }
+.galaxy .tip__rows { margin-top: 9px; display: grid; gap: 3px; }
+.galaxy .tip__row { display: flex; justify-content: space-between; gap: 16px; font-family: var(--font-mono); font-size: 10.5px; }
+.galaxy .tip__row span:first-child { color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.06em; }
+.galaxy .tip__row span:last-child { color: var(--text-dim); }
+
+/* svg element classes -- lanes are deliberately brighter/more pronounced */
+.galaxy .lane { stroke: var(--line-glow); stroke-width: 1.5; fill: none; opacity: 0.6;
+  transition: opacity .2s, stroke .2s; }
+.galaxy .lane--gate { stroke: var(--line-strong); stroke-dasharray: 9 7; stroke-linecap: round;
+  stroke-width: 1.5; opacity: 0.7; }
+/* Two-way traffic: the dashes crawl in opposite directions. The two strands are
+   separated PERPENDICULAR to the lane in the path geometry itself (see `dRev` in
+   Galaxy.tsx) -- NOT by a screen-space translate here, which would shift the dash
+   phase by an angle-dependent amount and make some gates read denser than others.
+   The dashoffset travels one dash period (16) so the loop is seamless. */
+.galaxy .lane--flow-fwd { animation: gx-lane-fwd 1.4s linear infinite; }
+.galaxy .lane--flow-rev { animation: gx-lane-rev 1.4s linear infinite; }
+
+@keyframes gx-lane-fwd { to { stroke-dashoffset: -16; } }
+
+@keyframes gx-lane-rev { to { stroke-dashoffset: 16; } }
+.galaxy .reg-label { font-family: var(--font-display); fill: var(--rl); letter-spacing: 0.08em;
+  text-anchor: middle; opacity: 0.92; paint-order: stroke; }
+.galaxy .node { cursor: pointer; }
+/* No focus border on click (mouse focus). Keyboard nav still gets a ring via
+   :focus-visible so the node stays reachable without a mouse. */
+.galaxy .node:focus { outline: none; }
+.galaxy .node:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.galaxy .node__core { transition: r .15s; }
+.galaxy .node__label { font-family: var(--font-mono); fill: var(--text-dim); letter-spacing: 0.02em;
+  pointer-events: none; paint-order: stroke; stroke: oklch(0.10 0.02 258 / 0.85); stroke-width: 3px; }
+.galaxy .node--hub .node__label { font-family: var(--font-display); fill: var(--text); letter-spacing: 0.04em; }
+.galaxy .twinkle { animation: gx-tw var(--d, 4s) ease-in-out infinite alternate; }
+
+@keyframes gx-tw { from { opacity: 0.15; } to { opacity: 0.9; } }
+
+@keyframes gx-drift { from { transform: translate(0,0); } to { transform: translate(var(--dx,6px), var(--dy,-5px)); } }
+.galaxy .nebula { animation: gx-drift var(--nd, 26s) ease-in-out infinite alternate; transform-origin: center; }
+.galaxy .pulse { transform-box: fill-box; transform-origin: center; animation: gx-hubpulse 3.4s ease-out infinite; pointer-events: none; }
+
+@keyframes gx-hubpulse { 0% { transform: scale(0.5); opacity: 0.55; } 70%,100% { transform: scale(2.4); opacity: 0; } }
+
+/* live pilot presence */
+.galaxy .wave { pointer-events: none; transform-box: fill-box; transform-origin: center; animation: gx-wave 2.85s ease-out infinite; }
+
+@keyframes gx-wave { 0% { transform: scale(0.4); opacity: 0.8; } 100% { transform: scale(3.4); opacity: 0; } }
+.galaxy .node--online .node__core { filter: drop-shadow(0 0 7px var(--presence)); }
+.galaxy .count { font-family: var(--font-mono); font-weight: 600; fill: var(--presence); opacity: 0.6;
+  letter-spacing: 0.01em; pointer-events: none; paint-order: stroke; stroke: oklch(0.09 0.02 240 / 0.85);
+  stroke-width: 3.4px; filter: drop-shadow(0 0 5px oklch(0.90 0.13 196 / 0.55)); }
+
+/* my-character markers: a pulsing yellow star with emanating wakes + name label.
+   --mine is the marker yellow; deliberately distinct from the teal presence hue
+   so your own characters stand out from the live-pilot glow. */
+.galaxy .mine { --mine: oklch(0.86 0.17 95); pointer-events: none; }
+.galaxy .mine__star { fill: var(--mine); stroke: oklch(0.99 0.02 95); stroke-width: 0.8;
+  transform-box: fill-box; transform-origin: center; animation: gx-mine-pulse 1.9s ease-in-out infinite;
+  filter: drop-shadow(0 0 6px var(--mine)); }
+.galaxy .mine__wake { stroke: var(--mine); stroke-width: 1.6; transform-box: fill-box;
+  transform-origin: center; animation: gx-mine-wake 2.6s ease-out infinite; }
+.galaxy .mine__label { font-family: var(--font-display); fill: var(--mine); letter-spacing: 0.03em;
+  paint-order: stroke; stroke: oklch(0.10 0.02 258 / 0.9); stroke-width: 3.4px;
+  filter: drop-shadow(0 0 5px oklch(0.86 0.17 95 / 0.5)); }
+
+@keyframes gx-mine-pulse { 0%,100% { transform: scale(0.92); opacity: 0.85; } 50% { transform: scale(1.12); opacity: 1; } }
+
+@keyframes gx-mine-wake { 0% { transform: scale(0.5); opacity: 0.7; } 100% { transform: scale(2.6); opacity: 0; } }
+
+.galaxy .map.dimall .node:not(.hot) { opacity: 0.28; }
+.galaxy .map.dimall .lane:not(.hot) { opacity: 0.10; }
+.galaxy .lane.hot { opacity: 0.95 !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  .galaxy .nebula, .galaxy .twinkle, .galaxy .pulse, .galaxy .wave,
+  .galaxy .mine__star, .galaxy .mine__wake, .galaxy .lane--flow-fwd, .galaxy .lane--flow-rev,
+  .gxlegend__pulse::after { animation: none !important; }
+}
+
+/* legend (interactive faction filter + online chip) */
+.gxlegend { display: grid; grid-template-columns: repeat(4, auto); gap: 7px 20px; align-items: center; }
+.gxlegend__item { display: inline-flex; align-items: center; gap: 8px; font-family: var(--font-mono);
+  font-size: 10.5px; letter-spacing: 0.10em; text-transform: uppercase; color: var(--text-faint);
+  cursor: default; transition: color .15s, opacity .15s; }
+.gxlegend__item:hover { color: var(--text-dim); }
+.gxlegend__sw { width: 9px; height: 9px; border-radius: 50%; box-shadow: 0 0 7px currentColor; flex: none; }
+.gxlegend.dim .gxlegend__item { opacity: 0.32; }
+.gxlegend.dim .gxlegend__item.on { opacity: 1; color: var(--text); }
+.gxlegend__online { display: inline-flex; align-items: center; gap: 8px; font-family: var(--font-mono);
+  font-size: 10.5px; letter-spacing: 0.10em; text-transform: uppercase; color: var(--presence);
+  cursor: default; transition: opacity .15s; }
+.gxlegend.dim .gxlegend__online:not(.on) { opacity: 0.32; }
+.gxlegend__pulse { position: relative; width: 9px; height: 9px; border-radius: 50%; background: var(--presence);
+  flex: none; box-shadow: 0 0 7px var(--presence); }
+.gxlegend__pulse::after { content: ""; position: absolute; inset: -3px; border-radius: 50%;
+  border: 1px solid var(--presence); animation: gx-srvpulse 2.2s ease-out infinite; }
+
+@keyframes gx-srvpulse { 0% { transform: scale(0.6); opacity: 0.8; } 100% { transform: scale(1.8); opacity: 0; } }
+
+/* ===== responsive ===== */
+/* md: give the map a real height so it never collapses once the app shell
+   switches to vertical scrolling (base.css), and let the legend wrap. */
+@media (max-width: 48rem) {
+  .galaxy .mapwrap { min-height: 62vh; }
+  .gxlegend { grid-template-columns: repeat(3, auto); gap: 6px 14px; width: 100%; }
+}
+
+@media (max-width: 30rem) {
+  .gxlegend { grid-template-columns: repeat(2, auto); }
+}

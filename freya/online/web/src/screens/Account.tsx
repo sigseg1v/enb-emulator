@@ -8,6 +8,7 @@
 // and the game client (same Argon2id PHC).
 import { useState } from 'react';
 import * as api from '../api';
+import styles from './Account.module.css';
 
 const MIN_LEN = 8;
 
@@ -52,12 +53,12 @@ export function Account({
         </div>
       </div>
 
-      <div className="account">
-        <form className="account__card hud-panel hud-corners" onSubmit={submit}>
-          <div className="account__cardhead">
-            <span className="disp account__cardtitle">Reset Password</span>
+      <div className={styles.account}>
+        <form className={`${styles.accountCard} hud-panel hud-corners`} onSubmit={submit}>
+          <div className={styles.accountCardhead}>
+            <span className={`disp ${styles.accountCardtitle}`}>Reset Password</span>
           </div>
-          <p className="account__note mono">
+          <p className={`${styles.accountNote} mono`}>
             Signed in as <b>{username}</b>. The new password applies to both the
             website and the game client.
           </p>
@@ -83,9 +84,9 @@ export function Account({
               placeholder="********" />
           </label>
 
-          {err && <div className="login__err mono">{err}</div>}
+          {err && <div className={`${styles.accountErr} mono`}>{err}</div>}
 
-          <button className="btn btn--primary login__submit" type="submit" disabled={busy}>
+          <button className={`btn btn--primary ${styles.accountSubmit}`} type="submit" disabled={busy}>
             {busy ? 'Updating...' : 'Reset Password'}
           </button>
         </form>

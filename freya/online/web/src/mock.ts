@@ -8,7 +8,7 @@
 
 import type {
   Item, Listing, MyListing, VaultSlot, Mail, Session, ServerStatus,
-  AvatarProfile, ShipView, SkillView, GalaxyMap, GalaxyOccupancy,
+  AvatarProfile, ShipView, SkillView, GalaxyMap, GalaxyOccupancy, AvatarLocation,
 } from './types';
 import { rarityFor } from './lib/rarity';
 
@@ -354,6 +354,12 @@ export const MOCK_GALAXY_OCCUPANCY: GalaxyOccupancy = {
   counts: { '1060': 50, '2005': 12, '3060': 7, '1075': 25, '4515': 1, '1015': 3 },
   total: 98,
 };
+
+export const MOCK_MY_AVATARS: AvatarLocation[] = [
+  { name: 'Kestrel_Vega', sector: '1060', online: true },
+  { name: 'Orin_Tasca', sector: '2005', online: false },
+  { name: 'Mara_Voss', sector: '3060', online: false },
+];
 
 export const MOCK_SKILLS: Record<string, SkillView[]> = {
   Kestrel_Vega: [
