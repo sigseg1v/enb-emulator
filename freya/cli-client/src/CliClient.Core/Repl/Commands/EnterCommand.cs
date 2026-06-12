@@ -59,8 +59,9 @@ public sealed class EnterCommand : ICommandHandler
         }
         if (_ctx.Sector is not null)
         {
+            string where = _ctx.ActiveSectorId is { } sid ? _ctx.SectorLabel(sid) : "a sector";
             await output.WriteLineAsync(AnsiPalette.Warn(
-                $"already in sector {_ctx.ActiveSectorId} -- restart the REPL to switch"))
+                $"already in {where} -- restart the REPL to switch"))
                 .ConfigureAwait(false);
             return 1;
         }
