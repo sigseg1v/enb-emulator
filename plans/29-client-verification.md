@@ -1096,3 +1096,31 @@ format & byte order", Trap 2).
   (category 90) and ordinary stackable items.
 - **Setup**: any deploy; a character docked at a station with a vendor, holding
   enough credits and free cargo to buy a multi-item stack.
+
+### [ ] CV-22 -- Formation commands arrange the group (CLI emits 0x00BC CTA_REQUEST)
+
+- **Change**: NO server/proxy wire change. This is a new CLI emitter only: the
+  `formation <pipe|block|slot|join|break>` command sends `0x00BC` CTA_REQUEST
+  (struct CTARequest: int32 SourceID, TargetID, Action; 12 bytes LE) with the
+  GroupAction codes the server's `PlayerManager::GroupAction` already dispatches
+  -- 6 pipe / 5 block / 4 slot-back (leader SetFormation), 7 form-up (member
+  FormUp), 8 leave-formation (member), 9 break-formation (leader). SourceID is
+  our own tagged GameID; the server strips PLAYER_TAG in GetPlayer. The server
+  handler is inherited and unchanged. Logged here because the CLI cannot observe
+  ships physically snapping into formation -- only the real client proves the
+  feature works end to end.
+- **CLI byte-pin**: `CtaRequest_IsByteExact` in
+  `freya/cli-client/tests/CliClient.UnitTests/Opcodes/SelfGroupStateTests.cs`
+  pins the 12-byte emitter; `SelfGroupStateTests` pins the self-group-state
+  decode (PlayerIndex 0x001B GroupInfo) that drives command gating.
+- **What to look for (real client)**: form a group (one client leads, others
+  accept). On the leader, run `formation pipe` (then `block`, `slot`) -- the
+  group's formation indicator changes. On a non-leader member, `formation join`
+  snaps the ship into the leader's formation (needs same sector, within 5000 of
+  the leader). On the leader `formation break` ends the formation for everyone;
+  on a member `formation break` drops just that ship out. Cross-check that the
+  CLI's offered verbs match the role: a leader is offered pipe/block/slot/break,
+  a not-yet-formed member is offered join/break, and `formation` is hidden when
+  solo (not grouped).
+- **Setup**: `just play-cli` (or `play-local`) with at least two characters in
+  the same sector, grouped via `group invite <player>` + `group accept`.

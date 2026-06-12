@@ -352,6 +352,70 @@ public sealed class AuxDataRecord : PacketRecord
         return new AuxSummary(gameId, name, level, maxSpeed, faction);
     }
 
+    /// <summary>
+    /// Self group/formation state pulled out of the self <c>PlayerIndex</c> aux
+    /// (0x001B, GameID == 0): am I grouped, am I the leader, am I currently in a
+    /// formation. Drives the <c>group</c>/<c>formation</c> command gating.
+    /// </summary>
+    public readonly record struct GroupState(bool InGroup, bool IsLeader, bool InFormation);
+
+    /// <summary>
+    /// Decode the self PlayerIndex aux's GroupInfo (field 17). Returns null when
+    /// the frame is not the self aux, no schema fits, or the parsed aux carries
+    /// no GroupInfo fields at all (a diff aux that changed only e.g. credits) --
+    /// so the caller leaves its cached state untouched rather than clobbering it.
+    /// Mirrors the best-fit walk in <see cref="TryExtractSummary"/>.
+    ///
+    /// The wire model (server/src/GroupManager.cpp): the leader sits at
+    /// Member[0] and <c>SetIsGroupLeader(MemberIndex == 0)</c>; empty member
+    /// slots carry GameID == -1. A non-leader member has IsGroupLeader == 0 yet
+    /// IS grouped, so "in a group" is read from the populated member count, NOT
+    /// the leader flag. <c>GroupInfo.Formation</c> (field 8, depth 1) is the
+    /// leader's chosen formation once set and each member's own formation once it
+    /// forms up (FormUp) -- 0 means "not in a formation" for either role.
+    /// </summary>
+    public static GroupState? TryExtractGroupState(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length < 8 || payload[6] != 1) return null;
+        uint gameId = BinaryPrimitives.ReadUInt32LittleEndian(payload[..4]);
+        if (gameId != 0) return null;   // self PlayerIndex only
+
+        List<AuxAnno>? best = null;
+        double bestPlaus = -1;
+        foreach (var c in AuxSchemaRegistry.Candidates)
+        {
+            if (!AuxSchemaRegistry.GateMatches(c.Gate, gameId)) continue;
+            var w = new AuxWalker(payload, c.Extended);
+            if (w.Walk(c.Schema) != payload.Length) continue;
+            double plaus = w.StringPlausibility;
+            if (plaus < 0.9) continue;
+            bool better = best is null
+                || plaus > bestPlaus + 0.001
+                || (System.Math.Abs(plaus - bestPlaus) <= 0.001 && w.Annos.Count > best.Count);
+            if (better) { best = w.Annos; bestPlaus = plaus; }
+        }
+        if (best is null) return null;
+
+        bool sawGroupInfo = false, isLeader = false, inFormation = false;
+        int populatedMembers = 0;
+        foreach (var a in best)
+        {
+            // GroupInfo's own fields are at depth 1; the per-member fields are
+            // nested two deeper (GroupInfo -> Members container -> element) at
+            // depth 3. The names are unique to GroupInfo so depth + name is an
+            // unambiguous match.
+            if (a.Depth == 1 && a.Name == "IsGroupLeader")
+            { sawGroupInfo = true; if (TryLeadingUint(a.Value, out uint v)) isLeader = v != 0; }
+            else if (a.Depth == 1 && a.Name == "Formation")
+            { sawGroupInfo = true; if (TryLeadingUint(a.Value, out uint v)) inFormation = v != 0; }
+            else if (a.Depth == 3 && a.Name == "GameID"
+                     && TryLeadingUint(a.Value, out uint g) && g != 0 && g != 0xFFFFFFFF)
+            { sawGroupInfo = true; populatedMembers++; }
+        }
+        if (!sawGroupInfo) return null;
+        return new GroupState(populatedMembers > 0, isLeader, inFormation);
+    }
+
     // AuxWalker renders strings as "\"value\"" and U32 as "{v}  (0x........)".
     private static string Unquote(string v)
         => v.Length >= 2 && v[0] == '"' && v[^1] == '"' ? v[1..^1] : v;

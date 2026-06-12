@@ -586,7 +586,7 @@ public sealed class SectorWorld
     /// <summary>
     /// Resolve a player/object name to its game id, case-insensitively. Prefers
     /// avatars (a 0x0061 description was seen) over other named objects, so
-    /// `group-invite Yee` lands on the player and not a same-named nav. Returns
+    /// `group invite Yee` lands on the player and not a same-named nav. Returns
     /// null when no tracked object carries that name.
     /// </summary>
     public int? FindByName(string name)

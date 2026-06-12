@@ -344,10 +344,20 @@ public sealed class SessionContext : IAsyncDisposable
     /// <summary>
     /// Name of the most recent player who sent us a group invite (0x001E GROUP,
     /// Flag 0x01), or null if none is pending. Set when the invite frame
-    /// arrives; the <c>group-invite-accept</c> command reads it to decide
-    /// whether there is anything to accept. Cleared once accepted/left.
+    /// arrives; the <c>group accept</c> command reads it to decide whether there
+    /// is anything to accept. Cleared once accepted/left.
     /// </summary>
     public string? PendingGroupInviter { get; set; }
+
+    /// <summary>
+    /// Latest self group/formation state, decoded from the self <c>PlayerIndex</c>
+    /// aux (0x001B, GameID == 0) whenever one carries GroupInfo. Drives the
+    /// availability gating of the <c>group</c> and <c>formation</c> subcommands.
+    /// Defaults to solo (not grouped, not leader, no formation); only a self aux
+    /// that actually carries GroupInfo updates it (see
+    /// <see cref="TrackSelfGroup"/>), so a credits-only diff aux never clobbers it.
+    /// </summary>
+    public AuxDataRecord.GroupState SelfGroup { get; private set; }
 
     public SessionContext(OpcodeRegistry registry)
     {
@@ -549,6 +559,7 @@ public sealed class SessionContext : IAsyncDisposable
         EchoChat(p, PacketDirection.Inbound);
         Narrate(p, events);
         AnnounceGroupInvite(p);
+        TrackSelfGroup(p);
         CaptureHandoff(p);
         CaptureSectorName(p);
         PrintIfEnabled(p, PacketDirection.Inbound);
@@ -633,7 +644,7 @@ public sealed class SessionContext : IAsyncDisposable
     /// Surface an inbound group invite (0x001E GROUP, Flag 0x01, message
     /// "&lt;name&gt; is requesting you to join their group") as a one-line prompt
     /// telling the operator how to accept, and remember the inviter so
-    /// <c>group-invite-accept</c> has something to act on. Never throws -- a
+    /// <c>group accept</c> has something to act on. Never throws -- a
     /// malformed frame must not kill the drain.
     /// </summary>
     private void AnnounceGroupInvite(Packet p)
@@ -654,7 +665,7 @@ public sealed class SessionContext : IAsyncDisposable
             string line = AnsiPalette.Colorize(
                 AnsiPalette.BrightYellow + AnsiPalette.Bold,
                 $"** You have been invited to a group by {inviter}. " +
-                "Use `group-invite-accept` to accept.");
+                "Use `group accept` to accept.");
             lock (_chatGate)
             {
                 if (LivePrompt is { } lp && lp.TryWriteLineAbove(line)) return;
@@ -663,6 +674,25 @@ public sealed class SessionContext : IAsyncDisposable
             }
         }
         catch { /* best-effort notification */ }
+    }
+
+    /// <summary>
+    /// Update <see cref="SelfGroup"/> from an inbound self <c>PlayerIndex</c> aux
+    /// (0x001B). Only a frame that actually carries GroupInfo moves the cached
+    /// state -- the server re-sends the self aux on every group/formation change
+    /// (GroupManager.cpp: SetData/SendEmptyGroupAux/SetFormation/FormUp/Leave),
+    /// so the gating stays current. Never throws -- state tracking is a
+    /// convenience, never a failure point for the drain.
+    /// </summary>
+    private void TrackSelfGroup(Packet p)
+    {
+        if (p.Header.Opcode != 0x001B) return;
+        try
+        {
+            if (AuxDataRecord.TryExtractGroupState(p.Payload.Span) is { } gs)
+                SelfGroup = gs;
+        }
+        catch { /* best-effort state tracking */ }
     }
 
     /// <summary>
