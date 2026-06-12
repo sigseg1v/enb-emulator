@@ -81,10 +81,7 @@
 /* live pilot presence */
 .galaxy .wave { pointer-events: none; transform-box: fill-box; transform-origin: center; animation: gx-wave 2.85s ease-out infinite; }
 
-/* --wi (0..1) is the per-sector presence intensity, normalized to the busiest
-   sector (set inline in Galaxy.tsx); it scales the wave's starting opacity so a
-   sector at the max glows hardest and lighter sectors fade proportionally. */
-@keyframes gx-wave { 0% { transform: scale(0.4); opacity: calc(0.85 * var(--wi, 1)); } 100% { transform: scale(3.4); opacity: 0; } }
+@keyframes gx-wave { 0% { transform: scale(0.4); opacity: 0.85; } 100% { transform: scale(3.4); opacity: 0; } }
 .galaxy .node--online .node__core { filter: drop-shadow(0 0 7px var(--presence)); }
 .galaxy .count { font-family: var(--font-mono); font-weight: 600; fill: var(--presence); opacity: 0.6;
   letter-spacing: 0.01em; pointer-events: none; paint-order: stroke; stroke: oklch(0.09 0.02 240 / 0.85);

@@ -704,16 +704,20 @@ export function Galaxy() {
                   )}
                   {/* live presence: sonar waves whose intensity is normalized to
                       the busiest sector (count / maxOnline), with a small floor so
-                      a lone pilot is still legible; plus the pilot count. */}
+                      a lone pilot is still legible; plus the pilot count. The
+                      normalized intensity is a STATIC group opacity that multiplies
+                      the waves' own fade animation -- robust, no var() in keyframes. */}
                   {online > 0 && (() => {
                     const intensity = maxOnline > 0
-                      ? Math.max(0.3, online / maxOnline) : 0;
+                      ? Math.max(0.35, online / maxOnline) : 0;
                     return <>
-                      {[0, 1, 2].map(w => (
-                        <circle key={'w' + w} className={styles.wave} cx={s.x} cy={s.y} r={R + 3} fill="none"
-                          stroke="var(--presence)" strokeWidth={1.2 + 1.4 * intensity}
-                          style={{ animationDelay: (w * 0.95).toFixed(2) + 's', '--wi': intensity.toFixed(3) } as React.CSSProperties} />
-                      ))}
+                      <g style={{ opacity: intensity }}>
+                        {[0, 1, 2].map(w => (
+                          <circle key={'w' + w} className={styles.wave} cx={s.x} cy={s.y} r={R + 3} fill="none"
+                            stroke="var(--presence)" strokeWidth={1.5 + intensity}
+                            style={{ animationDelay: (w * 0.95).toFixed(2) + 's' }} />
+                        ))}
+                      </g>
                       <text className={styles.count} x={s.x + R + 7} y={s.y - R - 4}
                         fontSize={s.hub ? 19 : 16}>{online}</text>
                     </>;
