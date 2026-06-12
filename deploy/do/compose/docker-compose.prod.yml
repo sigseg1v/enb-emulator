@@ -138,6 +138,12 @@ services:
         # volumes too. See db/postgres/external_status_events.sql.
         echo "schema-init: applying /db/external_status_events.sql -> net7_user"
         psql -h postgres -U net7 -d net7_user -v ON_ERROR_STOP=1 -f /db/external_status_events.sql
+        # Phase AQ sector-transition log (net7_user). UNCONDITIONAL, same
+        # rationale: new table, must land on pre-existing prod volumes too. The
+        # server INSERTs on every gate/undock/dock; the website reads it for the
+        # galaxy traffic animation. See db/postgres/gate_events.sql.
+        echo "schema-init: applying /db/gate_events.sql -> net7_user"
+        psql -h postgres -U net7 -d net7_user -v ON_ERROR_STOP=1 -f /db/gate_events.sql
         # Phase AM-8 server_status heartbeat singleton (net7_user). UNCONDITIONAL,
         # same rationale: new table, must land on pre-existing prod volumes too.
         # See db/postgres/server_status.sql.
@@ -197,6 +203,11 @@ services:
       # the droplet .env to turn it off (EmitExternalStatusEvent no-ops and
       # writes nothing). See deploy README.
       NET7_EXTERNAL_STATUS_ENABLED: "${NET7_EXTERNAL_STATUS_ENABLED:-1}"
+      # Phase AQ gate-events. Defaults ON (=1): the server appends a gate_events
+      # row on every sector transition (gate/undock/dock) for the galaxy traffic
+      # animation. Set NET7_GATE_EVENTS_ENABLED= (empty) to turn it off. See
+      # db/postgres/gate_events.sql.
+      NET7_GATE_EVENTS_ENABLED: "${NET7_GATE_EVENTS_ENABLED:-1}"
     # Resolve our own domain to loopback inside the container, mirroring the
     # dev stack's local.net-7.org remap. See the README "remote addressing"
     # caveat -- this is the load-bearing UNVERIFIED bit for remote play.

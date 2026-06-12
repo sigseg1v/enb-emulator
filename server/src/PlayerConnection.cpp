@@ -10363,6 +10363,14 @@ void Player::SendServerHandoff(long from_sector_id, long to_sector_id, char *fro
 		to_system = from_system;
 	}
 
+	// Phase AQ. Record the sector transition for the website's galaxy-traffic
+	// animation. This is the universal handoff chokepoint -- gate jumps, undock
+	// (LaunchIntoSpace), and dock all route through here -- so one emit covers
+	// every movement. from/to are host-order sector ids; EmitGateEvent drops a
+	// self-hop and no-ops unless NET7_GATE_EVENTS_ENABLED. Pure analytics
+	// side-write: the ServerHandoff packet below is unchanged.
+	EmitGateEvent(CharacterID(), from_sector_id, to_sector_id);
+
 	ServerHandoff server_handoff;
 	memset(&server_handoff, 0, sizeof(server_handoff));
 

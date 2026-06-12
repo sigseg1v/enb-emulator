@@ -338,6 +338,8 @@ type galaxyCache struct {
 	mapAt       time.Time
 	cachedOcc   *GalaxyOccupancy
 	occAt       time.Time
+	cachedFlow  *GalaxyGateFlow
+	flowAt      time.Time
 }
 
 func newGalaxyCache(store *Store) *galaxyCache { return &galaxyCache{store: store} }

@@ -25,13 +25,21 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import type { AvatarLocation, GalaxyMap, GalaxyOccupancy } from '../types';
+import type { AvatarLocation, GalaxyGateFlow, GalaxyMap, GalaxyOccupancy } from '../types';
 import * as api from '../api';
 import styles from './Galaxy.module.css';
 
 type Vars = CSSProperties & Record<string, string | number>;
 
 const OCCUPANCY_POLL_MS = 15_000;
+// Gate-flow is cached 60s server-side, so polling faster only re-serves the same
+// payload. Match the cache cadence.
+const GATEFLOW_POLL_MS = 60_000;
+// Seconds for one light to traverse a lane, and the largest number of lights we
+// draw on a single directed lane (a huge burst is capped so the lane stays
+// readable rather than turning into a solid stream).
+const FLOW_DUR_S = 3.2;
+const FLOW_MAX_DOTS = 6;
 const W = 1960;
 const H = 1280;
 // Five-pointed star centered on the origin (outer r 13, inner r 5.5), used for
@@ -378,6 +386,7 @@ function pad4(n: number) { return String(Math.max(0, Math.round(n))).padStart(4,
 
 export function Galaxy() {
   const [occ, setOcc] = useState<GalaxyOccupancy | null>(null);
+  const [flow, setFlow] = useState<GalaxyGateFlow | null>(null);
   const [myAvatars, setMyAvatars] = useState<AvatarLocation[]>([]);
   const [idByNorm, setIdByNorm] = useState<Record<string, string>>({});
   const [err, setErr] = useState<string | null>(null);
@@ -410,6 +419,18 @@ export function Galaxy() {
       .catch(() => { /* keep last good occupancy */ });
     tick();
     const h = setInterval(tick, OCCUPANCY_POLL_MS);
+    return () => { alive = false; clearInterval(h); };
+  }, []);
+
+  // Directed sector-to-sector traffic. Polled on the server cache cadence (60s);
+  // keep last good flow on a failed poll so the lights don't flicker out.
+  useEffect(() => {
+    let alive = true;
+    const tick = () => api.fetchGalaxyGateFlow()
+      .then(f => { if (alive) setFlow(f); })
+      .catch(() => { /* keep last good flow */ });
+    tick();
+    const h = setInterval(tick, GATEFLOW_POLL_MS);
     return () => { alive = false; clearInterval(h); };
   }, []);
 
@@ -463,6 +484,38 @@ export function Galaxy() {
   const maxOnline = useMemo(
     () => Object.values(presence).reduce((m, v) => Math.max(m, v), 0),
     [presence]);
+
+  // Directed traffic lights. Each flow lane {from,to,count} is matched to the
+  // undirected LANE whose endpoints are those two sectors; `reverse` tells the
+  // dot which way to travel along the lane's path. The path itself (L.d) runs
+  // a -> b, so a flow that goes b -> a animates with keyPoints reversed. count
+  // dots are spaced equidistant by staggering their start phase. A flow whose
+  // endpoints are not directly lane-connected (the server collapses dock/undock
+  // to self-hops, but a multi-hop or unknown pair could still appear) is
+  // dropped -- there is no single lane to ride.
+  const flowDots = useMemo(() => {
+    if (!flow || flow.lanes.length === 0) return [];
+    // ordered "aId>bId" / "bId>aId" -> the lane and its authored a-endpoint id.
+    const laneByPair: Record<string, { d: string; aId: string }> = {};
+    for (const L of LANES) {
+      const aId = idByNorm[gnorm(L.a)], bId = idByNorm[gnorm(L.b)];
+      if (!aId || !bId) continue;
+      laneByPair[aId + '>' + bId] = { d: L.d, aId };
+      laneByPair[bId + '>' + aId] = { d: L.d, aId };
+    }
+    const out: { key: string; d: string; reverse: boolean; count: number }[] = [];
+    for (const ln of flow.lanes) {
+      const hit = laneByPair[String(ln.from) + '>' + String(ln.to)];
+      if (!hit) continue;
+      out.push({
+        key: ln.from + '-' + ln.to,
+        d: hit.d,
+        reverse: String(hit.aId) !== String(ln.from), // path is a->b; reverse if flow is b->a
+        count: Math.min(ln.count, FLOW_MAX_DOTS),
+      });
+    }
+    return out;
+  }, [flow, idByNorm]);
 
   const dimall = hover != null || hl != null;
   const total = occ?.total ?? 0;
@@ -636,6 +689,28 @@ export function Galaxy() {
               }
               return <path key={i} className={base} d={L.d} />;
             })}
+          </g>
+
+          {/* live traffic: one travelling light per gate event over the last 5
+              minutes, riding the directed lane between source and destination.
+              N concurrent events on the same ordered pair => N lights spaced
+              equidistant (staggered start phase) along the same path. */}
+          <g className={styles.flow}>
+            {flowDots.flatMap(fd =>
+              Array.from({ length: fd.count }).map((_, i) => (
+                <circle key={fd.key + '-' + i} className={styles.flowDot} r={3}>
+                  <animateMotion
+                    dur={`${FLOW_DUR_S}s`}
+                    repeatCount="indefinite"
+                    path={fd.d}
+                    calcMode="linear"
+                    keyPoints={fd.reverse ? '1;0' : '0;1'}
+                    keyTimes="0;1"
+                    begin={`-${((i / fd.count) * FLOW_DUR_S).toFixed(2)}s`}
+                  />
+                </circle>
+              )),
+            )}
           </g>
 
           {/* sector nodes */}

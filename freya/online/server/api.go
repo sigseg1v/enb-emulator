@@ -71,6 +71,9 @@ func (s *apiServer) routes() http.Handler {
 	// (short-cached, polled by the SPA).
 	mux.HandleFunc("GET /api/galaxy", s.handleGalaxyMap)
 	mux.HandleFunc("GET /api/galaxy/occupancy", s.handleGalaxyOccupancy)
+	// Live directed sector-to-sector traffic (last 5 min, grouped by ordered
+	// pair); cached 60s. Drives the travelling-light animation on the lanes.
+	mux.HandleFunc("GET /api/galaxy/gateflow", s.handleGalaxyGateFlow)
 	// The logged-in account's own characters and the sectors they sit in (for
 	// personal star markers on the map). Auth-gated -- it is per-account data.
 	mux.HandleFunc("GET /api/galaxy/me", s.handleGalaxyMe)
@@ -706,6 +709,27 @@ func (s *apiServer) handleGalaxyOccupancy(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, occ)
+}
+
+// GET /api/galaxy/gateflow -- live directed sector-to-sector traffic over the
+// trailing window, grouped by ordered (from,to) pair with an event count.
+// Cached 60s server-side; the SPA polls it to drive the travelling-light
+// animation along each lane.
+func (s *apiServer) handleGalaxyGateFlow(w http.ResponseWriter, r *http.Request) {
+	_, acctID := s.loggedIn(r)
+	if acctID == 0 {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	flow, err := s.galaxy.getGateFlow(ctx, time.Now())
+	if err != nil {
+		log.Printf("api: galaxy gateflow: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, flow)
 }
 
 // GET /api/galaxy/me -- the logged-in account's own characters and the sector
