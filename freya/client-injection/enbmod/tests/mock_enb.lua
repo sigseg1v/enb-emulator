@@ -122,9 +122,10 @@ local function jval(v)
     error("unserializable: " .. t)
 end
 
-function M.dump_frame(frame, path)
-    local f = assert(io.open(path, "w"))
-    f:write(string.format('{"w":%d,"h":%d,"cmds":[\n', S.screen_w, S.screen_h))
+-- serialize a frame (the recorded draw cmds) to a JSON string. Used both by
+-- dump_frame (-> file, for render_frame.py) and the interactive host (-> stdout).
+function M.frame_json(frame)
+    local out = { string.format('{"w":%d,"h":%d,"cmds":[', S.screen_w, S.screen_h) }
     for i, c in ipairs(frame) do
         local parts = {}
         -- stable key order for diffable dumps
@@ -132,9 +133,16 @@ function M.dump_frame(frame, path)
                             "radius","rgb","rgb2","alpha","filled","text","path"}) do
             if c[k] ~= nil then parts[#parts + 1] = jstr(k) .. ":" .. jval(c[k]) end
         end
-        f:write("  {" .. table.concat(parts, ",") .. "}" .. (i < #frame and "," or "") .. "\n")
+        out[#out + 1] = "{" .. table.concat(parts, ",") .. "}" .. (i < #frame and "," or "")
     end
-    f:write("]}\n")
+    out[#out + 1] = "]}"
+    return table.concat(out)
+end
+
+function M.dump_frame(frame, path)
+    local f = assert(io.open(path, "w"))
+    f:write(M.frame_json(frame))
+    f:write("\n")
     f:close()
 end
 

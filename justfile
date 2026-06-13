@@ -162,13 +162,29 @@ build-enbmod:
     rm -rf bin/scripts; cp -r freya/client-injection/enbmod/scripts bin/scripts
     @echo ">>> done. bin/enbmod.dll + bin/scripts/. Enable in the launcher with UseClientMods=true."
 
-# Preview the enbmod Lua HUD without launching the game. Runs the headless mod
-# test suite (scripts/*.lua against tests/mock_enb.lua on a native Lua build),
-# which rasterizes the HUD scenarios to PNGs via tests/render_frame.py, then
-# assembles a labeled 2x2 contact sheet and opens it. This is how you SEE the
-# UI -- and any mod tweak -- with no client / WINE / D3D8. Re-run after editing
-# a script to see the change. Set NO_OPEN=1 to just write the files.
+# Open the enbmod Lua HUD in an INTERACTIVE in-browser previewer, without
+# launching the game. Runs the REAL mod scripts (scripts/*.lua) inside a native
+# Lua host (tests/interactive_host.lua against tests/mock_enb.lua) and bridges a
+# browser <canvas> to them: mouse move/click + keyboard drive the scripts'
+# on_input/on_tick handlers, and the returned draw commands render over the real
+# game-screen background (tests/enb-mod-bg.png, 1280x960) so HUD positioning can
+# be checked against the actual screen. Click an action-bar button or press
+# 1-9/0/-/= to fire its keybind; the HUD shows mouse coords, swallow state, and
+# the live tap count. Ctrl-C to stop. Set PORT=N to change the port, NO_OPEN=1
+# to not auto-open the browser. No client / WINE / D3D8 required.
 mock-ui:
+    @lua=freya/client-injection/enbmod/build/tests/lua; \
+    [ -x "$lua" ] || { echo ">>> native Lua not built yet -- building via the test suite"; \
+        freya/client-injection/enbmod/tests/run_tests.sh >/dev/null; }
+    python3 freya/client-injection/enbmod/tests/preview_server.py \
+        --port "${PORT:-8777}" $([ "${NO_OPEN:-0}" = 1 ] && echo --no-open)
+
+# Render the enbmod HUD scenarios to static PNGs and assemble a labeled 2x2
+# contact sheet (no interactivity). Runs the headless mod test suite, which
+# rasterizes each scenario via tests/render_frame.py. Use `just mock-ui` for the
+# interactive previewer; this is the quick visual-diff snapshot. NO_OPEN=1 to
+# just write the files.
+mock-ui-shots:
     @python3 -c 'import PIL' 2>/dev/null || { echo "ERROR: Pillow missing -- 'pip install pillow' (or apt install python3-pil)"; exit 1; }
     freya/client-injection/enbmod/tests/run_tests.sh
     @shots=freya/client-injection/enbmod/build/tests/shots; out="$shots/_contact.png"; \

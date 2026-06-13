@@ -183,10 +183,24 @@ This is how mods get debugged and verified programmatically -- including visuall
   `overlay.cpp`'s draw semantics (vertical gradients, rounded corners, alpha over a dark
   backdrop) -- so the UI can be *looked at* without launching the game.
 
-**Just want to LOOK at it?** From the repo root run **`just mock-ui`**: it runs the suite, stitches
-the four scenarios into a labeled 2x2 contact sheet (`build/tests/shots/_contact.png`), and opens it
-in your image viewer. Re-run after editing a script to see the change. `NO_OPEN=1 just mock-ui`
-writes the files without opening.
+**Want to PLAY with it?** From the repo root run **`just mock-ui`**: it opens an interactive
+in-browser previewer. The real `scripts/*.lua` run inside a native Lua host
+(`tests/interactive_host.lua`), a Python stdlib server (`tests/preview_server.py`) bridges a browser
+`<canvas>` to them, and the **actual game screen** (`tests/enb-mod-bg.png`, 1280x960) is the
+background so HUD positioning can be checked against the real client view. Mouse move/click and
+keyboard events drive the scripts' `on_input`/`on_tick` handlers live -- click an action-bar button
+or press `1`-`9`/`0`/`-`/`=` to fire its keybind; the corner HUD shows mouse coords, the swallow
+state, and the live tap count. Toggle calibrated stats, the background, and the resolution from the
+top-right controls. `PORT=N` changes the port; `NO_OPEN=1` skips auto-opening the browser; Ctrl-C
+stops the server.
+
+The background (`tests/enb-mod-bg.png`, a 1280x960 game-client screenshot) is a **local drop-in**,
+not committed -- it's a binary, copyrighted game image. Put your own screenshot there to position
+the HUD against the real view; without it the previewer just uses a dark backdrop.
+
+**Just want a quick snapshot?** **`just mock-ui-shots`** runs the suite and stitches the four
+scenarios into a labeled 2x2 contact sheet (`build/tests/shots/_contact.png`), opened in your image
+viewer -- a static visual-diff for a script tweak. `NO_OPEN=1` writes the files without opening.
 
 Caveats, honestly: the mock's text metric is the scripts' own 7px/char fallback (the real Tahoma
 atlas is variable-width), and the Python rasterizer is an approximation of the D3D8 path, not the

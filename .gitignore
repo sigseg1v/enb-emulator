@@ -162,6 +162,11 @@ deploy/certs/*.crt
 # Local-only scratch space. Never committed.
 /scratch/
 
+# enbmod UI previewer background -- a local game-client screenshot the developer
+# drops in to position the HUD against (just mock-ui). Binary + copyrighted game
+# image; never committed. The previewer falls back to a dark backdrop without it.
+/freya/client-injection/enbmod/tests/enb-mod-bg.png
+
 # Python bytecode (import tooling under tools/dataimport-jsonl/ etc.)
 __pycache__/
 *.pyc
