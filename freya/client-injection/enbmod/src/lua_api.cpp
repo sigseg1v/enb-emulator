@@ -188,9 +188,16 @@ static int l_self(lua_State* L){
 }
 
 // enb.state() -> "space" | "station" | "login" | "charsel" | "load" | "unknown".
-// Reads the calibrated game-state code and maps it to a name; "unknown" when
-// game_state_addr is unset or no calibrated code matches (HUD then shows -- the
-// pre-calibration default).
+// Two sources, in priority order:
+//   1. The calibrated game-state code (game_state_addr) -- the full state set,
+//      but it is currently UNCALIBRATED (game_state_addr == 0), so it yields
+//      nothing yet.
+//   2. The in-space heartbeat (enable_inspace_hook) -- a zero-calibration signal
+//      that positively reports "space" when the per-frame vitals updater is
+//      firing. It cannot distinguish station/login/charsel from each other, so
+//      it only ever upgrades "unknown" -> "space", never the reverse.
+// "unknown" is the remaining pre-calibration default (HUD then shows the
+// skeleton rather than hiding forever).
 static int l_state(lua_State* L){
     Offsets& o = offs();
     const char* name = "unknown";
@@ -201,6 +208,13 @@ static int l_state(lua_State* L){
         else if (o.state_login   >= 0 && s == o.state_login)   name = "login";
         else if (o.state_charsel >= 0 && s == o.state_charsel) name = "charsel";
         else if (o.state_load    >= 0 && s == o.state_load)    name = "load";
+    }
+    // Heartbeat fallback: if the calibrated source could not name a state, but
+    // the in-space vitals updater is firing, we ARE in space.
+    if (!strcmp(name, "unknown")) {
+        const unsigned long kFreshMs = 400;
+        unsigned long last = hooks::last_inspace_tick();
+        if (last != 0 && (GetTickCount() - last) <= kFreshMs) name = "space";
     }
     lua_pushstring(L, name);
     return 1;
@@ -322,6 +336,27 @@ static int l_on_chat(lua_State* L){
 }
 static int l_enable_event_hooks(lua_State* L){
     lua_pushboolean(L, hooks::enable_event_hooks()); return 1;
+}
+
+// enb.enable_inspace() -- install the in-space heartbeat hook (opt-in, same
+// safety gate as enable_event_hooks). Returns true on success.
+static int l_enable_inspace(lua_State* L){
+    lua_pushboolean(L, hooks::enable_inspace_hook()); return 1;
+}
+
+// enb.inspace() -> bool. True while the in-space vitals updater has fired
+// recently (within the freshness window below). The updater runs every frame in
+// space and not at all on the front-end / in station, so a fresh stamp means
+// "in space" with zero offset calibration. Returns false if the heartbeat hook
+// was never enabled (stamp stays 0).
+static int l_inspace(lua_State* L){
+    // Freshness window: a few frames' grace so a single skipped paint (alt-tab,
+    // a stall) doesn't flicker the HUD off. ~400ms ~= 24+ frames at 60fps.
+    const unsigned long kFreshMs = 400;
+    unsigned long last = hooks::last_inspace_tick();
+    bool fresh = last != 0 && (GetTickCount() - last) <= kFreshMs;
+    lua_pushboolean(L, fresh ? 1 : 0);
+    return 1;
 }
 
 // enb.on_input(fn [, mask])  -- fn(msg, wparam, lparam) -> truthy to SWALLOW.
@@ -532,6 +567,8 @@ void open(lua_State* L){
         {"screen", l_screen},
         {"measure", l_measure},
         {"enable_event_hooks", l_enable_event_hooks},
+        {"enable_inspace", l_enable_inspace},
+        {"inspace", l_inspace},
         {"tap", l_tap},
         {"key", l_key},
         {"char", l_char},

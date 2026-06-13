@@ -1205,26 +1205,39 @@ format & byte order", Trap 2).
 ### [ ] CV-AS-STATE -- Freya HUD shows ONLY in space/station, never on login/charsel/load
 
 - **Change**: client-only (enbmod.dll, Freya/MIT -- no server/proxy wire
-  change). The HUD is now visibility-gated on a new `enb.state()` that reads a
-  calibration-driven game-state int (`game_state_addr` + `state_space/station/
-  login/charsel/load` in game.h, mapped to a name in lua_api.cpp `l_state`).
-  `freya_hud.vis()` maps: space -> cards+hotbar, station -> cards only (hotbar
-  hidden, owner ask), login/charsel/load -> nothing. Until `game_state_addr` is
-  calibrated `enb.state()` returns "unknown", which deliberately shows the full
-  HUD (so dev/headless still renders).
+  change). The HUD is visibility-gated on `enb.state()`, which now has TWO
+  sources (lua_api.cpp `l_state`):
+  1. the calibration-driven game-state int (`game_state_addr` + `state_space/
+     station/login/charsel/load` in game.h) -- the full state set, but currently
+     UNCALIBRATED (`game_state_addr == 0`), so it names nothing yet;
+  2. a NEW zero-calibration **in-space heartbeat** -- a read-only hook on the
+     per-frame in-space vitals VALUE updater (`game.h::addr::EnergyBar`
+     0x005dc4a0, installed via `enb.enable_inspace()` from init.lua). That
+     updater repaints every frame in space and not at all on the front-end / in
+     station, so a fresh call stamp positively means "space". It can ONLY
+     distinguish space-vs-not-space, so it upgrades "unknown" -> "space" and
+     never names station/login/charsel.
+  Net effect today: `enb.state()` = "space" when in space, "unknown" everywhere
+  else. `freya_hud.vis()` maps space -> cards+hotbar, station -> cards only
+  (owner ask), login/charsel/load -> nothing, unknown -> full HUD (so dev /
+  pre-calibration still renders). init.lua also logs every `enb.state()` /
+  `enb.inspace()` transition (one line per change) to enbmod.log to DISCOVER the
+  real transitions the game fires.
 - **Headless coverage**: `freya_ui_spec.lua` + `xp_overlay_spec.lua` pin the
   gating against the mock (station drops the hotbar; login/charsel/load draw an
-  empty frame and pass input through). The mock cannot prove the REAL
-  game-state int address/values -- that is this entry.
-- **What to look for (real client)**: at the login screen and character select,
-  NO Freya cards/hotbar. On the load/zoning screen, nothing. In space, the full
-  HUD (player card + discipline card + hotbar). Docked in a station, the player
-  + discipline cards show but the bottom hotbar is gone. Requires calibrating
-  `game_state_addr` and the per-screen int values first (autocalib / memory
-  scan), then confirming each screen.
-- **Setup**: `just play-local` with `UseClientMods=true`; calibrate the
-  game-state address in-game, hot-reload, walk through login -> charsel -> load
-  -> space -> dock.
+  empty frame and pass input through). The EnergyBar hook is UNVERIFIABLE
+  headless (like `patch_ret`): the mock fakes `enb.inspace()` off mock state. The
+  real hook firing per-frame in space, and being silent everywhere else, is
+  exactly this entry.
+- **What to look for (real client)**: enbmod.log shows `inspace heartbeat -> true`
+  and `state: unknown -> space` ONLY after entering space (not at login/charsel/
+  load, not docked). In space, the full HUD appears (player + discipline cards +
+  hotbar). On the front-end and docked, the heartbeat stays false. Walk
+  login -> charsel -> load -> space -> dock and read the transition log to
+  confirm the heartbeat tracks space entry/exit and to capture what other
+  observable states the game exposes (for later calibrating `game_state_addr`).
+- **Setup**: `just play-local` with `UseClientMods=true`; walk login -> charsel
+  -> load -> space -> dock and tail enbmod.log.
 
 ### [ ] CV-AS-CURSOR -- Our mouse pointer draws ON TOP of the HUD, not under it
 

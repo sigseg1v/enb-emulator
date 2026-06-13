@@ -47,6 +47,15 @@ enum {
 bool enable_event_hooks();   // hooks SkillLifecycle (ability use) + ChatChannel (chat lines)
 void disable_event_hooks();
 
+// In-space heartbeat (opt-in, same safety gate as the event hooks). Hooks
+// game::addr::EnergyBar -- the per-frame in-space vitals VALUE updater -- read
+// only, and records GetTickCount() of its most recent call. last_inspace_tick()
+// returns that stamp (0 = never seen). The Lua layer turns this into
+// enb.inspace(): "in space" while the stamp is fresh. Zero-calibration state
+// signal -- needs no game_state_addr offset.
+bool enable_inspace_hook();
+unsigned long last_inspace_tick();
+
 // Event sinks set by the Lua layer. Args are best-effort raw pointers/values.
 void set_on_skill(std::function<void(unsigned /*this*/, unsigned /*arg*/)> cb);
 void set_on_chat (std::function<void(unsigned /*this*/, unsigned /*arg*/)> cb);

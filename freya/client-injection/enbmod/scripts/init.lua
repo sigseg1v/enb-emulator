@@ -22,6 +22,7 @@
 --   enb.state() -> space/station/login/charsel/load/unknown
 --   enb.on_tick(fn) / enb.on_input(fn[,mask]) / enb.on_skill(fn) / enb.on_chat(fn)
 --   enb.enable_event_hooks()
+--   enb.enable_inspace() / enb.inspace()         in-space heartbeat (zero-calib)
 --   enb.screen() / enb.measure(s)
 --   enb.draw.* (overlay) / enb.tap/key/char/hwnd / enb.call/call_cdecl
 --   enb.patch_ret(addr[,pop])      overwrite a function entry with a `ret`
@@ -37,6 +38,38 @@ do
         enb.calibrate(data)
         enb.log("init.lua: applied persisted calib_data.lua")
     end
+end
+
+-- In-space heartbeat: install the read-only hook on the per-frame vitals updater
+-- so enb.state()/enb.inspace() can positively report "space" with NO offset
+-- calibration. The HUD's visibility gate depends on this; without it state stays
+-- "unknown" forever (the pre-calibration default) and we can't tell space apart
+-- from the front-end. Safe to call even if it fails (logged) -- the HUD just
+-- falls back to the "unknown" skeleton.
+if enb.enable_inspace then
+    enb.log("init.lua: enable_inspace() -> " .. tostring(enb.enable_inspace()))
+end
+
+-- State-transition logger. The game exposes no single game-state global we've
+-- calibrated yet, so log every change in what we CAN observe -- enb.state() and
+-- the raw inspace heartbeat -- to discover the actual transitions the game fires
+-- (front-end -> char select -> load -> space -> station -> ...). One line per
+-- change only, so the log isn't spammed every frame.
+do
+    local last_state, last_inspace
+    enb.on_tick(function()
+        local s = (enb.state and enb.state()) or "unknown"
+        local ins = (enb.inspace and enb.inspace()) or false
+        if s ~= last_state then
+            enb.log(string.format("state: %s -> %s (inspace=%s)",
+                tostring(last_state), s, tostring(ins)))
+            last_state = s
+        end
+        if ins ~= last_inspace then
+            enb.log("inspace heartbeat -> " .. tostring(ins))
+            last_inspace = ins
+        end
+    end)
 end
 
 -- Discover and load every staged (= enabled) mod.

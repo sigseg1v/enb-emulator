@@ -46,11 +46,17 @@ H.RADIUS   = 2           -- design corner radius
 
 -- ---- visibility off the game state -----------------------------------------
 -- enb.state() (C++) returns one of: "space","station","login","charsel",
--- "load","none","unknown". It is calibration-driven: until game_state_addr is
--- calibrated (it currently is NOT -- see game.h, game_state_addr == 0) it
--- ALWAYS returns "unknown". So "unknown" CANNOT mean "hide" -- that would hide
--- the HUD permanently in the real client. "unknown" is the pre-calibration
--- default and SHOWS the HUD (matches the C++ l_state contract comment). Only
+-- "load","none","unknown". Two sources feed it:
+--   * the calibrated game-state code (game_state_addr) -- the full state set,
+--     but currently UNCALIBRATED (game.h, game_state_addr == 0), so it names
+--     nothing yet;
+--   * the in-space heartbeat (init.lua calls enb.enable_inspace()) -- a
+--     zero-calibration signal that positively reports "space" while the
+--     per-frame vitals updater is firing. It can ONLY say space-vs-not-space,
+--     so it never names station/login/charsel.
+-- Net effect today: "space" when in space, "unknown" everywhere else. So
+-- "unknown" CANNOT mean "hide" -- that would hide the HUD on the front-end AND
+-- in station. "unknown" is the pre-calibration default and SHOWS the HUD. Only
 -- the screens we can POSITIVELY identify as non-gameplay (login/charsel/load/
 -- none) hide it -- and those are only ever reported once state is calibrated.
 function H.state()

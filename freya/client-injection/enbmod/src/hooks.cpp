@@ -83,6 +83,34 @@ extern "C" {
     void notify_chat (unsigned thisp, unsigned arg0) { if (g_on_chat)  g_on_chat (thisp, arg0); }
 }
 
+// ---- in-space heartbeat -----------------------------------------------------
+// game.h::addr::EnergyBar (0x005dc4a0) is the vitals VALUE updater the client
+// repaints EVERY FRAME while the player is in space (it pushes the live
+// energy/shield/hull %s into the bars). It is NOT painted in station / on the
+// front-end screens, so "was it called in the last frame?" is a zero-calibration
+// "am I in space?" signal -- no game_state_addr offset required. We record the
+// timestamp of the most recent call; enb.inspace() (lua_api) reports true while
+// that timestamp is fresh. This hook is READ-ONLY: it observes the call and
+// forwards every original argument untouched via the naked trampoline, exactly
+// like the skill/chat hooks above -- it never alters the game's behaviour.
+//
+// EnergyBar is a __thiscall taking no stack args we care about; notify takes no
+// args, so the naked thunk just preserves registers, calls notify, and tail-jmps
+// into MinHook's trampoline with ECX + the stack exactly as the game left them.
+static volatile unsigned long g_last_inspace_tick = 0;
+extern "C" {
+    void* real_InSpace_tramp = nullptr;
+    void notify_inspace() { g_last_inspace_tick = GetTickCount(); }
+}
+extern "C" __attribute__((naked)) void hk_InSpace() {
+    __asm__ __volatile__(
+        "pushal\n\t"
+        "call _notify_inspace\n\t"
+        "popal\n\t"
+        "jmp *_real_InSpace_tramp\n\t"
+    );
+}
+
 // At naked entry: [esp]=return addr, [esp+4]=arg0, ECX=this. After `pushal` (32 bytes) the return
 // addr sits at 0x20(%esp) and arg0 at 0x24(%esp). We push arg0 then this for cdecl notify(this,arg0).
 extern "C" __attribute__((naked)) void hk_Skill() {
@@ -152,5 +180,22 @@ void disable_event_hooks() {
     MH_DisableHook((void*)game::addr::ChatChannel);
     g_event_hooks_on = false;
 }
+
+static bool g_inspace_hook_on = false;
+bool enable_inspace_hook() {
+    if (g_inspace_hook_on) return true;
+    if (MH_CreateHook((void*)game::addr::EnergyBar, (void*)&hk_InSpace,
+                      &real_InSpace_tramp) != MH_OK) {
+        logf("hook EnergyBar (inspace heartbeat) failed"); return false;
+    }
+    if (MH_EnableHook((void*)game::addr::EnergyBar) != MH_OK) {
+        logf("enable EnergyBar (inspace heartbeat) failed"); return false;
+    }
+    g_inspace_hook_on = true;
+    logf("inspace heartbeat hook installed on EnergyBar @ %p", (void*)game::addr::EnergyBar);
+    return true;
+}
+
+unsigned long last_inspace_tick() { return g_last_inspace_tick; }
 
 }} // namespace enb::hooks
