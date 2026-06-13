@@ -149,9 +149,14 @@ draws our pointer on top of it all. Both need real-client calibration/confirmati
 (CV-AS-STATE / CV-AS-CURSOR in `plans/29`).
 
 **Hiding the native widgets we replace** (AS-6): the glass is translucent, so the native stat/xp/
-skill widgets bleed through. `enb.patch_ret(addr[,pop])` suppresses the drawing routine (init.lua
-has a commented, **OFF-by-default** HIDE block off the address book). It ships disabled because the
-correct `pop` and "does an early ret break gameplay" are only knowable against the real client
+skill widgets bleed through. `enb.patch_ret(addr[,pop])` neuters a widget's per-frame PAINT routine
+with an early `ret` (init.lua has a commented, **OFF-by-default** HIDE block). The paint targets are
+pinned: `enb.addr.VitalsPaint` (0x005dcae0) and `enb.addr.XpPaint` (0x0058cf60) -- both `void
+__fastcall`, pop 0, pure paint (they only check each gadget's visible flag and call the paint
+primitive), so an early ret hides them without touching state. The `*Bars`/`EnergyBar`/`SkillButton`
+entries are the constructors/updater and must NOT be patched. The skill buttons have no standalone
+pure-paint entry, so they need a runtime per-gadget visible-flag write instead of a static patch.
+Ships disabled because "does an early ret break gameplay" is only confirmable on the real client
 (CV-AS-HIDE-VITALS/-XP/-SKILL). Until enabled, the native widgets remain visible behind the glass --
 honest status, not hidden yet.
 

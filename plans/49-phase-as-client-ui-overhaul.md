@@ -107,13 +107,25 @@ per-vertex gradient quads + rounded corners from triangle fans, not PNGs.
   `l_patch_ret`) overwrites a function entry with `ret` (0xC3, or 0xC2 imm16
   for callee-cleanup) under VirtualProtect + FlushInstructionCache. Refuses
   addrs below the image base; logs each patch. Mock records calls headless.
-- `[x]` Candidate entry points documented in init.lua's (commented, OFF) HIDE
-  block off the address book: VitalsBars/EnergyBar, XpBars, SkillButton.
-- `[!]` Cannot validate headless: the correct `pop` per function and "an early
-  ret hides the widget without breaking gameplay" are real-client-only.
-  Tracked as **CV-AS-HIDE-VITALS / -XP / -SKILL** in plans/29; owner enables
-  one line at a time. Until confirmed, the native widgets show through the
-  translucent glass (honest: NOT hidden yet).
+- `[x]` Paint targets pinned by behavioural analysis (2026-06-13): the hide
+  target is each widget's per-frame PAINT routine, not the constructor/updater.
+  `enb.addr.VitalsPaint` 0x005dcae0 and `enb.addr.XpPaint` 0x0058cf60 are both
+  `void __fastcall(ECX)`, pop 0, pure paint (each just checks the per-gadget
+  visible flag at +0x60 and calls the gadget paint primitive), so an early ret
+  hides them clean. The earlier candidates were WRONG: VitalsBars 0x005dbfc0 /
+  XpBars 0x0058c450 are constructors, EnergyBar 0x005dc4a0 is the value-updater,
+  SkillButton 0x00662dc0 is the skill constructor -- ret-patching any of those
+  leaves uninitialised pointers / frozen state and crashes. game.h + the init.lua
+  HIDE block now name the paint entries; the ctor/updater addrs are kept and
+  labelled "NOT a hide target".
+- `[!]` Skill buttons have NO standalone pure-paint entry (render is fused with
+  state mutation); hiding them needs a runtime per-gadget visible-flag write
+  (clear gadget+0x60 once the live pointer is known), not a static patch. Open.
+- `[!]` Vitals/xp hides cannot be validated headless: "an early ret hides the
+  widget without breaking gameplay" is real-client-only. Tracked as
+  **CV-AS-HIDE-VITALS / -XP / -SKILL** in plans/29; owner enables one line at a
+  time. Until confirmed, the native widgets show through the translucent glass
+  (honest: NOT hidden yet).
 - Note: the earlier "Tier A cover panel" approach is GONE -- the design is
   translucent glass, so an opaque cover would defeat the look. Suppression
   (patch_ret) is the only path to a clean result, and it is gated on CV.

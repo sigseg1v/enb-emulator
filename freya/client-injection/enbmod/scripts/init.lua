@@ -132,24 +132,34 @@ require("freya_ui")
 -- HIDE THE NATIVE WIDGETS WE REPLACE (opt-in; OFF by default).
 --
 -- The glass cards are translucent, so the native in-space stat bars / xp bars /
--- skill buttons show THROUGH them unless we suppress the routines that draw
--- them. enb.patch_ret(addr [, pop]) overwrites a function entry with a `ret` so
--- it returns immediately (pop = callee stack-cleanup bytes: 0 for caller-clean,
--- the exact arg-byte count for stdcall/thiscall/fastcall -- a wrong pop corrupts
--- the stack). The candidate entry points are in the address book (enb.addr.*):
+-- skill buttons show THROUGH them unless we suppress the routine that draws each.
+-- enb.patch_ret(addr [, pop]) overwrites a function entry with a `ret` so it
+-- returns immediately (pop = callee stack-cleanup bytes: 0 for caller-clean, the
+-- exact arg-byte count for stdcall/thiscall -- a wrong pop corrupts the stack).
 --
---   enb.addr.VitalsBars  -- reactor/shield/hull bars   (player-card replaces)
---   enb.addr.EnergyBar   -- the per-frame vitals updater/render
---   enb.addr.XpBars      -- combat/trade/explore xp bars (disc card replaces)
---   enb.addr.SkillButton -- the hotbar skill gadget buttons (hotbar replaces)
+-- The RIGHT entry to patch is the widget's per-frame PAINT routine -- a small
+-- function that, for each child bar, checks the gadget's visible flag and calls
+-- the gadget paint primitive, then returns void. It touches no game state, so an
+-- early `ret` hides the widget cleanly. The CONSTRUCTOR / value-updater entries
+-- are NOT safe: they build or mutate the gadget objects, and ret-patching them
+-- leaves uninitialised pointers / frozen state and crashes. The address book
+-- distinguishes them:
 --
--- This is left OFF because it CANNOT be validated from the headless harness:
--- the correct pop per function, and that an early `ret` hides the widget without
--- breaking gameplay, are only knowable against the real client. Each is tracked
--- in plans/29-client-verification.md (CV-AS-HIDE-*). Once the owner confirms an
--- (addr, pop) there, uncomment the matching line:
+--   enb.addr.VitalsPaint -- vitals PAINT (hull/shield/reactor). __fastcall(ECX),
+--                           no stack args -> pop 0. SAFE. Player-card replaces it.
+--   enb.addr.XpPaint     -- xp PAINT (combat/trade/explore). __fastcall(ECX),
+--                           no stack args -> pop 0. SAFE. Disc card replaces it.
+--   (enb.addr.VitalsBars / EnergyBar / XpBars / SkillButton are the ctor/updater
+--    entries -- do NOT patch_ret those.)
 --
--- enb.patch_ret(enb.addr.VitalsBars)        -- CV-AS-HIDE-VITALS
--- enb.patch_ret(enb.addr.XpBars)            -- CV-AS-HIDE-XP
--- enb.patch_ret(enb.addr.SkillButton)       -- CV-AS-HIDE-SKILL
+-- The skill buttons have NO standalone pure-paint entry (render is fused with
+-- state mutation), so there is no clean ret-patch for them; hiding them needs a
+-- runtime per-gadget visible-flag write, deferred to CV-AS-HIDE-SKILL.
+--
+-- Left OFF until verified against the real client (that an early `ret` hides the
+-- widget without side effects is only knowable there). Tracked in
+-- plans/29-client-verification.md. To enable after the owner confirms, uncomment:
+--
+-- enb.patch_ret(enb.addr.VitalsPaint)       -- CV-AS-HIDE-VITALS
+-- enb.patch_ret(enb.addr.XpPaint)           -- CV-AS-HIDE-XP
 -- ---------------------------------------------------------------------------

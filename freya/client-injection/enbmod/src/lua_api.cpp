@@ -466,8 +466,8 @@ static int l_hwnd(lua_State* L){ lua_pushinteger(L,(lua_Integer)(uintptr_t)actio
 static void push_addr_table(lua_State* L){
     lua_newtable(L);
     #define A(name) lua_pushinteger(L, (lua_Integer)addr::name); lua_setfield(L,-2,#name)
-    A(StatBlock);A(EnergyBar);A(HullPoints);A(VitalsBars);
-    A(LevelText);A(XpBars);A(RpgLevels);
+    A(StatBlock);A(EnergyBar);A(HullPoints);A(VitalsBars);A(VitalsPaint);
+    A(LevelText);A(XpBars);A(XpPaint);A(RpgLevels);
     A(TargetInfo);A(TargetPanel);
     A(ChatGadget);A(ChatRender);A(ChatChannel);A(ChatSend);
     A(NavListBuild);A(NavListRender);A(WarpPath);

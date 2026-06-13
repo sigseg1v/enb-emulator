@@ -25,13 +25,17 @@ namespace addr {
 
     // ---- vitals: hull / shield / reactor(energy) ----
     constexpr uintptr_t StatBlock     = 0x006f66e0; // Energy/MaxEnergy/Shield/MaxShield/Owner/Title
-    constexpr uintptr_t EnergyBar     = 0x005dc4a0; // EnergyPercent/MaxEnergyPower UI
+    constexpr uintptr_t EnergyBar     = 0x005dc4a0; // vitals VALUE updater (pushes %s into the bars) -- NOT a hide target
     constexpr uintptr_t HullPoints    = 0x006fe1e0; // HullPoints / ship damage
-    constexpr uintptr_t VitalsBars    = 0x005dbfc0; // draws reactor/shield/hull bars
+    constexpr uintptr_t VitalsBars    = 0x005dbfc0; // vitals bar CONSTRUCTOR (builds reactor/shield/hull) -- NOT a hide target
+    constexpr uintptr_t VitalsPaint   = 0x005dcae0; // vitals per-frame PAINT (hull/shield/reactor). Pure paint, gated on each
+                                                    // gadget's visible flag; entry is a clean ret-patch target (player-card replaces it)
 
     // ---- levels / xp (combat / trade / explore) ----
     constexpr uintptr_t LevelText     = 0x00548d60; // "Combat/Trade/Explore ... Level:%d"
-    constexpr uintptr_t XpBars        = 0x0058c450; // combat/trade/explore bar %  (UI EXPERIENCE)
+    constexpr uintptr_t XpBars        = 0x0058c450; // xp bar CONSTRUCTOR (combat/trade/explore) -- NOT a hide target
+    constexpr uintptr_t XpPaint       = 0x0058cf60; // xp per-frame PAINT (combat/trade/explore). Pure paint, clean ret-patch
+                                                    // target (discipline card replaces it)
     constexpr uintptr_t RpgLevels     = 0x0074bfb0; // reads RPGInfo Combat/TradeLevel from AuxData
 
     // ---- target ----
@@ -56,7 +60,10 @@ namespace addr {
     // ---- skills / abilities ----
     constexpr uintptr_t AbilitySlots  = 0x006a4b40; // RPGInfo SkillPowerupAbilityNumber
     constexpr uintptr_t SkillLifecycle= 0x0060f1a0; // Skill Activated/Deactivated/Interrupted
-    constexpr uintptr_t SkillButton   = 0x00662dc0; // hotbar skill gadget button
+    constexpr uintptr_t SkillButton   = 0x00662dc0; // skill button CONSTRUCTOR -- NOT a hide target. The skill gadget has no
+                                                    // standalone pure-paint entry (render is fused with state mutation), so unlike
+                                                    // vitals/xp there is no clean ret-patch; hiding it needs a runtime per-gadget
+                                                    // visible-flag write instead. Left to CV-AS-HIDE-SKILL.
 
     // ---- AuxData accessor candidates (universal read primitive once resolved) ----
     constexpr uintptr_t AuxGet_Ability= 0x006a4b40;

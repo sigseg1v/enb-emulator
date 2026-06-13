@@ -1211,24 +1211,34 @@ format & byte order", Trap 2).
   native in-space stat bars / xp bars / skill buttons bleed through. `enb.patch_ret(addr [,pop])`
   (lua_api.cpp `l_patch_ret`) overwrites a function entry with a `ret` (0xC3, or
   0xC2 imm16 for callee-cleanup) to suppress the routine that draws each. Ships
-  **OFF**: init.lua's HIDE block is commented out, because the correct `pop` per
-  function and "an early ret hides the widget without breaking gameplay" are NOT
-  knowable from the headless harness -- only against the real client. Candidate
-  entry points (address book): VitalsBars 0x005dbfc0 / EnergyBar 0x005dc4a0,
-  XpBars 0x0058c450, SkillButton 0x00662dc0.
+  **OFF**: init.lua's HIDE block is commented out, because "an early ret hides
+  the widget without breaking gameplay" is only confirmable against the real
+  client.
+- **Addresses pinned by behavioural analysis (2026-06-13).** The hide targets
+  are each widget's per-frame PAINT routine, NOT the constructor/updater. A
+  painter is a small `void __fastcall(ECX)` that, per child bar, checks the
+  gadget visible flag and calls the gadget paint primitive, then returns -- it
+  touches no game state, so pop=0 (`0xC3`) and an early ret is clean:
+  - **VITALS paint** = `enb.addr.VitalsPaint` 0x005dcae0 (paints hull/shield/
+    reactor gadgets at controller +0x1c/+0x20/+0x24).
+  - **XP paint** = `enb.addr.XpPaint` 0x0058cf60 (paints combat/trade/explore).
+  The earlier candidates were WRONG and unsafe: VitalsBars 0x005dbfc0 and
+  XpBars 0x0058c450 are CONSTRUCTORS; EnergyBar 0x005dc4a0 is the value-updater;
+  SkillButton 0x00662dc0 is the skill CONSTRUCTOR. Ret-patching any of those
+  leaves uninitialised pointers / frozen state and crashes -- do not.
 - **Headless coverage**: the mock records `enb.patch_ret` calls but cannot
   execute the patch; correctness is entirely this entry.
 - **What to look for (real client), PER widget** -- enable one line at a time:
-  - **VITALS**: `enb.patch_ret(enb.addr.VitalsBars)` (try pop=0 first; if the
-    stack corrupts, find the callee-cleanup byte count). The native reactor/
-    shield/hull bars vanish; the player card's bars remain; flight, targeting,
-    and stat updates still work; no crash on zone or undock.
-  - **XP**: `enb.patch_ret(enb.addr.XpBars)`. The native combat/trade/explore xp
+  - **VITALS**: `enb.patch_ret(enb.addr.VitalsPaint)`. The native reactor/shield/
+    hull bars vanish; the player card's bars remain; flight, targeting, and stat
+    updates still work; no crash on zone or undock.
+  - **XP**: `enb.patch_ret(enb.addr.XpPaint)`. The native combat/trade/explore xp
     bars vanish; the discipline card remains; leveling/xp still functions.
-  - **SKILL**: `enb.patch_ret(enb.addr.SkillButton)`. The native skill buttons
-    vanish; abilities still fire via the Freya hotbar (`enb.tap`) and the native
-    keybinds; no input deadlock.
-  Mark each sub-id independently; a wrong `pop` shows as an immediate crash on
-  the first call -- that sub-id stays `[!]` until the right value is found.
+  - **SKILL**: no clean ret-patch exists -- the skill gadget's render is fused
+    with state mutation, so there is no standalone pure-paint entry. Hiding it
+    needs a runtime per-gadget visible-flag write (clear the byte at gadget+0x60
+    on the skill gadget once its live pointer is known), not a static patch. This
+    sub-id stays open pending that runtime path; the constructor 0x00662dc0 must
+    NOT be ret-patched.
 - **Setup**: `just play-local` with `UseClientMods=true`; uncomment one HIDE
   line in init.lua, hot-reload, verify, then move to the next.
